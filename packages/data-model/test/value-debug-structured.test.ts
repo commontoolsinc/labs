@@ -22,7 +22,7 @@ import { expect } from "@std/expect";
 
 import type { DebugValueOptions } from "@/interface.ts";
 import { toStructuredDebugValue } from "@/value-debug.ts";
-import { isValidFabricValue } from "@/type-check.ts";
+import { isValidFabricValue } from "@/validity-check.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";

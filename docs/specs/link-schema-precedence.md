@@ -121,11 +121,12 @@ which side won the combination.
   and the candidate comparisons of `addUnique`/`removeByValue`.
 - `set()`'s pre-write resolution opts in too: the stream check reads the
   resolved terminal value, which makes that resolution a content read
-  like any other. A transaction the crossing marks relevant must then be
-  prepared before commit (`prepareTxForCommit`) — every runtime-owned
-  commit path already does, and a hand-rolled `edit()`/`commit()` that
-  sets through an ifc-bearing crossing owes the same call. Relevance for
-  the write itself still belongs to the write-policy gate
+  like any other. A transaction the crossing marks relevant is prepared
+  before it commits, by `commit()` itself where nothing prepared it
+  earlier (see [CFC commit preparation](cfc-commit-preparation.md)), so a
+  hand-rolled `edit()`/`commit()` that sets through an ifc-bearing
+  crossing is judged the same way a runtime-owned commit path is.
+  Relevance for the write itself still belongs to the write-policy gate
   (`recordRelevantSchemaWritePolicyInput`).
 
 ### Closure loading at the seam

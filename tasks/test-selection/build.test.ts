@@ -13,9 +13,9 @@ import {
   CI_SOURCE,
   dayOf,
   emptyAggregate,
+  executionsFor,
   Fold,
   foldReports,
-  identityOfKey,
   lastRun,
   localReporter,
   locateSurfaces,
@@ -23,21 +23,27 @@ import {
   provenance,
   readReport,
   recordSurface,
-  repeatsFor,
   reportFromText,
 } from "./build.ts";
 import { parseManifest, serializeManifest } from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
+  costSeconds,
   daysBetween,
   emptyState,
   flakeRate,
   type IdentityState,
+  samplesOf,
+  sealDay,
+  value,
 } from "./score.ts";
 import {
   COST_WINDOW_DAYS,
+  FLAKE_ANCHOR_EXECUTIONS,
+  FLAKE_ANCHOR_RATE,
   FLAKE_EXCLUSION_RATE,
-  MAX_REPEATS,
+  FLAKE_MIN_EXECUTIONS,
+  MAX_EXECUTIONS,
 } from "./policy.ts";
 
 const NO_ALIASES = new AliasResolver([]);
@@ -195,18 +201,32 @@ describe("build", () => {
     });
   });
 
-  describe("repeatsFor()", () => {
-    it("runs a steady test once", () => {
-      expect(repeatsFor(0)).toBe(1);
+  describe("executionsFor()", () => {
+    it("runs a test that has never disagreed once", () => {
+      expect(executionsFor(0)).toBe(1);
     });
 
-    it("runs a slightly intermittent one more than once", () => {
-      expect(repeatsFor(0.02)).toBeGreaterThan(1);
-      expect(repeatsFor(0.04)).toBe(MAX_REPEATS);
+    it("runs a test that has disagreed at all at least twice", () => {
+      // One execution cannot tell a pass from a lucky pass.
+      expect(executionsFor(Number.MIN_VALUE)).toBe(FLAKE_MIN_EXECUTIONS);
+      expect(executionsFor(0.0001)).toBe(FLAKE_MIN_EXECUTIONS);
     });
 
-    it("runs one past the exclusion rate once, since it is not selected", () => {
-      expect(repeatsFor(FLAKE_EXCLUSION_RATE + 0.1)).toBe(1);
+    it("runs a test at the anchor rate the anchor count of times", () => {
+      expect(executionsFor(FLAKE_ANCHOR_RATE)).toBe(FLAKE_ANCHOR_EXECUTIONS);
+    });
+
+    it("climbs between the two, and goes on climbing past the anchor", () => {
+      const half = executionsFor(FLAKE_ANCHOR_RATE / 2);
+      expect(half).toBeGreaterThan(FLAKE_MIN_EXECUTIONS);
+      expect(half).toBeLessThan(FLAKE_ANCHOR_EXECUTIONS);
+      expect(executionsFor(FLAKE_ANCHOR_RATE * 2)).toBeGreaterThan(
+        FLAKE_ANCHOR_EXECUTIONS,
+      );
+    });
+
+    it("stops climbing at the cap", () => {
+      expect(executionsFor(1)).toBe(MAX_EXECUTIONS);
     });
   });
 
@@ -221,17 +241,32 @@ describe("build", () => {
       expect(read.observations[0]!.day).toBe("2026-08-20");
     });
 
-    it("keeps the durations of everything that ran", () => {
+    it("keeps the durations of the executions that passed", () => {
       const read = readReport(
         stored(CI_NAME, context(), [
           record({ durationMs: 10 }),
           record({ durationMs: 90 }),
           record({ outcome: "skip", durationMs: 5000 }),
+          record({ outcome: "fail", durationMs: 300_000 }),
         ]),
         NO_ALIASES,
       );
       const byDay = [...read.durations.values()][0]!;
       expect(byDay.get("2026-08-20")).toEqual([10, 90]);
+    });
+
+    it("keeps a failed execution as an observation all the same", () => {
+      // Its duration is left out of the cost; the execution itself is
+      // what the churn and flake terms are counted from.
+      const read = readReport(
+        stored(CI_NAME, context(), [record({
+          outcome: "fail",
+          durationMs: 300_000,
+        })]),
+        NO_ALIASES,
+      );
+      expect(read.observations.map((seen) => seen.outcome)).toEqual(["fail"]);
+      expect([...read.durations.keys()]).toEqual([]);
     });
 
     it("reads nothing from a group whose start time is not a time", () => {
@@ -254,6 +289,34 @@ describe("build", () => {
         readReport(stored(CI_NAME, forked, [record()]), NO_ALIASES)
           .observations,
       ).toEqual([]);
+    });
+
+    it("reads nothing from a lane measuring itself", () => {
+      // The lane's own measurements travel as ordinary records, so they
+      // arrive here beside the tests they were recorded with. A lane is
+      // not a test: scoring one reads the batch it ran going red as the
+      // lane disagreeing with itself, which is the shape of a flake and
+      // is nothing of the kind.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record(),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            outcome: "fail",
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup deno" },
+          }),
+        ]),
+        NO_ALIASES,
+      );
+      // The test beside them is read, so this is the measurements being
+      // left out rather than the whole group.
+      expect(read.observations.map((seen) => seen.test.n)).toEqual([
+        "space > writes",
+      ]);
+      expect([...read.surfaces.keys()]).toEqual([KEY]);
+      expect([...read.durations.keys()]).toEqual([KEY]);
     });
   });
 
@@ -402,7 +465,33 @@ describe("build", () => {
       ]);
       const state = second.finish().states.get(KEY)!;
       expect(state.mainCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-20")).toBe(1);
+      expect(state.flakesByDay["2026-08-20"]).toBe(1);
+      // One run of two disagreed, which is what holds it out until it
+      // has run enough to say the rate is lower than that.
+      expect(flakeRate(state, "2026-08-20")).toBeGreaterThan(
+        FLAKE_EXCLUSION_RATE,
+      );
+    });
+
+    it("drops a lane measurement an earlier aggregate carried", () => {
+      // Nothing adds one now, and nothing has ever removed one, so an
+      // aggregate written while they were still folded would carry them
+      // for good.
+      const aggregate = emptyAggregate("2026-08-20");
+      const measurement = testIdentityKey({
+        k: "gate",
+        s: "ci",
+        n: "ci-lane batch workspace-unit",
+      });
+      aggregate.states[measurement] = emptyState();
+      aggregate.states[KEY] = emptyState();
+
+      const states = new Fold(aggregate, NO_ALIASES, "2026-08-20")
+        .finish().states;
+      expect(states.has(measurement)).toBe(false);
+      // The test beside it survives, so this drains the measurements
+      // rather than the aggregate.
+      expect(states.has(KEY)).toBe(true);
     });
 
     it("does not fold an object it has already folded", () => {
@@ -412,16 +501,6 @@ describe("build", () => {
       expect(fold.knows(CI_NAME)).toBe(true);
       expect(fold.knows(`${CI_NAME}2`)).toBe(false);
     });
-
-    it("names the identities the newest run on main left red", () => {
-      const folded = foldReports(
-        emptyAggregate("2026-08-20"),
-        [stored(CI_NAME, context(), [record({ outcome: "fail" })])],
-        NO_ALIASES,
-        "2026-08-20",
-      );
-      expect(folded.mainRed.size).toBe(1);
-    });
   });
 
   describe("parseAggregate()", () => {
@@ -429,6 +508,41 @@ describe("build", () => {
       const aggregate = emptyAggregate("2026-08-20");
       aggregate.folded.push(CI_NAME);
       expect(parseAggregate(JSON.stringify(aggregate))).toEqual(aggregate);
+    });
+
+    it("carries what could not be placed into the next run", () => {
+      // A run compares what it cannot place against what the previous one
+      // could not, which is what tells an identity waiting for a record
+      // that places it from a surface whose records never carry one.
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.unclaimed = [KEY];
+      expect(parseAggregate(JSON.stringify(aggregate))?.unclaimed)
+        .toEqual([KEY]);
+    });
+
+    it("gives back the cost a day carrying a percentile was giving", () => {
+      // The shape a state written before the samples were kept carries.
+      const aggregate = emptyAggregate("2026-08-20");
+      const held = emptyState();
+      (held.costByDay as Record<string, unknown>)["2026-08-20"] = {
+        p90: 4000,
+        count: 45,
+      };
+      aggregate.states[KEY] = held;
+      const parsed = parseAggregate(JSON.stringify(aggregate))!;
+      expect(costSeconds(parsed.states[KEY]!, "2026-08-20")).toBe(4);
+    });
+
+    it("reads a malformed unplaced list as nothing to compare against", () => {
+      // Nothing in the fold reads this list, so an aggregate carrying
+      // something else in its place is read as holding no list rather
+      // than refused outright.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      older.unclaimed = [7];
+      expect(parseAggregate(JSON.stringify(older))?.unclaimed).toBeUndefined();
     });
 
     it("returns undefined for anything that is not one", () => {
@@ -474,28 +588,6 @@ describe("build", () => {
         states: {},
       };
       expect(parseAggregate(JSON.stringify(before))?.compacted).toEqual([]);
-    });
-  });
-
-  describe("identityOfKey()", () => {
-    it("recovers the identity a canonical key names", () => {
-      expect(identityOfKey('["unit","memory","a"]')).toEqual({
-        k: "unit",
-        s: "memory",
-        n: "a",
-      });
-      expect(identityOfKey('["unit","memory","a","on"]')).toEqual({
-        k: "unit",
-        s: "memory",
-        n: "a",
-        v: "on",
-      });
-    });
-
-    it("returns undefined for anything that is not one", () => {
-      expect(identityOfKey("not json")).toBeUndefined();
-      expect(identityOfKey('["unit","memory"]')).toBeUndefined();
-      expect(identityOfKey('["unit",1,"a"]')).toBeUndefined();
     });
   });
 
@@ -560,6 +652,28 @@ describe("build", () => {
       expect(unplaced.unclaimed).toEqual([KEY]);
     });
 
+    it("leaves out the lane measuring itself", () => {
+      // A lane measures its own setup and its own batches through the
+      // record machinery every test uses. Those are not test surfaces, so
+      // they are neither placed nor counted as unplaced, and the suite
+      // here claims everything to show which of the two decides.
+      const key = testIdentityKey({
+        k: "gate",
+        s: "ci",
+        n: "ci-lane batch workspace-unit",
+      });
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("workspace-unit", () => ({ level: "unit", unit: "one" }))],
+        new Map([[key, {
+          suite: "gate:ci",
+          unit: "ci-lane batch workspace-unit",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
+    });
+
     it("passes over a key that names no identity", () => {
       // The surfaces come from a stored aggregate, which is untrusted
       // input like every other object in the store, so a key nothing can
@@ -609,7 +723,6 @@ describe("build", () => {
       );
       const manifest = buildManifest({
         states: folded.states,
-        mainRed: folded.mainRed,
         surfaces: folded.surfaces,
         today: "2026-08-20",
         generatedAt: "2026-08-20T04:00:00.000Z",
@@ -619,28 +732,6 @@ describe("build", () => {
       });
       expect(manifest.entries.length).toBe(2);
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
-    });
-
-    it("withholds an identity failing in the newest run on main", () => {
-      const folded = foldReports(
-        emptyAggregate("2026-08-20"),
-        [stored(CI_NAME, context(), [record({ outcome: "fail" })])],
-        NO_ALIASES,
-        "2026-08-20",
-      );
-      const manifest = buildManifest({
-        states: folded.states,
-        mainRed: folded.mainRed,
-        surfaces: folded.surfaces,
-        today: "2026-08-20",
-        generatedAt: "2026-08-20T04:00:00.000Z",
-        seed: "01K3",
-        commit: "c1",
-        runs: 1,
-      });
-      expect(manifest.withheld.map((held) => held.reason)).toEqual([
-        "main-red",
-      ]);
     });
 
     it("takes the last day an identity actually ran, not the last it holds", () => {
@@ -678,7 +769,6 @@ describe("build", () => {
       );
       const manifest = buildManifest({
         states: folded.states,
-        mainRed: folded.mainRed,
         surfaces: folded.surfaces,
         today: "2026-08-20",
         generatedAt: "2026-08-20T04:00:00.000Z",
@@ -708,13 +798,9 @@ describe("a fold's count of what it has folded", () => {
 describe("what buildManifest() does with the states it is given", () => {
   const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
 
-  function built(
-    states: Map<string, IdentityState>,
-    mainRed = new Set<string>(),
-  ) {
+  function built(states: Map<string, IdentityState>) {
     return buildManifest({
       states,
-      mainRed,
       surfaces: new Map(),
       today: "2026-08-20",
       generatedAt: "2026-08-20T00:00:00.000Z",
@@ -737,6 +823,7 @@ describe("what buildManifest() does with the states it is given", () => {
 
   it("withholds a test that disagrees with itself too often", () => {
     const state = emptyState();
+    state.runsByDay["2026-08-20"] = 100;
     state.failuresByDay["2026-08-20"] = 10;
     state.flakesByDay["2026-08-20"] = 10;
     const manifest = built(new Map([[KEY, state]]));
@@ -744,15 +831,57 @@ describe("what buildManifest() does with the states it is given", () => {
     expect(manifest.withheld[0]!.reason).toBe("flaky");
   });
 
-  it("calls a test failing on main red, however flaky it also is", () => {
-    // The two reasons are exclusive, and being broken on the default
-    // branch is the one that decides what a pull request may act on.
+  it("withholds nothing for a test that flaked once and passes since", () => {
+    // Every failure it has had was a flake, so a share of its failures
+    // would hold it out of every pull request for one bad run.
     const state = emptyState();
-    state.failuresByDay["2026-08-20"] = 10;
-    state.flakesByDay["2026-08-20"] = 10;
-    const manifest = built(new Map([[KEY, state]]), new Set([KEY]));
-    expect(manifest.withheld.length).toBe(1);
-    expect(manifest.withheld[0]!.reason).toBe("main-red");
+    state.runsByDay["2026-08-20"] = 10000;
+    state.failuresByDay["2026-08-20"] = 1;
+    state.flakesByDay["2026-08-20"] = 1;
+    const manifest = built(new Map([[KEY, state]]));
+    expect(manifest.withheld).toEqual([]);
+    // Selectable, and still run twice: it has disagreed with itself, and
+    // one execution cannot tell a pass from a lucky pass.
+    expect(manifest.entries[0]!.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
+  it("records a share as measured, however small it is", () => {
+    // One disagreement among a hundred thousand runs. Zero is what says
+    // a test has never been seen to disagree, and the execution count
+    // steps at it, so a share written to a few places would read this as
+    // a test that never has and run it once.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 100_000;
+    state.failuresByDay["2026-08-20"] = 1;
+    state.flakesByDay["2026-08-20"] = 1;
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.flakeRate).toBe(1 / 100_000);
+    expect(entry.repeats).toBe(FLAKE_MIN_EXECUTIONS);
+  });
+
+  it("records a cost and a score as measured", () => {
+    // Both are compared against thresholds, and a lane's budget is a sum
+    // of costs, so what is written is what was worked out.
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 3;
+    sealDay(state, "2026-08-20", samplesOf([37, 41, 43]));
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.cost).toBe(costSeconds(state, "2026-08-20"));
+    expect(entry.score).toBe(value(entry.inputs, "2026-08-20"));
+  });
+
+  it("carries the counts the share was taken from", () => {
+    const state = emptyState();
+    state.runsByDay["2026-08-20"] = 80;
+    state.failuresByDay["2026-08-20"] = 12;
+    state.flakesByDay["2026-08-20"] = 12;
+    const entry = built(new Map([[KEY, state]])).entries[0]!;
+    expect(entry.flakeEvidence).toEqual({ flakes: 12, runs: 80 });
+    // The counts are what was seen, flat. The share weights recent days
+    // more heavily, so it is not those counts divided; what it is, is
+    // the figure every decision here was taken on.
+    expect(entry.flakeRate).toBe(0.15);
+    expect(entry.repeats).toBe(executionsFor(entry.flakeRate));
   });
 
   it("withholds nothing for a test that has never failed", () => {

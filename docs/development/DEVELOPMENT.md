@@ -72,7 +72,11 @@ about one aspect of the runtime, are indexed in
   evaluates the module, side effects included: drop it, and put what it was
   there for in a comment on the surviving statement. Against nothing but an
   `import type`, it stays — a type-only import is erased and evaluates nothing,
-  so the bare import is the only thing producing the effect.
+  so the bare import is the only thing producing the effect. A statement whose
+  every name is marked `type` inline is erased the same way, so it belongs to
+  that second case rather than the first: the bare import stays, and that
+  statement is written `import type` to say what it is, which leaves the pair
+  one statement of each kind.
 - Import a given module in exactly one or two statements. Two shapes are
   allowed:
   - One unified statement, marking any type-only names inline:
@@ -84,8 +88,25 @@ about one aspect of the runtime, are indexed in
   allows is a second statement of the same kind — two value imports from one
   module, or two `import type`s from it. Those represent one dependency as
   though it were two, and the second is easy to miss when the first is being
-  edited or removed, so merge their specifier lists. A bare `import "x";` counts
-  toward the total.
+  edited or removed, so merge their specifier lists. Where one of the two takes
+  the module as a namespace, `import * as name from "x";`, no other name may
+  sit beside it in that statement, and the merge is to reach through the
+  namespace for what the other statement named. Where that reads worse than
+  the pair — a namespace imported only so its `typeof` names the whole module,
+  against a list of names the file uses throughout — the two statements stay,
+  with a `deno-lint-ignore` saying which case it is.
+  `packages/runner/src/builder/types.ts` is the one file in that position
+  today. A bare `import "x";` counts toward the total.
+
+  The `cf-import-list/one-statement-per-kind` lint rule
+  (`tasks/lint-import-list.ts`, registered in the root `deno.jsonc`) holds this
+  bullet, and this one alone. The grouping, collation, sorting and `@/` rules
+  around it are left to review, since several of them have exceptions that a
+  checker reading a file from top to bottom would call correct code wrong. The
+  rule reads a specifier as written, so `@/thing.ts` and `../thing.ts` are two
+  modules to it. Where it reports, the statement that survives the merge goes
+  where the earliest of the ones it replaces sat, which keeps the module's
+  evaluation at the point in the list it was already reached from.
 - Within a package that defines the `@/` import alias, address the aliased tree
   as `@/...` rather than by a `../` path that climbs out of the current
   directory to reach it. The alias exists so that a module's address does not
@@ -100,7 +121,7 @@ about one aspect of the runtime, are indexed in
 - These rules govern the declaration list. What may not be written outside it
   at all — a type spelled `import("./mod.ts").Thing`, and a module loaded by an
   `import("./mod.ts")` expression under some function — is
-  [`imports.md`](imports.md), which two lint rules enforce.
+  [`imports.md`](imports.md), which two further lint rules enforce.
 
 ### Classes
 
@@ -539,6 +560,135 @@ function processData(data: Data) {
   data.process();
 }
 ```
+
+### Walking or comparing a value
+
+A value the runtime holds may be a `FabricSpecialObject` — a byte sequence, a
+temporal value, a content hash, a regular expression, an error, a link, a map,
+a set. Each of those keeps its state in private fields and has no own
+properties at all, so a walk that decides "may I read this by property name?"
+with `isObjectOrArray()`, `isReadonlyObjectOrArray()`, `isObjectNotArray()`, or
+a bare `typeof value === "object"` gets the wrong result: it sees an empty
+record and then merges the value to `{}`, rebuilds it as `{}`, descends into it
+and finds nothing, or writes a property onto it. Two sites already carry a
+`TODO(danfuzz)` naming that defect against `isReadonlyObjectOrArray()` —
+`schema.ts`'s default merge and `cfc/schema-merge.ts` — and they are what these
+predicates are for.
+
+These functions from `@commonfabric/data-model` are what a walk needs, and
+using them is not optional in code that can reach a stored value:
+
+- `isKeyableObjectOrArray(value)` is the container question. Every
+  `FabricSpecialObject` returns `false`, `FabricPrimitive` and any further
+  subclass alike. For a `FabricPrimitive` that says the value has no keys to
+  reach, which is the whole story about one; for a `FabricInstance` it says
+  only that this walk cannot reach what it holds, which is incomplete rather
+  than wrong, and a walk taking that answer records what it under-reports.
+  Everything
+  outside the type is untouched: arrays and non-fabric class instances still
+  return `true`, so it is a drop-in for `isReadonlyObjectOrArray()`, which
+  narrows the same way. Against `isObjectOrArray()` the swap holds only where
+  the caller reads: that one narrows to a mutable `Record<string, unknown>`,
+  and a site that writes through the narrowed value fails to compile with
+  `TS2542`.
+- `isWalkableObjectOrArray(value)` is the same question with a `FabricInstance`
+  refused rather than reported as having no keys. The two differ on an instance
+  and nowhere else, and which one a walk wants turns on what a `false` would
+  cost it. An instance is a container a walk is meant to descend and cannot
+  yet, so a walk that rebuilds, merges, or carries a value forward takes
+  `false` as "carry this whole" and ships an empty record in place of the
+  value: that walk wants the refusal. A walk that only reports what a path
+  finds, or what a change triggers, reports an absence instead — incomplete,
+  not wrong — and takes `isKeyableObjectOrArray()` with a marker recording the
+  gap. So does a walk running where a throw cannot be delivered, under a
+  storage subscription that has to keep delivering.
+- A walk that can reach an instance and has a better answer than either tests
+  for one first — an error its own signature already carries, or a disposition
+  its caller can act on. Refusing is for a walk with nothing else to say.
+- `isKeyableObjectNotArray(value)` and `isWalkableObjectNotArray(value)` are
+  those two with arrays removed, for a walk to which an array is not merely a
+  different shape but something it must not treat as a record.
+- `isFabricPlainContainer(value)` asks the same container question of a value
+  the type system already says is a `FabricValue`, and is the one to reach for
+  where a caller holds one, with two differences to know. It rejects the values
+  a `FabricValue` cannot be — a `Cell`, a `Date`, a query-result proxy over
+  one — which the `isKeyable*` and `isWalkable*` pairs admit. And it returns
+  `false` for a `FabricInstance` rather than refusing one, so a walk that
+  would lose an instance gets no tripwire from it: reach for
+  `isWalkableObjectOrArray()` where that matters, even holding a
+  `FabricValue`.
+- `fabricAwareEqual(a, b)` is the comparison for operands that may hold a
+  `FabricValue` without being known to be one — a schema `const` against a
+  stored value, a schema default against a materialized one, a write against
+  the value it replaces, a request against the snapshot a policy was checked
+  over. It is a structural walk that decides every `FabricSpecialObject` it
+  reaches by content rather than by properties: two of one class go to
+  `valueEqual()`, and a pair whose classes differ, or with a special object on
+  one side only, is unequal without either one's contents being read. Neither half serves alone: `valueEqual()` throws
+  on a `Cell` or any other non-fabric instance, and `deepEqual()` compares by
+  enumerable own properties, of which a special object has none. Where both
+  operands are known to be `FabricValue`s, `valueEqual()` is the cheaper
+  call — it decides a container by a content hash cached on identity, where the
+  walk pays for every level each time — but it is not a drop-in even there. It
+  decides a container by hashing it whole, so it throws on a value holding a
+  cycle and on one holding a class whose codec is a stub, both of which this
+  walk returns for. `valueEqual({ v: aFabricMap }, { v: 5 })` throws where
+  `fabricAwareEqual()` returns `false`.
+
+Around a dozen walks in `runner` and `piece` take one of the two
+non-refusing answers, and what each says is decided by what it owes its
+caller. Five shapes cover the tree today:
+
+- **Report the error the signature already carries.** `attestation.ts`'s
+  `resolve()` returns its `TypeMismatchError`, and `cfc/structured-result.ts`
+  seals the value, which is the answer its unmodeled-key policy already gives
+  for anything it cannot measure against the schema.
+- **Answer the way a leaf is answered.** The stored path reads in
+  `storage/v2-path.ts` report the slot absent, and `traverse.ts`'s `getAtPath`
+  reports a path continuing past an instance absent as well. The first is the
+  measured case: `normalizeAndDiff()` reads the current value at every slot it
+  is about to write, so a write below a stored `FabricError` reaches it, and
+  refusing there replaces the storage layer's typed, in-band error with an
+  exception escaping `Cell.set()`. The second follows the decision `traverseDAG`
+  states earlier in its own file, that this file carries live instance traffic
+  and cannot fail loudly on one yet; no operation was found that reaches it.
+- **Stop the scan.** A walk that only collects — links to pre-sync in
+  `runner.ts` and `storage/v2.ts`, write redirects in `pattern-binding.ts` —
+  finds nothing inside an instance either way. Stopping is what its marker
+  already says happens, and throwing would turn a recorded gap into a crash.
+- **Treat it as the atomic value it is.** Three sites in `data-updating.ts`
+  hand it to the branch that emits it whole: two exclude it from array
+  anchoring, and one resets the slot before the per-key writes that follow.
+- **Compare it by content.** `storage/v2-transaction.ts`'s
+  `shallowStructureChanged()` hands both operands to `valueEqual()` rather than
+  comparing key sets, which for two special objects would compare two empty
+  sets. The commit-time reactivity pass calls it with the value at every proper
+  ancestor prefix of a written path, so a write below a stored instance reaches
+  it.
+
+`reactive-dependencies.ts` is the one that fits none of those. It keeps
+descending an instance by property name through its own `isKeyable()`. A throw
+there costs the rest of the notification being delivered, and `false` would
+make an instance indistinguishable from a leaf, so a read below one would stop
+triggering when the instance is deleted or replaced by a scalar.
+
+Separately from those, a walk that ends its descent at a link tests for one
+before it asks the container question, and the order is load-bearing rather
+than tidy. `isPrimitiveCellLink()` recognizes whichever form the active regime
+uses. Under the legacy representation a link is a record, which either
+container question reads as keyable, so the link test is the only thing that
+stops the descent. Under
+[`modernCellRep`](EXPERIMENTAL_OPTIONS.md#moderncellrep) it is a `FabricLink`,
+which `isKeyableObjectOrArray()` stops at on its own and
+`isWalkableObjectOrArray()` refuses — so at a walk asking the second, putting
+the link test last means an ordinary link takes the refusal meant for a value
+nothing knows how to walk.
+
+A walk that must not silently pass a `FabricInstance` by — one whose contents
+are reachable only through its codec — refuses it outright rather than walking
+it. Those refusals are discovery instruments; see "Flag-gated tripwires" in
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md), which states the obligation
+each new one carries.
 
 ### Avoid representing invalid state
 

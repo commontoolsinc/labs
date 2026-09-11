@@ -42,60 +42,51 @@ export function parseCellPath(path: string): CellPath {
   return path.split("/").map(linkPathSegmentToCellPathSegment);
 }
 
+/** Reads a path through the root projection, preserving ancestor branch choices. */
 export function resolveCellPath<T>(
   cell: Cell<T>,
   path: CellPath,
+  options: { requireProjection?: boolean } = {},
 ): unknown {
-  let currentCell = cell as Cell<unknown>;
-  let parentValue: unknown = undefined;
-
-  for (const segment of path) {
-    parentValue = currentCell.get() as unknown;
-    // An asCell-schema slot surfaces its value as a live Cell (the
-    // Writable<...> result shape); read through it like the leaf below
-    // does, or the traversal inspects the Cell instance's own JS
-    // properties and reports runner internals as "available keys".
-    if (isCell(parentValue)) {
-      currentCell = parentValue as Cell<unknown>;
-      parentValue = currentCell.get() as unknown;
+  let currentCell: Cell<unknown> = cell;
+  let value: unknown = cell.get();
+  for (const [index, segment] of path.entries()) {
+    if (isCell(value)) {
+      currentCell = value;
+      value = value.get();
     }
-    if (parentValue != null && typeof parentValue !== "object") {
+    currentCell = currentCell.key(segment);
+    if (value === undefined && !options.requireProjection) {
+      // A sparse root can fail to materialize while a selected child is
+      // readable. Correlated schemas require a matching root projection.
+      value = currentCell.get();
+      if (value !== undefined || index < path.length - 1) continue;
+    }
+    if (value != null && typeof value !== "object") {
       throw new Error(
         `Cannot access path "${
           path.join("/")
         }" - encountered non-object at "${segment}"`,
       );
     }
-    currentCell = currentCell.key(segment as keyof unknown) as Cell<unknown>;
+    if (value == null || !Object.hasOwn(value, segment)) {
+      const availableKeys = value != null && typeof value === "object"
+        ? Object.keys(value).filter((key) => !key.startsWith("$")).sort()
+        : [];
+      const hint = availableKeys.length > 0
+        ? `. Available keys: ${availableKeys.join(", ")}`
+        : "";
+      throw new Error(
+        `Cannot access path "${path.join("/")}" - property "${
+          String(segment)
+        }" not found${hint}`,
+      );
+    }
+    // Descend the materialized parent. Narrowing the original cell again
+    // would discard the branch selected by that parent's current value.
+    value = (value as Record<string | number, unknown>)[segment];
   }
-
-  const resolvedValue = currentCell.get();
-  const segment = path[path.length - 1];
-  // `Object.hasOwn`, not `in`: `segment` names data. `in` walks the prototype
-  // chain, so a segment called `toString` looked present on every record and
-  // this returned `undefined` instead of raising the documented "property not
-  // found" error. The `availableKeys` hint below already uses `Object.keys` —
-  // own-only — so the two disagreed about what the record actually carries.
-  const keyMissing = parentValue != null && typeof parentValue === "object"
-    ? !Object.hasOwn(parentValue as object, segment as string)
-    : resolvedValue === undefined;
-  if (path.length > 0 && keyMissing) {
-    const availableKeys = parentValue != null && typeof parentValue === "object"
-      ? Object.keys(parentValue as Record<string, unknown>)
-        .filter((k) => !k.startsWith("$"))
-        .sort()
-      : [];
-    const keysHint = availableKeys.length > 0
-      ? `. Available keys: ${availableKeys.join(", ")}`
-      : "";
-    throw new Error(
-      `Cannot access path "${path.join("/")}" - property "${
-        String(segment)
-      }" not found${keysHint}`,
-    );
-  }
-
-  return isCell(resolvedValue) ? resolvedValue.get() : resolvedValue;
+  return isCell(value) ? value.get() : value;
 }
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
@@ -349,7 +340,6 @@ export async function compileAndSavePattern(
   patternSrc: string | RuntimeProgram,
   options: {
     space: MemorySpace;
-    previousEntryIdentity?: string;
   },
 ): Promise<Pattern> {
   if (typeof patternSrc === "string") {
@@ -363,9 +353,6 @@ export async function compileAndSavePattern(
   // subsequent loads (CT-1623).
   const pattern = await runtime.patternManager.compilePattern(patternSrc, {
     space: options.space,
-    ...(options.previousEntryIdentity === undefined
-      ? {}
-      : { previousEntryIdentity: options.previousEntryIdentity }),
   });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");

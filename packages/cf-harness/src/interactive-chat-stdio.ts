@@ -24,6 +24,11 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import type { HarnessFabricSessionConfig } from "./config.ts";
+import {
+  HARNESS_FABRIC_SESSION_OPTION_NAMES,
+  resolveHarnessFabricSessionConfig,
+} from "./fabric-session-options.ts";
 import { resolveInteractiveProvisioning } from "./host-mounts.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
 import {
@@ -72,6 +77,12 @@ export interface RunHarnessInteractiveChatStdioOptions {
 }
 
 export interface HarnessInteractiveChatStdioCliOptions {
+  /** Resolved CLI binding, supplied through the host's basePromptLoopOptions. */
+  fabricSession?: HarnessFabricSessionConfig;
+
+  /** Operator-owned configuration resolved before the interactive service starts. */
+  loomAuthoringConfigPath?: string;
+
   sessionDbPath?: string;
   maxInMemoryEvents?: number;
 
@@ -110,9 +121,24 @@ Options:
   --host-mount <spec>                  Extra host bind mount, same grammar as the batch CLI
                                        (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <count>            Model turns allowed per user message (default 8)
+  --loom-authoring-config <path>       Absolute host-owned JSON file backing Loom tools
+  --fabric-api-url <url>              Fabric API URL for held Pattern Instance handles
+  --fabric-identity <path>            Host PKCS#8 identity keyfile, relative to the caller's cwd
+  --fabric-space <space>              Fabric space name or did:key; all three session flags go together
+  --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict
+  --fabric-cfc-flow-labels <mode>      off | observe | persist
+  --fabric-cfc-posture <name>          max-enforcement runtime posture
+  --max-confidentiality <json>         Fabric read ceiling, using the batch CLI's grammar
   --help                              Print this help text to stderr
 
 Environment:
+  CF_HARNESS_LOOM_AUTHORING_CONFIG     Default host authoring configuration file
+  CF_HARNESS_FABRIC_API_URL            Default value for --fabric-api-url
+  CF_HARNESS_FABRIC_IDENTITY           Default value for --fabric-identity
+  CF_HARNESS_FABRIC_SPACE              Default value for --fabric-space
+  CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
+  CF_HARNESS_FABRIC_CFC_FLOW_LABELS     Default value for --fabric-cfc-flow-labels
+  CF_HARNESS_FABRIC_CFC_POSTURE         Default value for --fabric-cfc-posture
   ${CHAT_SESSION_DB_ENV}                 Default SQLite chat session DB path
   ${CHAT_MAX_IN_MEMORY_EVENTS_ENV}       Default in-memory event retention cap
 `;
@@ -158,8 +184,10 @@ const parsePositiveIntegerOption = (
 export const parseHarnessInteractiveChatStdioCliOptions = (
   args: readonly string[],
   env: Record<string, string | undefined> = Deno.env.toObject(),
+  cwd: string = Deno.cwd(),
 ): HarnessInteractiveChatStdioCliOptions => {
   let sessionDbPath = env[CHAT_SESSION_DB_ENV];
+  let loomAuthoringConfigPath = env.CF_HARNESS_LOOM_AUTHORING_CONFIG;
   let maxInMemoryEvents = env[CHAT_MAX_IN_MEMORY_EVENTS_ENV] === undefined ||
       env[CHAT_MAX_IN_MEMORY_EVENTS_ENV]?.trim() === ""
     ? undefined
@@ -167,6 +195,7 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
       CHAT_MAX_IN_MEMORY_EVENTS_ENV,
       env[CHAT_MAX_IN_MEMORY_EVENTS_ENV],
     );
+  const fabricSessionArgs: Record<string, string> = {};
   let help = false;
   const hostMountSpecs: string[] = [];
   let maxModelTurns: number | undefined;
@@ -174,6 +203,33 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
     const arg = args[index];
     if (arg === "--help" || arg === "-h") {
       help = true;
+      continue;
+    }
+    const fabricOption = HARNESS_FABRIC_SESSION_OPTION_NAMES.find((name) =>
+      arg === `--${name}` || arg.startsWith(`--${name}=`)
+    );
+    if (fabricOption !== undefined) {
+      const prefix = `--${fabricOption}=`;
+      // A following flag is not an option value. Literal leading dashes can
+      // still be supplied with `--name=value`, as in the batch CLI.
+      if (!arg.startsWith(prefix) && args[index + 1]?.startsWith("-")) {
+        throw new Error(`--${fabricOption} requires a non-empty value`);
+      }
+      fabricSessionArgs[fabricOption] = arg.startsWith(prefix)
+        ? nonEmptyOptionValue(`--${fabricOption}`, arg.slice(prefix.length))
+        : nonEmptyOptionValue(`--${fabricOption}`, args[++index]);
+      continue;
+    }
+    if (arg === "--loom-authoring-config") {
+      index += 1;
+      loomAuthoringConfigPath = nonEmptyOptionValue(arg, args[index]);
+      continue;
+    }
+    if (arg.startsWith("--loom-authoring-config=")) {
+      loomAuthoringConfigPath = nonEmptyOptionValue(
+        "--loom-authoring-config",
+        arg.slice("--loom-authoring-config=".length),
+      );
       continue;
     }
     if (arg === "--host-mount") {
@@ -225,11 +281,18 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
     }
     throw new Error(`unsupported interactive chat stdio argument: ${arg}`);
   }
+  const fabricSession = help
+    ? undefined
+    : resolveHarnessFabricSessionConfig(fabricSessionArgs, env, cwd);
   return {
+    ...(fabricSession !== undefined ? { fabricSession } : {}),
     ...(sessionDbPath !== undefined && sessionDbPath.trim() !== ""
       ? { sessionDbPath }
       : {}),
     ...(maxInMemoryEvents !== undefined ? { maxInMemoryEvents } : {}),
+    ...(loomAuthoringConfigPath !== undefined
+      ? { loomAuthoringConfigPath }
+      : {}),
     ...(hostMountSpecs.length > 0 ? { hostMountSpecs } : {}),
     ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
     help,
@@ -654,7 +717,11 @@ export const runHarnessInteractiveChatStdioCli = async (
     options: RunHarnessInteractiveChatStdioOptions,
   ) => Promise<void> = runHarnessInteractiveChatStdio,
 ): Promise<void> => {
-  const options = parseHarnessInteractiveChatStdioCliOptions(args);
+  const options = parseHarnessInteractiveChatStdioCliOptions(
+    args,
+    Deno.env.toObject(),
+    cwd ?? Deno.cwd(),
+  );
   if (options.help) {
     await Deno.stderr.write(
       new TextEncoder().encode(harnessInteractiveChatStdioUsageText()),
@@ -668,7 +735,12 @@ export const runHarnessInteractiveChatStdioCli = async (
     cwd ?? Deno.cwd(),
   );
   await run({
-    ...options,
+    ...(options.sessionDbPath !== undefined
+      ? { sessionDbPath: options.sessionDbPath }
+      : {}),
+    ...(options.maxInMemoryEvents !== undefined
+      ? { maxInMemoryEvents: options.maxInMemoryEvents }
+      : {}),
     ...(Object.keys(provisioning).length > 0
       ? { basePromptLoopOptions: provisioning }
       : {}),

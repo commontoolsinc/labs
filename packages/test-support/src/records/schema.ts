@@ -38,6 +38,25 @@ export function testIdentityKey(test: TestIdentity): string {
   );
 }
 
+/** The identity a stable key names. Undefined for anything that is not one. */
+export function testIdentityOfKey(key: string): TestIdentity | undefined {
+  let parts: unknown;
+  try {
+    parts = JSON.parse(key);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parts) || parts.length < 3 || parts.length > 4) {
+    return undefined;
+  }
+  const [k, s, n, v] = parts as unknown[];
+  if (!isNonEmptyString(k) || !isNonEmptyString(s) || !isNonEmptyString(n)) {
+    return undefined;
+  }
+  if (v !== undefined && !isNonEmptyString(v)) return undefined;
+  return v === undefined ? { k, s, n } : { k, s, n, v };
+}
+
 /** One line stating that one test executed once in one run. */
 export interface TestRecord {
   line: "record";

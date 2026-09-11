@@ -4,17 +4,14 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { resolveLink } from "../link-resolution.ts";
+import type { RawNodeCause } from "../module.ts";
+import { readMaybeLink, resolveLink } from "../link-resolution.ts";
 import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
 import { narrowestScope, scopeRank } from "../scope.ts";
-import {
-  createSigilLinkFromParsedLink,
-  getMetaLink,
-  parseLink,
-} from "../link-utils.ts";
+import { createSigilLinkFromParsedLink, getMetaLink } from "../link-utils.ts";
 import { rawMetaWriteAuthorization } from "../meta-seam.ts";
 
 export function resolvedCellScope(
@@ -51,6 +48,27 @@ export function outputSpotFromBinding(
 ): { space: string; id: string; path: readonly unknown[] } | undefined {
   if (!binding) return undefined;
   return { space: binding.space, id: binding.id, path: [...binding.path] };
+}
+
+/**
+ * Returns an expression builtin's result-store cause from its operation,
+ * owning piece, and output coordinates. The cause stays equal across changes
+ * to the serialized inputs while the owning piece and output spot are
+ * unchanged.
+ *
+ * Throws if the node's output binding has no write redirect.
+ */
+export function ownedResultCause(
+  op: "ifElse" | "when" | "unless",
+  cause: RawNodeCause,
+  parentCell: Cell<any>,
+): Record<string, unknown> {
+  if (!cause.outputSpot) {
+    throw new Error(
+      `${op}: result store requires a write-redirect output binding`,
+    );
+  }
+  return { [op]: parentCell.entityId, outputSpot: cause.outputSpot };
 }
 
 export function cellIdentityKey(cell: Cell<any>): {
@@ -107,22 +125,13 @@ export function exposedResultCell<T>(
       ),
   );
   const initialCell = cell.withTx(tx);
-  // Identity probe: the raw value is only link-parsed to decide which
-  // target the exposed cell should point at — content is never consumed
-  // (a non-link value just fails the parse). Run it under the
-  // link-resolution-probe scope so flow-label derivation treats it as
-  // link topology, not a content read (S16 — without this, a list
-  // coordinator rebuilding its output array re-consumes every reused
-  // element result's label and smears it across fresh elements).
-  const raw = tx.runWithAmbientReadMeta(
+  // Resolve topology without reading a scalar result's content. Observing
+  // the value here would subscribe the list coordinator to every child value.
+  const link = tx.runWithAmbientReadMeta(
     { ...linkResolutionProbe, ...machineryRead },
-    () => initialCell.getRaw({ lastNode: "writeRedirect" }),
+    () => readMaybeLink(tx, target) ?? target,
   );
-  // If the last writeRedirect target is a link, use that, but otherwise use
-  // the last writeRedirect target.
-  const link = parseLink(raw, target) ?? target;
   if (
-    link === undefined ||
     scopeRank(link.scope) <= scopeRank(cell.getAsNormalizedFullLink().scope)
   ) {
     return cell;

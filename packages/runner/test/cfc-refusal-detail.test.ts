@@ -448,8 +448,7 @@ describe("refusal-detail", () => {
         tx.prepareCfc();
         const result = await tx.commit();
 
-        expect(result.error).toBeDefined();
-        expect(result.error!.name).toBe("CfcCommitRefusalError");
+        expect(result.error?.name).toBe("CfcCommitRefusalError");
         const detail = refusalsOf(result.error).find((entry) =>
           entry.gate === "writer-fit"
         );

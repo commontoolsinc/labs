@@ -16,6 +16,7 @@ import {
   type StoredReport,
   type TestIdentity,
   testIdentityKey,
+  testIdentityOfKey,
 } from "@commonfabric/test-support/records";
 import {
   costSeconds,
@@ -24,12 +25,14 @@ import {
   emptyContext,
   emptySamples,
   emptyState,
+  flakeCounts,
   flakeRate,
   type FoldContext,
   foldObservations,
   type IdentityState,
   type Observation,
   parseContext,
+  readCostsForward,
   sampleDuration,
   scoreInputs,
   sealDay,
@@ -40,6 +43,7 @@ import {
   value,
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
+import { isLaneMeasurement } from "../lane-measurement.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   type Calibration,
@@ -53,10 +57,12 @@ import {
 import { ObservationSpool } from "./observation-spool.ts";
 import {
   COST_WINDOW_DAYS,
+  FLAKE_ANCHOR_EXECUTIONS,
+  FLAKE_ANCHOR_RATE,
   FLAKE_EXCLUSION_RATE,
-  FLAKE_REPEAT_RATES,
+  FLAKE_MIN_EXECUTIONS,
   LANE_PROLOGUE_SECONDS,
-  MAX_REPEATS,
+  MAX_EXECUTIONS,
 } from "./policy.ts";
 
 /** The publisher's rolling aggregate, as one stored object. */
@@ -98,6 +104,19 @@ export interface AggregateState {
   compacted: string[];
 
   states: Record<string, IdentityState>;
+
+  /**
+   * Every identity no run has worked out a unit for, kept from one
+   * publish to the next. A run reads surfaces only from the objects it
+   * folds for the first time, so a surface recording less often than the
+   * publisher runs is absent from most runs; keeping the list across them
+   * is what lets a run tell an identity recorded once and not yet given a
+   * unit from one whose records keep arriving and keep saying too little.
+   * An entry is removed when the topology has a unit for its identity, or
+   * when it names something the count no longer holds, so the list is
+   * what the tree still says nothing about.
+   */
+  unclaimed?: string[];
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -183,13 +202,23 @@ export function parseAggregate(text: string): AggregateState | undefined {
   const compacted = state.compacted === undefined
     ? (written as string[]).map((day) => sourceDateKey(CI_SOURCE, day))
     : written as string[];
+  // What was unplaced last time is compared against rather than folded,
+  // so an aggregate written without it, or with something that is not a
+  // list of identities, is read as having nothing to compare against.
+  const unclaimed = Array.isArray(state.unclaimed) &&
+      state.unclaimed.every((key) => typeof key === "string")
+    ? state.unclaimed as string[]
+    : undefined;
+  const states = state.states as Record<string, IdentityState>;
+  for (const identity of Object.values(states)) readCostsForward(identity);
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
     folded: state.folded as string[],
     context: serializeContext(parseContext(state.context)),
     compacted,
-    states: state.states as Record<string, IdentityState>,
+    states,
+    ...(unclaimed === undefined ? {} : { unclaimed }),
   };
 }
 
@@ -235,7 +264,7 @@ export interface ReadReport {
   /** Where each identity in it runs, by identity key. */
   surfaces: Map<string, Surface>;
 
-  /** Every measured duration, by identity key and then by day. */
+  /** Every passing duration, by identity key and then by day. */
   durations: Map<string, Map<string, number[]>>;
 }
 
@@ -263,6 +292,13 @@ export function readReport(
     const day = dayOf(group.context.startedAt);
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
+      // A lane measuring its own setup or one of its batches is not a
+      // test, so nothing here scores it: a catch, a flake observation and
+      // a churn rate are all statements about a test, and a lane is
+      // neither passing nor failing in the sense they read. It reaches
+      // the store as an ordinary record so that it travels the path every
+      // record travels, and this is where that path parts.
+      if (isLaneMeasurement(test)) continue;
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
       // is all an unmapped record can say. Where another record of the
@@ -282,7 +318,11 @@ export function readReport(
         source: where.source,
         place: where.place,
       });
-      if (record.outcome === "skip") continue;
+      // A cost predicts what a lane will spend running this test again,
+      // and only a passing execution measures that. A failure ended
+      // where the failure was reached, and where a wait's safety net
+      // ended it, its duration is that net's bound.
+      if (record.outcome !== "pass") continue;
       let byDay = durations.get(key);
       if (byDay === undefined) {
         byDay = new Map();
@@ -319,10 +359,22 @@ export function recordSurface(
   test: TestIdentity,
   file: string | undefined,
 ): Surface {
-  const suite = test.v === undefined
+  return {
+    suite: surfaceName(test),
+    unit: file ?? test.n,
+    fromFile: file !== undefined,
+  };
+}
+
+/**
+ * The surface an identity's own record names: the kind of check, the
+ * workspace member that owns it, and the configuration it ran under where
+ * that is not the default one.
+ */
+export function surfaceName(test: TestIdentity): string {
+  return test.v === undefined
     ? `${test.k}:${test.s}`
     : `${test.k}:${test.s}:${test.v}`;
-  return { suite, unit: file ?? test.n, fromFile: file !== undefined };
 }
 
 /** What the topology could not place, and why. */
@@ -337,10 +389,21 @@ export interface Unplaced {
   suiteLevel: string[];
 
   /**
-   * Identities no suite claims at a unit level. An identity recorded
-   * before the registration preload carried its file is the usual one:
-   * the store knows the test and nothing knows which file registers it,
-   * so it will be placed again the first time it runs and records one.
+   * Identities the topology has no unit for. What decides an identity's
+   * unit is its own records: the file, for a suite whose units are files,
+   * and the recorded name for one whose units are not. An identity whose
+   * records say neither is given a unit the first time it records one the
+   * tree holds. An identity that matches two suites is here as well, which
+   * is a topology defect the drift guard fails on rather than a record
+   * that says too little. The lane's measurements of itself are not here:
+   * they are not test surfaces, and `isLaneMeasurement` is what says so.
+   *
+   * A count of these alone says nothing about which of those it holds. A
+   * run reads surfaces only from the objects it folds for the first time,
+   * so an identity here that `AggregateState.unclaimed` already held has
+   * recorded more since and still has no unit. That is a surface whose
+   * records never say which unit, rather than one whose next record
+   * will.
    */
   unclaimed: string[];
 }
@@ -368,8 +431,11 @@ export function locateSurfaces(
   const placed = new Map<string, Surface>();
   const unplaced: Unplaced = { suiteLevel: [], unclaimed: [] };
   for (const [key, surface] of surfaces) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
+    // A lane's measurement of its own setup or of one of its batches is
+    // not a test surface: no suite claims one, and none should.
+    if (isLaneMeasurement(test)) continue;
     const claims = claimsFor(suites, {
       test,
       // The unit a record's own surface fell back to is the file where
@@ -397,22 +463,33 @@ export function locateSurfaces(
   return { placed, unplaced };
 }
 
-/** How many times a lane runs an identity, given how flaky it is. */
-export function repeatsFor(rate: number): number {
-  if (rate > FLAKE_EXCLUSION_RATE) return 1;
-  let repeats = 1;
-  for (const band of FLAKE_REPEAT_RATES) {
-    if (rate > band) repeats++;
-  }
-  return Math.min(repeats, MAX_REPEATS);
+/**
+ * How many times a lane runs an identity, given how flaky it is.
+ *
+ * A test that has never disagreed with itself runs once. Any rate at all
+ * puts it on the line through `FLAKE_MIN_EXECUTIONS` at a rate of
+ * nothing and `FLAKE_ANCHOR_EXECUTIONS` at `FLAKE_ANCHOR_RATE`, which
+ * carries on past that anchor until `MAX_EXECUTIONS` stops it.
+ *
+ * The line runs past `FLAKE_EXCLUSION_RATE` on purpose. A test that
+ * flaky is not selected, so the only way it reaches a lane is a change
+ * that edits it or that its suite maps onto its unit — which is very
+ * likely a fix, and the count is what makes it prove itself.
+ */
+export function executionsFor(rate: number): number {
+  if (rate <= 0) return 1;
+  const line = FLAKE_MIN_EXECUTIONS +
+    (FLAKE_ANCHOR_EXECUTIONS - FLAKE_MIN_EXECUTIONS) *
+      (rate / FLAKE_ANCHOR_RATE);
+  return Math.min(
+    MAX_EXECUTIONS,
+    Math.max(FLAKE_MIN_EXECUTIONS, Math.round(line)),
+  );
 }
 
 /** What a manifest is built from beyond the folded state. */
 export interface BuildInput {
   states: Map<string, IdentityState>;
-
-  /** Identities failing in the newest run on `main`. */
-  mainRed: ReadonlySet<string>;
 
   /** Where each identity runs, by identity key. */
   surfaces: ReadonlyMap<string, Surface>;
@@ -425,30 +502,6 @@ export interface BuildInput {
   commit: string;
   runs: number;
   calibration?: Partial<Calibration>;
-}
-
-/** A number with the digits past `places` dropped. */
-function round(value: number, places: number): number {
-  const scale = 10 ** places;
-  return Math.round(value * scale) / scale;
-}
-
-/** The identity a key names, parsed back out of its canonical form. */
-export function identityOfKey(key: string): TestIdentity | undefined {
-  let parts: unknown;
-  try {
-    parts = JSON.parse(key);
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(parts) || parts.length < 3) return undefined;
-  const [k, s, n, v] = parts;
-  if (typeof k !== "string" || typeof s !== "string" || typeof n !== "string") {
-    return undefined;
-  }
-  const test: TestIdentity = { k, s, n };
-  if (typeof v === "string") test.v = v;
-  return test;
 }
 
 /**
@@ -471,31 +524,33 @@ export function buildManifest(input: BuildInput): Manifest {
   const entries: ManifestEntry[] = [];
   const withheld: WithheldEntry[] = [];
   for (const [key, state] of input.states) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
+    const evidence = flakeCounts(state, input.today);
+    // Every figure here is written as it was measured. Thresholds are
+    // compared against these, so a figure rounded on the way in decides
+    // at the rounding rather than at the threshold: a share rounded to
+    // four places reaches zero once a test has twenty thousand runs
+    // behind one disagreement, and zero is what the execution count
+    // steps at. Reading these is what rounds them, and a reader that
+    // shows one to a person rounds it there.
     const rate = flakeRate(state, input.today);
-    // Rounded because the digits past these are noise, and because a
-    // manifest carries one entry per identity: at twenty thousand of them
-    // the difference between a rounded float and a full one is megabytes.
-    inputs.catches = round(inputs.catches, 2);
-    inputs.churn = round(inputs.churn, 6);
     const ran = lastRun(state);
     entries.push({
       test,
       suite: surface.suite,
       unit: surface.unit,
-      cost: round(costSeconds(state, input.today), 3),
-      score: round(value(inputs, input.today), 4),
+      cost: costSeconds(state, input.today),
+      score: value(inputs, input.today),
       inputs,
-      flakeRate: round(rate, 4),
-      repeats: repeatsFor(rate),
+      flakeRate: rate,
+      flakeEvidence: evidence,
+      repeats: executionsFor(rate),
       ...(ran === undefined ? {} : { lastRun: ran }),
     });
-    if (input.mainRed.has(key)) {
-      withheld.push({ test, suite: surface.suite, reason: "main-red" });
-    } else if (rate > FLAKE_EXCLUSION_RATE) {
+    if (rate > FLAKE_EXCLUSION_RATE) {
       withheld.push({ test, suite: surface.suite, reason: "flaky" });
     }
   }
@@ -553,9 +608,17 @@ export class Fold {
     today: string,
   ) {
     this.#states = new Map(
-      Object.entries(aggregate.states).map((
-        [key, state],
-      ) => [key, { ...emptyState(), ...state }]),
+      Object.entries(aggregate.states)
+        // An aggregate written before lane measurements stopped being
+        // folded carries a state for each of them. Nothing new adds one,
+        // and a state nothing adds to is a state nothing removes either,
+        // so an aggregate carrying one carries it for good unless it is
+        // dropped on the way in.
+        .filter(([key]) => {
+          const test = testIdentityOfKey(key);
+          return test === undefined || !isLaneMeasurement(test);
+        })
+        .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
     this.#context = parseContext(aggregate.context);
     this.#folded = [...aggregate.folded];
@@ -695,10 +758,6 @@ export class Fold {
     for (const state of this.#states.values()) {
       trimWindows(state, this.#today);
     }
-    const mainRed = new Set<string>();
-    for (const [key, state] of this.#states) {
-      if (state.lastMainOutcome === "fail") mainRed.add(key);
-    }
     return {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
@@ -709,7 +768,6 @@ export class Fold {
         states: Object.fromEntries(this.#states),
       },
       states: this.#states,
-      mainRed,
       surfaces: this.#surfaces,
       observations: this.#observations,
     };
@@ -749,7 +807,6 @@ export class Fold {
 export interface FoldResult {
   aggregate: AggregateState;
   states: Map<string, IdentityState>;
-  mainRed: Set<string>;
   surfaces: Map<string, Surface>;
   observations: number;
 }

@@ -38,7 +38,7 @@ REQUIRES '${cliName()}' ON PATH:
   The installed function calls '${cliName()} completion complete' on every Tab,
   and swallows its errors, so without a '${cliName()}' on PATH completion
   silently yields nothing — including for "deno task ${cliName()} <TAB>".
-  mise puts the checkout's bin/ on PATH; otherwise symlink bin/${cliName()}.
+  Put one there once with 'deno task install-cf'.
   See "Installing ${cliName()} on PATH" in packages/cli/README.md.
 
 INSTALL (zsh), in ~/.zshrc after compinit:

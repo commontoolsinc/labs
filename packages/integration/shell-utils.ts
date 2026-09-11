@@ -202,6 +202,41 @@ export async function describeStateWaitFailure(
 }
 
 /**
+ * The `localStorage` key the shell's render-ceiling toggle is persisted under
+ * (packages/shell/src/lib/render-ceiling.ts).
+ */
+const RENDER_CEILING_KEY = "cfcRenderCeiling";
+
+/**
+ * Writes the shell's render-ceiling switch for `page`'s browser profile.
+ *
+ * `true` writes `"true"`, `false` writes `"false"`, and undefined removes the
+ * key. What each of those means is
+ * `packages/shell/src/lib/render-ceiling.ts`'s to decide;
+ * `isCfcRenderCeilingEnabled` reads the key as `=== "true"`, so `false` and
+ * undefined select the same profile there and differ only in what the caller
+ * said. Removing the key on undefined is what stops one navigation inheriting
+ * the side the previous navigation over the same page asked for, one page
+ * serving every case in a file.
+ *
+ * The worker runtime reads the key when it is constructed, at login, so this
+ * runs after the navigation that gives the page an origin to store it against
+ * and before the login: the same contract {@link enablePatternCoverage} runs
+ * under.
+ */
+async function seedRenderCeilingProfile(
+  page: Page,
+  enabled: boolean | undefined,
+): Promise<void> {
+  await page.evaluate<void, [string, string | null]>((key, value) => {
+    if (value === null) globalThis.localStorage.removeItem(key);
+    else globalThis.localStorage.setItem(key, value);
+  }, {
+    args: [RENDER_CEILING_KEY, enabled === undefined ? null : String(enabled)],
+  });
+}
+
+/**
  * The viewport size every page a {@link ShellIntegration} opens is set to.
  *
  * The shell's header has a narrow layout and a wide one, and lays out its
@@ -388,13 +423,23 @@ export class ShellIntegration {
    * states what it sends and what that has to reach as two separate things.
    *
    * If `identity` is provided, logs in with the identity after navigation.
+   *
+   * `renderCeiling` states the side of the shell's per-profile render ceiling
+   * switch this navigation's browser profile is on. With it on, the worker
+   * runtime carries the §8.10.6 display ceiling: display sinks admit the
+   * acting user's own identity atoms and the allow-listed influence-class
+   * caveat kinds, everything else renders as a blocked placeholder, and
+   * author-supplied render-boundary declassification is denied. Omitting it
+   * leaves the profile on the shell's own default. See
+   * {@link seedRenderCeilingProfile} for what each of the three states writes.
    */
   async goto(
-    { frontendUrl, view, urlPath, identity }: {
+    { frontendUrl, view, urlPath, identity, renderCeiling }: {
       frontendUrl: string;
       view: AppView;
       urlPath?: `/${string}`;
       identity?: Identity;
+      renderCeiling?: boolean;
     },
   ): Promise<void> {
     this.#checkIsOk();
@@ -415,6 +460,7 @@ export class ShellIntegration {
     // to be set after the page has an origin to store it against and before the
     // login below.
     await enablePatternCoverage(page);
+    await seedRenderCeilingProfile(page, renderCeiling);
     // [NDT] triage aid: seed the worker-console host toggle before login so
     // the worker runtime's console (where the storage taps live) reaches the
     // page console — and, with PIPE_CONSOLE, the test output. Same

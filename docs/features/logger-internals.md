@@ -138,7 +138,6 @@ to surface runtime conditions like "this action has invalid input":
 logger.flag("action invalid input", "action:myModule", true, {
   schema: { type: "object" },
   raw: currentRawValue,
-  queryResult: serializedResult,
 });
 
 // Clear the flag

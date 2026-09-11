@@ -1719,8 +1719,8 @@ async function uncoveredAddedLinesByFile(
 /**
  * Write the coverage-debt regression comment to a file for a later workflow to
  * post. The gate runs on `pull_request`, where fork PRs get a read-only token
- * and cannot comment, so the `coverage-comment` workflow_run job posts this from
- * the base-repo context instead. Never throws — this is best-effort so it cannot
+ * and cannot comment, so the `post-coverage-comment` job of the Pull
+ * Request Comments workflow posts this from the base-repo context instead. Never throws — this is best-effort so it cannot
  * mask the regression failure itself.
  */
 export async function writeCoverageDebtSuggestion(

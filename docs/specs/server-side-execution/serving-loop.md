@@ -57,22 +57,23 @@ for that principal's instance of every node that narrows beneath it
 (scopes.md §2, RULED 2026-08-16; fan-out stage B), so the demand
 registry keeps the demanding (user, session) pair on every INSTANCE a
 client session TRACKS — memory v2's schema-narrowed closure of that
-session's watches (the roots, every doc the selectors' schemas reach,
-AND the piece `source`/process wiring the tracker follows regardless of
-schema — a watched piece root pulls its whole internal graph, handler
-bindings and `ifElse` inputs included; absent targets included),
-instance-keyed, accumulated across its overlapping watches, space-scoped
-instances included. Demand is that union over the space's client
-sessions; there is no demand walk.
-*(AMENDED 2026-08-19 (descriptive; the RULED semantics — the tracked
-set — unchanged): W1's build measured what the tracker's closure
-actually is (stage-C W0 §2(b)) — it follows a piece root's
-`source`/process wiring, so a schema-narrowed root watch still demands
-the piece's whole internal graph, and the one-push-late structural-growth
-path is therefore pre-empted for a piece's own computeds and fires only
-for links OUT of a piece's wiring (a cross-piece link, an array element).
-Over-approximation, never under: the client renders nothing it is not
-delivered.)*
+session's watches (the roots, every doc the selectors' schemas reach —
+absent targets included — and the schema document a delivered document's
+`cfc` label names; the `pattern`, `argument`, `result`, and `internal`
+metadata of a document is data on it and puts nothing in the closure,
+05-queries.md "Metadata / Provenance Resolution"), instance-keyed,
+accumulated across its overlapping watches, space-scoped instances
+included. Demand is that union over the space's client sessions; there
+is no demand walk.
+*(AMENDED 2026-09-09 (descriptive; the RULED semantics — the tracked
+set — unchanged): a piece's own computeds are in a session's closure
+exactly where a watch's schema crosses to them — a result read under the
+pattern's result schema reaches the computed behind each result
+property — so a client that wants a derived value names it by reading
+under a schema that reaches it, and a schema-less root watch demands the
+root document alone. The one-push-late structural-growth path is what
+carries a piece's computeds into demand once the result document holds
+the link a schema crosses (protocol.md §4's later demand).)*
 The serving loop runs the STALE writers of demanded instances — a
 writer whose instance for a demanding pair never ran at its ratchet,
 or was dirtied since (§3b's per-instance clean bit; the basis index is
@@ -1082,9 +1083,13 @@ same crossing (builtins.md §5 carries the register row; RULED
 
 The SpaceServer owns the pattern-source watcher and the hot-swap. The
 two halves have different owners. FOLLOWING a piece's source origin
-belongs to whoever OPENS the piece, which a serving tenure never does
-(piece-source-lifecycle.md); a tenure owes its space the EXISTENCE of a
-root and nothing more. The SWAP is the server's: a pattern-pointer
+belongs to whoever explicitly OPENS the piece (piece-source-lifecycle.md).
+Tenure activation owes its space the EXISTENCE of a root, without following
+that root's source. A served wish explicitly opens the runtime-supplied
+sidecars it needs through `openSidecarSurface` and `SourceReconciler.open`;
+existing sidecars follow their origins on that open. The ON client only
+references those sidecars, leaving the serving runtime as their opener. The
+SWAP is the server's: a pattern-pointer
 write is an ordinary authored input that dirties the piece, the swap is
 the server reacting to it, and the swap's setup write stamps the
 `bookkeeping` kind and enters the wave
@@ -1093,10 +1098,10 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. Nothing server-side probes a pattern
-route any more, so the network source probe against a fully-local
-store that this section used to record as a residual is gone with the
-half that made it.
+under the writing principal. Root creation and explicit wish-sidecar opens
+fetch system source through the serving runtime's API URL. Those fetches remain
+within verification-coverage.md OW55's source-trust obligation; root ensuring
+adds no source-following probe for an existing root.
 
 ## 4. Effectful nodes: memoization contract
 

@@ -22,9 +22,6 @@ export interface ScoreInputs {
   /** Catches, weighted by where each happened. */
   catches: number;
 
-  /** How many of those were on `main`, which measure escapes as well. */
-  mainCatches: number;
-
   /** The day of the most recent catch, absent when there are none. */
   lastCatch?: string;
 
@@ -61,8 +58,21 @@ export interface ManifestEntry {
   /** The inputs behind that score, so a manifest explains itself. */
   inputs: ScoreInputs;
 
-  /** How often it disagrees with itself. */
+  /**
+   * The share of the runs it took part in that it was seen disagreeing
+   * with itself over, rather than the share of the failures among them.
+   */
   flakeRate: number;
+
+  /**
+   * The evidence behind that share, so a manifest explains this figure
+   * as it does the score. Counted flat, where the share weights recent
+   * days more heavily, so the share is not these divided. Absent from a
+   * manifest written before they were published: a reader shows nothing
+   * for it, since refusing the manifest would cost every test its score
+   * to save one column.
+   */
+  flakeEvidence?: FlakeEvidence;
 
   /** How many times a lane runs it. Every one of them must pass. */
   repeats: number;
@@ -82,8 +92,21 @@ export interface ManifestEntry {
   independent?: boolean;
 }
 
+/**
+ * What a flake share was measured over. A share alone cannot be weighed:
+ * one disagreement in two runs and a thousand in two thousand are the
+ * same ratio and not the same claim.
+ */
+export interface FlakeEvidence {
+  /** Runs seen to disagree with another run of the same commit. */
+  flakes: number;
+
+  /** Runs they were seen among, inside the flake window. */
+  runs: number;
+}
+
 /** Why an identity is not selectable on a pull request. */
-export type WithheldReason = "main-red" | "flaky";
+export type WithheldReason = "flaky";
 
 /** One identity held back, and why. */
 export interface WithheldEntry {
@@ -182,9 +205,6 @@ export interface Manifest {
   /** How many item-level identities the store knows, and their digest. */
   known: { count: number; digest: string };
 
-  /** The newest coverage attribution map, published on its own cadence. */
-  attributionMap?: string;
-
   coverageBaselines: CoverageBaseline[];
 }
 
@@ -253,8 +273,8 @@ function parseIdentity(value: unknown): TestIdentity | undefined {
 function parseInputs(value: unknown): ScoreInputs | undefined {
   if (!isRecord(value)) return undefined;
   if (
-    !isFiniteNumber(value.catches) || !isFiniteNumber(value.mainCatches) ||
-    !isFiniteNumber(value.sources) || !isFiniteNumber(value.churn)
+    !isFiniteNumber(value.catches) || !isFiniteNumber(value.sources) ||
+    !isFiniteNumber(value.churn)
   ) {
     return undefined;
   }
@@ -263,7 +283,6 @@ function parseInputs(value: unknown): ScoreInputs | undefined {
   }
   const inputs: ScoreInputs = {
     catches: value.catches,
-    mainCatches: value.mainCatches,
     sources: value.sources,
     churn: value.churn,
   };
@@ -301,6 +320,10 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   if (value.lastRun !== undefined && !isNonEmptyString(value.lastRun)) {
     return undefined;
   }
+  const evidence = parseFlakeEvidence(value.flakeEvidence);
+  if (value.flakeEvidence !== undefined && evidence === undefined) {
+    return undefined;
+  }
   const entry: ManifestEntry = {
     test,
     suite: value.suite,
@@ -313,15 +336,49 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   };
   if (value.lastRun !== undefined) entry.lastRun = value.lastRun;
   if (value.independent !== undefined) entry.independent = value.independent;
+  if (evidence !== undefined) entry.flakeEvidence = evidence;
   return entry;
 }
 
-function parseWithheld(value: unknown): WithheldEntry | undefined {
+/**
+ * Validates the counts behind a flake share. Counts of runs, so neither
+ * is fractional or negative, and a test cannot disagree with itself more
+ * often than it ran.
+ */
+function parseFlakeEvidence(value: unknown): FlakeEvidence | undefined {
   if (!isRecord(value)) return undefined;
-  const test = parseIdentity(value.test);
-  if (test === undefined || !isNonEmptyString(value.suite)) return undefined;
-  if (value.reason !== "main-red" && value.reason !== "flaky") return undefined;
-  return { test, suite: value.suite, reason: value.reason };
+  const { flakes, runs } = value;
+  if (
+    !isFiniteNumber(flakes) || !Number.isInteger(flakes) || flakes < 0 ||
+    !isFiniteNumber(runs) || !Number.isInteger(runs) || runs < 0 ||
+    flakes > runs
+  ) {
+    return undefined;
+  }
+  return { flakes, runs };
+}
+
+/**
+ * Validates the withheld list, keeping the entries whose reason this
+ * reader honors. A well-formed entry naming any other reason is dropped
+ * rather than refused: an unreadable manifest is treated as an absent
+ * one, which makes the whole corpus mandatory, so a writer that names a
+ * reason this reader has no rule for must not cost every other entry the
+ * manifest carries. A malformed entry still refuses the manifest, since
+ * that is a corrupt writer rather than a reason from elsewhere.
+ */
+function parseWithheldEntries(value: unknown): WithheldEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries: WithheldEntry[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) return undefined;
+    const test = parseIdentity(raw.test);
+    if (test === undefined || !isNonEmptyString(raw.suite)) return undefined;
+    if (!isNonEmptyString(raw.reason)) return undefined;
+    if (raw.reason !== "flaky") continue;
+    entries.push({ test, suite: raw.suite, reason: raw.reason });
+  }
+  return entries;
 }
 
 function parseUnavailable(value: unknown): UnavailableEntry | undefined {
@@ -468,7 +525,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
   }
   const calibration = parseCalibration(value.calibration);
   const entries = parseAll(value.entries, parseEntry);
-  const withheld = parseAll(value.withheld, parseWithheld);
+  const withheld = parseWithheldEntries(value.withheld);
   const unavailable = parseAll(value.unavailable, parseUnavailable);
   const unschedulable = parseAll(value.unschedulable, parseUnschedulable);
   const lanes = parseAll(value.lanes, parseLane);
@@ -487,12 +544,6 @@ export function parseManifest(value: unknown): Manifest | undefined {
   ) {
     return undefined;
   }
-  if (
-    value.attributionMap !== undefined &&
-    !isNonEmptyString(value.attributionMap)
-  ) {
-    return undefined;
-  }
   // One identity may not appear twice: the packer removes an identity
   // from the selectable set as it takes it, and a duplicate would let a
   // later pass take it again.
@@ -502,7 +553,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
     if (seen.has(key)) return undefined;
     seen.add(key);
   }
-  const manifest: Manifest = {
+  return {
     schema: MANIFEST_SCHEMA_VERSION,
     generatedAt: value.generatedAt,
     seed: value.seed,
@@ -518,10 +569,6 @@ export function parseManifest(value: unknown): Manifest | undefined {
     known: { count: value.known.count, digest: value.known.digest },
     coverageBaselines,
   };
-  if (value.attributionMap !== undefined) {
-    manifest.attributionMap = value.attributionMap;
-  }
-  return manifest;
 }
 
 /** Serializes a manifest for the store. */

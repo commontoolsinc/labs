@@ -4,13 +4,31 @@ import {
   BINARY_CACHE_DIR,
   CACHE_DIR,
   CAPABILITIES,
+  type Capability,
   type CapabilityId,
   COMPILE_CACHE_FILE,
   openCapabilities,
   pidOfBackgroundLaunch,
   resolveCapabilities,
 } from "./ci-capabilities.ts";
-import { serverExecutionCiLane } from "./server-execution-ci.ts";
+import {
+  serverExecutionCiLane,
+  type ServerExecutionCiRole,
+} from "./server-execution-ci.ts";
+
+/** A capability exporting `env`, built on `needs`. */
+function stub(
+  id: CapabilityId,
+  env: Record<string, string>,
+  needs?: readonly CapabilityId[],
+): Capability {
+  return {
+    id,
+    description: `a capability exporting ${Object.keys(env).join(", ")}`,
+    ...(needs === undefined ? {} : { needs }),
+    open: () => Promise.resolve({ env, close: () => Promise.resolve() }),
+  };
+}
 
 describe("ci capabilities", () => {
   it("opens what a capability is built on before the capability", () => {
@@ -62,6 +80,7 @@ describe("ci capabilities", () => {
       "jq",
       "local-dev-servers",
       "toolshed",
+      "toolshed-baked",
       "toolshed-baked-opposite",
     ]);
   });
@@ -72,7 +91,7 @@ describe("ci capabilities", () => {
       dryRun: true,
       workDir: "/nonexistent",
     });
-    expect(opened.env.API_URL).toBe("http://localhost:8000/");
+    expect(opened.envFor(["toolshed"]).API_URL).toBe("http://localhost:8000");
     expect(opened.timings.map((timing) => timing.capability)).toEqual([
       "deno",
       "toolshed",
@@ -134,17 +153,65 @@ describe("ci capabilities", () => {
     expect(opened.timings.length).toBe(CAPABILITIES.size);
     // The two servers export the addresses their suites reach them at,
     // and the command line exports the path it is found on.
-    expect(opened.env.API_URL).toBeDefined();
-    expect(opened.env.TOOLSHED_PORT).toBeDefined();
-    expect(opened.env.CF_LABS_ROOT).toBe(Deno.cwd());
-    expect(opened.env.BG_PIECE_SERVICE_BIN).toBe(
+    const every = opened.envFor([...CAPABILITIES.keys()]);
+    expect(every.API_URL).toBeDefined();
+    expect(every.TOOLSHED_PORT).toBeDefined();
+    expect(every.CF_LABS_ROOT).toBe(Deno.cwd());
+    expect(every.BG_PIECE_SERVICE_BIN).toBe(
       `${Deno.cwd()}/${BINARY_CACHE_DIR}/bg-piece-service`,
     );
-    expect(opened.env.PATH?.startsWith(`${Deno.cwd()}/bin`)).toBe(true);
-    expect(opened.env.CF_COMPILE_CACHE_FILE).toBe(
+    expect(every.PATH?.startsWith(`${Deno.cwd()}/bin`)).toBe(true);
+    expect(every.CF_COMPILE_CACHE_FILE).toBe(
       `${Deno.cwd()}/${COMPILE_CACHE_FILE}`,
     );
     await opened.close();
+  });
+
+  it("gives a suite the addresses its own server is listening on", async () => {
+    // Both Toolshed capabilities export the address theirs is listening
+    // on, and a lane may hold the default and opposite server-execution
+    // arms at once.
+    const registry = new Map<CapabilityId, Capability>([
+      ["toolshed", stub("toolshed", { API_URL: "http://default.test" })],
+      [
+        "toolshed-baked-opposite",
+        stub("toolshed-baked-opposite", { API_URL: "http://opposite.test" }),
+      ],
+    ]);
+    const opened = await openCapabilities(
+      ["toolshed", "toolshed-baked-opposite"],
+      { root: Deno.cwd(), dryRun: true, workDir: "/nonexistent" },
+      registry,
+    );
+    try {
+      expect(opened.envFor(["toolshed"]).API_URL).toBe("http://default.test");
+      expect(opened.envFor(["toolshed-baked-opposite"]).API_URL)
+        .toBe("http://opposite.test");
+    } finally {
+      await opened.close();
+    }
+  });
+
+  it("gives a suite what the capabilities under its own export too", async () => {
+    // A suite names one capability, and the batch runs with what
+    // everything under that one exports as well.
+    const registry = new Map<CapabilityId, Capability>([
+      ["deno", stub("deno", { UNDERNEATH: "yes" })],
+      ["cf", stub("cf", { NAMED: "yes" }, ["deno"])],
+    ]);
+    const opened = await openCapabilities(["cf"], {
+      root: Deno.cwd(),
+      dryRun: true,
+      workDir: "/nonexistent",
+    }, registry);
+    try {
+      expect(opened.envFor(["cf"])).toEqual({
+        UNDERNEATH: "yes",
+        NAMED: "yes",
+      });
+    } finally {
+      await opened.close();
+    }
   });
 
   it("closes what it opened, in the reverse of the opening order", async () => {
@@ -255,12 +322,15 @@ describe("opening a capability on a machine that answers", () => {
   /** What a capability asked the machine, and what it was told. */
   function machine(answers: Record<string, string> = {}) {
     const asked: string[] = [];
+    const envs: Array<Record<string, string> | undefined> = [];
     const exec = (
       command: string,
       args: readonly string[],
+      options?: { cwd?: string; env?: Record<string, string> },
     ): Promise<string> => {
       const line = [command, ...args].join(" ");
       asked.push(line);
+      envs.push(options?.env);
       for (const [match, answer] of Object.entries(answers)) {
         if (line.includes(match)) {
           return answer.startsWith("!")
@@ -270,10 +340,35 @@ describe("opening a capability on a machine that answers", () => {
       }
       return Promise.resolve("");
     };
-    return { asked, exec };
+    return { asked, envs, exec };
   }
 
-  async function open(id: CapabilityId, m: ReturnType<typeof machine>) {
+  /** The environment the machine was given for the call naming `match`. */
+  function envOf(m: ReturnType<typeof machine>, match: string) {
+    return m.envs[m.asked.findIndex((line) => line.includes(match))];
+  }
+
+  /** A server answering what one on `role` answers. */
+  function serving(role: ServerExecutionCiRole): typeof fetch {
+    const lane = serverExecutionCiLane(role);
+    const bodies: Record<string, unknown> = {
+      "/api/meta": {
+        experimental: { serverExecution: lane.enabled },
+        shellServerExecutionDefine: lane.experimentalValue ?? null,
+      },
+      "/api/health/stats": { servingLoop: lane.enabled ? 1 : null },
+    };
+    return (input) =>
+      Promise.resolve(
+        Response.json(bodies[new URL(String(input)).pathname] ?? {}),
+      );
+  }
+
+  async function open(
+    id: CapabilityId,
+    m: ReturnType<typeof machine>,
+    role: ServerExecutionCiRole = "default",
+  ) {
     const root = await Deno.makeTempDir({ prefix: "capability-" });
     try {
       const opened = await openCapabilities([id], {
@@ -281,6 +376,7 @@ describe("opening a capability on a machine that answers", () => {
         dryRun: false,
         workDir: root,
         exec: m.exec,
+        fetch: serving(role),
       }, CAPABILITIES);
       await opened.close();
       return { opened, root };
@@ -300,7 +396,24 @@ describe("opening a capability on a machine that answers", () => {
     expect(present.asked.some((line) => line.includes("chmod 666 /dev/fuse")))
       .toBe(true);
 
-    const missing = machine({ "command -v fusermount3": "!not found" });
+    // The runner image carries the FUSE runtime and not its development
+    // files, so `fusermount3` answers while the library the mount opens
+    // is absent. What the probe asks has to be the library.
+    const library = machine({
+      "pkg-config --exists fuse3": "!no such package",
+    });
+    await open("fuse", library);
+    expect(library.asked.some((line) => line.includes("libfuse3-dev")))
+      .toBe(true);
+
+    // The unmount runs `fusermount3`, which the development files do not
+    // carry, so the runtime package gets a probe of its own.
+    const runtime = machine({ "command -v fusermount3": "!not found" });
+    await open("fuse", runtime);
+    expect(runtime.asked.some((line) => line.includes("apt-get install")))
+      .toBe(true);
+
+    const missing = machine({ "command -v gcc": "!not found" });
     await open("fuse", missing);
     expect(missing.asked.some((line) => line.includes("apt-get update")))
       .toBe(true);
@@ -342,14 +455,80 @@ describe("opening a capability on a machine that answers", () => {
   it("starts a server on a port of its own and kills what it started", async () => {
     const m = machine({ "index.ts": "listening (pid 999999). Logs: x\n" });
     const { opened } = await open("toolshed", m);
-    const port = Number(opened.env.TOOLSHED_PORT);
+    const served = opened.envFor(["toolshed"]);
+    const port = Number(served.TOOLSHED_PORT);
     expect(Number.isInteger(port) && port > 0).toBe(true);
-    expect(opened.env.API_URL).toBe(`http://localhost:${port}/`);
+    // No trailing slash: the shell suites compose a path onto this, and
+    // the Deno suites add a slash of their own when they need one.
+    expect(served.API_URL).toBe(`http://localhost:${port}`);
     expect(m.asked.some((line) => line.includes(`--port=${port}`))).toBe(true);
     expect(m.asked.some((line) => line.includes("--background"))).toBe(true);
     // Closing is what `open` already did; killing a process this test
     // invented would be worse than not checking, and what matters is
     // that it does not throw.
+  });
+
+  it("holds a server it started to the arm it started it for", async () => {
+    // A server on the other arm answers every request the suites make
+    // and passes, so the run reports that the arm it named works when
+    // nothing exercised it.
+    const answers = { "index.ts": "listening (pid 999999). Logs: x\n" };
+    await open("toolshed", machine(answers), "default");
+
+    const wrong = machine(answers);
+    await expect(open("toolshed", wrong, "opposite")).rejects.toThrow(
+      "default lane publishes serverExecution",
+    );
+  });
+
+  it("gives a server the define its own role names", async () => {
+    // A lane holding both arms carries one value in its ambient
+    // environment, and the shell bakes in whatever the build saw. The
+    // define a server builds and runs under is the one its role names:
+    // the value for the opposite arm, and none at all for the default.
+    const named = serverExecutionCiLane("opposite").experimentalValue;
+    const before = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+    Deno.env.set(
+      "EXPERIMENTAL_SERVER_EXECUTION",
+      named === "true" ? "false" : "true",
+    );
+    try {
+      const source = machine({
+        "index.ts": "listening (pid 999999). Logs: x\n",
+      });
+      await open("toolshed", source);
+      expect(envOf(source, "index.ts")?.EXPERIMENTAL_SERVER_EXECUTION)
+        .toBeUndefined();
+
+      const baked = await openBaked(
+        "toolshed-baked",
+        "toolshed-baked-default",
+        "default",
+      );
+      expect(envOf(baked, "build-binaries")?.EXPERIMENTAL_SERVER_EXECUTION)
+        .toBeUndefined();
+      expect(
+        envOf(baked, "toolshed-baked-default")?.EXPERIMENTAL_SERVER_EXECUTION,
+      ).toBeUndefined();
+
+      const opposite = await openBaked(
+        "toolshed-baked-opposite",
+        "toolshed-baked-opposite",
+        "opposite",
+      );
+      expect(envOf(opposite, "build-binaries")?.EXPERIMENTAL_SERVER_EXECUTION)
+        .toBe(named);
+      expect(
+        envOf(opposite, "toolshed-baked-opposite")
+          ?.EXPERIMENTAL_SERVER_EXECUTION,
+      ).toBe(named);
+    } finally {
+      if (before === undefined) {
+        Deno.env.delete("EXPERIMENTAL_SERVER_EXECUTION");
+      } else {
+        Deno.env.set("EXPERIMENTAL_SERVER_EXECUTION", before);
+      }
+    }
   });
 
   it("refuses a launch that names no process to kill later", async () => {
@@ -359,9 +538,35 @@ describe("opening a capability on a machine that answers", () => {
     await expect(open("toolshed", m)).rejects.toThrow("named no process");
   });
 
+  /** Opens a baked capability against a root that has no binary yet. */
+  async function openBaked(
+    id: CapabilityId,
+    binaryName: string,
+    role: ServerExecutionCiRole,
+  ) {
+    const m = machine({ [binaryName]: "listening (pid 999999). Logs: x\n" });
+    const root = await Deno.makeTempDir({ prefix: "capability-" });
+    try {
+      // What a build leaves behind, so the copy into the cache has
+      // something to copy.
+      await Deno.mkdir(`${root}/dist`, { recursive: true });
+      await Deno.writeTextFile(`${root}/dist/toolshed`, "");
+      const opened = await openCapabilities([id], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+        fetch: serving(role),
+      }, CAPABILITIES);
+      await opened.close();
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+    return m;
+  }
+
   it("builds the server-execution binary only when none was restored", async () => {
-    const opposite = serverExecutionCiLane("opposite");
-    const binaryName = `toolshed-baked-${opposite.experimentalValue}`;
+    const binaryName = "toolshed-baked-opposite";
     const answers = {
       [binaryName]: "listening (pid 999999). Logs: x\n",
     };
@@ -384,6 +589,7 @@ describe("opening a capability on a machine that answers", () => {
         dryRun: false,
         workDir: root,
         exec: m.exec,
+        fetch: serving("opposite"),
       }, CAPABILITIES);
       await opened.close();
       await Deno.remove(root, { recursive: true });
@@ -456,7 +662,7 @@ describe("the compile cache a lane hands the pattern suites", () => {
         dryRun: false,
         workDir: root,
       });
-      expect(opened.env.CF_COMPILE_CACHE_FILE).toBe(
+      expect(opened.envFor(["compile-cache"]).CF_COMPILE_CACHE_FILE).toBe(
         `${root}/${COMPILE_CACHE_FILE}`,
       );
       expect((await Deno.stat(`${root}/${CACHE_DIR}/compile`)).isDirectory)

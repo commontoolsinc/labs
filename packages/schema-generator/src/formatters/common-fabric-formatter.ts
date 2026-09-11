@@ -11,6 +11,7 @@ import {
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
+import { reportUnresolvedDefault } from "../default-diagnostics.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -18,6 +19,7 @@ import {
   extractDefaultBrandPayloadValue,
   getArrayElementInfo,
   getPropertyNameText,
+  isEmptyObjectDefaultType,
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
@@ -310,7 +312,11 @@ export class CommonFabricFormatter implements TypeFormatter {
               : { default: defaultValue }) as MutableJSONSchemaObj;
           }
           (valueSchema as Record<string, unknown>).default = defaultValue;
+        } else {
+          reportUnresolvedDefault(context);
         }
+      } else {
+        reportUnresolvedDefault(context);
       }
 
       return valueSchema;
@@ -989,6 +995,8 @@ export class CommonFabricFormatter implements TypeFormatter {
           : { default: defaultValue }) as MutableJSONSchemaObj;
       }
       (valueSchema as any).default = defaultValue;
+    } else {
+      reportUnresolvedDefault(context, defaultTypeNode);
     }
 
     return valueSchema;
@@ -1836,23 +1844,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       return this.#extractValueFromTypeQuery(typeNode, context);
     }
 
-    // Handle type references that represent empty objects
-    // This includes Record<string, never>, Record<K, never>, and similar mapped types
-    if (ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments) {
-      // For mapped types like Record<K, V>, if V is never, the result is an empty object
-      // Check the last type argument (the value type in mapped types)
-      const lastTypeArg =
-        typeNode.typeArguments[typeNode.typeArguments.length - 1];
-      if (lastTypeArg) {
-        const lastType = context.typeRegistry?.get(lastTypeArg) ??
-          context.typeChecker.getTypeFromTypeNode(lastTypeArg);
-        // If the value type is never, this represents an empty object
-        if (lastType.flags & ts.TypeFlags.Never) {
-          return {};
-        }
-      }
-    }
-
     // Handle literal types
     if (ts.isLiteralTypeNode(typeNode)) {
       const literal = typeNode.literal;
@@ -1865,28 +1856,35 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     // Handle array literals (tuples) like [1, 2] or ["item1", "item2"]
     if (ts.isTupleTypeNode(typeNode)) {
-      return typeNode.elements.map((element) =>
-        this.#extractDefaultValueFromNode(element, context)
-      );
+      const values: unknown[] = [];
+      for (const element of typeNode.elements) {
+        const value = this.#extractDefaultValueFromNode(element, context);
+        if (value === undefined) return undefined;
+        values.push(value);
+      }
+      return values;
     }
 
-    // Handle object literals like { theme: "dark", count: 10 }
     if (ts.isTypeLiteralNode(typeNode)) {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
-        if (ts.isPropertySignature(member) && member.name && member.type) {
-          const propName = getPropertyNameText(
-            member.name,
-            context.typeChecker,
-          );
-          if (!propName) {
-            continue;
-          }
-          obj[propName] = this.#extractDefaultValueFromNode(
-            member.type,
-            context,
-          );
+        if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+          const type = context.typeRegistry?.get(typeNode) ??
+            context.typeChecker.getTypeFromTypeNode(typeNode);
+          return isEmptyObjectDefaultType(type, context.typeChecker)
+            ? {}
+            : undefined;
         }
+        const propName = getPropertyNameText(member.name, context.typeChecker);
+        if (propName === undefined) return undefined;
+        const value = this.#extractDefaultValueFromNode(member.type, context);
+        if (value === undefined) return undefined;
+        Object.defineProperty(obj, propName, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return obj;
     }
@@ -1920,6 +1918,11 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
     if (type.flags & ts.TypeFlags.Undefined) {
       return undefined;
+    }
+
+    // Empty type literals and mapped records need no value declaration.
+    if (isEmptyObjectDefaultType(type, context.typeChecker)) {
+      return {};
     }
 
     // For complex values (arrays/objects), try to extract from the type's symbol
@@ -1971,7 +1974,6 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Check if this is an empty object type (no properties, object type)
-    // This handles cases like Record<string, never>
     if (
       (type.flags & ts.TypeFlags.Object) !== 0 &&
       context.typeChecker.getPropertiesOfType(type).length === 0

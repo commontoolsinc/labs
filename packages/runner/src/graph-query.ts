@@ -22,7 +22,6 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "./builder/types.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import {
-  ALL_META_RAILS,
   type BaseMemoryAddress,
   CompoundCycleTracker,
   createSchemaMemo,
@@ -30,17 +29,15 @@ import {
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
-  loadMetaLinkedDocs,
+  loadLabelSchemaDoc,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
-  type MetaRail,
   type ObjectStorageManager,
   type SchemaMemo,
   SchemaObjectTraverser,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
   schemaTrackerKey,
-  sinkMetaLinkedDocKeys,
   type TraversalContext,
 } from "./traverse.ts";
 
@@ -57,7 +54,6 @@ export {
   schemaTrackerCoversSelector,
   schemaTrackerKey,
 };
-export { sinkMetaLinkedDocKeys };
 
 /** Counters a walk accumulates, for query diagnostics and benchmarks. */
 export type GraphQueryWalkStats = {
@@ -70,16 +66,6 @@ export type GraphQueryWalkStats = {
   getDocAtPathCalls: number;
   schemaMemoHits: number;
 };
-
-/**
- * The rails a crossing-reached document still chases: the ones computed
- * values are supplied through. A plain subscriber whose walk crosses into
- * a piece reads what the piece computes off `result`, and `internal`
- * carries the sub-piece manifests those computations hang off. The
- * remaining rails — pattern, argument, cfc — serve loading and running a
- * piece, which is the intent of naming one, not of reaching one.
- */
-const CROSSING_META_RAILS: readonly MetaRail[] = ["result", "internal"];
 
 export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
   coveredSelectorSkips: 0,
@@ -143,16 +129,6 @@ export type GraphQueryWalkOptions = {
     referrerKey: string | undefined,
   ) => void;
 
-  /**
-   * Receives the tracker-style key of every `internal`-rail document a
-   * crossing-reached piece links, INSTEAD of that document being loaded
-   * and delivered. The receiver owns keeping the subscription reactive to
-   * those keys — delivering one when a later commit touches it. Absent,
-   * crossings chase the internal rail eagerly, exactly as named roots
-   * always do.
-   */
-  lazyInternalSink?: (key: string, referrerKey: string) => void;
-
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
 
@@ -188,13 +164,12 @@ export class GraphQueryWalk {
     this.#manager = options.manager;
     this.#space = options.space;
     this.#identity = options.identity;
-    const { space, identity, onMissedDoc, lazyInternalSink } = options;
+    const { space, identity, onMissedDoc } = options;
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
       options.schemaTracker,
       identity,
       true,
-      undefined,
       // Record a value-link dead-end with the caller (see `onMissedDoc`
       // above for the contract and why it is not the schema tracker).
       // Same-space only: a foreign-space target can never ride this
@@ -218,24 +193,6 @@ export class GraphQueryWalk {
             : this.#keyOverrides.get(referrerKey) ?? referrerKey,
         );
       },
-      undefined,
-      undefined,
-      // A document this walk loads through a link crossing chases only the
-      // rails computed values arrive through — `result` and `internal` —
-      // so a subscriber reading THROUGH a piece still receives and stays
-      // subscribed to what the piece computes. The full family belongs to
-      // the documents a query names: `visit()` chases every rail for its
-      // named document, which is what a caller that intends to load and
-      // run one — a piece resume, a setsrc staging read — relies on.
-      // Chasing every rail at every crossing instead multiplies a wide
-      // walk by each visited piece's whole doc set (pattern, argument,
-      // cfc and their recursion) for documents nothing asked to run.
-      CROSSING_META_RAILS,
-      // With a sink, the internal rail is registered rather than loaded:
-      // a crossed piece's derived cells stay subscribed without shipping
-      // every one of them now (delivery rides their next commit).
-      lazyInternalSink === undefined ? [] : ["internal"],
-      lazyInternalSink,
     );
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
@@ -243,10 +200,9 @@ export class GraphQueryWalk {
 
   /**
    * Walks `document` under `selector`, recording every document the schema
-   * reaches in the walk's schema tracker. The named document's own metadata
-   * family — pattern, source, cfc, and the rest — is recorded with it;
-   * documents the walk merely reaches through link crossings are recorded
-   * under the selectors that reached them, without their families.
+   * reaches in the walk's schema tracker, and with each of them — the
+   * named document and the documents reached through link crossings alike
+   * — the schema document its `cfc` envelope names.
    *
    * The document records under `schemaTrackerKey` over the walk's identity
    * unless the caller passes `docKey`: a caller that named an explicit
@@ -258,12 +214,6 @@ export class GraphQueryWalk {
     document: IAttestation,
     selector: SchemaPathSelector,
     docKey?: `${string}/${ScopeKey}/${string}`,
-    // Which family the visited document is owed. A document a query NAMES
-    // is a "root": every rail, eagerly. A tracked document being
-    // re-walked that no query ever named — dirty-refresh territory — is a
-    // "crossing": the same rails a mid-walk crossing gets, so a
-    // document's delivered shape does not depend on its update history.
-    role: "root" | "crossing" = "root",
   ): void {
     const effectiveSelector = selector.schema === undefined
       ? { ...selector, schema: false }
@@ -328,36 +278,15 @@ export class GraphQueryWalk {
       }
     }
 
-    // A named root's FULL family — every rail, eagerly — chased even when
-    // selector coverage skips the traversal above: a crossing may have
-    // covered this document before a root named it, and coverage proves
-    // reach, not family. What a caller names, it may intend to load; what
-    // a walk merely reaches, it does not. A crossing-role visit chases the
-    // crossing rails instead, under the context's lazy routing, so a
-    // re-walk delivers the same shape the original crossing did. The
-    // chase dedupes through `metaDocsVisited` against this call's rails.
-    if (role === "root") {
-      loadMetaLinkedDocs(
-        tx,
-        {
-          address: { ...document.address, space: this.#space },
-          value: document.value,
-        },
-        this.#context,
-        ALL_META_RAILS,
-        false,
-      );
-    } else {
-      loadMetaLinkedDocs(
-        tx,
-        {
-          address: { ...document.address, space: this.#space },
-          value: document.value,
-        },
-        this.#context,
-        CROSSING_META_RAILS,
-      );
-    }
+    // The schema document the labels are stated against, loaded even when
+    // selector coverage skipped the traversal above: coverage proves reach,
+    // and a reader of a labeled document is owed that schema wherever it
+    // reached the document from.
+    const loaded = {
+      address: { ...document.address, space: this.#space },
+      value: document.value,
+    };
+    loadLabelSchemaDoc(tx, loaded, this.#context);
   }
 
   #addTraverserStats(traverser: SchemaObjectTraverser<FabricValue>): void {

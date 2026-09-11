@@ -104,14 +104,36 @@ Read(entity, path):
 
 ### 3.3.4 Single-Snapshot Rule
 
-A transaction's reads and writes MUST be computed against a single stable local
-snapshot. While application code is building a transaction, incoming server sync
-frames are buffered rather than applied immediately. The client applies those
-buffered frames only after the transaction has been submitted or abandoned.
+A commit's read set MUST describe one coherent client view: confirmed bases
+from one integrated prefix of the space's history plus the session's own
+pending stack, never a mixture of states observed before and after unrelated
+incoming changes. This is what makes the submitted `reads.confirmed[].seq`
+values meaningful.
 
-This rule makes the submitted `reads.confirmed[].seq` values meaningful: they
-describe one coherent client view, not a mixture of states observed before and
-after unrelated incoming changes.
+A client satisfies the rule in either of two ways:
+
+- **Buffering.** While application code is building a transaction, incoming
+  server sync frames are held rather than applied, and applied only after the
+  transaction has been submitted or abandoned. The state the reads ran against
+  is then the state the commit is built from.
+- **Checking.** Frames apply as they arrive. The transaction holds each
+  document it reads as a snapshot taken at its first read of that document,
+  and at commit re-reads every snapshotted document from the local state the
+  read set is exported from, rejecting the transaction locally — before it
+  reaches the wire, for its caller to re-run — when any value differs from
+  its snapshot. The read set then names the seqs of the local state at build
+  time, and the check has established that every read's content is the
+  content at those seqs. The check has to be immediate: a transaction closed
+  as one commit per space builds each space's read set after awaiting the
+  earlier spaces' round trips, so it re-checks each later space's documents
+  right before building that space's read set.
+
+The runner takes the checking form: `claim()` in
+`packages/runner/src/storage/transaction/attestation.ts`, run by every commit
+path of `v2-transaction.ts`, and the local rejection is
+`StorageTransactionInconsistent`, which those paths' callers classify as
+retryable. The two forms are equivalent in what reaches the server; they
+differ in when a change under an open transaction is discovered.
 
 ## 3.4 Commit Structure
 
@@ -292,6 +314,54 @@ with seq > read.seq
 The validation model is path-aware and seq-based. A later write to an unrelated
 path on the same entity does not invalidate the read.
 
+An **identity commit** is exempt from this rule and from the staleness half of
+§3.6.3. It is a commit that leaves every document it writes as the space
+already holds it. The server proves that only once a staleness check has
+refused the commit, since the proof reads stored documents and reconstructs
+the reader's view of each; a commit that validates pays nothing for it, and
+one refused for an unresolved or rejected dependency is not a candidate. The
+proof is per document, over the commit's `set` and `patch` operations on that
+document in order, so a commit that creates a document with a `set` and then
+patches it is judged as one write of the final value:
+
+- replayed on the document as the commit's read of that document saw it, the
+  sequence yields the stored document;
+- replayed on the stored document, the sequence leaves it unchanged. This
+  condition is for the writer's replica, which re-folds the operations over
+  whatever confirmed base it holds when the accept arrives: a sequence
+  idempotent on the durable value lands on that value from any base between
+  the read and the head, where a positional splice replayed over a base
+  already carrying its elements would duplicate them.
+
+The reader's view of a document is reconstructed from the commit's own read
+of it, on the commit's branch: for a pending read, the document at the read's
+declared `basisSeq` with exactly the own layers the read names replayed on it
+in local order, since that read is the view the value came through, even
+where the commit also carries a confirmed read of the document; for a
+confirmed read, the document at its `seq`; and the stored document itself
+when the commit did not read the document, where the sequence is an identity
+only if it is idempotent. A read names its branch only where that differs
+from the commit's, exactly as §3.6.1's staleness rule reads it, and a read of
+the same entity on another branch is passed over. Two reads leave the view
+unreconstructable, and a commit carrying one gets no exemption: a pending
+read that declares no `basisSeq`, since the durable document at a named
+layer's resolution is not the reader's view, carrying every foreign write on
+other paths that landed before the layer and that the reader had not
+integrated; and a read whose basis lies below the commit's branch's creation
+seq, which names no state of that branch (`06-branching.md` §6.10.1).
+
+Applying such a commit changes nothing, so no read it recorded can have led it
+to a wrong write, and refusing it would only make the writer re-derive the
+value the space already holds. An operation that is not a `set` or a `patch`,
+or that no reconstructed view accepts, keeps the commit out of the exemption.
+Every operation of an identity commit elides
+(§3.7.1 step 5). The exemption covers staleness only: a pending read naming an
+unresolved or rejected layer still refuses the commit (§3.6.3), so a commit the
+client has cascade-dropped is never accepted (`09-invariants.md`, INV-6). A
+commit touching a space's ACL document is never an identity commit: INV-12 and
+INV-13 define its admission, and a losing genesis is refused rather than
+recorded twice.
+
 ### 3.6.2 Write-Footprint Overlap
 
 Validation is based on overlap, not just entity identity.
@@ -411,16 +481,43 @@ interface ConflictError extends Error {
    * reaching this seq reflects the winning write.
    */
   retryAfterSeq: number;
+  /** First stale confirmed read per branch, entity, and scope. */
+  conflicts?: Array<{
+    of: string;
+    scope: "space" | "user" | "session";
+    /** Absent for the default branch. */
+    branch?: string;
+    seq: number;
+    conflictSeq: number;
+  }>;
 }
 ```
 
 The rejection carries no document values. Instead the server marks the commit's
 write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
 for the session — origin-less, so the session's own echo suppression does not
-hide them — and the next sync frame delivers the current documents for all of
-them as ordinary upserts. Repair therefore arrives as a consistent cut over the
-session's watched view — covering stale read dependencies as well as write
-targets, with every document the frame links to delivered in the same cut.
+hide them — and the next sync frame delivers the watched documents as ordinary
+upserts. Repair therefore arrives as a consistent cut over the session's watched
+view, with every document the frame links to delivered in the same cut. A dirty
+address outside that view does not gain a watch through dirty marking alone.
+Confirmed-read validation reports each stale branch, entity, and scope once. Its
+first stale read supplies the diagnostic read sequence and conflicting sequence;
+subsequent reads of that instance skip the staleness scan. Every read still
+validates its branch and resolves its scope. An unknown branch or unresolvable
+scope takes precedence over any stale reads already found. The `conflicts` array
+includes an entry even when only one instance is stale. Non-default branches are
+named in the descriptor; an absent `branch` means the default branch, regardless
+of the commit's target branch. A client can query each conflicting branch,
+entity, and scope before retrying. The runner emits default-branch reads and its
+retry helper repairs those instances; cross-branch clients use the memory
+protocol's branch-aware queries. Each scope resolves under the rejected session's
+identity. Older responses can omit this array; their diagnostic identifies
+entities but does not preserve their scopes. The runner also exposes the first
+descriptor as `conflict` for existing consumers. The diagnostic previews up to
+three distinct entity IDs and counts the remaining IDs. Each entity's clause
+uses its first reported instance's sequences; other scopes or branches of that
+entity share the clause. The structured array remains complete regardless of
+the diagnostic's length.
 
 ## 3.7 Server-Side Commit Processing
 
@@ -435,8 +532,9 @@ in the commit log.
 4. Append a `commit` row containing the original payload and resolution data.
 5. Append one `revision` row per operation in the transaction — except an
    operation proven to change nothing (an identical re-`set` of a
-   content-addressed document), which appends no revision and is reported
-   in the verdict's elided operation indexes.
+   content-addressed document, or every operation of an identity commit,
+   §3.6.1), which appends no revision and is reported in the verdict's
+   elided operation indexes.
 6. Update `head` pointers for touched entities (an elided operation touches
    nothing).
 7. Materialize or refresh snapshots as needed.
@@ -596,12 +694,17 @@ The server applies a transaction atomically:
   update per operation that changes state
 - or none of them do
 
-An identical re-`set` of a content-addressed document is a semantic no-op
-the engine proves before applying: it produces no revision, no head update,
-and no dirty mark, while the commit row and the space sequence still
-advance and the verdict names the elided operation indexes. There is no
-partial visibility of a committed transaction — a no-op is exact by proof,
-not a torn apply.
+An identical re-`set` of a content-addressed document, and every operation of
+an identity commit (§3.6.1), is a semantic no-op the engine proves before
+applying: it produces no revision, no head update, and no dirty mark, while
+the commit row and the space sequence still advance and the verdict names the
+elided operation indexes. There is no partial visibility of a committed
+transaction — a no-op is exact by proof, not a torn apply. A client that
+promotes its own accepted write to the commit's seq therefore holds a basis
+for the document above its per-document head; the basis is truthful, because
+the proof established that the document's content at that seq is what the
+client holds, and validation scans revisions above a basis rather than
+comparing it to a head.
 
 ## 3.11 Branch-Aware Commits
 

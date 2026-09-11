@@ -12,6 +12,7 @@ import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-sink-ceiling");
 
@@ -92,7 +93,7 @@ const readConfidentialThenSink = (
   id: string,
   sink = "fetchJson",
   schema = CONFIDENTIAL_SCHEMA,
-): { commit: () => Promise<{ ok?: unknown; error?: unknown }> } => {
+) => {
   const tx = runtime.edit();
   const cell = runtime.getCell(
     signer.did(),
@@ -148,7 +149,7 @@ describe("CFC sink-request confidentiality ceiling", () => {
           "sink-ceiling-reject",
         );
         const result = await commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(String((result.error as Error).message)).toContain(
           "exceeds ceiling for fetchJson",
         );
@@ -185,7 +186,7 @@ describe("CFC sink-request confidentiality ceiling", () => {
         );
         tx.prepareCfc();
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(String((result.error as Error).message)).toContain(
           "exceeds ceiling for fetchJson",
         );
@@ -320,7 +321,7 @@ describe("CFC sink-request confidentiality ceiling", () => {
           MARKER_LABELLED_SCHEMA,
         );
         const result = await commit();
-        expect(result.error).toBeDefined();
+        expect(isCfcEnforcementRejection(result.error)).toBe(true);
         expect(String((result.error as Error).message)).toContain(
           "exceeds ceiling for fetchJson",
         );

@@ -499,12 +499,12 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       cell.set({ owned: "authorized" });
 
+      // The prepare is what runs the writeAuthorizedBy arm, and the runtime's
+      // own commit paths run it before every commit.
+      const digest = tx.prepareCfc();
+      expect(digest).not.toBe("");
       const result = await tx.commit();
-      // The writeAuthorizedBy arm passes; any remaining reason would be unrelated
-      // to identity-borrowing. Assert specifically no writeAuthorizedBy failure.
-      if (result.error) {
-        expect(String(result.error)).not.toContain("writeAuthorizedBy");
-      }
+      expect(result.error).toBeUndefined();
     });
   });
 
@@ -628,11 +628,10 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         "attack5-self-authoring",
       );
       // Accepted: the writer authored its own claim (file/path agree with the
-      // writer's identity, and the missing id field is stamped to self).
-      if (result.error) {
-        expect(String(result.error)).not.toContain("writeAuthorizedBy");
-      }
-      expect(typeof digest).toBe("string");
+      // writer's identity, and the missing id field is stamped to self). A
+      // prepare that reached a verdict returns a digest, and the commit lands.
+      expect(digest).not.toBe("");
+      expect(result.error).toBeUndefined();
     });
 
     it("a legacy claim (bundleId only) does NOT match a moduleIdentity-only identity (no cross-arm confusion)", async () => {
@@ -898,10 +897,8 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         },
         "attack8-both-ids-module-arm",
       );
-      expect(typeof digest).toBe("string");
-      if (result.error) {
-        expect(String(result.error)).not.toContain("writeAuthorizedBy");
-      }
+      expect(digest).not.toBe("");
+      expect(result.error).toBeUndefined();
     });
   });
 

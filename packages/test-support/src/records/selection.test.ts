@@ -25,6 +25,35 @@ describe("selection", () => {
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
     });
 
+    it("drops a field it does not know rather than refusing the object", () => {
+      // Manifests already in the store carry fields this reader has
+      // since stopped keeping. Refusing those would leave every lane
+      // running the whole corpus for as long as one is the newest.
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      for (const entry of object.entries) entry.inputs.mainCatches = 3;
+      const parsed = parseManifest(JSON.stringify(object));
+      expect(parsed).toBeDefined();
+      expect(parsed!.entries.length).toBe(object.entries.length);
+      expect(Object.hasOwn(parsed!.entries[0]!.inputs, "mainCatches"))
+        .toBe(false);
+    });
+
+    it("drops a withheld reason it does not honor, keeping the rest", () => {
+      // Manifests already in the store hold tests back for reasons this
+      // reader has since stopped acting on. Refusing one of those would
+      // withhold nothing and make the whole corpus mandatory instead.
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      object.withheld = [
+        { test: TEST, suite: "workspace-unit", reason: "main-red" },
+        { test: TEST, suite: "workspace-unit", reason: "flaky" },
+      ];
+      const parsed = parseManifest(JSON.stringify(object));
+      expect(parsed).toBeDefined();
+      expect(parsed!.withheld).toEqual([
+        { test: TEST, suite: "workspace-unit", reason: "flaky" },
+      ]);
+    });
+
     it("returns undefined for a schema version it does not know", () => {
       const ahead = {
         ...sampleManifest(),
@@ -85,6 +114,36 @@ describe("selection", () => {
       }
     });
 
+    it("keeps an entry whose manifest carries no flake counts", () => {
+      // They are absent from a manifest written before they were
+      // published. Refusing it would cost every test its score, and an
+      // absent manifest makes the whole corpus mandatory, to save one
+      // column a reader can simply not show.
+      const manifest = sampleManifest();
+      delete manifest.entries[0]!.flakeEvidence;
+      const parsed = parseManifest(JSON.stringify(manifest));
+      expect(parsed?.entries[0]?.flakeEvidence).toBeUndefined();
+      expect(parsed?.entries.length).toBe(manifest.entries.length);
+    });
+
+    it("rejects flake counts that cannot both be true", () => {
+      // Counts of runs, and a test cannot disagree with itself more
+      // often than it ran. A count past its own denominator would put
+      // the share over one and read as a test that always flakes.
+      for (
+        const flakeEvidence of [
+          { flakes: 3, runs: 2 },
+          { flakes: -1, runs: 10 },
+          { flakes: 1.5, runs: 10 },
+          { flakes: 1, runs: -10 },
+        ]
+      ) {
+        const manifest = sampleManifest();
+        manifest.entries[0]!.flakeEvidence = flakeEvidence;
+        expect(parseManifest(JSON.stringify(manifest))).toBeUndefined();
+      }
+    });
+
     it("rejects a generation time that is not one", () => {
       // A reader measures a manifest's age from this, and a value that
       // does not parse compares false against every threshold, so a
@@ -136,15 +195,14 @@ describe("selection", () => {
         "a known digest that is not one",
         withField("known", { count: 0, digest: "" }),
       ],
-      ["an attribution map that is not a name", withField("attributionMap", 7)],
       ["entries that are not a list", withField("entries", {})],
       ["withheld that is not a list", withField("withheld", {})],
       [
-        "a withheld reason nobody wrote",
+        "a withheld reason that is not a string",
         withField("withheld", [{
           test: { k: "a", s: "b", n: "c" },
           suite: "s",
-          reason: "why",
+          reason: 7,
         }]),
       ],
       [
@@ -227,7 +285,6 @@ describe("selection", () => {
         "a churn that is not a number",
         withField("inputs", {
           catches: 0,
-          mainCatches: 0,
           sources: 0,
           churn: "some",
         }, "entry"),
@@ -236,7 +293,6 @@ describe("selection", () => {
         "a last catch that is not a day",
         withField("inputs", {
           catches: 0,
-          mainCatches: 0,
           sources: 0,
           churn: 0,
           lastCatch: 7,
@@ -433,7 +489,6 @@ describe("selection", () => {
 
     it("accepts the optional fields when they are well formed", () => {
       const manifest = sampleManifest({
-        attributionMap: "labs/test-selection/v1/map-1.json",
         unavailable: [{
           suite: "s",
           unit: "u",
@@ -451,7 +506,7 @@ describe("selection", () => {
         withheld: [{
           test: TEST,
           suite: "workspace-unit",
-          reason: "main-red",
+          reason: "flaky",
         }],
         unschedulable: [{
           test: TEST,

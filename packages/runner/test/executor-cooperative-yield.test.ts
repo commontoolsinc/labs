@@ -32,7 +32,6 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
-import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -46,7 +45,7 @@ import { waitUntil } from "./support/wait-until.ts";
 
 const newSharedServer = () =>
   new MemoryV2Server.Server({
-    sessions: new SessionRegistry({ ttlMs: 600_000 }),
+    sessions: new MemoryV2Server.SessionRegistry({ ttlMs: 600_000 }),
     subscriptionRefreshDelayMs: 0,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
@@ -74,17 +73,13 @@ const burn = (ms: number): void => {
 const WALK_STEPS = 30;
 const STEP_MS = 40;
 
-// Read as a REAL: the engine opens its database with the driver's default
-// integer mode, which hands a JS caller the low 32 bits of an INTEGER
-// column. An epoch-millisecond expiry is well past 32 bits, so the raw read
-// is a wrapped value whose SIGN flips every 2^31 ms (~24.9 days) — the row
-// stayed correct and the lease's own liveness checks compare inside SQL,
-// but the raw number read here went negative on 2026-09-08 07:51 UTC and
-// failed the `> 0` pin below. A REAL is exact for any millisecond timestamp.
+/** Reads the expiry as a millisecond timestamp through SQLite's REAL accessor. */
 const leaseExpiry = (engine: Engine.Engine): number =>
   (engine.database.prepare(
-    `SELECT CAST(expires_at AS REAL) AS expires_at FROM execution_lease
-      WHERE space = :space`,
+    // The engine's INTEGER accessor truncates to 32 bits; millisecond
+    // timestamps are exactly representable as REAL values.
+    `SELECT CAST(expires_at AS REAL) AS expires_at
+     FROM execution_lease WHERE space = :space`,
   ).get({ space }) as { expires_at: number } | undefined)?.expires_at ?? 0;
 
 describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
@@ -268,7 +263,7 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     const engine = await activate();
     const spaceServer = host.spaceServer(space)!;
     const expiryAtStart = leaseExpiry(engine);
-    expect(expiryAtStart).toBeGreaterThan(0);
+    expect(expiryAtStart).toBeGreaterThan(Date.now());
     const seqBefore = Engine.serverSeq(engine);
     const derivedBefore = host.stats().derivedCommits;
 

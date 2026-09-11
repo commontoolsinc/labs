@@ -405,7 +405,11 @@ describe("onCommit callback final outcome", () => {
       tx,
     );
     guardedCell.set({ value: "seed" });
-    await tx.commit();
+    // The labeled schema makes this seed CFC-relevant, so it lands only when
+    // it is prepared the way the scheduler prepares the handler's own write
+    // below.
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
     tx = runtime.edit();
 
     runtime.scheduler.addEventHandler(
