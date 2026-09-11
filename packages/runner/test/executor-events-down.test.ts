@@ -30,6 +30,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
@@ -397,18 +398,6 @@ const GATED_ORDERED_LOG_PATTERN = [
   ">(({ log, gate }) => ({ log, a: pushA({ log, gate }), b: pushB({ log }) }));",
 ].join("\n");
 
-// OW54's refused-commit class (verification-coverage.md §3): a stored
-// envelope whose `result.anyOf` carries TWO ifc branches is genuinely
-// ambiguous — the class the RULING-5 narrowing still refuses
-// (cfc/schema-merge.ts). The FIRST writer's commit lands (nothing is
-// stored yet, so no merge runs), poisoning the stored envelope; every
-// later merging writer's commit-prep records the refusal and the
-// commit is rejected PRE-STORAGE with the "CFC enforcement rejected
-// commit" message class (extended-storage-transaction.ts). The
-// fixtures mirror cfc-prepare-crash-surfacing.test.ts, which pins the
-// mechanism at the transaction level; here the same refusal lands on a
-// SERVED event's commit, where it classifies as a give-up disposition
-// (scheduler/events.ts).
 const ow54ProfileViewSchema: JSONSchema = {
   type: "object",
   properties: {
@@ -416,20 +405,10 @@ const ow54ProfileViewSchema: JSONSchema = {
   },
 } as JSONSchema;
 
-const ow54AltProfileViewSchema: JSONSchema = {
-  type: "string",
-  ifc: { confidentiality: ["other"] },
-} as JSONSchema;
-
-const ow54AmbiguousEnvelopeSchema: JSONSchema = {
+const ow54PreparedEnvelopeSchema: JSONSchema = {
   type: "object",
   properties: {
-    result: {
-      anyOf: [
-        ow54ProfileViewSchema,
-        ow54AltProfileViewSchema,
-      ],
-    },
+    result: ow54ProfileViewSchema,
     candidates: { type: "array", items: ow54ProfileViewSchema },
   },
 } as JSONSchema;
@@ -1824,16 +1803,15 @@ describe("Phase 3 events-down (serving side)", () => {
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
 
-    // Poison the stored envelope before the serving side exists: the
-    // first writer's commit lands, and the stored envelope is then
-    // genuinely ambiguous for every later merging writer.
+    // The served handler writes through a persisted, CFC-relevant envelope.
+    // A fault at preparation supplies the crash independently of schema policy.
     const poisonedDocName = "ow54-poisoned-envelope";
     {
       const tx = clientRuntime.edit();
       const cell = clientRuntime.getCell(
         space,
         poisonedDocName,
-        ow54AmbiguousEnvelopeSchema,
+        ow54PreparedEnvelopeSchema,
         tx,
       );
       cell.set({ candidates: [{ name: "Bob" }] });
@@ -1895,13 +1873,13 @@ describe("Phase 3 events-down (serving side)", () => {
     await servingRuntime!.getCell(
       space,
       poisonedDocName,
-      ow54AmbiguousEnvelopeSchema,
+      ow54PreparedEnvelopeSchema,
     ).sync();
 
-    // The probe replaces the pattern's handler on the serving runtime:
-    // a served handler whose write meets the stored ambiguous envelope,
-    // so its commit-prep records the refusal and the commit is rejected
-    // before storage.
+    // The probe keeps the actual preparation and commit paths: only the first
+    // state read inside preparation throws, then the normal failure settles.
+    const preparationCrash = "injected served CFC preparation failure";
+    const preparationFailures: Array<{ kind: string; name: string }> = [];
     const probeRuns = new Map<string, number>();
     const gatedRetryStarted = Promise.withResolvers<void>();
     const releaseGatedRetry = Promise.withResolvers<void>();
@@ -1926,9 +1904,19 @@ describe("Phase 3 events-down (serving side)", () => {
         servingRuntime!.getCell(
           space,
           poisonedDocName,
-          ow54AmbiguousEnvelopeSchema,
+          ow54PreparedEnvelopeSchema,
           tx,
         ).set({ result: resolved, candidates: [] });
+        const fault = stub(tx, "getCfcState", () => {
+          fault.restore();
+          throw new Error(preparationCrash);
+        });
+        tx.prepareCfc();
+        tx.addCommitCallback((_tx, outcome) => {
+          if (outcome.error) {
+            preparationFailures.push({ kind, name: outcome.error.name });
+          }
+        });
       },
       streamLink,
     );
@@ -1973,6 +1961,10 @@ describe("Phase 3 events-down (serving side)", () => {
         "the first durable commit-preparation checkpoint",
       );
       const deferred = entryByKind("poison-1")!;
+      expect(preparationFailures).toContainEqual({
+        kind: "poison-1",
+        name: "CommitPreparationError",
+      });
       expect(deferred.consequenced).not.toBe(true);
       expect(deferred.error).toBeUndefined();
       expect(deferred.status).toBeUndefined();
