@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
 
+import { taggedHashStringOf } from "@commonfabric/data-model";
+
 import {
   applyCommit,
   close,
@@ -17,6 +19,11 @@ const setOp = (id: string, value: unknown) =>
 
 const patchOp = (id: string, patches: unknown[]) =>
   ({ op: "patch", id, patches }) as never;
+
+// A content-addressed document is the content its id names, so the fixture
+// derives the id from the content the way the engine verifies it.
+const cidSetOp = (content: unknown) =>
+  setOp(`cid:${taggedHashStringOf(content)}`, content);
 
 const commit = (localSeq: number, extra: Record<string, unknown>) =>
   ({
@@ -993,7 +1000,7 @@ describe("applyCommit() with an identity commit", () => {
     applyCommit(engine, {
       sessionId: "s:a",
       commit: commit(2, {
-        operations: [setOp("cid:fid1:closure", { type: "string" })],
+        operations: [cidSetOp("export const closure = 1;")],
       }),
     });
 
@@ -1005,7 +1012,7 @@ describe("applyCommit() with an identity commit", () => {
           pending: [],
         },
         operations: [
-          setOp("cid:fid1:closure", { type: "string" }),
+          cidSetOp("export const closure = 1;"),
           setOp("of:doc", { n: 2 }),
         ],
       }),
@@ -1027,7 +1034,7 @@ describe("applyCommit() with an identity commit", () => {
             pending: [],
           },
           operations: [
-            setOp("cid:fid1:fresh", { type: "number" }),
+            cidSetOp("export const fresh = 2;"),
             setOp("of:doc", { n: 2 }),
           ],
         }),
