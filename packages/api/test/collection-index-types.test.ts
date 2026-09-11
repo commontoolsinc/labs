@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type {
   Cell,
+  CollectionIndexData,
   CollectionIndexKeyEntry,
   GroupIndex,
   KeyIndex,
@@ -36,7 +37,15 @@ function checkIndexTypes(
   grouped.get();
   // @ts-expect-error Index handles do not expose writes.
   unique.set({});
+  // @ts-expect-error Public descriptors require both enumeration surfaces.
+  const incomplete: CollectionIndexData<string, number[]> = {
+    kind: "collection-index",
+    mode: "group",
+    keys: [],
+    buckets: {},
+  };
   return {
+    incomplete,
     group,
     emptyGroup,
     match,

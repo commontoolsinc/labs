@@ -253,39 +253,35 @@ export default pattern((__cf_pattern_input) => {
                     }
                 },
                 keyEntries: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                anyOf: [{
-                                        type: "object",
-                                        properties: {
-                                            kind: {
-                                                type: "string",
-                                                "enum": ["value"]
-                                            },
-                                            value: {
-                                                type: "string"
-                                            }
-                                        },
-                                        required: ["kind", "value"]
-                                    }, {
-                                        type: "object",
-                                        properties: {
-                                            kind: {
-                                                type: "string",
-                                                "enum": ["cell"]
-                                            },
-                                            cell: {
-                                                type: "string",
-                                                asCell: ["cell"]
-                                            }
-                                        },
-                                        required: ["kind", "cell"]
-                                    }]
-                            }
-                        }]
+                    type: "array",
+                    items: {
+                        anyOf: [{
+                                type: "object",
+                                properties: {
+                                    kind: {
+                                        type: "string",
+                                        "enum": ["value"]
+                                    },
+                                    value: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["kind", "value"]
+                            }, {
+                                type: "object",
+                                properties: {
+                                    kind: {
+                                        type: "string",
+                                        "enum": ["cell"]
+                                    },
+                                    cell: {
+                                        type: "string",
+                                        asCell: ["cell"]
+                                    }
+                                },
+                                required: ["kind", "cell"]
+                            }]
+                    }
                 },
                 buckets: {
                     type: "object",
@@ -298,7 +294,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             },
-            required: ["kind", "mode", "keys", "buckets"],
+            required: ["kind", "mode", "keys", "keyEntries", "buckets"],
             asCell: ["readonly"]
         },
         unique: {
@@ -318,24 +314,20 @@ export default pattern((__cf_pattern_input) => {
                     }
                 },
                 keyEntries: {
-                    anyOf: [{
-                            type: "undefined"
-                        }, {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    kind: {
-                                        type: "string",
-                                        "enum": ["value"]
-                                    },
-                                    value: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["kind", "value"]
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            kind: {
+                                type: "string",
+                                "enum": ["value"]
+                            },
+                            value: {
+                                type: "string"
                             }
-                        }]
+                        },
+                        required: ["kind", "value"]
+                    }
                 },
                 buckets: {
                     type: "object",
@@ -349,7 +341,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             },
-            required: ["kind", "mode", "keys", "buckets"],
+            required: ["kind", "mode", "keys", "keyEntries", "buckets"],
             asCell: ["readonly"]
         }
     },

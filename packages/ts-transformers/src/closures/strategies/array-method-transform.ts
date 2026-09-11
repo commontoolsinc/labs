@@ -339,9 +339,9 @@ function createPatternCallWithParams(
 }
 
 /**
- * Tags keys before closure extraction, then evaluates the tagged return after
- * captures have been rewritten. Evaluation preserves primitive values and Cell
- * identities across the selector pattern's serialization boundary.
+ * Tags selector returns and builds their reactive evaluation wrappers.
+ * Evaluation preserves primitive values and Cell identities across the selector
+ * pattern's serialization boundary.
  */
 function tagSelectorReturns(
   body: ts.ConciseBody,

@@ -36,9 +36,15 @@ installFakeClock({
     // they arm — a semantics change, not a speedup. The test waits on
     // watermark/subscription edges with bounded timeouts.
     "executor-serving-loop",
+    "executor-llm-supersession",
+    // The engine read-through suite drives the same live ExecutorHost
+    // under the same wall-clock policies.
+    "engine-read-through",
     // The compiled-child suite runs the same live serving host. Its lease
     // renew interval must advance in real time while compiler work settles.
     "executor-compile-and-run",
+    // Scoped fetch requests use the same live serving host and lease cadence.
+    "executor-fetch-instances",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
@@ -54,6 +60,9 @@ installFakeClock({
     // timers are the wall-clock behavior under test; auto-advance would
     // fire them as fast as they arm.
     "executor-cooperative-yield",
+    // The lifecycle-verb suite drives a live ExecutorHost through verbs
+    // and reads what they left through a client under the same policies.
+    "executor-lifecycle-verbs",
     // The Phase-2 speculation-overlay journeys run a live ExecutorHost
     // (the serving side of the client-loses-derivation-commit journey)
     // under the same wall-clock policies.

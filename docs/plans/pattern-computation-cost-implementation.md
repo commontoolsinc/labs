@@ -14,7 +14,8 @@ bounded-render repairs in #7313 and #7315. Row-invalidation implementation and
 acceptance landed in #7329 and #7331. B1/B2's contract landed in #7294 and its
 typed lookup foundation landed in #7304. Producer lowering, optimized bucket
 maintenance, and local/cross-space join acceptance are implemented in #7323;
-final validation and mixed-key enumeration acceptance remain in progress.
+tagged enumeration passes authored-consumer acceptance. Final integration and
+publication gates remain in progress.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with

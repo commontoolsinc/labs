@@ -1411,7 +1411,7 @@ export interface CollectionIndexData<K extends CollectionIndexKey, V> {
   readonly keys: K[];
 
   /** Occupied keys with explicit primitive and Cell identity tags. */
-  readonly keyEntries?: CollectionIndexKeyEntry<K>[];
+  readonly keyEntries: CollectionIndexKeyEntry<K>[];
 
   /** Per-key results addressed by the index's internal typed-key encoding. */
   readonly buckets: Record<string, V>;
@@ -1436,7 +1436,7 @@ export interface CollectionIndexHandle<
   keys(): Reactive<T["keys"]>;
 
   /** Enumerates occupied primitive values and Cell identities with explicit tags. */
-  keyEntries(): Reactive<NonNullable<T["keyEntries"]>>;
+  keyEntries(): Reactive<T["keyEntries"]>;
 }
 
 /** Index whose missing-key lookup yields an empty group. */

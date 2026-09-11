@@ -3,12 +3,12 @@
 Status: B1/B2 implementation and acceptance contract for the
 [computation-cost implementation](pattern-computation-cost-implementation.md).
 The [feature documentation](../features/collection-indexes.md) describes index
-producers and lookup. The remaining acceptance work includes mixed primitive/Cell `keys()`
-enumeration: the runtime union materializer can wrap a primitive alternative as
-a Cell. Membership and lookup preserve the distinction; the enumeration output
-representation is explicit tagged enumeration through `keyEntries()`; full
-validation and review remain pending. Isolation, scale measurements, and joins have
-implementation evidence in #7323 and remain subject to its final review gates.
+producers and lookup. Mixed primitive/Cell keys use tagged `keyEntries()`
+enumeration; homogeneous domains also support `keys()`. The implementation and
+focused authored-consumer acceptance are complete in #7323. Publication remains
+subject to current-head CI and review, tracked separately on the execution
+dashboard. Isolation, scale measurements, and joins have implementation evidence
+in that PR.
 
 ## Key domain and equality
 
@@ -60,8 +60,9 @@ Q7 is resolved: provide an explicit tagged enumeration API for mixed keys,
 with `{ kind: "value", value: primitiveKey }` and
 `{ kind: "cell", cell: cellKey }` entries. Preserve homogeneous `keys()` usage.
 The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
-records the context, consequences, and alternatives. Tagged enumeration is
-implemented and under validation; approval alone does not establish acceptance.
+records the context, consequences, and alternatives. Tagged enumeration and its
+focused acceptance tests are implemented. Publication gates remain separate
+from the checked implementation items below.
 
 - [x] Approve explicit tagged enumeration and record the decision.
 - [x] Add the public tagged type, enumeration method, and compiler/runtime wiring.
@@ -69,7 +70,8 @@ implemented and under validation; approval alone does not establish acceptance.
       including equal contents, distinct Cells, and lookup round trips.
 - [x] Verify cross-space references, removal/reinsertion, cold resume, and
       demand-only enumeration without broadening lookup dependencies.
-- [ ] Update current API documentation and demonstrations, then complete tests,
+- [x] Update current API documentation and demonstrations.
+- [ ] Complete publication gates: final integration tests, current-head CI,
       antagonistic review, and Cubic review.
 
 General runtime union materialization changes are outside this implementation.

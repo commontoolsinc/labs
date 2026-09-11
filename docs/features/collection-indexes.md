@@ -62,6 +62,12 @@ shape. Branch on `kind` and pass the selected field to lookup within that branch
 Combining both fields into an untagged intermediate value reintroduces the
 primitive/Cell union materialization boundary.
 
+Public descriptors include both enumeration fields. Manually constructed
+`CollectionIndexData` values must supply `keyEntries`; a descriptor stored without
+it needs producer reconciliation or an explicit data migration before exposure
+through the public handle. Producer reconciliation supplies the missing field
+before publishing a recovered descriptor.
+
 Both surfaces preserve deterministic typed-key order and observe occupied-key
 membership independently of bucket lookup. Cell entries retain resolved identity,
 including cross-space identity. As with other Cell-valued pattern results,
