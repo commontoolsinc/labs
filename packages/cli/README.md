@@ -553,6 +553,31 @@ That status means “source changed, running deploy unverified,” not rollback:
 `piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
 A receipt alone is never proof that the updated piece starts.
 
+## Where a piece is created
+
+Against a deployment that runs the serving loop — one whose published posture
+selects `EXPERIMENTAL_SERVER_EXECUTION`, which the connection adopts —
+`cf piece new` does not compile or commit in this process. It resolves the
+program from disk, pins its fabric imports, and sends it to the deployment's
+pattern-lifecycle route, signed with the identity the command connects as; the
+space's serving runtime compiles it, creates the piece, and answers with the
+receipt the command prints. Where the deployment enforces ACLs, the identity
+must hold WRITE or OWNER on the space; a deployment with enforcement off admits
+any signed caller, as its memory server does. The registry entry and the slug
+travel with the creation, so a taken name refuses it before anything is created,
+and the space root is the serving loop's to ensure rather than this command's.
+What stays in this process after the receipt is what opening a piece does
+anyway: the start, which `--no-start` skips; `--no-start` also asks the serving
+loop not to derive the piece until something demands it. The receipt returns
+once the piece is durable; the serving loop derives it in the cycle after, so a
+reader that needs the derived value pulls it. Against any other deployment, and
+under `cf test`, the command performs every step itself, as before.
+`cf piece setsrc` and `cf piece setsrc --check` perform every step in this
+process on every deployment: a source update publishes module update authority,
+which requires an owned setup transaction that commits to storage, and a serving
+wave cannot supply one. The contract, including the refusals and their codes, is
+[`server-pattern-lifecycle.md`](../../docs/features/server-pattern-lifecycle.md).
+
 ## Piece discovery
 
 `cf piece describe --cell <piece>` documents a piece's readable fields and
@@ -1077,18 +1102,20 @@ constructs its first storage read from the union of predicate-observed and
 projected paths. Structurally declared properties, including local `$ref` item
 schemas, are pruned to that union: predicate-only fields can decide membership
 without appearing in the result, and omitted linked subgraphs are not hydrated.
-Schema-less or root-union sources retain a value-shape read before the transform
-because their array/object projection semantics cannot be established from the
-declaration. Ambiguous source-schema compositions remain intact and can retain a
-wider selector. The runtime's list filter/map builtins therefore handle CFC
-exactly as authored pattern expressions do: predicate observations label array
-membership, projection reads propagate labels, and filtered elements retain
-their source links. Projection map/lift nodes construct the requested shape from
-a source-schema-selected read rather than returning a widening identity alias.
-Nested non-stream Cell handles are materialized before the predicate/projection
-JavaScript runs; stream handles remain capabilities. The source cell's schema
-remains authoritative for Common Fabric metadata. A caller cannot introduce or
-override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
+A schemaless source first loads its stored root without following children; an
+object or array establishes its projection shape directly. Root links and
+instances need materialization, as do ambiguous schema unions, whose schema can
+transform the stored value. Ambiguous source-schema compositions remain intact
+and can retain a wider selector. The runtime's list filter/map builtins
+therefore handle CFC exactly as authored pattern expressions do: predicate
+observations label array membership, projection reads propagate labels, and
+filtered elements retain their source links. Projection map/lift nodes construct
+the requested shape from a source-schema-selected read rather than returning a
+widening identity alias. Nested non-stream Cell handles are materialized before
+the predicate/projection JavaScript runs; stream handles remain capabilities.
+The source cell's schema remains authoritative for Common Fabric metadata. A
+caller cannot introduce or override `ifc`, `asCell`, `scope`, or `default`
+through `--schema`.
 
 #### Which keywords a `--schema` projection may contain
 
@@ -1244,27 +1271,28 @@ no longer say which positions they came from, and an address names a position.
 
 #### What a selection means for a call
 
-A selection shapes a result that already exists. It does not narrow what the
-call fetches: the readback materializes the whole receipt before the selection
-runs. (A plain result's receipt does carry a descriptive schema of what it holds
-— a receipt holding anything reactive carries none — but either way the fetch
-has happened before the selection applies.) The same holds for a tool, whose
-result is read off the cell the tool wrote. Use a selection to control what
-reaches stdout, not to control what travels.
+A selection over a schemaless handler receipt starts by loading the receipt
+without following its children. If it holds an object or array, the CLI selects
+from that container directly. An address-only selection can therefore return a
+stored child link without loading the child. The verb's declared result remains
+available for cycle bounding; it does not replace the selection's source schema.
 
-A selection also adds a computed read after the call. The shaped readback runs
-through the same shared read step as `cf cell get`, and waits for its output
-with one `Cell.pull()`. That pull drives the output's transitive computation and
-linked-document loads through the runtime scheduler and its manager-wide
-convergence pool, so work already active in that runtime can still share the
-wait. Declared object keys are then ordered locally from the projection before
-rendering, and the keys an open projection retains beyond its declaration follow
-them in the value's own order; that step starts no graph or storage work. When
-isolating the read matters, shape the collect instead. Call plain (or
-`--no-wait`), then collect from the receipt with
-`cf cell get --cell <receipt id> --select …`.
+Root links, instances, scalars, and receipts read through an explicit schema are
+materialized before selection. A root link can resolve to an absent value, so
+its stored existence alone does not establish a result. Tool calls also
+materialize their result before selection.
 
-Three cases follow from that:
+A shaped readback uses the same shared read step as `cf cell get`. Its
+`Cell.pull()` calls drive transitive computation and linked-document loads
+through the runtime scheduler and its manager-wide convergence pool, so work
+already active in that runtime can still share the wait. Declared object keys
+are then ordered locally from the projection before rendering, and the keys an
+open projection retains beyond its declaration follow them in the value's own
+order; that step starts no graph or storage work. When isolating the read
+matters, shape the collect instead. Call plain (or `--no-wait`), then collect
+from the receipt with `cf cell get --cell <receipt id> --select …`.
+
+Selections also follow these rules:
 
 - **A value-less verb still reports nothing.** Its receipt is the empty witness,
   and the Invocation JSON omits `result` to say so. A selection is about a
@@ -1273,11 +1301,12 @@ Three cases follow from that:
   from a result that _does_ exist is a different fact, and it is refused rather
   than reported as an absent result.
 - **`--no-wait` refuses all three flags.** That mode exits once the commit is
-  acknowledged and skips the receipt readback, so there is no result to shape.
-  The refusal names the flags that need the readback, alongside `--show-links`
-  for the same reason. What it still returns is the envelope's `receipt` — the
-  address of the cell holding the outcome, known at commit — so the shaping
-  flags apply to the `cf cell get` that collects it.
+  acknowledged — the handling's commit, or under server execution the event
+  append the server then handles — and skips the receipt readback, so there is
+  no result to shape. The refusal names the flags that need the readback,
+  alongside `--show-links` for the same reason. What it still returns is the
+  envelope's `receipt` — the address of the cell holding the outcome, known at
+  commit — so the shaping flags apply to the `cf cell get` that collects it.
 - **`--show-links` composes with a projection, not with `--filter`.** Links are
   collected after the selection, over exactly the value the caller is holding: a
   projection leaves every surviving path where it was, so each address still

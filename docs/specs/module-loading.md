@@ -516,6 +516,15 @@ linked data:
    may roll `runtimeVersion` alone only after the fingerprint inputs distinguish
    it from executable semantics.
 
+A source or compiled document is written whole, and only when the stored
+document differs. Its `imports` elements are stored inline in the document,
+not in documents of their own, so a write of the same document from any
+session lands on that one document and touches no other. A stored document
+whose elements sit in documents of their own is rewritten whole, and those
+element documents are left behind. The pre-write sync loads each document the
+write-back writes, so the write reads it with its true version rather than
+claiming it absent, a claim the store refuses.
+
 Each new source document whose reachable graph contains an external dependency
 also records the runtime fingerprint used for its identity. A source document
 without such a dependency uses the canonical empty fingerprint, and writers

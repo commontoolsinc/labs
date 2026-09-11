@@ -1057,6 +1057,77 @@ describe("cli piece parsing", () => {
     ).toThrow();
   });
 
+  it("newPiece() asks a serving deployment to create the piece and keeps only the start", async () => {
+    // The connection carries the deployment's flag posture; under it the
+    // client resolves the program, sends it with the name and the registry
+    // request, leaves the space root to the serving loop, and starts the
+    // piece it is handed back unless told not to.
+    const program = { main: "/main.tsx", files: [] };
+    const cell = { name: "the new piece's cell" };
+    const seen: {
+      ensured?: true;
+      requests: unknown[];
+      started: unknown[];
+    } = { requests: [], started: [] };
+    const controller = {
+      runtime: { experimental: { serverExecution: true } },
+      getSpace: () => SPACE_DID,
+      ensureDefaultPattern: () => {
+        seen.ensured = true;
+        return Promise.resolve();
+      },
+      getPieceCell: () => Promise.resolve(cell),
+      startPiece: (started: unknown) => {
+        seen.started.push(started);
+        return Promise.resolve();
+      },
+    };
+    const deps = {
+      loadPieces: () => Promise.resolve(controller as any),
+      getPinnedProgramFromFile: () => Promise.resolve(program as any),
+      loadIdentity: () => Promise.resolve({} as any),
+      instantiatePieceOnServer: (_config: unknown, input: unknown) => {
+        seen.requests.push(input);
+        return Promise.resolve({
+          pieceId: PIECE,
+          pattern: { identity: "i", symbol: "default" },
+          slug: "named",
+        });
+      },
+    };
+    const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const entry = { mainPath: "/main.tsx", repository: "repo" };
+
+    const started = await newPiece(config, entry, { slug: "named" }, deps);
+    expect(started).toBe(PIECE);
+    expect(seen.requests[0]).toEqual({
+      space: SPACE_DID,
+      program,
+      repository: "repo",
+      slug: "named",
+      register: true,
+    });
+    expect(seen.started).toEqual([cell]);
+
+    const unstarted = await newPiece(
+      config,
+      entry,
+      { start: false, force: true },
+      deps,
+    );
+    expect(unstarted).toBe(PIECE);
+    expect(seen.requests[1]).toEqual({
+      space: SPACE_DID,
+      program,
+      repository: "repo",
+      force: true,
+      register: true,
+      start: false,
+    });
+    expect(seen.started).toEqual([cell]);
+    expect(seen.ensured).toBeUndefined();
+  });
+
   it("recreateSpaceRootPattern() targets the explicit space", async () => {
     const seen: { config?: SpaceConfig } = {};
     const pieceId = await recreateSpaceRootPattern({

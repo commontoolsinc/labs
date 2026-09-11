@@ -45,6 +45,14 @@ toolshed process
 A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (runtime disposed, lease released).
 Activation on: session open, event append, or explicit warm request.
+*(AMENDED 2026-09-09: a fourth trigger — a pattern-lifecycle verb
+request, which the host queues on the space's serving loop; the loop
+runs it ahead of a cycle's event drain, its seals joining that cycle's
+wave, and once the wave has committed re-announces the documents the
+verb staged to itself as a warm-marked notice — the same carrier as the
+provisioning path's — so the next cycle loads and derives the staged
+piece; the request settles at the verb's own wave commit —
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -1143,10 +1151,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   activity). Canonicalization: sorted keys, no undefined, links by entity
   id + path.
 - **Storage**: the result is an ordinary cell commit; the memo key is
-  written alongside the result (same doc, `requestHash` field). No new
-  tables.
-- **Hit rule**: if the recomputed key equals the stored key, the stored
-  result IS the node's value — no effect fires. This is what makes
+  written alongside the result (same doc, `requestHash` field). A builtin
+  may also write this field with `pending: true` to select the current
+  request; that marker alone is not a stored result. No new tables.
+- **Hit rule**: if the recomputed key equals the stored key and a settled
+  result or error is present, the stored result IS the node's value — no effect fires. This is what makes
   restart-recovery safe: recompute pure nodes, re-derive keys, reuse
   results.
 - **Miss rule**: enqueue the effect on the outbox with the key AND
@@ -1177,8 +1186,10 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   completion commit and consumption is covered by recovery: the basis
   index shows the consumers stale against the result doc's head (§6).
 - **In-flight dedupe**: one outstanding effect per (key, result
-  target) per space; a second miss on the same (key, target)
-  attaches to the in-flight effect. Two DISTINCT result targets
+  target) per space; the target includes its resolved user/session instance.
+  A second miss on the same (key, target) attaches to the in-flight effect.
+  Completion acceptance follows the currently selected request in that
+  instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
   each egresses (RULED 2026-08-13; the earlier per-key-only
   wording promised a cross-target sharing that §4's own miss
@@ -1191,7 +1202,7 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.
 
-FORBIDDEN: re-firing an effect whose stored key matches; effect retry
+FORBIDDEN: re-firing an effect whose settled stored result has a matching key; effect retry
 timers inside the loop; a "pending effects" table (the EFFECT half of
 the outbox is
 process-local; on crash, missing results are re-missed from keys —
