@@ -1,9 +1,9 @@
 {
-  "updated": "2026-09-11T04:31:12.890540+00:00",
+  "updated": "2026-09-11T04:49:55.656447+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
-  "pr": "https://github.com/commontoolsinc/labs/pull/7282",
-  "activity": "D3 verification is implemented: 1,431 runner tests / 8,923 steps, 46 type-check groups, 599 documentation blocks, formatting/lint, history index, and all six exact benchmark-count checks pass. Preparing the slice for PR review.",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7307",
+  "activity": "D3 verification is published in #7307: full runner validation, 46 type groups, 599 docs blocks, and six exact benchmark-count checks pass. CI and Cubic review are running.",
   "review": "Antagonistic D3 review is clean after correcting status wording and verifying reentry of both metadata scopes. The D3 PR requires its own CI and Cubic review before landing.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
@@ -227,9 +227,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+  "validatedRevision": "4f2057b0d64c95e35558ff224786f4b7712fa173",
   "validationProvenance": {
-    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
-    "scope": "Local package, type, pattern, browser, and vintage validation of the integrated implementation. This is the parent of published dashboard checkpoint d67c923566146faa6f7b2493b1828140295f7d47. It does not identify the separately recorded browser baseline capture."
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/4f2057b0d64c95e35558ff224786f4b7712fa173",
+    "scope": "D3 tests, benchmark, and documentation checkpoint. Full runner and final focused snapshot tests pass; this revision does not identify separately recorded browser captures."
   }
 }
