@@ -308,24 +308,24 @@ describe("CFC UI contract matching", () => {
     }]);
   });
 
-  it("resolves contracts from nested property-local $defs", () => {
+  it("resolves contracts through a nested property's ref into the root's $defs", () => {
     const contracts = uiContractsFromSchema({
       type: "object",
+      $defs: {
+        Message: {
+          type: "object",
+          properties: {
+            body: { type: "string" },
+          },
+          required: ["body"],
+          ifc: trustedPatternUiActionSchema.ifc,
+        },
+      },
       properties: {
         messages: {
           type: "array",
           items: {
             $ref: "#/$defs/Message",
-          },
-          $defs: {
-            Message: {
-              type: "object",
-              properties: {
-                body: { type: "string" },
-              },
-              required: ["body"],
-              ifc: trustedPatternUiActionSchema.ifc,
-            },
           },
         },
       },

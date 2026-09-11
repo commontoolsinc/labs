@@ -231,9 +231,7 @@ const uiContractsFromSchemaInternal = (
     return [];
   }
 
-  const childRoot = isObjectOrArray(resolvedSchema.$defs)
-    ? resolvedSchema
-    : root;
+  const childRoot = root ?? resolvedSchema;
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,

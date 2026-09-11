@@ -346,12 +346,13 @@ export {
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {
-  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
+  cfcSchemaResolvedRoot,
   cfcSchemaToObject,
   findCfcSchemaRefs,
+  hoistCfcSchemaDefs,
   isEmbeddedCfcSchemaRef,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,

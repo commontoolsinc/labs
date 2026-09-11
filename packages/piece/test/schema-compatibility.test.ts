@@ -1731,62 +1731,96 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
-  it("rejects narrowing through nested child-local definitions", () => {
-    const argumentWithLocalValue = (value: JSONSchema) =>
-      pattern(
-        {
-          type: "object",
-          properties: {
-            nested: {
-              type: "object",
-              properties: { value: { $ref: "#/$defs/Value" } },
-              $defs: { Value: value },
-            },
-          },
-          $defs: { Value: { type: "number" } },
-        },
-        oldPattern.resultSchema,
-      );
-
-    const previous = argumentWithLocalValue({
-      type: ["number", "string"],
-    });
-    const narrowed = argumentWithLocalValue({ type: "number" });
-    const widened = argumentWithLocalValue({
-      type: ["number", "string", "undefined"],
-    });
-
-    expect(() => assertPatternSchemasBackwardCompatible(previous, narrowed))
-      .toThrow(/argument\.nested\.value/);
-    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
-      .not.toThrow();
-  });
-
-  it("does not borrow an outer default for a referenced definition body", () => {
-    const previous = pattern(
-      { type: "object", properties: {} },
-      oldPattern.resultSchema,
-    );
-    const candidate = pattern(
+  const argumentWithNestedValue = (
+    value: JSONSchema,
+    rootDefinitions?: Record<string, JSONSchema>,
+  ) =>
+    pattern(
       {
         type: "object",
-        properties: { item: { $ref: "#/$defs/Entry" } },
-        required: ["item"],
-        $defs: {
-          Entry: {
+        properties: {
+          nested: {
             type: "object",
             properties: { value: { $ref: "#/$defs/Value" } },
-            required: ["value"],
-            $defs: { Value: { type: "string" } },
+            $defs: { Value: value },
           },
-          Value: { type: "number", default: 1 },
         },
+        ...(rootDefinitions !== undefined && { $defs: rootDefinitions }),
       },
       oldPattern.resultSchema,
     );
 
-    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
-      .toThrow(/argument\.item.*no default/);
+  it("rejects an argument schema whose ref only a nested `$defs` could satisfy", () => {
+    // The root declares no `$defs`, so `#/$defs/Value` names nothing and the
+    // schema is invalid, whatever the nested map defines.
+    const previous = argumentWithNestedValue({
+      type: ["number", "string"],
+    });
+    const widened = argumentWithNestedValue({
+      type: ["number", "string", "undefined"],
+    });
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
+      .toThrow(/argument has an invalid schema/);
+  });
+
+  it("ignores a nested `$defs` below the root's map when comparing", () => {
+    // `#/$defs/Value` names the root's definition, which is unchanged, so a
+    // narrowed definition under the nested map changes nothing.
+    const rootDefinitions: Record<string, JSONSchema> = {
+      Value: { type: "number" },
+    };
+    const previous = argumentWithNestedValue(
+      { type: ["number", "string"] },
+      rootDefinitions,
+    );
+    const narrowed = argumentWithNestedValue(
+      { type: "number" },
+      rootDefinitions,
+    );
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, narrowed))
+      .not.toThrow();
+  });
+
+  it("reads a referenced definition body's refs against the document's map, default included", () => {
+    const previous = pattern(
+      { type: "object", properties: {} },
+      oldPattern.resultSchema,
+    );
+    const candidateWithRootValue = (value: JSONSchema) =>
+      pattern(
+        {
+          type: "object",
+          properties: { item: { $ref: "#/$defs/Entry" } },
+          required: ["item"],
+          $defs: {
+            Entry: {
+              type: "object",
+              properties: { value: { $ref: "#/$defs/Value" } },
+              required: ["value"],
+              $defs: { Value: { type: "string" } },
+            },
+            Value: value,
+          },
+        },
+        oldPattern.resultSchema,
+      );
+
+    // The root's `Value` is the one named, so its default satisfies the new
+    // required property; the `$defs` on `Entry` is inert.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        previous,
+        candidateWithRootValue({ type: "number", default: 1 }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        previous,
+        candidateWithRootValue({ type: "number" }),
+      )
+    ).toThrow(/argument\.item.*no default/);
   });
 
   it("keeps embedded ref roots while comparing unchanged native schemas", () => {
@@ -2167,9 +2201,14 @@ describe("piece schema compatibility", () => {
     for (const target of targets) {
       expect(() => assertSchemaSubset(true, target)).not.toThrow();
       expect(() => assertSchemaSubset(target, true)).not.toThrow();
+      // A target carrying `$defs` is a document of its own; placed under a
+      // wrapper, its definitions move to the wrapper's root, where its
+      // `#/$defs/<name>` refs point.
+      const { $defs, ...body } = target;
       const targetRoot: JSONSchema = {
         type: "object",
-        additionalProperties: target,
+        additionalProperties: body,
+        ...($defs !== undefined && { $defs }),
       };
       expect(() =>
         assertSchemaSubset(

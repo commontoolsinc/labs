@@ -133,6 +133,10 @@ import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -3361,7 +3365,7 @@ const policySchemaMatchesValue = (
   if (typeof schema === "boolean") {
     return schema;
   }
-  const schemaRoot = schema.$defs !== undefined ? schema : root;
+  const schemaRoot = root;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(
       schema,
@@ -3376,7 +3380,14 @@ const policySchemaMatchesValue = (
     if (resolved === undefined || resolved === schema) {
       throw new UnevaluablePolicyRefError(schema.$ref);
     }
-    return policySchemaMatchesValue(resolved, value, schemaRoot);
+    return policySchemaMatchesValue(
+      resolved,
+      value,
+      cfcSchemaResolvedRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      ),
+    );
   }
   if (
     schema.const !== undefined && !fabricAwareEqual(schema.const, value)

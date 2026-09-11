@@ -9,7 +9,7 @@ import {
   type NormalizedFullLink,
 } from "@commonfabric/runner";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   resolveCfcSchemaRefs,
 } from "@commonfabric/runner/cfc/schema-refs";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -525,12 +525,14 @@ function firstUndeclaredEventField(
   if (isOpaqueReference(value)) return undefined;
   if (!isSchemaObject(schema)) return undefined;
   if (!atRoot && carriesCellMarker(schema)) return undefined;
-  const scopeRoot = cfcSchemaChildRoot(schema, root);
+  const scopeRoot = root;
   const node = localRefTarget(schema, scopeRoot);
   if (!isSchemaObject(node)) return undefined;
   if (!atRoot && carriesCellMarker(node)) return undefined;
   if (node.anyOf !== undefined || node.oneOf !== undefined) return undefined;
-  const nodeRoot = cfcSchemaChildRoot(node, scopeRoot);
+  const nodeRoot = node !== schema
+    ? cfcSchemaResolvedRoot(node, scopeRoot)
+    : scopeRoot;
 
   if (Array.isArray(value)) {
     if (!schemaIsArrayShaped(node)) return undefined;
@@ -650,10 +652,12 @@ export function declaredEventFields(
   // It answers `undefined` where a ref dangles or cycles, which fails toward
   // "not a fields position" — the scalar vocabulary, exactly where an
   // unresolvable event schema sat before.
-  const scopeRoot = cfcSchemaChildRoot(schema, schema);
+  const scopeRoot = schema;
   const target = resolveCfcSchemaRefs(schema, scopeRoot);
   if (!isSchemaObject(target)) return null;
-  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+  const targetRoot = target !== schema
+    ? cfcSchemaResolvedRoot(target, scopeRoot)
+    : scopeRoot;
   // The gate the flag surfaces have always applied, widened by exactly one
   // term. A position stating `type: "object"` or carrying `properties` is a
   // fields position, and now so is one carrying `allOf` — because that is
@@ -759,11 +763,13 @@ export function eventSchemaJudgesRootFields(
   // whether it judges them — and the flag door asks both. Reading a `$ref`
   // one way here and another way there would let an `additionalProperties`
   // written beside the ref go unseen while the fields it governs are named.
-  const scopeRoot = cfcSchemaChildRoot(schema, schema);
+  const scopeRoot = schema;
   const target = resolveCfcSchemaRefs(schema, scopeRoot);
   if (!isSchemaObject(target)) return false;
   if (target.anyOf !== undefined || target.oneOf !== undefined) return false;
-  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+  const targetRoot = target !== schema
+    ? cfcSchemaResolvedRoot(target, scopeRoot)
+    : scopeRoot;
   if (!schemaIsObjectShaped(target, targetRoot)) return false;
   const declared = declaredFieldsAt(target, targetRoot);
   return declared.sources.length > 0 && !declared.honorsUndeclared;
@@ -922,7 +928,7 @@ export function resolveEmittedAddressArguments(
   const root = scopeRoot ?? schema;
   const node = localRefTarget(schema, root);
   if (!isSchemaObject(node)) return { value };
-  const nodeRoot = cfcSchemaChildRoot(node, root);
+  const nodeRoot = node !== schema ? cfcSchemaResolvedRoot(node, root) : root;
 
   // The marker rides the `$ref` SITE (`{$ref: …, asCell: […]}`), where the
   // authored cell wrapper was declared, so the pre-resolution node is

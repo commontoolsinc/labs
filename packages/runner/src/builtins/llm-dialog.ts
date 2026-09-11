@@ -49,7 +49,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { cfcSchemaChildRoot } from "../cfc/schema-refs.ts";
+import { cfcSchemaResolvedRoot } from "../cfc/schema-refs.ts";
 import { isExternalSchemaRef } from "../schema-decompose.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import {
@@ -2210,13 +2210,7 @@ function toolInputRequiredIntegrityFailure(
   // an external reference makes the resolved document the owning root for
   // everything under it.
   let structural = schema;
-  // A schema that declares its own `$defs` opens a scope: local references
-  // under it resolve against IT, not the inherited document. The same
-  // child-root rule the CFC schema walkers apply.
-  let structuralRoot: JSONSchema = cfcSchemaChildRoot(
-    schema as JSONSchema,
-    (root ?? schema) as JSONSchema,
-  );
+  let structuralRoot: JSONSchema = (root ?? schema) as JSONSchema;
   const ref = structural.$ref;
   if (typeof ref === "string") {
     try {
@@ -2229,7 +2223,7 @@ function toolInputRequiredIntegrityFailure(
       if (isExternalSchemaRef(ref)) {
         structuralRoot = resolved;
       }
-      structuralRoot = cfcSchemaChildRoot(
+      structuralRoot = cfcSchemaResolvedRoot(
         structural as JSONSchema,
         structuralRoot,
       );

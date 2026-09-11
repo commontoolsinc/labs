@@ -244,6 +244,26 @@ Generated schemas also hoist named types into `$defs` and reference them via
 `#/$defs/...`. The full TypeScript→schema mapping is specified in the
 schema-generator mapping spec (`docs/specs/schema-generator/`).
 
+A `#/$defs/<name>` ref names a definition of the document root, as JSON
+Schema resolves it: `#` is the root of the schema resource, and the runtime
+supports no keyword that starts another resource below it (`$id`, `$anchor`,
+and the dynamic-ref keywords are refused). A `$defs` on a subschema below the
+root's map is therefore inert: a union arm that declares `$defs` of its own
+still resolves its `$ref` against the union's document, and `#/$defs/<name>`
+is the only local pointer form the runtime resolves, so nothing reaches a
+nested map by path either. A document whose root declares no `$defs` has no
+local definitions, and a `#/$defs/<name>` ref below it does not resolve
+whatever `$defs` a subschema declares; a self-contained schema placed under
+such a wrapper needs its `$defs` hoisted to the wrapper's root. Following an
+embedded or `cid:` external ref enters another document, whose own map
+governs everything below it. The runtime attaches a document's map to
+fragments it evaluates apart from the document — a union arm, an element
+schema, a resolved definition body — so that the fragment resolves standalone;
+such a copy holds the enclosing document's definitions and opens no new scope.
+A member of a content-addressed cyclic group is read as a view whose refs
+into the group take the external `cid:<hash>#/$defs/<name>` form, so it
+resolves wherever a derived schema later embeds it.
+
 ### Handling of `never`
 
 The `never` type is commonly used in scenarios like rejecting invalid

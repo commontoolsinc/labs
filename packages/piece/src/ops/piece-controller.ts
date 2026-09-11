@@ -50,8 +50,8 @@ import {
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
-  cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
+  cfcSchemaResolvedRoot,
   loadStoredCfcEnvelope,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -609,7 +609,7 @@ function resolvePathSchemaContract(
   contract: PathSchemaContract,
 ): PathSchemaContract {
   const schema = contract.schema;
-  const schemaRoot = cfcSchemaChildRoot(schema, contract.root);
+  const schemaRoot = contract.root;
   if (
     typeof schema !== "object" || schema === null ||
     typeof schema.$ref !== "string"
@@ -624,7 +624,7 @@ function resolvePathSchemaContract(
   return {
     ...contract,
     schema: resolved,
-    root: cfcSchemaChildRoot(resolved, owningRoot),
+    root: cfcSchemaResolvedRoot(resolved, owningRoot),
   };
 }
 
@@ -720,7 +720,7 @@ export function linkPathContracts(
         }
         next.push(...applicable.map((child) => ({
           schema: child,
-          root: cfcSchemaChildRoot(child, root),
+          root: root,
           mayBeMissing,
         })));
         continue;
@@ -741,7 +741,7 @@ export function linkPathContracts(
           : schema.items ?? true;
         next.push({
           schema: child,
-          root: cfcSchemaChildRoot(child, root),
+          root: root,
           mayBeMissing,
         });
         continue;
@@ -943,7 +943,7 @@ export function currentValuePathContracts(
           {
             ...contract,
             schema: selectedContainer,
-            root: cfcSchemaChildRoot(selectedContainer, root),
+            root: root,
           },
           segment,
           currentValue,
@@ -974,7 +974,7 @@ export function currentValuePathContracts(
           {
             ...contract,
             schema: base,
-            root: cfcSchemaChildRoot(base, root),
+            root: root,
           },
           segment,
           currentValue,
@@ -992,10 +992,10 @@ export function currentValuePathContracts(
       const branchContract = (branch: JSONSchema): PathSchemaContract => ({
         ...contract,
         schema: branch,
-        root: cfcSchemaChildRoot(branch, root),
+        root: root,
       });
       const branchMatches = (branch: JSONSchema, value: unknown): boolean => {
-        const branchRoot = cfcSchemaChildRoot(branch, root);
+        const branchRoot = root;
         return validateSchemaValue(
           branch,
           value,
@@ -1152,7 +1152,7 @@ export function localizeOuterCellContract(
         localizeOuterCellContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           stored,
           active,
@@ -1225,7 +1225,7 @@ export function localizeOuterCellContract(
         localizeOuterCellContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           stored,
           active,
@@ -1334,7 +1334,7 @@ export function assertWritablePiecePath(
         ]);
         return {
           schema: child,
-          root: cfcSchemaChildRoot(child, contract.root),
+          root: contract.root,
         };
       });
     }
@@ -1392,7 +1392,7 @@ export function localizeStreamEventContract(
         localizeStreamEventContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           active,
         )
@@ -1427,7 +1427,7 @@ export function localizeStreamEventContract(
         localizeStreamEventContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           active,
         )

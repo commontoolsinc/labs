@@ -4695,14 +4695,20 @@ describe("schemaAcceptsType()", () => {
     }, "string")).toBe(true);
   });
 
-  it("returns `true` when a union arm's own `$defs` define its `$ref` as the type and the union's define it otherwise", () => {
-    // The arm declares its own scope, so its `$ref` names the string there,
-    // not the number the union defines under the same name. That is the CFC
-    // reading of a nested `$defs`; JSON Schema resolves `#/$defs/Name`
-    // against the root's.
+  it("returns `false` when a union arm's own `$defs` define its `$ref` as the type but the union's define it otherwise", () => {
+    // `#/$defs/Name` names the union's definition: the arm sits in the
+    // union's document, and its own `$defs` is inert there.
     expect(schemaAcceptsType({
       $defs: { Name: { type: "number" } },
       anyOf: [{ $ref: "#/$defs/Name", $defs: { Name: { type: "string" } } }],
-    }, "string")).toBe(true);
+    }, "string")).toBe(false);
+  });
+
+  it("returns `false` when only the union arm declares the `$defs` its `$ref` names", () => {
+    // The union declares no `$defs`, so the ref names nothing and the arm
+    // accepts no type.
+    expect(schemaAcceptsType({
+      anyOf: [{ $ref: "#/$defs/Name", $defs: { Name: { type: "string" } } }],
+    }, "string")).toBe(false);
   });
 });

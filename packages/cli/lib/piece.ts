@@ -74,7 +74,7 @@ import {
   type CfcLabelView,
   cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromSchema,
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   getCarriedCfcLabelView,
   type IFCLabel,
   mergeCfcLabelViews,
@@ -2378,12 +2378,9 @@ export function partitionVerbListing(
  * named type its author declared, while a root piece's is written inline. The
  * `$defs` sit on the root, so the root is what the reference resolves against.
  *
- * The returned root is the scope a property's own references resolve in. A
- * `$defs` closure is local: the definition the root names may carry
- * definitions of its own, and a reference inside it names THOSE. Resolving at
- * the outer root finds nothing, or — worse — a same-named definition
- * belonging to someone else. `cfcSchemaChildRoot` opens the inner scope where
- * there is one and hands back the outer root where there is not.
+ * The returned root is the document a property's own references resolve in:
+ * the schema itself, or the document the resolved view is when resolution
+ * minted one of its own (`cfcSchemaResolvedRoot`).
  *
  * Returns `undefined` for a schema that declares no object at all.
  */
@@ -2399,7 +2396,9 @@ function declaredProperties(
   }
   return {
     properties: declared.properties as Record<string, unknown>,
-    root: cfcSchemaChildRoot(declared as JSONSchema, schema as JSONSchema),
+    root: typeof schema.$ref === "string"
+      ? cfcSchemaResolvedRoot(declared as JSONSchema, schema as JSONSchema)
+      : schema as JSONSchema,
   };
 }
 
@@ -3007,9 +3006,8 @@ function servedDefinitionName(
  * declares it. Nothing here is written back: these are read to look a position
  * up, and the served document keeps its own shape.
  *
- * Scope is threaded rather than assumed. `cfcSchemaChildRoot` opens a new one
- * wherever a subtree carries its own `$defs`, and `resolveCfcSchemaRefRoot`
- * reports the scope a ref chain ends in, so a definition's nested references
+ * The document is threaded rather than assumed: `resolveCfcSchemaRefRoot`
+ * reports the one a ref chain ends in, so a definition's nested references
  * resolve in the document that declares them.
  *
  * Termination is by the open-reference stack, keyed on the pair of reference
@@ -3029,9 +3027,7 @@ function expandDeclared(
     direct: boolean,
   ): void => {
     if (!isObjectOrArray(node)) return;
-    // A node carrying its own definitions opens a scope before its own `$ref`
-    // is read, because that reference may name one of them.
-    const scope = cfcSchemaChildRoot(node, root);
+    const scope = root;
     const ref = node.$ref;
     let resolved: JSONSchema | undefined = node;
     let childRoot = scope;
@@ -3042,7 +3038,7 @@ function expandDeclared(
       openRefs.push({ ref, root: scope });
       resolved = resolveCfcSchemaRefs(node, scope);
       childRoot = isObjectOrArray(resolved)
-        ? cfcSchemaChildRoot(resolved, resolveCfcSchemaRefRoot(node, scope))
+        ? cfcSchemaResolvedRoot(resolved, resolveCfcSchemaRefRoot(node, scope))
         : scope;
     }
     try {

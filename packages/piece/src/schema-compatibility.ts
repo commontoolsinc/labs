@@ -5,7 +5,7 @@ import {
   schemaHasDefaultValue,
 } from "@commonfabric/runner";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   type IfcKey,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -1818,7 +1818,7 @@ function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
 ): { schema: JSONSchema | undefined; root: JSONSchema } {
-  const schemaRoot = cfcSchemaChildRoot(schema, root);
+  const schemaRoot = root;
   const hasRef = typeof schema === "object" && schema !== null &&
     typeof schema.$ref === "string";
   const owningRoot = hasRef
@@ -1827,9 +1827,9 @@ function resolveSchema(
   const resolved = hasRef ? resolveCfcSchemaRefs(schema, schemaRoot) : schema;
   return {
     schema: resolved === undefined ? undefined : internSchema(resolved),
-    root: resolved === undefined
+    root: resolved === undefined || !hasRef
       ? owningRoot
-      : cfcSchemaChildRoot(resolved, owningRoot),
+      : cfcSchemaResolvedRoot(resolved, owningRoot),
   };
 }
 

@@ -245,11 +245,18 @@ export const nameSchema = internSchema(
 
 export type NameSchema = Schema<typeof nameSchema>;
 
+// The renderer schema placed under a property: its `$defs` move to the
+// wrapper's root, which is where its `#/$defs/<name>` refs point once it
+// sits below another root.
+const { $defs: rendererVDOMDefinitions, ...rendererVDOMRoot } =
+  rendererVDOMSchema;
+
 export const uiSchema = internSchema(
   {
     type: "object",
-    properties: { [UI]: rendererVDOMSchema },
+    properties: { [UI]: rendererVDOMRoot },
     required: [UI],
+    $defs: rendererVDOMDefinitions,
   },
 );
 
