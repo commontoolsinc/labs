@@ -62,7 +62,6 @@ import type { Suite } from "./test-topology/suite.ts";
 import {
   fetchManifest,
   manifestBody,
-  type ManifestFetch,
   manifestObjectName,
   manifestPrefix,
   newestAtOrBefore,

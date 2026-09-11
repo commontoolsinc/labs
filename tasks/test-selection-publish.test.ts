@@ -32,10 +32,6 @@ import {
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
 import { stateObjectName } from "./test-selection/store.ts";
-import {
-  type CoverageBaseline,
-  emptyManifest,
-} from "./test-selection/manifest.ts";
 
 /**
  * A topology holding the one suite these cases record against. Supplied
