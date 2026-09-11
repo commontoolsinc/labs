@@ -30,13 +30,16 @@ export function collectionIndexKeys(
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
   _addCancel: AddCancel,
 ): RawBuiltinReturnType {
-  return (tx) => {
-    sendResult(
-      tx,
-      readCollectionIndexKeys(
+  return {
+    deferUntilDemand: true,
+    action: (tx) => {
+      sendResult(
         tx,
-        inputs.withTx(tx).key("state").resolveAsCell(),
-      ),
-    );
+        readCollectionIndexKeys(
+          tx,
+          inputs.withTx(tx).key("state").resolveAsCell(),
+        ),
+      );
+    },
   };
 }

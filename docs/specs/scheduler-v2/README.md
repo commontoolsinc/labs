@@ -442,6 +442,16 @@ readers before dormancy is decided. If a time gate defers the node past its
 creating pass, provisional demand persists until that first completed run,
 so the materializing run is never lost.
 
+A computation whose output addresses are known at registration may opt into
+`deferUntilDemand`. Registration keeps its declared write surface and marks it
+invalid, but does not inherit provisional parent demand. Readers of that
+surface determine when it first executes. Collection-index key enumeration uses
+this option so lookup-only initialization and resume do not enumerate occupied
+keys. The option requires a nonempty effective write surface and is invalid for
+an effect, including an already registered effect. Rejection precedes any
+registration mutation. Idempotency diagnostics retain their separate policy of
+executing computations.
+
 This is the principled form of v1's `pullDemandedFirstRunComputations` +
 `hasDemandedParentContext`. v1's *continuation* set
 (`pullDemandedContinuationComputations` — "child wrote what the already-run

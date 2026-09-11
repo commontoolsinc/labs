@@ -6,6 +6,7 @@ import { createNodeFactory } from "../../src/builder/module.ts";
 import { collectionKeyBucket } from "../../src/builtins/collection-index-key.ts";
 import type { MaintainedCollectionIndex } from "../../src/builtins/collection-index-membership.ts";
 import { Runtime } from "../../src/runtime.ts";
+import { RuntimeTelemetryEvent } from "../../src/telemetry.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
   EmulatedStorageManager,
@@ -193,6 +194,19 @@ describe("collection-index", () => {
       new Runtime({ apiUrl: new URL(import.meta.url), storageManager })
     );
     const [first, second] = runtimes;
+    const keyRuns = [0, 0];
+    const collectors = runtimes.map((runtime, index) => {
+      runtime.scheduler.setReadStatsEnabled(true);
+      const collect = (event: Event) => {
+        const marker = (event as RuntimeTelemetryEvent).marker;
+        if (
+          marker.type === "scheduler.run.complete" &&
+          marker.actionId.includes("collectionIndexKeys")
+        ) keyRuns[index]++;
+      };
+      runtime.telemetry.addEventListener("telemetry", collect);
+      return collect;
+    });
     const program = {
       main: "/main.tsx",
       files: [{
@@ -234,6 +248,7 @@ describe("collection-index", () => {
       );
       cancellations.push(cancel);
       await first.idle();
+      expect(keyRuns[0]).toBe(0);
       expect(await result.key("index").key("buckets").key(bucket).pull())
         .toHaveLength(2);
       await storages[0].synced();
@@ -255,6 +270,7 @@ describe("collection-index", () => {
       );
       expect(await second.start(restored)).toBe(true);
       await second.idle();
+      expect(keyRuns[1]).toBe(0);
       expect(await restored.key("index").key("buckets").key(bucket).pull())
         .toHaveLength(2);
       const edit = second.edit();
@@ -266,8 +282,14 @@ describe("collection-index", () => {
       await second.idle();
       expect(await restored.key("index").key("buckets").key(bucket).pull())
         .toEqual([{ title: "Second", category: "A" }]);
+      expect(keyRuns[1]).toBe(0);
+      expect(await restored.key("index").key("keys").pull()).toEqual(["A"]);
+      expect(keyRuns[1]).toBeGreaterThan(0);
     } finally {
       for (const cancel of cancellations) cancel();
+      runtimes.forEach((runtime, index) =>
+        runtime.telemetry.removeEventListener("telemetry", collectors[index])
+      );
       for (const runtime of runtimes) {
         await runtime.dispose({ closeStorage: false });
       }

@@ -163,7 +163,8 @@ describe("collection index resume sync", () => {
             maintenanceHeld.resolve();
             await storage.synced();
             await runtime.scheduler.idleWithPendingCommits();
-            expect(output.get()).toEqual({
+            // Full descriptor demand includes its independently computed keys.
+            expect(await output.pull()).toEqual({
               kind: "collection-index",
               mode: "group",
               keys: [],
