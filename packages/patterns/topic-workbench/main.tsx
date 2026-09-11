@@ -618,9 +618,6 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                 >
                   {hasTopic ? title : "No topic linked yet"}
                 </cf-text>
-                {hasTopic
-                  ? <cf-cell-link $cell={topic} label="Open topic" />
-                  : null}
               </cf-hstack>
               <cf-text variant="caption" tone="muted">
                 {hasTopic
