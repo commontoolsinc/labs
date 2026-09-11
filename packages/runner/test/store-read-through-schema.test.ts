@@ -77,4 +77,69 @@ describe("store read-through schema metadata", () => {
       }
     });
   }
+
+  it("quarantines malformed metadata on an initial read", async () => {
+    const signer = await Identity.fromPassphrase(
+      "malformed metadata read through",
+    );
+    const manager = StorageManager.emulate({ as: signer });
+    const { rootRef } = decomposeSchema(schema);
+    try {
+      manager.installStoreReadThrough(signer.did(), ({ id, scopeKey }) => ({
+        branch: "",
+        id,
+        scope: "space",
+        scopeKey,
+        seq: 1,
+        doc: { value: "invalid", schema: { $ref: rootRef, type: "object" } },
+      }));
+      const replica = manager.open(signer.did()).replica;
+      expect(replica.getDocument("of:malformed-carrier" as URI))
+        .toBeUndefined();
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it("keeps a malformed refresh from blocking valid sibling documents", async () => {
+    const signer = await Identity.fromPassphrase("mixed metadata read through");
+    const manager = StorageManager.emulate({ as: signer });
+    const invalidId = "of:malformed-carrier" as URI;
+    const validId = "of:valid-carrier" as URI;
+    const original = { value: "original" };
+    const { rootRef } = decomposeSchema(schema);
+    const docs = new Map<string, EntityDocument>([
+      [invalidId, original],
+      [validId, original],
+    ]);
+    let seq = 1;
+    try {
+      manager.installStoreReadThrough(signer.did(), ({ id, scopeKey }) => ({
+        branch: "",
+        id,
+        scope: "space",
+        scopeKey,
+        seq,
+        doc: docs.get(id)!,
+      }));
+      const replica = manager.open(signer.did()).replica;
+      expect(replica.getDocument(invalidId)).toEqual(original);
+      expect(replica.getDocument(validId)).toEqual(original);
+      docs.set(invalidId, {
+        value: "invalid",
+        schema: { $ref: rootRef, type: "object" },
+      });
+      const updated = { value: "updated" };
+      docs.set(validId, updated);
+      seq++;
+      expect(manager.integrateStoreWrites(signer.did(), [
+        { id: invalidId, scopeKey: "space" },
+        { id: validId, scopeKey: "space" },
+      ])).toBe(2);
+      expect(replica.getDocument(invalidId)).toEqual(original);
+      expect(replica.getDocument(validId)).toEqual(updated);
+    } finally {
+      await manager.close();
+    }
+  });
 });
