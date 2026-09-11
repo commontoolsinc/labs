@@ -133,6 +133,8 @@ describe("piece-call-discovery", () => {
           Promise.resolve({
             getSpace: () => space,
             get: () => Promise.resolve(piece),
+            getPieceCell: () => Promise.resolve(root),
+            getResult: () => root,
             runtime,
           }),
         loadPiece: () => Promise.resolve(piece),
