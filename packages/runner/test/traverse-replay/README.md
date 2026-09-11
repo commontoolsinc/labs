@@ -84,6 +84,12 @@ with a counter explanation.
   fast-fail traffic.
 - `shopping-list-test` — small array/handler-heavy client load; 474 invocations,
   77 docs, fast inner-loop fixture (~20ms).
+- `toolshed-reload` — server-side schema-query load, captured from a local
+  toolshed (memory v2 server) while the runner integration suite and ten rounds
+  of `patterns/integration/reload/default-app-notebook` ran against it; 20k
+  invocations (the recorder's cap), 6.4k docs, 298 distinct selectors. Per-query
+  shared contexts and memos, `traverseCells`, and wire-decoded (frozen but not
+  interned) doc schemas. The full-replay server-shaped metric (~3s).
 - `piece-query-legacy` — a captured server query dataset (36 docs);
   server-shaped (`traverseCells`, single big traversal). Converted from the old
   `integration/traverse_timing.test.ts` dataset. The fixture keeps the original
