@@ -8,6 +8,7 @@ import {
   parseLink,
   resolveEntryIdentity,
   resolveSystemPatternSource,
+  resultSchemaMetaSpelling,
   Runtime,
   setPatternSource,
 } from "@commonfabric/runner";
@@ -479,7 +480,9 @@ describe("opening a space root", () => {
       currentPattern,
     )!;
     expect(currentRef.identity).toBe(await identityForSource(SOURCE_V2));
-    expect(currentPattern.resultSchema).toEqual(root.getMetaRaw("schema"));
+    expect(root.getMetaRaw("schema")).toEqual(
+      resultSchemaMetaSpelling(currentPattern.resultSchema!),
+    );
 
     const metadataUpdate = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw(

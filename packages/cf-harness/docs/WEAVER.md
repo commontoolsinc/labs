@@ -208,7 +208,9 @@ The daemon's proxy and the console read the same inputs in the same order —
 `--port` above all three — so **recording a port in `pieces.json` moves both.**
 That is what to do for a second instance on a machine that already has a
 console: the port is not derived from the offset, so two instances left at the
-default contend for one.
+default contend for one. A launch whose console port is held by something it did
+not start says so and names the pid holding it, because the console already
+there answers the health check the launch makes.
 
 The inherited variable is the one to check when the route reaches nothing. A
 daemon started from a shell that exported the console's own variable proxies

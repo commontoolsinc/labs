@@ -353,6 +353,7 @@ export function map(
       runtime,
       elementRuns,
       new Set(elementKeys.values()),
+      listScope,
     );
 
     const newArrayValue = new Array<any>(list.length);

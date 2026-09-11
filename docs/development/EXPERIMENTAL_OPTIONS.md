@@ -145,7 +145,10 @@ server](#clients-that-are-not-built-alongside-their-server).
   deploy together: link writers replace inline schemas with
   `{ "$ref": "cid:<hash>" }` references to content-addressed schema
   documents, whose closure is installed into the destination space in the
-  same transaction as the reference; `$alias` bindings stamp the same
+  same transaction as the reference, and a result document's `schema`
+  metadata (the result schema a piece's setup writes, a receipt's shape)
+  takes the same reference form through the same staging; `$alias`
+  bindings stamp the same
   references at pattern serialization, resolving through the realm
   registry (an alias is a binding only by context — the storage layer
   treats `$alias`-shaped records as plain data); and watch/sync selectors
@@ -159,7 +162,11 @@ server](#clients-that-are-not-built-alongside-their-server).
   keeps reading throughout the rollout, and the server answers an
   unresolvable selector reference with a loud QueryError, which a
   compliant client never provokes; a schema decomposition refuses stays
-  inline exactly as with the flag off. The rollout is one-way: the flag
+  inline exactly as with the flag off. A reference in `schema` metadata
+  is delivered like a link's: the server ships its closure with the
+  document, and a client validates the member on arrival, so a server
+  deploys this behavior before the clients that write the reference. The
+  rollout is one-way: the flag
   turns on only once every deployed client is a reader, and references
   written under it persist, so turning it back off stops emission without
   un-writing anything.
@@ -182,6 +189,9 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Status on 2026-08-19.** Phases 1 and 2 implemented (#5878, #6011), on
   by default. The flag-off behaviors stay pinned by runner tests that pass
   `false` explicitly, which is also the rollback override.
+- **Status on 2026-09-11.** A result document's `schema` metadata takes the
+  reference form under the flag (#7299), delivered and validated like a
+  link position; the flag-off path keeps it inline.
 
 ### `plainResultReceipts`
 

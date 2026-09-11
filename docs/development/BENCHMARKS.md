@@ -426,3 +426,23 @@ The command reports measured totals and per-run maxima for every interval. Keep
 the functional assertions, declared collection sizes, and render windows when
 adjusting a ceiling; a budget failure should lead to attribution of the added
 reads before changing the limit.
+
+## Scoped snapshot memo reuse
+
+`packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view
+requests within an ambient metadata scope, both at the current instant and at a
+historical read epoch. Each sample opens a fresh transaction and makes 74, 296,
+or 1,184 requests for one labeled address. Setup and transaction cleanup are
+outside the timed interval.
+
+The reused-memo case includes its first miss. The cleared-memo control clears
+only the active snapshot memo before each request; storage read caches remain
+active. That control includes clearing the map and journaling the additional
+reads. Both cases still merge label views for every request. They measure the
+cost of repeated derivation in this fixture, not a whole-pattern speedup.
+
+Untimed diagnostics verify one metadata read with reuse and one per request
+with clearing. These are transaction read activities, not proxy-access counts
+or storage network requests. Run with `deno bench -A --json
+packages/runner/test/snapshot-memo.bench.ts`; the JSON timing report goes to
+stdout and the exact read counts go to stderr.

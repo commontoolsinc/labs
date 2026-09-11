@@ -4646,6 +4646,14 @@ export class CfHarnessPromptLoop {
       ...(this.engine.config.fabricSession !== undefined
         ? { fabricSession: this.engine.config.fabricSession }
         : {}),
+      // And the connector handles the console was launched against, so a
+      // child's grants resolve from the same configuration its parent's did
+      // rather than from a second reading of loom's records. What a child
+      // actually holds is still decided by `seedSubagentHandleTable`: this
+      // carries the configuration, not an entitlement.
+      ...(this.engine.connectorGrants.length > 0
+        ? { connectorGrants: this.engine.connectorGrants }
+        : {}),
       // Likewise the index client: a child searches and runs indexed
       // patterns through the one the parent built. The connection CONFIG
       // rides along too, because the operator's dials live on it — a parent
