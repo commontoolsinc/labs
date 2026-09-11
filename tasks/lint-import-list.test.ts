@@ -146,6 +146,53 @@ describe("lint-import-list", () => {
       expect(diagnose(source)).toEqual([MERGE_THROUGH_NAMESPACE]);
     });
 
+    it("reports merging through the namespace only where one of the pair takes it", () => {
+      // Each statement merges into the first of its kind, so the namespace
+      // written third blocks its own merge and not the one above it.
+      const source = `
+        import { a } from "./mod.ts";
+        import { b } from "./mod.ts";
+        import * as mod from "./mod.ts";
+        export const all = [a, b, mod];
+      `;
+      expect(diagnose(source)).toEqual([MERGE, MERGE_THROUGH_NAMESPACE]);
+      expect(statements(source)).toEqual([
+        `import { b } from "./mod.ts";`,
+        `import * as mod from "./mod.ts";`,
+      ]);
+    });
+
+    it("reports a second `import type` of one module with an empty clause", () => {
+      const source = `
+        import type {} from "./mod.ts";
+        import type {} from "./mod.ts";
+      `;
+      expect(diagnose(source)).toEqual([MERGE]);
+      expect(statements(source)).toEqual([`import type {} from "./mod.ts";`]);
+    });
+
+    it("counts an empty `import type` clause against a named one", () => {
+      const source = `
+        import type {} from "./mod.ts";
+        import type { A } from "./mod.ts";
+        export type Alias = A;
+      `;
+      expect(diagnose(source)).toEqual([MERGE]);
+      expect(statements(source)).toEqual([
+        `import type { A } from "./mod.ts";`,
+      ]);
+    });
+
+    it("passes an empty `import type` clause beside a bare import", () => {
+      // The bare statement is what evaluates the module, and the `import type`
+      // is a statement of the other kind, so the pair is one of each.
+      const source = `
+        import "./mod.ts";
+        import type {} from "./mod.ts";
+      `;
+      expect(diagnose(source)).toEqual([]);
+    });
+
     it("reports each statement after the first, one report each", () => {
       const source = `
         import { a } from "./mod.ts";

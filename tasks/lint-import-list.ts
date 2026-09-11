@@ -26,6 +26,12 @@
  * rather than the bare one, because writing it `import type` is what makes the
  * pair legal and leaves the module evaluated.
  *
+ * An `import type` with an empty clause, `import type {} from "x";`, binds
+ * nothing and evaluates nothing. The split above is about which statements
+ * evaluate the module, and an `import type` answers that the same way whatever
+ * its clause holds, so an empty one counts toward the module's `import type`
+ * total like any other rather than standing apart as a bare statement does.
+ *
  * Whichever statement survives a merge goes where the earliest of the
  * statements it replaces sat. That is what keeps the module's evaluation at
  * the point in the list it was already reached from, which matters when the
@@ -157,7 +163,11 @@ export default {
               run = { kind, specifier, named: [], bare: [] };
               runs.set(key, run);
             }
-            const statements = node.specifiers.length > 0
+            // The split is about which statements evaluate the module, which
+            // is a question only a value statement raises: an `import type`
+            // evaluates nothing whatever its clause holds, so an empty one
+            // counts toward its kind rather than standing apart as bare.
+            const statements = kind === "type" || node.specifiers.length > 0
               ? run.named
               : run.bare;
             statements.push(node);
@@ -165,11 +175,16 @@ export default {
 
           "Program:exit"() {
             for (const { kind, specifier, named, bare } of runs.values()) {
-              const namespaced = named.some(takesNamespace);
+              // A statement merges into the first of its kind, so what
+              // decides which message it takes is whether either of those two
+              // takes a namespace, rather than whether any statement in the
+              // run does.
               for (const node of named.slice(1)) {
+                const throughNamespace = takesNamespace(named[0]) ||
+                  takesNamespace(node);
                 context.report({
                   node,
-                  message: namespaced
+                  message: throughNamespace
                     ? mergeThroughNamespaceMessage(kind, specifier)
                     : mergeMessage(kind, specifier),
                 });
