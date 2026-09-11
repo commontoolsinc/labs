@@ -2981,28 +2981,23 @@ export class SpaceServer implements TransactionSealDestination {
    * the serving replica holds, so its scheduler sees the change a session
    * watch would otherwise have delivered. The loop's own derived commits
    * are skipped: the replica confirmed those at its seal, and re-reading
-   * them would only cost the engine a read per written document.
+   * them would only cost the engine a read per written document. A read
+   * or integration that throws propagates: the drain must not consume a
+   * record whose writes never reached the replica, since the watermark
+   * would then cover an input nothing derived over. The loop's own catch
+   * parks the space `loop-failed`, and the re-activation's fresh runtime
+   * reads the engine's head.
    */
   #refreshHeldDocuments(record: AdmittedCommitNotice): void {
     if (this.#options.policy?.storeReadThrough !== true) return;
     const runtime = this.#runtime;
     if (runtime === undefined) return;
     if (record.class === "derived" && record.holder === this.#holder) return;
-    try {
-      this.#options.stats.storeRefreshes +=
-        runtime.storageManager.integrateStoreWrites?.(
-          this.#options.space,
-          record.writes,
-        ) ?? 0;
-    } catch (error) {
-      // A failed refresh leaves the held documents where they were; the
-      // next commit touching them, or the next tenure, reads them again.
-      logger.error("store-refresh-failed", () => [
-        `space ${this.#options.space}: refreshing held documents for ` +
-        `commit ${record.seq} failed`,
-        error,
-      ]);
-    }
+    this.#options.stats.storeRefreshes +=
+      runtime.storageManager.integrateStoreWrites?.(
+        this.#options.space,
+        record.writes,
+      ) ?? 0;
   }
 
   /**

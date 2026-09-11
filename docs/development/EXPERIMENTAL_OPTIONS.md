@@ -52,6 +52,7 @@ was last checked against the code.
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | off by default; acquisition/removal ordering tested; real-latency measurement pending |
 | [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate to an unconditional ceiling                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
+| [`SERVER_EXECUTION_STORE_READ_THROUGH`](#server_execution_store_read_through) | `SERVER_EXECUTION_STORE_READ_THROUGH` env on toolshed, or `SpaceServerPolicy.storeReadThrough` | off | Bernhard Seefeld (store read-through) | close the two session-delivery divergences, flip on, then delete the knob and the home-space session read path | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
 Removed or never-shipped flags that documentation elsewhere still references are
@@ -1299,6 +1300,40 @@ the per-epic implementation notes).
 - **Path to removal.** Fix named-space key derivation, run the retirement
   sweep, turn the flag on by default, then delete the gate and mount the router
   unconditionally.
+
+### `SERVER_EXECUTION_STORE_READ_THROUGH`
+
+- **Toggle via.** The `SERVER_EXECUTION_STORE_READ_THROUGH` environment
+  variable on toolshed, read by the serving-host bootstrap
+  ([`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts))
+  into `SpaceServerPolicy.storeReadThrough`; a harness constructing an
+  `ExecutorHost` sets the policy field directly. Only the literal `true` turns
+  it on; `false` and unset leave it off, and anything else warns and leaves it
+  off. Meaningful only with the serving loop running
+  ([`serverExecution`](#serverexecution) on).
+- **Added by.** Bernhard Seefeld, in the store read-through change.
+- **Purpose.** The serving runtime reads its HOME space straight from the
+  space's engine instead of over its loopback session: a document its replica
+  does not hold is read synchronously on first access, a `sync()` resolves
+  from the engine with no session watch, and the feed's admitted commits
+  re-read the documents the replica holds. The memory server then never walks
+  a selector's schema closure for the serving session, and the loopback
+  transport carries no frames for it. Writes and foreign-space reads stay on
+  the session. [`serving-loop.md`](../specs/server-side-execution/serving-loop.md)
+  §1 plane (a) states the posture and what it does not do.
+- **Current default and planned end state.** Off by default. Two divergences
+  from session delivery stand between it and a default: the lapsed-lease
+  delivery filter (protocol.md §3) is not consulted, and a read of an absent
+  address leaves a confirmed absence in the replica. The end state is on by
+  default once those are closed, then the session read path for the home space
+  goes.
+- **Status on 2026-09-10.** Implemented, off by default. Under the posture the
+  runner's executor suites pass except four steps that pin the two divergences
+  above and one per-session fan-out case still under investigation; the
+  toolshed-backed integration lanes pass. Measured on the topic-board
+  navigation benchmark: the served journey runs in roughly a third of the time.
+- **Path to removal.** Close the two divergences, flip the default, then delete
+  the knob and the home-space session read path it replaces.
 
 ## Flag-gated tripwires
 
