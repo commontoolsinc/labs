@@ -2522,6 +2522,18 @@ const linkWritePolicyOnlySchema = (
   return Object.keys(ifc).length === 0 ? {} : { ifc } as JSONSchema;
 };
 
+/** Intersects independent policy documents while retaining their definition scopes. */
+const intersectVerificationSchemas = (
+  schemas: readonly JSONSchema[],
+): JSONSchema => {
+  if (schemas.length === 0) return {};
+  const { fragments, definitions } = hoistCfcSchemaDefs(schemas);
+  return {
+    allOf: fragments,
+    ...(definitions === undefined ? {} : { $defs: definitions }),
+  } as JSONSchema;
+};
+
 const storedSchemaClaimsForLinkWrites = (
   schema: JSONSchema,
   inputs: readonly LinkWritePolicyInput[],
@@ -2571,7 +2583,7 @@ const storedSchemaClaimsForLinkWrites = (
   }
   // Verification intersects independently conditioned claims. Merging their
   // IFC fields would turn disjoint union branches into an unconditional gate.
-  return claims.length === 0 ? {} : { allOf: claims };
+  return intersectVerificationSchemas(claims);
 };
 
 // The consumption class an authored schema declares for its ifc label (C5).
@@ -6807,12 +6819,10 @@ export const prepareBoundaryCommit = (
         linkWriteInputs.length > 0
       ? undefinedCandidate
         ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
-        : {
-          allOf: [
-            schema,
-            storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
-          ],
-        } as JSONSchema
+        : intersectVerificationSchemas([
+          schema,
+          storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
+        ])
       : schema;
 
     const requirementFailure = verifyInputRequirements(

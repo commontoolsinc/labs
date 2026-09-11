@@ -120,78 +120,92 @@ describe("linked policy applicability", () => {
     });
   }
 
-  it("keeps independent writers and local definitions on acquired reference branches", async () => {
-    const scopedSchema = {
-      ...schema,
-      $defs: {
-        ...schema.$defs,
-        Origin: { type: "string", enum: ["unrelated-root"] },
-        Sent: {
-          ...schema.$defs.Sent,
-          properties: {
-            ...schema.$defs.Sent.properties,
-            origin: { $ref: "#/$defs/Origin" },
+  for (const typed of [false, true]) {
+    it(`keeps independent writers and local definitions on acquired reference branches${typed ? " with a typed receiver" : ""}`, async () => {
+      const scopedSchema = {
+        ...schema,
+        $defs: {
+          ...schema.$defs,
+          SentOrigin: schema.$defs.Sent.properties.origin,
+          ImportedOrigin: schema.$defs.Imported.properties.origin,
+          Sent: {
+            ...schema.$defs.Sent,
+            properties: {
+              ...schema.$defs.Sent.properties,
+              origin: { $ref: "#/$defs/SentOrigin" },
+            },
           },
-          $defs: { Origin: schema.$defs.Sent.properties.origin },
-        },
-        Imported: {
-          ...schema.$defs.Imported,
-          properties: {
-            ...schema.$defs.Imported.properties,
-            origin: { $ref: "#/$defs/Origin" },
+          Imported: {
+            ...schema.$defs.Imported,
+            properties: {
+              ...schema.$defs.Imported.properties,
+              origin: { $ref: "#/$defs/ImportedOrigin" },
+            },
+            ifc: { writeAuthorizedBy: ["trusted-importer"] },
           },
-          $defs: { Origin: schema.$defs.Imported.properties.origin },
-          ifc: { writeAuthorizedBy: ["trusted-importer"] },
         },
-      },
-    } as const satisfies JSONSchema;
-    const seed = runtime.edit();
-    seed.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: "trusted-sender",
-    });
-    runtime.getCell(signer.did(), "chat", scopedSchema, seed).set({
-      messages: [{ origin: "sent", body: "genuine" }],
-    });
-    expect((await seed.commit()).error).toBeUndefined();
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      seed.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "trusted-sender",
+      });
+      runtime.getCell(signer.did(), "chat", scopedSchema, seed).set({
+        messages: [{ origin: "sent", body: "genuine" }],
+      });
+      expect((await seed.commit()).error).toBeUndefined();
 
-    const create = runtime.edit();
-    const imported = runtime.getCell(
-      signer.did(),
-      "imported",
-      undefined,
-      create,
-    );
-    imported.set({ origin: "imported", body: "claim" });
-    const forged = runtime.getCell(signer.did(), "forged", undefined, create);
-    forged.set({ origin: "sent", body: "forged" });
-    expect((await create.commit()).error).toBeUndefined();
+      const create = runtime.edit();
+      const imported = runtime.getCell(
+        signer.did(),
+        "imported",
+        undefined,
+        create,
+      );
+      imported.set({ origin: "imported", body: "claim" });
+      const forged = runtime.getCell(signer.did(), "forged", undefined, create);
+      forged.set({ origin: "sent", body: "forged" });
+      expect((await create.commit()).error).toBeUndefined();
 
-    const append = runtime.edit();
-    append.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: "trusted-importer",
-    });
-    runtime.getCell(signer.did(), "chat", undefined, append).key("messages")
-      .push(imported.withTx(append));
-    expect((await append.commit()).error).toBeUndefined();
-    const messages = runtime.getCell(signer.did(), "chat", scopedSchema)
-      .key("messages");
-    expect(messages.key(1).resolveAsCell().getAsNormalizedFullLink().id).toBe(
-      imported.getAsNormalizedFullLink().id,
-    );
+      const append = runtime.edit();
+      append.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "trusted-importer",
+      });
+      runtime.getCell(
+        signer.did(),
+        "chat",
+        typed ? scopedSchema : undefined,
+        append,
+      ).key("messages")
+        .push(imported.withTx(append));
+      expect((await append.commit()).error).toBeUndefined();
+      const messages = runtime.getCell(signer.did(), "chat", scopedSchema)
+        .key("messages");
+      expect(messages.key(1).resolveAsCell().getAsNormalizedFullLink().id).toBe(
+        imported.getAsNormalizedFullLink().id,
+      );
 
-    const impostor = runtime.edit();
-    impostor.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: "trusted-importer",
+      const impostor = runtime.edit();
+      impostor.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "trusted-importer",
+      });
+      runtime.getCell(
+        signer.did(),
+        "chat",
+        typed ? scopedSchema : undefined,
+        impostor,
+      ).key("messages")
+        .push(forged.withTx(impostor));
+      expect((await impostor.commit()).error?.message).toContain(
+        "writeAuthorizedBy failed",
+      );
+      expect(messages.key("length").get()).toBe(2);
+      expect(messages.key(0).get()).toEqual({
+        origin: "sent",
+        body: "genuine",
+      });
     });
-    runtime.getCell(signer.did(), "chat", undefined, impostor).key("messages")
-      .push(forged.withTx(impostor));
-    expect((await impostor.commit()).error?.message).toContain(
-      "writeAuthorizedBy failed",
-    );
-    expect(messages.key("length").get()).toBe(2);
-    expect(messages.key(0).get()).toEqual({ origin: "sent", body: "genuine" });
-  });
+  }
 });
