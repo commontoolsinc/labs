@@ -219,26 +219,6 @@ export type DispatchingVisitorResult<
  */
 export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
-   * Visits an element of an array. This method is called as a result of the
-   * visitor returning a `recurse` result for a visited array.
-   */
-  visitArrayElement(
-    index: number,
-    value: DomainFor<DomainExtra>,
-  ): BaselineVisitResult<ResultType>;
-
-  /**
-   * Visits a gap (one or more holes) in an array. `start` is the start index of
-   * the gap (integer `>= 0`), and `count` is the number of holes in the gap
-   * (integer `>= 1`). This method is called as a result of the visitor
-   * returning a `recurse` result for a visited array.
-   */
-  visitArrayGap(
-    start: number,
-    count: number,
-  ): BaselineVisitResult<ResultType>;
-
-  /**
    * Visits a value which is already in the process of being visited. The
    * visitor engine calls this method _before_ calling `visitValue()` when the
    * value to be visited is already in the middle of being visited as a
@@ -285,16 +265,6 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits an item from a map-like container (`FabricPlainObject` or
-   * `FabricInstance`). This method is called as a result of the visitor
-   * returning a `recurse` result for a visited map-like container.
-   */
-  visitMapping(
-    key: DomainFor<DomainExtra>,
-    value: DomainFor<DomainExtra>,
-  ): BaselineVisitResult<ResultType>;
-
-  /**
    * Visits a value determined to _not_ be a valid `FabricValue`.
    *
    * **Note:** When this visitor is called using a function that allows for
@@ -322,6 +292,43 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   visitValue(
     value: DomainFor<DomainExtra>,
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
+
+  /**
+   * Indicates that an array element was just visited. This method is called as
+   * a result of the visitor returning a `recurse` result for a visited array
+   * and is called _after_ the element itself was directly visited.
+   */
+  visitedArrayElement(
+    index: number,
+    value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType>;
+
+  /**
+   * Indicates that an array gap (one or more holes) was just nominally visited.
+   * This method is called as a result of the visitor returning a `recurse`
+   * result for a visited array and is called during iteration as gaps are
+   * encountered. The sequencingf of this call is meant to mirror
+   * `visitedArrayElement()`, but since there is nothing to recurse on (it's a
+   * gap, not any actual values), there is no regular `visitValue()` call which
+   * immediately precedes it (hence the visit was "nominal"). `start` is the
+   * start index of the gap (integer `>= 0`), and `count` is the number of holes
+   * in the gap (integer `>= 1`). This method is called as a result of the
+   * visitor returning a `recurse` result for a visited array.
+   */
+  visitedArrayGap(
+    start: number,
+    count: number,
+  ): BaselineVisitResult<ResultType>;
+
+  /**
+   * Indicates that a container mapping was just visited. This method is called
+   * as a result of the visitor returning a `recurse` result for a visited
+   * container and is called _after_ the mapping itself was directly visited.
+   */
+  visitedMapping(
+    key: DomainFor<DomainExtra>,
+    value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType>;
 }
 
 /**
@@ -335,18 +342,6 @@ export abstract class BaseValueVisitor<
   //
   // Subclass contract
   //
-
-  /** @inheritDoc */
-  abstract visitArrayElement(
-    index: number,
-    value: DomainFor<DomainExtra>,
-  ): BaselineVisitResult<ResultType>;
-
-  /** @inheritDoc */
-  abstract visitArrayGap(
-    start: number,
-    count: number,
-  ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
   abstract visitCycle(
@@ -376,12 +371,6 @@ export abstract class BaseValueVisitor<
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
-  abstract visitMapping(
-    key: DomainFor<DomainExtra>,
-    value: DomainFor<DomainExtra>,
-  ): BaselineVisitResult<ResultType>;
-
-  /** @inheritDoc */
   abstract visitNonFabricValue(
     value: DomainExtra,
   ): LeafVisitorResult<DomainExtra, ResultType>;
@@ -396,6 +385,24 @@ export abstract class BaseValueVisitor<
   abstract visitValue(
     value: DomainFor<DomainExtra>,
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitedArrayElement(
+    index: number,
+    value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType>;
+
+  /** @inheritDoc */
+  abstract visitedArrayGap(
+    start: number,
+    count: number,
+  ): BaselineVisitResult<ResultType>;
+
+  /** @inheritDoc */
+  abstract visitedMapping(
+    key: DomainFor<DomainExtra>,
+    value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType>;
 
   //
   // Instance members
@@ -417,22 +424,6 @@ export abstract class BaseValueVisitor<
  */
 export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   extends BaseValueVisitor<DomainExtra, ResultType> {
-  /** @inheritDoc */
-  visitArrayElement(
-    _index: number,
-    _value: DomainFor<DomainExtra>,
-  ): BaselineVisitResult<ResultType> {
-    return undefined;
-  }
-
-  /** @inheritDoc */
-  visitArrayGap(
-    _start: number,
-    _count: number,
-  ): BaselineVisitResult<ResultType> {
-    return undefined;
-  }
-
   /** @inheritDoc */
   visitCycle(
     _value: DomainFor<DomainExtra>,
@@ -471,14 +462,6 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   }
 
   /** @inheritDoc */
-  visitMapping(
-    _key: DomainFor<DomainExtra>,
-    _value: DomainFor<DomainExtra>,
-  ): BaselineVisitResult<ResultType> {
-    return undefined;
-  }
-
-  /** @inheritDoc */
   visitNonFabricValue(
     _value: DomainExtra,
   ): LeafVisitorResult<DomainExtra, ResultType> {
@@ -497,6 +480,30 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   visitValue(
     _value: DomainFor<DomainExtra>,
   ): DispatchingVisitorResult<DomainExtra, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitedArrayElement(
+    _index: number,
+    _value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitedArrayGap(
+    _start: number,
+    _count: number,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitedMapping(
+    _key: DomainFor<DomainExtra>,
+    _value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType> {
     return undefined;
   }
 }
@@ -843,7 +850,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         if (idxNumber !== (lastIdx + 1)) {
           // There's a gap just before this element.
-          const result = vis.visitArrayGap(
+          const result = vis.visitedArrayGap(
             lastIdx + 1,
             idxNumber - lastIdx - 1,
           );
@@ -862,8 +869,8 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value from `elemResult` into
-        // `visitArrayElement()` and not the original `element`.
-        const result = vis.visitArrayElement(idxNumber, element);
+        // `visitedArrayElement()` and not the original `element`.
+        const result = vis.visitedArrayElement(idxNumber, element);
         if (result?.type === "mainResult") {
           return result;
         }
@@ -871,7 +878,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       if (array.length !== (lastIdx + 1)) {
         // There's a gap at the end of the array.
-        const result = vis.visitArrayGap(
+        const result = vis.visitedArrayGap(
           lastIdx + 1,
           array.length - lastIdx - 1,
         );
@@ -934,7 +941,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value(s) from the visits immediately
         // above instead of the original `key` and `value`.
-        const result = vis.visitMapping(key, value);
+        const result = vis.visitedMapping(key, value);
         if (result?.type === "mainResult") {
           return result;
         }
