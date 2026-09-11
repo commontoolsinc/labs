@@ -5,7 +5,7 @@ import {
   schemaHasDefaultValue,
 } from "@commonfabric/runner";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   type IfcKey,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -597,12 +597,19 @@ export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
   candidate: Pattern,
 ): void {
+  // Both sides are validated as stored. A previous schema that fails here —
+  // one whose `#/$defs/<name>` refs only a `$defs` below the root could
+  // satisfy, for instance — refuses every replacement, and the override is
+  // the way past it: the stored schema is broken, and the update is taken
+  // knowing that.
+  const previousArgumentSchema = previous.argumentSchema;
+  const previousResultSchema = previous.resultSchema;
   const issues: string[] = [];
   for (
     const [label, schema] of [
-      ["previous argument", previous.argumentSchema],
+      ["previous argument", previousArgumentSchema],
       ["candidate argument", candidate.argumentSchema],
-      ["previous result", previous.resultSchema],
+      ["previous result", previousResultSchema],
       ["candidate result", candidate.resultSchema],
     ] as const
   ) {
@@ -620,11 +627,11 @@ export function assertPatternSchemasBackwardCompatible(
   }
 
   const argumentIssue = schemaSubsetIssue(
-    previous.argumentSchema,
+    previousArgumentSchema,
     candidate.argumentSchema,
     "argument",
     {
-      sourceRoot: previous.argumentSchema,
+      sourceRoot: previousArgumentSchema,
       targetRoot: candidate.argumentSchema,
       role: "argument",
       activePairs: new WeakMap(),
@@ -638,11 +645,11 @@ export function assertPatternSchemasBackwardCompatible(
 
   const resultIssue = schemaSubsetIssue(
     candidate.resultSchema,
-    previous.resultSchema,
+    previousResultSchema,
     "result",
     {
       sourceRoot: candidate.resultSchema,
-      targetRoot: previous.resultSchema,
+      targetRoot: previousResultSchema,
       role: "result",
       activePairs: new WeakMap(),
       allowEvolutionPolicy: true,
@@ -1909,7 +1916,7 @@ function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
 ): { schema: JSONSchema | undefined; root: JSONSchema } {
-  const schemaRoot = cfcSchemaChildRoot(schema, root);
+  const schemaRoot = root;
   const hasRef = typeof schema === "object" && schema !== null &&
     typeof schema.$ref === "string";
   const owningRoot = hasRef
@@ -1918,9 +1925,9 @@ function resolveSchema(
   const resolved = hasRef ? resolveCfcSchemaRefs(schema, schemaRoot) : schema;
   return {
     schema: resolved === undefined ? undefined : internSchema(resolved),
-    root: resolved === undefined
+    root: resolved === undefined || !hasRef
       ? owningRoot
-      : cfcSchemaChildRoot(resolved, owningRoot),
+      : cfcSchemaResolvedRoot(resolved, owningRoot),
   };
 }
 

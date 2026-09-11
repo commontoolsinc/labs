@@ -416,6 +416,50 @@ describe("cf cell get transforms", () => {
       .toEqual(["visible"]);
   });
 
+  it("resolves a nested reference against the document root, not an inert inner `$defs`", () => {
+    const contract: JSONSchema = {
+      type: "object",
+      properties: { title: { type: "string" }, note: { type: "string" } },
+    };
+    const inert: Record<string, JSONSchema> = {
+      T: { type: "array", items: { type: "string" } },
+    };
+    const mask = {
+      type: "object" as const,
+      properties: { title: true as const },
+      additionalProperties: false as const,
+    };
+    const narrowed = {
+      type: "object",
+      properties: { title: { type: "string" } },
+      additionalProperties: false,
+    };
+
+    const arm = selectSourceSchema(
+      {
+        $defs: { T: contract },
+        anyOf: [{ $ref: "#/$defs/T", $defs: inert }],
+      },
+      mask,
+      "projected-output",
+    );
+    expect(arm).toMatchObject({ anyOf: [narrowed] });
+    const [projectedArm] = (arm as { anyOf: Array<{ properties: object }> })
+      .anyOf;
+    expect(Object.keys(projectedArm.properties)).toEqual(["title"]);
+
+    const property = selectSourceSchema({
+      $defs: { T: contract },
+      type: "object",
+      properties: { item: { $ref: "#/$defs/T", $defs: inert } },
+    }, {
+      type: "object",
+      properties: { item: mask },
+      additionalProperties: false,
+    });
+    expect(property).toMatchObject({ properties: { item: narrowed } });
+  });
+
   it("drops a required entry named like a prototype member that the mask did not select", () => {
     // `required` is filtered to the SELECTED properties. That test must ask
     // whether the selection holds the key as its own: a `required` entry
@@ -628,6 +672,35 @@ describe("cf cell get transforms", () => {
       { title: "Second" },
       { title: "Third" },
     ]);
+  });
+
+  it("projects through a union arm whose own `$defs` conflicts with the root's", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "inert-arm-defs-source",
+      {
+        $defs: {
+          T: {
+            type: "object",
+            properties: { title: { type: "string" }, note: { type: "string" } },
+          },
+        },
+        anyOf: [{
+          $ref: "#/$defs/T",
+          $defs: { T: { type: "array", items: { type: "string" } } },
+        }],
+      },
+      tx,
+    );
+    source.set({ title: "visible", note: "hidden" });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("title"),
+      }),
+    ).toEqual({ title: "visible" });
   });
 
   it("narrows the initial source selector to predicate and projection fields", async () => {

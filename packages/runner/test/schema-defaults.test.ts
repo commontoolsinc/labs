@@ -101,10 +101,10 @@ describe("Schema - Default Values", () => {
       expect(value.pair).toEqual([{ x: 1 }, { y: 2 }]);
     });
 
-    it("resolves $ref tuple slots against the array's $defs", () => {
-      // PR #4969 review: the selected slot schema was passed to recursive
-      // default processing without the array's $defs, so a $ref slot went
-      // unresolved and its nested defaults disappeared.
+    it("resolves $ref tuple slots against the document's $defs", () => {
+      // The selected slot schema is passed to recursive default processing
+      // carrying the document's `$defs`, so a `$ref` slot resolves and its
+      // nested defaults are filled.
       const c = runtime.getCell<{ name: string }>(
         space,
         "tuple defaults ref slot 1",
@@ -121,12 +121,12 @@ describe("Schema - Default Values", () => {
             type: "array",
             default: [{}],
             prefixItems: [{ $ref: "#/$defs/P" }],
-            $defs: {
-              P: {
-                type: "object",
-                properties: { x: { type: "number", default: 1 } },
-              },
-            },
+          },
+        },
+        $defs: {
+          P: {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
           },
         },
       } as const satisfies JSONSchema;
