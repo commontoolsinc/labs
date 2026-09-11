@@ -1,7 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
-import type { Identity } from "@commonfabric/identity";
+import * as MemoryClient from "@commonfabric/memory/v2/client";
+import { Server as MemoryServer } from "@commonfabric/memory/v2/server";
+import { Identity } from "@commonfabric/identity";
 import {
   DEFAULT_MAX_OUTSTANDING_EFFECTS,
   ensureSpaceRootsFromEnv,
@@ -317,6 +318,89 @@ describe("ensureSpaceRootsFromEnv", () => {
       ).toBe(true);
       expect(warnings.length).toBe(1);
       expect(warnings[0]).toContain("SERVER_EXECUTION_ENSURE_SPACE_ROOTS");
+    }
+  });
+});
+
+describe("startServerExecutionHost with the store read-through on", () => {
+  // A real memory server and a client session on it: the session open
+  // activates the space, the host's factory builds the serving runtime with
+  // the read-through the SpaceServer handed it installed ahead of the
+  // runtime, and the space serves. What the knob switches on, end to end.
+
+  /** Polls `predicate` until it holds, and throws naming `label` once the
+   * deadline has passed — a backstop on a live host's activation, which
+   * exposes no event to await, sized for a stuck condition rather than a
+   * slow one (the runner's executor suites wait the same way). */
+  const until = async (
+    predicate: () => boolean,
+    label: string,
+    timeoutMs = 20_000,
+  ): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${label}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
+
+  it("serves a space whose client session opens, with the read-through installed through the factory", async () => {
+    const identity = await Identity.fromPassphrase(
+      "store read-through service",
+    );
+    const client = await Identity.fromPassphrase("store read-through client");
+    const space = (await Identity.fromPassphrase("store read-through space"))
+      .did();
+    const server = new MemoryServer({
+      store: new URL("memory://store-read-through-serving"),
+      subscriptionRefreshDelayMs: 0,
+      // Both shapes: the signed loopback invocation the serving runtime's
+      // session carries `iss`; the client mounted below carries
+      // `authorization.principal`.
+      authorizeSessionOpen: (message) => {
+        const iss = (message.invocation as { iss?: unknown } | undefined)?.iss;
+        if (typeof iss === "string") return iss;
+        const principal =
+          (message.authorization as { principal?: unknown } | undefined)
+            ?.principal;
+        return typeof principal === "string" ? principal : undefined;
+      },
+      sessionOpenAuth: { audience: "did:key:z6Mk-store-read-through" },
+    });
+    const knobs: Record<string, string> = {
+      EXPERIMENTAL_SERVER_EXECUTION: "true",
+      SERVER_EXECUTION_STORE_READ_THROUGH: "true",
+      SERVER_EXECUTION_ENSURE_SPACE_ROOTS: "false",
+    };
+    const host = startServerExecutionHost({
+      server,
+      identity,
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: (name) => knobs[name],
+    });
+    expect(host).toBeDefined();
+    const connection = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+    });
+    try {
+      await connection.mount(space, {}, (_space, _descriptor, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: client.did() },
+      }));
+      await until(
+        () => host!.spaceServer(space)?.active === true,
+        "the space to activate on the client's session",
+      );
+      expect(host!.stats().activeSpaces).toBe(1);
+    } finally {
+      await connection.close();
+      await stopServerExecutionHost();
+      await server.close();
     }
   });
 });

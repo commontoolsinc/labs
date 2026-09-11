@@ -2872,10 +2872,10 @@ export class SpaceServer implements TransactionSealDestination {
    * under the store read-through posture, each record's writes are
    * re-read into the replica here (`#refreshHeldDocuments()`) and the
    * same notifications follow. */
-  #drainFeed(): { batchHead: number } {
+  #drainFeed(runtime: Runtime): { batchHead: number } {
     for (let index = 0; index < this.#feed.length; index++) {
       const record = this.#feed[index]!;
-      if (!this.#refreshHeldDocuments(record)) {
+      if (!this.#refreshHeldDocuments(record, runtime)) {
         // The record's writes have not reached the replica: hold it and
         // everything behind it for the next cycle, and stop the head this
         // cycle covers short of it. Clamped against the record's own seq,
@@ -3032,10 +3032,11 @@ export class SpaceServer implements TransactionSealDestination {
    * catch parks the space `loop-failed`, and the re-activation's fresh
    * runtime reads the engine's head.
    */
-  #refreshHeldDocuments(record: AdmittedCommitNotice): boolean {
+  #refreshHeldDocuments(
+    record: AdmittedCommitNotice,
+    runtime: Runtime,
+  ): boolean {
     if (this.#options.policy?.storeReadThrough !== true) return true;
-    const runtime = this.#runtime;
-    if (runtime === undefined) return true;
     if (record.class === "derived" && record.holder === this.#holder) {
       return true;
     }
@@ -4604,7 +4605,7 @@ export class SpaceServer implements TransactionSealDestination {
       await this.#ensureSpaceRoot(runtime);
       timing.time(ensureStart, "executor", "wave", "root-ensure");
     }
-    const { batchHead } = this.#drainFeed();
+    const { batchHead } = this.#drainFeed(runtime);
     // The event drain stays a fully-awaited, single-flight step AHEAD
     // of the deadline race (Phase 3's shape): at most one drain runs
     // at a time, so a deadline-cut wave can never leave a detached

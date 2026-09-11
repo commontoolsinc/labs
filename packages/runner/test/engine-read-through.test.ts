@@ -17,12 +17,15 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
+import type { FabricValue } from "@commonfabric/api";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
+import { type Options, SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type { MemorySpace, URI } from "../src/storage/interface.ts";
+import { engineReadThrough } from "../src/executor/engine-read-through.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import {
   type RuntimeFactoryContext,
@@ -87,6 +90,9 @@ describe("engine-read-through", () => {
    * the tests exercise. */
   let factoryContext: RuntimeFactoryContext | undefined;
 
+  /** The serving manager the factory built at the last activation. */
+  let factoryManager: SharedServerStorageManager | undefined;
+
   const newHost = (policy: SpaceServerPolicy): ExecutorHost =>
     new ExecutorHost({
       server,
@@ -96,6 +102,7 @@ describe("engine-read-through", () => {
         const manager = SharedServerStorageManager.connectTo(server, {
           as: serviceSigner,
         });
+        factoryManager = manager;
         const integrate = manager.integrateStoreWrites.bind(manager);
         manager.integrateStoreWrites = (writeSpace, writes) => {
           refreshCalls += 1;
@@ -287,6 +294,15 @@ describe("engine-read-through", () => {
     }
     const readsAfterFirst = host.stats().storeReads;
     expect(readsAfterFirst).toBeGreaterThan(0);
+    // A refresh touches only what the replica holds: nothing to list, or
+    // an instance it never read, refreshes nothing and reads nothing.
+    expect(factoryManager!.integrateStoreWrites(space, [])).toBe(0);
+    expect(
+      factoryManager!.integrateStoreWrites(space, [
+        { id: "of:never-read", scopeKey: "space" },
+      ]),
+    ).toBe(0);
+    expect(host.stats().storeReads).toBe(readsAfterFirst);
 
     // The second write lands after the serving runtime read the argument
     // document; with no watch on it, only the feed refresh can move it.
@@ -345,5 +361,123 @@ describe("engine-read-through", () => {
     await tenure.whenParked;
     expect(tenure.active).toBe(false);
     expect(refreshCalls).toBe(STORE_REFRESH_ATTEMPTS);
+  });
+
+  it("returns nothing for every address once the engine's database is closed", async () => {
+    // A separate server, so closing its engine here leaves the suite's own
+    // teardown nothing to close twice.
+    const closing = new MemoryV2Server.Server({
+      subscriptionRefreshDelayMs: 0,
+      authorizeSessionOpen: () => aliceSigner.did(),
+      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+    });
+    const engine = await closing.engineForSpace(space);
+    let reads = 0;
+    const read = engineReadThrough(engine, {
+      onRead: () => {
+        reads += 1;
+      },
+    });
+    const absent = read({ id: "of:never-written" as never, scopeKey: "space" });
+    expect(absent).toEqual({
+      branch: "",
+      id: "of:never-written",
+      scope: "space",
+      scopeKey: "space",
+      seq: 0,
+      deleted: true,
+    });
+    expect(reads).toBe(1);
+    // A replica served by it reads the same way: before the close a miss
+    // is served, after it a miss stays a miss and a sync resolves with
+    // nothing.
+    const manager = SharedServerStorageManager.connectTo(closing, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, read);
+      const provider = manager.open(space);
+      expect(provider.replica.getDocument("of:never-written" as URI))
+        .toBeUndefined();
+      expect(reads).toBe(2);
+      await closing.close();
+      expect(provider.replica.getDocument("of:closed-late" as URI))
+        .toBeUndefined();
+      expect((await provider.sync("of:closed-late" as URI)).ok).toBeDefined();
+      expect(reads).toBe(2);
+    } finally {
+      await manager.close();
+    }
+    expect(read({ id: "of:never-written" as never, scopeKey: "space" }))
+      .toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it("reads the schema documents a document's link positions name, and the documents those name in turn, along with it", async () => {
+    // The chase the frame validator's delivery guarantee needs, over a
+    // store of three documents: a carrier whose link carries a schema
+    // reference, the schema document that reference names, and the
+    // schema document THAT one's own refs name. One read of the carrier
+    // integrates all three.
+    const decomposed = decomposeSchema({
+      type: "object",
+      properties: { leaf: { $ref: "#/$defs/Leaf" } },
+      $defs: {
+        Leaf: { type: "object", properties: { text: { type: "string" } } },
+      },
+    });
+    const store = new Map<string, FabricValue>(
+      [...decomposed.documents].map((
+        [hash, document],
+      ) => [`cid:${hash}`, document as FabricValue]),
+    );
+    const carried = {
+      "/": {
+        "link@1": {
+          id: "of:chase-target",
+          path: [],
+          schema: { $ref: decomposed.rootRef },
+        },
+      },
+    };
+    store.set("of:chase-carrier", { carried });
+    const reads: string[] = [];
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads.push(id);
+        const value = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(value === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: 1, doc: { value } }),
+        };
+      });
+      // The class, for the persisted-content probe the interface does
+      // not carry.
+      const replica = manager.open(space).replica as SpaceReplica;
+      expect(replica.getDocument("of:chase-carrier" as URI)).toEqual({
+        value: { carried },
+      });
+      // Dependency-first in the decomposition, so the chase — which reads
+      // the referrer before what it references — runs it in reverse.
+      expect(reads).toEqual([
+        "of:chase-carrier",
+        ...[...decomposed.documents.keys()].reverse().map((hash) =>
+          `cid:${hash}`
+        ),
+      ]);
+      for (const hash of decomposed.documents.keys()) {
+        expect(replica.isContentAddressedDocPersisted(hash)).toBe(true);
+      }
+    } finally {
+      await manager.close();
+    }
   });
 });
