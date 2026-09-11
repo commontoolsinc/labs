@@ -72,6 +72,7 @@ function getKeysPattern() {
       createNodeFactory({
         type: "ref",
         implementation: "collectionIndexKeys",
+        resultSchema: { type: "array", items: true },
       })(input),
     { type: "object", additionalProperties: true },
     true,
