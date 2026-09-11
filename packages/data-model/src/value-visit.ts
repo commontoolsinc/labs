@@ -35,7 +35,7 @@ import {
   tagFromFabricValue,
   tagFromFabricValueElseNull,
   VALUE_TAGS,
-  ValueTag,
+  type ValueTag,
 } from "./value-tags.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 
