@@ -381,6 +381,21 @@ export type ServingLoopStats = {
      * register's owed follow-up on the OW45 row. */
     preQueueDeferralStuck: number;
 
+    /** Ordered publication/response barriers attempted for lagging event views. */
+    visibilityBarriers: number;
+
+    /** Event identities visible at the recomputed index after a barrier. */
+    visibilityRecoveries: number;
+
+    /** Drain passes stopped by an event view still missing its stored identity. */
+    visibilityDeferrals: number;
+
+    /** Deferral backstops scheduled across all transient drain outcomes. */
+    deferredRescansArmed: number;
+
+    /** Deferral backstops that fired during an active serving tenure. */
+    deferredRescansFired: number;
+
     /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
      * completed-run sentence: LT1 same-space in-process copies (`served
      * !== undefined && served.streamEntry === undefined`) the flush
@@ -623,6 +638,11 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     skippedIdempotent: 0,
     drainInFlightSkips: 0,
     preQueueDeferralStuck: 0,
+    visibilityBarriers: 0,
+    visibilityRecoveries: 0,
+    visibilityDeferrals: 0,
+    deferredRescansArmed: 0,
+    deferredRescansFired: 0,
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
