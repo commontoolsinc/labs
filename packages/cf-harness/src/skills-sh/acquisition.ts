@@ -335,14 +335,21 @@ const readCappedBytes = async (
 };
 
 /**
- * Fetches the recursive tree and root `SKILL.md` at exactly `pin.commitSha`.
+ * Fetches the recursive tree and every admitted file at exactly
+ * `pin.commitSha`.
  *
  * The whitelist judges the selected candidate root's subtree, not the whole
  * repository: sibling skills and repository-level files outside that root are
- * not part of the acquired payload. Inside that subtree, only root
- * `SKILL.md` is admitted. Any other path refuses the whole payload. Silently
- * dropping a path would make instructions-only true only of the cell and
- * invisible in the record; a skill whose prose references `scripts/foo.py`
+ * not part of the acquired payload. Inside that subtree two things are
+ * admitted — the root `SKILL.md`, and the regular files directly under
+ * `scripts/` whose filenames are printable ASCII without a path separator, a
+ * control codepoint or a leading dot. Any other path refuses the whole
+ * payload, a skill shipping more than {@link SKILLS_SH_MAX_SCRIPTS} scripts
+ * refuses on the inventory before anything is fetched, and each admitted file
+ * is read under {@link SKILLS_SH_MAX_SKILL_BYTES}.
+ *
+ * Silently dropping a path would make what was acquired true of the payload
+ * and invisible in the record; a skill whose prose references `scripts/foo.py`
  * is not that skill without the script, and would instead instruct a model to
  * run something that is not there.
  */

@@ -1,6 +1,10 @@
 /**
  * The `acquire_skill` tool: resolve a discovery id to a GitHub commit, enforce
- * the instructions-only tree whitelist, and durably return only a handle.
+ * the tree whitelist, and durably return only a handle.
+ *
+ * The handle names the instructions and nothing else. A skill's scripts are
+ * acquired beside them and stay host-side, so what a chooser can hand onward
+ * is still the prose it never read.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
