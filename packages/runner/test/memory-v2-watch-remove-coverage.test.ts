@@ -1,12 +1,14 @@
-// Deterministic coverage for the "removes" arm of
-// `SpaceReplica.#applySessionSync()` in
-// storage/v2.ts. A watch refresh / sync batch can carry removals when a watched
-// doc is deleted upstream. Most tests only deliver upserts, so the removes path
-// runs intermittently. Here the scripted transport answers the watch.add with a
-// sync that upserts two docs and removes one of them in the same batch, so the
-// removes loop always runs while provider.sync() is awaited.
+/**
+ * The removal arms of a replica's watch handling: the `removes` a watch
+ * refresh batch carries when a watched doc is deleted upstream, and the
+ * temporary watches absence reconciliation takes out and then cleans up,
+ * including that cleanup's retries and its race with the replica closing.
+ * Every transport here is scripted to exercise the arm on every run.
+ */
 
-import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import {
@@ -220,216 +222,219 @@ class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
   }
 }
 
-Deno.test("memory v2 runner applies removes carried in a watch refresh batch", async () => {
-  const docA = `of:watch-remove-keep-${crypto.randomUUID()}` as URI;
-  const docB = `of:watch-remove-drop-${crypto.randomUUID()}` as URI;
-  const transport = new WatchAddRemoveTransport(docB);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-remove-coverage"),
-  }, sessionFactory);
-  const provider = storageManager.open(space) as TestProvider;
+describe("memory-v2-watch-remove-coverage", () => {
+  it("applies the removes carried in a watch refresh batch", async () => {
+    const docA = `of:watch-remove-keep-${crypto.randomUUID()}` as URI;
+    const docB = `of:watch-remove-drop-${crypto.randomUUID()}` as URI;
+    const transport = new WatchAddRemoveTransport(docB);
+    const sessionFactory = new SingleSessionFactory(transport);
+    const storageManager = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("memory://runner-v2-watch-remove-coverage"),
+    }, sessionFactory);
+    const provider = storageManager.open(space) as TestProvider;
 
-  try {
-    await Promise.all([
-      provider.sync(docA, { path: [], schema: false }),
-      provider.sync(docB, { path: [], schema: false }),
-    ]);
+    try {
+      await Promise.all([
+        provider.sync(docA, { path: [], schema: false }),
+        provider.sync(docB, { path: [], schema: false }),
+      ]);
 
-    // docA was upserted and kept; docB was upserted in the same sync and then
-    // removed, so the removes loop must have reset it back to absent.
-    assertEquals(getObjectValue(provider, docA), { label: docA });
-    assertEquals(provider.get(docB), undefined);
-  } finally {
-    await storageManager.close();
-  }
-});
-
-Deno.test("absence reconciliation retries a failed temporary watch removal", async () => {
-  const transport = new FailFirstWatchRemovalTransport();
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-removal-retry"),
-  }, sessionFactory);
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
-  });
-  const provider = storageManager.open(space);
-  const tx = runtime.edit();
-  tx.read({
-    space,
-    id: `of:watch-removal-retry-${crypto.randomUUID()}`,
-    type: "application/json",
-    scope: "space",
-    path: [],
-  }, { trackReadWithoutLoad: true });
-
-  try {
-    if (provider.loadUnexaminedAbsences === undefined) {
-      throw new Error("absence reconciliation capability unavailable");
+      // docA was upserted and kept; docB was upserted in the same sync and then
+      // removed, so the removes loop must have reset it back to absent.
+      expect(getObjectValue(provider, docA)).toEqual({ label: docA });
+      expect(provider.get(docB)).toBeUndefined();
+    } finally {
+      await storageManager.close();
     }
-    assertEquals(await provider.loadUnexaminedAbsences(tx.tx), 0);
-    assertEquals(transport.watchRemovalAttempts, 2);
-  } finally {
-    tx.abort("inspection only");
-    await runtime.dispose();
-    await storageManager.close();
-  }
-});
-
-Deno.test("absence cleanup integrates syncs that precede its watch mutation", async () => {
-  const precedingId =
-    `of:watch-removal-preceding-${crypto.randomUUID()}` as URI;
-  const transport = new FailFirstWatchRemovalTransport(0, precedingId);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-removal-preceding"),
-  }, sessionFactory);
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
   });
-  const provider = storageManager.open(space) as TestProvider;
-  const tx = runtime.edit();
-  tx.read({
-    space,
-    id: `of:watch-removal-preceding-probe-${crypto.randomUUID()}`,
-    type: "application/json",
-    scope: "space",
-    path: [],
-  }, { trackReadWithoutLoad: true });
 
-  try {
-    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
-    assertEquals(getObjectValue(provider, precedingId), {
-      label: "preceding cleanup sync",
+  describe("absence reconciliation", () => {
+    it("retries a failed temporary watch removal", async () => {
+      const transport = new FailFirstWatchRemovalTransport();
+      const sessionFactory = new SingleSessionFactory(transport);
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("memory://runner-v2-watch-removal-retry"),
+      }, sessionFactory);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const provider = storageManager.open(space);
+      const tx = runtime.edit();
+      tx.read({
+        space,
+        id: `of:watch-removal-retry-${crypto.randomUUID()}`,
+        type: "application/json",
+        scope: "space",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+
+      try {
+        if (provider.loadUnexaminedAbsences === undefined) {
+          throw new Error("absence reconciliation capability unavailable");
+        }
+        expect(await provider.loadUnexaminedAbsences(tx.tx)).toBe(0);
+        expect(transport.watchRemovalAttempts).toBe(2);
+      } finally {
+        tx.abort("inspection only");
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
-  } finally {
-    tx.abort("inspection only");
-    await runtime.dispose();
-    await storageManager.close();
-  }
-});
 
-Deno.test("absence cleanup closes a returned view when the replica closes concurrently", async () => {
-  const transport = new FailFirstWatchRemovalTransport(0);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-removal-close-race"),
-  }, sessionFactory);
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
+    it("integrates the syncs that precede its watch mutation", async () => {
+      const precedingId =
+        `of:watch-removal-preceding-${crypto.randomUUID()}` as URI;
+      const transport = new FailFirstWatchRemovalTransport(0, precedingId);
+      const sessionFactory = new SingleSessionFactory(transport);
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("memory://runner-v2-watch-removal-preceding"),
+      }, sessionFactory);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const provider = storageManager.open(space) as TestProvider;
+      const tx = runtime.edit();
+      tx.read({
+        space,
+        id: `of:watch-removal-preceding-probe-${crypto.randomUUID()}`,
+        type: "application/json",
+        scope: "space",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+
+      try {
+        expect(await provider.loadUnexaminedAbsences!(tx.tx)).toBe(0);
+        expect(getObjectValue(provider, precedingId)).toEqual({
+          label: "preceding cleanup sync",
+        });
+      } finally {
+        tx.abort("inspection only");
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("closes the view it returned when the replica closes concurrently", async () => {
+      const transport = new FailFirstWatchRemovalTransport(0);
+      const sessionFactory = new SingleSessionFactory(transport);
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("memory://runner-v2-watch-removal-close-race"),
+      }, sessionFactory);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const provider = storageManager.open(space);
+      let closing: Promise<void> | undefined;
+      transport.onWatchAdded = () => {
+        const session = sessionFactory.session!;
+        const original = session.watchRemoveSync.bind(session);
+        session.watchRemoveSync = async (watchIds) => {
+          const result = await original(watchIds);
+          closing = (provider.replica as unknown as { close(): Promise<void> })
+            .close();
+          return result;
+        };
+        transport.onWatchAdded = undefined;
+      };
+      const tx = runtime.edit();
+      tx.read({
+        space,
+        id: `of:watch-removal-close-race-${crypto.randomUUID()}`,
+        type: "application/json",
+        scope: "space",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+
+      try {
+        expect(await provider.loadUnexaminedAbsences!(tx.tx)).toBe(0);
+        await closing;
+      } finally {
+        tx.abort("inspection only");
+        await closing;
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("retries the watch removal when applying its sync fails", async () => {
+      const transport = new FailFirstWatchRemovalTransport(0);
+      const sessionFactory = new SingleSessionFactory(transport);
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("memory://runner-v2-watch-removal-apply-retry"),
+      }, sessionFactory);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const provider = storageManager.open(space);
+      // The first removal's response arrives without its `sync`, so applying it
+      // fails on the client side after the wire accepted it.
+      transport.malformedRemovalSyncs = 1;
+      const tx = runtime.edit();
+      tx.read({
+        space,
+        id: `of:watch-removal-apply-retry-${crypto.randomUUID()}`,
+        type: "application/json",
+        scope: "space",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+
+      try {
+        expect(await provider.loadUnexaminedAbsences!(tx.tx)).toBe(0);
+        expect(transport.watchRemovalAttempts).toBe(2);
+      } finally {
+        tx.abort("inspection only");
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("warns after the temporary watch cleanup exhausts its retries", async () => {
+      const transport = new FailFirstWatchRemovalTransport(2);
+      const sessionFactory = new SingleSessionFactory(transport);
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("memory://runner-v2-watch-removal-exhausted"),
+      }, sessionFactory);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const provider = storageManager.open(space);
+      const tx = runtime.edit();
+      tx.read({
+        space,
+        id: `of:watch-removal-exhausted-${crypto.randomUUID()}`,
+        type: "application/json",
+        scope: "space",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+      const originalWarn = console.warn;
+      const warnings: unknown[][] = [];
+      console.warn = (...values: unknown[]) => warnings.push(values);
+
+      try {
+        expect(await provider.loadUnexaminedAbsences!(tx.tx)).toBe(0);
+        expect(transport.watchRemovalAttempts).toBe(2);
+        expect(
+          warnings.some((values) =>
+            values[0] === "failed to remove temporary graph watches after retry"
+          ),
+        ).toBe(true);
+      } finally {
+        console.warn = originalWarn;
+        tx.abort("inspection only");
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
   });
-  const provider = storageManager.open(space);
-  let closing: Promise<void> | undefined;
-  transport.onWatchAdded = () => {
-    const session = sessionFactory.session!;
-    const original = session.watchRemoveSync.bind(session);
-    session.watchRemoveSync = async (watchIds) => {
-      const result = await original(watchIds);
-      closing = (provider.replica as unknown as { close(): Promise<void> })
-        .close();
-      return result;
-    };
-    transport.onWatchAdded = undefined;
-  };
-  const tx = runtime.edit();
-  tx.read({
-    space,
-    id: `of:watch-removal-close-race-${crypto.randomUUID()}`,
-    type: "application/json",
-    scope: "space",
-    path: [],
-  }, { trackReadWithoutLoad: true });
-
-  try {
-    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
-    await closing;
-  } finally {
-    tx.abort("inspection only");
-    await closing;
-    await runtime.dispose();
-    await storageManager.close();
-  }
-});
-
-Deno.test("absence reconciliation retries when applying a watch removal sync fails", async () => {
-  const transport = new FailFirstWatchRemovalTransport(0);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-removal-apply-retry"),
-  }, sessionFactory);
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
-  });
-  const provider = storageManager.open(space);
-  // The first removal's response arrives without its `sync`, so applying it
-  // fails on the client side after the wire accepted it.
-  transport.malformedRemovalSyncs = 1;
-  const tx = runtime.edit();
-  tx.read({
-    space,
-    id: `of:watch-removal-apply-retry-${crypto.randomUUID()}`,
-    type: "application/json",
-    scope: "space",
-    path: [],
-  }, { trackReadWithoutLoad: true });
-
-  try {
-    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
-    assertEquals(transport.watchRemovalAttempts, 2);
-  } finally {
-    tx.abort("inspection only");
-    await runtime.dispose();
-    await storageManager.close();
-  }
-});
-
-Deno.test("absence reconciliation warns after temporary watch cleanup exhausts retries", async () => {
-  const transport = new FailFirstWatchRemovalTransport(2);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-removal-exhausted"),
-  }, sessionFactory);
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
-  });
-  const provider = storageManager.open(space);
-  const tx = runtime.edit();
-  tx.read({
-    space,
-    id: `of:watch-removal-exhausted-${crypto.randomUUID()}`,
-    type: "application/json",
-    scope: "space",
-    path: [],
-  }, { trackReadWithoutLoad: true });
-  const originalWarn = console.warn;
-  const warnings: unknown[][] = [];
-  console.warn = (...values: unknown[]) => warnings.push(values);
-
-  try {
-    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
-    assertEquals(transport.watchRemovalAttempts, 2);
-    assertEquals(
-      warnings.some((values) =>
-        values[0] === "failed to remove temporary graph watches after retry"
-      ),
-      true,
-    );
-  } finally {
-    console.warn = originalWarn;
-    tx.abort("inspection only");
-    await runtime.dispose();
-    await storageManager.close();
-  }
 });
