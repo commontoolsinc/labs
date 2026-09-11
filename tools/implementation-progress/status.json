@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T12:43:53.407507+00:00",
+  "updated": "2026-09-11T12:51:46.919867+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -69,8 +69,8 @@
     {
       "id": "C1",
       "title": "Multi-replica reproductions",
-      "status": "active",
-      "detail": "Remote edits, removal, and restoration landed in #7285; first-browser-materialization acceptance landed in #7302. Four nested/mapped \u00d7 same/cross-space cases pass, with local demos. Reconnect remains pending."
+      "status": "done",
+      "detail": "Remote edits, removal/restoration, and cold first-browser materialization are validated in nested/mapped and same/cross-space fixtures. Session-restoration repair #7308 and rendered reconnect acceptance #7312 are merged; local recordings remain available."
     },
     {
       "id": "B1",
@@ -106,7 +106,7 @@
       "id": "C3",
       "title": "Remote row invalidation",
       "status": "review",
-      "detail": "Client acceptance merged as #7329. Serving acceptance #7331 passes correct values, stable full links/producer identities, and untouched-row inactivity in both directions. Full runner task: 1,437 tests / 8,960 steps; final serving-loop file: 27 cases. C3 publication completes when #7331 lands."
+      "detail": "Client acceptance landed in #7329. Serving-host acceptance is in review in #7331: correct values, stable full output links/producer identities, and untouched-row inactivity in both edit directions. Full runner validation and all 27 final serving-loop cases pass. Publication completes when #7331 lands."
     },
     {
       "id": "C4",
@@ -221,7 +221,7 @@
     {
       "title": "See remote updates",
       "state": "Available \u00b7 C1/C3",
-      "detail": "The row demo shows remote membership, colors, ranking, cross-space profiles, and first browser materialization. Reconnect acceptance remains pending."
+      "detail": "The row demo shows remote membership, colors, ranking, cross-space profiles, and cold first browser materialization. Rendered reconnect acceptance is validated and merged in #7312."
     },
     {
       "title": "Compare optimized vote updates",

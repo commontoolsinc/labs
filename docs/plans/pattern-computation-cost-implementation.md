@@ -10,8 +10,8 @@ repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
 landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
 reactive row migration is implemented and validated on the scoped-child and
-bounded-render repairs in #7313 and #7315. Remaining row-invalidation acceptance
-stays open. B1/B2's contract landed in
+bounded-render repairs in #7313 and #7315. Row-invalidation implementation and validation are complete;
+serving-host acceptance is in review in #7331. B1/B2's contract landed in
 #7294 and its typed lookup foundation landed in #7304. Producer lowering,
 bucket maintenance, and joins remain pending.
 
@@ -239,8 +239,8 @@ passed before merge, with clean Cubic and antagonistic reviews.
   profiles. Ordinary memory queries wait for session restoration before
   constructing their requests. This guards the handshake-to-session interval;
   a subsequent disconnect during request issue remains a separate boundary.
-  These synthetic probes do not authorize removing the lunch-poll workaround or
-  accessing the live poll.
+  These synthetic probes cover repository behavior. Live poll changes require
+  coordination with Mike.
 
   C3's landed fix records the mutable inline element used when resolving a
   nested array to a content-addressed snapshot. The
@@ -403,7 +403,7 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete C3's remaining acceptance checks. C4's repository migration is
+Finish review and publication of C3 acceptance, then continue the collection-operator work. C4's repository migration is
 implemented and validated; updating any deployed poll requires coordination
 with Mike. The first-materialization cases in
 [PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
