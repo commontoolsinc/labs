@@ -10081,14 +10081,21 @@ export class Runner {
         // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
         if (typeof Deno !== "undefined" && isObjectOrArray(inputs)) {
           const summary: Record<string, string> = {};
-          for (const key of Object.keys(inputs)) {
-            const link = parseLink(
-              (inputs as Record<string, unknown>)[key],
-              resultCell,
-            );
+          const describe = (value: unknown, key: string, depth: number) => {
+            const link = parseLink(value, resultCell);
             if (link === undefined) {
-              summary[key] = `plain:${typeof (inputs as any)[key]}`;
-              continue;
+              if (depth < 2 && isObjectOrArray(value)) {
+                for (const k of Object.keys(value)) {
+                  describe(
+                    (value as Record<string, unknown>)[k],
+                    `${key}.${k}`,
+                    depth + 1,
+                  );
+                }
+              } else {
+                summary[key] = `plain:${typeof value}`;
+              }
+              return;
             }
             let raw: unknown;
             try {
@@ -10103,6 +10110,9 @@ export class Runner {
             summary[key] = `${link.id.slice(0, 24)}/${link.path.join(".")} => ${
               JSON.stringify(raw)?.slice(0, 60)
             }`;
+          };
+          for (const key of Object.keys(inputs)) {
+            describe((inputs as Record<string, unknown>)[key], key, 0);
           }
           tempTrace("TEMP-PRESYNC-INPUTS", JSON.stringify(summary));
         }
