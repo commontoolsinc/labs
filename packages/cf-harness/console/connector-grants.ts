@@ -20,7 +20,10 @@
 
 import { HANDLE_NAME_PATTERN } from "../src/input-cells.ts";
 import { parseHandleRef } from "../src/handle-table.ts";
-import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
+import type {
+  HarnessConnectorGrantSource,
+  HarnessConnectorGrantSpec,
+} from "../src/contracts/well-known-grants.ts";
 import { HARNESS_WELL_KNOWN_GRANT_NAMES } from "../src/contracts/well-known-grants.ts";
 
 /** The CFC atom type whose `class` names what a column holds. */
@@ -201,7 +204,12 @@ export const resolveConnectorGrants = (
   const sources = sourcesByHandle(records.piecesJson, records.piecesJsonPath);
   const grants: HarnessConnectorGrantSpec[] = [];
   const unnamed: UnnamedConnectorHandle[] = [];
-  const claimedBy = new Map<string, string>();
+  // Named in a second pass: what a handle is called depends on whether any
+  // OTHER handle declares the same class, which is not known until every one
+  // has been read. Collected here in receipt order.
+  const named: Array<
+    { cfcClass: string; ref: string; source: HarnessConnectorGrantSource }
+  > = [];
   for (const entry of handles) {
     const handle = asRecord(entry);
     const connection = asNonEmptyString(handle?.connection_id) ?? "(unnamed)";
@@ -276,16 +284,40 @@ export const resolveConnectorGrants = (
       );
       continue;
     }
-    const claimed = claimedBy.get(name);
-    if (claimed !== undefined) {
-      skip(
-        `its declared CFC class \`${name}\` is already the grant connection ` +
-          `\`${claimed}\` was named by`,
-      );
+    named.push({ cfcClass: name, ref, source: { connection, piece } });
+  }
+  // A class shared by two handles names neither on its own: `email` would say
+  // which data it is and not which of two mailboxes. Both take the longer form
+  // rather than first-come-wins, so a name does not depend on receipt order
+  // and does not change under a reseed that reorders the handles.
+  const perClass = new Map<string, number>();
+  for (const entry of named) {
+    perClass.set(entry.cfcClass, (perClass.get(entry.cfcClass) ?? 0) + 1);
+  }
+  for (const entry of named) {
+    const shared = (perClass.get(entry.cfcClass) ?? 0) > 1;
+    const name = shared
+      ? `${entry.cfcClass}-${entry.source.connection}`
+      : entry.cfcClass;
+    if (!HANDLE_NAME_PATTERN.test(name)) {
+      unnamed.push({
+        connection: entry.source.connection,
+        piece: entry.source.piece,
+        reason:
+          `its declared CFC class \`${entry.cfcClass}\` is shared, and the ` +
+          `disambiguated name \`${name}\` is not a name a model may be handed`,
+      });
       continue;
     }
-    claimedBy.set(name, connection);
-    grants.push({ name, ref, source: { connection, piece } });
+    if (RESERVED_GRANT_NAMES.has(name)) {
+      unnamed.push({
+        connection: entry.source.connection,
+        piece: entry.source.piece,
+        reason: `its name \`${name}\` is a name the harness already grants`,
+      });
+      continue;
+    }
+    grants.push({ name, ref: entry.ref, source: entry.source });
   }
   return { grants, unnamed };
 };

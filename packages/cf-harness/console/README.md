@@ -817,8 +817,10 @@ Three cases the launch printout states rather than resolving silently:
 - A handle whose declared contract carries no CFC class, or more than one, is
   printed as `grant <connection>  (none: <reason>)` and is not granted. A name
   guessed at is a name a session would be told means something it does not.
-- A second handle declaring a class the first already took is printed the same
-  way, naming the connection that holds the name.
+- A composed `<class>-<connection>` name that is not a name a model may be
+  handed, or that collides with a fixed grant, is printed the same way. Both
+  checks run again on the composed name, because a name that did not exist
+  before it was composed can fail either.
 - A receipt that does not parse refuses the launch. A console that came up
   holding no grants while its report claimed two is the silent misconfiguration
   this launch path exists to rule out; an absent receipt, by contrast, is simply
