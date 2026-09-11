@@ -2689,6 +2689,10 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   publication. A refused request may publish its binding without owning the
   resolution represented by a peer's cache claim. These controls exercise local
   program responses; cancellation of resolver network requests remains separate.
+  Same-binding retry controls hold the original refusal until the retry commits
+  or withdraws: only accepted publication suppresses the earlier announcement.
+  They also cover an accepted different target between retries and preservation
+  of accepted-target visibility after a refusal write fails.
 
   The program lifecycle controls also admit duplicate accepted contributions
   through the real `SpaceOutbox` under a held dispatch budget. A release refusal

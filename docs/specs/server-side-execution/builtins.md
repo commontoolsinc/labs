@@ -95,9 +95,13 @@ releases its accepted claims and suppresses writeback from every dispatched
 resolution. Cancellation does not reach `HttpProgramResolver` network requests.
 Accepted publication owns the raw node's physical binding independently from
 cache state. A late refusal cannot replace another actor's accepted target, while
-distinct bindings can announce the same pending result. A rejected release check
-releases a claim with no dispatched owner. Pending publication and request
-records retire when their work settles.
+distinct bindings can announce the same pending result. Attempts for one physical
+binding share an accepted-publication sequence; a retry supersedes an earlier
+refusal only when its publication commits. Staging retains one record per binding
+and target, including after a refusal write fails, until an accepted publication
+covers it or the node stops. A rejected release check
+releases a claim with no dispatched owner. Accepted request records retire when
+their work settles.
 
 Served `llm`, `generateText`, and `generateObject` bind lifecycle state and
 outbox identity to the resolved output instance. The pending request writes
