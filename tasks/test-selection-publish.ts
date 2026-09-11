@@ -60,6 +60,7 @@ import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import { publishableBaselines } from "./test-selection/baselines.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import {
+  fetchManifest,
   manifestBody,
   manifestObjectName,
   manifestPrefix,
@@ -71,7 +72,6 @@ import {
   type CoverageBaseline,
   serializeManifest,
 } from "./test-selection/manifest.ts";
-import { fetchManifest } from "./test-selection/store.ts";
 import { plan } from "./test-selection/plan.ts";
 import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
 
