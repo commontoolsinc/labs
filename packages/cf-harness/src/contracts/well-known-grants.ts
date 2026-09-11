@@ -15,6 +15,16 @@
  */
 export type HarnessWellKnownGrantName = "piece-registry";
 
+/**
+ * Every fixed name, as a value. The harness describes each of these and the
+ * console refuses to name a connector grant after one, and both read this
+ * list — so adding a fixed grant is one edit here and the two consumers
+ * follow, rather than a union that type-checks while a hand-written set
+ * beside it stays one name short.
+ */
+export const HARNESS_WELL_KNOWN_GRANT_NAMES:
+  readonly HarnessWellKnownGrantName[] = ["piece-registry"];
+
 /** Which loom connector handle a connector grant names. */
 export interface HarnessConnectorGrantSource {
   /** The loom connection the handle belongs to. */

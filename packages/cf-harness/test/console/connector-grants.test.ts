@@ -8,6 +8,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { HARNESS_WELL_KNOWN_GRANT_NAMES } from "../../src/contracts/well-known-grants.ts";
 import {
   declaredClasses,
   parseConnectorGrants,
@@ -278,6 +279,28 @@ describe("connector-grants", () => {
       }));
       expect(result.grants).toEqual([]);
       expect(result.unnamed[0]?.reason).toContain("does not parse");
+    });
+
+    it("reserves every fixed grant name the harness declares, not a copy of the list", () => {
+      // The set is built from `HARNESS_WELL_KNOWN_GRANT_NAMES`, so a fixed
+      // grant added there is reserved here without a second edit. This is the
+      // assertion that keeps the two from drifting apart.
+
+      for (const reserved of HARNESS_WELL_KNOWN_GRANT_NAMES) {
+        const collides = {
+          name: "cf-gmail-messages--gmail-work",
+          sqlite_sources: [
+            source("gmail-work", { subject: labeledColumn(reserved) }),
+          ],
+        };
+        const result = resolveConnectorGrants(
+          records({ piecesJson: piecesJson([collides]) }),
+        );
+        expect(result.grants).toEqual([]);
+        expect(result.unnamed[0]?.reason).toBe(
+          `its declared CFC class \`${reserved}\` is a name the harness already grants`,
+        );
+      }
     });
 
     it("reports a handle whose declared class is a name the harness already grants", () => {

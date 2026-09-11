@@ -20,10 +20,8 @@
 
 import { HANDLE_NAME_PATTERN } from "../src/input-cells.ts";
 import { parseHandleRef } from "../src/handle-table.ts";
-import type {
-  HarnessConnectorGrantSpec,
-  HarnessWellKnownGrantName,
-} from "../src/contracts/well-known-grants.ts";
+import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
+import { HARNESS_WELL_KNOWN_GRANT_NAMES } from "../src/contracts/well-known-grants.ts";
 
 /** The CFC atom type whose `class` names what a column holds. */
 const RESOURCE_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Resource";
@@ -33,9 +31,9 @@ const RESOURCE_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Resource";
  * these is reported here rather than passed on, because the seeding refuses a
  * name twice and would take every session on the console down with it.
  */
-const RESERVED_GRANT_NAMES: ReadonlySet<string> = new Set<
-  HarnessWellKnownGrantName
->(["piece-registry"]);
+const RESERVED_GRANT_NAMES: ReadonlySet<string> = new Set<string>(
+  HARNESS_WELL_KNOWN_GRANT_NAMES,
+);
 
 /** The loom records a connector grant is resolved from. */
 export interface LoomConnectorRecords {
