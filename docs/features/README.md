@@ -17,6 +17,8 @@ Add a line for each new document to the index below.
 
 ## Writes, storage, and sync
 
+- [`collection-indexes.md`](collection-indexes.md) — reactive grouping,
+  unique-key lookup, membership ownership, and work limits
 - [`collection-aggregates.md`](collection-aggregates.md) — named incremental
   aggregates, their numeric contracts, public type surface, and update costs
 - [`read-accounting.md`](read-accounting.md) — opt-in reactive action read
@@ -93,6 +95,7 @@ Add a line for each new document to the index below.
 
 ## Patterns, components, and hosts
 
+- [`server-pattern-lifecycle.md`](server-pattern-lifecycle.md) — the upload and instantiate verbs as calls the space's serving runtime executes under server execution: the route, the writer authority it needs, the wave cycle a verb runs in, what `cf` still does in its own process, and why a source update is not among them
 - [`invoking-handlers-outside-a-pattern.md`](invoking-handlers-outside-a-pattern.md)
   — calling a handler stream from `RuntimeProcessor`, or from anywhere else
   outside a pattern body

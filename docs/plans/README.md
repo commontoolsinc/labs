@@ -11,7 +11,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 ## Current plans
 
 - [Collection indexes and keyed lookup](collection-index-contract.md) defines
-  proposed B1/B2 semantics and acceptance tests before implementation.
+  B1/B2 semantics and acceptance tests for index producers, keyed lookup,
+  left joins, and tagged mixed-key `keyEntries()` enumeration. Homogeneous
+  key domains also support `keys()`. The contract tracks publication gates.
 
 - [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
   executes the design in PR #7155 with checkable measurement, collection
@@ -90,11 +92,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   collaborative-field substrate, the first CodeMirror codec and editor
   integration, and the checkpoints and review gates required before a future
   WordGard codec.
-- [Seed: pattern verbs as server calls](server-pattern-verbs-seed.md)
-  records the ruled 2026-08-24 serverize direction — upload-pattern /
-  instantiate / setsrc as server calls, client speculative-local with
-  server-state winning, and the thin-CLI end-state — for the arc that picks
-  it up.
 - [Seed: codeless graph rebuild](codeless-graph-rebuild-seed.md) records,
   for a parked arc, the facts that make a running piece's graph durably
   reconstructible from scheduler state and module-addressed code — the
