@@ -230,10 +230,15 @@ export const parseGenerations = (
     throw new Error(`${path} is not JSON: ${errorMessage(error)}`);
   }
   const record = parsed as Partial<SeedGenerations>;
+  // `atoms` is a map from an atom's name to its chain, and an array is an
+  // object with numeric keys — so one read here as a record would key every
+  // chain by its position, and a run reading it would name a prior generation
+  // for an atom called `0`.
   if (
-    typeof parsed !== "object" || parsed === null ||
+    typeof parsed !== "object" || parsed === null || Array.isArray(parsed) ||
     typeof record.note !== "string" ||
-    typeof record.atoms !== "object" || record.atoms === null
+    typeof record.atoms !== "object" || record.atoms === null ||
+    Array.isArray(record.atoms)
   ) {
     throw new Error(`${path} holds no {note, atoms} record`);
   }
@@ -658,10 +663,21 @@ export const runSeed = async (
 
   let created = 0;
   let held = 0;
+  let wrote = false;
   let recorded = generations;
   for (const entry of entries) {
     const response = await deps.publish(publishRequestFor(entry));
-    recorded = withGeneration(recorded, entry.name, response.patternId);
+    const next = withGeneration(recorded, entry.name, response.patternId);
+    if (next !== recorded) {
+      // Written here rather than once the loop is through. From this point the
+      // index holds the entry whatever happens to the atoms after it, and this
+      // file is what a later run reads to say which generation a new one
+      // supersedes — so a publication that landed and went unrecorded is what
+      // makes that link name a generation the index has already displaced.
+      await deps.writeGenerations(next);
+      recorded = next;
+      wrote = true;
+    }
     if (response.created) {
       created += 1;
       // The index ranks on recorded events, and a publication is not one. The
@@ -677,8 +693,7 @@ export const runSeed = async (
       }: ${entry.name} (${response.patternId})`,
     );
   }
-  if (recorded !== generations) {
-    await deps.writeGenerations(recorded);
+  if (wrote) {
     deps.log(
       `\n${GENERATIONS_FILE} records what this run published; commit it.`,
     );

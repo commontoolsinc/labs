@@ -124,14 +124,25 @@ export const SourceRowCount = pattern<
   const errorMessage = computed(() => errorText(countRead.error));
   const hasError = computed(() => errorMessage !== "");
 
+  // Both counts fall back to zero while the read is in flight, and `0 of 0` is
+  // the one reading this part exists to rule out — a full table that looks
+  // empty. So nothing states a count until the read has settled.
+  const summary = computed(() =>
+    pending ? "counting" : `${matching} of ${total}`
+  );
+
   return {
-    [NAME]: computed(() => `${matching} of ${total} rows in ${table}`),
+    [NAME]: computed(() =>
+      pending
+        ? `counting rows in ${table}`
+        : `${matching} of ${total} rows in ${table}`
+    ),
     [UI]: (
       <cf-vstack gap="2" padding="3">
         <cf-hstack gap="2" align="center" justify="between">
           <cf-text style="flex: 1;">{table}</cf-text>
           <cf-text style="font-variant-numeric: tabular-nums;">
-            {computed(() => `${matching} of ${total}`)}
+            {summary}
           </cf-text>
         </cf-hstack>
 

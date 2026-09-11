@@ -317,6 +317,14 @@ describe("seed-pattern-index", () => {
         .toThrow(/holds no \{note, atoms\} record/);
     });
 
+    it("refuses a record whose `atoms` is an array", () => {
+      // An array is an object with numeric keys, so one admitted here would be
+      // read as a record keying every chain by its position.
+
+      expect(() => parseGenerations("record.json", '{"note":"n","atoms":[]}'))
+        .toThrow(/holds no \{note, atoms\} record/);
+    });
+
     it("refuses an atom recorded as something other than identities", () => {
       expect(() =>
         parseGenerations(
@@ -612,6 +620,30 @@ describe("seed-pattern-index", () => {
         "id-for-counter.tsx",
       ]);
       expect(r.lines.join("\n")).toContain(GENERATIONS_FILE);
+    });
+
+    it("records what it published before a later atom fails", async () => {
+      // The index holds an entry from the moment it accepts it, so a run that
+      // dies afterwards must leave that identity recorded: a record missing it
+      // makes the next run's `priorPatternId` name a generation the index has
+      // already displaced.
+
+      const r = recorder({
+        publish: (request) =>
+          request.patternId === "id-for-counter.tsx"
+            ? Promise.resolve({ patternId: request.patternId, created: true })
+            : Promise.reject(new Error("the index refused")),
+      });
+
+      await expect(
+        runSeed(
+          { dryRun: false, only: ["counter", "dice-roller"], directory },
+          r.deps,
+        ),
+      ).rejects.toThrow("the index refused");
+
+      expect(r.written.length).toBe(1);
+      expect(r.written[0].atoms["counter"]).toEqual(["id-for-counter.tsx"]);
     });
 
     it("leaves the record alone in a dry run", async () => {
