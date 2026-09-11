@@ -54,15 +54,15 @@ export type MainResultForm<ResultType> = {
 
 /**
  * A `recurse` form. This is returned by visitor methods which visit containers.
- * (It is never a valid result for a non-container-specific visit method.) By
- * returning this form, a visitor indicates that the container's elements or
- * mappings should be visited by the engine, recursively, such that each visited
- * item is known by the engine to be contained by the container which is being
- * iterated over.
+ * This tells the visitor engine that it should recursively visit the contents
+ * of the container, such that each visited item is known by the engine to be
+ * contained by the container which is being iterated over. The two `boolean`
+ * properties indicate whether the container's keys and/or values is to be
+ * recursed over. `doKeys` is ignored in a context where there is no key.
  *
- * The two `boolean` properties indicate whether the container's keys and/or
- * values is to be recursed over. `doKey` is ignored in a context where there is
- * no key.
+ * If a visitor returns an instance of this type which (implicitly) references a
+ * a non-container, that situation is detected at runtime and results in a
+ * `throw`n error.
  *
  * **Note:** The visit calls per-mapping are specifically in key-then-value
  * order, and if the result of visiting a key is a `mainResult`, then that ends
