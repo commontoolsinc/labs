@@ -254,7 +254,8 @@ export type SpaceServerPolicy = {
 
   /** The host's failure-park re-activation backoff (read by the
    * ExecutorHost, not the SpaceServer): after N consecutive
-   * `loop-failed` parks of one space, its next re-activation is delayed
+   * loop failures or initialization lease losses of one space, its next
+   * re-activation is delayed
    * `min(base·2^(N−1), max)` — a permanently failing space rebuilds at
    * a bounded rate instead of once per admission. A successfully
    * committed wave clears the streak. */
@@ -1106,7 +1107,7 @@ export class SpaceServer implements TransactionSealDestination {
       this.#initializing = false;
       if (!activated) {
         await this.#parkResources(
-          lease.held ? "activation-failed" : "lease-lost",
+          lease.held ? "activation-failed" : "activation-lease-lost",
         );
       }
     }

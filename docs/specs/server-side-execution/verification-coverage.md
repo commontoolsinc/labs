@@ -798,6 +798,11 @@ extension owed and WHEN it earns its cost:
   disposal despite observer cleanup errors, and host shutdown waiting for the
   returning runtime's disposal. A factory read-through control verifies that
   another user's stored instance becomes unavailable after lease takeover.
+  Host controls also require fresh-runtime activation and an accepted stored
+  result after initialization lease loss with surviving session, event, or warm
+  demand. They cover warm notices arriving during initialization and cleanup,
+  no-demand and rival refusal, closed hosts, and controlled exponential backoff
+  whose pending rebuild is canceled by shutdown.
 
 - OW9 — the §3d rebase arm: the model's conflict machinery requeues
   EVERY raced consequence — it has no field-level-merge disposition —

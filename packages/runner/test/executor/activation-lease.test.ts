@@ -138,7 +138,28 @@ async function fixture(options: {
   };
 }
 
-async function commitFirstWork(f: Awaited<ReturnType<typeof fixture>>) {
+async function freshServingRuntime(server: ReturnType<typeof newSharedServer>) {
+  const manager = EmulatedStorageManager.connectTo(server, {
+    as: serviceSigner,
+  });
+  let runtime: Runtime;
+  try {
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+  } catch (error) {
+    await manager.close();
+    throw error;
+  }
+  return { runtime, dispose: () => runtime.dispose() };
+}
+
+async function commitFirstWork(
+  f: Pick<Awaited<ReturnType<typeof fixture>>, "runtime" | "engine">,
+) {
   const probe = f.runtime.getCell<number>(space, "first-work", undefined);
   await probe.sync();
   const tx = f.runtime.edit();
@@ -429,6 +450,320 @@ describe("activation-lease", () => {
       await f.close(activation);
     }
     expect(f.disposeCalls).toBe(1);
+  });
+
+  for (
+    const demand of [
+      "session",
+      "event",
+      "warm",
+      "late warm",
+      "cleanup warm",
+    ] as const
+  ) {
+    it(`reactivates ${demand} demand after initialization loses its lease without a successor`, async () => {
+      const f = await fixture();
+      const aliceManager = EmulatedStorageManager.connectTo(f.server, {
+        as: aliceSigner,
+      });
+      const alice = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: aliceManager,
+      });
+      const nextRuntime = defer<Runtime>();
+      let builds = 0;
+      using time = new FakeTime();
+      using _timeout = stub(globalThis, "setTimeout", realSetTimeout);
+      using _clearTimeout = stub(globalThis, "clearTimeout", realClearTimeout);
+      const host = new ExecutorHost({
+        server: f.server,
+        serviceIdentity: serviceSigner.did(),
+        ensureSpaceRoots: false,
+        policy: { failureParkBackoffBaseMs: 0 },
+        createRuntime: async (_space, context) => {
+          if (++builds === 1) return await f.createRuntime(context);
+          const built = await freshServingRuntime(f.server);
+          nextRuntime.resolve(built.runtime);
+          return built;
+        },
+      });
+      try {
+        const warmNotice = () =>
+          f.server.noteExecutorCommit({
+            space,
+            seq: Engine.serverSeq(f.engine),
+            class: "authored",
+            sessionId: "initialization-warm-issuer",
+            writes: [{ id: "of:surviving-warm-demand", scopeKey: "space" }],
+            warm: true,
+          });
+        const activate = SpaceServer.prototype.activate;
+        using _activate = stub(
+          SpaceServer.prototype,
+          "activate",
+          async function (this: SpaceServer) {
+            const activated = await activate.call(this);
+            if (demand === "cleanup warm" && !activated && builds === 1) {
+              // Cleanup removed the old server, but its host activation still
+              // owns the in-flight record until this result returns.
+              warmNotice();
+            }
+            return activated;
+          },
+        );
+        if (demand === "session") {
+          await alice.getCell<number>(space, "surviving-demand", undefined)
+            .sync();
+        } else if (demand === "event") {
+          const stream = { id: "of:surviving-event-demand", path: ["event"] };
+          expect(
+            (await f.server.commitDelegatedAppend({
+              targetSpace: space,
+              targetStream: streamEntriesDocId(stream),
+              targetStreamLink: stream,
+              eventId: "initialization-event",
+              payload: {},
+              actingPrincipal: aliceSigner.did(),
+              actingSession: "initialization-session",
+              capabilityRef: "initialization-capability",
+              sessionId: "initialization-delivery",
+              localSeq: 1,
+            })).deduped,
+          ).toBe(false);
+          expect(Engine.selectPendingStreamEventDocs(f.engine)).toHaveLength(1);
+        } else if (demand === "warm") {
+          warmNotice();
+        }
+        // This joins an existing activation, or starts the late-warm case.
+        // No request is issued after lease loss until a fresh factory runs.
+        const firstAttempt = host.runLifecycleVerb(space, {
+          name: "observe-initial-activation",
+          run: () => Promise.resolve(),
+        });
+        await f.entered.promise;
+        if (demand === "late warm") warmNotice();
+        expect(f.server.hasLiveSessionsForSpace(space, {
+          excludePrincipal: serviceSigner.did(),
+        })).toBe(demand === "session");
+        const first = host.spaceServer(space)!;
+        releaseExecutionLease(f.engine, { space, holder: first.holder });
+        time.tick(5_000);
+        f.release.resolve();
+        await expect(firstAttempt).rejects.toThrow("not served");
+        expect(host.stats().reactivationBackoffs).toBe(1);
+        const runtime = await nextRuntime.promise;
+        await host.runLifecycleVerb(space, {
+          name: "observe-successor-activation",
+          run: () => Promise.resolve(),
+        });
+        await commitFirstWork({ runtime, engine: f.engine });
+        expect(builds).toBe(2);
+        expect(host.stats().activeSpaces).toBe(1);
+        expect(f.disposeCalls).toBe(1);
+        if (
+          demand === "warm" || demand === "late warm" ||
+          demand === "cleanup warm"
+        ) {
+          expect(host.stats().demand.warmWakes).toBe(
+            demand === "cleanup warm" ? 1 : 2,
+          );
+        }
+      } finally {
+        f.release.resolve();
+        await host.close();
+        try {
+          await alice.dispose({ closeStorage: false });
+        } finally {
+          await aliceManager.close();
+        }
+        await f.close();
+      }
+      expect(time.next()).toBe(false);
+    });
+  }
+
+  for (const boundary of ["no demand", "rival", "closed"] as const) {
+    it(`does not rebuild beyond the ${boundary} boundary after initialization lease loss`, async () => {
+      const f = await fixture();
+      const aliceManager = EmulatedStorageManager.connectTo(f.server, {
+        as: aliceSigner,
+      });
+      const alice = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: aliceManager,
+      });
+      let builds = 0;
+      using time = new FakeTime();
+      using _timeout = stub(globalThis, "setTimeout", realSetTimeout);
+      using _clearTimeout = stub(globalThis, "clearTimeout", realClearTimeout);
+      const host = new ExecutorHost({
+        server: f.server,
+        serviceIdentity: serviceSigner.did(),
+        ensureSpaceRoots: false,
+        policy: { failureParkBackoffBaseMs: 0 },
+        createRuntime: (_space, context) => {
+          builds++;
+          return f.createRuntime(context);
+        },
+      });
+      let closing: Promise<void> | undefined;
+      const rival = executionLeaseHolder("did:key:initialization-successor");
+      try {
+        if (boundary !== "no demand") {
+          await alice.getCell<number>(space, "remaining-demand", undefined)
+            .sync();
+        }
+        const initial = host.runLifecycleVerb(space, {
+          name: "observe-initial-activation",
+          run: () => Promise.resolve(),
+        });
+        await f.entered.promise;
+        const first = host.spaceServer(space)!;
+        if (boundary === "closed") closing = host.close();
+        releaseExecutionLease(f.engine, { space, holder: first.holder });
+        if (boundary === "rival") {
+          expect(acquireExecutionLease(f.engine, { space, holder: rival }))
+            .toBe(true);
+        }
+        time.tick(5_000);
+        f.release.resolve();
+        await expect(initial).rejects.toThrow("not served");
+        if (boundary === "rival") {
+          expect(host.stats().reactivationBackoffs).toBe(1);
+          // The automatically scheduled successor is already in backoff.
+          // Joining it waits for the actual acquire refusal, not a timeout.
+          await expect(host.runLifecycleVerb(space, {
+            name: "observe-successor-refusal",
+            run: () => Promise.resolve(),
+          })).rejects.toThrow("not served");
+          expect(host.stats().reactivationBackoffs).toBe(1);
+          expect(liveExecutionLeaseHolder(f.engine, space)).toBe(rival);
+        } else {
+          await closing;
+          expect(host.stats().reactivationBackoffs).toBe(0);
+          expect(liveExecutionLeaseHolder(f.engine, space)).toBeUndefined();
+        }
+        expect(builds).toBe(1);
+        expect(f.disposeCalls).toBe(1);
+        expect(host.stats().activeSpaces).toBe(0);
+      } finally {
+        f.release.resolve();
+        await host.close();
+        try {
+          await alice.dispose({ closeStorage: false });
+        } finally {
+          await aliceManager.close();
+        }
+        await f.close();
+      }
+      expect(time.next()).toBe(false);
+    });
+  }
+
+  it("backs off repeated initialization lease loss and cancels the next rebuild on close", async () => {
+    const f = await fixture();
+    const aliceManager = EmulatedStorageManager.connectTo(f.server, {
+      as: aliceSigner,
+    });
+    const alice = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: aliceManager,
+    });
+    const secondStarted = defer<void>();
+    const releaseSecond = defer<void>();
+    let builds = 0;
+    using time = new FakeTime();
+    const controlledTimeout = globalThis.setTimeout;
+    const controlledClearTimeout = globalThis.clearTimeout;
+    const backoffBase = 123_456;
+    const backoffDelays: number[] = [];
+    const backoffTimers = new Set<Parameters<typeof clearTimeout>[0]>();
+    // Only the host backoffs join the lease clock. Transport and scheduler
+    // callbacks still run on their real event boundaries.
+    using _timeout = stub(
+      globalThis,
+      "setTimeout",
+      ((...timeoutArgs: Parameters<typeof setTimeout>) => {
+        const [callback, delay, ...args] = timeoutArgs;
+        if (delay === backoffBase || delay === backoffBase * 2) {
+          backoffDelays.push(delay);
+          const timer = controlledTimeout(callback, delay, ...args);
+          backoffTimers.add(timer);
+          return timer;
+        }
+        return realSetTimeout(callback, delay, ...args);
+      }) as typeof setTimeout,
+    );
+    using _clearTimeout = stub(globalThis, "clearTimeout", (timer) => {
+      if (timer !== undefined && backoffTimers.delete(timer)) {
+        controlledClearTimeout(timer);
+      } else {
+        realClearTimeout(timer);
+      }
+    });
+    const host = new ExecutorHost({
+      server: f.server,
+      serviceIdentity: serviceSigner.did(),
+      ensureSpaceRoots: false,
+      policy: {
+        failureParkBackoffBaseMs: backoffBase,
+        failureParkBackoffMaxMs: backoffBase * 4,
+      },
+      createRuntime: async (_space, context) => {
+        if (++builds === 1) return await f.createRuntime(context);
+        const built = await freshServingRuntime(f.server);
+        secondStarted.resolve();
+        await releaseSecond.promise;
+        return built;
+      },
+    });
+    const observe = () =>
+      host.runLifecycleVerb(space, {
+        name: "observe-initialization",
+        run: () => Promise.resolve(),
+      });
+    try {
+      await alice.getCell<number>(space, "backoff-demand", undefined).sync();
+      await f.entered.promise;
+      const initial = observe();
+      releaseExecutionLease(f.engine, {
+        space,
+        holder: host.spaceServer(space)!.holder,
+      });
+      time.tick(5_000);
+      f.release.resolve();
+      await expect(initial).rejects.toThrow("not served");
+      expect(backoffDelays).toEqual([backoffBase]);
+      time.tick(backoffBase - 1);
+      expect(builds).toBe(1);
+      time.tick(1);
+      await secondStarted.promise;
+      expect(builds).toBe(2);
+      const second = observe();
+      releaseExecutionLease(f.engine, {
+        space,
+        holder: host.spaceServer(space)!.holder,
+      });
+      time.tick(5_000);
+      releaseSecond.resolve();
+      await expect(second).rejects.toThrow("not served");
+      expect(backoffDelays).toEqual([backoffBase, backoffBase * 2]);
+      expect(host.stats().reactivationBackoffs).toBe(2);
+      await host.close();
+      expect(builds).toBe(2);
+      expect(time.next()).toBe(false);
+      expect(liveExecutionLeaseHolder(f.engine, space)).toBeUndefined();
+    } finally {
+      f.release.resolve();
+      releaseSecond.resolve();
+      await host.close();
+      try {
+        await alice.dispose({ closeStorage: false });
+      } finally {
+        await aliceManager.close();
+      }
+      await f.close();
+    }
   });
 
   it("waits for an initializing runtime's disposal before host close returns", async () => {

@@ -306,8 +306,17 @@ processes* (deploy overlap, partition) it holds via the lease:
   its renewal timer is cleared, and its lease is released. Observer cleanup
   failures cannot skip the factory disposer; observer cleanup and disposer
   failures cannot skip lease release. Host shutdown waits
-  for this lifecycle before returning. These boundaries are covered by
-  `test/executor/activation-lease.test.ts`.
+  for this lifecycle before returning. After initialization loses its lease,
+  the host clears that activation's in-flight record and re-evaluates live
+  sessions, undelivered events, and retained warm requests. Matching demand
+  starts a fresh tenure after the failure-park backoff; repeated initialization
+  losses extend that backoff, and a committed wave clears the streak. Warm
+  notices arriving during initialization or its cleanup remain obligations of
+  the successor. Initial acquisition refusal on a rival's lease does not
+  schedule another attempt, and host shutdown cancels a pending backoff. A
+  lifecycle-verb request whose activation fails receives the not-served error;
+  the request alone is not a persistent reactivation criterion. These
+  boundaries are covered by `test/executor/activation-lease.test.ts`.
 - On renewal failure or expiry: the SpaceServer MUST stop committing
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
