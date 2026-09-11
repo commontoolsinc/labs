@@ -8,10 +8,12 @@ antagonistic reviews. A4's browser benchmark shipped in #7261; count limits
 landed in #7282. C1's remote-row reproductions and C3's inline-element dependency
 repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
-landed in #7308; rendered acceptance is validated in #7312, pending merge gates.
-Remaining row-invalidation acceptance stays open. B1/B2's contract landed in
-#7294 and its typed lookup foundation landed in #7304. Producer lowering and bucket maintenance are implemented; scale acceptance
-and joins remain pending.
+landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
+reactive row migration is implemented and validated on the scoped-child and
+bounded-render repairs in #7313 and #7315. Remaining row-invalidation acceptance
+stays open. B1/B2's contract landed in
+#7294 and its typed lookup foundation landed in #7304. Producer lowering and bucket maintenance are implemented locally;
+publication and the remaining key-enumeration contract are pending coordination.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -264,10 +266,20 @@ passed before merge, with clean Cubic and antagonistic reviews.
 - [ ] **C2 — Repair partial materialization.** Verify complete inputs under cold
       reads, remote inserts/removals, and reconnect where relevant.
 - [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
-      stable element identities survive, and untouched rows do not rerun.
-- [ ] **C4 — Restore reactive lunch-poll rows.** Remove the workaround and its
-      explanatory comment only after both regressions pass. Re-run A4 and
-      coordinate with B5 to keep one coherent pattern migration.
+      stable element identities survive, and untouched rows do not rerun. The
+      client-execution acceptance in
+      [reactive vote rows](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+      edits each of two rows from another replica, checks stable normalized
+      output links and producer identities, and verifies that only the edited
+      row producer runs. Serving-host producer counts remain separate acceptance
+      work because a client diagnostic graph does not contain those actions.
+- [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
+      voter maps use the scoped callback-child repair. Repository acceptance
+      includes 93 assertions, unchanged A4 budgets at all three sizes, and
+      concurrent two-browser voting. The
+      [acceptance record](../history/development/performance/2026-09-11-reactive-lunch-rows.md)
+      states measurement limits. B5's operator migration remains separate;
+      deployed poll updates require coordination with Mike.
 
 ## 6–9. Complete the collection algebra: B1–B4
 
@@ -336,8 +348,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## 12–13. Guidance and related runtime work: D, E
 
-- [ ] **E1 — Measure identical `computed` and `lift` collection loops** under
-      current defaults and compare declared read width and access counts.
+- [x] **E1 — Measure identical `computed` and `lift` collection loops** under
+      current defaults and compare declared read width and access counts. The
+      [reproducible comparison](../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+      validates three forms at 32, 128, and 512 linked rows, including unread-field
+      edits. The dashboard tracks publication and review status.
 - [ ] **E2 — Publish the measured advice** where pattern authors encounter
       collections, `computed`, and `lift`. Explain nested-scan cost and use only
       available operators in replacement examples.
@@ -391,11 +406,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete scale acceptance and review for the producer implementation in
-[PR #7323](https://github.com/commontoolsinc/labs/pull/7323), then build and
-measure the left lookup join from the [index contract](collection-index-contract.md).
-The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
+Measure the local producer implementation against current-main runtime and
+compiler fixes. Producer PR #7323 is closed; publication awaits coordination
+with Mike. The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
 separate initialization, bucket maintenance, key enumeration, and lookup costs.
-Mixed primitive/Cell key enumeration still needs an API/runtime decision; it
-is not an accepted producer capability. A5 still needs cross-space and deployed measurements before product
-performance claims. Live poll access requires coordination with Mike.
+Mixed primitive/Cell key enumeration remains an API/runtime decision. Local
+left-lookup join acceptance is being measured independently. A5 still needs
+cross-space and deployed measurements before product performance claims.
+Live poll access requires coordination with Mike.

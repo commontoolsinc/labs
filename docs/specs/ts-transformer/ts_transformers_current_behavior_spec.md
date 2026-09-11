@@ -1090,6 +1090,12 @@ narrower paths beside it. The lift is then applied to the whole object and
 re-runs for any field of it, where it could have been applied to the one field
 the body reads.
 
+Callback-local declarations are excluded from captures using parameter lineage
+and the owning function's authored range. Rebuilt callbacks carry that range in
+their source maps. Matching requires the same function kind and exact range;
+ancestor traversal stops at intervening function boundaries, keeping nested
+parameters out of an enclosing callback's capture object.
+
 The set has one deliberately narrow reader on the way out. When the rewriter
 synthesizes an `ifElse`/`when`/`unless` call, `unwrapParentheses` tidies the
 operands placed in the call, and the probe recognizing a zero-arg inline IIFE
