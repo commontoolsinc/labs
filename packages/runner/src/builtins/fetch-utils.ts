@@ -6,6 +6,7 @@ import {
   FabricError,
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 
 import type { Schema } from "../builder/types.ts";
@@ -224,9 +225,11 @@ export function liveFetchClaimMatches<
   internal: Cell<Schema<typeof internalSchema>>,
   result: Cell<unknown>,
   requestId: string,
+  identity?: ScopeKeyIdentity,
 ): boolean {
   const tx = runtime.edit();
   try {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
     const unavailable = selectUnavailableFetchInput(
       inputsCell.withTx(tx).getRaw(),
       { runtime, tx, base: inputsCell },
@@ -238,11 +241,13 @@ export function liveFetchClaimMatches<
     );
     const currentInternal = internal.withTx(tx).get();
     const currentResult = result.withTx(tx).getRaw();
-    return liveHash === expectedInputHash &&
+    const resultIsPending = isDataUnavailable(currentResult) &&
+      currentResult.reason === "pending";
+    const matches = liveHash === expectedInputHash &&
       currentInternal.inputHash === expectedInputHash &&
       currentInternal.requestId === requestId &&
-      isDataUnavailable(currentResult) &&
-      currentResult.reason === "pending";
+      resultIsPending;
+    return matches;
   } finally {
     tx.abort();
   }
@@ -273,6 +278,8 @@ export async function tryClaimMutex<T extends Record<string, any>>(
    * (server-execution v2 stage G, serving-loop.md §4); inert
    * everywhere else. */
   effectKey?: string,
+  /** Identity captured by the requesting served run. */
+  identity?: ScopeKeyIdentity,
 ): Promise<{
   claimed: boolean;
   inputs: T;
@@ -288,6 +295,8 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+
     // Re-check availability inside the mutex transaction. The outbox release
     // and the reactive builtin action can race: a prior request may still be
     // published as pending when the live input has already become unavailable.
@@ -345,10 +354,12 @@ export async function tryClaimMutex<T extends Record<string, any>>(
       claimed = false;
       return;
     }
+    const hasSettledResultForInputs = currentInternal.inputHash === inputHash &&
+      hasSettledResult;
     // Can claim if no settled result raced this claim attempt and either:
     // 1. Nothing is pending, OR
     // 2. The standing claim has gone stale and is treated as abandoned.
-    const canClaim = !hasSettledResult &&
+    const canClaim = !hasSettledResultForInputs &&
       (
         !isPending || currentInternal.requestId === "" ||
         currentInternal.lastActivity < now - timeout
@@ -363,10 +374,19 @@ export async function tryClaimMutex<T extends Record<string, any>>(
       // still precedes every write of this arm, which is the
       // markEffectCompletion contract.
       if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
-      pending.withTx(tx).set(true);
+      writeUnavailableFetchResult(
+        tx,
+        pending,
+        result,
+        error,
+        DataUnavailable.pending(),
+      );
+      // The served claim is authoritative. Its request hash must travel with
+      // the claim even when an optimistic derivation already shows that hash.
       internal.withTx(tx).update({
         requestId,
         lastActivity: now,
+        inputHash,
       });
       claimed = true;
     } else {
@@ -399,9 +419,12 @@ export async function tryWriteResult<T extends Record<string, any>>(
   snapshotInputs?: (cell: Cell<T>) => T,
   /** See {@link tryClaimMutex}'s `effectKey`. */
   effectKey?: string,
+  /** Identity captured by the requesting served run. */
+  identity?: ScopeKeyIdentity,
 ): Promise<{ written: boolean; commitError?: CommitError }> {
   let success = false;
   const committed = await runtime.editWithRetry((tx) => {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
     if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))
@@ -429,8 +452,10 @@ export async function releaseFetchMutexClaim(
   internal: Cell<Schema<typeof internalSchema>>,
   expectedInputHash: string,
   requestId: string,
+  identity?: ScopeKeyIdentity,
 ): Promise<void> {
   await runtime.editWithRetry((tx) => {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
     const current = internal.withTx(tx).get();
     if (
       current.inputHash === expectedInputHash &&

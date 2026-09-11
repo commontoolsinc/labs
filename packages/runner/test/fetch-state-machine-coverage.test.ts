@@ -84,6 +84,7 @@ describe("fetch state-machine edge paths", () => {
     const parent = new FakeCell("parent", undefined);
     const cells = { pending, result, error, internal };
     const runtime = {
+      experimental: { serverExecution: false },
       getCell(
         _space: unknown,
         cause: { fetchText: Record<string, unknown> },
