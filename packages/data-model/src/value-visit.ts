@@ -57,7 +57,7 @@ export type MainResultForm<ResultType> = {
  * This tells the visitor engine that it should recursively visit the contents
  * of the container, such that each visited item is known by the engine to be
  * contained by the container which is being iterated over. The two `boolean`
- * properties indicate whether the container's keys and/or values is to be
+ * properties indicate whether the container's keys and/or values are to be
  * recursed over. `doKeys` is ignored in a context where there is no key.
  *
  * If a visitor returns an instance of this type which (implicitly) references a
@@ -299,7 +299,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * Indicates that an array gap (one or more holes) was just nominally visited.
    * This method is called as a result of the visitor returning a `recurse`
    * result for a visited array and is called during iteration as gaps are
-   * encountered. The sequencingf of this call is meant to mirror
+   * encountered. The sequencing of this call is meant to mirror
    * `visitedArrayElement()`, but since there is nothing to recurse on (it's a
    * gap, not any actual values), there is no regular `visitValue()` call which
    * immediately precedes it (hence the visit was "nominal"). `start` is the
@@ -856,7 +856,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * Iterates over all the elements in an array, in response to a `recurse`
    * result.
    */
-  #iterateArray(result: RecurseOfForm) {
+  #iterateArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
     const { container, doValues }: {
       container: FabricContainerValue;
@@ -868,7 +868,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       // `result` represents a no-op `recurse`. Though pointless, nothing
       // prevents a client from returning it as a visit result, so just handle
       // it gracefully here.
-      return;
+      return undefined;
     }
 
     this.#stack.push(array);
@@ -935,7 +935,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * Iterates over all the elements in a map-like value, in response to a
    * `recurse` result.
    */
-  #iterateMap(result: RecurseOfForm) {
+  #iterateMap(result: RecurseOfForm): BaselineVisitResult<ResultType> {
     const vis = this.#visitor;
     const { container, doKeys, doValues }: {
       container: FabricContainerValue;
@@ -947,7 +947,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       // `result` represents a no-op `recurse`. Though pointless, nothing
       // prevents a client from returning it as a visit result, so just handle
       // it gracefully here.
-      return;
+      return undefined;
     }
 
     const mappings = isFabricPlainObject(container)
