@@ -155,7 +155,6 @@ import {
   type SchedulerGraphSnapshotState,
 } from "./graph-snapshot.ts";
 import { entityKey, entityNameKey } from "./keys.ts";
-import { tempTrace } from "../temp-trace.ts";
 import { SpeculationLineage } from "./lineage.ts";
 import {
   type ActionTimingState,
@@ -1140,20 +1139,6 @@ export class Scheduler {
           : undefined);
       if (demandRootIds === undefined) continue;
       if (!demandRootIds.some((id) => roots.has(id))) continue;
-      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-      if (typeof Deno !== "undefined") {
-        tempTrace(
-          `TEMP-REARM ${
-            this.#getActionId(record.action)
-          } status=${record.status} fanOut=${
-            record.fanOut !== undefined
-          } narrowed=${record.fanOut?.narrowed} rearm=${
-            record.fanOut === undefined
-              ? record.status !== "never-ran"
-              : record.fanOut.narrowed
-          }`,
-        );
-      }
       if (record.fanOut === undefined) {
         if (record.status === "never-ran") continue;
       } else if (!record.fanOut.narrowed) continue;
@@ -3089,19 +3074,15 @@ export class Scheduler {
       ]),
     );
     this.#headEventLoadPark = { eventId: event.id, keys, generations };
-    // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-    tempTrace(`TEMP-PARK event ${event.id} parks on`, keys);
+    logger.debug("event-load-park", () => [
+      `event ${event.id} parks on ${keys.length} loading document(s)`,
+      keys,
+    ]);
     const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
       Promise.resolve();
     settled.then(
-      () => {
-        tempTrace(`TEMP-PARK event ${event.id} released`);
-        this.#releaseHeadEventLoadPark(event.id);
-      },
-      (error) => {
-        tempTrace(`TEMP-PARK event ${event.id} load failed`, keys, error);
-        this.#failHeadEventLoadPark(event, error);
-      },
+      () => this.#releaseHeadEventLoadPark(event.id),
+      (error) => this.#failHeadEventLoadPark(event, error),
     );
   }
 

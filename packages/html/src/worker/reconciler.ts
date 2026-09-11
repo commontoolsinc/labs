@@ -354,10 +354,6 @@ export class WorkerReconciler {
           rootWatchedSpaces,
           addCancel,
           () => {
-            // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-            if (typeof Deno === "undefined") {
-              console.log("TEMP-RENDER root membership changed; re-render");
-            }
             if (rootHasRendered) renderRoot(lastRootValue);
           },
         );
@@ -372,18 +368,6 @@ export class WorkerReconciler {
           )
         ) {
           this.#denyCellRender(vnode as Cell<unknown>, this.#rootRenderPolicy);
-          // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-          if (typeof Deno === "undefined") {
-            console.log(
-              "TEMP-RENDER root denied",
-              JSON.stringify(this.#renderLabelSummary(vnode as Cell<unknown>)),
-              JSON.stringify({
-                ceiling: this.#rootRenderPolicy.maxConfidentiality ??
-                  "unbounded",
-                declassified: this.#rootRenderPolicy.declassifyConfidentiality,
-              }),
-            );
-          }
           this.#reconcileIntoWrapper(
             ctx,
             wrapperState,
@@ -1392,14 +1376,6 @@ export class WorkerReconciler {
    * read-failure marker blocks with no ceiling in force at all.
    */
   #denyCellRender(cell: Cell<unknown>, policy: RenderPolicy): void {
-    // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-    if (typeof Deno === "undefined") {
-      console.log(
-        "TEMP-RENDER cell denied",
-        JSON.stringify(this.#renderLabelSummary(cell)),
-        JSON.stringify({ ceiling: policy.maxConfidentiality ?? "unbounded" }),
-      );
-    }
     reportCfcDenial(
       "render-confidentiality-ceiling",
       "the render policy did not admit a cell's confidentiality label",

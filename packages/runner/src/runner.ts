@@ -134,7 +134,6 @@ import {
   ignoreReadForScheduling,
 } from "./scheduler.ts";
 import { entityKey } from "./scheduler/keys.ts";
-import { tempTrace } from "./temp-trace.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import { isSchemaMismatchError } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -7286,9 +7285,6 @@ export class Runner {
       : { ...identity };
     const sync: DependencySync = async (resultCell, pattern, inputs) => {
       const syncStart = performance.now();
-      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-      const tempId = resultCell.getAsNormalizedFullLink().id.slice(0, 20);
-      tempTrace(`TEMP-PRESYNC start ${tempId}`);
       try {
         return await this.#syncCellsForRunningPatternInner(
           resultCell,
@@ -7297,8 +7293,6 @@ export class Runner {
           capturedIdentity,
         );
       } finally {
-        // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-        tempTrace(`TEMP-PRESYNC end ${tempId}`);
         // Resume-boot decomposition: this is the dependency pre-sync a fresh
         // runtime pays before wiring a stored piece back up. Recorded under
         // the runner timing stats (they record even when the logger is
@@ -7582,9 +7576,7 @@ export class Runner {
       manager.loadsSettled === undefined
     ) return;
     const awaited = new Set<string>();
-    let round = 0;
     for (;;) {
-      round += 1;
       const readTx = this.#familyReadTx(identity);
       for (const plan of plans) {
         const schema = this.#planReadSchema(plan);
@@ -7603,11 +7595,6 @@ export class Runner {
       const keys = manager.pendingLoadAddresses()
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
         .filter((key) => !awaited.has(key));
-      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-      tempTrace(
-        `TEMP-PRESYNC cross-space round ${round}: ${keys.length} new pending`,
-        keys.slice(0, 6),
-      );
       if (keys.length === 0) return;
       for (const key of keys) awaited.add(key);
       const settleStart = performance.now();
@@ -7616,11 +7603,10 @@ export class Runner {
       } catch (error) {
         // A load that failed leaves its document absent; the next round
         // reads past it, and the run reads the same absence.
-        // TEMP-INSTRUMENTATION (PR #7287): console, not debug; remove before merge.
-        tempTrace(
-          "TEMP-PRESYNC a load a cross-space read kicked did not land",
+        logger.debug("resume-pre-sync", () => [
+          "a load a cross-space read kicked did not land",
           error,
-        );
+        ]);
       }
       logger.time(settleStart, "start", "resumeCrossSpaceSettle");
     }
@@ -10170,44 +10156,6 @@ export class Runner {
         // link into another space kicks that document's load here rather
         // than in the body.
         inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
-        // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-        if (typeof Deno !== "undefined" && isObjectOrArray(inputs)) {
-          const summary: Record<string, string> = {};
-          const describe = (value: unknown, key: string, depth: number) => {
-            const link = parseLink(value, resultCell);
-            if (link === undefined) {
-              if (depth < 2 && isObjectOrArray(value)) {
-                for (const k of Object.keys(value)) {
-                  describe(
-                    (value as Record<string, unknown>)[k],
-                    `${key}.${k}`,
-                    depth + 1,
-                  );
-                }
-              } else {
-                summary[key] = `plain:${typeof value}`;
-              }
-              return;
-            }
-            let raw: unknown;
-            try {
-              raw = this.#runtime.getCellFromLink({
-                ...link,
-                schema: undefined,
-              })
-                .withTx(tx).getRaw({ meta: ignoreReadForScheduling });
-            } catch (error) {
-              raw = `threw:${String(error).slice(0, 60)}`;
-            }
-            summary[key] = `${link.id.slice(0, 24)}/${link.path.join(".")} => ${
-              JSON.stringify(raw)?.slice(0, 60)
-            }`;
-          };
-          for (const key of Object.keys(inputs)) {
-            describe((inputs as Record<string, unknown>)[key], key, 0);
-          }
-          tempTrace("TEMP-PRESYNC-INPUTS", JSON.stringify(summary));
-        }
       }
       : undefined;
 

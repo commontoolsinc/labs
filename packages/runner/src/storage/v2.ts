@@ -96,7 +96,6 @@ import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { combineOptionalSchema } from "../traverse.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
-import { tempTrace } from "../temp-trace.ts";
 import * as Differential from "./differential.ts";
 import {
   IMemoryAddress,
@@ -1589,11 +1588,6 @@ export class StorageManager implements IStorageManager {
         eventAppendPacing: this.#eventAppendPacing,
       });
       this.#providers.set(space, provider);
-      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
-      tempTrace(
-        `TEMP-OPEN space ${space}`,
-        new Error().stack?.split("\n").slice(1, 14).join("\n"),
-      );
     }
     if (firstOpen && this.spaceOpenObserver !== undefined) {
       // Deferred a microtask: the observer subscribes cells, which
