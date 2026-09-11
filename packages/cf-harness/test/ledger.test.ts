@@ -5,11 +5,11 @@ import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import type { PatternIndexPublishRequest } from "../src/pattern-index/client.ts";
 import {
-  createPatternIndexPublicationLedger,
+  createPatternIndexLedger,
   patternCapabilityKey,
-} from "../src/pattern-index/publish-ledger.ts";
+} from "../src/pattern-index/ledger.ts";
 
-const signer = await Identity.fromPassphrase("cf-harness publish ledger");
+const signer = await Identity.fromPassphrase("cf-harness pattern index ledger");
 
 interface RecordedCall {
   fn: string;
@@ -23,7 +23,9 @@ interface RecordedCall {
  * hang on for one — and it is a real event, which is what
  * `docs/development/waiting-in-tests.md` asks for in place of a sleep.
  */
-const stubClient = (options: { fail?: boolean; created?: boolean } = {}) => {
+const stubClient = (
+  options: { fail?: boolean; created?: boolean; failFirstEvent?: boolean } = {},
+) => {
   const calls: RecordedCall[] = [];
   const waiters: { fn: string; count: number; resolve: () => void }[] = [];
   const answered: Record<string, number> = {};
@@ -47,6 +49,16 @@ const stubClient = (options: { fail?: boolean; created?: boolean } = {}) => {
       announce(fn);
       return Promise.resolve(response);
     };
+    if (
+      fn === "recordEvent" && options.failFirstEvent === true &&
+      calls.filter((call) => call.fn === "recordEvent").length === 1
+    ) {
+      return answer(
+        new Response(JSON.stringify({ error: "index is down" }), {
+          status: 500,
+        }),
+      );
+    }
     if (fn === "publishPattern" && options.fail === true) {
       return answer(
         new Response(JSON.stringify({ error: "index is down" }), {
@@ -101,7 +113,12 @@ const request = (
 const publishes = (calls: RecordedCall[]) =>
   calls.filter((call) => call.fn === "publishPattern");
 
-describe("pattern index publication ledger", () => {
+const eventTypes = (calls: RecordedCall[]) =>
+  calls.filter((call) => call.fn === "recordEvent").map((call) =>
+    call.body.eventType
+  );
+
+describe("pattern index ledger", () => {
   describe("patternCapabilityKey()", () => {
     it("reads two spellings of one description as one capability", () => {
       expect(patternCapabilityKey(request("a"))).toBe(
@@ -129,7 +146,7 @@ describe("pattern index publication ledger", () => {
   describe("stage() and flush()", () => {
     it("publishes nothing until the session ends", async () => {
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("one"));
       expect(publishes(calls)).toEqual([]);
       await ledger.flush();
@@ -138,7 +155,7 @@ describe("pattern index publication ledger", () => {
 
     it("offers search the last of a capability's iterations and records the rest", async () => {
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("first"));
       ledger.stage(request("second"));
       ledger.stage(request("third"));
@@ -164,7 +181,7 @@ describe("pattern index publication ledger", () => {
       // the displaced one has to be gone BEFORE the flush — measured before
       // it, since after it the two sends are indistinguishable.
       const { calls, getClient, settled } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("first"));
       ledger.stage(request("second"));
       // `stage` does not await, so the displaced send rides the ledger's own
@@ -184,7 +201,7 @@ describe("pattern index publication ledger", () => {
 
     it("offers search each of a session's distinct capabilities", async () => {
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("table"));
       ledger.stage(request("doubler", { description: "Doubles a number" }));
       await ledger.flush();
@@ -199,7 +216,7 @@ describe("pattern index publication ledger", () => {
       // What a person reads later should say what was found. Being displaced
       // is the less informative of the two facts.
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(
         request("first", {
           nonDiscoverable: { reason: "render gate: broken" },
@@ -218,7 +235,7 @@ describe("pattern index publication ledger", () => {
       // hold, so a session composing an atom it authored earlier has to send
       // that atom first.
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("doubler", { description: "Doubles a number" }));
       ledger.stage(
         request("quadrupler", {
@@ -240,7 +257,7 @@ describe("pattern index publication ledger", () => {
 
     it("names a dependency-published entry as the lineage of its next iteration", async () => {
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("first"));
       ledger.stage(
         request("other", {
@@ -263,7 +280,7 @@ describe("pattern index publication ledger", () => {
       // dependency this session never staged must still be sent rather than
       // held forever waiting for its turn.
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(
         request("composite", { dependencies: ["never-staged-here"] }),
       );
@@ -280,7 +297,7 @@ describe("pattern index publication ledger", () => {
       // still sends, because holding a contribution forever is worse than
       // sending it in an order the index may refuse.
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(
         request("one", { description: "One", dependencies: ["two"] }),
       );
@@ -295,7 +312,7 @@ describe("pattern index publication ledger", () => {
     it("reports a failed publication without throwing it at the session", async () => {
       const errors: string[] = [];
       const { getClient } = stubClient({ fail: true });
-      const ledger = createPatternIndexPublicationLedger(getClient, {
+      const ledger = createPatternIndexLedger(getClient, {
         onError: (message) => errors.push(message),
       });
       ledger.stage(request("one"));
@@ -306,7 +323,7 @@ describe("pattern index publication ledger", () => {
 
     it("records a created event for an entry the index did not hold", async () => {
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("one"));
       await ledger.flush();
       expect(
@@ -318,7 +335,7 @@ describe("pattern index publication ledger", () => {
 
     it("records no created event for an entry the index already held", async () => {
       const { calls, getClient } = stubClient({ created: false });
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(request("one"));
       await ledger.flush();
       expect(calls.filter((call) => call.fn === "recordEvent")).toEqual([]);
@@ -326,7 +343,7 @@ describe("pattern index publication ledger", () => {
 
     it("publishes a dependency first even when it was staged second", async () => {
       const { calls, getClient } = stubClient();
-      const ledger = createPatternIndexPublicationLedger(getClient);
+      const ledger = createPatternIndexLedger(getClient);
       ledger.stage(
         request("composite", {
           description: "Composes the doubler",
@@ -340,6 +357,42 @@ describe("pattern index publication ledger", () => {
         "doubler",
         "composite",
       ]);
+    });
+  });
+
+  describe("record() and flush()", () => {
+    it("sends an event without the caller waiting for it", async () => {
+      const { calls, getClient } = stubClient();
+      const ledger = createPatternIndexLedger(getClient);
+      ledger.record("pat-doubler", "instantiated");
+      expect(calls).toEqual([]);
+      await ledger.flush();
+      expect(eventTypes(calls)).toEqual(["instantiated"]);
+    });
+
+    it("reports a refused event without throwing it at the session", async () => {
+      const errors: string[] = [];
+      const { getClient } = stubClient({ failFirstEvent: true });
+      const ledger = createPatternIndexLedger(getClient, {
+        onError: (message) => errors.push(message),
+      });
+      ledger.record("pat-doubler", "run_succeeded");
+      await ledger.flush();
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("could not record the run_succeeded event");
+      expect(errors[0]).toContain("pat-doubler");
+    });
+
+    it("sends the event written after one the index refused", async () => {
+      const errors: string[] = [];
+      const { calls, getClient } = stubClient({ failFirstEvent: true });
+      const ledger = createPatternIndexLedger(getClient, {
+        onError: (message) => errors.push(message),
+      });
+      ledger.record("pat-doubler", "instantiated");
+      ledger.record("pat-doubler", "run_succeeded");
+      await ledger.flush();
+      expect(eventTypes(calls)).toEqual(["instantiated", "run_succeeded"]);
     });
   });
 });

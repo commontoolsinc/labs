@@ -3,6 +3,7 @@ import {
   cloneIfNecessary,
   hashStringOf,
   isKeyableObjectOrArray,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
@@ -84,7 +85,7 @@ import {
 } from "../link-types.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { combineOptionalSchema } from "../traverse.ts";
@@ -304,29 +305,28 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
- * path into it, and where it lives.
+ * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
  * carries its whole value in its id, so the id is the one part that varies
  * without bound — a rendered UI tree reaches tens of kilobytes — and a cache
  * keyed on it directly would cost that much per entry.
  */
-export function dataURISyncKey(sync: {
+export function dataURISyncKey(identity: {
   id: string;
   schema: JSONSchema | undefined;
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
-  /** The served run's identity when the sync names its instances. */
-  identity?: ScopeKeyIdentity;
+  scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
-    sync.id,
-    sync.schema ? hashStringOf(sync.schema) : "",
-    [...sync.path],
-    sync.space,
-    normalizeCellScope(sync.scope),
-    sync.identity === undefined ? "" : hashStringOf(sync.identity),
+    identity.id,
+    identity.schema ? hashStringOf(identity.schema) : "",
+    [...identity.path],
+    identity.space,
+    normalizeCellScope(identity.scope),
+    identity.scopeKeyIdentity,
   ]);
 }
 
@@ -1459,11 +1459,13 @@ export class StorageManager implements IStorageManager {
     this.#providers.get(space)?.noteAclChanged();
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
     // Already-open replicas only: creating a provider is a session-level
     // side effect no elision probe should carry. A space this manager has
     // not opened answers false, and false stages.
-    return this.#providers.get(space)?.replica.isSchemaDocPersisted(hash) ??
+    return this.#providers.get(space)?.replica.isContentAddressedDocPersisted(
+      hash,
+    ) ??
       false;
   }
 
@@ -2244,7 +2246,7 @@ export class StorageManager implements IStorageManager {
         id,
         schema,
         scope,
-        options?.scopeKeyIdentity,
+        { ...(options?.scopeKeyIdentity ?? this.scopeKeyIdentity()) },
       );
     }
 
@@ -2430,7 +2432,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
-    identity: ScopeKeyIdentity | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2438,7 +2440,7 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
-      identity,
+      scopeKeyIdentity: identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
@@ -2462,7 +2464,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
-    identity: ScopeKeyIdentity | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2509,7 +2511,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
-    identity: ScopeKeyIdentity | undefined,
+    identity?: ScopeKeyIdentity,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2816,7 +2818,7 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     // ids, and session-resume replay all see one selector form.
     const normalizedSelector = externalizeSyncSelector(
       normalizeSyncSelector(selector),
-      (hash) => this.replica.isSchemaDocPersisted(hash),
+      (hash) => this.replica.isContentAddressedDocPersisted(hash),
     );
     // Replay requests are per (doc, instance): an instance-named load
     // (stage A) must replay as that instance on a replacement replica.
@@ -6958,7 +6960,8 @@ export class SpaceReplica
 
   /**
    * Whether this replica holds SERVER-CONFIRMED verified content for
-   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * `cid:<hash>` — the emission gate for selector references and the
+   * elision seam for staged content-addressed documents: a confirmed
    * document arrived by delivery or by an acknowledged commit, so the
    * space's server holds it, and content addressing means it can never
    * change. The confirmed layer specifically: a pending local write is
@@ -6968,13 +6971,13 @@ export class SpaceReplica
    * relies on the provisional route not changing after observable reads
    * (CT-2046 tracks enforcing that broadly).
    */
-  isSchemaDocPersisted(hash: string): boolean {
+  isContentAddressedDocPersisted(hash: string): boolean {
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
-    const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    const value = doc.value;
+    // A content-addressed document's value must hash to the id it sits under.
+    return taggedHashStringOf(value) === hash;
   }
 
   /**
@@ -8308,12 +8311,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8322,16 +8351,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

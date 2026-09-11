@@ -54,6 +54,7 @@ import {
   Runtime,
   type RuntimeOptions,
   runtimePresets,
+  RuntimeTelemetryEvent,
   TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
@@ -84,6 +85,7 @@ import {
 } from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
 
+import { ActionReadReport } from "./action-read-report.ts";
 import { assertionOutcome } from "./assert-record.ts";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
@@ -338,6 +340,9 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+
+  /** Disables the verification replay for performance measurements only. */
+  noIdempotencyCheck?: boolean;
 
   /**
    * Root directory for resolving imports. If not provided, the nearest
@@ -1158,7 +1163,20 @@ export async function runTestPattern(
         },
       })),
   );
-  runtime.enableIdempotencyCheck();
+  if (!options.noIdempotencyCheck) runtime.enableIdempotencyCheck();
+  else if (options.verbose) {
+    console.log("  Idempotency verification disabled for this measurement.");
+  }
+  const readReport = options.verbose ? new ActionReadReport() : undefined;
+  const onReadReport = (event: Event) => {
+    if (event instanceof RuntimeTelemetryEvent) {
+      readReport?.record(event.marker);
+    }
+  };
+  if (readReport) {
+    runtime.scheduler.setReadStatsEnabled(true);
+    runtime.telemetry.addEventListener("telemetry", onReadReport);
+  }
   // Channel 1: capture pattern-code console.error / console.warn calls that
   // flow through the scheduler's harness console event.  The handler must
   // return args unchanged so the call still appears in the host console.
@@ -1499,6 +1517,16 @@ export async function runTestPattern(
       );
     };
 
+    /** Formats the current step when its duration reaches the reporting threshold. */
+    const printReadReport = (label: string, duration: number): void => {
+      if (!readReport || duration < (options.statsThreshold ?? 5000)) return;
+      for (
+        const line of readReport.format(label, options.statsActionLimit ?? 10)
+      ) {
+        console.log(line);
+      }
+    };
+
     // 5. Process tests sequentially
     const results: TestResult[] = [];
     let lastActionIndex: number | null = null;
@@ -1506,7 +1534,20 @@ export async function runTestPattern(
     let actionCount = 0;
     let renderCount = 0;
 
+    if (readReport) {
+      for (
+        const line of readReport.format(
+          "initialization",
+          options.statsActionLimit ?? 10,
+        )
+      ) {
+        console.log(line);
+      }
+      readReport.clear();
+    }
+
     for (let i = 0; i < testSteps.length; i++) {
+      readReport?.clear();
       if (options.verbose) {
         resetAllCountBaselines();
         resetAllTimingBaselines();
@@ -1535,7 +1576,11 @@ export async function runTestPattern(
       // step is transparent — it produces no result. A settle timeout propagates
       // to the outer handler and fails the whole run (a stuck settle is fatal).
       if (isSettle) {
-        if (!stepValue.skip) await settleFully(i);
+        try {
+          if (!stepValue.skip) await settleFully(i);
+        } finally {
+          printReadReport(`settle_${i}`, performance.now() - itemStart);
+        }
         continue;
       }
 
@@ -1546,14 +1591,18 @@ export async function runTestPattern(
       if (isRender) {
         renderCount++;
         const renderName = `render_${renderCount}`;
-        if (!stepValue.skip) {
-          await materializeTestVDOM(
-            stepCell.key("render") as Cell<unknown>,
-            () => settleRuntime(i, renderName, 20),
-          );
-          if (options.verbose) console.log(`  ◇ ${renderName}`);
-        } else if (options.verbose) {
-          console.log(`  ⊘ ${renderName} (skipped)`);
+        try {
+          if (!stepValue.skip) {
+            await materializeTestVDOM(
+              stepCell.key("render") as Cell<unknown>,
+              () => settleRuntime(i, renderName, 20),
+            );
+            if (options.verbose) console.log(`  ◇ ${renderName}`);
+          } else if (options.verbose) {
+            console.log(`  ⊘ ${renderName} (skipped)`);
+          }
+        } finally {
+          printReadReport(renderName, performance.now() - itemStart);
         }
         continue;
       }
@@ -1864,6 +1913,10 @@ export async function runTestPattern(
       // Print delta stats for slow steps
       if (options.verbose) {
         const statsThreshold = options.statsThreshold ?? 5000;
+        printReadReport(
+          isAction ? `action_${actionCount}` : `assertion_${assertionCount}`,
+          performance.now() - itemStart,
+        );
         const stepDuration = performance.now() - itemStart;
         if (stepDuration > statsThreshold || statsThreshold === 0) {
           const stepLabel = isAction
@@ -1957,6 +2010,7 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
+    runtime.telemetry.removeEventListener("telemetry", onReadReport);
     if (
       patternCoverage && options.patternCoverageDir &&
       writeLocalPatternCoverage

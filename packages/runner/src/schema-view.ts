@@ -47,9 +47,11 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
+import { readStatsActive, recordProxyAccess } from "./read-stats.ts";
 import { toCell } from "./back-to-cell.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import {
   type CfcLabelView,
   rebaseCfcLabelView,
@@ -274,7 +276,8 @@ const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
 };
 
 /**
- * A branch with its `$ref` resolved, against the union's `$defs` or its own.
+ * A branch with its `$ref` resolved in its definition scope: its own `$defs`,
+ * or the union's when it declares none.
  *
  * A branch that will not resolve narrows to `false` — nothing matches it. It
  * cannot be left as it was: a bare `$ref` declares no `type` and no `required`,
@@ -290,28 +293,19 @@ const resolveBranch = (
   parent: JSONSchemaObj,
 ): JSONSchema => {
   if (!isObjectOrArray(branch) || !("$ref" in branch)) return branch;
-  const roots = [
-    ...(isObjectOrArray(parent.$defs)
-      ? [{ $defs: parent.$defs } as JSONSchemaObj]
-      : []),
-    branch as JSONSchemaObj,
-  ];
-  for (const root of roots) {
-    try {
-      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
-        branch as JSONSchemaObj,
-        root,
-      );
-      // A boolean target is a resolution, not a failure to resolve: `true`
-      // matches everything and `false` matches nothing, which is what the
-      // definition said. Only exhausting the roots is a failure, and the
-      // resolver throws rather than returning a boolean for that.
-      if (isObjectOrArray(resolved) || typeof resolved === "boolean") {
-        return resolved;
-      }
-    } catch {
-      // Try the next root; the warning below covers exhausting them.
+  try {
+    const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+      cfcSchemaWithInheritedDefs(branch, parent.$defs) as JSONSchemaObj,
+    );
+    // A boolean target is a resolution, not a failure to resolve: `true`
+    // matches everything and `false` matches nothing, which is what the
+    // definition said. The resolver throws rather than returning a boolean for
+    // a ref it cannot resolve.
+    if (isObjectOrArray(resolved) || typeof resolved === "boolean") {
+      return resolved;
     }
+  } catch {
+    // The warning below covers a ref that does not resolve.
   }
   // Worth saying out loud: an unresolvable ref means a schema document that
   // did not replicate, not data that happens not to match.
@@ -764,10 +758,11 @@ function createObjectView(
   // Every read this view takes goes through here, so this is where it steps
   // into the instant it describes. Before the transaction's first write there
   // is nothing to step into — every epoch names the same root — so the common
-  // case pays one boolean and no more. Entered by hand rather than around a
+  // case checks the accounting flag and the read epoch. Entered by hand rather than around a
   // callback: a reader walking a large value touches this per property, and a
   // callback would allocate a closure each time.
   const childOrAbsent = (key: string): unknown => {
+    if (readStatsActive) recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveChild(key);
     const previous = tx.enterReadEpoch(epoch);
     try {
@@ -885,6 +880,7 @@ function createArrayView(
   // into the instant this view describes, and skips the step entirely until the
   // transaction has written. See the note there for why it is entered by hand.
   const element = (index: number): unknown => {
+    if (readStatsActive) recordProxyAccess(tx);
     if (!tx.hasWrites()) return resolveElement(index);
     const previous = tx.enterReadEpoch(epoch);
     try {
@@ -924,7 +920,10 @@ function createArrayView(
   return new Proxy(new Array(value.length), {
     get: (_target, prop, receiver) => {
       if (prop === "then" && tx.status().status !== "ready") return undefined;
-      if (prop === "length") return value.length;
+      if (prop === "length") {
+        if (readStatsActive) recordProxyAccess(tx);
+        return value.length;
+      }
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return (): Cell<unknown> =>
@@ -941,7 +940,9 @@ function createArrayView(
       }
       if (isArrayIndexPropertyName(prop)) {
         const index = Number(prop);
-        return index in value ? element(index) : undefined;
+        if (index in value) return element(index);
+        if (readStatsActive) recordProxyAccess(tx);
+        return undefined;
       }
       const method = Reflect.get(Array.prototype, prop, receiver);
       if (typeof method !== "function") return method;
@@ -961,6 +962,7 @@ function createArrayView(
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (prop === "length") {
+        if (readStatsActive) recordProxyAccess(tx);
         return Object.getOwnPropertyDescriptor(target, "length");
       }
       if (typeof prop === "symbol" || !isArrayIndexPropertyName(prop)) {

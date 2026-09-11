@@ -38,6 +38,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
@@ -70,6 +71,7 @@ import type {
 } from "./builder/types.ts";
 import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import type { LastNode } from "./link-resolution.ts";
 import {
@@ -2477,6 +2479,7 @@ function followPointer(
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
   // We use a nonRecursive read, since we may not need everything at the target.
+  if (readStatsActive) recordLinkResolution(tx);
   const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
@@ -4490,6 +4493,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
     const target = this.#plainArrayItemLinkTarget(doc, selector);
     if (target === undefined) return undefined;
+    if (readStatsActive) recordLinkResolution(this.tx);
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined) {
       if (error.name !== "NotFoundError" || error.path.length !== 0) {
@@ -4718,6 +4722,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
             this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
           }
           const preparedTarget = preparedPlainLinks?.targets[batchIndex];
+          if (readStatsActive && preparedTarget !== undefined) {
+            recordLinkResolution(this.tx);
+          }
           const preparedResult = preparedTarget === undefined
             ? undefined
             : this.tx.read(preparedTarget, READ_NON_RECURSIVE);
@@ -5574,6 +5581,7 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
+    if (readStatsActive) recordLinkResolution(tx);
     // This extra hop bypasses followPointer, so it carries the crossing
     // seam itself.
     markIfcBearingLinkCrossing(
@@ -5678,7 +5686,7 @@ function schemaTypeValidity(
     let match: TypeValidity.True | TypeValidity.Unknown | undefined;
     for (const option of schemaObj.allOf) {
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       // ignore undefined result (unknown type), but if any option returns
@@ -5705,7 +5713,7 @@ function schemaTypeValidity(
         break;
       }
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       if (valid === TypeValidity.False) {
@@ -5732,7 +5740,7 @@ function schemaTypeValidity(
         break;
       }
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       if (valid === TypeValidity.False) {
@@ -5794,15 +5802,4 @@ export function schemaAcceptsType(
   valueType: JSONSchemaTypes,
 ): boolean {
   return schemaTypeValidity(schema, valueType) !== TypeValidity.False;
-}
-
-function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
-  // We need to preserve any parent $defs in the branch
-  if (!parent.$defs || !isObjectOrArray(option)) {
-    return option;
-  }
-  return {
-    ...option,
-    $defs: parent.$defs,
-  };
 }

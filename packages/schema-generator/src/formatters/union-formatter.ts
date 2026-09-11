@@ -6,6 +6,7 @@ import { hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
+import { reportUnresolvedDefault } from "../default-diagnostics.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -14,8 +15,9 @@ import {
   extractDefaultValueFromBrandedMembers,
   getNativeTypeSchema,
   getPropertyNameText,
+  hasDefaultMarker,
   isDefaultBrandedMember,
-  isEmptyRecordType,
+  isEmptyObjectDefaultType,
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -263,9 +265,8 @@ export class UnionFormatter implements TypeFormatter {
    * Authored-node handling stays primary: tryFormatDefaultUnion runs first
    * and also covers non-literal V forms (e.g. `typeof CONST`) via
    * declaration reads. This fallback fires only when the alias node is
-   * unavailable, and bails (returning undefined) when the union carries no
-   * brand, more than one brand, or a payload that is not literal-shaped —
-   * preserving prior behavior exactly in those cases.
+   * unavailable. An actual Default brand with an unextractable or conflicting
+   * payload produces a warning before falling back to ordinary union formatting.
    */
   #tryFormatExpandedDefaultViaBrandPayload(
     members: readonly ts.Type[],
@@ -281,7 +282,12 @@ export class UnionFormatter implements TypeFormatter {
     // all carrying the same payload — extract the agreed value across all of
     // them, and exclude all of them from the formatted remainder.
     const extracted = extractDefaultValueFromBrandedMembers(branded, checker);
-    if (!extracted) return undefined;
+    if (!extracted) {
+      if (branded.some((member) => hasDefaultMarker(member, checker))) {
+        reportUnresolvedDefault(context);
+      }
+      return undefined;
+    }
 
     let rest = members.filter((m) => !isDefaultBrandedMember(m, checker));
     // Degenerate empty-array members (the empty tuple `[]` / `never[]`) ride
@@ -364,6 +370,13 @@ export class UnionFormatter implements TypeFormatter {
         nonDefaultNodes,
         context.typeChecker,
       );
+      if (defaultEntry.entry.defaultValue === undefined) {
+        reportUnresolvedDefault(
+          context,
+          defaultEntry.entry.defaultTypeNode,
+          "DeepDefault",
+        );
+      }
       return this.#applyDeepDefaultToSchema(
         this.#combineUnionSchemas(schemas, context),
         defaultEntry.entry.defaultValue,
@@ -387,6 +400,10 @@ export class UnionFormatter implements TypeFormatter {
       schemas.push(
         this.#formatTypeNodeMember(defaultEntry.entry.valueTypeNode, context),
       );
+    }
+
+    if (defaultEntry.entry.defaultValue === undefined) {
+      reportUnresolvedDefault(context, defaultEntry.entry.defaultTypeNode);
     }
 
     return this.#applySchemaDefault(
@@ -848,25 +865,35 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     if (ts.isTupleTypeNode(typeNode)) {
-      return typeNode.elements.map((element) =>
-        this.#extractDefaultValueFromNode(element, context)
-      );
+      const values: unknown[] = [];
+      for (const element of typeNode.elements) {
+        const value = this.#extractDefaultValueFromNode(element, context);
+        if (value === undefined) return undefined;
+        values.push(value);
+      }
+      return values;
     }
 
     if (ts.isTypeLiteralNode(typeNode)) {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
         if (!ts.isPropertySignature(member) || !member.name || !member.type) {
-          continue;
+          const type = context.typeRegistry?.get(typeNode) ??
+            context.typeChecker.getTypeFromTypeNode(typeNode);
+          return isEmptyObjectDefaultType(type, context.typeChecker)
+            ? {}
+            : undefined;
         }
         const propName = getPropertyNameText(member.name, context.typeChecker);
-        if (!propName) {
-          continue;
-        }
-        obj[propName] = this.#extractDefaultValueFromNode(
-          member.type,
-          context,
-        );
+        if (propName === undefined) return undefined;
+        const value = this.#extractDefaultValueFromNode(member.type, context);
+        if (value === undefined) return undefined;
+        Object.defineProperty(obj, propName, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return obj;
     }
@@ -900,7 +927,7 @@ export class UnionFormatter implements TypeFormatter {
       return undefined;
     }
 
-    if (isEmptyRecordType(type, context.typeChecker)) {
+    if (isEmptyObjectDefaultType(type, context.typeChecker)) {
       return {};
     }
 

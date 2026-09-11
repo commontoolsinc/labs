@@ -38,6 +38,7 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
 } from "../src/runner.ts";
 import {
   type ICommitNotification,
@@ -2150,6 +2151,90 @@ describe("setup/start", () => {
       serving.clearSealDestination();
       await serving.dispose();
       await servingStorage.close();
+    }
+  });
+
+  it("runSynced refuses source-update authority while sealing without requesting a receipt", async () => {
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const resultCell = serving.getCell(
+        space,
+        "source authority while sealing",
+      );
+      const initial = await compileReceiptPattern(serving, "v1");
+      const candidate = await compileReceiptPattern(serving, "v2");
+      await serving.runSynced(resultCell, initial, {});
+      const before = receiptSourceSnapshot(serving, resultCell);
+      const transition = await receiptSourceTransition(serving, resultCell);
+      const sealed: IExtendedStorageTransaction[] = [];
+      serving.installSealDestination({
+        seal: (tx: IExtendedStorageTransaction) => {
+          sealed.push(tx);
+          return tx.commit();
+        },
+      });
+
+      await expect(serving.runSynced(resultCell, candidate, {}, {
+        expectedPatternIdentity: before.pattern,
+        pieceSourceTransition: transition,
+      })).rejects.toThrow(SEALING_SOURCE_UPDATE_REFUSAL);
+      expect(sealed).toEqual([]);
+      expect(receiptSourceSnapshot(serving, resultCell)).toEqual(before);
+      expect(resultCell.get()).toEqual({ marker: "v1" });
+      const successor = serving.patternManager.getArtifactEntryRef(candidate)!;
+      const tx = serving.edit();
+      try {
+        expect(
+          tx.getCfcState().moduleDelegations.get(space)?.get(
+            successor.identity,
+          ),
+        )
+          .toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSynced refuses to grant update authority in a caller-owned transaction", async () => {
+    const resultCell = runtime.getCell(space, "bound source authority");
+    const initial = await compileReceiptPattern(runtime, "v1");
+    const candidate = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(resultCell, initial, {});
+    const before = receiptSourceSnapshot(runtime, resultCell);
+    const transition = await receiptSourceTransition(runtime, resultCell);
+    const tx = runtime.edit();
+    try {
+      await expect(runtime.runSynced(resultCell.withTx(tx), candidate, {}, {
+        expectedPatternIdentity: before.pattern,
+        pieceSourceTransition: transition,
+      })).rejects.toThrow(
+        "source update authority requires an owned setup transaction",
+      );
+      expect(receiptSourceSnapshot(runtime, resultCell)).toEqual(before);
+    } finally {
+      tx.abort();
+    }
+    const successor = runtime.patternManager.getArtifactEntryRef(candidate)!;
+    const storedTx = runtime.edit();
+    try {
+      expect(
+        storedTx.getCfcState().moduleDelegations.get(space)?.get(
+          successor.identity,
+        ),
+      ).toBeUndefined();
+    } finally {
+      storedTx.abort();
     }
   });
 
