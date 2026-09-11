@@ -104,6 +104,35 @@ describe("event-reference-context", () => {
   }
 
   for (const modern of [false, true]) {
+    it(`retains send confidentiality on a cycle without other references (modern=${modern})`, async () => {
+      setModernCellRepConfig(modern);
+      const held = await selectedReference();
+      type CyclicInput = { value: string; self?: CyclicInput };
+      const input: CyclicInput = { value: "event value" };
+      input.self = input;
+      const send = runtime.edit();
+      held.withTx(send).get();
+      const event = serializeRuntimeEvent(input, send, space);
+      send.abort();
+      const payload = restoreRuntimeEventReferences(
+        roundtrip(event.payload),
+        event.runtimeReferenceContext,
+      );
+      const read = runtime.edit();
+      try {
+        const inputs = runtime.getImmutableCell(
+          space,
+          payload,
+          undefined,
+          read,
+        );
+        expect(inputs.key("self").key("value").get()).toBe("event value");
+        expect(deriveFlowJoin(read).confidentiality).toContainEqual(secret);
+      } finally {
+        read.abort();
+      }
+    });
+
     for (const nested of [false, true]) {
       it(`retains acquired references through a cyclic event payload (modern=${modern}, nested=${nested})`, async () => {
         setModernCellRepConfig(modern);
@@ -641,5 +670,16 @@ describe("event-reference-context", () => {
     expect(restoreRuntimeEventReferences(roundtrip(event.payload), undefined))
       .toEqual({ amount: 3 });
     tx.abort();
+  });
+
+  it("refuses an explicit relative link without acquisition evidence", () => {
+    const send = runtime.edit();
+    try {
+      expect(() =>
+        serializeRuntimeEvent({ self: linkRefFrom({ path: [] }) }, send, space)
+      ).toThrow("authenticated acquisition");
+    } finally {
+      send.abort();
+    }
   });
 });

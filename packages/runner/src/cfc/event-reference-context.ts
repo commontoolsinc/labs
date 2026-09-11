@@ -257,7 +257,7 @@ export function serializeRuntimeEvent(
       return result;
     },
   });
-  if (references.length === 0) return { payload };
+  if (references.length === 0 && cycles.length === 0) return { payload };
   const flow = deriveFlowJoin(tx).confidentiality;
   if (cycles.length > 0) {
     // A cycle names an ancestor inside these exact immutable payload bytes.

@@ -517,7 +517,7 @@ describe("stage G outbox + sqlite discharge", () => {
       undefined,
       send,
     );
-    const event = serializeRuntimeEvent({ box }, send);
+    const event = serializeRuntimeEvent({ box }, send, targetSpace);
     send.abort();
     const stream = { id: "of:reference-outbox-stream", path: [] as string[] };
     const sidecar = streamEntriesDocId(stream);
