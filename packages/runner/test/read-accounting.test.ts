@@ -272,6 +272,50 @@ describe("read-accounting", () => {
     expect(readStatsActive).toBe(false);
   });
 
+  it("settles queued events after preflight setup fails", async () => {
+    runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+    const failure = new Error("preflight setup failed");
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => errors.push(error));
+    const beginReadAttempt = runtime.scheduler.beginReadAttempt;
+    using _begin = stub(
+      runtime.scheduler,
+      "beginReadAttempt",
+      function (...args) {
+        beginReadAttempt.apply(this, args);
+        if (args[1] === "preflight") throw failure;
+      },
+    );
+    let invoked = false;
+    const handler: EventHandler = () => {
+      invoked = true;
+    };
+    handler.populateDependencies = () => {};
+    const link = runtime.getCell(space, "preflight-setup-event")
+      .getAsNormalizedFullLink();
+    const commits: IExtendedStorageTransaction[] = [];
+    const outcomes: ServedEventFailureOutcome[] = [];
+    runtime.scheduler.addEventHandler(handler, link);
+    runtime.scheduler.queueEvent(
+      link,
+      undefined,
+      false,
+      (tx) => commits.push(tx),
+      false,
+      {
+        served: { onFailure: (outcome) => outcomes.push(outcome) },
+      },
+    );
+    await runtime.settled();
+    expect(invoked).toBe(false);
+    expect(errors).toEqual([failure]);
+    expect(commits).toHaveLength(1);
+    expect(commits[0].status().status).toBe("error");
+    expect(outcomes).toHaveLength(1);
+    expect(runtime.scheduler.accessForTestingOnly.eventQueue).toEqual([]);
+    expect(readStatsActive).toBe(false);
+  });
+
   it("closes read-only preflight accounting when error reporting throws", () => {
     runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
     const markers: RuntimeTelemetryMarker[] = [];
@@ -327,9 +371,8 @@ describe("read-accounting", () => {
       dropEvent: (event, reason) =>
         dropQueuedEvent(access.eventExecutionState, event, reason),
     };
-    expect(() => preflightQueuedEventDependencies(state, queued)).toThrow(
-      failure.message,
-    );
+    expect(preflightQueuedEventDependencies(state, queued).shouldSkipEvent)
+      .toBe(true);
     expect(
       markers.filter((m) => m.type === "scheduler.read-attempt").map((m) =>
         m.reads.proxyAccesses

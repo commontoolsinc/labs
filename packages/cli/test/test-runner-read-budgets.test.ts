@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { resolve } from "@std/path";
 import { stub } from "@std/testing/mock";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, RuntimeTelemetryEvent } from "@commonfabric/runner";
 
 import { runTests } from "../lib/test-runner.ts";
 
@@ -59,6 +59,25 @@ describe("test-runner read budgets", {
         line.includes("Read budget (step 2)") && line.includes("FAIL")
       ),
     ).toBe(true);
+  });
+
+  it("enforces render budgets before advancing through the render branch", async () => {
+    const result = await runTests(resolve(root, "failing-render.test.tsx"), {
+      root,
+    });
+    const steps = result.results.flatMap((r) => r.results);
+    expect(
+      steps.some((s) =>
+        s.error?.includes("step 1: read budget total exceeded")
+      ),
+    )
+      .toBe(true);
+    expect(
+      steps.some((s) =>
+        s.error?.includes("step 1: read budget perRun exceeded")
+      ),
+    )
+      .toBe(true);
   });
 
   it("enforces initialization separately from subsequent steps", async () => {
@@ -132,6 +151,65 @@ describe("test-runner read budgets", {
     expect(result.results[0].error).toContain(
       "read budgets are not supported in multi-user tests",
     );
+  });
+
+  it("reports incomplete initialization without restarting a rejected budget settlement", async () => {
+    const settled = Runtime.prototype.settled;
+    let budgetBarriers = 0;
+    using _settled = stub(Runtime.prototype, "settled", function (maxRounds) {
+      if (maxRounds === Infinity) {
+        budgetBarriers++;
+        return Promise.reject(new Error("initialization settlement failed"));
+      }
+      return settled.call(this, maxRounds);
+    });
+    const result = await runTests(resolve(root, "passing.test.tsx"), { root });
+    expect(result.failed).toBeGreaterThan(0);
+    expect(result.results[0].error).toContain(
+      "initialization settlement failed",
+    );
+    expect(result.results[0].error).toContain(
+      "initialization: read budget measurement incomplete",
+    );
+    expect(budgetBarriers).toBe(1);
+  });
+
+  it("does not restart settlement after the initial idle phase fails", async () => {
+    const run = Runtime.prototype.run;
+    const idle = Runtime.prototype.idle;
+    const settled = Runtime.prototype.settled;
+    let initializationCommitted = false;
+    let rejected = false;
+    let budgetBarriers = 0;
+    using _run = stub(Runtime.prototype, "run", function (...args) {
+      this.telemetry.addEventListener("telemetry", (event) => {
+        if (
+          event instanceof RuntimeTelemetryEvent &&
+          event.marker.type === "scheduler.read-attempt" &&
+          event.marker.kind === "initialization"
+        ) initializationCommitted = true;
+      });
+      return run.apply(this, args);
+    });
+    using _idle = stub(Runtime.prototype, "idle", function (...args) {
+      if (initializationCommitted && !rejected) {
+        rejected = true;
+        return Promise.reject(new Error("initial idle failed"));
+      }
+      return idle.apply(this, args);
+    });
+    using _settled = stub(Runtime.prototype, "settled", function (maxRounds) {
+      if (maxRounds === Infinity) budgetBarriers++;
+      return settled.call(this, maxRounds);
+    });
+    const result = await runTests(resolve(root, "passing.test.tsx"), { root });
+    expect(result.failed).toBeGreaterThan(0);
+    expect(rejected).toBe(true);
+    expect(result.results[0].error).toContain("initial idle failed");
+    expect(result.results[0].error).toContain(
+      "initialization: read budget measurement incomplete",
+    );
+    expect(budgetBarriers).toBe(0);
   });
 
   it("does not restart settlement after an action settlement failure", async () => {

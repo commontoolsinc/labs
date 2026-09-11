@@ -1256,9 +1256,22 @@ export function preflightQueuedEventDependencies(state: {
     try {
       reportFailure(error);
     } catch {
-      // Observer failures cannot replace the dependency failure.
+      // The event's failure notification and queue removal finalize the failure.
     }
-    throw error;
+    return {
+      shouldSkipEvent: true,
+      deps: { reads: [], shallowReads: [], writes: [] },
+      invalidDeps: new Set(),
+      hasInvalidDependencies: false,
+      dirtySizeBefore,
+      pendingSizeBefore,
+      populateMs,
+      txToLogMs,
+      depCommitMs,
+      collectMs,
+      scheduleMs,
+      preflightStats,
+    };
   }
 }
 

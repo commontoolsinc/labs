@@ -25,19 +25,25 @@ export class ReadBudgetMeasurement {
   record(marker: RuntimeTelemetryMarker): void {
     if (marker.type === "scheduler.read-attempt") {
       this.#total += marker.reads.proxyAccesses;
-      const key = marker.actionId ?? marker.kind;
+      const key = marker.actionId === undefined
+        ? `attempt:${marker.kind}`
+        : `action:${marker.actionId}`;
       const row = this.#contributors.get(key) ??
-        { label: `${marker.kind}: ${key}`, total: 0, perRun: 0 };
+        {
+          label: `${marker.kind}: ${marker.actionId ?? marker.kind}`,
+          total: 0,
+          perRun: 0,
+        };
       row.total += marker.reads.proxyAccesses;
       this.#contributors.set(key, row);
     } else if (marker.type === "scheduler.run.complete" && marker.reads) {
       this.#perRun = Math.max(this.#perRun, marker.reads.proxyAccesses);
-      const row = this.#contributors.get(marker.actionId) ??
+      const row = this.#contributors.get(`action:${marker.actionId}`) ??
         { label: marker.actionId, total: 0, perRun: 0 };
       row.label = marker.src ?? marker.actionInfo?.moduleName ??
         marker.actionId;
       row.perRun = Math.max(row.perRun, marker.reads.proxyAccesses);
-      this.#contributors.set(marker.actionId, row);
+      this.#contributors.set(`action:${marker.actionId}`, row);
     }
   }
 
