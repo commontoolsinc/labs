@@ -27,7 +27,13 @@
     "#7327 merged as b135f7f067ca8112ac7bf6f638b9511b26361944: all current-head CI gates succeeded or were skipped; Cubic run 103250197793 reported zero issues on dae8319a23; antagonistic review was clean. All nine measurement cases and the forced-disposal cleanup control passed.",
     "#7308 merged as e435590cf4c94c91a32260315efe1eedc5e66a7b: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. Memory queries wait for session restoration before issuing requests.",
     "#7312 merged as c00a2581f13b3183986f4d30c6d4ad86e28a34ab: all 69 reviewed-head checks succeeded or were skipped, with clean Cubic and antagonistic review. Rendered row acceptance covers storage outages, catch-up, and subsequent updates.",
-    "#7329 merged as 593c341b27a8baff681374bd01b3125a70ffeca8: all 69 exact-head checks succeeded or were skipped; Cubic run 103258387302 reported zero issues on 9e28f27015; antagonistic review was clean. Client remote-row identity and narrow-invalidation acceptance is landed."
+    "#7329 merged as 593c341b27a8baff681374bd01b3125a70ffeca8: all 69 exact-head checks succeeded or were skipped; Cubic run 103258387302 reported zero issues on 9e28f27015; antagonistic review was clean. Client remote-row identity and narrow-invalidation acceptance is landed.",
+    "#7328 merged as 26de7f96079d1b4c87eaa44296cc9a453f5f2b9d: all 69 exact-head checks succeeded or were skipped; Cubic 103273903333 reported zero issues on c003f349e8; antagonistic review was clean.",
+    "#7330 merged as 06942589ab4825d260e5d8acf64219bdb5d48854: all 69 exact-head gates passed or skipped; Cubic 103278783473 reviewed all five files with zero issues on fe53a2d97d; antagonistic review clean.",
+    "#7332 merged as 881bda4ba1c0805ca88c3e5d2046cfefbcba5e4a: all 69 exact-head gates passed or skipped; Cubic 103278889723 reviewed both files with zero issues on db78661841; antagonistic review clean. C2 acceptance reconciliation is complete.",
+    "#7317 merged as 3e55b4e42dfd70fef3bd1cf4346fa706c4f2d87c: Restore reactive lunch-poll option and voter rows. All 69 exact-head gates passed or skipped on c2e63c1306da1723547b72d98e7c78fc16b878e5; clean Cubic and antagonistic reviews preceded merge.",
+    "#7320 merged as 3f2401638594bdca616906816a6c06011a39b643: Separate list coordinator state across serving principals and sessions. All 69 exact-head gates passed or skipped on d843b3be374d9b999f3cbd4975ae9f75d4f5e9c1; clean Cubic and antagonistic reviews preceded merge.",
+    "#7321 merged as 2fda18e1acc435f0c6642ff93809d14cd1ecc543: Index pending schema policies to bound document lookup work. All 69 exact-head gates passed or skipped on 8d9937f7192f16fc70cc01641bcae8b24ad83551; clean Cubic and antagonistic reviews preceded merge."
   ],
   "stages": [
     {
@@ -111,8 +117,8 @@
     {
       "id": "C4",
       "title": "Reactive lunch-poll rows",
-      "status": "todo",
-      "detail": "Remove workaround after both regressions pass."
+      "status": "done",
+      "detail": "Repository reactive lunch rows landed in #7317 (3e55b4e42d), with serving-instance and policy-index dependencies #7320/#7321. All merge gates passed. Synthetic two-user tests pass in both execution modes. Live poll update still requires coordination."
     },
     {
       "id": "B5",
@@ -153,14 +159,14 @@
     {
       "id": "E2",
       "title": "Author guidance",
-      "status": "review",
-      "detail": "Measured advice is implemented in the computed/lift and collection guides, linked from the author index. Documentation validation and PR review govern landing."
+      "status": "done",
+      "detail": "Measured author guidance merged in #7330: computed/lift read width, repeated scans, explicit cell receivers, and numeric/measurement limits. All 69 exact-head gates and both reviews passed."
     },
     {
       "id": "E3",
       "title": "Nested-scan diagnostic",
-      "status": "review",
-      "detail": "PR #7328 implements and validates the nested-scan warning with eleven focused cases and a 413-entry corpus review. CI and Cubic review govern landing."
+      "status": "done",
+      "detail": "Nested-scan warning merged in #7328 after 69 exact-head checks, clean Cubic, and clean antagonistic review. Eleven focused cases and the 413-entry corpus review validate the diagnostic."
     }
   ],
   "questions": [
@@ -229,9 +235,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "4f2057b0d64c95e35558ff224786f4b7712fa173",
+  "validatedRevision": "6f5a2b23307cc8fdf4716ef6be94f87e0596779b",
   "validationProvenance": {
-    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/4f2057b0d64c95e35558ff224786f4b7712fa173",
-    "scope": "D3 tests, benchmark, and documentation checkpoint. Full runner and final focused snapshot tests pass; this revision does not identify separately recorded browser captures."
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/6f5a2b23307cc8fdf4716ef6be94f87e0596779b",
+    "scope": "Serving-host acceptance: full runner suite passed (1,437 tests / 8,960 steps); final serving-loop file passed all 27 cases after the authored-watermark correction. All 46 type groups and 599 documentation blocks passed. CI and Cubic review are tracked separately before landing."
   }
 }

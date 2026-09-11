@@ -10,8 +10,8 @@ repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
 landed in #7308 and rendered reconnect acceptance in #7312. C4's repository-only
 reactive row migration is implemented and validated on the scoped-child and
-bounded-render repairs in #7313 and #7315. Remaining row-invalidation acceptance
-stays open. B1/B2's contract landed in
+bounded-render repairs in #7313 and #7315. Row-invalidation implementation and validation are complete;
+serving-host acceptance is in review in #7331. B1/B2's contract landed in
 #7294 and its typed lookup foundation landed in #7304. Producer lowering,
 bucket maintenance, and joins remain pending.
 
@@ -272,14 +272,16 @@ passed before merge, with clean Cubic and antagonistic reviews.
       materialization change is required for these reproductions. Disconnects
       during request issue remain the separate boundary stated above; C3's
       producer-identity and rerun checks are tracked independently.
-- [ ] **C3 — Repair remote row invalidation.** Verify affected rows update,
-      stable element identities survive, and untouched rows do not rerun. The
-      client-execution acceptance in
-      [reactive vote rows](../../packages/patterns/integration/reactive-vote-rows.test.ts)
-      edits each of two rows from another replica, checks stable normalized
-      output links and producer identities, and verifies that only the edited
-      row producer runs. Serving-host producer counts remain separate acceptance
-      work because a client diagnostic graph does not contain those actions.
+- [x] **C3 — Repair remote row invalidation.** Client and serving-host
+      acceptance verify correct derived values, stable normalized output links
+      and producer identities, and no execution of the untouched row producer
+      after edits to each of two linked rows. The
+      [client case](../../packages/patterns/integration/reactive-vote-rows.test.ts)
+      uses independent worker replicas and merged in #7329. The
+      [serving-loop case](../../packages/runner/test/executor-serving-loop.test.ts)
+      observes the actual serving runtime and waits for the authored input
+      watermark; a client diagnostic graph does not contain those actions.
+      The dashboard records serving acceptance as in review until #7331 lands.
 - [x] **C4 — Restore reactive lunch-poll rows.** Direct reactive option and
       voter maps use the scoped callback-child repair. Repository acceptance
       includes 93 assertions, unchanged A4 budgets at all three sizes, and
@@ -417,7 +419,8 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Finish review and publication of C3 acceptance, then continue the collection-operator work. C4's repository migration is
+Continue the collection-operator implementation and its measured acceptance.
+C4's repository migration is
 implemented and validated; updating any deployed poll requires coordination
 with Mike. The first-materialization cases in
 [PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
