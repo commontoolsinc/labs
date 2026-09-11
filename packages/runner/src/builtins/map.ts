@@ -399,6 +399,7 @@ export function map(
       runtime,
       elementRuns,
       new Set(elementKeys.values()),
+      listScope,
     );
 
     if (elementAwaitSync) {

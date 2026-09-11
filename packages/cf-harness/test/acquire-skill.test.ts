@@ -297,7 +297,7 @@ describe("acquire-skill", () => {
     });
   });
 
-  it("returns instructions-only refusal metadata without writing a handle", async () => {
+  it("returns path-refusal metadata without writing a handle", async () => {
     await withFabric(async ({ pieces }) => {
       const engine = createEngine(pieces, buildgreatFetch);
 
@@ -308,10 +308,12 @@ describe("acquire-skill", () => {
 
       expect(output.status).toBe("refused");
       expect(output.reason.code).toBe("instructions_only");
-      expect(output.reason.message).toContain("22 offending paths");
-      expect(output.offendingCount).toBe(22);
+      expect(output.reason.message).toContain("refused 20 paths");
+      expect(output.offendingCount).toBe(20);
       expect(output.offendingPaths).toContain("assets/vision-template.json");
-      expect(output.offendingPaths).toContain("scripts/validate-vision.js");
+      // The skill's own script is admitted now, so it is not what refused this
+      // payload; the `references/` and `assets/` trees beside it are.
+      expect(output.offendingPaths).not.toContain("scripts/validate-vision.js");
       expect(output).not.toHaveProperty("skillHandle");
     });
   });

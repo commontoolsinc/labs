@@ -129,6 +129,7 @@ import type {
   HarnessWellKnownGrant,
 } from "./contracts/well-known-grants.ts";
 import {
+  checkRecordedWellKnownGrant,
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
 } from "./well-known-grants.ts";
@@ -1426,7 +1427,14 @@ export class CfHarnessEngine {
    */
   async establishWellKnownGrants(): Promise<HarnessWellKnownGrant[]> {
     if (this.#runState.wellKnownGrants !== undefined) {
-      return structuredClone(this.#runState.wellKnownGrants);
+      // Checked on the way out of the record, not only on the way in: a
+      // resumed run reads these from a file this process did not write, and a
+      // connector grant's name reaches model-facing text.
+      const recorded = structuredClone(this.#runState.wellKnownGrants);
+      for (const grant of recorded) {
+        checkRecordedWellKnownGrant(grant);
+      }
+      return recorded;
     }
     if (this.#fabricSessionFactory === undefined) {
       return [];
