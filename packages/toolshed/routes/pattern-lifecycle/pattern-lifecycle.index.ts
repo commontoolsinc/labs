@@ -1,3 +1,8 @@
+// The pattern-lifecycle router: the verbs' routes behind the middleware
+// order the control plane needs — the body cap first, then the rate limit,
+// then the first-party request proof — mounted under one prefix
+// (docs/features/server-pattern-lifecycle.md).
+
 import { bodyLimit } from "@hono/hono/body-limit";
 
 import * as handlers from "./pattern-lifecycle.handlers.ts";

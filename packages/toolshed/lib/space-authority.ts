@@ -136,16 +136,16 @@ export const NOT_OWNER_MESSAGE =
   "hold the recovery phrase) and grant your CLI DID with `cf acl set`. A " +
   "passkey login cannot currently be exported to the CLI at all.";
 
-/** The one denial a writer check answers with; see {@link authorizeSpaceWriter}. */
+/** The one denial a writer check returns; see {@link authorizeSpaceWriter}. */
 export const NOT_WRITER_MESSAGE =
   "Not authorized to write to that space, or no such space. Check the grant " +
   "for the identity you are signing with: `cf acl ls --space <space>` and " +
   '`cf id did "$CF_IDENTITY"`.';
 
 /**
- * A writer check's answer: admitted, or the denial {@link SpaceAuthority}
- * carries. It hands back no ACL, since a deployment with enforcement off
- * admits without reading one.
+ * What a writer check returns: admitted, or the denial
+ * {@link SpaceAuthority} carries. It hands back no ACL, since a deployment
+ * with enforcement off admits without reading one.
  */
 export type SpaceWriterAuthority =
   | { ok: true }

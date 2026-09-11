@@ -34,13 +34,17 @@ export interface LifecycleDeps {
   /** What the writer check reads the space's ACL through. */
   authority: SpaceAuthorityDeps;
 
-  /** The serving loop's host; `undefined` on a deployment running without
-   * it, which answers every verb 503. */
+  /**
+   * The serving loop's host; `undefined` on a deployment running without
+   * it, which answers every verb 503.
+   */
   host: () => ExecutorHost | undefined;
 
-  /** The identity the serving runtime's piece controller opens the space
+  /**
+   * The identity the serving runtime's piece controller opens the space
    * as — the serving side's own, since the verb runs as the loop's
-   * bookkeeping under the lease. */
+   * bookkeeping under the lease.
+   */
   serviceIdentity: Identity;
 
   logger?: {
@@ -58,7 +62,7 @@ export type LifecycleErrorCode =
   | "space-not-served"
   | "internal";
 
-/** What a verb answers: its receipt on 200, or a refusal with its code. */
+/** What a verb returns: its receipt on 200, or a refusal with its code. */
 export type LifecycleResult<T> =
   | { status: 200; body: T }
   | {

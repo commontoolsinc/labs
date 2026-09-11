@@ -427,8 +427,10 @@ export type LifecycleVerb<T> = {
   demandRoots?: (receipt: T) => ReadonlyArray<string>;
 };
 
-/** The message a queued verb rejects with when its space parks before
- * the verb ran; the host runs such a verb again on the successor tenure. */
+/**
+ * The message a queued verb rejects with when its space parks before the
+ * verb ran; the host runs such a verb again on the successor tenure.
+ */
 export const LIFECYCLE_VERB_SPACE_PARKED =
   "the space parked before the lifecycle verb ran";
 
@@ -444,8 +446,10 @@ type RanLifecycleVerb = QueuedLifecycleVerb & {
   /** The roots the verb named as demand, loaded once its wave committed. */
   demandRoots: ReadonlyArray<string>;
 
-  /** Every space-scoped document the verb's transactions wrote, the
-   * roots included — what the warm re-announcement carries. */
+  /**
+   * Every space-scoped document the verb's transactions wrote, the roots
+   * included — what the warm re-announcement carries.
+   */
   stagedWrites: ReadonlyArray<{ id: string; scopeKey: "space" }>;
 };
 
@@ -813,20 +817,26 @@ export class SpaceServer implements TransactionSealDestination {
    * skip. */
   #rootEnsureAwaitingOwner = false;
 
-  /** Lifecycle verbs awaiting the next wave cycle, in arrival order
+  /**
+   * Lifecycle verbs awaiting the next wave cycle, in arrival order
    * ({@link runLifecycleVerb}). Drained by the cycle that runs them;
-   * emptied, each rejected, by a park. */
+   * emptied, each rejected, by a park.
+   */
   readonly #lifecycleVerbs: QueuedLifecycleVerb[] = [];
 
-  /** The space-scoped documents the currently running verb's transactions
+  /**
+   * The space-scoped documents the currently running verb's transactions
    * have sealed, recorded by `seal()` while `#runQueuedLifecycleVerbs`
-   * awaits the verb. */
+   * awaits the verb.
+   */
   #runningLifecycleVerbWrites:
     | Map<string, { id: string; scopeKey: "space" }>
     | undefined;
 
-  /** The seq of the last wave this tenure committed with content, the
-   * seq a verb's warm re-announcement names (`#settleLifecycleVerbs`). */
+  /**
+   * The seq of the last wave this tenure committed with content, the seq
+   * a verb's warm re-announcement names (`#settleLifecycleVerbs`).
+   */
   #lastCommittedWaveSeq: number | undefined;
 
   /** F6 (log hygiene): the no-owner WARN fires once per tenure — a
@@ -4405,14 +4415,6 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /**
-   * One wave (serving-loop.md §3): drain input, let the scheduler run
-   * the affected graph to quiescence — or to the consequence-flush
-   * deadline (the second exhaustion trigger, RULED 2026-08-04) — then
-   * commit ONE derived transaction carrying the wave's writes, the
-   * watermark doc write, and `derivedThrough`.
-   */
-
-  /**
    * The LT1 leftover PURGE (stage C build W3, (α1); events.md §4's RULED
    * sentence: "the serving loop purges unrun in-process leftovers at the
    * flush deadline"): synchronously at the deadline decision — before the
@@ -4662,11 +4664,13 @@ export class SpaceServer implements TransactionSealDestination {
     return ran;
   }
 
-  /** Register the documents a verb staged as warm demand (see
+  /**
+   * Register the documents a verb staged as warm demand (see
    * {@link LifecycleVerb.demandRoots}): the roots and every document the
    * verb's transactions wrote, since a piece's computed values live in
    * documents of their own and a writer becomes live only when the
-   * document it writes is demanded. */
+   * document it writes is demanded.
+   */
   #warmLifecycleVerbRoots(
     writes: ReadonlyArray<{ id: string; scopeKey: "space" }>,
   ): void {
@@ -4680,8 +4684,10 @@ export class SpaceServer implements TransactionSealDestination {
     if (captured) this.noteDemandChanged("warm");
   }
 
-  /** Record a running verb's space-scoped writes off the transaction's
-   * journal at its seal; no-op outside a verb's run. */
+  /**
+   * Record a running verb's space-scoped writes off the transaction's
+   * journal at its seal; no-op outside a verb's run.
+   */
   #recordLifecycleVerbWrites(tx: IExtendedStorageTransaction): void {
     const staged = this.#runningLifecycleVerbWrites;
     if (staged === undefined) return;
@@ -4744,8 +4750,13 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  /** The cycle's serving half: drain the input batch, settle the graph
-   * under the flush deadline, and commit the wave. */
+  /**
+   * One wave (serving-loop.md §3): drain the input batch, let the
+   * scheduler run the affected graph to quiescence — or to the
+   * consequence-flush deadline (the second exhaustion trigger, RULED
+   * 2026-08-04) — then commit ONE derived transaction carrying the wave's
+   * writes, the watermark doc write, and `derivedThrough`.
+   */
   async #serveWave(runtime: Runtime): Promise<void> {
     const { batchHead } = this.#drainFeed();
     // The event drain stays a fully-awaited, single-flight step AHEAD

@@ -14,7 +14,6 @@ import {
   type LifecycleClientConfig,
   lifecycleUrl,
   ServedLifecycleError,
-  uploadPatternOnServer,
   wireProgram,
 } from "../lib/pattern-lifecycle.ts";
 
@@ -181,25 +180,6 @@ describe("pattern-lifecycle client", () => {
           expect(failure).toBeInstanceOf(ServedLifecycleError);
           expect(failure.code).toBe("http-502");
           expect(failure.message).toContain("instantiate failed (502)");
-        },
-      );
-    });
-  });
-
-  describe("uploadPatternOnServer", () => {
-    it("returns the pattern the space now holds", async () => {
-      const cfg = await configured();
-      await withStubbedFetch(
-        { body: { pattern: { identity: "i", symbol: "default" } } },
-        async (calls) => {
-          const { pattern } = await uploadPatternOnServer(cfg, {
-            space: SPACE_DID,
-            program: PROGRAM,
-          });
-          expect(pattern).toEqual({ identity: "i", symbol: "default" });
-          expect(calls[0].url.pathname).toBe(
-            "/fabric/api/pattern-lifecycle/upload",
-          );
         },
       );
     });

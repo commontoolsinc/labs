@@ -78,8 +78,10 @@ describe("ExecutorHost.runLifecycleVerb", () => {
     return runtime;
   };
 
-  /** A verb whose one write is a marker document, stamped as the loop's
-   * own bookkeeping the way every served verb's writes are. */
+  /**
+   * A verb whose one write is a marker document, stamped as the loop's
+   * own bookkeeping the way every served verb's writes are.
+   */
   const writeMarker = (runtime: Runtime, marker: string) =>
     runtime.editWithRetry((tx) => {
       runtime.stampServerRun(tx, {

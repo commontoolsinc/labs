@@ -129,17 +129,6 @@ async function call<T>(
   return parsed as T;
 }
 
-/** Compile `program` into `space`; the space then holds it by identity. */
-export async function uploadPatternOnServer(
-  config: LifecycleClientConfig,
-  input: { space: string; program: RuntimeProgram },
-): Promise<{ pattern: PatternRef }> {
-  return await call(config, "upload", {
-    space: input.space,
-    program: wireProgram(input.program),
-  });
-}
-
 /**
  * Create a piece in `space` from `program`, set up and not started, with
  * its registry entry and its name when asked for, all in one transaction.
