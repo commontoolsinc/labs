@@ -1,10 +1,17 @@
 # Collection indexes and keyed lookup
 
-Status: proposed B1/B2 contract for the
+Status: B1/B2 implementation and acceptance contract for the
 [computation-cost implementation](pattern-computation-cost-implementation.md).
-These operators are pending implementation. The decisions below define the first
-implementation and its acceptance tests; measured complexity belongs in the
-feature documentation when the operators ship.
+The [feature documentation](../features/collection-indexes.md) describes index
+producers and lookup. Mixed primitive/Cell keys use tagged `keyEntries()`
+enumeration; homogeneous domains also support `keys()`. The implementation and
+focused authored-consumer acceptance are complete in #7323. Publication remains
+subject to current-head CI and review, tracked separately on the execution
+dashboard. Isolation, scale measurements, and joins have implementation evidence
+in that PR. The separate phase-count probe in
+[PR #7362](https://github.com/commontoolsinc/labs/pull/7362) validates membership
+edits and lookup retargeting across increasing sizes. Its publication gates
+remain pending too.
 
 ## Key domain and equality
 
@@ -50,6 +57,29 @@ returns undefined. A lookup with a missing key has the corresponding absent
 result. An invalid lookup key produces the same diagnostic as an invalid
 extracted key.
 
+## Tagged enumeration acceptance
+
+Q7 is resolved: provide an explicit tagged enumeration API for mixed keys,
+with `{ kind: "value", value: primitiveKey }` and
+`{ kind: "cell", cell: cellKey }` entries. Preserve homogeneous `keys()` usage.
+The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
+records the context, consequences, and alternatives. Tagged enumeration and its
+focused acceptance tests are implemented. Publication gates remain separate
+from the checked implementation items below.
+
+- [x] Approve explicit tagged enumeration and record the decision.
+- [x] Add the public tagged type, enumeration method, and compiler/runtime wiring.
+- [x] Verify compiled consumers preserve primitive values and Cell identities,
+      including equal contents, distinct Cells, and lookup round trips.
+- [x] Verify cross-space references, removal/reinsertion, cold resume, and
+      demand-only enumeration without broadening lookup dependencies.
+- [x] Update current API documentation and demonstrations.
+- [ ] Complete publication gates: final integration tests, current-head CI,
+      antagonistic review, and Cubic review.
+
+General runtime union materialization changes are outside this implementation.
+
+
 Group enumeration contains occupied keys only and has deterministic typed-key
 order: booleans, numbers, strings, then Cell addresses. Within a domain use
 boolean order, numeric order, UTF-8 string order, or UTF-8 canonical address
@@ -69,7 +99,8 @@ reactive value containing a group or an optional original element. A Cell passed
 as the key always denotes its identity; callers use an explicit value read when
 its stored primitive should be the key. This keeps Cell identity unambiguous
 when an index accepts both primitive and Cell keys. A separate
-`keys()` operation observes occupied-key membership. Each lookup subscribes to
+`keys()` operation observes homogeneous occupied keys; `keyEntries()` exposes
+explicit tags for mixed primitive/Cell keys. Each lookup subscribes to
 one key's bucket and the lookup key's resolution path; it must not subscribe to
 index enumeration.
 
@@ -78,7 +109,7 @@ addressed buckets and occupied keys. Compiled lookup delegates to the descriptor
 Cell and returns an ordinary reactive value. Its acceptance tests cover
 primitive/Cell key separation, link retargeting, unrelated-bucket isolation,
 missing-key insertion, linked row contents, and durable lookup resume. Index
-construction, per-element extraction, and bucket ownership remain pending.
+construction uses owned per-occurrence extraction and bucket maintenance.
 
 The first join is a left lookup join against a `keyBy` index: one output per
 left occurrence, with its original left element and an optional right element.
@@ -100,6 +131,22 @@ use ordinary reactive child runs and transaction rollback. Follow
 independent readers, teardown, and reload. Reusing a key after removal should
 address the same deterministic bucket; retired children must not leak merely
 because another key remains populated.
+
+Per-element maintenance must remain demanded when only an unrelated or absent
+bucket is observed. Ordinary child ownership establishes lifetime, not demand:
+a selector currently assigned to B must still run when its key changes to A and
+only A has a reader. Use the scheduler's existing materializer write envelopes
+for owned maintenance children, with selector outputs as their reactive inputs.
+Do not make lookup read every selector or occupied-key enumeration to establish
+that demand.
+
+Materializer envelopes must cover possible destination buckets before a key
+changes, while each transaction writes only affected buckets. Broad envelopes
+may introduce O(N) scheduler ordering edges per lookup; measure that topology
+cost separately from callback and consumer run counts. Teardown releases the
+maintenance registrations. Acceptance includes B-to-A movement with only A
+observed, insertion into an initially absent watched bucket, rejected maintenance,
+and cold resume.
 
 The implementation must distinguish these costs:
 
@@ -124,18 +171,29 @@ groups.
 
 - [x] Prototype the typed index handle and its transformer/schema boundary. Keep
       key lookup separate from ordinary object-property `Cell.key`.
-- [ ] Implement shared key resolution and per-element extraction, reusing
+- [x] Implement shared key resolution and per-element extraction, reusing
       runtime identity and ownership machinery.
-- [ ] Implement `groupBy`, unique-key selection, and per-key lookup.
-- [ ] Test primitive domains, missing/invalid keys, duplicate occurrences,
+- [x] Implement `groupBy`, unique-key selection, and per-key lookup.
+- [x] Test primitive domains, missing/invalid keys, duplicate occurrences,
       source reorder, key edits, link-only retargeting, and cross-space keys.
-- [ ] Test absent lookup before insertion, last-member removal, reinsertion,
+      Verified in #7323 by the collection-index key, producer, and tagged-entry
+      runner tests.
+- [x] Test absent lookup before insertion, last-member removal, reinsertion,
       rejected transactions, teardown, cold resume, and independent readers.
-- [ ] Count callback and consumer runs. A change to key A must leave a key B
+      Verified in #7323 by the builtin, serving, resume-sync, and lookup tests.
+- [x] Count callback and consumer runs. A change to key A must leave a key B
       lookup's run count unchanged when its declared dependencies are unchanged.
-- [ ] Implement the left lookup join; cover both-side updates and unmatched
-      rows.
-- [ ] Benchmark initialization, membership reconciliation, one linked-row edit,
-      lookup, and skewed duplicates independently at increasing sizes.
-- [ ] Publish contracts, measured limits, and a synthetic roster/tally demo.
+      The collection-index invalidation tests in #7323 assert both the idle
+      unrelated consumer and its later response to a matching change.
+- [x] Implement the left lookup join; cover both-side updates and unmatched
+      rows. The local/cross-space join tests in #7323 also cover restart.
+- [x] Benchmark initialization, membership reconciliation, one linked-row edit,
+      lookup, and skewed duplicates as separate phases at increasing sizes.
+      PR #7362 completes 12 cases and 96 phases with output assertions and a
+      failing negative control. Phases share an evolving fixture per case;
+      counts cover completed action bodies, not all runtime work.
+- [x] Implement contracts, measured limits, and a synthetic roster/tally demo.
+      The feature documentation and local dashboard expose the operator
+      contracts, join behavior, and measurements; PRs #7323 and #7362 carry
+      repository publication through the separate gates above.
       Live poll migration remains subject to coordination with Mike.

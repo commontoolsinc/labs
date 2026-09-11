@@ -259,9 +259,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   /**
    * Install a store read-through for SPACE's replica: from then on a
    * document the replica does not hold is read synchronously from the
-   * store on first access, and a `sync()` against the space resolves
-   * from the store without registering a watch. Optional: only a manager
-   * co-hosted with the store can serve one.
+   * store on first access, a `sync()` of one resolves from the store
+   * without registering a watch, and a `sync()` of a held document is
+   * answered from the replica — `integrateStoreWrites` is what moves a
+   * held record. Optional: only a manager co-hosted with the store can
+   * serve one.
    */
   installStoreReadThrough?(space: MemorySpace, read: StoreReadThrough): void;
 
