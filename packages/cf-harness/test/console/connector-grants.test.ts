@@ -443,6 +443,32 @@ describe("connector-grants", () => {
       expect(result.unnamed).toEqual([]);
     });
 
+    it("reports a space-carrying reference when the receipt names no space", () => {
+      // With nothing to check the claim against there is no reading on which
+      // granting it is safe, so the guard fails closed rather than switching
+      // itself off. A receipt written without a `space` is the case.
+
+      const spaceless = JSON.stringify({
+        schema_version: 1,
+        handles: [
+          handle(
+            "cf-gmail-messages--gmail-work",
+            "gmail-work",
+            `/@${OWNER}${MAIL_REF}`,
+          ),
+          handle("cf-plaid-transactions--plaid-sim", "plaid-sim", BANK_REF),
+        ],
+      });
+      const result = resolveConnectorGrants(
+        records({ handlesJson: spaceless }),
+      );
+
+      expect(result.grants.map((grant) => grant.name)).toEqual(["finance"]);
+      expect(result.unnamed[0]?.reason).toContain(
+        "names no space to check it against",
+      );
+    });
+
     it("reports a handle the receipt records no reference for", () => {
       const result = resolveConnectorGrants(records({
         handlesJson: handlesJson([{
