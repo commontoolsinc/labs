@@ -21,6 +21,7 @@ describe("NopValueVisitor", () => {
     expect(vis.visitValue(1)).toBeUndefined();
     expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
     expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
+    expect(vis.visitedFabricInstance(instance, {})).toBeUndefined();
     expect(vis.visitedFabricPlainObjectEntry({}, "k", 1)).toBeUndefined();
   });
 

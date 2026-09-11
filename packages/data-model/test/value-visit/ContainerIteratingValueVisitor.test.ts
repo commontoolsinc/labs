@@ -5,9 +5,7 @@ import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import {
   ContainerIteratingValueVisitor,
   type DispatchingVisitorResult,
-  DO_RECURSE_KEYS_VALUES,
   DO_RECURSE_VALUES,
-  DO_VISIT_SUBTYPE,
   type LeafVisitorResult,
 } from "@/value-visit";
 
@@ -32,8 +30,10 @@ describe("ContainerIteratingValueVisitor", () => {
 
   describe("instance members", () => {
     describe("visitFabricContainer()", () => {
-      it("returns `DO_VISIT_SUBTYPE`", () => {
-        expect(new Iterating().visitFabricContainer([])).toBe(DO_VISIT_SUBTYPE);
+      it("returns `DO_RECURSE_VALUES`, without subtype dispatch", () => {
+        expect(new Iterating().visitFabricContainer([])).toBe(
+          DO_RECURSE_VALUES,
+        );
       });
     });
 
@@ -52,11 +52,11 @@ describe("ContainerIteratingValueVisitor", () => {
     });
 
     describe("visitFabricInstance()", () => {
-      it("returns `DO_RECURSE_KEYS_VALUES`", () => {
+      it("returns `DO_RECURSE_VALUES`", () => {
         const instance = new FabricMap(new Map());
 
         expect(new Iterating().visitFabricInstance(instance)).toBe(
-          DO_RECURSE_KEYS_VALUES,
+          DO_RECURSE_VALUES,
         );
       });
     });
@@ -67,6 +67,8 @@ describe("ContainerIteratingValueVisitor", () => {
 
         expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
         expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
+        expect(vis.visitedFabricInstance(new FabricMap(new Map()), {}))
+          .toBeUndefined();
         expect(vis.visitedFabricPlainObjectEntry({}, "k", 1)).toBeUndefined();
       });
     });

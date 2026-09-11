@@ -66,6 +66,10 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
     value: unknown,
   ) => BaselineVisitResult<unknown>;
   onVisitedGap?: (start: number, count: number) => BaselineVisitResult<unknown>;
+  onVisitedInstance?: (
+    instance: FabricInstance,
+    state: unknown,
+  ) => BaselineVisitResult<unknown>;
   onVisitedMapping?: (
     key: unknown,
     value: unknown,
@@ -126,11 +130,10 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
   override visitFabricInstance(
     value: FabricInstance,
   ): LeafVisitorResult<unknown, unknown> {
-    // Unlike the other container hooks, this one does not defer to the
-    // superclass by default: the engine cannot yet iterate an instance, so
-    // the default here is to stop.
     this.events.push(["instance", value]);
-    return this.onInstance ? this.onInstance(value) : undefined;
+    return this.onInstance
+      ? this.onInstance(value)
+      : super.visitFabricInstance(value);
   }
 
   override visitPrimitive(
@@ -166,6 +169,16 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
   ): BaselineVisitResult<unknown> {
     this.events.push(["visitedGap", array, start, count]);
     return this.onVisitedGap ? this.onVisitedGap(start, count) : undefined;
+  }
+
+  override visitedFabricInstance(
+    instance: FabricInstance,
+    state: unknown,
+  ): BaselineVisitResult<unknown> {
+    this.events.push(["visitedInstance", instance, state]);
+    return this.onVisitedInstance
+      ? this.onVisitedInstance(instance, state)
+      : undefined;
   }
 
   override visitedFabricPlainObjectEntry(

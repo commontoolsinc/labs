@@ -185,10 +185,16 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           }
 
           default: {
+            // deno-coverage-ignore-start
+
+            // This is a defense-in-depth protection against bugs in this
+            // submodule: `containerTag` is typed as exactly the three cases
+            // above, so nothing else can reach here.
             throw new Error(
               `Shouldn't happen: Got unrecognized \`containerTag\`: \`${result.containerTag}\``,
             );
           }
+            // deno-coverage-ignore-stop
         }
       }
 
