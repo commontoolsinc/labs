@@ -29,8 +29,6 @@ import {
   agentOwnerSchema,
   agentPrincipalSchema,
   cellHasOwnerProtection,
-} from "../src/fabric-graph.ts";
-import {
   pushStableCellGraph,
   readStableCellGraphValue,
 } from "../src/fabric-graph.ts";
