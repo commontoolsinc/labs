@@ -1485,8 +1485,11 @@ export interface IDerivable<T> {
   /** Counts a per-element predicate pattern's truthy results. */
   countWithPattern(
     this: AnyBrandedCell<unknown[]>,
-    op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
-    params: Record<string, any>,
+    op: PatternFactory<{
+      element: T extends Array<infer U> ? U : T;
+      index: number;
+      array: T;
+    }, boolean>,
   ): Reactive<number>;
   /** Sums numeric members exactly and rounds once to binary64. Empty input returns positive zero. */
   sum(this: AnyBrandedCell<number[]>): Reactive<number>;
@@ -1506,8 +1509,11 @@ export interface IDerivable<T> {
   /** Selects an element using a per-element score pattern. */
   minByWithPattern(
     this: AnyBrandedCell<unknown[]>,
-    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
-    params: Record<string, any>,
+    op: PatternFactory<{
+      element: T extends Array<infer U> ? U : T;
+      index: number;
+      array: T;
+    }, number>,
   ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
   /** Selects an element by numeric score, breaking ties by stable identity. Empty input returns undefined. */
   maxBy(
@@ -1521,8 +1527,11 @@ export interface IDerivable<T> {
   /** Selects an element using a per-element score pattern. */
   maxByWithPattern(
     this: AnyBrandedCell<unknown[]>,
-    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
-    params: Record<string, any>,
+    op: PatternFactory<{
+      element: T extends Array<infer U> ? U : T;
+      index: number;
+      array: T;
+    }, number>,
   ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
   reduce<S>(
     this: IsThisObject,

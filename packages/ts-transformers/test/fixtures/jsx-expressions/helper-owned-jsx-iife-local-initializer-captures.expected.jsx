@@ -95,7 +95,19 @@ const __cfLift_2 = __cfHelpers.lift<{
         tree: {
             type: "array",
             items: {
-                $ref: "#/$defs/Entry"
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    type: {
+                        "enum": ["file", "folder"]
+                    },
+                    children: {
+                        $ref: "#/$defs/AnonymousType_1"
+                    }
+                },
+                required: ["name", "type"]
             },
             asCell: ["readonly"]
         },
@@ -108,6 +120,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["tree", "p"],
     $defs: {
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
+        },
         Entry: {
             type: "object",
             properties: {
@@ -121,10 +139,7 @@ const __cfLift_2 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    }
+                    $ref: "#/$defs/AnonymousType_1"
                 }
             },
             required: ["id", "name", "type"]
@@ -149,13 +164,16 @@ const __cfLift_2 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    }
+                    $ref: "#/$defs/AnonymousType_1"
                 }
             },
             required: ["id", "name", "type"]
+        },
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
@@ -186,13 +204,16 @@ const __cfLift_3 = __cfHelpers.lift<{
                     "enum": ["file", "folder"]
                 },
                 children: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    }
+                    $ref: "#/$defs/AnonymousType_1"
                 }
             },
             required: ["id", "name", "type"]
+        },
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {

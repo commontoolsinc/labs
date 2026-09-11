@@ -75,7 +75,7 @@ const __cfHandler_1 = __cfHelpers.handler({
         entries: {
             type: "array",
             items: {
-                type: "unknown"
+                type: "string"
             },
             "default": [],
             asCell: ["cell"]
