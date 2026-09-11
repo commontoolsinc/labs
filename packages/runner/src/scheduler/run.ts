@@ -30,6 +30,7 @@ import {
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
 import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
+import { tempTrace } from "../temp-trace.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   getSchedulerActionName,
@@ -497,6 +498,14 @@ export async function runSchedulerAction(
   if (runningPromise) await runningPromise;
 
   const record = state.nodes.get(action);
+  // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+  if (typeof Deno !== "undefined") {
+    tempTrace(
+      `TEMP-RUN ${actionId} status=${record?.status} fanOut=${
+        record?.fanOut !== undefined
+      } serving=${state.runtime.servingPosture}`,
+    );
+  }
   const invalidCauses = record ? takeInvalidCauses(record) : undefined;
   if (record) {
     state.nodes.setStatus(action, "clean");

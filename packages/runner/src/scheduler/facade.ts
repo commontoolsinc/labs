@@ -1118,9 +1118,6 @@ export class Scheduler {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut === undefined) {
-        if (record.status === "never-ran") continue;
-      } else if (!record.fanOut.narrowed) continue;
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??
@@ -1129,6 +1126,23 @@ export class Scheduler {
           : undefined);
       if (demandRootIds === undefined) continue;
       if (!demandRootIds.some((id) => roots.has(id))) continue;
+      // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+      if (typeof Deno !== "undefined") {
+        tempTrace(
+          `TEMP-REARM ${
+            this.#getActionId(record.action)
+          } status=${record.status} fanOut=${
+            record.fanOut !== undefined
+          } narrowed=${record.fanOut?.narrowed} rearm=${
+            record.fanOut === undefined
+              ? record.status !== "never-ran"
+              : record.fanOut.narrowed
+          }`,
+        );
+      }
+      if (record.fanOut === undefined) {
+        if (record.status === "never-ran") continue;
+      } else if (!record.fanOut.narrowed) continue;
       this.#markActionInvalid(record.action, undefined, {
         fanOutInstances: "keep",
       });
