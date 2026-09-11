@@ -1973,6 +1973,12 @@ const isMetaSeamPath = (
  * id derived from its parent's, which no author named either, and it is
  * measured. Adding a class here means arguing that case on its own.
  *
+ * A class is enumerable here only while its ids say which class they are. A
+ * document at a plain `of:fid1:<hash>` id looks like every other document, so
+ * a third class of that shape is named by the runtime as it writes it instead
+ * — `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE`, which the compilation
+ * cache records for its own documents.
+ *
  * The entries document's half is a prefix inside the `of:` scheme rather than
  * a scheme of its own, so the id shape alone does not say who wrote it. Two
  * gates compose over one instead: this one skips the ceiling, and the memory
@@ -1988,12 +1994,14 @@ const isUndeclarableIdClass = (id: string): boolean =>
  * Whether a schema could have declared a store policy for a write at `path`
  * on `id` — the surfaces the §8.12.4 writer-fit measurement quantifies over.
  *
- * Two things are outside it. The raw meta seam is one, per {@link
+ * Three things are outside it. The raw meta seam is one, per {@link
  * isMetaSeamPath}: no value schema describes the document-root siblings of
- * `value`. The two id classes of {@link isUndeclarableIdClass} are the other.
- * A pattern declares policy on the data it names, and it names none of them.
+ * `value`. The two id classes of {@link isUndeclarableIdClass} are the second.
+ * The third is `markedUndeclarable`, a document the runtime named as it wrote
+ * it, for a class whose ids carry no shape of their own. A pattern declares
+ * policy on the data it names, and it names none of the three.
  *
- * Both stay flow stamp targets: the join lands on them as the `derived`
+ * All three stay flow stamp targets: the join lands on them as the `derived`
  * component, so a later read of one is tainted and a later egress of one is
  * gated on that label. The residency clause is part of the ceiling this
  * skips, so a derivation's result may land in a space whose name none of the
@@ -2004,10 +2012,11 @@ const isUndeclarableIdClass = (id: string): boolean =>
 const isDeclarablePolicyPath = (
   id: string,
   joinIsLocal: boolean,
+  markedUndeclarable: boolean,
   metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
   path: readonly string[],
 ): boolean =>
-  (!isUndeclarableIdClass(id) || !joinIsLocal) &&
+  ((!isUndeclarableIdClass(id) && !markedUndeclarable) || !joinIsLocal) &&
   !isMetaSeamPath(metaOnlyByPath, path);
 
 // S16 flow labels (default transition): one conservative confidentiality join
@@ -7305,10 +7314,11 @@ export const prepareBoundaryCommit = (
         }
       }
       // Writer-fit measures the surfaces a schema could have declared a
-      // policy at, which leaves out the raw meta seam and two id classes
-      // alike (`isDeclarablePolicyPath`). The measurement is skipped on both
-      // at every rung, so neither raises a strict reject nor a
-      // persist-and-flag diagnostic.
+      // policy at, which leaves out the raw meta seam, two id classes, and a
+      // document the runtime marked as undeclarable alike
+      // (`isDeclarablePolicyPath`). The measurement is skipped on all three at
+      // every rung, so none raises a strict reject nor a persist-and-flag
+      // diagnostic.
       //
       // A ceiling can still resolve at a meta path, from a document-root
       // declared entry by longest prefix. The skip is unconditional anyway:
@@ -7322,10 +7332,20 @@ export const prepareBoundaryCommit = (
       // what that field declares — over-taint, which leaves the declared
       // entry untouched and reads protected.
       if (flowConfidentiality.length > 0) {
+        // The third arm of the declarability question, asked per target the
+        // way the id classes are: whether the runtime named this document as
+        // one no schema declares a policy on. Marked as the write was made,
+        // on this transaction, which is the only one that measures it.
+        const markedUndeclarable = tx.isUndeclarablePolicyStore(
+          target.space,
+          id,
+          runtimeWritePolicyAuthorization,
+        );
         const measuredPaths = derivedStampPaths.filter((path) =>
           isDeclarablePolicyPath(
             id,
             flowJoinIsLocal,
+            markedUndeclarable,
             flowTarget?.metaOnlyByPath,
             path,
           )
