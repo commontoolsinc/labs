@@ -100,7 +100,14 @@ export default pattern(() => {
   });
   const attached = new Writable<Attachment[] | Default<[]>>([]);
   const commands = new Writable<CommandValue[] | Default<[]>>([]);
-  const wb = Workbench({ topic, sessions: index, attached, commands });
+  const wb = Workbench({
+    topic,
+    sessions: index,
+    attached,
+    commands,
+    startMode: "acceptEdits",
+    harnessesShown: [{ id: "gemini", driver: "acp" }],
+  });
 
   const assert_header = assert(() =>
     wb[NAME] === "Workbench: Workbench topic" &&
@@ -192,7 +199,17 @@ export default pattern(() => {
     firstCommand(commands.get())?.payload?.cwd === "/w/labs" &&
     firstCommand(commands.get())?.payload?.title ===
       "topic #7: Workbench topic" &&
-    firstCommand(commands.get())?.payload?.text === wb.kickoff
+    firstCommand(commands.get())?.payload?.text === wb.kickoff &&
+    firstCommand(commands.get())?.payload?.mode === "acceptEdits"
+  );
+  // The shown-but-unconfigured harness is offered and starts nothing.
+  const action_start_shown = action(() => {
+    wb.spawnSource.set("gemini");
+    wb.startSession.send();
+  });
+  const assert_shown_is_inert = assert(() =>
+    commands.get().length === 1 &&
+    wb.attachedSessions.length === 2
   );
   const assert_start_attached = assert(() =>
     wb.attachedSessions.length === 2 &&
@@ -222,6 +239,8 @@ export default pattern(() => {
       { action: action_start },
       { assertion: assert_start_command },
       { assertion: assert_start_attached },
+      { action: action_start_shown },
+      { assertion: assert_shown_is_inert },
     ],
   };
 });

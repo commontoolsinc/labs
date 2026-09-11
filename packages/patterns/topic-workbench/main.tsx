@@ -88,6 +88,12 @@ export interface SourceEntry {
   driver: string;
 }
 
+/** A harness shown in the picker that no configured source backs. */
+export interface ShownHarness {
+  id: string;
+  driver: string;
+}
+
 /** A JSON-encoded connector command, as the connector's queues hold them. */
 export type CommandValue = string;
 
@@ -171,6 +177,17 @@ export interface WorkbenchInput {
    * the host has linked it; a start sent before then reaches nothing.
    */
   commands?: Writable<CommandValue[] | Default<[]>>;
+  /**
+   * The permission mode a started session's first turn runs under, one the
+   * driver advertises. Empty leaves the driver's default, which cannot pass a
+   * tool or network approval headlessly.
+   */
+  startMode?: string | Default<"">;
+  /**
+   * Harnesses to list in the picker beside the connector's sources, for a
+   * machine that shows a harness it does not run. Picking one starts nothing.
+   */
+  harnessesShown?: ShownHarness[] | Default<[]>;
 }
 
 export interface WorkbenchOutput {
@@ -310,11 +327,15 @@ const presentLinksOf = lift((
   )
 );
 
-/** The connector's sources, as picker options; Claude sources first. */
+/** The connector's sources, as picker options; Claude sources first, then
+ * the harnesses the piece is told to show without a source behind them. */
 export const sourceOptionsOf = lift((
-  { index }: { index?: SessionIndexView },
-): CheckoutOption[] =>
-  (index?.sources ?? [])
+  { index, shown }: {
+    index?: SessionIndexView;
+    shown?: ShownHarness[] | Default<[]>;
+  },
+): CheckoutOption[] => {
+  const configured = (index?.sources ?? [])
     .flatMap((source) =>
       source?.id
         ? [{ label: `${source.id}  (${source.driver})`, value: source.id }]
@@ -323,8 +344,24 @@ export const sourceOptionsOf = lift((
     .toSorted((a, b) =>
       (a.label.includes("claude-agent-sdk") ? 0 : 1) -
       (b.label.includes("claude-agent-sdk") ? 0 : 1)
-    )
-);
+    );
+  const known = new Set(configured.map((option) => option.value));
+  const extra = (shown ?? [])
+    .filter((harness) => harness.id && !known.has(harness.id))
+    .map((harness) => ({
+      label: `${harness.id}  (${harness.driver}, not on this Mac)`,
+      value: harness.id,
+    }));
+  return [...configured, ...extra];
+});
+
+/** Whether a picked source is one the connector runs. */
+export const sourceIsConfigured = (
+  index: SessionIndexView | undefined,
+  sourceId: string,
+): boolean =>
+  (index?.sessions !== undefined) &&
+  (index.sources ?? []).some((source) => source?.id === sourceId);
 
 /** Checkouts the connector discovered, as picker options. */
 export const checkoutOptionsOf = lift((
@@ -473,14 +510,19 @@ export const startSessionCommand = handler<void, {
   spawnRoot: Writable<string>;
   spawnSource: Writable<string>;
   sourceOptions: CheckoutOption[];
+  configuredSources: string[];
   kickoff: string;
   ownerDid: string;
   shortName: string;
   title: string;
+  startMode: string;
 }>((_, state) => {
   const sourceId = (state.spawnSource.get() || state.sourceOptions[0]?.value ||
     "").trim();
   if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
+  // A harness shown for display has no source to run it; starting is a no-op.
+  if (!state.configuredSources.includes(sourceId)) return;
+  const mode = state.startMode.trim();
   const nativeSessionId = mintSessionId();
   const createdAt = new Date().toISOString();
   const sessionTitle = state.shortName
@@ -499,6 +541,7 @@ export const startSessionCommand = handler<void, {
       text: state.kickoff,
       ...(cwd ? { cwd } : {}),
       ...(sessionTitle ? { title: sessionTitle } : {}),
+      ...(mode ? { mode } : {}),
     },
   }));
   // Attached now, so the session shows as starting before the index carries
@@ -511,8 +554,15 @@ export const startSessionCommand = handler<void, {
 
 // ===== The pattern =====
 
+/** The ids of the sources the connector runs, for the start's own check. */
+const configuredSourcesOf = lift((
+  { index }: { index?: SessionIndexView },
+): string[] =>
+  (index?.sources ?? []).flatMap((source) => source?.id ? [source.id] : [])
+);
+
 export default pattern<WorkbenchInput, WorkbenchOutput>(
-  ({ topic, sessions, attached, commands }) => {
+  ({ topic, sessions, attached, commands, startMode, harnessesShown }) => {
     const spawnPrompt = new Writable.perSession("");
     const spawnRoot = new Writable.perSession("");
     const spawnSource = new Writable.perSession("");
@@ -531,8 +581,13 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const recentSessions = recentRowsOf({ rows, limit: 8 });
     const links = presentLinksOf({ links: topic?.links });
     const checkoutOptions = checkoutOptionsOf({ index: sessions });
-    const sourceOptions = sourceOptionsOf({ index: sessions });
+    const sourceOptions = sourceOptionsOf({
+      index: sessions,
+      shown: harnessesShown,
+    });
+    const configuredSources = configuredSourcesOf({ index: sessions });
     const ownerDid = sessions?.ownerDid ?? "";
+    const mode = startMode ?? "";
     const defaultPrompt = defaultPromptOf({ shortName, title });
     const kickoff = kickoffOf({
       prompt: spawnPrompt,
@@ -549,10 +604,12 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       spawnRoot,
       spawnSource,
       sourceOptions,
+      configuredSources,
       kickoff,
       ownerDid,
       shortName,
       title,
+      startMode: mode,
     });
 
     const hasAttached = attachedSessions.length > 0;
