@@ -7,10 +7,10 @@ import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
   DO_VISIT_SUBTYPE,
-  EmptyValueVisitor,
   type LeafVisitorResult,
   makeVisitFabricValueFunction,
   makeVisitValueFunction,
+  NopValueVisitor,
   type ValueVisitor,
   visitFabricValue,
   visitValue,
@@ -41,7 +41,7 @@ describe("value-visit/impl", () => {
     });
 
     it("returns a `mainResult` typed by the visitor's `ResultType`", () => {
-      class FirstNumber extends EmptyValueVisitor<never, number> {
+      class FirstNumber extends NopValueVisitor<never, number> {
         override visitValue(): DispatchingVisitorResult<never, number> {
           return DO_VISIT_SUBTYPE;
         }
@@ -76,7 +76,7 @@ describe("value-visit/impl", () => {
       // half is that the engine, told by `isDomainExtra()` that the value is
       // outside the domain, throws rather than handing it to the non-fabric
       // hook, whose parameter type is `never`.
-      class Strict extends EmptyValueVisitor<never, number> {
+      class Strict extends NopValueVisitor<never, number> {
         override visitValue(): DispatchingVisitorResult<never, number> {
           return DO_VISIT_SUBTYPE;
         }
@@ -105,7 +105,7 @@ describe("value-visit/impl", () => {
     });
 
     it("returns a `mainResult` typed by the visitor's `ResultType`", () => {
-      class FirstPrimitive extends EmptyValueVisitor<never, string> {
+      class FirstPrimitive extends NopValueVisitor<never, string> {
         override visitValue(): DispatchingVisitorResult<never, string> {
           return DO_VISIT_SUBTYPE;
         }

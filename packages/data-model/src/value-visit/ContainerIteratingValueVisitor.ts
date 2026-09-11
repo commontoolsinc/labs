@@ -29,7 +29,7 @@ import {
  * methods per the above description, and also implements no-op (empty)
  * `visited*()` methods. Every other method of the interface remains `abstract`.
  */
-export abstract class ContainerIteratingVisitor<
+export abstract class ContainerIteratingValueVisitor<
   DomainExtra = never,
   ResultType = FabricValue,
 > extends BaseValueVisitor<DomainExtra, ResultType> {

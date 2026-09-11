@@ -25,7 +25,7 @@ import {
  * `DomainExtra`). This is meant to be a reasonable base implementation for more
  * useful visitors, not to be particularly useful by itself.
  */
-export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
+export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   extends BaseValueVisitor<DomainExtra, ResultType> {
   /** @inheritDoc */
   isDomainExtra(_value: DomainFor<DomainExtra>): _value is DomainExtra {

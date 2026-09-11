@@ -2,15 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
-import {
-  type DispatchingVisitorResult,
-  EmptyValueVisitor,
-} from "@/value-visit";
+import { type DispatchingVisitorResult, NopValueVisitor } from "@/value-visit";
 import { VisitInProgress } from "@/value-visit/VisitInProgress.ts";
 
-describe("EmptyValueVisitor", () => {
+describe("NopValueVisitor", () => {
   it("returns `undefined` from every visitor method, and `false` from `isDomainExtra()`", () => {
-    const vis = new EmptyValueVisitor<unknown, unknown>();
+    const vis = new NopValueVisitor<unknown, unknown>();
     const instance = new FabricMap(new Map());
 
     expect(vis.isDomainExtra(new Date(0))).toBe(false);
@@ -28,7 +25,7 @@ describe("EmptyValueVisitor", () => {
   });
 
   it("completes a visit of a nested value without descending", () => {
-    class Counting extends EmptyValueVisitor<never, number> {
+    class Counting extends NopValueVisitor<never, number> {
       calls = 0;
       override visitValue(): DispatchingVisitorResult<never, number> {
         this.calls++;
