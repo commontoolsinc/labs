@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Index maintenance phase counts](development/performance/2026-09-11-index-maintenance-phases.md) — completed action-body counts for both index types across membership edits, key edits and lookup retargeting at three sizes.
+
 - [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
 - [Lazy scalar read width](development/performance/2026-09-11-lazy-scalar-read-width.md) — D2 eager/lazy one-scalar and all-row baseline at 74, 296, and 1,184 inline rows, with journal counts and timing limits.
 
