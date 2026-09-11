@@ -728,6 +728,8 @@ describe("engine-read-through", () => {
       },
     });
     try {
+      // A read on access under such a scope is not served either.
+      expect(replica.getDocument("of:by-name" as URI, "user")).toBeUndefined();
       expect((await replica.sync("of:by-name" as URI, undefined, "user")).ok)
         .toBeDefined();
       expect(reads).toEqual([]);
