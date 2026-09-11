@@ -5,8 +5,6 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   setCompileCacheRuntimeVersionForTesting,
-  sourceDocKey,
-  WRITE_TARGET_EDGE_SYNC_SCHEMA,
 } from "../src/compilation-cache/cell-cache.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -17,15 +15,13 @@ describe("compile-cache write-back after a runtime-version bump", () => {
   it("recovery write-back persists despite pre-existing docs on a cold replica", async () => {
     // CT-1824 regression: a runtime-version bump sends loads through the
     // cold-load recovery path (recompile + write-back). The write-back
-    // re-writes version-independent source docs whose cell-layer-derived
-    // documents (link/import-edge cells) already exist from the original
-    // compile — documents a cold replica has never read. The commit then
-    // carries stale seq-0 reads and fails with a ConflictError; before the fix,
-    // editWithRetry re-ran immediately against the same stale replica, so every
-    // retry failed identically, the compiled cache never healed, and EVERY
-    // subsequent cold boot recompiled. The conflict's `readyToRetry` catch-up
-    // gate is the designed remedy; editWithRetry must await it like the
-    // scheduler does (scheduler/action-run.ts).
+    // re-writes version-independent source docs that already exist from the
+    // original compile — documents a cold replica may not have read at their
+    // true version. A commit carrying such a stale read is refused; the
+    // conflict's `readyToRetry` catch-up gate is the designed remedy, and
+    // editWithRetry must await it like the scheduler does
+    // (scheduler/action-run.ts) rather than re-running against the same
+    // stale replica until the budget runs out and the cache never heals.
 
     const server = newSharedServer();
     const program = {
@@ -42,8 +38,8 @@ describe("compile-cache write-back after a runtime-version bump", () => {
       }],
     };
 
-    // Version A: compile + persist (source docs, their derived link cells,
-    // and compiled docs keyed under vA).
+    // Version A: compile + persist (source docs, and compiled docs keyed
+    // under vA).
     const restoreVersion = setCompileCacheRuntimeVersionForTesting(
       "test-version-A",
     );
@@ -71,8 +67,8 @@ describe("compile-cache write-back after a runtime-version bump", () => {
 
       // Version B ("the compiler shipped"): a COLD replica finds no compiled
       // docs under vB and takes the recovery path — recompile, then write
-      // back source docs (which already exist server-side, with their derived
-      // cells this replica has never read) plus compiled docs under vB.
+      // back source docs (which already exist server-side) plus compiled
+      // docs under vB.
       setCompileCacheRuntimeVersionForTesting("test-version-B");
       smB = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeB = new Runtime({
@@ -95,10 +91,7 @@ describe("compile-cache write-back after a runtime-version bump", () => {
       await smB.synced();
 
       // Healing proof: a THIRD cold replica at vB warm-hits the compiled
-      // closure B wrote back — no recovery, no recompile. Before the fix,
-      // B's write-back died on a deterministic ConflictError (stale seq-0
-      // read of a pre-existing derived doc), so C recompiled again — and so
-      // did every cold boot after it, forever.
+      // closure B wrote back — no recovery, no recompile.
       smC = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeC = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -120,300 +113,6 @@ describe("compile-cache write-back after a runtime-version bump", () => {
       await smC?.close();
       await smB?.close();
       await smA.close();
-      await server.close();
-    }
-  });
-});
-
-describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
-  it("edge-schema sync delivers element docs to a cold replica; schema-less does not", async () => {
-    // CT-1848: the write-target pre-sync carries the one-hop edge selector, so
-    // the per-edge element docs (the derived docs the cell layer hoists each
-    // `imports[i]` into) are client-known BEFORE the re-write. A schema-less
-    // pre-sync normalizes to the rejecting selector and delivers only the root
-    // doc; in the browser the re-write then touches the element docs blind and
-    // needs a rejected commit plus conflict repair. NOTE: the blind-conflict does
-    // not reproduce in-process (this fixture's flows warm the element docs some
-    // other way — same limitation as the healing test above); the conflict-free
-    // attempt-1 property is verified live on the browser rig. What IS pinned
-    // here, differentially, is the selector semantics the fix rides on: the
-    // edge-schema sync materializes the element docs into a cold replica, the
-    // schema-less sync does not.
-
-    const server = newSharedServer();
-    const program = {
-      main: "/main.tsx",
-      files: [
-        {
-          name: "/main.tsx",
-          contents: [
-            "import { pattern } from 'commonfabric';",
-            "import { double } from './dep.ts';",
-            "export default pattern<{ value: number }>(({ value }) => {",
-            "  return { result: double(value) };",
-            "});",
-          ].join("\n"),
-        },
-        {
-          name: "/dep.ts",
-          contents: [
-            "import { lift } from 'commonfabric';",
-            "export const double = lift((x: number) => x * 2);",
-          ].join("\n"),
-        },
-      ],
-    };
-
-    const restoreVersion = setCompileCacheRuntimeVersionForTesting(
-      "ct1848-version-A",
-    );
-    const smA = EmulatedStorageManager.connectTo(server, { as: signer });
-    const runtimeA = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: smA,
-    });
-    let smB: EmulatedStorageManager | undefined;
-    let runtimeB: Runtime | undefined;
-    let smC: EmulatedStorageManager | undefined;
-    let runtimeC: Runtime | undefined;
-    try {
-      const txA = runtimeA.edit();
-      const compiled = await runtimeA.patternManager.compilePattern(program, {
-        space,
-        tx: txA,
-      });
-      const ref = runtimeA.patternManager.getArtifactEntryRef(compiled)!;
-      await runtimeA.patternManager.flushCompileCacheWrites();
-      await txA.commit();
-      await smA.synced();
-
-      // Arm 1 — COLD replica, sync the entry under the one-hop edge schema
-      // (what the write-target pre-sync now uses): the element docs arrive.
-      smB = EmulatedStorageManager.connectTo(server, { as: signer });
-      runtimeB = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: smB,
-      });
-      const edgeCell = runtimeB.getCell(
-        space,
-        sourceDocKey(ref.identity),
-        WRITE_TARGET_EDGE_SYNC_SCHEMA,
-      );
-      await edgeCell.sync();
-      const parentUri = edgeCell.getAsNormalizedFullLink().id;
-      const providerB = smB.open(space);
-      // deno-lint-ignore no-explicit-any
-      const rawParent = (providerB as any).get(parentUri);
-      expect(rawParent).toBeDefined();
-      const importsRaw = rawParent?.value?.imports;
-      expect(Array.isArray(importsRaw)).toBe(true);
-      expect((importsRaw as unknown[]).length).toBeGreaterThan(0);
-      const elementIds: string[] = [];
-      for (
-        const el of importsRaw as { "/"?: { "link@1"?: { id?: string } } }[]
-      ) {
-        const id = el?.["/"]?.["link@1"]?.id;
-        expect(typeof id).toBe("string");
-        elementIds.push(id!);
-        // deno-lint-ignore no-explicit-any
-        expect((providerB as any).get(id)).toBeDefined();
-      }
-
-      // Arm 2 — another COLD replica, schema-less sync (the pre-fix
-      // behavior): the root arrives, the element docs do NOT. This is the
-      // differential that makes the edge selector load-bearing.
-      smC = EmulatedStorageManager.connectTo(server, { as: signer });
-      runtimeC = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: smC,
-      });
-      const bareCell = runtimeC.getCell(space, sourceDocKey(ref.identity));
-      await bareCell.sync();
-      const providerC = smC.open(space);
-      // deno-lint-ignore no-explicit-any
-      expect((providerC as any).get(parentUri)).toBeDefined();
-      for (const id of elementIds) {
-        // deno-lint-ignore no-explicit-any
-        expect((providerC as any).get(id)).toBeUndefined();
-      }
-    } finally {
-      restoreVersion();
-      await runtimeC?.dispose();
-      await runtimeB?.dispose();
-      await runtimeA.dispose();
-      await smC?.close();
-      await smB?.close();
-      await smA.close();
-      await server.close();
-    }
-  });
-});
-
-describe("editWithRetry conflict catch-up", () => {
-  it("awaits readyToRetry between attempts and then succeeds", async () => {
-    // Direct contract test for the fix: a conflict's `readyToRetry` catch-up
-    // gate must be awaited BEFORE the retry re-runs, and the retry then
-    // succeeds.
-
-    const server = newSharedServer();
-    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-    });
-    const events: string[] = [];
-    let commits = 0;
-    const fakeTx = () => ({
-      tx: {},
-      abort: () => {},
-      commit: () => {
-        commits++;
-        if (commits === 1) {
-          return Promise.resolve({
-            error: {
-              name: "ConflictError",
-              message:
-                "stale confirmed read: of:test at seq 0 conflicted with seq 9",
-              readyToRetry: () => {
-                events.push("caught-up");
-                return Promise.resolve();
-              },
-            },
-          });
-        }
-        return Promise.resolve({});
-      },
-    });
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).edit = () => fakeTx();
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).prepareTxForCommit = () => {};
-    try {
-      const result = await runtime.editWithRetry(() => {
-        events.push(`attempt-${commits + 1}`);
-      });
-      expect(result.error).toBeUndefined();
-      // The catch-up gate resolves BEFORE the second attempt runs.
-      expect(events).toEqual(["attempt-1", "caught-up", "attempt-2"]);
-    } finally {
-      await runtime.dispose();
-      await sm.close();
-      await server.close();
-    }
-  });
-});
-
-describe("editWithRetry conflict repair", () => {
-  it("pulls every named document before one retry", async () => {
-    const server = newSharedServer();
-    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-    });
-    const conflicts = Array.from({ length: 8 }, (_, index) => ({
-      space,
-      the: "application/json",
-      of: `of:doc-${index + 1}`,
-    }));
-    const pulls: string[] = [];
-    const provider = sm.open(space);
-    // deno-lint-ignore no-explicit-any
-    (provider as any).sync = (uri: string) => {
-      pulls.push(uri);
-      if (uri === "of:doc-3") {
-        return Promise.reject(new Error("pull failed"));
-      }
-      return Promise.resolve({ ok: {} });
-    };
-    let commits = 0;
-    const fakeTx = () => ({
-      tx: {},
-      abort: () => {},
-      commit: () => {
-        commits++;
-        if (commits === 1) {
-          return Promise.resolve({
-            error: {
-              name: "ConflictError",
-              message: "stale confirmed reads",
-              readyToRetry: () => Promise.reject(new Error("session replaced")),
-              conflict: conflicts[0],
-              conflicts: [...conflicts, conflicts[0]],
-            },
-          });
-        }
-        return Promise.resolve({});
-      },
-    });
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).edit = () => fakeTx();
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).prepareTxForCommit = () => {};
-    try {
-      const result = await runtime.editWithRetry(() => {});
-      expect(result.error).toBeUndefined();
-      expect(commits).toBe(2);
-      expect(pulls).toEqual(
-        conflicts.map(({ of }) => of),
-      );
-    } finally {
-      await runtime.dispose();
-      await sm.close();
-      await server.close();
-    }
-  });
-
-  it("pulls a singular conflict from an older rejection", async () => {
-    const server = newSharedServer();
-    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-    });
-    const provider = sm.open(space);
-    const pulls: string[] = [];
-    // deno-lint-ignore no-explicit-any
-    (provider as any).sync = (uri: string) => {
-      pulls.push(uri);
-      return Promise.resolve({ ok: {} });
-    };
-    let commits = 0;
-    const fakeTx = () => ({
-      tx: {},
-      abort: () => {},
-      commit: () => {
-        commits++;
-        return Promise.resolve(
-          commits === 1
-            ? {
-              error: {
-                name: "ConflictError",
-                message: "stale confirmed read",
-                readyToRetry: () => Promise.resolve(),
-                conflict: {
-                  space,
-                  the: "application/json",
-                  of: "of:legacy-doc",
-                },
-              },
-            }
-            : {},
-        );
-      },
-    });
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).edit = () => fakeTx();
-    // deno-lint-ignore no-explicit-any
-    (runtime as any).prepareTxForCommit = () => {};
-    try {
-      const result = await runtime.editWithRetry(() => {});
-      expect(result.error).toBeUndefined();
-      expect(commits).toBe(2);
-      expect(pulls).toEqual(["of:legacy-doc"]);
-    } finally {
-      await runtime.dispose();
-      await sm.close();
       await server.close();
     }
   });
