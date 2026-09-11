@@ -175,7 +175,7 @@ describe("read options, four ways", () => {
     profile: Cell<unknown>,
     selection: CellSelection,
   ): Promise<unknown> {
-    const { pieces } = controllerFor(profile, profileSpace);
+    const { pieces, piece } = controllerFor(profile, profileSpace);
     return await getCellValue(
       {
         apiUrl: "https://example.com",
@@ -188,6 +188,7 @@ describe("read options, four ways", () => {
       {
         // deno-lint-ignore no-explicit-any
         loadPieces: () => Promise.resolve(pieces as any),
+        loadPieceForRead: () => Promise.resolve(piece as never),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );

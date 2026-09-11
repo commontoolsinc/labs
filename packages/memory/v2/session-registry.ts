@@ -1,5 +1,6 @@
 import type {
   OpCursor,
+  OperationWatchSpec,
   SessionDescriptor,
   SessionToken,
   WatchSpec,
@@ -15,6 +16,16 @@ export type SessionState = {
   seenSeq: number;
   lastSyncedSeq: number;
   watches: WatchSpec[];
+
+  /** Watch declarations by id, updated with the array at publication. */
+  watchIndex: Map<string, WatchSpec>;
+
+  /** Scoped dirty keys owned by operation watches. Rebuilt on replacement. */
+  operationTrackedIds: Set<string>;
+
+  /** Operation declarations in accepted list order, for incremental refresh. */
+  operationWatches: OperationWatchSpec[];
+
   operationCursors: Map<string, OpCursor>;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
@@ -146,6 +157,9 @@ export class SessionRegistry {
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
+      watchIndex: existing?.watchIndex ?? new Map(),
+      operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
+      operationWatches: existing?.operationWatches ?? [],
       operationCursors: existing?.operationCursors ?? new Map(),
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),

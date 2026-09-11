@@ -1,7 +1,7 @@
 import { renderInProcess } from "@commonfabric/html/in-process";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import { type Cell, UI } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { uiSchema } from "@commonfabric/runner/schemas";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { loadPieces } from "./piece.ts";
@@ -128,13 +128,9 @@ export async function renderPiece(
     undefined,
     config.pieceScope,
   );
-  const cell = piece.getCell().asSchema({
-    type: "object",
-    properties: {
-      [UI]: rendererVDOMSchema,
-    },
-    required: [UI],
-  }) as Cell<Record<string, unknown>>;
+  const cell = piece.getCell().asSchema(uiSchema) as Cell<
+    Record<string, unknown>
+  >;
 
   // Check if piece has UI
   if (!cell.get()?.[UI]) {

@@ -342,6 +342,15 @@ derived consequences are fully committed. Persisted in the space (one
 well-known doc, updated in the same transaction as derived commits — never
 its own commit).
 
+An event whose sidecar synchronization fails or whose replica view does not
+hold its stored `(eventId, seq)` has not entered the scheduler. A quiet scheduler
+therefore cannot establish coverage for it. The drain retains the earliest such
+sequence across cycles, clamping both input-head and quiescent-tail advancement
+below it. A fresh scan re-evaluates this floor; ending the serving tenure clears
+it. This composes with the foreign-write shadow floor and does not wait for
+sealed-write durability. [Event visibility](events.md#2-lifecycle-end-to-end)
+defines the ordered publication/response barrier before deferral.
+
 ```
 on activate(space):
   acquire lease (else park)
@@ -393,10 +402,12 @@ on wave budget exhaustion — EITHER trigger (deadline RULED, owner
 2026-08-04): (a) a cascade that will not quiesce within the
 scheduler's pass budget, or (b) the CONSEQUENCE-FLUSH DEADLINE — a
 wave still running at T_flush commits what is sealed so far. ONE
-mechanism for both: commit the wave anyway — the in-memory state is
-a consistent snapshot — count wavesBudgetExhausted, and advance W NOT AT
-ALL: an exhausted wave's commit carries no watermark movement
-(`derivedThrough` stays at the current W). Continuation waves carry the
+mechanism for both: close a wave when it has sealed contributions or pending
+effects, count `wavesBudgetExhausted`, and keep W unchanged. A zero-delta
+cycle with no pending effects closes no wave and makes no durable commit,
+but still increments the exhaustion counter. A committed exhausted wave
+contains a consistent sealed snapshot; its `derivedThrough` stays at the
+current W. Continuation waves carry the
 cascade as dirtiness; W jumps to the top of the pending input batch only
 at true quiescence. Crash recovery stays sound because the basis index
 re-marks the truncated dirty frontier (§3b, §6) and memo hits suppress
@@ -455,9 +466,14 @@ Light waves never reach the deadline and stay single-commit — the
 zero-delta case, which is why this is a trigger on the EXISTING
 exhaustion machinery rather than a new commit topology. T_flush is
 a policy knob (order 50–100 ms), tuned in Phase 6 with the other
-budgets; `wavesBudgetExhausted` counts both triggers, and the
-amplification budget's inspection rule treats deadline flushes
-under load as a legitimate re-baseline reason (testing.md §4).
+budgets. The configured default is 100 ms. `wavesBudgetExhausted` counts
+exhausted cycles, including those with no wave closure or durable commit;
+`waves` counts closures, including vacuous or aborted outcomes. Their ratio
+is not a committed-wave exhaustion fraction. The amplification budget's
+inspection rule treats deadline flushes under load as a reason to inspect
+and, with the required evidence, re-baseline (testing.md §4). The deadline
+allows sealed consequences to become visible under sustained multi-user
+input while full input coverage remains gated on quiescence.
 
 **Sealing order makes the first flush worth flushing**: events and
 their handler consequences MUST seal ahead of deep demanded
@@ -1372,6 +1388,15 @@ escalate.
 
 ## 7. Counters (implement with the loop, not after)
 
+`events.visibilityBarriers` counts ordered publication/response attempts for
+lagging event views. `visibilityRecoveries` counts matching identities after
+those attempts, and `visibilityDeferrals` counts scans that still stop at a
+mismatched identity. `deferredRescansArmed` and `deferredRescansFired` count
+scheduled backstops and callbacks that ran during an active tenure, across all
+transient drain outcomes. An armed timer can be unnecessary if input wakes the
+drain first; these counters do not equate each deferral with an elapsed timer
+interval or each cycle with a durable commit.
+
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
@@ -1387,7 +1412,9 @@ demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
 pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
-drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
+drainInFlightSkips, visibilityBarriers, visibilityRecoveries,
+visibilityDeferrals, deferredRescansArmed, deferredRescansFired,
+lt1LeftoversPurged, lt1LateSealsRefused,
 orphanDeliveriesRefused, handlerNotRunDeferrals, loadParkDeferrals,
 loadParkFailures,
 deliveryDeferralsActive, deliveryFailuresActive,
@@ -1411,17 +1438,32 @@ docs never materialized, verification-coverage.md OW46) is a
 health-stats fact instead of an undifferentiated share of the
 per-attempt `structureLoadDeferred` aggregate; the streak clears when
 the root starts or terminalizes;
-`structureLoadTerminal`/`structureLoadRearmed` carry the
-demand-cycle terminal state (stage P2-F, the OW19 design): a root
-confirmed synced with no pattern meta parks TERMINAL — counted per
-terminalization, no per-cycle churn — and a commit touching one of
-the load's observed docs RE-ARMS it (the retry is settle-gated so it
-reads the re-arming commit's applied state); the demanded-structure
-load pass itself runs UNDER §3's flush deadline (single-flighted
-across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts waves whose W
-advance was actually clamped below the input batch head by the
-Phase-2 settle input barrier — inbound foreign novelty still
-shadowed by a parked own write; the clamp is honesty, not failure,
+`structureLoadTerminal`/`structureLoadRearmed` carry the demand-cycle terminal
+state. A root with no pattern metadata is confirmed by a second owning-result
+traversal, including the scoped-to-space fallback. Each traversal syncs the
+complete addresses it reads; cycle detection distinguishes scopes. Confirmation
+does not subscribe to additional addresses formed by combining observed IDs
+with other scopes. A confirmed root parks terminal, counted once, and a commit
+touching an observed document re-arms it. Admissions racing either traversal
+invalidate a no-metadata verdict when they touch an observed document; pending
+foreign novelty hidden by a sealed write also prevents terminalization. These
+invalidated attempts count as deferrals.
+
+The retry follows frame application within the settle loop. Its structure load
+and demanded derivations finish before the watermark covers the triggering
+input. A shadowed retry waits for the replica's shadow-flip signal, allowing
+the wave to commit the sealed writes that make its input visible. The load pass
+runs under §3's flush deadline and is single-flighted across cycles of one
+tenure. Demand departure drops terminal decisions; a new tenure starts its own
+pass. Park cancels structure loading at its next asynchronous boundary, before
+any subsequent piece start. Completion from a parked tenure cannot publish a
+terminal decision; park does not wait for unresolved pattern loading.
+`watermarkClamped` counts
+non-exhausted cycles whose foreign-write shadow floor is below an input batch
+head above W. An event-visibility floor can constrain the same cycle, so the
+counter does not isolate the marginal effect of the shadow floor. The shadow
+clamp covers inbound foreign novelty still hidden by a parked own write; it
+is honesty, not failure,
 and lifts by itself; `storeReads` counts the engine reads that the store
 read-through posture (§1 plane (a)) performs for serving replicas, and
 `storeRefreshes` counts the held documents it re-reads off the feed, both
@@ -1484,9 +1526,13 @@ registry deltas; the label is wall time, review MINOR-3);
 `demandChanged`, the `session.watch.set`/`.add` notifies, and the warm
 request's staged-instance captures — the third kept apart so
 `watchWakes` keeps meaning exactly the session-watch notifies) BEFORE the
-300 ms-grace coalescing — a burst is several notifies but one demand pass,
-so these exceed the pass-wake count (review NIT-5); the service (loopback)
-session's notifies are DROPPED — its tracked-set growth is the serving
+300 ms grace coalesces notifications into one pending callback. Each
+notification advances the demand generation; a notification racing a pass
+can require another pass after it completes. Input-driven cycles reconcile
+demand before a held grace callback fires, so 300 ms is not a universal
+cold-session latency floor. Count notifications, callbacks, passes, wave
+closures, and durable commits separately. The service (loopback) session's
+notifies are DROPPED — its tracked-set growth is the serving
 graph's own reads, not client demand (review MINOR-4). `demandArrivals`
 (top-level) the root-level arrival re-arm's count. The `settle` block is
 SERVER SETTLE per authored input — admission (the feed's admitted-commit

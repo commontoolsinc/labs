@@ -9,7 +9,7 @@ import { expect } from "@std/expect";
 import type { PiecesController } from "@commonfabric/piece/ops";
 
 import { keysOf, listCellKeys } from "../lib/cell-listing.ts";
-import type { PieceConfig, PieceResolutionDeps } from "../lib/piece.ts";
+import type { PieceConfig } from "../lib/piece.ts";
 
 const SPACE = "did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk";
 
@@ -55,10 +55,17 @@ function stubController(
 }
 
 /** The seam under test: a held connection, and no address lookup behind it. */
-function over(pieces: PiecesController): PieceResolutionDeps {
+function over(pieces: PiecesController) {
   return {
     loadPieces: () => Promise.resolve(pieces),
-    resolvePieceAddress: (_pieces, token) => Promise.resolve(token),
+    loadPieceForRead: (
+      _pieces: PiecesController,
+      id: string,
+      step: boolean,
+      scope: PieceConfig["pieceScope"],
+    ) => pieces.get(id, step, undefined, scope),
+    resolvePieceAddress: (_pieces: PiecesController, token: string) =>
+      Promise.resolve(token),
   };
 }
 

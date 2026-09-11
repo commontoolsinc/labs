@@ -55,7 +55,26 @@ function getMemberPattern() {
         type: "ref",
         implementation: "collectionIndexMember",
       })(input),
-    { type: "object", additionalProperties: true },
+    {
+      type: "object",
+      properties: {
+        extracted: { asCell: ["cell"], type: "unknown" },
+        element: { asCell: ["cell"], type: "unknown" },
+        // Setup watches retain shared addresses without traversing every bucket.
+        state: { asCell: ["cell"], type: "unknown" },
+        index: { asCell: ["cell"], type: "unknown" },
+        occurrence: { type: "string" },
+        mode: { enum: ["group", "key"] },
+      },
+      required: [
+        "extracted",
+        "element",
+        "state",
+        "index",
+        "occurrence",
+        "mode",
+      ],
+    },
     true,
   );
 }

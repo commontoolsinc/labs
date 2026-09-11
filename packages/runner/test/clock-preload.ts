@@ -15,6 +15,10 @@ installFakeClock({
   mode: "auto-advance",
   // Test files kept on the real clock for now. These should be converted to use
   // a fake clock. // TODO: convert these tests to a fake clock
+  // The event-visibility suite uses clock.settle() to hold positive-delay
+  // timers while transport work drains, and ticks only the deferred-rescan
+  // boundary. It intentionally stays on the fake clock: absence of a visibility
+  // response fails a call-count assertion without waiting for a timer.
   realClockFiles: [
     // Holds the resume's per-element documents in the transport so the
     // coordinator reconciles while they are absent. A commit carrying a read of
