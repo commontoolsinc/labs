@@ -15,14 +15,20 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { CellScope, Schema } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
+import { useCancelGroup } from "../cancel.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import { mapSubschemas } from "../schema-walk.ts";
-import { waveRunContextOf } from "../executor/wave.ts";
+import {
+  requireWaveAcceptance,
+  waveRunContextOf,
+  waveSettlementOf,
+} from "../executor/wave.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
@@ -65,6 +71,27 @@ type FetchInputs = {
   schema?: JSONSchema;
 
   options?: FetchRequestOptions;
+};
+
+/** Publication and refusal ownership of one staged request. */
+type FetchStaging = {
+  /** Resolved physical output-binding instance, or the shared raw callback. */
+  bindingKey: string;
+
+  /** Symbolic result link, shared by actors selecting the same scoped target. */
+  target: string;
+
+  /** Invocation order within this builtin closure. */
+  sequence: number;
+
+  /** Input snapshot hash when this publication stages a request. */
+  inputHash?: string;
+
+  /** Whether the request's staging contribution was durably accepted. */
+  accepted?: boolean;
+
+  /** Whether the shared outbox work has completed or skipped dispatch. */
+  finished?: boolean;
 };
 
 /**
@@ -313,11 +340,48 @@ function fetchBuiltin(kind: FetchKind) {
     cause: Cell<any>[],
     parentCell: Cell<any>,
     runtime: Runtime, // Runtime will be injected by the registration function
+    _outputBinding?: NormalizedFullLink,
+    _awaitSync?: boolean,
+    publicationBinding?: NormalizedFullLink,
   ): Action {
     const instances = new Map<string, ReturnType<typeof createInstance>>();
+    let publicationSequence = 0;
+    addCancel(() => {
+      const [cancelAll, addInstanceCancel] = useCancelGroup();
+      for (const instance of instances.values()) {
+        addInstanceCancel(instance.cancel);
+      }
+      instances.clear();
+      cancelAll();
+    });
+
+    /** Applies binding ownership only after publication is durable. */
+    function observePublication(
+      tx: IExtendedStorageTransaction,
+      publication: FetchStaging,
+      onAccepted?: () => void,
+    ): void {
+      requireWaveAcceptance(tx);
+      const accept = () => {
+        for (const other of instances.values()) {
+          other.supersedePublication(publication);
+        }
+        onAccepted?.();
+      };
+      tx.addCommitCallback((committedTx, outcome) => {
+        if (outcome.error) return;
+        const settlement = waveSettlementOf(committedTx) ??
+          waveSettlementOf(tx);
+        if (settlement) {
+          settlement.then((verdict) => {
+            if (!verdict.error) accept();
+          });
+        } else accept();
+      });
+    }
 
     /** Owns the request lifecycle for one selected result instance. */
-    function createInstance(identity?: ScopeKeyIdentity) {
+    function createInstance(instanceKey: string, served: boolean) {
       let cellsInitialized = false;
       let pending: Cell<boolean>;
       let result: Cell<any | undefined>;
@@ -326,18 +390,81 @@ function fetchBuiltin(kind: FetchKind) {
       let cellScope: CellScope | undefined;
       let myRequestId: string | undefined = undefined;
 
-      /**
-       * The request this node staged on its most recent run, if that run staged
-       * one. A token rather than the request's hash: two stagings of the same
-       * inputs are still two requests, and the ending of the first must not be
-       * read as the ending of the second.
-       */
-      let currentStaging: symbol | undefined = undefined;
+      // Distinct output bindings can select the same result instance. Each
+      // binding retains its latest request until dispatch or refusal settles.
+      const stagings = new Map<string, FetchStaging>();
+
+      // Accepted outbox work survives a change in the published target, even
+      // before dispatch creates an abort controller or active work promise.
+      const acceptedRequests = new Set<string>();
+      let latestSequence = 0;
 
       let abortController: AbortController | undefined = undefined;
+      let activeWork = 0;
+      let requestIdentity: ScopeKeyIdentity | undefined;
+
+      /** Retains pending requests while releasing completed served instances. */
+      function releaseIfIdle(
+        settled?: FetchStaging,
+        sharedCompletion = false,
+      ): void {
+        // Outbox deduplication can drop accepted equivalent callbacks. An
+        // uncommitted different binding still needs its own refusal outcome.
+        if (settled) {
+          if (sharedCompletion) {
+            settled.finished = true;
+            acceptedRequests.delete(settled.inputHash!);
+          }
+          for (const [key, latest] of stagings) {
+            if (sharedCompletion && latest.inputHash === settled.inputHash) {
+              latest.finished = true;
+            }
+            if (
+              latest === settled ||
+              (sharedCompletion && latest.inputHash === settled.inputHash &&
+                (key === settled.bindingKey || latest.accepted))
+            ) stagings.delete(key);
+          }
+        }
+        if (
+          !served || activeWork > 0 || stagings.size > 0 ||
+          acceptedRequests.size > 0
+        ) return;
+        if (instances.get(instanceKey) === instance) {
+          instances.delete(instanceKey);
+        }
+      }
+
+      /** Drops older requests whose binding selected a different target. */
+      function supersedePublication(publication: FetchStaging): void {
+        const previous = stagings.get(publication.bindingKey);
+        if (
+          previous && previous.sequence < publication.sequence &&
+          previous.target !== publication.target
+        ) {
+          stagings.delete(publication.bindingKey);
+          releaseIfIdle();
+        }
+      }
+
+      /** Keeps the instance alive through its authoritative writeback. */
+      function trackWork(
+        work: Promise<void>,
+        staging: FetchStaging,
+        sharedCompletion = false,
+      ): void {
+        activeWork++;
+        runtime.trackAsyncWork(
+          work.finally(() => {
+            activeWork--;
+            releaseIfIdle(staging, sharedCompletion);
+          }),
+          parentCell,
+        );
+      }
 
       // This is called when the pattern containing this node is being stopped.
-      addCancel(() => {
+      function cancel(): void {
         // Abort the request if it's still pending.
         abortController?.abort("Pattern stopped");
 
@@ -357,7 +484,9 @@ function fetchBuiltin(kind: FetchKind) {
           runtime.stampServerRun(tx, {
             actionId: `${kind.name}/teardown/${parentCell.sourceURI}`,
             kind: "bookkeeping",
-            ...(identity !== undefined ? { scopeKeyIdentity: identity } : {}),
+            ...(requestIdentity !== undefined
+              ? { scopeKeyIdentity: requestIdentity }
+              : {}),
           });
 
           // If the pending request is ours, set pending to false and clear the
@@ -377,19 +506,23 @@ function fetchBuiltin(kind: FetchKind) {
           // Ignore errors during cleanup - the runtime might be shutting down
           tx.abort();
         }
-      });
+      }
 
-      return (
+      function run(
         tx: IExtendedStorageTransaction,
         inputsSnapshot: FetchInputs,
         mutexTimeoutMs: number | undefined,
         outputScope: CellScope,
-      ) => {
-        // Cleared for the whole run and set again only by the arm that stages a
-        // request, so every way this run can end without staging one — an empty
-        // url, a result already stored, a request already in flight — leaves the
-        // ending of an earlier request with nothing of this node's to write to.
-        currentStaging = undefined;
+        identity?: ScopeKeyIdentity,
+      ): void {
+        // Raw callers without publication coordinates share one callback;
+        // declared container scope is not a physical binding address.
+        const bindingKey =
+          identity === undefined || publicationBinding === undefined
+            ? "local"
+            : resolveScopeKey(publicationBinding.scope ?? "space", identity);
+        stagings.delete(bindingKey);
+        latestSequence = ++publicationSequence;
 
         if (!cellsInitialized || cellScope !== outputScope) {
           pending = ownedCell<boolean>(
@@ -460,6 +593,39 @@ function fetchBuiltin(kind: FetchKind) {
         // that this write is a no-op after the first successful write, so this
         // should be fine.
         sendResult(tx, { pending, result, error });
+        const staging: FetchStaging = {
+          bindingKey,
+          target: effectTargetKey("publication", result),
+          sequence: latestSequence,
+        };
+        if (identity !== undefined) {
+          // Memo and empty results also select the binding's symbolic link.
+          // Only accepted publication can supersede another target's refusal.
+          observePublication(tx, staging, () => {
+            staging.accepted = true;
+            if (staging.inputHash !== undefined) {
+              if (staging.finished) {
+                releaseIfIdle(staging, true);
+                return;
+              }
+              acceptedRequests.add(staging.inputHash);
+            }
+            // A shared request can finish before this equivalent contribution
+            // is accepted. Its stored memo retires the accepted token without
+            // depending on a deduplicated callback running again.
+            if (staging.inputHash !== undefined && activeWork === 0) {
+              const read = runtime.readTx();
+              read.tx.scopeKeyIdentity = identity;
+              if (
+                internal.withTx(read).key("inputHash").get() ===
+                  staging.inputHash &&
+                pending.withTx(read).get() !== true &&
+                (result.withTx(read).get() !== undefined ||
+                  error.withTx(read).get() !== undefined)
+              ) releaseIfIdle(staging, true);
+            }
+          });
+        }
 
         const url = inputsSnapshot?.url;
         if (!url) {
@@ -538,8 +704,8 @@ function fetchBuiltin(kind: FetchKind) {
           // inputs keeps its own effect — its closure writes its own cells,
           // which a shared key would have dropped (round-2 headline).
           const newRequestId = `${runtime.id}:${inputHash}`;
-          const staging = Symbol(inputHash);
-          currentStaging = staging;
+          staging.inputHash = inputHash;
+          stagings.set(bindingKey, staging);
           // These cells as this request found them. Whether anything has been
           // committed to them since is one question about all four together, not
           // four questions: a request that answers writes its result without
@@ -630,6 +796,7 @@ function fetchBuiltin(kind: FetchKind) {
                   // against the input hash, not the claim id: any request for
                   // these inputs may write the result.
                   myRequestId = newRequestId;
+                  requestIdentity = identity;
                   await startFetch(
                     runtime,
                     kind,
@@ -647,12 +814,18 @@ function fetchBuiltin(kind: FetchKind) {
                   );
                 },
               );
-              runtime.trackAsyncWork(work, parentCell);
+              trackWork(work, staging, true);
             },
             {
               idempotencyKey: effectKey,
+              onReleaseRejected: () => releaseIfIdle(staging, true),
               onRejected: (rejection) => {
-                runtime.trackAsyncWork(
+                if (
+                  identity !== undefined &&
+                  (instances.get(instanceKey) !== instance ||
+                    stagings.get(bindingKey) !== staging)
+                ) return;
+                trackWork(
                   settleAbandonedRequest(
                     runtime,
                     kind.name,
@@ -661,9 +834,16 @@ function fetchBuiltin(kind: FetchKind) {
                       if (identity !== undefined) {
                         settleTx.tx.scopeKeyIdentity = identity;
                       }
-                      // The announcement rode the abandoned transaction, so it
-                      // is made again whoever owns the answer now.
+                      const ownsBinding = identity === undefined ||
+                        (instances.get(instanceKey) === instance &&
+                          stagings.get(bindingKey) === staging);
+                      if (!ownsBinding) return;
+                      // A binding may need this announcement even when another
+                      // binding's request owns the shared result fields.
                       sendResult(settleTx, { pending, result, error });
+                      if (identity !== undefined) {
+                        observePublication(settleTx, staging);
+                      }
                       // Decided here rather than when this callback ran.
                       // Another request holds these cells in either of two ways,
                       // and the ending steps around both. One is in flight: the
@@ -686,7 +866,7 @@ function fetchBuiltin(kind: FetchKind) {
                       // already answered keeps that answer and writes nothing, so
                       // the two durable tests below both see exactly what this
                       // request left behind.
-                      if (currentStaging !== staging) return;
+                      if (latestSequence !== staging.sequence) return;
                       const cellsNow = {
                         pending: pending.withTx(settleTx).get(),
                         result: result.withTx(settleTx).get(),
@@ -714,13 +894,20 @@ function fetchBuiltin(kind: FetchKind) {
                       error.withTx(settleTx).set(rejection.message);
                     },
                   ),
-                  parentCell,
+                  staging,
                 );
               },
             },
           );
         }
+      }
+      const instance = {
+        run,
+        cancel,
+        releaseIfIdle,
+        supersedePublication,
       };
+      return instance;
     }
 
     return (tx: IExtendedStorageTransaction) => {
@@ -734,10 +921,11 @@ function fetchBuiltin(kind: FetchKind) {
         : resolveScopeKey(outputScope, identity);
       let instance = instances.get(instanceKey);
       if (instance === undefined) {
-        instance = createInstance(identity);
+        instance = createInstance(instanceKey, identity !== undefined);
         instances.set(instanceKey, instance);
       }
-      instance(tx, inputsSnapshot, mutexTimeoutMs, outputScope);
+      instance.run(tx, inputsSnapshot, mutexTimeoutMs, outputScope, identity);
+      instance.releaseIfIdle();
     };
   };
 }

@@ -2638,7 +2638,14 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   pin user/session key separation and sharing at the declared scope.
   `executor-fetch-instances` pins a service-identity host with one requester,
   two users, two sessions, and one request superseding or failing while the
-  neighboring instance completes independently.
+  neighboring instance completes independently. Idle and completed instances
+  retire without accumulating graph cleanup callbacks; a returning session
+  can issue again, and graph stop still aborts a pending owner. Direct staged
+  tests pin equivalent-request retirement, late-refusal ownership, and each
+  issuance's representative identity while an earlier request is held. Refusal
+  publication tests cover scope changes, shared results across distinct output
+  bindings, memo and empty results, and withdrawn waves; output binding
+  publication is independent of ownership of the request's result fields.
 
   Remaining investigation obligations: `fetchProgram`, the generate/LLM
   family, llm-dialog, non-clearance SQLite instance keys, and the provider READ

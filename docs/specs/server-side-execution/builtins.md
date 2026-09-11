@@ -71,8 +71,19 @@ served result instance. The requesting run's identity resolves the outbox key
 and every asynchronous claim, completion, error, abandonment, and teardown
 transaction before its first cell read. A served mutex claim commits the
 validated input hash with its claim id and activity timestamp, so a subsequent
-unchanged-input run recognizes that in-flight request. Unstamped client runs
-use the runtime's own identity and keep one local lifecycle.
+unchanged-input run recognizes that in-flight request. Each issuance captures
+its own run identity, including when a shared scope changes representatives.
+One graph-level cancellation callback visits retained instances; completed or
+idle instances retire after their accepted outbox requests, active work, and
+pending publications settle.
+Late refusal callbacks cannot mutate a replacement instance. Each result
+instance retains one latest pending publication per physical output-binding
+instance; declared result-container scope does not determine that address.
+Accepted publication, including memo and empty results, supersedes older
+requests selecting another target for the same binding. Distinct bindings can
+announce a shared result independently without changing another request's
+result fields. Unstamped client runs use the runtime's own identity and keep
+one local lifecycle.
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of
