@@ -158,37 +158,28 @@ export type BaselineVisitResult<ResultType = FabricValue> =
   | undefined;
 
 /**
- * Possible results from a visitor method which accepts leaf (non-container)
- * values when not _directly_ being the subject of an iteration.
+ * Possible results from a `visit*()` method which accepts leaf (non-dispatched)
+ * values. This includes the `recurse` form, which is only valid to return when
+ * the value being visited is in fact a container; this constraint is checked at
+ * runtime and results in a `throw`n error when violated.
  *
- * This is a "leaf" in the sense of visitor dispatch -- there is not a
- * more-specific subtype-based visitor method to call -- but that said, the
- * value being visited itself might or might not be a leaf in the sense of the
- * graph structure of the value.
+ * About the name: This is a "leaf" in the sense of visitor dispatch -- there is
+ * not a more-specific subtype-based visitor method to call -- but that said,
+ * the value being visited itself might or might not be a leaf in the sense of
+ * the graph structure of the value.
  *
  * See the included result types for details on what they mean.
  */
 export type LeafVisitorResult<DomainExtra = never, ResultType = FabricValue> =
   | BaselineVisitResult<ResultType>
+  | RecurseForm
   | ReplaceForm<DomainExtra>;
 
 /**
- * Possible results from container-specific visitor methods, that is, `visit*()`
- * methods which are only ever passed container values. This type includes
- * everything also allowed by `LeafVisitorResult`.
- *
- * See the included result types for details on what they mean.
- */
-export type ContainerVisitorResult<
-  DomainExtra = never,
-  ResultType = FabricValue,
-> =
-  | LeafVisitorResult<DomainExtra, ResultType>
-  | RecurseForm;
-
-/**
  * Possible results from a visitor method which covers two or more subtypes of
- * value that the visitor engine can dispatch to.
+ * value that the visitor engine can dispatch to. Such a method is also allowed
+ * to take a non-dispatch action, and so all of the `LeafVisitorResults` are
+ * included as options with this type.
  *
  * See the included result types for details on what they mean.
  */
@@ -196,7 +187,7 @@ export type DispatchingVisitorResult<
   DomainExtra = never,
   ResultType = FabricValue,
 > =
-  | ContainerVisitorResult<DomainExtra, ResultType>
+  | LeafVisitorResult<DomainExtra, ResultType>
   | VisitSubtypeForm;
 
 //
