@@ -4704,11 +4704,9 @@ describe("schemaAcceptsType()", () => {
     }, "string")).toBe(false);
   });
 
-  it("returns `false` when only the union arm declares the `$defs` its `$ref` names", () => {
-    // The union declares no `$defs`, so the ref names nothing and the arm
-    // accepts no type.
+  it("returns `true` when the union declares no `$defs` and the arm resolves as the document it is", () => {
     expect(schemaAcceptsType({
       anyOf: [{ $ref: "#/$defs/Name", $defs: { Name: { type: "string" } } }],
-    }, "string")).toBe(false);
+    }, "string")).toBe(true);
   });
 });

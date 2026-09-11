@@ -74,6 +74,7 @@ import {
   cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromSchema,
   cfcSchemaResolvedRoot,
+  cfcSchemaWithInheritedDefs,
   getCarriedCfcLabelView,
   type IFCLabel,
   mergeCfcLabelViews,
@@ -2586,11 +2587,16 @@ export function handlerVerbEvents(
         ? argumentSchema.properties.$event
         : undefined;
       if (!isObjectOrArray(event)) continue;
+      // An inline event is a fragment of the argument document: it carries
+      // that document's definitions, in place of any `$defs` of its own.
       eventSchema = typeof event.$ref === "string"
         ? resolveCfcSchemaRefs(event, argumentSchema as JSONSchema)
-        : isObjectOrArray(argumentSchema.$defs) && event.$defs === undefined
-        ? { ...event, $defs: argumentSchema.$defs } as JSONSchema
-        : event as JSONSchema;
+        : pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
+          event as JSONSchema,
+          isObjectNotArray(argumentSchema.$defs)
+            ? argumentSchema.$defs as Record<string, JSONSchema>
+            : undefined,
+        ));
     }
     if (matched === 0) continue;
     verbs.set(name, matched === 1 ? eventSchema : undefined);
@@ -2659,9 +2665,16 @@ export function declaredVerbProse(
     const description = typeof property.description === "string"
       ? property.description
       : undefined;
+    // An inline property is a fragment of the result document: it carries
+    // that document's definitions, in place of any `$defs` of its own.
     const eventSchema = typeof property.$ref === "string"
       ? resolveCfcSchemaRefs(property, declaredRoot)
-      : property as JSONSchema;
+      : pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
+        property as JSONSchema,
+        isObjectOrArray(declaredRoot) && isObjectNotArray(declaredRoot.$defs)
+          ? declaredRoot.$defs as Record<string, JSONSchema>
+          : undefined,
+      ));
     if (description === undefined && eventSchema === undefined) continue;
     prose.set(name, {
       ...(description !== undefined && { description }),

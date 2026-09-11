@@ -46,17 +46,27 @@ export type UiContractEntry = {
   path: string[];
   contract: UiContract;
   schema?: JSONSchema;
+
+  /** The schema document that resolves local references inside `.schema`. */
+  root?: JSONSchema;
 };
 
 const uiContractEntry = (
   path: string[],
   contract: UiContract,
   schema?: JSONSchema,
+  root?: JSONSchema,
 ): UiContractEntry => {
   const entry: UiContractEntry = { path, contract };
   if (schema !== undefined) {
     Object.defineProperty(entry, "schema", {
       value: schema,
+      enumerable: false,
+    });
+  }
+  if (root !== undefined) {
+    Object.defineProperty(entry, "root", {
+      value: root,
       enumerable: false,
     });
   }
@@ -251,7 +261,9 @@ const uiContractsFromSchemaInternal = (
     new Set(),
   );
   if (contract !== undefined) {
-    entries.push(uiContractEntry([...path], contract, resolvedSchema));
+    entries.push(
+      uiContractEntry([...path], contract, resolvedSchema, childRoot),
+    );
   }
 
   const hasProperties = isObjectOrArray(resolvedSchema.properties);

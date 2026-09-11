@@ -266,7 +266,7 @@ export const hoistCfcSchemaDefs = (
         body,
         map,
         new Set(merged!.keys()),
-        "union_arm",
+        "hoisted",
       );
       stripped = renamedBody;
       additions = renamed!;
@@ -280,6 +280,57 @@ export const hoistCfcSchemaDefs = (
   return {
     fragments: hoisted,
     definitions: merged === undefined ? undefined : Object.fromEntries(merged),
+  };
+};
+
+/**
+ * Return `schema` with every `$defs` below its root lifted onto the root.
+ *
+ * A subschema's own `$defs` is inert under the root, so a document laid out
+ * to resolve refs against one — the layout an earlier runtime stored, where a
+ * subtree's `$defs` opened a scope of its own — reads today with those refs
+ * dangling. Lifting rebuilds the document that layout described: each nested
+ * map's names are renamed apart within the subtree that declared them, refs
+ * included, and the renamed definitions join the root's map, so every ref
+ * resolves to the definition it did under that layout. A document declaring
+ * no `$defs` below its root is returned as it is.
+ */
+export const hoistNestedCfcSchemaDefs = (schema: JSONSchema): JSONSchema => {
+  if (!isObjectOrArray(schema)) return schema;
+  const merged = new Map<string, JSONSchema>(
+    isObjectNotArray(schema.$defs) ? Object.entries(schema.$defs) : [],
+  );
+  let lifted = false;
+  const lift = (fragment: JSONSchema): JSONSchema => {
+    if (!isObjectOrArray(fragment)) return fragment;
+    let body: JSONSchemaObj = fragment;
+    if (isObjectNotArray(fragment.$defs)) {
+      lifted = true;
+      const { $defs: map, ...rest } = fragment;
+      const { $defs: renamed, ...renamedBody } = namespaceLocalDefinitionScope(
+        rest,
+        map,
+        new Set(merged.keys()),
+        "legacy_scope",
+      );
+      for (const [name, definition] of Object.entries(renamed!)) {
+        merged.set(name, lift(definition));
+      }
+      body = renamedBody;
+    }
+    return mapSubschemas(body, lift, ALL_SUBSCHEMAS);
+  };
+  const { $defs: rootDefinitions, ...rootBody } = schema;
+  const body = mapSubschemas(rootBody as JSONSchemaObj, lift, ALL_SUBSCHEMAS);
+  if (isObjectNotArray(rootDefinitions)) {
+    for (const [name, definition] of Object.entries(rootDefinitions)) {
+      merged.set(name, lift(definition));
+    }
+  }
+  if (!lifted) return schema;
+  return {
+    ...(body as JSONSchemaObj),
+    ...(merged.size > 0 && { $defs: Object.fromEntries(merged) }),
   };
 };
 
@@ -342,10 +393,8 @@ const hasLocalDefinitionRef = (schema: JSONSchema): boolean =>
   summarizeCfcSchemaRefs(schema).localDefinitions.size > 0;
 
 // Views `cfcSchemaWithInheritedDefs()` minted for a deep-frozen fragment, per
-// fragment per definition map, with `NO_DEFINITIONS` standing for the view
-// that carries none. A fragment read repeatedly under one document then
-// keeps one identity, which downstream identity-keyed caches depend on.
-const NO_DEFINITIONS = Object.freeze({});
+// fragment per definition map. A fragment read repeatedly under one document
+// then keeps one identity, which downstream identity-keyed caches depend on.
 const inheritedDefsViews = new WeakMap<object, WeakMap<object, JSONSchema>>();
 
 const memoizedInheritedDefsView = (
@@ -375,9 +424,10 @@ const memoizedInheritedDefsView = (
  * `#/$defs/<name>` refs name. This attaches `inheritedDefinitions` to the
  * fragment, in place of any `$defs` it declares of its own, which is inert
  * below the enclosing document's root (see `cfcSchemaResolvedRoot()`). With
- * nothing to inherit, a fragment carrying a `$defs` of its own has it
- * removed for the same reason: its local refs name definitions the enclosing
- * document does not declare.
+ * nothing to inherit the fragment is returned as it is: a caller holding no
+ * map may be holding a document in reference form, and a fragment carrying a
+ * map of its own is then the self-contained view resolution minted, which
+ * the consumer reads as a document.
  *
  * A deep-frozen fragment is scanned for such a ref first, and comes back as
  * the same object when it has none — its refs are all embedded or external,
@@ -393,20 +443,8 @@ export const cfcSchemaWithInheritedDefs = (
   schema: JSONSchema,
   inheritedDefinitions: SchemaDefinitions | undefined,
 ): JSONSchema => {
-  if (!isObjectOrArray(schema)) return schema;
-  if (!isObjectNotArray(inheritedDefinitions)) {
-    if (
-      schema.$defs === undefined ||
-      (isDeepFrozen(schema) && !hasLocalDefinitionRef(schema))
-    ) {
-      return schema;
-    }
-    return memoizedInheritedDefsView(schema, NO_DEFINITIONS, () => {
-      const { $defs: _inert, ...rest } = schema;
-      return rest;
-    });
-  }
   if (
+    !isObjectNotArray(inheritedDefinitions) ||
     !canInheritDefs(schema, inheritedDefinitions) ||
     (isDeepFrozen(schema) && !hasLocalDefinitionRef(schema))
   ) {

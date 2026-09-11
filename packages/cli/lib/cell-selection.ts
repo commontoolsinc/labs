@@ -24,6 +24,7 @@ import {
   hoistCfcSchemaDefs,
   isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "@commonfabric/runner/cfc/schema-refs";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
@@ -1519,20 +1520,24 @@ function walkSchemaRoot<T>(
     return behavior.unknown;
   }
   ancestors.add(schema);
-  const documentRoot = schema.$defs !== undefined ? schema : root;
   try {
     // A reference is the source shape for this heuristic. Resolve it before
     // inspecting sibling keywords so a broken reference cannot lend false
-    // shape authority through, for example, a sibling `type`.
+    // shape authority through, for example, a sibling `type`. The root
+    // moves only where the reference chain enters another document.
     if (schema.$ref !== undefined) {
       try {
+        const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+          schema,
+          root,
+        );
         return walkSchemaRoot(
-          ContextualFlowControl.resolveSchemaRefsOrThrow(
-            schema,
-            documentRoot,
-          ),
+          resolved,
           behavior,
-          documentRoot,
+          cfcSchemaResolvedRoot(
+            resolved,
+            resolveCfcSchemaRefRoot(schema, root),
+          ),
           ancestors,
         );
       } catch (error) {
@@ -1550,7 +1555,7 @@ function walkSchemaRoot<T>(
     if (alternatives.length > 0) {
       return behavior.fromAlternatives(
         alternatives.map((option) =>
-          walkSchemaRoot(option, behavior, documentRoot, ancestors)
+          walkSchemaRoot(option, behavior, root, ancestors)
         ),
       );
     }
@@ -1558,7 +1563,7 @@ function walkSchemaRoot<T>(
     if (schema.allOf !== undefined) {
       return behavior.fromAllOf(
         schema.allOf.map((option) =>
-          walkSchemaRoot(option, behavior, documentRoot, ancestors)
+          walkSchemaRoot(option, behavior, root, ancestors)
         ),
       );
     }

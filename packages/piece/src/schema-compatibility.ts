@@ -6,6 +6,7 @@ import {
 } from "@commonfabric/runner";
 import {
   cfcSchemaResolvedRoot,
+  hoistNestedCfcSchemaDefs,
   type IfcKey,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -597,12 +598,20 @@ export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
   candidate: Pattern,
 ): void {
+  // A schema an earlier runtime stored may declare `$defs` below its root,
+  // which resolves nothing today. The previous side is read with those
+  // lifted onto the root, so a replacement is judged against what the stored
+  // schema described rather than refused for the layout it was stored in.
+  const previousArgumentSchema = hoistNestedCfcSchemaDefs(
+    previous.argumentSchema,
+  );
+  const previousResultSchema = hoistNestedCfcSchemaDefs(previous.resultSchema);
   const issues: string[] = [];
   for (
     const [label, schema] of [
-      ["previous argument", previous.argumentSchema],
+      ["previous argument", previousArgumentSchema],
       ["candidate argument", candidate.argumentSchema],
-      ["previous result", previous.resultSchema],
+      ["previous result", previousResultSchema],
       ["candidate result", candidate.resultSchema],
     ] as const
   ) {
@@ -620,11 +629,11 @@ export function assertPatternSchemasBackwardCompatible(
   }
 
   const argumentIssue = schemaSubsetIssue(
-    previous.argumentSchema,
+    previousArgumentSchema,
     candidate.argumentSchema,
     "argument",
     {
-      sourceRoot: previous.argumentSchema,
+      sourceRoot: previousArgumentSchema,
       targetRoot: candidate.argumentSchema,
       role: "argument",
       activePairs: new WeakMap(),
@@ -638,11 +647,11 @@ export function assertPatternSchemasBackwardCompatible(
 
   const resultIssue = schemaSubsetIssue(
     candidate.resultSchema,
-    previous.resultSchema,
+    previousResultSchema,
     "result",
     {
       sourceRoot: candidate.resultSchema,
-      targetRoot: previous.resultSchema,
+      targetRoot: previousResultSchema,
       role: "result",
       activePairs: new WeakMap(),
       allowEvolutionPolicy: true,

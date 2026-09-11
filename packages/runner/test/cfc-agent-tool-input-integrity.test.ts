@@ -1050,7 +1050,8 @@ describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
 
   it("resolves a local reference under a nested object against the event root's $defs", () => {
     // The reference sits two levels down; it names the root's definition,
-    // and the walk reaches the floor there and refuses the literal for the
+    // and the `$defs` that `envelope` declares of its own is inert below the
+    // root, so the walk reaches the floor and refuses the literal for the
     // floor's own reason rather than reading the schema as unresolvable.
     const eventSchema = {
       type: "object",
@@ -1063,6 +1064,7 @@ describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
       properties: {
         envelope: {
           type: "object",
+          $defs: { Unrelated: { type: "string" } },
           properties: {
             recipient: { $ref: "#/$defs/Floored" },
           },

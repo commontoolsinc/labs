@@ -29,6 +29,7 @@ import {
   cfcSchemaWithInheritedDefs,
   findCfcSchemaRefs,
   hoistCfcSchemaDefs,
+  hoistNestedCfcSchemaDefs,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefs,
@@ -1048,11 +1049,11 @@ describe("hoistCfcSchemaDefs()", () => {
 
     expect(fragments).toEqual([
       { $ref: "#/$defs/Leaf" },
-      { properties: { a: { $ref: "#/$defs/__cfc_union_arm_0_Leaf" } } },
+      { properties: { a: { $ref: "#/$defs/__cfc_hoisted_0_Leaf" } } },
     ]);
     expect(definitions).toEqual({
       Leaf: { type: "string" },
-      __cfc_union_arm_0_Leaf: { type: "number" },
+      __cfc_hoisted_0_Leaf: { type: "number" },
     });
   });
 
@@ -1062,6 +1063,72 @@ describe("hoistCfcSchemaDefs()", () => {
       fragments,
       definitions: undefined,
     });
+  });
+});
+
+describe("hoistNestedCfcSchemaDefs()", () => {
+  it("lifts a nested map onto the root under renamed names, refs included", () => {
+    // Under the layout being lifted, the nested `Value` was the one the ref
+    // below it named; the root's `Value` stays the one the root-level ref
+    // names.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        outer: { $ref: "#/$defs/Value" },
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          $defs: { Value: { type: "string" } },
+        },
+      },
+      $defs: { Value: { type: "number" } },
+    };
+
+    expect(hoistNestedCfcSchemaDefs(schema)).toEqual({
+      type: "object",
+      properties: {
+        outer: { $ref: "#/$defs/Value" },
+        nested: {
+          type: "object",
+          properties: {
+            value: { $ref: "#/$defs/__cfc_legacy_scope_0_Value" },
+          },
+        },
+      },
+      $defs: {
+        Value: { type: "number" },
+        __cfc_legacy_scope_0_Value: { type: "string" },
+      },
+    });
+  });
+
+  it("lifts a nested map under a root that declares none", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          $ref: "#/$defs/Inner",
+          $defs: { Inner: { type: "string" } },
+        },
+      },
+    };
+
+    expect(hoistNestedCfcSchemaDefs(schema)).toEqual({
+      type: "object",
+      properties: {
+        nested: { $ref: "#/$defs/__cfc_legacy_scope_0_Inner" },
+      },
+      $defs: { __cfc_legacy_scope_0_Inner: { type: "string" } },
+    });
+  });
+
+  it("returns a document declaring no `$defs` below its root as the same object", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { value: { $ref: "#/$defs/Value" } },
+      $defs: { Value: { type: "number" } },
+    };
+    expect(hoistNestedCfcSchemaDefs(schema)).toBe(schema);
   });
 });
 
@@ -1113,6 +1180,16 @@ describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
     // Should not throw — vnode.json is registered in embeddedSchemas
     const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(schema);
     expect(resolved).toBeDefined();
+  });
+
+  it("resolves an embedded schema to a view whose refs into its definitions are external", () => {
+    const url = "https://commonfabric.org/schemas/vnode.json";
+    const document = resolveCfcSchemaRef({}, url) as JSONSchemaObj;
+    expect(document.$defs).toBeUndefined();
+    expect(document.$ref).toBe(`${url}#/$defs/VNode`);
+    const node = resolveCfcSchemaRef({}, `${url}#/$defs/VNode`);
+    expect(node).toMatchObject({ type: "object" });
+    expect((node as JSONSchemaObj).$defs).toBeUndefined();
   });
 
   it("throws with actionable message for unknown external $ref", () => {
