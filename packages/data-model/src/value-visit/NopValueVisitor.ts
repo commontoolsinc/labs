@@ -118,7 +118,7 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   }
 
   /** @inheritDoc */
-  visitedMapping(
+  visitedFabricPlainObject(
     _container: FabricPlainObject,
     _key: DomainFor<DomainExtra>,
     _value: DomainFor<DomainExtra>,

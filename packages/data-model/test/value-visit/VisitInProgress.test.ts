@@ -61,9 +61,9 @@ describe("VisitInProgress", () => {
             ["object", inner],
             ["value", null],
             ["primitive", null, "null"],
-            ["visitedMapping", inner, "b", null],
+            ["visitedFabricPlainObject", inner, "b", null],
             ["visitedElement", array, 1, inner],
-            ["visitedMapping", root, "a", array],
+            ["visitedFabricPlainObject", root, "a", array],
           ]);
         });
 
@@ -299,14 +299,14 @@ describe("VisitInProgress", () => {
           expect(rec.events.map((e) => e[1])).not.toContain(30);
         });
 
-        it("ends the visit from `visitedMapping()`, skipping later mappings", () => {
+        it("ends the visit from `visitedFabricPlainObject()`, skipping later mappings", () => {
           const rec = new Recorder();
           rec.onVisitedMapping = () => mainResult("first");
           const object = { a: 1, b: 2 };
 
           expect(visit(object, rec)).toEqual(mainResult("first"));
-          expect(rec.events.filter((e) => e[0] === "visitedMapping")).toEqual([
-            ["visitedMapping", object, "a", 1],
+          expect(rec.events.filter((e) => e[0] === "visitedFabricPlainObject")).toEqual([
+            ["visitedFabricPlainObject", object, "a", 1],
           ]);
           expect(rec.events.map((e) => e[1])).not.toContain(2);
         });
@@ -320,7 +320,7 @@ describe("VisitInProgress", () => {
           expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
             ["primitive", "a", "string"],
           ]);
-          expect(rec.names).not.toContain("visitedMapping");
+          expect(rec.names).not.toContain("visitedFabricPlainObject");
         });
 
         it("ends the visit from `visitedArrayGap()`, for a gap before an element", () => {
@@ -409,16 +409,16 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("reports each mapping to `visitedMapping()` whichever of keys or values is recursed", () => {
+        it("reports each mapping to `visitedFabricPlainObject()` whichever of keys or values is recursed", () => {
           for (const form of [DO_RECURSE_KEYS, DO_RECURSE_VALUES]) {
             const rec = new Recorder();
             rec.onPlainObject = () => form;
             const object = { a: 1 };
 
             visit(object, rec);
-            expect(rec.events.filter((e) => e[0] === "visitedMapping"))
+            expect(rec.events.filter((e) => e[0] === "visitedFabricPlainObject"))
               .toEqual([
-                ["visitedMapping", object, "a", 1],
+                ["visitedFabricPlainObject", object, "a", 1],
               ]);
           }
         });
@@ -442,7 +442,7 @@ describe("VisitInProgress", () => {
 
           visit({ a: 1 }, rec);
           expect(rec.names).not.toContain("primitive");
-          expect(rec.names).not.toContain("visitedMapping");
+          expect(rec.names).not.toContain("visitedFabricPlainObject");
         });
 
         it("honors a `recurse` returned directly from `visitValue()`, without subtype dispatch", () => {

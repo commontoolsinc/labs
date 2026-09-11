@@ -67,7 +67,7 @@ describe("ContainerIteratingValueVisitor", () => {
 
         expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
         expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
-        expect(vis.visitedMapping({}, "k", 1)).toBeUndefined();
+        expect(vis.visitedFabricPlainObject({}, "k", 1)).toBeUndefined();
       });
     });
   });

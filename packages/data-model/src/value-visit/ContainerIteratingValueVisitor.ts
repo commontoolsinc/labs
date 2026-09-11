@@ -91,7 +91,7 @@ export abstract class ContainerIteratingValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedMapping(
+  visitedFabricPlainObject(
     _container: FabricPlainObject,
     _key: DomainFor<DomainExtra>,
     _value: DomainFor<DomainExtra>,
