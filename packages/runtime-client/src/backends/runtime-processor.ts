@@ -55,6 +55,7 @@ import {
   entityIdFrom,
   type EventIntentOutcome,
   getCellOrThrow,
+  getMetaLink,
   getPatternIdentityRef,
   hasOperationStorageCapability,
   type IExtendedStorageTransaction,
@@ -62,11 +63,13 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
+  KeepAsCell,
   markCellDocumentSynced,
   markDurableReadTx,
   narrowerScopeCap,
   type NormalizedFullLink,
   normalizeSpaceHost,
+  parseLink,
   PatternCoverageCollector,
   popFrame,
   pushFrame,
@@ -108,7 +111,6 @@ import {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { getMetaLink, KeepAsCell, parseLink } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   type AcquireCellRequest,

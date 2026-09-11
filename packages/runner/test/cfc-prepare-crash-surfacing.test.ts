@@ -12,7 +12,6 @@ import {
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -253,7 +252,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
 
     const makeServer = () =>
       new MemoryV2Server.Server({
-        sessions: new SessionRegistry({ ttlMs: 600_000 }),
+        sessions: new MemoryV2Server.SessionRegistry({ ttlMs: 600_000 }),
         subscriptionRefreshDelayMs: 0,
         authorizeSessionOpen(message) {
           const principal = (message.authorization as { principal?: unknown })

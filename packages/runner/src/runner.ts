@@ -10036,7 +10036,11 @@ export class Runner {
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined
-      ? async (event: any, identity?: ScopeKeyIdentity): Promise<void> => {
+      ? async (
+        event: any,
+        identity: ScopeKeyIdentity | undefined,
+        tx: IExtendedStorageTransaction,
+      ): Promise<void> => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -10045,6 +10049,7 @@ export class Runner {
           resultCell.space,
           eventInputs,
           undefined,
+          tx,
         );
         const argument = inputsCell.asSchema(module.argumentSchema!).get();
         const promises: Promise<unknown>[] = [];

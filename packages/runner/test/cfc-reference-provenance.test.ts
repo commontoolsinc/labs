@@ -41,10 +41,9 @@ import {
 } from "../src/cfc/types.ts";
 import { getCellOrThrow } from "../src/query-result-proxy.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Pattern } from "../src/builder/types.ts";
-import { getMetaLink } from "../src/link-utils.ts";
 import {
   createTrustedBuilder,
   trustExecutable,
