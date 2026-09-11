@@ -48,6 +48,10 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
     for (const verb of ["upload", "instantiate"]) {
       const res = await post(`${BASE}/${verb}`);
       expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({
+        error: "Unauthorized",
+        code: "unauthorized",
+      });
     }
   });
 

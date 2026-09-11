@@ -1627,7 +1627,10 @@ async function lifecycleClient(
  * and materializes the piece — the creation act, with its registry entry
  * and its name in the same transaction — and this connection then starts
  * it the way it starts any piece it opens, running the graph as
- * speculation while the server derives on demand.
+ * speculation while the server derives on demand. The request is awaited
+ * without a wall-clock bound: a creation the server is still committing
+ * is not one to walk away from, since it lands whether or not this
+ * process waits. `boundStart` is the bound the local start runs under.
  */
 async function createOnServer(
   config: SpaceConfig,
@@ -1636,6 +1639,7 @@ async function createOnServer(
   entry: EntryConfig,
   options: { start?: boolean; slug?: string; force?: boolean } | undefined,
   deps: PieceOperationDependencies,
+  boundStart: <T>(start: Promise<T>) => Promise<T>,
 ): Promise<{ id: string; getCell: () => Cell<unknown> }> {
   const receipt = await (deps.instantiatePieceOnServer ??
     instantiatePieceOnServer)(await lifecycleClient(config, deps), {
@@ -1647,9 +1651,10 @@ async function createOnServer(
       ...(options?.slug === undefined ? {} : { slug: options.slug }),
       ...(options?.force === undefined ? {} : { force: options.force }),
       register: true,
+      ...(options?.start === false ? { start: false } : {}),
     });
   const cell = await pieces.getPieceCell(receipt.pieceId, false);
-  if (options?.start !== false) await pieces.startPiece(cell);
+  if (options?.start !== false) await boundStart(pieces.startPiece(cell));
   return { id: receipt.pieceId, getCell: () => cell };
 }
 
@@ -1672,15 +1677,21 @@ export async function newPiece(
     () => (deps.loadPieces ?? loadPieces)(config),
   );
 
-  // Registration through `pieces.add()` requires an existing default pattern
-  // and fails before sending if none exists. Ensuring it creates an absent
-  // root and reconciles and repairs an existing one; fail here with the cause
-  // if initialization fails.
+  // Against a serving deployment the space root is the serving loop's to
+  // ensure — it does so on activation, ahead of the verb this command sends
+  // — and a served creation that finds no root refuses with `no-space-root`.
+  // Otherwise registration through `pieces.add()` requires an existing
+  // default pattern and fails before sending if none exists. Ensuring it
+  // creates an absent root and reconciles and repairs an existing one; fail
+  // here with the cause if initialization fails.
+  const served = servesLifecycleVerbs(pieces);
   try {
-    await timeCliPhase(
-      "newPiece.ensureDefaultPattern",
-      () => pieces.ensureDefaultPattern(),
-    );
+    if (!served) {
+      await timeCliPhase(
+        "newPiece.ensureDefaultPattern",
+        () => pieces.ensureDefaultPattern(),
+      );
+    }
   } catch (error) {
     throw new Error(
       `Could not initialize the space's default pattern: ${
@@ -1712,14 +1723,7 @@ export async function newPiece(
   const PIECE_START_TIMEOUT_MS = 60_000;
   const runtimeErrors = runtimeErrorLog(pieces.runtime);
   const errorCountBefore = runtimeErrors.length;
-  const served = servesLifecycleVerbs(pieces);
-  const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = served
-      ? createOnServer(config, pieces, program, entry, options, deps)
-      : pieces.create(program, {
-        repository: entry.repository,
-        start: options?.start,
-      });
+  const boundStart = <T>(starting: Promise<T>): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -1736,10 +1740,26 @@ export async function newPiece(
         );
       }, PIECE_START_TIMEOUT_MS);
     });
-    return Promise.race([createPromise, timeout]).finally(() =>
-      clearTimeout(timer)
-    );
-  });
+    return Promise.race([starting, timeout]).finally(() => clearTimeout(timer));
+  };
+  const piece = await timeCliPhase(
+    "newPiece.create",
+    () =>
+      served
+        ? createOnServer(
+          config,
+          pieces,
+          program,
+          entry,
+          options,
+          deps,
+          boundStart,
+        )
+        : boundStart(pieces.create(program, {
+          repository: entry.repository,
+          start: options?.start,
+        })),
+  );
   // Here rather than after the registry add below: the piece now exists in
   // the space, and a slug or registry step that throws afterwards leaves a
   // partial write that the operator is owed the location of.

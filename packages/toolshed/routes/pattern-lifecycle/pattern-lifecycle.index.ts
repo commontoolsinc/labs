@@ -36,7 +36,10 @@ router.use(`${routes.BASE}/*`, rateLimit(verbLimiter));
 // No cors(): a credentialed control plane; the app-wide policy allows only
 // GET/OPTIONS cross-origin, so a signed POST from another origin fails its
 // preflight.
-router.use(`${routes.BASE}/*`, requireFirstPartyHttpAuth());
+router.use(
+  `${routes.BASE}/*`,
+  requireFirstPartyHttpAuth({ code: "unauthorized" }),
+);
 
 export default router
   .openapi(routes.upload, handlers.upload)

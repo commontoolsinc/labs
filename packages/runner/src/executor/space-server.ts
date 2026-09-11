@@ -105,6 +105,7 @@ import { ensureSpaceRootPattern } from "../ensure-space-root.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,
+  type WaveCommitOutcome,
   type WaveCommitSink,
   waveRunContextOf,
   type WaveWriteAnnotation,
@@ -442,6 +443,13 @@ type QueuedLifecycleVerb = {
 
 type RanLifecycleVerb = QueuedLifecycleVerb & {
   outcome: { failed: false; ok: unknown } | { failed: true; error: unknown };
+
+  /**
+   * The wave the verb's transactions sealed into, and the range of its
+   * contributions there — what the wave's commit outcome is read by to
+   * settle the verb. `undefined` when the verb sealed nothing.
+   */
+  sealed: { wave: WaveAccumulator; from: number; to: number } | undefined;
 
   /** The roots the verb named as demand, loaded once its wave committed. */
   demandRoots: ReadonlyArray<string>;
@@ -838,6 +846,15 @@ export class SpaceServer implements TransactionSealDestination {
    * a verb's warm re-announcement names (`#settleLifecycleVerbs`).
    */
   #lastCommittedWaveSeq: number | undefined;
+
+  /**
+   * The wave the current cycle's serving step closed and its commit
+   * outcome, which settles the lifecycle verbs that sealed into it;
+   * `undefined` until the step reaches its commit.
+   */
+  #servedWave:
+    | { wave: WaveAccumulator; outcome: WaveCommitOutcome }
+    | undefined;
 
   /** F6 (log hygiene): the no-owner WARN fires once per tenure — a
    * permanently-ownerless space whose ACL doc keeps getting written
@@ -4598,6 +4615,7 @@ export class SpaceServer implements TransactionSealDestination {
     // error after the wave commits, or with the cycle's own error if the
     // wave never gets that far.
     const verbs = await this.#runQueuedLifecycleVerbs(runtime);
+    this.#servedWave = undefined;
     try {
       await this.#serveWave(runtime);
     } catch (error) {
@@ -4611,25 +4629,38 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /**
-   * Run every lifecycle verb queued before this cycle, one at a time and
-   * each awaited before the next, so a verb's seals join this cycle's
+   * Run the lifecycle verbs queued when this cycle began, one at a time
+   * and each awaited before the next, so a verb's seals join this cycle's
    * wave (a seal resolves at acceptance, ahead of the wave commit, so
-   * awaiting it here cannot deadlock against the wave). A verb that
-   * throws is settled as rejected once the cycle ends; the verbs behind
-   * it still run.
+   * awaiting it here cannot deadlock against the wave). The batch is the
+   * queue as it stood at the start: a verb arriving while one runs waits
+   * for the next cycle, so a steady arrival of requests cannot keep the
+   * cycle from reaching its serving step. A verb that throws is settled
+   * as rejected once the cycle ends; the verbs behind it still run. A
+   * park mid-batch rejects the verbs not yet run the way a park rejects
+   * the queue.
    */
   async #runQueuedLifecycleVerbs(
     runtime: Runtime,
   ): Promise<RanLifecycleVerb[]> {
     const ran: RanLifecycleVerb[] = [];
     const stats = this.#options.stats.lifecycleVerbs;
-    while (this.#lifecycleVerbs.length > 0 && this.#active) {
-      const queued = this.#lifecycleVerbs.shift()!;
+    const batch = this.#lifecycleVerbs.splice(0);
+    for (const [index, queued] of batch.entries()) {
+      if (!this.#active) {
+        for (const unrun of batch.slice(index)) {
+          unrun.reject(new Error(LIFECYCLE_VERB_SPACE_PARKED));
+        }
+        break;
+      }
       const start = performance.now();
       const staged = new Map<string, { id: string; scopeKey: "space" }>();
       this.#runningLifecycleVerbWrites = staged;
+      const from = this.#currentWave?.contributionCount ?? 0;
       try {
         const ok = await queued.verb.run(runtime);
+        const wave = this.#currentWave;
+        const to = wave?.contributionCount ?? from;
         const demandRoots = queued.verb.demandRoots?.(ok) ?? [];
         for (const id of demandRoots) {
           staged.set(toDirtyKey(id, "space"), { id, scopeKey: "space" });
@@ -4639,6 +4670,9 @@ export class SpaceServer implements TransactionSealDestination {
         ran.push({
           ...queued,
           outcome: { failed: false, ok },
+          sealed: wave === undefined || to === from
+            ? undefined
+            : { wave, from, to },
           demandRoots,
           stagedWrites,
         });
@@ -4652,6 +4686,7 @@ export class SpaceServer implements TransactionSealDestination {
         ran.push({
           ...queued,
           outcome: { failed: true, error },
+          sealed: undefined,
           demandRoots: [],
           stagedWrites: [],
         });
@@ -4662,6 +4697,32 @@ export class SpaceServer implements TransactionSealDestination {
       timing.time(start, "executor", "wave", "lifecycle-verb");
     }
     return ran;
+  }
+
+  /**
+   * Why a verb's writes are not durable after its cycle's serving step,
+   * read off the wave commit outcome: the wave aborted, a different wave
+   * was served, or one of the verb's own contributions was withdrawn or
+   * partly dropped at the commit. `undefined` when every contribution
+   * committed, or when the verb sealed nothing.
+   */
+  #lifecycleVerbNotDurable(entry: RanLifecycleVerb): string | undefined {
+    if (entry.sealed === undefined) return undefined;
+    const served = this.#servedWave;
+    if (served === undefined || served.wave !== entry.sealed.wave) {
+      return "the wave carrying its writes was not committed";
+    }
+    if (served.outcome.aborted !== undefined) {
+      return `the wave carrying its writes aborted (${served.outcome.aborted})`;
+    }
+    const dispositions = served.outcome.dispositions.slice(
+      entry.sealed.from,
+      entry.sealed.to,
+    );
+    const withdrawn = dispositions.find((d) => d.kind !== "committed");
+    return withdrawn === undefined
+      ? undefined
+      : `a contribution of its was ${withdrawn.kind} at the wave commit`;
   }
 
   /**
@@ -4700,11 +4761,12 @@ export class SpaceServer implements TransactionSealDestination {
 
   /**
    * Settle the verbs a cycle ran, after the cycle's wave commit step: a
-   * verb whose run threw rejects with that error; one whose `confirm`
-   * throws rejects with that; every other resolves with its receipt.
-   * `confirm` runs against the serving runtime's replica, which the wave
-   * outcome has already applied to — a withdrawn contribution's writes
-   * are gone from it — so the read it makes is a read of durable state.
+   * verb whose run threw rejects with that error; one whose contributions
+   * the wave commit did not carry whole rejects, as does one whose
+   * `confirm` throws; every other resolves with its receipt. The wave's
+   * commit outcome is the positive witness — the verb's contributions
+   * committed — and `confirm` the read behind it, against the serving
+   * runtime's replica, which the outcome has already applied to.
    *
    * A verb's staged documents go back to the loop as a warm-marked notice
    * — the explicit warm request's carrier (serving-loop.md §1), which
@@ -4724,6 +4786,8 @@ export class SpaceServer implements TransactionSealDestination {
         continue;
       }
       try {
+        const notDurable = this.#lifecycleVerbNotDurable(entry);
+        if (notDurable !== undefined) throw new Error(notDurable);
         await entry.verb.confirm?.(runtime, entry.outcome.ok);
         const seq = this.#lastCommittedWaveSeq;
         if (this.#active && entry.demandRoots.length > 0 && seq !== undefined) {
@@ -5170,6 +5234,7 @@ export class SpaceServer implements TransactionSealDestination {
       ? advanceTo
       : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
+    this.#servedWave = { wave: closing, outcome };
     if (outcome.seq !== undefined) this.#lastCommittedWaveSeq = outcome.seq;
     // The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
     // trigger; RULED 2026-08-21): every foreign provisioning batch this

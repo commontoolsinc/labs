@@ -195,8 +195,10 @@ export function processUpload(
 
 /**
  * The `instantiate` verb: create a piece from the request's pattern, named
- * and registered as asked, and name its root as the loop's demand so the
- * cycle after the creation's commit derives it.
+ * and registered as asked, and — unless `start` is `false` — name its root
+ * as the loop's demand so the cycle after the creation's commit derives
+ * it. A piece created without that demand runs when something first
+ * demands it, the served meaning of a setup-only creation.
  */
 export function processInstantiate(
   deps: LifecycleDeps,
@@ -208,6 +210,7 @@ export function processInstantiate(
     slug?: string;
     force?: boolean;
     register?: boolean;
+    start?: boolean;
   },
 ): Promise<LifecycleResult<ServedInstantiateReceipt>> {
   const source = wireSource(input);
@@ -234,6 +237,8 @@ export function processInstantiate(
       }),
     confirm: (runtime, receipt) =>
       confirmServedInstantiate(runtime, input.space as MemorySpace, receipt),
-    demandRoots: (receipt) => [pieceRootDocId(receipt.pieceId)],
+    ...(input.start === false
+      ? {}
+      : { demandRoots: (receipt) => [pieceRootDocId(receipt.pieceId)] }),
   });
 }

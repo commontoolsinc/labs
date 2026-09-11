@@ -155,6 +155,11 @@ export const instantiate = createRoute({
             register: z.boolean().optional().describe(
               "Add the piece to the space root's registry.",
             ),
+            start: z.boolean().optional().describe(
+              "Have the serving loop derive the piece once the creation " +
+                "commits (the default); `false` leaves it set up and not " +
+                "run until something demands it.",
+            ),
           }),
         },
       },

@@ -130,8 +130,11 @@ async function call<T>(
 }
 
 /**
- * Create a piece in `space` from `program`, set up and not started, with
- * its registry entry and its name when asked for, all in one transaction.
+ * Create a piece in `space` from `program`, set up and not started here,
+ * with its registry entry and its name when asked for, all in one
+ * transaction. The serving loop derives the piece in the cycle after the
+ * creation commits unless `start` is `false`, which leaves it to the
+ * first demand.
  */
 export async function instantiatePieceOnServer(
   config: LifecycleClientConfig,
@@ -143,6 +146,7 @@ export async function instantiatePieceOnServer(
     slug?: string;
     force?: boolean;
     register?: boolean;
+    start?: boolean;
   },
 ): Promise<{ pieceId: string; pattern: PatternRef; slug?: string }> {
   return await call(config, "instantiate", {
@@ -153,5 +157,6 @@ export async function instantiatePieceOnServer(
     ...(input.slug === undefined ? {} : { slug: input.slug }),
     ...(input.force === undefined ? {} : { force: input.force }),
     ...(input.register === undefined ? {} : { register: input.register }),
+    ...(input.start === undefined ? {} : { start: input.start }),
   });
 }

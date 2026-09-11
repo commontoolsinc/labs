@@ -137,8 +137,16 @@ resolves the program locally — reading the files, pinning fabric imports —
 and sends it. What `cf piece new` still does in its own process after the
 receipt is what any client does when it opens a piece: it starts the piece,
 which under the flag runs the graph as speculation while the serving loop
-serves the derived values. `--no-start` skips that. The registry entry and
-the slug are part of the served creation.
+serves the derived values. `--no-start` skips that and sends `start: false`,
+which leaves the piece set up and undemanded on the serving side too: the
+loop derives it when something first demands it, not in the cycle after
+the creation. The registry entry and the slug are part of the served
+creation, and so is the space root the registry lives in: the serving loop
+ensures the root on activation, ahead of the verb, so the client no longer
+initializes it in its own process; a creation that finds no root is refused
+with `no-space-root`. The request is awaited without a wall-clock bound,
+since a creation the server is still committing lands whether or not the
+client waits; the bound the client keeps is on its own start.
 
 Other clients of the piece controller — the browser shell, the background
 piece service — keep the client-side shape. Moving each is its own change;

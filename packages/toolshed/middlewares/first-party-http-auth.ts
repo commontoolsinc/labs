@@ -3,9 +3,15 @@ import { verifyFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-
 import { trace } from "@opentelemetry/api";
 import type { AppBindings } from "@/lib/types.ts";
 
-export function requireFirstPartyHttpAuth(): MiddlewareHandler<
-  AppBindings
-> {
+/**
+ * Admit only a request carrying a valid first-party proof; the verified
+ * DID lands on the context for the route's own authorization. A route
+ * whose refusals carry a stable code passes the code its 401 should name,
+ * so a client branches on it the way it branches on the route's others.
+ */
+export function requireFirstPartyHttpAuth(
+  options: { code?: string } = {},
+): MiddlewareHandler<AppBindings> {
   return async (c, next) => {
     try {
       const { userDid } = await verifyFirstPartyHttpRequest({
@@ -32,7 +38,12 @@ export function requireFirstPartyHttpAuth(): MiddlewareHandler<
         },
         "Rejected unauthenticated first-party HTTP request",
       );
-      return c.json({ error: "Unauthorized" }, 401);
+      return c.json(
+        options.code === undefined
+          ? { error: "Unauthorized" }
+          : { error: "Unauthorized", code: options.code },
+        401,
+      );
     }
     await next();
   };
