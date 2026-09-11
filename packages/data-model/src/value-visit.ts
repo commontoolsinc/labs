@@ -468,8 +468,8 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
 
   /** @inheritDoc */
   visitArrayGap(
-    start: number,
-    count: number,
+    _start: number,
+    _count: number,
   ): BaselineVisitResult<ResultType> {
     return undefined;
   }
