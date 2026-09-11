@@ -46,6 +46,7 @@ export function reportNestedCollectionScans(
           checker.getSymbolAtLocation(root)?.getDeclarations();
         if (
           insideCollection && declarations?.length &&
+          !ts.isElementAccessExpression(unwrapExpression(target.expression)) &&
           !declarations.some((declaration) =>
             isDeclaredWithinFunction(declaration, insideCollection)
           ) &&

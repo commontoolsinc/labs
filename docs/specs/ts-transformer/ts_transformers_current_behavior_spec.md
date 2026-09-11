@@ -830,7 +830,9 @@ followed by a push to the same collection, and reports:
   - the message text is produced per classification by `diagnosticMessage`;
     capability analysis feeds the findings via `mergeablePushMisuseSink`
 
-`PatternContextValidationTransformer` also reports **Warning**
+### 6.9a Nested collection scan validation
+
+`PatternContextValidationTransformer` reports **Warning**
 `collection:nested-scan` (`src/diagnostics/nested-collection-scan.ts`) for an
 inline reactive array-method callback scanning a captured reactive collection.
 It recognizes the array-method families classified by `classifyArrayMethodCallSite`
@@ -839,7 +841,7 @@ and callback-local declarations as collection roots are excluded, so a row's
 own child array or a locally derived
 child list does not trigger this warning. The reported receiver must resolve to
 a captured root binding; complex receiver expressions are outside this check.
-Plain local arrays, sequential scans, lowered calls, and scans
+Indexed receiver results, plain local arrays, sequential scans, lowered calls, and scans
 inside unrelated function boundaries are excluded. The warning does not change
 execution or claim that every update scans both collections; it asks the author
 to measure potentially multiplicative work and consider contract-compatible

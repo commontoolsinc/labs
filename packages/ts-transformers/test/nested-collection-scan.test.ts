@@ -8,7 +8,7 @@ async function warnings(body: string) {
   const result = await validateSource(
     `
     import {pattern,computed} from "commonfabric";
-    export default pattern<{rows:{key:string;children:string[]}[];other:{key:string}[]}>(({rows,other})=>{
+    export default pattern<{rows:{key:string;children:string[]}[];other:{key:string}[];collections:string[][]}>(({rows,other,collections})=>{
       ${body}
     });
   `,
@@ -89,6 +89,13 @@ describe("nested collection scan warnings", () => {
       { types: COMMONFABRIC_TYPES, typeCheck: true },
     );
     expect(result.diagnostics).toEqual([]);
+  });
+  it("leaves a captured collection selected by element access unreported", async () => {
+    expect(
+      await warnings(
+        "return rows.map(row=>collections[0].map(child=>child));",
+      ),
+    ).toHaveLength(0);
   });
   it("warns for nested captured scans within a computed body", async () => {
     expect(

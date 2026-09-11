@@ -140,8 +140,7 @@ sequential scans, and unrelated function scopes are excluded. It does not trace
 arbitrary helper calls, complex receivers, or other loop forms. Absence of this
 warning is not a complexity guarantee.
 
-Move shared work outside the callback when possible. An
-[indexed lookup](collection-indexes.md) or
+Move shared work outside the callback when possible. A
 [named aggregate](collection-aggregates.md) can fit some workloads; check its
 cardinality, numeric, ordering, and update contract before changing the pattern.
 Use the counters and budgets above to validate the resulting behavior.
