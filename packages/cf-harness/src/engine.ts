@@ -2028,6 +2028,23 @@ export class CfHarnessEngine {
     return normalizeHostPath(this.#resolveHostMount(path).mount.hostPath);
   }
 
+  /**
+   * The sandbox mount covering `path`, or `undefined` when no mount of this
+   * run's sandbox does.
+   *
+   * What a run can read is what it mounts, so this is the question "could this
+   * run see a file here?" asked of a host path. `acquire_skill` asks it of the
+   * directory it is about to write a skill's scripts into: the parent that
+   * plans an acquisition must not be able to read the bytes, and a mount over
+   * that directory is the one way it could.
+   */
+  #hostMountCovering(path: string): HostSandboxMount | undefined {
+    const hostPath = normalizeHostPath(path);
+    return this.#hostMounts.find((mount) =>
+      isHostPathWithinRoot(normalizeHostPath(mount.hostPath), hostPath)
+    );
+  }
+
   #hostPathToWorkspacePath(path: string): string | undefined {
     const hostPath = normalizeHostPath(path);
     for (const mount of this.#hostMounts) {
@@ -2314,6 +2331,15 @@ export class CfHarnessEngine {
       resolveHostRootPath: (path: string) => this.#resolveHostRootPath(path),
       hostPathToWorkspacePath: (path: string) =>
         this.#hostPathToWorkspacePath(path),
+      describeHostMountCovering: (path: string) => {
+        const mount = this.#hostMountCovering(path);
+        return mount === undefined ? undefined : {
+          kind: mount.kind,
+          ...(mount.name !== undefined ? { name: mount.name } : {}),
+          hostPath: mount.hostPath,
+          sandboxPath: mount.sandboxPath,
+        };
+      },
       isHostPathWithinWorkspace: (
         path: string,
         options?: { allowMissing?: boolean },

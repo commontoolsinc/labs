@@ -286,6 +286,66 @@ export interface HarnessSkillActivation {
   acquisition?: HarnessSkillAcquisition;
 }
 
+export const HARNESS_ACQUIRED_SKILLS_TYPE = "cf-harness.acquired-skills";
+
+/**
+ * One script of an acquired skill, materialized on the host so a run can
+ * execute it.
+ *
+ * `valueDigest` is taken at acquisition, over the bytes the pinned commit
+ * served, and it is what an execution re-checks the file against — the same
+ * pin a registry script gets from the run-start registry snapshot. A file
+ * changed on the host between acquisition and execution refuses.
+ */
+export interface HarnessAcquiredSkillScript {
+  /** Path relative to the skill root, as an allowlist entry names it. */
+  path: string;
+
+  /** Where the host holds the bytes. */
+  hostPath: string;
+
+  /** The same file, as the sandbox that may run it sees it. */
+  sandboxPath: string;
+
+  valueDigest: string;
+  sizeBytes: number;
+}
+
+/**
+ * The scripts one acquisition materialized, under the pin they came from.
+ *
+ * The pin is the allowlist key's skill field, so what an operator allowlisted
+ * and what a run resolves are the same string. The host root is mounted
+ * read-only, and only into the sandbox of a run that holds the skill's handle:
+ * the parent that planned the acquisition never holds the skill's bytes, and
+ * that is the property the demo rests on.
+ */
+export interface HarnessAcquiredSkill {
+  /** Discovery id, in `owner/repo/slug` form. */
+  registryId: string;
+
+  commitSha: string;
+
+  /** `registryId@commitSha`, which is what an allowlist entry names. */
+  pin: string;
+
+  /** The host directory holding this acquisition's `scripts/`. */
+  hostRoot: string;
+
+  /** The same directory, as a run that mounts it sees it. */
+  sandboxRoot: string;
+
+  scripts: HarnessAcquiredSkillScript[];
+}
+
+/** Every skill this run acquired scripts for. */
+export interface HarnessAcquiredSkills {
+  type: typeof HARNESS_ACQUIRED_SKILLS_TYPE;
+  version: 1;
+  generatedAt: string;
+  skills: HarnessAcquiredSkill[];
+}
+
 export interface HarnessSkillActivations {
   type: typeof HARNESS_SKILL_ACTIVATIONS_TYPE;
   version: 1;

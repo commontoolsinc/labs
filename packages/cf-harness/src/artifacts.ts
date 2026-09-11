@@ -94,6 +94,24 @@ export interface HarnessArtifactStore {
    */
   readonly imageAttachmentSnapshotDir?: string;
 
+  /**
+   * Host directory holding the scripts this run acquired, a sibling of the
+   * run root rather than a directory inside it.
+   *
+   * Held apart from the run root BECAUSE of CT-2117, not despite it: the
+   * artifact tree is not a confidentiality boundary — `bash` does not reserve
+   * it the way the file tools do — and `acquire_skill` runs in the PARENT, so
+   * a script written under the parent's run root is a script the planner can
+   * read wherever that tree is reachable. That is the one property the
+   * hostile-skill receipt rests on.
+   *
+   * Being a sibling buys the lifecycle and not the boundary: it is created
+   * with the run and removed with it, and what keeps the parent out is that
+   * no mount of the parent's sandbox covers it. The acquisition checks that
+   * rather than assuming it, and refuses where it does not hold.
+   */
+  readonly acquiredSkillsDir?: string;
+
   persistRunState(state: HarnessRunState): Promise<string>;
   persistTranscript(
     transcript: readonly HarnessTranscriptMessage[],
@@ -149,11 +167,19 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
   readonly imageAttachmentSnapshotDir: string;
+  readonly acquiredSkillsDir: string;
 
   constructor(options: FileSystemHarnessArtifactStoreOptions) {
     this.artifactRoot = resolve(options.artifactRoot);
-    this.runRoot = join(this.artifactRoot, assertValidRunId(options.runId));
+    const runId = assertValidRunId(options.runId);
+    this.runRoot = join(this.artifactRoot, runId);
     this.imageAttachmentSnapshotDir = join(this.runRoot, "image-attachments");
+    // A sibling rather than a child: same lifecycle, and one directory the
+    // run's own artifacts do not contain.
+    this.acquiredSkillsDir = join(
+      this.artifactRoot,
+      `${runId}.acquired-skills`,
+    );
   }
 
   async persistRunState(state: HarnessRunState): Promise<string> {
