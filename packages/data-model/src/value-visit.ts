@@ -517,11 +517,47 @@ export abstract class ContainerIteratingVisitor<
   DomainExtra = never,
   ResultType = FabricValue,
 > extends BaseValueVisitor<DomainExtra, ResultType> {
+  //
+  // Instance members
+  //
+
+  /** @inheritDoc */
+  visitFabricArray(
+    _value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    ContainerIteratingVisitor.#throwShouldnt("visitFabricArray");
+  }
+
+  /** @inheritDoc */
+  visitFabricInstance(
+    _value: FabricInstance,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    ContainerIteratingVisitor.#throwShouldnt("visitFabricInstance");
+  }
+
+  /** @inheritDoc */
+  visitFabricPlainObject(
+    _value: FabricPlainObject,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    ContainerIteratingVisitor.#throwShouldnt("visitFabricPlainObject");
+  }
+
   /** @inheritDoc */
   visitFabricContainer(
     _value: FabricContainerValue,
   ): DispatchingVisitorResult<DomainExtra, ResultType> {
     return DO_RECURSE_KEYS_VALUES;
+  }
+
+  //
+  // Static members
+  //
+
+  /** Throws a "shouldn't happen" error, as appropriate for this class. */
+  static #throwShouldnt(methodName: string): never {
+    const desc = `\`${methodName}()\``;
+    const thisCls = toCompactDebugString(this, { backtickQuote: true });
+    throw new Error(`Shouldn't happen: ${desc} called on ${thisCls}`);
   }
 }
 
