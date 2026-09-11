@@ -77,3 +77,23 @@ no constant-time update guarantee. Group consumers also pay for the members they
 read. Scale measurements and join operators are tracked by the
 [implementation plan](../plans/pattern-computation-cost-implementation.md) and
 [index contract](../plans/collection-index-contract.md).
+
+## Left lookup joins
+
+A left lookup join composes a `keyBy` index of the right collection with a `map`
+over the left collection. Each left callback returns its original row and
+`index.lookup(row.key)` as an optional right match. There is one output per left
+occurrence, including unmatched rows; output ordering follows the left `map`.
+Duplicate right keys use the index's deterministic winner.
+
+A right-side key edit changes only lookups of the old and new keys. Consumers
+read right payload fields through the original linked row, so a payload-only
+edit need not rebuild membership. A left-side key edit retargets that left
+occurrence's lookup. Removing a shared right match makes every participating
+left output unmatched while retaining those left occurrences.
+
+The [join acceptance tests](../../packages/runner/test/collection-index-join.test.ts)
+exercise these transitions with local and cross-space right rows, and restart
+the composed join in an independent
+runtime before editing its right collection. Their observer counts demonstrate
+which row consumers rerun; they do not bound all scheduler or storage work.
