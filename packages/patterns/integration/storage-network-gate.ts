@@ -63,7 +63,9 @@ export class StorageNetworkGate {
     const incoming = new URL(request.url);
     const target = new URL(incoming.pathname + incoming.search, this.#target);
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-      return await fetch(new Request(target, request));
+      const forwarded = new Request(target, request);
+      forwarded.headers.delete("host");
+      return await fetch(forwarded);
     }
     target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
     const upstream = new WebSocket(target);

@@ -5,6 +5,40 @@ import { stub } from "@std/testing/mock";
 import { StorageNetworkGate } from "./storage-network-gate.ts";
 
 describe("storage network gate", () => {
+  it("forwards HTTP requests with the target host and original body", async () => {
+    const server = Deno.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      onListen: () => {},
+    }, async (request) =>
+      Response.json({
+        host: request.headers.get("host"),
+        path: new URL(request.url).pathname,
+        query: new URL(request.url).search,
+        method: request.method,
+        body: await request.text(),
+      }));
+    const gate = new StorageNetworkGate(
+      new URL(`http://127.0.0.1:${server.addr.port}`),
+    );
+    try {
+      const response = await fetch(new URL("inspect?case=host", gate.url), {
+        method: "POST",
+        body: "relay payload",
+      });
+      expect(await response.json()).toEqual({
+        host: `127.0.0.1:${server.addr.port}`,
+        path: "/inspect",
+        query: "?case=host",
+        method: "POST",
+        body: "relay payload",
+      });
+    } finally {
+      await gate.close();
+      await server.shutdown();
+    }
+  });
+
   it("closes a connecting upstream when its reader disconnects", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
