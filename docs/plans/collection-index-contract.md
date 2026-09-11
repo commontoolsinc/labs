@@ -6,7 +6,8 @@ The [feature documentation](../features/collection-indexes.md) describes index
 producers and lookup. The remaining acceptance work includes mixed primitive/Cell `keys()`
 enumeration: the runtime union materializer can wrap a primitive alternative as
 a Cell. Membership and lookup preserve the distinction; the enumeration output
-representation remains pending. Isolation, scale measurements, and joins have
+representation is approved as explicit tagged enumeration; implementation and
+acceptance remain pending. Isolation, scale measurements, and joins have
 implementation evidence in #7323 and remain subject to its final review gates.
 
 ## Key domain and equality
@@ -53,9 +54,26 @@ returns undefined. A lookup with a missing key has the corresponding absent
 result. An invalid lookup key produces the same diagnostic as an invalid
 extracted key.
 
-The intended enumeration contract below still requires mixed primitive/Cell
-representation acceptance. It must not be read as a claim that the current
-runtime preserves both alternatives through `keys()`.
+## Tagged enumeration acceptance
+
+Q7 is resolved: provide an explicit tagged enumeration API for mixed keys,
+with `{ kind: "value", value: primitiveKey }` and
+`{ kind: "cell", cell: cellKey }` entries. Preserve homogeneous `keys()` usage.
+The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
+records the context, consequences, and alternatives. Implementation is pending;
+approval alone does not establish mixed enumeration correctness.
+
+- [x] Approve explicit tagged enumeration and record the decision.
+- [ ] Add the public tagged type, enumeration method, and compiler/runtime wiring.
+- [ ] Verify compiled consumers preserve primitive values and Cell identities,
+      including equal contents, distinct Cells, and lookup round trips.
+- [ ] Verify cross-space references, removal/reinsertion, cold resume, and
+      demand-only enumeration without broadening lookup dependencies.
+- [ ] Update current API documentation and demonstrations, then complete tests,
+      antagonistic review, and Cubic review.
+
+General runtime union materialization changes are outside this implementation.
+
 
 Group enumeration contains occupied keys only and has deterministic typed-key
 order: booleans, numbers, strings, then Cell addresses. Within a domain use

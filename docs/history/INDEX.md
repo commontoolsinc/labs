@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Mixed index key enumeration decision](features/2026-09-11-index-key-enumeration-decision.md) — 2026-09-11: approved Q7 tagged enumeration contract, caller consequences, alternatives, and pending acceptance requirements.
+
 - [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
 
 - [2026-09-11-nested-collection-scan-diagnostic.md](development/performance/2026-09-11-nested-collection-scan-diagnostic.md) — E3 warning acceptance across 413 pattern entries and 1,731 modules: seven occurrences at five source sites, guarded-UI limits, and callback-local exclusions.

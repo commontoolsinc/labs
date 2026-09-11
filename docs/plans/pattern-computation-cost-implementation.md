@@ -306,9 +306,12 @@ passed before merge, with clean Cubic and antagonistic reviews.
         missing extracted keys and absent lookups.
   - [x] Group membership order, homogeneous-key enumeration order, lookup
         surface, and identity across removal/reinsertion.
-  - [ ] Mixed primitive/Cell enumeration representation and output acceptance.
-        The runtime union materializer can wrap primitive alternatives as
-        Cells; the API decision is tracked as Q7 on the dashboard.
+  - [x] Mixed primitive/Cell enumeration API decision (Q7): explicit tagged
+        entries, preserving homogeneous `keys()` usage. The
+        [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
+        records consequences and alternatives.
+  - [ ] Implement tagged enumeration and verify authored output acceptance,
+        lookup round trips, cross-space identities, and durable resume.
   - [ ] Bound invalidation to affected keys; state initialization, update,
         lookup, and storage complexity.
 - [x] **B2 contract — Specify lookup and join.** The index contract defines

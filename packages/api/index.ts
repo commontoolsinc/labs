@@ -891,7 +891,11 @@ export interface CollectionIndexHandle<
     key: T["keys"][number] | null | undefined,
   ): Reactive<T["buckets"][string]>;
 
-  /** Enumerates occupied keys in deterministic typed-key order. */
+  /**
+   * Enumerates occupied keys in deterministic typed-key order.
+   * Mixed primitive/Cell enumeration awaits a representation contract; mixed
+   * membership and lookup are supported.
+   */
   keys(): Reactive<T["keys"]>;
 }
 
@@ -917,7 +921,11 @@ export declare function tagCollectionKey<T>(
  * operations.
  */
 export interface IDerivable<T> {
-  /** Builds a reactive index while retaining original source occurrences. */
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys support membership and lookup; their enumeration
+   * awaits the representation contract documented on `keys()`.
+   */
   groupBy<K extends CollectionIndexKey>(
     this: AnyBrandedCell<unknown[]>,
     selector: (
@@ -935,7 +943,11 @@ export interface IDerivable<T> {
     params: Record<string, unknown>,
   ): GroupIndex<K, T extends Array<infer U> ? U : T>;
 
-  /** Builds a reactive index while retaining original source occurrences. */
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys support membership and lookup; their enumeration
+   * awaits the representation contract documented on `keys()`.
+   */
   keyBy<K extends CollectionIndexKey>(
     this: AnyBrandedCell<unknown[]>,
     selector: (

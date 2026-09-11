@@ -1,9 +1,9 @@
 {
-  "updated": "2026-09-11T12:59:52.897720+00:00",
+  "updated": "2026-09-11T18:01:14.230110+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7331",
-  "activity": "Finish review of the validated compiler guidance and remote-row acceptance while advancing the remaining collection operators. Live poll changes require coordination.",
+  "activity": "Q7 approved: implementing explicit tagged mixed-key enumeration and recording its consequences and alternatives. Producer and independent cross-space fixture review fixes continue through validation. Live poll unchanged.",
   "review": "Each slice requires clean current-head CI, actual Cubic review, and antagonistic review before landing. The checks ledger records completed merges.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
@@ -210,6 +210,13 @@
       "title": "May I post signed code-review replies?",
       "proposal": "Signed implementation review replies and fresh Cubic review requests are authorized.",
       "blocks": "None.",
+      "status": "Approved"
+    },
+    {
+      "id": "Q7",
+      "title": "How should enumeration expose mixed primitive and Cell keys?",
+      "proposal": "Mike approved explicit tagged mixed-key enumeration, preserving homogeneous keys() usage. Decision, consequences, and alternatives are recorded in docs/history/features/2026-09-11-index-key-enumeration-decision.md.",
+      "blocks": "No unanswered decision. Tagged API implementation and acceptance remain in progress.",
       "status": "Approved"
     }
   ],

@@ -9,26 +9,31 @@ import {
 } from "../../src/builtins/collection-index.ts";
 import type { MaintainedCollectionIndex } from "../../src/builtins/collection-index-membership.ts";
 import { useCancelGroup } from "../../src/cancel.ts";
-import { Runtime } from "../../src/runtime.ts";
+import { type ErrorWithContext, Runtime } from "../../src/runtime.ts";
 import type { Action } from "../../src/scheduler.ts";
 import { EmulatedStorageManager } from "../../src/storage/v2-emulate.ts";
 
 /** Resume confirmation remains recoverable and respects coordinator teardown. */
 describe("collection index resume sync", () => {
-  for (const cancelWhileHeld of [false, true]) {
+  for (const outcome of ["retry", "cancel-resolve", "cancel-reject"] as const) {
+    const cancelWhileHeld = outcome !== "retry";
     it(
-      cancelWhileHeld
+      outcome === "cancel-resolve"
         ? "does not rearm a canceled coordinator when held confirmation completes"
-        : "confirms after a rejected sync when a later source change invalidates the action",
+        : outcome === "cancel-reject"
+        ? "does not report a held confirmation failure after coordinator cancellation"
+        : "reports rejected confirmation and retries only after a source change",
       async () => {
         const signer = await Identity.fromPassphrase(
-          `index-resume-sync-${cancelWhileHeld}`,
+          `index-resume-sync-${outcome}`,
         );
         const storage = EmulatedStorageManager.emulate({ as: signer });
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: storage,
         });
+        const errors: ErrorWithContext[] = [];
+        runtime.scheduler.onError((error) => errors.push(error));
         const [cancel, addCancel] = useCancelGroup();
         const held = Promise.withResolvers<void>();
         const maintenanceHeld = Promise.withResolvers<void>();
@@ -128,14 +133,28 @@ describe("collection index resume sync", () => {
           expect(invalidations.calls).toHaveLength(0);
           if (cancelWhileHeld) {
             cancel();
-            held.resolve();
+            if (outcome === "cancel-reject") {
+              held.reject(new Error("confirmation failed after cancellation"));
+            } else {
+              held.resolve();
+            }
             await storage.synced();
+            expect(errors).toHaveLength(0);
             expect(invalidations.calls).toHaveLength(0);
             expect(runs).toBe(heldRuns);
             expect(output.getRaw()).toBeUndefined();
           } else {
-            held.reject(new Error("injected source confirmation failure"));
+            const rejection = new Error("injected source confirmation failure");
+            held.reject(rejection);
             await storage.synced();
+            expect(errors).toHaveLength(2);
+            for (const error of errors) {
+              expect(error.message).toBe(
+                "Confirming index maintenance state failed",
+              );
+              expect(error.cause).toBe(rejection);
+              expect(error.action).toBe(action);
+            }
             expect(attempts).toHaveLength(2);
             expect(runs).toBe(heldRuns);
             expect(invalidations.calls).toHaveLength(0);

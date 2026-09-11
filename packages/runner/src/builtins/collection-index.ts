@@ -1,7 +1,6 @@
 /** Owns per-occurrence reactive index maintenance and reconciles membership. */
 
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
-import { getLogger } from "@commonfabric/utils/logger";
 
 import { createNodeFactory } from "../builder/module.ts";
 import { pattern } from "../builder/pattern.ts";
@@ -149,19 +148,23 @@ function createCollectionIndexInstance(
       if (pending.has(key)) continue;
       pending.add(key);
       runtime.storageManager.trackUntilSettled(
-        syncCellForIdentity(cell.withTx(), identity).then(() => {
+        syncCellForIdentity(cell.withTx(), identity).finally(() =>
+          pending.delete(key)
+        ).then(() => {
           if (!active || !requiredConfirmations.has(key)) return;
           confirmed.add(key);
           if (registeredAction) {
             runtime.scheduler.invalidateAction(registeredAction);
           }
         }).catch((error: unknown) => {
-          getLogger("collection-index").warn(
-            "resume-sync",
-            "confirming index maintenance state failed",
-            { error },
+          if (!active || !requiredConfirmations.has(key)) return;
+          runtime.scheduler.reportError(
+            new Error("Confirming index maintenance state failed", {
+              cause: error,
+            }),
+            registeredAction ?? reconcile,
           );
-        }).finally(() => pending.delete(key)),
+        }),
       );
     }
     return ready;

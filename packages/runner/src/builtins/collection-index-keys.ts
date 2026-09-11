@@ -8,7 +8,11 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { compareCollectionKeys } from "./collection-index-key.ts";
 import type { CollectionIndexMembership } from "./collection-index-membership.ts";
 
-/** Reads occupied keys in deterministic typed order, preserving Cell keys. */
+/**
+ * Reads raw occupied keys in deterministic typed order, preserving Cell keys.
+ * Public mixed primitive/Cell enumeration awaits a representation contract at
+ * the result materialization boundary.
+ */
 export function readCollectionIndexKeys(
   tx: IExtendedStorageTransaction,
   state: Cell<CollectionIndexMembership>,

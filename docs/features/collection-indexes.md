@@ -58,9 +58,10 @@ omit an occurrence. Unsupported keys fail through the shared key resolver.
 Mixed primitive/Cell selectors are supported for membership and lookup, but
 mixed-key `keys()` enumeration is not accepted yet. The runtime can materialize
 a primitive alternative as a Cell when the result schema admits both. Do not
-rely on enumeration preserving that distinction until the
-[index contract](../plans/collection-index-contract.md) resolves its output
-representation.
+rely on mixed `keys()` preserving that distinction. The
+[index contract](../plans/collection-index-contract.md#tagged-enumeration-acceptance)
+specifies the approved tagged enumeration API, whose implementation and
+acceptance remain pending.
 
 A Cell key denotes its resolved space, document, path, and scope. Its schema and
 stored contents do not participate in equality. Selecting a Cell preserves that
@@ -87,8 +88,11 @@ the coordinator confirms its source, selector collection, descriptor, and
 maintenance records before reconciling membership. Child setup propagates the
 resume synchronization requirement. Pending selector tags preserve existing
 membership. Teardown releases owned children and prevents pending synchronization
-from rearming a released coordinator. A rejected confirmation is reported and
-leaves membership intact; a later input change can start confirmation again.
+from rearming a released coordinator. A rejected confirmation reaches the
+runtime's error handlers with its cause and owning action, while membership
+remains intact. Error reporting does not schedule another attempt; a later
+input change can start confirmation again. Failures from canceled or superseded
+confirmations are ignored.
 
 ## Work and limitations
 
