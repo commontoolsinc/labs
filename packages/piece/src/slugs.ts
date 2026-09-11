@@ -118,11 +118,14 @@ const SLUG_INDEX_SCHEMA = {
  *
  * What it does not do is widen what a sync reaches. An object with no
  * properties describes the shape a redirect payload has and names nothing to
- * follow, so that second sync loads that document and no further one, and the
- * stored bytes are identical either way. Measured with a five-document chain
- * behind the name: those five are loaded by the sync `setSlugLink` performs
- * before its transaction, which runs with or without this schema, so none of
- * them are this schema's doing.
+ * follow. What a sync of the name reaches beyond that document is the
+ * server's doing rather than the schema's: serving a document whose value is
+ * a redirect, it resolves the redirect through the links on its path under
+ * whichever schema the selector carries, so both syncs reach the same
+ * documents and the stored bytes are identical either way. Measured with a
+ * five-document chain behind the name: those five arrive with the sync
+ * `setSlugLink` performs before its transaction, which runs with or without
+ * this schema, so none of them are this schema's doing.
  */
 const SLUG_REDIRECT_SCHEMA = { type: "object" } as const satisfies JSONSchema;
 
