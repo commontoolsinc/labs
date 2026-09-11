@@ -3383,8 +3383,10 @@ class PiecePropIo implements PieceCellIo {
         // elsewhere. Such slots are staged as the unresolved-link placeholder
         // and accepted opaquely; their schema check happens when a reactive
         // read materializes them, the rule stored-argument validation
-        // applies. The written slot is never deferred: its counterpart in the
-        // raw tree below is the value being written, not a link.
+        // applies. The written slot, and every slot above it, is judged as
+        // written: in the raw tree below, the write path holds the value being
+        // written rather than a link, so a write below a stored link answers
+        // for the required fields it would leave absent at its destination.
         const judgedRoot = overlayUnreadableLinkPlaceholders(
           tx,
           targetCell.getAsNormalizedFullLink(),
