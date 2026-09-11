@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-11T12:21:13.942025+00:00",
+  "updated": "2026-09-11T12:29:32.578203+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
@@ -23,7 +23,9 @@
     "#7282 main integration: all six functional assertions and declared budgets, 413 authoritative pattern checks, full pattern package including browser tests, and all 46 type groups pass.",
     "#7304 merged as c0454ab24e after all 69 exact-head checks, zero issues in the full nine-file Cubic rereview, and clean antagonistic review.",
     "D3 local validation: 1,431 runner tests / 8,923 steps; 46 type groups; 599 documentation blocks; history index, formatting, lint, and six exact reuse/control benchmark counts pass. Antagonistic review is clean.",
-    "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass."
+    "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass.",
+    "#7327 merged as b135f7f067ca8112ac7bf6f638b9511b26361944: all current-head CI gates succeeded or were skipped; Cubic run 103250197793 reported zero issues on dae8319a23; antagonistic review was clean. All nine measurement cases and the forced-disposal cleanup control passed.",
+    "#7329 merged as 593c341b27a8baff681374bd01b3125a70ffeca8: all 69 exact-head checks succeeded or were skipped; Cubic run 103258387302 reported zero issues on 9e28f27015; antagonistic review was clean. Client remote-row identity and narrow-invalidation acceptance is landed."
   ],
   "stages": [
     {
@@ -101,8 +103,8 @@
     {
       "id": "C3",
       "title": "Remote row invalidation",
-      "status": "active",
-      "detail": "Client acceptance is in #7329. Serving-host acceptance now passes correct values, full normalized-link and producer-identity stability, and edited-only execution in both directions. Full runner task: 1,437 tests / 8,960 steps; final serving-loop file: 27 cases. C3 closes after both reviewed slices land."
+      "status": "review",
+      "detail": "Client acceptance merged as #7329. Serving acceptance #7331 passes correct values, stable full links/producer identities, and untouched-row inactivity in both directions. Full runner task: 1,437 tests / 8,960 steps; final serving-loop file: 27 cases. C3 publication completes when #7331 lands."
     },
     {
       "id": "C4",
@@ -143,8 +145,8 @@
     {
       "id": "E1",
       "title": "Computed versus lift measurements",
-      "status": "review",
-      "detail": "PR #7327 implements and validates the computed/broad-lift/narrow-lift comparison at 32/128/512 linked rows. The report and reproduction command are linked from the implementation tracker. CI and Cubic review govern landing."
+      "status": "done",
+      "detail": "Merged #7327: validated computed/broad-lift/narrow-lift measurements at 32/128/512 linked rows, with unread-field edits and a reproducible command."
     },
     {
       "id": "E2",
