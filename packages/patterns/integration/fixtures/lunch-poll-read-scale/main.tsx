@@ -1,12 +1,16 @@
 import {
+  type Default,
   handler,
+  type JSXElement,
   NAME,
   pattern,
+  type PerSpace,
   type Stream,
   UI,
   Writable,
 } from "commonfabric";
 import LunchPoll, {
+  type CozyPollOutput,
   type LunchProfile,
   type Option,
   type User,
@@ -15,8 +19,56 @@ import LunchPoll, {
   voteKeyFor,
 } from "../../../lunch-poll/main.tsx";
 
+/** Dimensions of one synthetic poll. */
+interface SeedEvent {
+  /** Number of independently linked votes. */
+  voteCount: number;
+
+  /** Number of separately stored voter profiles. */
+  voterCount: number;
+
+  /** Number of rendered options. */
+  optionCount: number;
+
+  /** Requires every supplied profile to be readable before seeding. */
+  requireExistingProfiles?: boolean;
+}
+
+/** Observable controls and results shared by CLI and browser fixtures. */
+interface Output {
+  /** Fixture title. */
+  [NAME]: string;
+
+  /** Production poll with a synthetic viewer control. */
+  [UI]: JSXElement;
+
+  /** Initializes a fresh fixture. */
+  seed: Stream<SeedEvent>;
+
+  /** Selects the first synthetic voter. */
+  claim: Stream<Record<string, unknown>>;
+
+  /** Production vote handler. */
+  castVote: CozyPollOutput["castVote"];
+
+  /** Number of stored votes. */
+  voteCount: number;
+
+  /** Number of rendered options. */
+  optionCount: number;
+
+  /** Number of roster members. */
+  userCount: number;
+
+  /** Whether the synthetic viewer belongs to the roster. */
+  isJoined: boolean;
+
+  /** Stored vote links used by functional assertions. */
+  votes: readonly Vote[];
+}
+
 const seed = handler<
-  { voteCount: number; voterCount: number; optionCount: number },
+  SeedEvent,
   {
     profiles: Writable<LunchProfile[]>;
     users: Writable<User[]>;
@@ -24,7 +76,7 @@ const seed = handler<
     votes: Writable<Vote[]>;
   }
 >((
-  { voteCount, voterCount, optionCount },
+  { voteCount, voterCount, optionCount, requireExistingProfiles },
   { profiles, users, options, votes },
 ) => {
   if (
@@ -48,8 +100,15 @@ const seed = handler<
   users.set(Array.from({ length: voterCount }, (_, index) => {
     const profile = profiles.elementById(String(index));
     const name = `Voter ${index}`;
-    profile.set({ name });
-    profiles.addUnique(profile);
+    if (profile.get() === undefined) {
+      if (requireExistingProfiles) {
+        throw new Error(
+          "Supplied voter profiles must be available before seeding",
+        );
+      }
+      profile.set({ name });
+      profiles.addUnique(profile);
+    }
     return { name, profile, color: "#2f6f4e" };
   }));
   const seededVotes: Writable<Vote>[] = [];
@@ -72,8 +131,9 @@ const claim = handler<Record<string, unknown>, {
   overrideViewer.send({ profile: profiles.elementById("0"), name: "Voter 0" });
 });
 
-export default pattern(() => {
-  const profiles = new Writable.perSpace<LunchProfile[]>([]);
+export default pattern<{
+  profiles?: PerSpace<Default<LunchProfile[], []>>;
+}, Output>(({ profiles }) => {
   const users = new Writable.perSpace<User[]>([]);
   const options = new Writable.perSpace<Option[]>([]);
   const votes = new Writable.perSpace<Vote[]>([]);
