@@ -60,6 +60,11 @@ Declared receiving policies apply to the reference slot and projected paths
 structurally. Merely declaring confidentiality there does not inspect the
 target's type or contents.
 
+Stored policies that condition a write on its value retain that condition and
+its schema definition scope when a reference is written. Independent union
+branch policies are checked separately; a writer requirement for one message
+kind does not govern a distinct untrusted import kind.
+
 Runtime-minted integrity from a schema, such as `LlmDerived` or `InjectionSafe`,
 certifies the concrete value written by its authenticated builtin. Wildcard
 schemas expand only over written inline slots; they do not endorse later array

@@ -59,6 +59,7 @@ import {
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
@@ -138,6 +139,7 @@ import {
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
+import { cfcSchemaWithInheritedDefs } from "./schema-refs.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
@@ -2434,25 +2436,17 @@ export const gatedSinkRequestExists = (
   );
 };
 
-const policyOnlySchema = (schema: JSONSchema): JSONSchema => {
-  if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
-    return {};
-  }
-  return { ifc: { ...schema.ifc } } as JSONSchema;
-};
-
 const linkWritePolicyOnlySchema = (
   schema: JSONSchema,
   path: readonly string[],
 ): JSONSchema => {
-  const policy = policyOnlySchema(schema);
   if (
-    !isObjectOrArray(policy) || !isObjectOrArray(policy.ifc) ||
-    !path.includes("*")
+    !isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)
   ) {
-    return policy;
+    return {};
   }
-  const { integrity: _integrity, ...ifc } = policy.ifc;
+  const { integrity: _integrity, ...wildcardIfc } = schema.ifc;
+  const ifc = path.includes("*") ? wildcardIfc : schema.ifc;
   return Object.keys(ifc).length === 0 ? {} : { ifc } as JSONSchema;
 };
 
@@ -2460,7 +2454,23 @@ const storedSchemaClaimsForLinkWrites = (
   schema: JSONSchema,
   inputs: readonly LinkWritePolicyInput[],
 ): JSONSchema => {
-  let result: JSONSchema | undefined;
+  const claims: JSONSchema[] = [];
+  const conditions = new Map<JSONSchema, JSONSchema>();
+  // Each entry contributes its own policy once. Descendant declarations are
+  // separate entries, while their value conditions and definition scopes are
+  // needed to decide whether this entry applies.
+  const conditionWithoutPolicies = (node: JSONSchema): JSONSchema => {
+    if (!isObjectOrArray(node)) return node;
+    const cached = conditions.get(node);
+    if (cached !== undefined) return cached;
+    const { ifc: _ifc, ...condition } = node;
+    const result = mapSubschemas(condition, conditionWithoutPolicies, {
+      includeDefs: true,
+      includeUnused: true,
+    });
+    conditions.set(node, result);
+    return result;
+  };
   const targetPaths = inputs.map((input) =>
     canonicalizeLogicalPath(input.target.path)
   );
@@ -2472,19 +2482,24 @@ const storedSchemaClaimsForLinkWrites = (
     }
     const policySchema = linkWritePolicyOnlySchema(entry.schema, entry.path);
     if (
-      isObjectOrArray(policySchema) && Object.keys(policySchema).length === 0
+      !isObjectOrArray(policySchema) || Object.keys(policySchema).length === 0
     ) {
       continue;
     }
-    const envelope = schemaEnvelopeForTargetPath(
-      policySchema,
-      entry.path,
+    const condition = conditionWithoutPolicies(
+      cfcSchemaWithInheritedDefs(
+        entry.schema,
+        isObjectOrArray(entry.root) ? entry.root.$defs : undefined,
+      ),
     );
-    result = result === undefined
-      ? envelope
-      : mergeCfcSchemaEnvelopes(result, envelope);
+    claims.push(schemaEnvelopeForTargetPath({
+      ...(isObjectOrArray(condition) ? condition : {}),
+      ...policySchema,
+    }, entry.path));
   }
-  return result ?? {};
+  // Verification intersects independently conditioned claims. Merging their
+  // IFC fields would turn disjoint union branches into an unconditional gate.
+  return claims.length === 0 ? {} : { allOf: claims };
 };
 
 // The consumption class an authored schema declares for its ifc label (C5).
@@ -6686,11 +6701,12 @@ export const prepareBoundaryCommit = (
         linkWriteInputs.length > 0
       ? undefinedCandidate
         ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
-        : mergeCfcSchemaEnvelopes(
-          schema,
-          storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
-          { generatedOutputPaths: generatedOutputPaths.get(key) },
-        )
+        : {
+          allOf: [
+            schema,
+            storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
+          ],
+        } as JSONSchema
       : schema;
 
     const requirementFailure = verifyInputRequirements(
