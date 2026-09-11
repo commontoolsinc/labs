@@ -1,4 +1,5 @@
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import { FactoryCodec } from "@/codec-common/FactoryCodec.ts";
 import { REALM_FORMAT, type RealmCodecValue } from "./interface.ts";
 import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 
@@ -30,6 +31,7 @@ export function createBaseRealmRegistry(): CodecRegistry<RealmCodecValue> {
     "symbol",
     new SymbolCodec<RealmCodecValue>((key) => key),
   );
+  registry.registerCallable(new FactoryCodec());
 
   // Self-representing primitives: emitted as-is, being their own wire form.
   registry.registerSelfRep("null");

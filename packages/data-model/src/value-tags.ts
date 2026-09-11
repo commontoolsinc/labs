@@ -12,6 +12,7 @@
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
 import { isPlainObject } from "@commonfabric/utils/types";
 
+import { isAdmittedFabricFactory } from "./fabric-factory.ts";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -98,6 +99,7 @@ export type PrimitiveValueTag =
 export const FABRIC_VALUE_TAGS = Object.freeze(
   {
     Array: "Array",
+    FabricFactory: "FabricFactory",
     FabricInstance: "FabricInstance",
     Object: "Object",
     ...PRIMITIVE_VALUE_TAGS,
@@ -119,6 +121,7 @@ export type FabricValueTag =
  * * **Native JS builtins**: arrays and plain objects represented by `Array`
  *   and `Object`, and classes represented by their respective names under a
  *   `Js` prefix.
+ * * **`FabricFactory`s**: admitted callables represented by `FabricFactory`.
  * * **`FabricPrimitive`s**: classes defined by this package which are
  *   considered equivalent to primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella. These
@@ -129,6 +132,7 @@ export type FabricValueTag =
 export const VALUE_TAGS = Object.freeze(
   {
     Array: "Array",
+    FabricFactory: "FabricFactory",
     FabricInstance: "FabricInstance",
     JsDate: "JsDate",
     JsError: "JsError",
@@ -227,8 +231,7 @@ export function tagFromFabricValueElseNull(
   const jsType = jsTagFromValue(value);
 
   if (jsType === VALUE_TAGS.function) {
-    // A function is no `FabricValue`, so its tag is not one this returns.
-    return null;
+    return isAdmittedFabricFactory(value) ? VALUE_TAGS.FabricFactory : null;
   } else if (jsType !== "object") {
     return jsType;
   }

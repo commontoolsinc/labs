@@ -32,7 +32,9 @@ describe("aggregate methods", () => {
       const module = parseModule(output);
       for (const method of ["count", "minBy", "maxBy"]) {
         expect(callsNamed(module, method)).toHaveLength(0);
-        expect(callsNamed(module, `${method}WithPattern`)).toHaveLength(1);
+        const lowered = callsNamed(module, `${method}WithPattern`);
+        expect(lowered).toHaveLength(1);
+        expect(lowered[0].arguments).toHaveLength(1);
       }
       expect(emittedSchemas(module)).toEqual(expect.arrayContaining([
         expect.objectContaining({

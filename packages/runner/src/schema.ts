@@ -67,6 +67,7 @@ import {
 } from "./cfc/label-view-state.ts";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
+import { materializeFactoryForSchema } from "./factory-materialization.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
@@ -985,6 +986,9 @@ export interface ValidateAndTransformOptions {
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
 
+  /** False for dependency-only reads that must preserve inert factory shells. */
+  materializeFactories?: boolean;
+
   /**
    * Set by a schema view reading one of its children: a mismatch there is a
    * refusal the reader must be told about, not the `undefined` a root read
@@ -1037,6 +1041,7 @@ export function validateAndTransform(
       options?.synced ?? false,
       link,
       cfcLabelView,
+      options?.materializeFactories ?? true,
     ).createObject(
       { ...link, schema: resolvedSchema },
       undefined,
@@ -1100,6 +1105,7 @@ export function validateAndTransform(
     options?.synced ?? false,
     link,
     cfcLabelView,
+    options?.materializeFactories ?? true,
   );
 
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
@@ -1110,7 +1116,14 @@ export function validateAndTransform(
     ) &&
     filteredSchema === undefined
   ) {
-    return createQueryResultProxy(runtime, tx, link, 0, cfcLabelView);
+    return createQueryResultProxy(
+      runtime,
+      tx,
+      link,
+      0,
+      cfcLabelView,
+      options?.materializeFactories ?? true,
+    );
   }
 
   // Now resolve further links until we get the actual value.
@@ -1398,6 +1411,7 @@ class TransformObjectCreator
   #synced: boolean;
   #baseLink: NormalizedFullLink;
   #cfcLabelView: CfcLabelView | undefined;
+  #materializeFactories: boolean;
 
   constructor(
     runtime: Runtime,
@@ -1405,12 +1419,14 @@ class TransformObjectCreator
     synced: boolean,
     baseLink: NormalizedFullLink,
     cfcLabelView: CfcLabelView | undefined,
+    materializeFactories: boolean,
   ) {
     this.#runtime = runtime;
     this.#tx = tx;
     this.#synced = synced;
     this.#baseLink = baseLink;
     this.#cfcLabelView = cfcLabelView;
+    this.#materializeFactories = materializeFactories;
   }
 
   setBase(
@@ -1577,6 +1593,15 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,
   ): AnyCellWrapping<FabricValue> {
+    if (this.#materializeFactories) {
+      const materialized = materializeFactoryForSchema(value, link.schema, {
+        runtime: this.#runtime,
+        artifactSpace: link.space,
+      });
+      if (!Object.is(materialized, value)) {
+        return materialized as AnyCellWrapping<FabricValue>;
+      }
+    }
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -1589,6 +1614,7 @@ class TransformObjectCreator
         link,
         0,
         this.#labelViewFor(link),
+        this.#materializeFactories,
       );
     } else if (isObjectOrArray(link.schema)) {
       // A reference-form schema resolves here — materialization is a
@@ -1646,6 +1672,7 @@ class TransformObjectCreator
           link,
           0,
           this.#labelViewFor(link),
+          this.#materializeFactories,
         );
       }
       // link.schema is not true, and not asCell/asStream

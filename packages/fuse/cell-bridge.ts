@@ -12,8 +12,12 @@ import {
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
-import type { Cell } from "@commonfabric/runner";
 import {
+  type Cell,
+  ContextualFlowControl,
+  getCellOrThrow,
+  isCell,
+  isCellResultForDereferencing,
   lookupSchemaDocument,
   parseExternalSchemaRef,
   recomposeSchema,
@@ -86,6 +90,52 @@ function expandSchemaReference(
   } catch {
     return schema;
   }
+}
+
+/** Number of schema-declared Cell boundaries FUSE projects through. */
+function asCellProjectionDepth(schema: JSONSchema | undefined): number {
+  const fullSchema = expandSchemaReference(schema);
+  const seen = new Set<object>();
+  const visit = (candidate: JSONSchema | undefined): number => {
+    candidate = expandSchemaReference(candidate);
+    if (
+      typeof candidate !== "object" || candidate === null ||
+      Array.isArray(candidate) || seen.has(candidate)
+    ) {
+      return 0;
+    }
+    seen.add(candidate);
+
+    if (
+      typeof candidate.$ref === "string" &&
+      typeof fullSchema === "object" && fullSchema !== null &&
+      !Array.isArray(fullSchema)
+    ) {
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        candidate,
+        fullSchema,
+      );
+      if (
+        typeof resolved === "object" && resolved !== null &&
+        !Array.isArray(resolved)
+      ) {
+        candidate = resolved;
+      }
+    }
+
+    const direct = ContextualFlowControl.getAsCellValues(candidate);
+    if (direct.length > 0) return direct.length;
+
+    const anyOf = Array.isArray(candidate.anyOf) ? candidate.anyOf : [];
+    const oneOf = Array.isArray(candidate.oneOf) ? candidate.oneOf : [];
+    const branches = [...anyOf, ...oneOf];
+    for (const branch of branches) {
+      const depth = visit(branch);
+      if (depth > 0) return depth;
+    }
+    return 0;
+  };
+  return visit(fullSchema);
 }
 
 /** Strip asCell markers from a schema for display as input schema. */
@@ -985,7 +1035,9 @@ export class CellBridge {
     let patternRef: PiecePatternRef | undefined;
 
     try {
-      const result = await piece.result.get();
+      const result = await piece.result.get(undefined, {
+        materializeFactories: false,
+      });
       summary = this.#extractSummary(result);
     } catch {
       // Summary is best-effort only.
@@ -2339,7 +2391,9 @@ export class CellBridge {
       promise: (async (): Promise<boolean> => {
         try {
           const cell = await info.piece[propName].getCell();
-          const newValue = await info.piece[propName].get();
+          const newValue = await info.piece[propName].get(undefined, {
+            materializeFactories: false,
+          });
           await this.#enqueuePiecePropRebuild({
             cell,
             newValue,
@@ -2482,7 +2536,9 @@ export class CellBridge {
       return;
     }
     const cell = await writePath.piece[writePath.cell].getCell();
-    const newValue = await writePath.piece[writePath.cell].get();
+    const newValue = await writePath.piece[writePath.cell].get(undefined, {
+      materializeFactories: false,
+    });
     await this.#enqueuePiecePropRebuild({
       cell,
       newValue,
@@ -3818,7 +3874,9 @@ export class CellBridge {
     skipEntry: (value: unknown) => boolean;
     classifyEntry: (key: string, value: unknown) => CallableKind | null;
   } {
-    const schema = rootCell.asSchemaFromLinks().schema as
+    const schema = expandSchemaReference(
+      rootCell.asSchemaFromLinks().schema,
+    ) as
       | Record<string, unknown>
       | undefined;
     const schemaProperties = schema?.properties as
@@ -3856,28 +3914,17 @@ export class CellBridge {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let resolvedCandidate = candidate;
       try {
-        resolvedCandidate = childCell.getRaw?.() ?? childCell.get?.() ??
-          candidate;
+        const rawCandidate = childCell.getRaw?.();
+        resolvedCandidate = rawCandidate !== undefined
+          ? rawCandidate
+          : childCell.getWithoutFactoryMaterialization?.() ?? candidate;
       } catch {
         resolvedCandidate = candidate;
       }
 
       const childSchema = expandSchemaReference(childCell.schema);
-      let callableKind = classifyCallableEntry(candidate, childSchema) ??
+      const callableKind = classifyCallableEntry(candidate, childSchema) ??
         classifyCallableEntry(resolvedCandidate, childSchema);
-
-      if (!callableKind) {
-        try {
-          const pattern = childCell.key("pattern").getRaw?.() ??
-            childCell.key("pattern").get?.();
-          const extraParams = childCell.key("extraParams").get?.();
-          if (pattern !== undefined && extraParams !== undefined) {
-            callableKind = "tool";
-          }
-        } catch {
-          // Not a pattern tool-shaped child cell.
-        }
-      }
 
       if (!callableKind) continue;
 
@@ -3887,7 +3934,10 @@ export class CellBridge {
         schema: getInputSchema(childSchema),
       });
       callableKinds.set(key, callableKind);
-      if (typeof candidate === "object" && candidate !== null) {
+      if (
+        (typeof candidate === "object" && candidate !== null) ||
+        typeof candidate === "function"
+      ) {
         callableValues.add(candidate);
       }
     }
@@ -3895,7 +3945,8 @@ export class CellBridge {
     return {
       callables,
       skipEntry: (candidate: unknown) =>
-        (typeof candidate === "object" && candidate !== null &&
+        (((typeof candidate === "object" && candidate !== null) ||
+          typeof candidate === "function") &&
           callableValues.has(candidate)) ||
         isVNode(candidate),
       classifyEntry: (key: string) => callableKinds.get(key) ?? null,
@@ -3913,7 +3964,9 @@ export class CellBridge {
       return value;
     }
 
-    const schema = rootCell.asSchemaFromLinks().schema as
+    const schema = expandSchemaReference(
+      rootCell.asSchemaFromLinks().schema,
+    ) as
       | Record<
         string,
         unknown
@@ -3932,22 +3985,44 @@ export class CellBridge {
         : {};
     for (const key of Object.keys(properties)) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
+      const childSchema = expandSchemaReference(childCell.schema);
       let childValue: unknown;
+      let childReadSucceeded = false;
       try {
-        childValue = childCell.get?.();
+        const readWithoutFactoryMaterialization = (childCell as {
+          getWithoutFactoryMaterialization?: () => unknown;
+        }).getWithoutFactoryMaterialization;
+        childValue = typeof readWithoutFactoryMaterialization === "function"
+          ? readWithoutFactoryMaterialization.call(childCell)
+          : childCell.get?.();
+        childReadSucceeded = true;
         // Override with the raw link reference only for sigil links, which
         // is what enables FUSE symlinks.
         const rawValue = childCell.getRaw?.();
         if (isSigilLink(rawValue)) {
           childValue = rawValue;
+        } else {
+          const asCellDepth = asCellProjectionDepth(childSchema);
+          for (let remaining = asCellDepth; remaining > 0; remaining--) {
+            if (
+              !isCell(childValue) &&
+              !isCellResultForDereferencing(childValue)
+            ) {
+              break;
+            }
+            const projectedCell = isCell(childValue)
+              ? childValue
+              : getCellOrThrow(childValue);
+            childValue = projectedCell.getWithoutFactoryMaterialization();
+          }
         }
       } catch {
         childValue = undefined;
+        childReadSucceeded = false;
       }
 
-      const callableKind =
-        classifyCallableEntry(childValue, childCell.schema) ??
-          classifyCallableEntry(childCell, childCell.schema);
+      const callableKind = classifyCallableEntry(childValue, childSchema) ??
+        classifyCallableEntry(childCell, childSchema);
 
       if (callableKind) {
         if (!(key in materialized)) {
@@ -3956,8 +4031,19 @@ export class CellBridge {
         continue;
       }
 
-      if (childValue !== undefined && !(key in materialized)) {
+      if (
+        childReadSucceeded &&
+        (childValue !== undefined || !(key in materialized) ||
+          isCell(materialized[key]) ||
+          isCellResultForDereferencing(materialized[key]))
+      ) {
         materialized[key] = childValue;
+      } else if (
+        !childReadSucceeded &&
+        (isCell(materialized[key]) ||
+          isCellResultForDereferencing(materialized[key]))
+      ) {
+        delete materialized[key];
       }
     }
 
@@ -4219,11 +4305,13 @@ export class CellBridge {
               let rebuildValue = newValue;
               if (rebuildValue === undefined) {
                 if (typeof cell.pull === "function") {
-                  await cell.pull().catch(() => undefined);
+                  await cell.pull({ materializeFactories: false }).catch(() =>
+                    undefined
+                  );
                 }
-                rebuildValue = await piece[propName].get().catch(() =>
-                  undefined
-                );
+                rebuildValue = await piece[propName].get(undefined, {
+                  materializeFactories: false,
+                }).catch(() => undefined);
               }
               if (rebuildValue === undefined) {
                 return;
@@ -4255,7 +4343,7 @@ export class CellBridge {
               );
             });
           }, 150);
-        });
+        }, { materializeFactories: false });
         cancels.push(() => {
           cancel();
           if (debounceTimer !== undefined) {

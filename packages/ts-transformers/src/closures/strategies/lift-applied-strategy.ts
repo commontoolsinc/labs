@@ -17,10 +17,17 @@ import {
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
+import {
+  getCallbackReturnExpression,
+  propagateFactoryContractHints,
+} from "../../transformers/schema-injection.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/cell-type.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
+import {
+  buildCapturePropertyAssignments,
+  preserveCaptureReferenceOrigins,
+} from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
   normalizeBindingName,
@@ -262,9 +269,13 @@ function buildLiftAppliedInputObject(
   }
 
   // Add captures with potentially renamed property names
-  properties.push(
-    ...buildCapturePropertyAssignments(captureTree, factory, captureNameMap),
+  const captureProperties = buildCapturePropertyAssignments(
+    captureTree,
+    factory,
+    captureNameMap,
   );
+  preserveCaptureReferenceOrigins(captureProperties, captureTree);
+  properties.push(...captureProperties);
 
   return factory.createObjectLiteralExpression(
     properties,
@@ -604,6 +615,11 @@ export function transformLiftAppliedCall(
       context,
       newCallback,
     );
+  }
+  propagateFactoryContractHints(mergedInput, inputTypeNode, context);
+  const returnExpression = getCallbackReturnExpression(callback);
+  if (returnExpression && resultTypeNode) {
+    propagateFactoryContractHints(returnExpression, resultTypeNode, context);
   }
   const schedulerOptions = createDeriveSchedulerOptions(
     inputParamSummary,

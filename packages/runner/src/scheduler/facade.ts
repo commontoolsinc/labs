@@ -163,6 +163,7 @@ import type {
   Action,
   ActionRunTraceEntry,
   EventHandler,
+  EventHandlerRegistration,
   EventPreflightTraceContext,
   QueuedEvent,
   ReactivityLog,
@@ -258,6 +259,7 @@ export type {
   TriggerTraceValueSummary,
 } from "./types.ts";
 export { txToReactivityLog } from "./reactivity.ts";
+export { RetryWhenReady } from "./retry-when-ready.ts";
 
 export {
   allowMutableTransactionRead,
@@ -267,7 +269,8 @@ export {
 
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
-  #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  #eventHandlers: EventHandlerRegistration[] = [];
+  #eventHandlerGeneration = 0;
   readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.#dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
@@ -290,6 +293,8 @@ export class Scheduler {
 
   #actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   readonly #retries = new WeakMap<Action, number>();
+  #actionGenerations = new WeakMap<Action, number>();
+  #actionReadinessAttempts = new WeakMap<Action, Map<string, symbol>>();
   #offBudgetRetries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
@@ -430,6 +435,8 @@ export class Scheduler {
 
   #idlePromises: (() => void)[] = [];
   #backgroundTasks = new Set<Promise<unknown>>();
+  #pendingDurableReadiness = new Map<Promise<void>, Cancel>();
+  #pendingDurableEventReadiness = new Set<Promise<void>>();
 
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
@@ -708,6 +715,7 @@ export class Scheduler {
       | SchedulerRegisterOptions,
     maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
+    const generation = this.#advanceActionGeneration(action);
     const { dependencies, options } = normalizeRegistrationArgs(
       dependenciesOrOptions,
       maybeOptions,
@@ -739,7 +747,11 @@ export class Scheduler {
         options.awaitSyncBeforeInitialRun,
       );
     }
-    return cancel;
+    return () => {
+      if (this.#isActionGenerationCurrent(action, generation)) {
+        cancel();
+      }
+    };
   }
 
   /**
@@ -864,8 +876,52 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.#advanceActionGeneration(action);
     unsubscribeSchedulerAction(this.#unsubscribeState, action, options);
     this.#materializers.clearAction(action);
+  }
+
+  #advanceActionGeneration(action: Action): number {
+    const generation = (this.#actionGenerations.get(action) ?? 0) + 1;
+    this.#actionGenerations.set(action, generation);
+    this.#retries.delete(action);
+    return generation;
+  }
+
+  #getActionGeneration(action: Action): number {
+    return this.#actionGenerations.get(action) ?? 0;
+  }
+
+  #beginActionReadinessAttempt(
+    action: Action,
+    instanceKey?: string,
+  ): symbol {
+    const attempt = Symbol("scheduler-action-readiness-attempt");
+    let attempts = this.#actionReadinessAttempts.get(action);
+    if (attempts === undefined) {
+      attempts = new Map();
+      this.#actionReadinessAttempts.set(action, attempts);
+    }
+    attempts.set(instanceKey ?? "", attempt);
+    return attempt;
+  }
+
+  #isActionGenerationCurrent(
+    action: Action,
+    generation: number,
+  ): boolean {
+    return this.#getActionGeneration(action) === generation;
+  }
+
+  #isActionReadinessAttemptCurrent(
+    action: Action,
+    generation: number,
+    attempt: symbol,
+    instanceKey?: string,
+  ): boolean {
+    return this.#isActionGenerationCurrent(action, generation) &&
+      this.#actionReadinessAttempts.get(action)?.get(instanceKey ?? "") ===
+        attempt;
   }
 
   async run(action: Action): Promise<any> {
@@ -910,8 +966,45 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Keep the client-facing durability barrier open for reactive work that is
+   * parked outside the scheduler's running set. Plain `idle()` remains free so
+   * unrelated actions can continue while the prerequisite is pending.
+   *
+   * The returned cancel releases the barrier without canceling `work`; owners
+   * use it during teardown to fence a prerequisite that can no longer produce
+   * a live result. The work's own success or failure also releases it.
+   */
+  trackDurableReadiness(work: PromiseLike<unknown>): Cancel {
+    const gate = Promise.withResolvers<void>();
+    let active = true;
+    const release = () => {
+      if (!active) return;
+      active = false;
+      this.#pendingDurableReadiness.delete(gate.promise);
+      gate.resolve();
+    };
+    this.#pendingDurableReadiness.set(gate.promise, release);
+    Promise.resolve(work).then(release, release);
+    return release;
+  }
+
   idle(): Promise<void> {
     return this.#waitForQuiescence(false);
+  }
+
+  /**
+   * Reach the reactive fixpoint a cell pull has always promised, and join the
+   * client durability barrier only when that pass discovers parked work whose
+   * result the pull depends on. This keeps ordinary pulls independent of
+   * unrelated commit confirmation while preventing a resumed list from being
+   * returned before its pre-synced rows can run.
+   */
+  async idleForPull(): Promise<void> {
+    await this.idle();
+    if (this.#pendingDurableReadiness.size > 0) {
+      await this.idleWithPendingCommits();
+    }
   }
 
   /**
@@ -1026,6 +1119,26 @@ export class Scheduler {
         // (the serving loop's settle probes must not chase client
         // persistence).
         this.runtime.patternManager.pendingPatternWorkSettled().then(recheck);
+      } else if (
+        awaitPendingCommits && this.#pendingDurableEventReadiness.size > 0
+      ) {
+        // A user event whose handler is waiting for cold factory code is still
+        // an unprocessed durable intent. Plain idle stays available to
+        // unrelated work, but the client-facing safe-reload barrier waits
+        // until that intent is requeued, canceled, or rejected.
+        Promise.allSettled([...this.#pendingDurableEventReadiness]).then(
+          recheck,
+        );
+      } else if (
+        awaitPendingCommits && this.#pendingDurableReadiness.size > 0
+      ) {
+        // Reactive readiness does not occupy the scheduler's running set, so
+        // ordinary idle stays available to unrelated actions. A client-facing
+        // safe-read/reload barrier must still wait for selected work to rerun
+        // or be canceled by its owner.
+        Promise.allSettled([...this.#pendingDurableReadiness.keys()]).then(
+          recheck,
+        );
       } else if (this.#disposed) {
         // Every branch below parks on `#idlePromises`, which only the execute
         // loop drains — and `#execute()` returns immediately once disposed. So
@@ -1105,13 +1218,25 @@ export class Scheduler {
    * the arriving principal's instances are not clean, so only those run
    * (B7 — the siblings stay current). A node that has not narrowed needs
    * nothing (its one output is shared); a node that never ran will run
-   * for everyone when demanded. Returns the number of nodes re-armed.
+   * for everyone when demanded. A newly resolved non-root demand may set
+   * `includeUnfanned` because a warm structure load can complete its narrowed
+   * probe before that mapping exists; that arm re-runs every matching action
+   * so it can create the newly known demanded instance. Returns the number of
+   * nodes re-armed.
    */
-  invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
+  invalidateActionsForDemandRoots(
+    rootIds: readonly string[],
+    options: { includeUnfanned?: boolean } = {},
+  ): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
+      if (
+        !options.includeUnfanned &&
+        (record.fanOut === undefined || !record.fanOut.narrowed)
+      ) {
+        continue;
+      }
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??
@@ -1573,10 +1698,13 @@ export class Scheduler {
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.#eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
+    for (const registration of this.#eventHandlers) {
+      if (
+        registration.active &&
+        areNormalizedLinksSame(registration.ref, eventLink)
+      ) {
         return shaperInstanceGroupKey(
-          (handler as {
+          (registration.handler as {
             schedulerObservationIdentity?: SchedulerObservationIdentity;
           }).schedulerObservationIdentity,
         );
@@ -1643,6 +1771,9 @@ export class Scheduler {
   ): Cancel {
     return addSchedulerEventHandler({
       eventHandlers: this.#eventHandlers,
+      nextEventHandlerGeneration: () => ++this.#eventHandlerGeneration,
+      eventQueue: this.#eventQueue,
+      queueExecution: () => this.queueExecution(),
     }, {
       handler,
       ref,
@@ -1656,6 +1787,13 @@ export class Scheduler {
 
   onError(fn: ErrorHandler): void {
     this.#errorHandlers.add(fn);
+  }
+
+  reportError(error: unknown, action: unknown = { name: "runner" }): void {
+    this.#handleError(
+      error instanceof Error ? error : new Error(String(error)),
+      action,
+    );
   }
 
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
@@ -2026,6 +2164,9 @@ export class Scheduler {
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
+    for (const release of [...this.#pendingDurableReadiness.values()]) {
+      release();
+    }
     this.#disposed = true;
     this.#gates.cancelWake();
     if (this.#pendingQueueTaskTimer !== null) {
@@ -2064,6 +2205,21 @@ export class Scheduler {
       this.#diagnosisTimeout = null;
     }
     this.#diagnosisEnabled = false;
+  }
+
+  /**
+   * Settle events whose exact handler registration is still pending before
+   * runtime teardown waits for scheduler quiescence. Live runtimes keep these
+   * intents parked indefinitely; teardown is the terminal owner cancellation.
+   */
+  cancelHandlerLoadPendingEvents(reason: string): void {
+    let dropped = false;
+    for (const event of [...this.#eventQueue]) {
+      if (event.handlerLoadPending !== true) continue;
+      this.#dropEvent(event, reason);
+      dropped = true;
+    }
+    if (dropped) this.queueExecution();
   }
 
   //
@@ -2726,6 +2882,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventQueue: this.#eventQueue,
+      pendingDurableEventReadiness: this.#pendingDurableEventReadiness,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),
@@ -2805,6 +2962,23 @@ export class Scheduler {
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,
       actionRunTrace: this.#actionRunTrace,
+      getActionGeneration: (target) => this.#getActionGeneration(target),
+      beginActionReadinessAttempt: (target, instanceKey) =>
+        this.#beginActionReadinessAttempt(target, instanceKey),
+      isActionGenerationCurrent: (target, generation) =>
+        this.#isActionGenerationCurrent(target, generation),
+      isActionReadinessAttemptCurrent: (
+        target,
+        generation,
+        attempt,
+        instanceKey,
+      ) =>
+        this.#isActionReadinessAttemptCurrent(
+          target,
+          generation,
+          attempt,
+          instanceKey,
+        ),
       nodes: this.#nodes,
       diagnosisHistory: this.#diagnosisHistory,
       diagnosisNonIdempotent: this.#diagnosisNonIdempotent,

@@ -3,13 +3,13 @@ import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import { type Pattern } from "../builder/types.ts";
-import { type AddCancel } from "../cancel.ts";
+import { type AddCancel, type Cancel } from "../cancel.ts";
 import { type Cell, syncCellForIdentity } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, RetryWhenReady } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   linkResolutionProbe,
@@ -32,7 +32,13 @@ import { listInstanceCoordinator } from "./list-instance-coordinator.ts";
 import { seedResultContainerWhenPullSettles } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { resumeSettleRunKind } from "./resume-republish.ts";
-import { exposedResultCell } from "./scope-policy.ts";
+import {
+  boundPatternFactoryScope,
+  exposedResultCell,
+  resolvedCellScope,
+} from "./scope-policy.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
+import { narrowestScope } from "../scope.ts";
 
 export const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
@@ -62,9 +68,7 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
+ * Nodes carry a bound PatternFactory in `op` and no sibling params.
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -80,14 +84,12 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  *
  * @param list - A doc containing an array of values to map over.
  * @param op - A pattern to apply to each value.
- * @param params - Optional object containing captured variables from outer scope (closure mode).
  * @returns A doc containing the mapped values.
  */
 export function map(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -156,6 +158,15 @@ function createMapInstance(
   // for reuse across position changes. We pass list[i] directly each time, so
   // there's no need to store the element cell separately.
   const elementRuns = new Map<string, ElementRun>();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Cleared when the coordinator is torn down, so the asynchronous resume work
   // below stops writing to a container nothing owns any more. The same teardown
@@ -173,6 +184,19 @@ function createMapInstance(
   // carry the same intent. Elements added by later (post-resume) reconciles
   // are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
+  let resumeRowsReadyKey: string | undefined;
+  let resumeRowsReadiness: Promise<void> | undefined;
+  let resumeRowsDurableReadiness:
+    | { resolve: () => void; release: Cancel }
+    | undefined;
+  const completeResumeRowsDurableReadiness = (): void => {
+    const durableReadiness = resumeRowsDurableReadiness;
+    if (durableReadiness === undefined) return;
+    resumeRowsDurableReadiness = undefined;
+    durableReadiness.resolve();
+    durableReadiness.release();
+  };
+  addCancel(completeResumeRowsDurableReadiness);
 
   // Hold the durable container while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -225,6 +249,13 @@ function createMapInstance(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    if (resumeRowsReadiness !== undefined) {
+      throw new RetryWhenReady(
+        resumeRowsReadiness,
+        "map: resumed row patterns are waiting for durable state",
+        { keepDependenciesWhileWaiting: false },
+      );
+    }
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
@@ -235,17 +266,35 @@ function createMapInstance(
     // result container — is the plan the resume pre-sync shares, naming the
     // children this reconcile runs before the parent instantiates; its
     // reads and their rationale live in list-coordinator-plan.ts.
+    const factorySelection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "map",
+    );
     const plan = listCoordinatorPlan(
       runtime,
       tx,
       "map",
       inputsCell,
-      MAP_INPUT_SCHEMA,
+      factorySelection,
       parentCell,
       outputBinding,
     );
-    const { opPattern, argumentUsage, listCell, list } = plan;
+    const {
+      opPattern,
+      factoryGeneration,
+      factorySelectionLink,
+      factorySourceLink,
+      listCell,
+      list,
+    } = plan;
     const listScope = plan.scope;
+    const factoryResultScope = boundPatternFactoryScope(
+      runtime,
+      tx,
+      opPattern,
+      factorySourceLink,
+    );
 
     // Whether this reconcile issues the container's links: a container it
     // mints needs them, and one whose last issuance did not commit owes them.
@@ -287,10 +336,9 @@ function createMapInstance(
       .withTx(tx);
 
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: listCell } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: listCell,
     });
 
     // If the result's value is undefined, set it to the empty array.
@@ -379,9 +427,6 @@ function createMapInstance(
       throw new Error("map currently only supports arrays");
     }
 
-    // The resume batch has now been observed; later reconciles are post-resume.
-    if (list.length > 0) resumeBatchAwaitSync = false;
-
     // The whole current key set has to exist before any element is touched:
     // it is what says which children the list has stopped holding.
     const elementKeys = listElementKeys(list);
@@ -392,19 +437,80 @@ function createMapInstance(
       listScope,
     );
 
+    if (elementAwaitSync) {
+      const rowKeys = [...elementKeys.values()];
+      const readyKey = JSON.stringify([factoryGeneration, rowKeys]);
+      if (resumeRowsReadyKey !== readyKey) {
+        const rowCells = rowKeys.map((elementKey) =>
+          listElementResultCell(
+            runtime,
+            tx,
+            "map",
+            result!,
+            elementKey,
+          ).withTx()
+        );
+        const readiness = Promise.all(
+          rowCells.map((rowCell) =>
+            runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
+          ),
+        ).then(
+          () => {
+            resumeRowsReadyKey = readyKey;
+          },
+          (error) => {
+            logger.warn(
+              "resume-rows",
+              "syncing resumed row patterns failed; retrying",
+              { error },
+            );
+          },
+        );
+        resumeRowsReadiness = readiness;
+        if (resumeRowsDurableReadiness === undefined) {
+          const completion = Promise.withResolvers<void>();
+          resumeRowsDurableReadiness = {
+            resolve: completion.resolve,
+            release: runtime.scheduler.trackDurableReadiness(
+              completion.promise,
+            ),
+          };
+        }
+        void readiness.finally(() => {
+          if (resumeRowsReadiness === readiness) {
+            resumeRowsReadiness = undefined;
+          }
+        });
+        result = undefined;
+        throw new RetryWhenReady(
+          readiness,
+          "map: resumed row patterns are waiting for durable state",
+          { keepDependenciesWhileWaiting: false },
+        );
+      }
+    }
+
+    // The resume batch has now been observed; later reconciles are post-resume.
+    if (list.length > 0) resumeBatchAwaitSync = false;
+
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
 
       const elementKey = elementKeys.get(i)!;
+      const rowScope = narrowestScope([
+        resolvedCellScope(runtime, tx, list[i]),
+        factoryResultScope,
+      ]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
         const previousIndex = existing.lastIndex;
         if (
           existing.needsSetup ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
+          existing.runGeneration !== factoryGeneration ||
+          existing.lastIndex !== i
         ) {
           runtime.runner.run(
             tx,
@@ -415,8 +521,10 @@ function createMapInstance(
               doNotUpdateOnPatternChange: true,
               awaitSyncBeforeInitialRun: elementAwaitSync,
               parentPieceRootId,
+              factorySelectionLink,
             },
           );
+          existing.runGeneration = factoryGeneration;
           // The whole setup, every time, because issuing it takes the debt for
           // it: an overlapping reconcile that wrote the links and has not
           // settled hands them to this one, and a partial issuance would leave
@@ -427,7 +535,12 @@ function createMapInstance(
         }
         existing.lastIndex = i;
         if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
-        newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
+        newArrayValue[i] = exposedResultCell(
+          runtime,
+          tx,
+          existing.resultCell,
+          rowScope,
+        );
       } else {
         const boundResultCell = listElementResultCell(
           runtime,
@@ -450,16 +563,28 @@ function createMapInstance(
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
             parentPieceRootId,
+            factorySelectionLink,
           },
         );
         linkElementCell(boundResultCell);
-        const entry = { resultCell, lastIndex: i, needsSetup: false };
+        const entry = {
+          resultCell,
+          lastIndex: i,
+          needsSetup: false,
+          runGeneration: factoryGeneration,
+        };
         elementRuns.set(elementKey, entry);
         rollback.created(elementKey, entry);
-        newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
+        newArrayValue[i] = exposedResultCell(
+          runtime,
+          tx,
+          resultCell,
+          rowScope,
+        );
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));
+    completeResumeRowsDurableReadiness();
   };
 
   // Child-starting coordinator: its reconcile must run on resume to

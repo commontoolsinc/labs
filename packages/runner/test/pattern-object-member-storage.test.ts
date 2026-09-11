@@ -104,11 +104,10 @@ describe("Pattern result object with a function member", () => {
       tx,
     );
 
-    // ...but running it throws synchronously at result-projection time, when
-    // the live function is converted to a `FabricValue`. The error originates
-    // in packages/data-model/src/native-conversion.ts.
+    // ...but running it throws synchronously while deriving the result
+    // identity, before the invalid function can reach durable storage.
     expect(() => runtime.run(tx, methodPattern, {}, resultCell)).toThrow(
-      "Not representable as a `FabricValue`: function",
+      "Arbitrary functions are not valid createRef values",
     );
   });
 

@@ -101,8 +101,10 @@ import { caseFold } from "unicode-case-folding";
 
 import {
   isHandlerCell,
-  isPatternToolSchema,
-  isPatternToolValue,
+  isPatternFactorySchema,
+  isPatternFactoryValue,
+  patternFactorySchemas,
+  patternFactorySchemasFromSchema,
 } from "../../fuse/callables.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
@@ -117,7 +119,6 @@ import {
   canonicalAddress,
   CF_RUNTIME_ERROR_LOG,
   type CliRuntimeErrorRecord,
-  cloneWithoutBoundToolKeys,
   detectCallableKind,
   executeResolvedCallable,
   type InvocationOutcome,
@@ -1122,7 +1123,7 @@ async function searchTextMatches(
     if (owner !== undefined && owner !== ownership.pieceId) return false;
   }
 
-  const value = await rootCell.pull();
+  const value = await rootCell.pull({ materializeFactories: false });
   const pending: Iterator<SearchEntry>[] = [
     singleSearchEntry(
       value,
@@ -1172,7 +1173,7 @@ async function searchTextMatches(
           if (owner !== undefined && owner !== ownership.pieceId) continue;
         }
 
-        const nested = await current.pull();
+        const nested = await current.pull({ materializeFactories: false });
         if (nested !== current) {
           pending.push(singleSearchEntry(nested, true, current));
         }
@@ -1234,7 +1235,9 @@ async function searchTextMatches(
           seenCells.add(cellKey);
 
           const materializedCell = sourceCell.asSchema(true);
-          const nested = await materializedCell.pull();
+          const nested = await materializedCell.pull({
+            materializeFactories: false,
+          });
           pending.push(singleSearchEntry(
             nested,
             true,
@@ -2417,6 +2420,7 @@ async function resolvePieceCallable(
       return {
         ...resolved,
         callableCell: liveCallableCell,
+        identityCell: resolved.identityCell ?? resolved.callableCell,
         commandSpec: callableCommandSpec(liveCallableCell, "tool"),
       };
     }
@@ -3565,13 +3569,13 @@ export async function listPieceCallables(
  * A result-side name is a verb on one of three grounds, each a statement the
  * pattern makes about itself:
  *
- * - the declared result type marks the property a stream, or a tool;
+ * - the declared result type marks the property a stream or PatternFactory;
  * - the result graph wires a handler node's `$event` to the property, which
  *   is the same stream written twice in the pattern's own terms
  *   (`handlerVerbEvents`) — the only source of a handler the declared result
  *   type omits;
- * - the result graph holds a tool at the property, inline as `patternTool`
- *   builds one — the only source of a tool the declared type omits.
+ * - the result graph holds a PatternFactory tool at the property — the only
+ *   source of a tool the declared type omits.
  *
  * A name meeting none of these is data, whatever else the pattern hangs at
  * it. An argument-side name is a verb when the declared argument type marks
@@ -3580,9 +3584,9 @@ export async function listPieceCallables(
  *
  * A declared row serves the declared event type as its input schema and the
  * property's own prose and marks. A row the declared type omits serves the
- * handler module's event contract (`handlerVerbEvents`), or a tool's argument
- * schema less the parameters it binds, and carries no prose — nothing
- * declared it. A handler's declared result rides its node
+ * handler module's event contract (`handlerVerbEvents`), or a factory's public
+ * argument schema, and carries no prose — nothing declared it. A handler's
+ * declared result rides its node
  * (`handlerVerbResults`); a tool's rides the tool itself.
  *
  * Rows sort by byte order, not locale collation: this is a machine-readable
@@ -3622,24 +3626,19 @@ export function verbsFromCompiledPattern(
       : declared;
     const wired = graph[name];
     if (
-      isPatternToolSchema(resolved as JSONSchema) || isPatternToolValue(wired)
+      isPatternFactorySchema(resolved as JSONSchema) ||
+      isPatternFactoryValue(wired)
     ) {
-      const tool = isPatternToolValue(wired)
-        ? wired as {
-          pattern: { argumentSchema?: JSONSchema; resultSchema?: JSONSchema };
-          extraParams: unknown;
-        }
-        : undefined;
-      const outputSchema = tool?.pattern.resultSchema;
+      const schemas = patternFactorySchemas(wired) ??
+        patternFactorySchemasFromSchema(resolved as JSONSchema);
       listings.set(name, {
         name,
         kind: "tool",
         on: "result",
-        inputSchema: tool === undefined ? true : cloneWithoutBoundToolKeys(
-          tool.pattern.argumentSchema ?? true,
-          isObjectNotArray(tool.extraParams) ? tool.extraParams : {},
-        ),
-        ...(outputSchema !== undefined ? { outputSchema } : {}),
+        inputSchema: schemas?.argumentSchema ?? true,
+        ...(schemas?.resultSchema !== undefined
+          ? { outputSchema: schemas.resultSchema }
+          : {}),
         ...(declared !== undefined ? declaredVerbAnnotations(declared) : {}),
       });
       continue;
@@ -3936,7 +3935,10 @@ export async function linkPieces(
     } else if (resolvedSourcePath.length > 0) {
       const sourceData = await timeCliPhase(
         "linkPieces.readSourceResult",
-        () => sourcePiece.result.get(),
+        () =>
+          sourcePiece.result.get(undefined, {
+            materializeFactories: false,
+          }),
       );
       // Check source path resolves
       let current: any = sourceData;
@@ -3993,7 +3995,10 @@ export async function linkPieces(
       }
       const targetData = await timeCliPhase(
         "linkPieces.readTargetInput",
-        () => targetPiece.input.get(),
+        () =>
+          targetPiece.input.get(undefined, {
+            materializeFactories: false,
+          }),
       );
       let current: unknown = targetData;
       for (const segment of resolvedTargetPath) {
@@ -4483,8 +4488,12 @@ export async function inspectPiece(
   const id = piece.id;
   const name = piece.name();
   const patternRef = await piece.getPatternRef();
-  const source = (await piece.input.get()) as Readonly<unknown>;
-  const result = (await piece.result.get()) as Readonly<unknown>;
+  const source = (await piece.input.get(undefined, {
+    materializeFactories: false,
+  })) as Readonly<unknown>;
+  const result = (await piece.result.get(undefined, {
+    materializeFactories: false,
+  })) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
     id: piece.id,
     name: piece.name(),
@@ -4523,8 +4532,9 @@ async function inspectSlugTargetCell(
   slug: string,
 ): Promise<PieceInspection> {
   const target = await resolveSlugTargetCell(pieces, slug);
-  await target.pull();
-  const result = target.get() as Readonly<unknown>;
+  const result = await target.pull({
+    materializeFactories: false,
+  }) as Readonly<unknown>;
   const name = isObjectOrArray(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
@@ -4857,7 +4867,7 @@ export async function getCellValue(
       if (path.length === 0) {
         await timeCliPhase(
           "getCellValue.step.piece.pull",
-          () => piece.getCell().pull(),
+          () => piece.getCell().pull({ materializeFactories: false }),
         );
       }
       const targetCell = options.input
@@ -4865,7 +4875,7 @@ export async function getCellValue(
         : (await piece.result.getCell()).key(...path);
       await timeCliPhase(
         "getCellValue.step.target.pull",
-        () => targetCell.pull(),
+        () => targetCell.pull({ materializeFactories: false }),
       );
       await timeCliPhase(
         "getCellValue.step.synced.beforeIdle",
@@ -4960,7 +4970,7 @@ export async function getCellValue(
     try {
       value = await timeCliPhase(
         `getCellValue.${prop}.get`,
-        () => piece[prop].get(path),
+        () => piece[prop].get(path, { materializeFactories: false }),
       );
     } catch (error) {
       if (

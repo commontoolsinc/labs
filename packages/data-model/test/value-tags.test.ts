@@ -30,6 +30,7 @@ import {
   BaseFabricPrimitive,
   VALUE_TAG,
 } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import { registerFabricFactory } from "@/fabric-factory.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -136,6 +137,12 @@ const JS_TYPE_TAGS: ReadonlyArray<[string, unknown, JsTypeValueTag]> = [
   ...JS_PRIMITIVE_TAGS,
   ["a function", () => {}, VALUE_TAGS.function],
 ];
+
+/** An admitted callable in the narrow function arm of `FabricValue`. */
+const FABRIC_FACTORY = registerFabricFactory(() => undefined, "module", {
+  kind: "module",
+  rootToken: {},
+});
 
 /** One instance of each production primitive class, with the tag it carries. */
 const FABRIC_PRIMITIVE_TAGS: ReadonlyArray<
@@ -383,6 +390,10 @@ describe("value-tags", () => {
         .toBe(VALUE_TAGS.FabricInstance);
     });
 
+    it("returns `FabricFactory` for an admitted factory", () => {
+      expect(tagFromFabricValue(FABRIC_FACTORY)).toBe(VALUE_TAGS.FabricFactory);
+    });
+
     it("throws for a function", () => {
       expect(() => tagFromFabricValue((() => {}) as unknown as FabricValue))
         .toThrow("Not possibly a valid `FabricValue`");
@@ -424,6 +435,12 @@ describe("value-tags", () => {
       expect(
         tagFromFabricValueElseNull(FabricError.fromNativeError(new Error("x"))),
       ).toBe(VALUE_TAGS.FabricInstance);
+    });
+
+    it("returns `FabricFactory` for an admitted factory", () => {
+      expect(tagFromFabricValueElseNull(FABRIC_FACTORY)).toBe(
+        VALUE_TAGS.FabricFactory,
+      );
     });
 
     it("returns `null` for a function", () => {

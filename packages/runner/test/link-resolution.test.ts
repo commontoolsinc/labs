@@ -221,6 +221,43 @@ describe("link-resolution", () => {
         $alias: { path: ["value"] },
       });
     });
+
+    it("does not follow a link envelope that has data siblings", () => {
+      const targetCell = runtime.getCell<string>(
+        space,
+        "link-shaped-record-target",
+        undefined,
+        tx,
+      );
+      targetCell.set("target");
+      const sourceCell = runtime.getCell<unknown>(
+        space,
+        "link-shaped-record-source",
+        undefined,
+        tx,
+      );
+      sourceCell.setRaw({
+        ...targetCell.getAsWriteRedirectLink(),
+        sibling: "data",
+      });
+      const location = sourceCell.getAsNormalizedFullLink();
+
+      const resolved = resolveLink(runtime, tx, location);
+
+      expect(areNormalizedLinksSame(resolved, location)).toBe(true);
+      expect(tx.readValueOrThrow(resolved)).toEqual({
+        ...targetCell.getAsWriteRedirectLink(),
+        sibling: "data",
+      });
+
+      const siblingLocation = sourceCell.key("sibling")
+        .getAsNormalizedFullLink();
+      const resolvedSibling = resolveLink(runtime, tx, siblingLocation);
+      expect(areNormalizedLinksSame(resolvedSibling, siblingLocation)).toBe(
+        true,
+      );
+      expect(tx.readValueOrThrow(resolvedSibling)).toBe("data");
+    });
   });
 
   describe("Schema handling in links", () => {

@@ -19,6 +19,7 @@ import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   FabricArray,
   FabricContainerValue,
+  FabricFactory,
   FabricInstance,
   FabricPlainObject,
   FabricPrimitive,
@@ -235,6 +236,13 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /**
+   * Visits the given `FabricFactory` as an atomic callable leaf.
+   */
+  visitFabricFactory(
+    value: FabricFactory,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /**
    * Visits the given `FabricInstance`.
    */
   visitFabricInstance(
@@ -281,7 +289,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
    * Visits the given arbitrary value. If this returns type `visitSubtype`, then
    * the visitor system will call one of `visitFabricContainer()`,
-   * `visitNonFabricValue()`, or `visitPrimitive()`.
+   * `visitFabricFactory()`, `visitNonFabricValue()`, or `visitPrimitive()`.
    */
   visitValue(
     value: DomainFor<DomainExtra>,
@@ -350,6 +358,11 @@ export abstract class BaseValueVisitor<
   /** @inheritDoc */
   abstract visitFabricArray(
     value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType>;
+
+  /** @inheritDoc */
+  abstract visitFabricFactory(
+    value: FabricFactory,
   ): LeafVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
@@ -446,6 +459,13 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
   /** @inheritDoc */
   visitFabricArray(
     _value: FabricArray,
+  ): LeafVisitorResult<DomainExtra, ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitFabricFactory(
+    _value: FabricFactory,
   ): LeafVisitorResult<DomainExtra, ResultType> {
     return undefined;
   }
@@ -801,6 +821,11 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
           if (result?.type === "visitSubtype") {
             result = vis.visitFabricInstance(instance);
           }
+          break;
+        }
+
+        case VALUE_TAGS.FabricFactory: {
+          result = vis.visitFabricFactory(value as FabricFactory);
           break;
         }
 

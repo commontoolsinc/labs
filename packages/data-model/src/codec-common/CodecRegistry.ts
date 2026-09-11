@@ -92,6 +92,9 @@ export class CodecRegistry<Encoded> {
   /** Class -> codec map for O(1) encode dispatch on object values. */
   readonly #classMap = new Map<Constructor, CodecForFormat<Encoded>>();
 
+  /** The one codec allowed to inspect callable Fabric values. */
+  #callableCodec: CodecForFormat<Encoded> | undefined;
+
   /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
   readonly #primitiveCodecs = new Map<
     PrimitiveTypeName,
@@ -183,6 +186,19 @@ export class CodecRegistry<Encoded> {
   }
 
   /**
+   * Registers the dedicated callable-factory codec. Functions never join
+   * primitive or constructor dispatch, so arbitrary callables remain invalid.
+   */
+  registerCallable(codec: CodecForFormat<Encoded>): void {
+    this.#assertNotFrozen();
+    CodecRegistry.#assertClassified(codec);
+    CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
+    this.#callableCodec = codec;
+    const tag = codec.recognizedTypeTag;
+    if (tag !== undefined) this.#tagMap.set(tag, codec);
+  }
+
+  /**
    * Registers a codec for a primitive `type` (see {@link PrimitiveTypeName}).
    * Indexes the codec by its `recognizedTypeTag` (for decode) and by `type`
    * (for O(1) encode dispatch on primitives).
@@ -252,6 +268,7 @@ export class CodecRegistry<Encoded> {
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
     for (const [key, value] of this.#classMap) result.#classMap.set(key, value);
+    result.#callableCodec = this.#callableCodec;
     for (const [key, value] of this.#primitiveCodecs) {
       result.#primitiveCodecs.set(key, value);
     }
@@ -290,7 +307,8 @@ export class CodecRegistry<Encoded> {
     const type = jsTagFromValue(value);
 
     if (type === VALUE_TAGS.function) {
-      // Not a `FabricValue`; nothing can encode it.
+      const codec = this.#callableCodec;
+      if (codec?.canEncode(value)) return codec;
       return undefined;
     } else if (type !== "object") {
       const matched = this.#primitiveCodecs.get(type);

@@ -4,6 +4,7 @@ export {
   type FabricArray,
   type FabricContainerValue,
   type FabricConvertibleValue,
+  type FabricFactory,
   FabricInstance,
   type FabricNativeObject,
   type FabricPlainObject,

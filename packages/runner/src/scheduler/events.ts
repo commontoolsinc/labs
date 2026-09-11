@@ -45,6 +45,7 @@ import { planEventInvalidDependencyScheduling } from "./execution.ts";
 import type { OriginStatus } from "./lineage.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
+import { RetryWhenReady } from "./retry-when-ready.ts";
 import {
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
@@ -57,6 +58,7 @@ import {
 import {
   type Action,
   type EventHandler,
+  type EventHandlerRegistration,
   type EventPreflightTraceContext,
   LT1_LATE_SEAL_REFUSED,
   type QueuedEvent,
@@ -116,7 +118,7 @@ function selectEventImplementation(
 /** Stable queued callback whose selection follows the live stream registry. */
 function createGuardedDispatcher(
   ref: NormalizedFullLink,
-  eventHandlers: readonly [NormalizedFullLink, EventHandler][],
+  eventHandlers: readonly EventHandlerRegistration[],
 ): GuardedDispatcher {
   const dispatcher: GuardedDispatcher = Object.assign(
     (tx: IExtendedStorageTransaction, event: unknown) => {
@@ -132,7 +134,7 @@ function createGuardedDispatcher(
     {
       [guardedImplementations]: {
         implementations: new Map<string, { handler: EventHandler }>(),
-        current: () => findEventHandler(eventHandlers, ref),
+        current: () => findEventHandler(eventHandlers, ref)?.handler,
       },
     },
   );
@@ -298,12 +300,13 @@ export interface EventDependencyPreflightResult {
 
 export interface SchedulerEventQueueState {
   readonly runtime: Runtime;
-  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: readonly EventHandlerRegistration[];
   readonly eventQueue: QueuedEvent[];
   readonly backgroundTasks: Set<Promise<unknown>>;
   readonly loadPieceForEvent?: (
     runtime: Runtime,
     eventLink: NormalizedFullLink,
+    options?: { signal?: AbortSignal },
   ) => Promise<EnsurePieceVerdict>;
   readonly queueExecution: () => void;
   readonly recordLineageEvent: (
@@ -391,6 +394,13 @@ export function dropQueuedEvent(
     servedOutcome?: ServedEventFailureOutcome;
   } = {},
 ): void {
+  if (event.cancelPending !== undefined) {
+    event.cancelPending(reason);
+    return;
+  }
+  const loadControl = event.handlerLoadControl;
+  delete event.handlerLoadControl;
+  loadControl?.abortLoad(reason);
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
   if (event.originTx !== undefined) {
@@ -456,11 +466,13 @@ export function deferLaterSameSpaceServedEvents(
 }
 
 function findEventHandler(
-  handlers: readonly [NormalizedFullLink, EventHandler][],
+  handlers: readonly EventHandlerRegistration[],
   eventLink: NormalizedFullLink,
-): EventHandler | undefined {
-  return handlers.find(([link]) => areNormalizedLinksSame(link, eventLink))
-    ?.[1];
+): EventHandlerRegistration | undefined {
+  return handlers.find((registration) =>
+    registration.active &&
+    areNormalizedLinksSame(registration.ref, eventLink)
+  );
 }
 
 // Source of QueuedEvent.enqueueSeq stamps. Process-global monotonicity is a
@@ -490,7 +502,7 @@ function readyQueuedEvent(args: {
   readonly id: string;
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
-  readonly handler: EventHandler;
+  readonly registration: EventHandlerRegistration;
   readonly retries: boolean;
   readonly onCommit?: QueuedEvent["onCommit"];
   readonly eventId?: string;
@@ -507,8 +519,10 @@ function readyQueuedEvent(args: {
     time: args.time,
     originTx: args.originTx,
     eventLink: args.eventLink,
-    action: (tx) => args.handler(tx, args.event),
-    handler: args.handler,
+    action: (tx) => args.registration.handler(tx, args.event),
+    handler: args.registration.handler,
+    handlerRegistration: args.registration,
+    handlerGeneration: args.registration.generation,
     event: args.event,
     runtimeInjectedEventKeys: args.runtimeInjectedEventKeys,
     retry: args.retries,
@@ -561,6 +575,20 @@ function chainOnCommit(
   return chained;
 }
 
+function hydrateLoadPendingEvent(
+  queuedEvent: QueuedEvent,
+  registration: EventHandlerRegistration,
+): void {
+  const loadControl = queuedEvent.handlerLoadControl;
+  delete queuedEvent.handlerLoadControl;
+  loadControl?.releaseSchedulerWait();
+  queuedEvent.handlerRegistration = registration;
+  queuedEvent.handlerGeneration = registration.generation;
+  queuedEvent.handler = registration.handler;
+  queuedEvent.action = (tx) => registration.handler(tx, queuedEvent.event);
+  delete queuedEvent.handlerLoadPending;
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -578,9 +606,9 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   // ingress caller's opaque idempotency key is bound to its stream earlier,
   // at the send surface (cell.ts), via scopeCallerEventId.
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
-  const handler = findEventHandler(state.eventHandlers, args.eventLink);
+  const registration = findEventHandler(state.eventHandlers, args.eventLink);
 
-  if (handler) {
+  if (registration) {
     // W4: bound the per-(stream, handler) in-queue backlog. Below the cap,
     // events queue normally (ordinary delivery is unchanged); at the cap,
     // collapse the newest into the last pending entry (last-wins) instead of
@@ -615,7 +643,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       let sameDeliveryId: QueuedEvent | undefined;
       for (const q of state.eventQueue) {
         if (
-          q.handler === handler &&
+          q.handlerRegistration === registration &&
           areNormalizedLinksSame(q.eventLink, args.eventLink)
         ) {
           pending++;
@@ -669,7 +697,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         // into a log-flood amplifier; any telemetry added later must be
         // rate-limited.
         lastSameOrigin.event = args.event;
-        lastSameOrigin.action = (tx) => handler(tx, args.event);
+        lastSameOrigin.action = (tx) => registration.handler(tx, args.event);
         // Last-wins takes the newest event's injection provenance with its
         // payload — the marker must describe the payload that dispatches.
         lastSameOrigin.runtimeInjectedEventKeys = args.runtimeInjectedEventKeys;
@@ -692,7 +720,11 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         return;
       }
     }
-    const queuedEvent = readyQueuedEvent({ ...args, id, handler });
+    const queuedEvent = readyQueuedEvent({
+      ...args,
+      id,
+      registration,
+    });
     state.eventQueue.push(queuedEvent);
     if (args.originTx !== undefined) {
       state.recordLineageEvent(args.originTx, queuedEvent);
@@ -709,12 +741,29 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const unavailableHandler: EventHandler = () => {
       throw new Error(`Event ${id} dispatched before its handler loaded`);
     };
+    const unavailableRegistration: EventHandlerRegistration = {
+      ref: args.eventLink,
+      handler: unavailableHandler,
+      generation: -1,
+      readinessCancels: new Set(),
+      active: true,
+    };
     const queuedEvent = readyQueuedEvent({
       ...args,
       id,
-      handler: unavailableHandler,
+      registration: unavailableRegistration,
     });
     queuedEvent.handlerLoadPending = true;
+    const loadWaitReleased = Promise.withResolvers<void>();
+    const loadAbort = new AbortController();
+    const loadControl = {
+      releaseSchedulerWait: () => loadWaitReleased.resolve(),
+      abortLoad: (_reason: string) => {
+        loadAbort.abort();
+        loadWaitReleased.resolve();
+      },
+    };
+    queuedEvent.handlerLoadControl = loadControl;
     state.eventQueue.push(queuedEvent);
     if (args.originTx !== undefined) {
       state.recordLineageEvent(args.originTx, queuedEvent);
@@ -723,11 +772,16 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
 
     const startTask = (async () => {
       try {
-        const verdict = await (state.loadPieceForEvent ??
-          ensurePieceRunningVerdict)(
+        const loadOutcome = await Promise.race([
+          (state.loadPieceForEvent ?? ensurePieceRunningVerdict)(
             state.runtime,
             args.eventLink,
-          );
+            { signal: loadAbort.signal },
+          ).then((verdict) => ({ kind: "loaded" as const, verdict })),
+          loadWaitReleased.promise.then(() => ({ kind: "released" as const })),
+        ]);
+        if (loadOutcome.kind === "released") return;
+        const { verdict } = loadOutcome;
         // The origin may have failed while the piece was loading.
         if (
           queuedEvent.finalOutcomeNotified ||
@@ -739,9 +793,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           args.eventLink,
         );
         if (loadedHandler) {
-          queuedEvent.handler = loadedHandler;
-          queuedEvent.action = (tx) => loadedHandler(tx, args.event);
-          delete queuedEvent.handlerLoadPending;
+          hydrateLoadPendingEvent(queuedEvent, loadedHandler);
         } else if (
           verdict.started && verdict.graphIsInstalled?.() !== false
         ) {
@@ -817,6 +869,9 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           );
         }
       } finally {
+        if (queuedEvent.handlerLoadControl === loadControl) {
+          delete queuedEvent.handlerLoadControl;
+        }
         state.queueExecution();
       }
     })();
@@ -838,7 +893,10 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
 }
 
 export function addSchedulerEventHandler(state: {
-  readonly eventHandlers: [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: EventHandlerRegistration[];
+  readonly nextEventHandlerGeneration: () => number;
+  readonly eventQueue?: readonly QueuedEvent[];
+  readonly queueExecution?: () => void;
 }, args: {
   readonly handler: EventHandler;
   readonly ref: NormalizedFullLink;
@@ -847,20 +905,84 @@ export function addSchedulerEventHandler(state: {
     event: Parameters<EventHandler>[1],
   ) => void;
 }): Cancel {
+  const cancelRegistration = (
+    registration: EventHandlerRegistration,
+    reason: string,
+  ) => {
+    if (!registration.active) return;
+    registration.active = false;
+    for (const cancelReadiness of [...registration.readinessCancels]) {
+      cancelReadiness(reason);
+    }
+    registration.readinessCancels.clear();
+  };
+  const installRegistration = (
+    handler: EventHandler,
+  ): EventHandlerRegistration => {
+    const registration: EventHandlerRegistration = {
+      ref: args.ref,
+      handler,
+      generation: state.nextEventHandlerGeneration(),
+      readinessCancels: new Set(),
+      active: true,
+    };
+    state.eventHandlers.push(registration);
+    let hydratedPendingEvent = false;
+    for (const queuedEvent of state.eventQueue ?? []) {
+      if (
+        queuedEvent.handlerLoadPending === true &&
+        areNormalizedLinksSame(queuedEvent.eventLink, registration.ref)
+      ) {
+        hydrateLoadPendingEvent(queuedEvent, registration);
+        hydratedPendingEvent = true;
+      }
+    }
+    if (hydratedPendingEvent) state.queueExecution?.();
+    return registration;
+  };
+  const retireGuardedRegistration = (
+    registration: EventHandlerRegistration,
+    reason: string,
+  ) => {
+    const index = state.eventHandlers.indexOf(registration);
+    if (index !== -1) state.eventHandlers.splice(index, 1);
+    for (const cancelReadiness of [...registration.readinessCancels]) {
+      cancelReadiness(reason);
+    }
+    registration.readinessCancels.clear();
+    // A queued event deliberately keeps the stable dispatcher alive after it
+    // leaves the current registry. Its next selection follows whatever
+    // registration then owns this stream. With no queued owner, retirement is
+    // an ordinary cancellation and the generation becomes stale immediately.
+    if (
+      !(state.eventQueue ?? []).some((queuedEvent) =>
+        queuedEvent.handlerRegistration === registration
+      )
+    ) {
+      registration.active = false;
+    }
+  };
   if (args.populateDependencies) {
     args.handler.populateDependencies = args.populateDependencies;
   }
-  const existingIndex = state.eventHandlers.findIndex(([existing]) =>
-    areNormalizedLinksSame(existing, args.ref)
+  const existingIndex = state.eventHandlers.findIndex((existing) =>
+    existing.active && areNormalizedLinksSame(existing.ref, args.ref)
   );
-  const existing = state.eventHandlers[existingIndex]?.[1];
+  const existingRegistration = state.eventHandlers[existingIndex];
+  const existing = existingRegistration?.handler;
   if (args.handler.implementationSelection !== undefined) {
     const dispatcher = existing && isGuardedDispatcher(existing)
       ? existing
       : createGuardedDispatcher(args.ref, state.eventHandlers);
     if (dispatcher !== existing) {
-      if (existingIndex !== -1) state.eventHandlers.splice(existingIndex, 1);
-      state.eventHandlers.push([args.ref, dispatcher]);
+      if (existingRegistration !== undefined) {
+        state.eventHandlers.splice(existingIndex, 1);
+        cancelRegistration(
+          existingRegistration,
+          "Event handler registration replaced",
+        );
+      }
+      installRegistration(dispatcher);
     }
     const key = args.handler.implementationSelection.key;
     const registration = { handler: args.handler };
@@ -870,35 +992,95 @@ export function addSchedulerEventHandler(state: {
       if (implementations.get(key) !== registration) return;
       implementations.delete(key);
       if (implementations.size === 0) {
-        const index = state.eventHandlers.findIndex(([, h]) =>
-          h === dispatcher
+        const dispatcherRegistration = state.eventHandlers.find(
+          (registration) =>
+            registration.active && registration.handler === dispatcher,
         );
-        if (index !== -1) state.eventHandlers.splice(index, 1);
+        if (dispatcherRegistration !== undefined) {
+          retireGuardedRegistration(
+            dispatcherRegistration,
+            "Event handler registration canceled",
+          );
+        }
       }
     };
   }
   if (existingIndex !== -1) {
     if (existing && isGuardedDispatcher(existing)) {
       existing[guardedImplementations].implementations.clear();
+      retireGuardedRegistration(
+        existingRegistration,
+        "Event handler registration replaced",
+      );
+    } else {
+      state.eventHandlers.splice(existingIndex, 1);
+      cancelRegistration(
+        existingRegistration,
+        "Event handler registration replaced",
+      );
     }
-    state.eventHandlers.splice(existingIndex, 1);
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
       { linkId: args.ref.id },
     ]);
   }
-  state.eventHandlers.push([args.ref, args.handler]);
+  const registration = installRegistration(args.handler);
   return () => {
-    const index = state.eventHandlers.findIndex(([r, h]) =>
-      r === args.ref && h === args.handler
-    );
+    if (!registration.active) return;
+    cancelRegistration(registration, "Event handler registration canceled");
+    const index = state.eventHandlers.indexOf(registration);
     if (index !== -1) state.eventHandlers.splice(index, 1);
   };
+}
+
+export function isQueuedEventRegistrationCurrent(
+  queuedEvent: QueuedEvent,
+): boolean {
+  return queuedEvent.handlerRegistration.active &&
+    queuedEvent.handlerRegistration.generation ===
+      queuedEvent.handlerGeneration;
+}
+
+/**
+ * Remove an event whose captured registration was canceled or replaced.
+ * Settle its callback with an aborted transaction so stream.send waiters do
+ * not hang, and release any lineage record owned by the queued intent.
+ */
+export function dropStaleQueuedEvent(state: {
+  readonly runtime: Runtime;
+  readonly eventQueue: QueuedEvent[];
+  readonly releaseLineageEvent: (
+    originTx: IExtendedStorageTransaction,
+    event: QueuedEvent,
+  ) => void;
+}, queuedEvent: QueuedEvent): boolean {
+  if (isQueuedEventRegistrationCurrent(queuedEvent)) return false;
+
+  const index = state.eventQueue.indexOf(queuedEvent);
+  if (index !== -1) state.eventQueue.splice(index, 1);
+  if (queuedEvent.originTx !== undefined) {
+    state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+  }
+  if (queuedEvent.onCommit) {
+    const tx = state.runtime.edit();
+    tx.abort(new Error("Event handler registration superseded"));
+    try {
+      queuedEvent.onCommit(tx);
+    } catch (error) {
+      logger.error(
+        "schedule-error",
+        "Error in canceled event commit callback:",
+        error,
+      );
+    }
+  }
+  return true;
 }
 
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
+  readonly pendingDurableEventReadiness: Set<Promise<void>>;
   readonly backpressure: CommitBackpressurePolicy;
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
@@ -1423,6 +1605,7 @@ export async function processPullQueuedEventDuringExecute(
   await dispatchQueuedEvent({
     runtime: state.runtime,
     eventQueue: state.eventQueue,
+    pendingDurableEventReadiness: state.pendingDurableEventReadiness,
     backpressure: state.backpressure,
     setRunningPromise: (promise) => {
       state.setRunningPromise(promise);
@@ -1448,6 +1631,7 @@ export async function processPullQueuedEventDuringExecute(
 export async function dispatchQueuedEvent(state: {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
+  readonly pendingDurableEventReadiness: Set<Promise<void>>;
   readonly backpressure: CommitBackpressurePolicy;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
   readonly getActionId: (action: Action | EventHandler) => string;
@@ -1522,6 +1706,7 @@ export async function dispatchQueuedEvent(state: {
       if (presyncTx.status().status === "ready") presyncTx.abort();
     }
   }
+  if (dropStaleQueuedEvent(state, queuedEvent)) return;
 
   // Lineage may fail while presync is awaiting I/O. Keep the event in its FIFO
   // slot until that await completes so the lineage callback can still find and
@@ -1735,6 +1920,7 @@ export async function dispatchQueuedEvent(state: {
     // originStatus() fallback ("confirmed") would let a descendant of a failed
     // origin run.
     const requeueForNameResolution = () => {
+      if (!isQueuedEventRegistrationCurrent(queuedEvent)) return;
       // A served name-resolution retry re-enters this scheduler settle. If it
       // runs before the flush deadline, the installed destination seals its
       // warmed-cache run into the current wave; a cut instead leaves the
@@ -1755,6 +1941,8 @@ export async function dispatchQueuedEvent(state: {
         action,
         eventLink: queuedEvent.eventLink,
         handler,
+        handlerRegistration: queuedEvent.handlerRegistration,
+        handlerGeneration: queuedEvent.handlerGeneration,
         event: eventValue,
         runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
         retry,
@@ -1784,6 +1972,25 @@ export async function dispatchQueuedEvent(state: {
       state.queueExecution();
     };
 
+    // Re-queue the exact captured intent once runner-owned factory loading is
+    // ready. Unlike RetryImmediately and transient commit backoff, readiness is
+    // not authored retry policy: retries:false still waits and re-runs. Spreading
+    // the queued value deliberately preserves its id, registration generation,
+    // callback, retry flag, lineage origin, and any existing retry window state.
+    const requeueAfterReadiness = (): boolean => {
+      if (!isQueuedEventRegistrationCurrent(queuedEvent)) return false;
+      const requeued: QueuedEvent = {
+        ...queuedEvent,
+        notBefore: undefined,
+      };
+      insertInEnqueueOrder(state.eventQueue, requeued);
+      if (requeued.originTx !== undefined) {
+        state.recordLineageEvent(requeued.originTx, requeued);
+      }
+      state.queueExecution();
+      return true;
+    };
+
     // Re-queue a transient outcome for a later retry. With `runAt` the retry is
     // parked via notBefore so the scheduler backs off (capped exponential delay)
     // instead of busy-looping; without it the caller parks the requeued head on
@@ -1797,7 +2004,8 @@ export async function dispatchQueuedEvent(state: {
       deadline: number,
       runAt: number | undefined,
       notRunBackoffs: number | undefined = queuedEvent.notRunBackoffs,
-    ): QueuedEvent => {
+    ): QueuedEvent | undefined => {
+      if (!isQueuedEventRegistrationCurrent(queuedEvent)) return undefined;
       // Same served-absence assert as the name-resolution requeue above:
       // served copies queue with retries: false, so a stale-basis failure
       // classifies give-up "opt-out" and never reaches the backoff window —
@@ -1806,7 +2014,7 @@ export async function dispatchQueuedEvent(state: {
       // served retry semantics are undecided, so fail loudly instead.
       if (queuedEvent.served !== undefined) {
         throw new Error(
-          "requeueForBackoff reached with a served event; served retry " +
+          "requeueForRetry reached with a served event; served retry " +
             "semantics are undecided (see the comment at this assert)",
         );
       }
@@ -1822,6 +2030,8 @@ export async function dispatchQueuedEvent(state: {
         action,
         eventLink: queuedEvent.eventLink,
         handler,
+        handlerRegistration: queuedEvent.handlerRegistration,
+        handlerGeneration: queuedEvent.handlerGeneration,
         event: eventValue,
         runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
         retry,
@@ -1845,6 +2055,107 @@ export async function dispatchQueuedEvent(state: {
     };
 
     const finalize = (error?: unknown): void => {
+      if (!isQueuedEventRegistrationCurrent(queuedEvent)) {
+        if (tx.status().status === "ready") {
+          tx.abort(new Error("Event handler registration superseded"));
+        }
+        runFinalCommitCallback();
+        return;
+      }
+      // A cold factory artifact pauses only this handler invocation. Its
+      // transaction is aborted so no partial authored result escapes; readiness
+      // is observed outside the scheduler's running promise so unrelated work
+      // continues. Resolution re-queues the same event intent, while rejection
+      // is reported as the underlying load error and settles the original
+      // callback without an authored retry.
+      if (error instanceof RetryWhenReady) {
+        if (tx.status().status === "ready") {
+          tx.abort(error);
+        }
+        const durableReadiness = Promise.withResolvers<void>();
+        state.pendingDurableEventReadiness.add(durableReadiness.promise);
+        durableReadiness.promise.finally(() => {
+          state.pendingDurableEventReadiness.delete(durableReadiness.promise);
+        });
+        let parked = true;
+        const clearParkedReadiness = () => {
+          if (!parked) return false;
+          parked = false;
+          queuedEvent.handlerRegistration.readinessCancels.delete(
+            cancelParkedReadiness,
+          );
+          delete queuedEvent.cancelPending;
+          return true;
+        };
+        const cancelParkedReadiness = (reason: string) => {
+          if (!clearParkedReadiness()) return;
+          if (queuedEvent.originTx !== undefined) {
+            state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+          }
+          runFinalCommitCallback();
+          logger.debug("scheduler", reason, { eventId: queuedEvent.id });
+          durableReadiness.resolve();
+        };
+        queuedEvent.cancelPending = cancelParkedReadiness;
+        queuedEvent.handlerRegistration.readinessCancels.add(
+          cancelParkedReadiness,
+        );
+        if (queuedEvent.originTx !== undefined) {
+          const originTx = queuedEvent.originTx;
+          state.recordLineageEvent(originTx, queuedEvent);
+          const originStatus = originTx.status().status;
+          if (
+            state.lineageStatus(originTx) === "failed" ||
+            originStatus === "error"
+          ) {
+            cancelParkedReadiness(
+              "Event readiness canceled after its speculative origin failed",
+            );
+          } else if (originStatus === "ready" || originStatus === "pending") {
+            // The event left the FIFO before its handler disclosed that it had
+            // to park. Observe the origin directly as well as through lineage:
+            // an in-flight origin can fail in the interval between that dequeue
+            // and this re-registration, after lineage has released its record.
+            originTx.addVerdictCallback((_settledTx, result) => {
+              if (result.error) {
+                cancelParkedReadiness(
+                  "Event readiness canceled after its speculative origin failed",
+                );
+              }
+            });
+          }
+        }
+        error.readiness.then(
+          () => {
+            if (!clearParkedReadiness()) return;
+            if (!requeueAfterReadiness()) {
+              if (queuedEvent.originTx !== undefined) {
+                state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+              }
+              runFinalCommitCallback();
+            }
+            durableReadiness.resolve();
+          },
+          (readinessError) => {
+            if (!clearParkedReadiness()) return;
+            if (queuedEvent.originTx !== undefined) {
+              state.releaseLineageEvent(queuedEvent.originTx, queuedEvent);
+            }
+            if (!isQueuedEventRegistrationCurrent(queuedEvent)) {
+              runFinalCommitCallback();
+              durableReadiness.resolve();
+              return;
+            }
+            try {
+              state.handleError(normalizeThrownError(readinessError), action);
+            } finally {
+              runFinalCommitCallback();
+              durableReadiness.resolve();
+            }
+          },
+        );
+        return;
+      }
       // A RetryImmediately signal means the handler referenced an inSpace("name")
       // target that has now been resolved into the runtime cache. Abort this run's
       // transaction and re-queue the event so the handler re-runs and resolves the
@@ -2013,7 +2324,7 @@ export async function dispatchQueuedEvent(state: {
           parkKeys.length > 0 ? undefined : step.runAt,
           notRunBackoffs,
         );
-        if (parkKeys.length > 0) {
+        if (parkKeys.length > 0 && requeued !== undefined) {
           state.parkHeadEventForLoads(requeued, parkKeys);
         }
         return;
@@ -2184,6 +2495,14 @@ export async function dispatchQueuedEvent(state: {
             message: "Event handler aborted its transaction",
           });
         };
+
+        // A cancellation after commit kickoff cannot undo an already-applied
+        // local transaction, but it must fence every later-generation behavior:
+        // never back off, retry, or report convergence for the retired handler.
+        if (!isQueuedEventRegistrationCurrent(queuedEvent)) {
+          runFinalCommitCallback();
+          return;
+        }
 
         switch (disposition.kind) {
           case "success":
@@ -2381,6 +2700,10 @@ export async function dispatchQueuedEvent(state: {
   } catch (error) {
     finalizeFailure(error);
   }
+}
+
+function normalizeThrownError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function formatEventCommitAddress(address: {

@@ -105,6 +105,7 @@ export const UNUSED_RECORD_SUBSCHEMA_KEYS = [
 ] as const;
 
 export type SubschemaKeyword =
+  | "asFactory"
   | (typeof SINGLE_SUBSCHEMA_KEYS)[number]
   | (typeof ARRAY_SUBSCHEMA_KEYS)[number]
   | (typeof RECORD_SUBSCHEMA_KEYS)[number]
@@ -126,6 +127,8 @@ export function isSubschema(value: unknown): value is JSONSchema {
 }
 
 export interface SchemaWalkOptions {
+  /** Descend into the public schemas carried by `asFactory`. Default true. */
+  readonly includeFactorySchemas?: boolean;
   /** Also descend into `$defs` bodies. Default false. */
   readonly includeDefs?: boolean;
 
@@ -281,6 +284,23 @@ export function forEachSubschema(
 ): boolean {
   if (!isObjectOrArray(schema)) return false;
   const node = schema as JSONSchemaObj;
+  if (opts.includeFactorySchemas !== false && node.asFactory !== undefined) {
+    const fields = node.asFactory.kind === "handler"
+      ? (["contextSchema", "eventSchema"] as const)
+      : (["argumentSchema", "resultSchema"] as const);
+    for (const field of fields) {
+      const child = node.asFactory[field] as JSONSchema | undefined;
+      if (child === undefined) continue;
+      if (
+        visit(
+          child,
+          "asFactory",
+          field,
+          undefined,
+        )
+      ) return true;
+    }
+  }
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
     if (child === undefined) continue;
@@ -344,6 +364,20 @@ export function* subschemaEdges(
 ): Generator<SubschemaEdge> {
   if (!isObjectOrArray(schema)) return;
   const node = schema as JSONSchemaObj;
+  if (opts.includeFactorySchemas !== false && node.asFactory !== undefined) {
+    const fields = node.asFactory.kind === "handler"
+      ? (["contextSchema", "eventSchema"] as const)
+      : (["argumentSchema", "resultSchema"] as const);
+    for (const field of fields) {
+      const child = node.asFactory[field] as JSONSchema | undefined;
+      if (child === undefined) continue;
+      yield {
+        schema: child,
+        keyword: "asFactory",
+        key: field,
+      };
+    }
+  }
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
     if (child === undefined) continue;
@@ -388,6 +422,23 @@ export function mapSubschemas(
     result ??= { ...schema };
     result[key] = value;
   };
+
+  if (opts.includeFactorySchemas !== false && schema.asFactory !== undefined) {
+    const fields = schema.asFactory.kind === "handler"
+      ? (["contextSchema", "eventSchema"] as const)
+      : (["argumentSchema", "resultSchema"] as const);
+    let mappedFactory: Record<string, unknown> | undefined;
+    for (const field of fields) {
+      const child = schema.asFactory[field] as JSONSchema | undefined;
+      if (child === undefined) continue;
+      const mapped = map(child);
+      if (mapped !== child) {
+        mappedFactory ??= { ...schema.asFactory };
+        mappedFactory[field] = mapped;
+      }
+    }
+    if (mappedFactory !== undefined) update("asFactory", mappedFactory);
+  }
 
   for (const keyword of singleKeywordsFor(opts)) {
     const child = schema[keyword];

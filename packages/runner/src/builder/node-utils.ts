@@ -1,4 +1,9 @@
 import { FabricInstance, refuseFabricInstance } from "@commonfabric/data-model";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { isCell } from "../cell.ts";
@@ -134,6 +139,13 @@ function attachCfcToOutputs(
       // Cell already has a cause (computed/derived output) — its schema was
       // set during construction, so we cannot override it here.
     }
+    return;
+  } else if (isAdmittedFabricFactory(outputs)) {
+    const state = factoryStateOf(outputs);
+    mapFactoryStateValues(state, (value) => {
+      attachCfcToOutputs(value, lubConfidentiality);
+      return value;
+    });
     return;
   } else if (isObjectOrArray(outputs)) {
     // Descend into objects and arrays.

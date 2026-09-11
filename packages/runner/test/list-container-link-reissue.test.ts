@@ -170,9 +170,14 @@ function observeCoordinator(
   ref: string,
   // deno-lint-ignore no-explicit-any
   implementation: any,
-): { issued: Cell<unknown[]>[]; log: ReconcileRecord[] } {
+): {
+  issued: Cell<unknown[]>[];
+  log: ReconcileRecord[];
+  linkCommitted: Promise<void>;
+} {
   const issued: Cell<unknown[]>[] = [];
   const log: ReconcileRecord[] = [];
+  const linkCommitted = Promise.withResolvers<void>();
   runtime.moduleRegistry.addModuleByRef(
     ref,
     raw((
@@ -213,6 +218,9 @@ function observeCoordinator(
             issuedLink,
             outcome: result.error ? `rejected:${result.error.name}` : "commits",
           });
+          if (issuedLink && result.error === undefined) {
+            linkCommitted.resolve();
+          }
         });
       };
       return isRawBuiltinResult(built)
@@ -221,7 +229,7 @@ function observeCoordinator(
       // deno-lint-ignore no-explicit-any
     }) as any,
   );
-  return { issued, log };
+  return { issued, log, linkCommitted: linkCommitted.promise };
 }
 
 type ResumeOutcome = {
@@ -313,7 +321,7 @@ async function resumeOverEmptiedSpot(
     apiUrl: new URL(import.meta.url),
     storageManager: sm2,
   });
-  const { issued, log } = observeCoordinator(
+  const { issued, log, linkCommitted } = observeCoordinator(
     rt2,
     coordinator.name,
     coordinator.implementation,
@@ -333,6 +341,11 @@ async function resumeOverEmptiedSpot(
 
     expect(await rt2.start(rc2)).toBe(true);
     await rc2.pull();
+    await rt2.settled();
+    // A map resume may park while its row state loads. Scheduler idleness
+    // deliberately excludes parked readiness, so wait for the observable
+    // link-commit event before inspecting convergence.
+    await linkCommitted;
     await rt2.settled();
 
     return {
@@ -362,7 +375,7 @@ describe("list container link reissue", () => {
         expect(
           outcome.log[0],
           "the first reconcile issued the container link and committed",
-        ).toEqual({ attempt: 1, issuedLink: true, outcome: "commits" });
+        ).toMatchObject({ issuedLink: true, outcome: "commits" });
         expect(
           outcome.aggregate,
           "the aggregate is reachable again through the re-issued link",
@@ -375,25 +388,24 @@ describe("list container link reissue", () => {
           `${coordinator.name} link regression`,
           { replica: "cold" },
         );
-
         // The scenario this test exists to cover: the reconcile that issued the
         // link lost its commit, and a later one converged without it. Found by
-        // attempt, not by position in the log: a reconcile's verdict lands
-        // when its commit settles, and a rejected first attempt's rejection
-        // rides a catch-up that later, fresher attempts can commit ahead of —
-        // the resume pre-sync names the coordinator's children, so those
-        // attempts read warm results rather than sharing the stale basis.
+        // first write was rejected and the later committed write re-issued it.
+        // Scheduler passes parked on row readiness have no commit callback and
+        // may create gaps in attempt numbering, so the assertion follows the
+        // write-bearing records rather than assuming a particular attempt id.
+        const issuedRecords = outcome.log.filter((record) => record.issuedLink)
+          .toSorted((left, right) => left.attempt - right.attempt);
         expect(
-          outcome.log.find((record) => record.attempt === 1),
+          issuedRecords[0],
           "the first reconcile issued the container link and was rejected on a stale basis",
-        ).toEqual({
-          attempt: 1,
+        ).toMatchObject({
           issuedLink: true,
           outcome: "rejected:ConflictError",
         });
         expect(
-          outcome.log.some((record) => record.outcome === "commits"),
-          "a later reconcile committed",
+          issuedRecords.some((record) => record.outcome === "commits"),
+          "a later reconcile re-issued the link and committed",
         ).toBe(true);
         expect(
           outcome.container,

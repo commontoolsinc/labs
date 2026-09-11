@@ -6,6 +6,11 @@ import {
   taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
@@ -33,6 +38,7 @@ import {
   type CommitPrecondition,
   DEFAULT_BRANCH,
   type DocumentPath,
+  type EnsureOperation,
   type EntityDocument,
   type EntityIdListOptions,
   type EntityIdListResult,
@@ -50,6 +56,7 @@ import {
   type SessionHolding,
   type SessionSync,
   type SessionSyncUpsert,
+  type SetOperation,
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
@@ -111,6 +118,7 @@ import {
   IStorageTransaction,
   IStorageTransactionInconsistent,
   NativeStorageCommit,
+  NativeStorageCommitOperation,
   PullError,
   PushError,
   ReplicaLoadFailureError,
@@ -2296,6 +2304,30 @@ export class StorageManager implements IStorageManager {
     });
     let loadFailure: unknown;
     try {
+      // A durable link may carry a reference-form selector into a fresh
+      // registry lease. Load each referenced schema document first so the
+      // normal selector externalizer can both recompose the closure and prove
+      // that the target space persists it. Schema-document pulls include
+      // their own closure, so one pull per root is sufficient. An absent or
+      // failed document remains unavailable and the selector gate below keeps
+      // failing closed rather than emitting an unbacked reference.
+      for (
+        const hash of collectExternalSchemaRefHashes(
+          (schema ?? false) as JSONSchema,
+        )
+      ) {
+        if (
+          this.isContentAddressedDocPersisted(space, hash) &&
+          lookupSchemaDocument(hash) !== undefined
+        ) {
+          continue;
+        }
+        const schemaResult = await provider.sync(`cid:${hash}` as URI, {
+          path: [],
+          schema: false,
+        });
+        loadFailure ??= schemaResult.error;
+      }
       const result = await provider.sync(
         id,
         {
@@ -2541,6 +2573,25 @@ export class StorageManager implements IStorageManager {
     if (value === null || value === undefined || seen.has(value)) {
       return;
     }
+
+    if (isAdmittedFabricFactory(value)) {
+      seen.add(value);
+      const state = factoryStateOf(value);
+      mapFactoryStateValues(state, (nested, field) => {
+        this.#collectLinkedCellSyncs(
+          nested,
+          base,
+          field === "params" && state.kind === "pattern"
+            ? state.paramsSchema
+            : undefined,
+          promises,
+          seen,
+        );
+        return nested;
+      });
+      return;
+    }
+
     if (typeof value !== "object") {
       return;
     }
@@ -3138,6 +3189,50 @@ type NativeCommitOperation =
   }
   | { op: "delete"; id: URI; scope?: CellScope };
 
+type WireOnlyOperation = EnsureOperation | SetOperation;
+
+const isPromiseLike = <T>(value: T | Promise<T>): value is Promise<T> =>
+  typeof (value as { then?: unknown })?.then === "function";
+
+const normalizeWireOnlyOperations = (
+  operations: readonly NativeStorageCommitOperation[],
+): WireOnlyOperation[] =>
+  operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) => {
+      if (operation.op === "set" && operation.id.startsWith("cid:")) {
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        };
+      }
+      if (operation.op === "ensure") {
+        return {
+          op: "ensure" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+          ...(operation.ignore?.length
+            ? { ignore: [...operation.ignore] }
+            : {}),
+          ...(operation.addUnique?.length
+            ? { addUnique: [...operation.addUnique] }
+            : {}),
+        };
+      }
+      throw new Error(
+        `native commit preparation may only produce ensure operations or content-addressed sets, got ${operation.op}`,
+      );
+    });
+
+interface WireSendReservation {
+  readonly predecessor: Promise<void> | undefined;
+  readonly releaseTurn: () => void;
+  readonly releaseTurnInOrder: () => Promise<void>;
+}
+
 class StorageTransactionRejectionError extends Error {
   constructor(readonly rejection: StorageTransactionRejected) {
     super(rejection.message);
@@ -3307,6 +3402,10 @@ export class SpaceReplica
    * teardown rejects every in-flight request.
    */
   readonly #suppressedVerdicts = new Set<Promise<void>>();
+
+  // Wire sends are released in localSeq order. A cold artifact preparation may
+  // hold one turn without delaying later transactions' optimistic local apply.
+  #wireSendTail: Promise<void> | undefined;
 
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
 
@@ -4986,56 +5085,117 @@ export class SpaceReplica
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = withCommitTiming(
+    const { operations, wireOperations } = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => {
+        const operations: NativeCommitOperation[] = [];
+        const wireOperations: WireOnlyOperation[] = [];
+        for (const operation of transaction.operations) {
+          if (operation.type !== DOCUMENT_MIME) continue;
+          if (operation.op === "ensure") {
+            wireOperations.push(...normalizeWireOnlyOperations([operation]));
+          } else if (operation.op === "delete") {
+            operations.push({
+              op: "delete",
+              id: operation.id,
+              scope: operation.scope,
+            });
+          } else if (operation.op === "patch") {
+            operations.push({
+              op: "patch",
+              id: operation.id,
+              scope: operation.scope,
+              patches: operation.patches,
+              value: toExplicitDocument(operation.value),
+            });
+          } else {
+            operations.push({
+              op: "set",
+              id: operation.id,
+              scope: operation.scope,
+              value: toExplicitDocument(operation.value),
+            });
+          }
+        }
+        return { operations, wireOperations };
+      },
     );
+
+    const deferredWireOperations: Promise<WireOnlyOperation[]>[] = [];
+    for (const preparation of transaction.preparations ?? []) {
+      try {
+        const prepared = preparation.prepare();
+        if (isPromiseLike(prepared)) {
+          deferredWireOperations.push(
+            Promise.resolve(prepared).then(normalizeWireOnlyOperations),
+          );
+        } else {
+          wireOperations.push(...normalizeWireOnlyOperations(prepared));
+        }
+      } catch (error) {
+        deferredWireOperations.push(Promise.reject(error));
+      }
+    }
+    const wirePreparation = deferredWireOperations.length === 0
+      ? undefined
+      : Promise.all(deferredWireOperations).then((groups) => groups.flat());
+    // Preparation starts before this semantic commit reserves and reaches its
+    // wire turn. Attach a handler immediately so a fast rejection cannot
+    // become unhandled while an earlier causal turn is still held.
+    void wirePreparation?.catch(() => {});
+    const confirmationCallbacks = (transaction.preparations ?? []).flatMap(
+      (preparation) =>
+        preparation.onConfirmed === undefined ? [] : [preparation.onConfirmed],
+    );
+    const rejectionCallbacks = (transaction.preparations ?? []).flatMap(
+      (preparation) =>
+        preparation.onRejected === undefined ? [] : [preparation.onRejected],
+    );
+    const rejectPreparations = (reason: unknown) => {
+      for (const callback of rejectionCallbacks) {
+        try {
+          callback(reason);
+        } catch (error) {
+          logger.warn("commit-rejection-callback-failed", () => [
+            String(error),
+          ]);
+        }
+      }
+    };
 
     const sqliteOps = transaction.sqliteOps ?? [];
 
     if (
-      operations.length === 0 &&
+      operations.length === 0 && wireOperations.length === 0 &&
+      wirePreparation === undefined &&
       !preconditions?.length &&
       sqliteOps.length === 0
     ) {
+      this.#runCommitConfirmationCallbacks(0, confirmationCallbacks);
       return { ok: {} };
     }
 
-    return await withCommitTiming(
-      ["commitNative", "commitOperations"],
-      () =>
-        this.#commitOperations(
-          operations,
-          source,
-          preconditions,
-          sqliteOps,
-          options,
-        ),
-    );
+    try {
+      const result = await withCommitTiming(
+        ["commitNative", "commitOperations"],
+        () =>
+          this.#commitOperations(
+            operations,
+            source,
+            preconditions,
+            sqliteOps,
+            options,
+            wireOperations,
+            wirePreparation,
+            confirmationCallbacks,
+          ),
+      );
+      if (result.error !== undefined) rejectPreparations(result.error);
+      return result;
+    } catch (error) {
+      rejectPreparations(error);
+      throw error;
+    }
   }
 
   /**
@@ -5689,12 +5849,17 @@ export class SpaceReplica
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
     commitOptions?: TransactionCommitOptions,
+    wireOperations: readonly WireOnlyOperation[] = [],
+    wirePreparation?: Promise<readonly WireOnlyOperation[]>,
+    confirmationCallbacks: readonly (() => void)[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     if (
-      operations.length === 0 && sqliteOps.length === 0 &&
+      operations.length === 0 && wireOperations.length === 0 &&
+      wirePreparation === undefined && sqliteOps.length === 0 &&
       activePreconditions.length === 0
     ) {
+      this.#runCommitConfirmationCallbacks(0, confirmationCallbacks);
       return { ok: {} };
     }
 
@@ -5707,9 +5872,11 @@ export class SpaceReplica
       (): ClientCommit => ({
         localSeq,
         reads: this.#buildReads(source, localSeq),
-        // Cell ops first, folded SQLite ops last (applied in array order by the
-        // engine; sqlite ops are not entity revisions and carry no id/scope).
+        // Artifact publication operations first, containing cell ops next,
+        // folded SQLite ops last. Publication operations are wire-only and
+        // never enter the optimistic replica.
         operations: [
+          ...wireOperations,
           ...operations.map((operation) => {
             switch (operation.op) {
               case "delete":
@@ -5773,79 +5940,120 @@ export class SpaceReplica
       }
       return { error: rejection };
     }
-    // A pushed commit is the replica's own identity's (every client, the
-    // OFF arm): touched entries carry no explicit instance.
-    const touched: LocalDocAddress[] = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
-    const hasSemanticOperations = operations.length > 0;
-    const shouldNotifySubscribers = hasSemanticOperations &&
-      this.#hasNotificationSubscribers();
-    const shouldNotifySinks = hasSemanticOperations &&
-      this.#hasSinkSubscribers(touched);
-    const before = withCommitTiming(
-      ["commitOperations", "snapshotBefore"],
-      () =>
-        shouldNotifySubscribers
-          ? Differential.checkout(
-            this,
-            touched.map(({ id, scope, scopeKey }) =>
-              snapshotState(this, id, scope, scopeKey)
-            ),
-            this.#scopeKeyIdentity(),
-          )
-          : undefined,
-    );
 
-    withCommitTiming(["commitOperations", "applyPending"], () => {
-      for (const operation of operations) {
-        this.#applyPending(operation, localSeq);
-      }
-    });
+    // Reserve this localSeq's wire position before any user-observable
+    // optimistic notification. A synchronous subscriber may commit again; its
+    // higher localSeq must queue behind this one while cold preparation runs.
+    const wireSendReservation = this.#reserveWireSendTurn();
+    let pushStarted = false;
+    try {
+      // A pushed commit is the replica's own identity's (every client, the
+      // OFF arm): touched entries carry no explicit instance.
+      const touched: LocalDocAddress[] = operations.map((operation) => ({
+        id: operation.id,
+        scope: operation.scope,
+      }));
+      const hasSemanticOperations = operations.length > 0;
+      const shouldNotifySubscribers = hasSemanticOperations &&
+        this.#hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.#hasSinkSubscribers(touched);
+      const before = withCommitTiming(
+        ["commitOperations", "snapshotBefore"],
+        () =>
+          shouldNotifySubscribers
+            ? Differential.checkout(
+              this,
+              touched.map(({ id, scope, scopeKey }) =>
+                snapshotState(this, id, scope, scopeKey)
+              ),
+              this.#scopeKeyIdentity(),
+            )
+            : undefined,
+      );
 
-    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
-      if (before !== undefined) {
-        const optimistic = before.compare(this);
-        this.#subscription.next({
-          type: "commit",
-          space: this.#space,
-          changes: optimistic,
-          source,
-        });
-        if (shouldNotifySinks) {
-          this.#notifySinks(optimistic);
+      withCommitTiming(["commitOperations", "applyPending"], () => {
+        for (const operation of operations) {
+          this.#applyPending(operation, localSeq);
         }
-      } else if (shouldNotifySinks) {
-        this.#notifySinksForIds(touched);
-      }
-    });
+      });
 
-    const promise = withCommitTiming(
-      ["commitOperations", "pushCommitStart"],
-      () =>
-        this.#pushCommit(
-          localSeq,
-          operations,
-          commit,
-          source,
-          { commitOptions },
-        ),
-    );
-    this.#commitPromises.add(promise);
-    // Keyed registration for the old-server scalarization hold: a later
-    // stacked commit awaits its omitted lower dependencies' outcomes here.
-    // Removed on settlement (absent key = settled); the .catch keeps the
-    // tracking copy from surfacing as an unhandled rejection.
-    this.#commitOutcomeBySeq.set(
-      localSeq,
-      promise.catch(() => {}).finally(() => {
-        this.#commitOutcomeBySeq.delete(localSeq);
-      }),
-    );
-    const result = await promise;
-    this.#commitPromises.delete(promise);
-    return result;
+      withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+        if (before !== undefined) {
+          const optimistic = before.compare(this);
+          this.#subscription.next({
+            type: "commit",
+            space: this.#space,
+            changes: optimistic,
+            source,
+          });
+          if (shouldNotifySinks) {
+            this.#notifySinks(optimistic);
+          }
+        } else if (shouldNotifySinks) {
+          this.#notifySinksForIds(touched);
+        }
+      });
+
+      const promise = withCommitTiming(
+        ["commitOperations", "pushCommitStart"],
+        () =>
+          this.#pushCommit(
+            localSeq,
+            operations,
+            commit,
+            source,
+            {
+              commitOptions,
+              wirePreparation,
+              confirmationCallbacks,
+              wireSendReservation,
+            },
+          ),
+      );
+      pushStarted = true;
+      this.#commitPromises.add(promise);
+      // Keyed registration for the old-server scalarization hold: a later
+      // stacked commit awaits its omitted lower dependencies' outcomes here.
+      // Removed on settlement (absent key = settled); the .catch keeps the
+      // tracking copy from surfacing as an unhandled rejection.
+      this.#commitOutcomeBySeq.set(
+        localSeq,
+        promise.catch(() => {}).finally(() => {
+          this.#commitOutcomeBySeq.delete(localSeq);
+        }),
+      );
+      try {
+        return await promise;
+      } finally {
+        this.#commitPromises.delete(promise);
+      }
+    } finally {
+      // Once pushCommit starts it owns every release path. A staging or
+      // notification failure still has to release this turn in predecessor
+      // order so later localSeq commits cannot wedge or overtake it.
+      if (!pushStarted) await wireSendReservation.releaseTurnInOrder();
+    }
+  }
+
+  #reserveWireSendTurn(): WireSendReservation {
+    const predecessor = this.#wireSendTail;
+    const turn = Promise.withResolvers<void>();
+    this.#wireSendTail = turn.promise;
+    let turnReleased = false;
+    const releaseTurn = () => {
+      if (turnReleased) return;
+      turnReleased = true;
+      turn.resolve();
+      if (this.#wireSendTail === turn.promise) {
+        this.#wireSendTail = undefined;
+      }
+    };
+    const releaseTurnInOrder = async () => {
+      if (predecessor !== undefined) await predecessor;
+      releaseTurn();
+    };
+    return { predecessor, releaseTurn, releaseTurnInOrder };
   }
 
   /**
@@ -5964,11 +6172,17 @@ export class SpaceReplica
       routeSources?: readonly IStorageTransaction[];
       prepareIssue?: (commit: ClientCommit) => boolean;
       commitOptions?: TransactionCommitOptions;
+      wirePreparation?: Promise<readonly WireOnlyOperation[]>;
+      confirmationCallbacks?: readonly (() => void)[];
+      wireSendReservation?: WireSendReservation;
     } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
     const resolveAtVerdict = options.commitOptions?.resolveAt === "verdict";
+    const { predecessor, releaseTurn, releaseTurnInOrder } =
+      options.wireSendReservation ?? this.#reserveWireSendTurn();
+    let submittedCommit = commit;
     // Rejection receipt seals the fate for EVERY contributing transaction.
     // finalizeRejection's own notify covers the cascade paths that do not
     // come through here; the once-guard makes the overlap free.
@@ -6060,10 +6274,19 @@ export class SpaceReplica
         spaceDid: this.#space,
       });
       try {
+        if (options.wirePreparation !== undefined) {
+          const prepared = await options.wirePreparation;
+          if (prepared.length > 0) {
+            submittedCommit = {
+              ...commit,
+              operations: [...prepared, ...commit.operations],
+            };
+          }
+        }
         const { client, session } = await this.#activeSessionHandle();
         if (
           options.prepareIssue !== undefined &&
-          !options.prepareIssue(commit)
+          !options.prepareIssue(submittedCommit)
         ) {
           return { ok: {} };
         }
@@ -6071,9 +6294,9 @@ export class SpaceReplica
         // resolve array dependency sets — otherwise collapse each to its
         // top-of-stack element before sending.
         const wireCommit = client.serverFlags?.pendingReadStacks === true
-          ? commit
-          : scalarizePendingReadStacks(commit);
-        if (wireCommit !== commit && inFlight !== undefined) {
+          ? submittedCommit
+          : scalarizePendingReadStacks(submittedCommit);
+        if (wireCommit !== submittedCommit && inFlight !== undefined) {
           // Old-server hold (split-brain guard): the scalarized wire omits
           // the lower layers, so the server could durably ACCEPT a commit
           // this client is about to cascade-reject — the caller would see a
@@ -6085,7 +6308,7 @@ export class SpaceReplica
           // adds at most roughly one verdict round-trip, only against
           // pre-`pendingReadStacks` servers, only for stacked commits.
           const waits: Promise<unknown>[] = [];
-          for (const read of commit.reads.pending) {
+          for (const read of submittedCommit.reads.pending) {
             if (!Array.isArray(read.localSeq)) continue;
             const top = scalarizeLocalSeq(read.localSeq);
             for (const layer of read.localSeq) {
@@ -6121,18 +6344,40 @@ export class SpaceReplica
             sealed,
           );
         }
+
+        // All fallible preparation happens before the causal gate. Enter the
+        // session in localSeq order, but let verdicts settle concurrently.
+        if (predecessor !== undefined) await predecessor;
+        const sealedAtTurn = inFlight === undefined
+          ? undefined
+          : this.#preSendRejection(inFlight);
+        if (sealedAtTurn !== undefined) {
+          notifyRejectionSources(sealedAtTurn);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            sealedAtTurn,
+          );
+        }
+        const verdict = session.transact(
+          wireCommit,
+          () => this.#markRouteWriteIssued(routeSources),
+        );
+        releaseTurn();
         if (inFlight === undefined) {
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
-          const applied = await session.transact(
-            wireCommit,
-            () => this.#markRouteWriteIssued(routeSources),
-          );
+          const applied = await verdict;
           const settled = this.#settleAccept(
             localSeq,
             operations,
             applied,
             resolveAtVerdict,
+          );
+          this.#runCommitConfirmationCallbacks(
+            localSeq,
+            options.confirmationCallbacks ?? [],
           );
           // Tx-sourced commits ALWAYS record the coverage wait: the inner
           // settlement promise carries commit callbacks and the
@@ -6155,10 +6400,6 @@ export class SpaceReplica
         // Race the server verdict against a locally-fabricated rejection (a
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
-        const verdict = session.transact(
-          wireCommit,
-          () => this.#markRouteWriteIssued(routeSources),
-        );
         const outcome = await Promise.race([
           verdict.then((applied) => ({ applied })),
           inFlight.localRejection.promise.then((rejection) => ({ rejection })),
@@ -6188,6 +6429,10 @@ export class SpaceReplica
           outcome.applied,
           resolveAtVerdict,
         );
+        this.#runCommitConfirmationCallbacks(
+          localSeq,
+          options.confirmationCallbacks ?? [],
+        );
         // Same rule as the direct-await branch above: tx-sourced commits
         // always record; only the direct path honors the verdict opt-out.
         if (source !== undefined) {
@@ -6212,7 +6457,7 @@ export class SpaceReplica
           cause instanceof StorageTransactionRejectionError ? cause : undefined;
         let rejection = schedulerDependencyRejection !== undefined
           ? schedulerDependencyRejection.rejection
-          : toRejectedError(cause, commit, this.#space);
+          : toRejectedError(cause, submittedCommit, this.#space);
         // Leg-C belt (speculation.md §6): a ConflictError whose commit
         // names one of THIS replica's speculative layers can never
         // converge — the dependency never reaches the wire.
@@ -6224,7 +6469,7 @@ export class SpaceReplica
           schedulerDependencyRejection === undefined &&
           rejection.name === "ConflictError"
         ) {
-          const speculativeLayers = this.#speculativeLayersOf(commit);
+          const speculativeLayers = this.#speculativeLayersOf(submittedCommit);
           if (speculativeLayers.length > 0) {
             logger.error("speculative-basis-exported", () => [
               "a commit naming speculative overlay layer(s) reached the " +
@@ -6233,7 +6478,7 @@ export class SpaceReplica
               { localSeq, speculativeLayers },
             ]);
             rejection = this.#makeSpeculativeBasisRefusal(
-              commit,
+              submittedCommit,
               speculativeLayers,
             );
           }
@@ -6246,7 +6491,7 @@ export class SpaceReplica
         if (schedulerDependencyRejection === undefined) {
           this.#attachProviderReadyToRetry(rejection, localSeq);
           if (admissionMode !== "off" && rejection.name === "ConflictError") {
-            this.#recordStaleFloor(commit, localSeq);
+            this.#recordStaleFloor(submittedCommit, localSeq);
           }
         }
         // Counted (even while silent) so multi-writer churn can be read back via
@@ -6272,7 +6517,26 @@ export class SpaceReplica
         );
       }
     } finally {
+      // A pre-send return or failure releases in predecessor order. After
+      // submission releaseTurn() has already made this idempotent.
+      await releaseTurnInOrder();
       this.#settleInFlightCommit(localSeq);
+    }
+  }
+
+  #runCommitConfirmationCallbacks(
+    localSeq: number,
+    callbacks: readonly (() => void)[],
+  ): void {
+    for (const callback of callbacks) {
+      try {
+        callback();
+      } catch (error) {
+        logger.warn("commit-confirmation-callback-failed", () => [
+          `commit ${localSeq} was accepted but its local confirmation callback failed`,
+          String(error),
+        ]);
+      }
     }
   }
 

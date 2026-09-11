@@ -37,6 +37,7 @@ import {
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import { dedupeByValueEqual } from "../value-equality.ts";
 import { scopeInsideUnionError } from "../scope-placement.ts";
+import { containsFactoryType } from "./factory-formatter.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -90,7 +91,7 @@ const CELL_CAPABILITY_KIND_MAP: Readonly<Record<CellWrapperKind, boolean>> = {
 const isCellCapabilityKind = (kind: WrapperKind): boolean =>
   CELL_CAPABILITY_KIND_MAP[kind];
 
-const resolveScopeWrapperNode = (
+export const resolveScopeWrapperNode = (
   typeNode: ts.TypeNode | undefined,
 ): ResolvedScopeWrapper | undefined => {
   if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
@@ -135,6 +136,12 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
+    if (
+      (type.flags & ts.TypeFlags.Union) !== 0 &&
+      containsFactoryType(type, context.typeChecker)
+    ) {
+      return false;
+    }
     const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
     if (scopeForWrapperName(aliasName) !== undefined) {
       return true;
@@ -166,7 +173,12 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
     // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
     // "Default" type node. The type object itself still carries aliasSymbol = Default.
-    if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
+    if (
+      isDefaultAliasSymbol(
+        (type as TypeWithInternals).aliasSymbol,
+        context.typeChecker,
+      )
+    ) {
       return true;
     }
 
@@ -197,25 +209,35 @@ export class CommonFabricFormatter implements TypeFormatter {
   ): MutableJSONSchema {
     const n = context.typeNode;
     const resolvedScopeWrapper = resolveScopeWrapperNode(n);
+    const aliasType = type as TypeWithInternals;
+    const aliasScope = scopeForWrapperName(aliasType.aliasSymbol?.name);
+    const semanticInnerType = aliasType.aliasTypeArguments?.[0];
+
     if (resolvedScopeWrapper) {
       return this.#formatScopeWrapperTypeFromNode(
         resolvedScopeWrapper.node,
         context,
         resolvedScopeWrapper.scope,
+        // Closure schemas pair an exact semantic scoped-wrapper Type with a
+        // synthetic TypeNode used for emission. The node remains authoritative
+        // because it can contain deliberate capability or structural
+        // refinements. Its matching semantic inner type is recovery data when
+        // a detached synthetic node cannot resolve aliases or concrete generic
+        // instantiations such as Cell<Box<string>>.
+        aliasScope === resolvedScopeWrapper.scope
+          ? semanticInnerType
+          : undefined,
       );
     }
 
-    const aliasType = type as TypeWithInternals;
-    const aliasScope = scopeForWrapperName(aliasType.aliasSymbol?.name);
     if (aliasScope !== undefined) {
-      const innerType = aliasType.aliasTypeArguments?.[0];
-      if (!innerType) {
+      if (!semanticInnerType) {
         throw new Error(
           `${aliasType.aliasSymbol?.name}<T> requires type argument`,
         );
       }
       const innerSchema = this.#schemaGenerator.formatChildType(
-        innerType,
+        semanticInnerType,
         context,
         undefined,
       );
@@ -278,7 +300,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
     const typeWithAlias = type as TypeWithInternals;
     if (
-      isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
+      isDefaultAliasSymbol(typeWithAlias.aliasSymbol, context.typeChecker) &&
       typeWithAlias.aliasTypeArguments &&
       typeWithAlias.aliasTypeArguments.length >= 1
     ) {
@@ -514,6 +536,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     scope: SchemaScope,
+    fallbackInnerType?: ts.Type,
   ): MutableJSONSchema {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
@@ -526,6 +549,12 @@ export class CommonFabricFormatter implements TypeFormatter {
         context.typeChecker.getTypeFromTypeNode(innerTypeNode);
     } catch {
       innerType = context.typeChecker.getAnyType();
+    }
+    if (
+      this.#isUnusableInnerType(innerType) && fallbackInnerType &&
+      !this.#isUnusableInnerType(fallbackInnerType)
+    ) {
+      innerType = fallbackInnerType;
     }
 
     const innerSchema = this.#schemaGenerator.formatChildType(
@@ -630,11 +659,21 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     const syntheticNodeNeedsHelp = !!innerTypeNode && !!isSyntheticNode &&
       this.#innerTypeNeedsNodeAssistance(innerType, context.typeChecker);
+    const registeredSyntheticInnerType = innerTypeNode
+      ? context.typeRegistry?.get(innerTypeNode)
+      : undefined;
+    const syntheticNodeHasRegisteredType = registeredSyntheticInnerType !==
+        undefined &&
+      !this.#isUnusableInnerType(registeredSyntheticInnerType);
 
     // Prefer real source nodes, but allow synthetic nodes when the resolved type
-    // is widened/unusable and the node still carries useful structure.
+    // is widened/unusable and the node still carries useful structure. A
+    // compiler-owned registry pairing is also authoritative: node syntax can
+    // retain Default/CFC semantics erased from the checker Type, while the
+    // paired Type preserves exact nested generic instantiations.
     const shouldPassTypeNode = innerTypeNode && !innerTypeIsGeneric &&
-      (!isSyntheticNode || syntheticNodeNeedsHelp);
+      (!isSyntheticNode || syntheticNodeNeedsHelp ||
+        syntheticNodeHasRegisteredType);
 
     // Check for schema hints on the current typeNode and propagate to child context.
     // This allows identity-only/property-only array access patterns to avoid

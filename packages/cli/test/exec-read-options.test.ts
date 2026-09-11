@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import type { Cell } from "@commonfabric/runner";
 import {
   type ExecutedMountedCallableFile,
-  executeMountedCallableFile,
+  executeMountedCallableFile as executeMountedCallableFileImpl,
 } from "../lib/exec.ts";
 import {
   exitExecFailure,
@@ -20,6 +21,22 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import { cf, relevantStderr } from "./utils.ts";
+
+async function executeMountedCallableFile(
+  ...args: Parameters<typeof executeMountedCallableFileImpl>
+): ReturnType<typeof executeMountedCallableFileImpl> {
+  const [filePath, rawArgs, deps = {}, options] = args;
+  const testDeps = {
+    ...deps,
+    prepareFactory: (factory: unknown) => Promise.resolve(factory),
+  };
+  return await executeMountedCallableFileImpl(
+    filePath,
+    rawArgs,
+    testDeps,
+    options,
+  );
+}
 
 /**
  * `cf exec`'s read options and the shape it emits.
@@ -141,16 +158,19 @@ describe("cf exec read options", () => {
       type: "object",
       properties: { query: { type: "string" } },
     };
-    const value = {
-      pattern: { argumentSchema: inputSchema },
-      extraParams: {},
-    };
+    const value = createFactoryShell({
+      kind: "pattern",
+      ref: { identity: "A".repeat(43), symbol: "readOptionsTool" },
+      argumentSchema: inputSchema,
+      resultSchema: true,
+      paramsSchema: true,
+    });
     const cell: CallableCellDouble = {
       schema: {
-        type: "object",
-        properties: {
-          pattern: { type: "object" },
-          extraParams: { type: "object" },
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: inputSchema,
+          resultSchema: true,
         },
       } as JSONSchema,
       get: () => value,
@@ -163,10 +183,7 @@ describe("cf exec read options", () => {
         path: [],
       }),
     };
-    cell.key = (key: string) => ({
-      get: () => (value as Record<string, unknown>)[key],
-      getRaw: () => (value as Record<string, unknown>)[key],
-    });
+    cell.key = () => undefined;
     return cell;
   }
 

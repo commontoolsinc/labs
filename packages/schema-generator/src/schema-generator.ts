@@ -8,6 +8,7 @@ import type {
 import type {
   GenerationContext,
   SchemaGenerationOptions,
+  SchemaHint,
   SchemaHints,
   TypeFormatter,
 } from "./interface.ts";
@@ -15,10 +16,14 @@ import { attachUiContract, getUiContractHint } from "./ui-contract.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
-import { CommonFabricFormatter } from "./formatters/common-fabric-formatter.ts";
+import {
+  CommonFabricFormatter,
+  resolveScopeWrapperNode,
+} from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
+import { FactoryFormatter } from "./formatters/factory-formatter.ts";
 import {
   detectWrapperViaNode,
   getNamedTypeKey,
@@ -36,6 +41,7 @@ import { assertScopeDeclarationsAreReachable } from "./scope-placement.ts";
  */
 export class SchemaGenerator {
   #formatters: TypeFormatter[] = [
+    new FactoryFormatter(this),
     new CommonFabricFormatter(this),
     new NativeTypeFormatter(),
     new UnionFormatter(this),
@@ -52,6 +58,9 @@ export class SchemaGenerator {
   /** Counter to generate stable synthetic identifiers */
   #anonymousNameCounter: number = 0;
 
+  /** Contract-document types on the current synchronous generation path. */
+  #activeFactoryContractTypes = new Set<ts.Type>();
+
   /**
    * Generate JSON Schema for a TypeScript type.
    * AUTO-DETECTS whether to use type-based or node-based analysis.
@@ -63,12 +72,13 @@ export class SchemaGenerator {
     options?: SchemaGenerationOptions,
     schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
   ): MutableJSONSchema {
     return this.#generateSchemaInternal(
       type,
       checker,
       typeNode,
-      undefined,
+      typeRegistry,
       options,
       schemaHints,
       sourceFile,
@@ -101,6 +111,69 @@ export class SchemaGenerator {
       schemaHints,
       sourceFile,
     );
+  }
+
+  /** Generate one compiler-hinted factory contract document. */
+  public generateHintedFactoryContractSchema(
+    typeNode: ts.TypeNode,
+    type: ts.Type | undefined,
+    checker: ts.TypeChecker,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
+    sourceFile?: ts.SourceFile,
+  ): MutableJSONSchema {
+    const schema = type && !containsAnyOrUnknownTypeNode(typeNode)
+      ? this.generateSchema(
+        type,
+        checker,
+        typeNode,
+        undefined,
+        schemaHints,
+        sourceFile,
+        typeRegistry,
+      )
+      : this.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+        typeRegistry,
+        schemaHints,
+        sourceFile,
+      );
+    return type
+      ? this.#attachRootDescription(schema, type, { typeChecker: checker })
+      : schema;
+  }
+
+  /** Generate an independently comparable factory contract schema. */
+  public generateFactoryContractSchema(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): MutableJSONSchema {
+    if (this.#activeFactoryContractTypes.has(type)) {
+      const symbol = type.aliasSymbol ?? type.getSymbol();
+      const declaration = symbol?.getDeclarations()?.[0];
+      const location = declaration
+        ? (() => {
+          const source = declaration.getSourceFile();
+          const { line, character } = source.getLineAndCharacterOfPosition(
+            declaration.getStart(source),
+          );
+          return `${source.fileName}:${line + 1}:${character + 1}`;
+        })()
+        : "unknown location";
+      throw new Error(
+        `${location}: Recursive nested factory contract for ` +
+          `'${checker.typeToString(type)}' cannot be emitted as a finite ` +
+          "self-contained schema document",
+      );
+    }
+
+    this.#activeFactoryContractTypes.add(type);
+    try {
+      return this.#generateSchemaInternal(type, checker);
+    } finally {
+      this.#activeFactoryContractTypes.delete(type);
+    }
   }
 
   /**
@@ -153,7 +226,7 @@ export class SchemaGenerator {
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
     let result: MutableJSONSchema;
-    if (this.#shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
+    if (this.#shouldUseNodeBasedAnalysis(type, typeNode, context)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       schema = this.#analyzeTypeNodeStructure(
         typeNode!,
@@ -186,22 +259,36 @@ export class SchemaGenerator {
    * When TypeScript widens a type to 'any' (e.g., for array element types or synthetic nodes),
    * the TypeNode structure is more reliable than the Type.
    *
-   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueCell) erase to their inner type,
-   * which may appear as 'any', but they should use type-based analysis because
-   * CommonFabricFormatter handles them specially via typeNode context.
+   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueCell and the
+   * PerSpace/PerUser/PerSession/PerAny scope wrappers) erase to their inner
+   * type, which may appear as 'any', but they should use type-based analysis
+   * because CommonFabricFormatter handles them specially via typeNode context.
    */
   #shouldUseNodeBasedAnalysis(
     type: ts.Type,
     typeNode: ts.TypeNode | undefined,
-    checker: ts.TypeChecker,
+    context: GenerationContext,
   ): boolean {
-    if (!typeNode || !(type.flags & ts.TypeFlags.Any)) {
+    if (!typeNode) {
+      return false;
+    }
+
+    const checker = context.typeChecker;
+    const unreliableAny = (type.flags & ts.TypeFlags.Any) !== 0;
+    const recoveredUnknownReference =
+      (type.flags & ts.TypeFlags.Unknown) !== 0 &&
+        ts.isTypeReferenceNode(typeNode) && typeNode.pos < 0
+        ? this.#resolveTypeReferenceFromScope(typeNode, checker, context)
+        : undefined;
+    const unreliableUnknown = !!recoveredUnknownReference &&
+      (recoveredUnknownReference.flags & ts.TypeFlags.Unknown) === 0;
+    if (!unreliableAny && !unreliableUnknown) {
       return false;
     }
 
     // Check if this is a wrapper type - if so, use type-based analysis
     const wrapperKind = detectWrapperViaNode(typeNode, checker);
-    if (wrapperKind) {
+    if (wrapperKind || resolveScopeWrapperNode(typeNode)) {
       return false;
     }
 
@@ -230,7 +317,7 @@ export class SchemaGenerator {
     const useNodeBased = this.#shouldUseNodeBasedAnalysis(
       type,
       typeNode,
-      context.typeChecker,
+      childContext,
     );
     if (useNodeBased) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
@@ -599,7 +686,7 @@ export class SchemaGenerator {
   #attachRootDescription(
     schema: MutableJSONSchema,
     type: ts.Type,
-    context: GenerationContext,
+    context: Pick<GenerationContext, "typeChecker">,
   ): MutableJSONSchema {
     if (typeof schema !== "object") return schema;
 
@@ -691,6 +778,14 @@ export class SchemaGenerator {
     context: GenerationContext,
   ): MutableJSONSchema {
     const typeRegistry = context.typeRegistry;
+    const factoryContracts = context.schemaHints?.get(typeNode)
+      ?.factoryContracts ??
+      context.schemaHints?.get(ts.getOriginalNode(typeNode))?.factoryContracts;
+    if (factoryContracts?.length) {
+      const hintedType = typeRegistry?.get(typeNode) ?? checker.getAnyType();
+      const { typeNode: _, ...baseContext } = context;
+      return this.#formatType(hintedType, { ...baseContext, typeNode }, false);
+    }
 
     // Handle TypeLiteral nodes (object types)
     if (ts.isTypeLiteralNode(typeNode)) {
@@ -811,9 +906,17 @@ export class SchemaGenerator {
     // explicitly. Keyword types (string, number, boolean, undefined, null) are
     // resolved directly by the switch below, so they never cause widening.
     if (ts.isUnionTypeNode(typeNode)) {
-      const memberSchemas = typeNode.types.map((member) =>
-        this.#analyzeTypeNodeStructure(member, checker, context)
-      );
+      const memberSchemas = typeNode.types.map((member) => {
+        const contracts = context.schemaHints?.get(member)?.factoryContracts ??
+          context.schemaHints?.get(ts.getOriginalNode(member))
+            ?.factoryContracts;
+        if (contracts?.length) {
+          const memberType = typeRegistry?.get(member) ??
+            checker.getTypeFromTypeNode(member);
+          return this.formatChildType(memberType, context, member);
+        }
+        return this.#analyzeTypeNodeStructure(member, checker, context);
+      });
       if (memberSchemas.some((schema) => schema === true)) {
         return true;
       }
@@ -863,6 +966,9 @@ export class SchemaGenerator {
         context,
       );
       if (resolved) {
+        if ((resolved.flags & ts.TypeFlags.Unknown) !== 0) {
+          return { type: "unknown" };
+        }
         return this.formatChildType(resolved, context, typeNode);
       }
 
@@ -918,13 +1024,37 @@ export class SchemaGenerator {
     if (!ts.isIdentifier(typeNode.typeName)) {
       return undefined;
     }
+    const resolveNonGenericDeclaredType = (
+      symbol: ts.Symbol,
+    ): ts.Type | undefined => {
+      const resolvedSymbol = (symbol.flags & ts.SymbolFlags.Alias) !== 0
+        ? checker.getAliasedSymbol(symbol)
+        : symbol;
+      if ((resolvedSymbol.flags & ts.SymbolFlags.TypeParameter) !== 0) {
+        return undefined;
+      }
+      const declarations = resolvedSymbol.getDeclarations() ?? [];
+      const isGenericDeclaration = declarations.some((declaration) =>
+        (ts.isTypeAliasDeclaration(declaration) ||
+          ts.isInterfaceDeclaration(declaration) ||
+          ts.isClassDeclaration(declaration)) &&
+        (declaration.typeParameters?.length ?? 0) > 0
+      );
+      if (isGenericDeclaration) return undefined;
+
+      const declared = checker.getDeclaredTypeOfSymbol(resolvedSymbol);
+      return declared &&
+          (declared.flags &
+              (ts.TypeFlags.Any | ts.TypeFlags.TypeParameter)) === 0
+        ? declared
+        : undefined;
+    };
+
     const typeName = typeNode.typeName.text;
     const symbolAtNode = checker.getSymbolAtLocation(typeNode.typeName);
     if (symbolAtNode) {
-      const declared = checker.getDeclaredTypeOfSymbol(symbolAtNode);
-      if (declared && !(declared.flags & ts.TypeFlags.Any)) {
-        return declared;
-      }
+      const declared = resolveNonGenericDeclaredType(symbolAtNode);
+      if (declared) return declared;
     }
 
     const checkerWithProgram = checker as ts.TypeChecker & {
@@ -946,12 +1076,16 @@ export class SchemaGenerator {
       ts.SymbolFlags.Type,
     );
     const symbol = candidates.find((candidate) => candidate.name === typeName);
-    if (!symbol) return undefined;
-    const declared = checker.getDeclaredTypeOfSymbol(symbol);
-    if (!declared || (declared.flags & ts.TypeFlags.Any)) {
-      return undefined;
-    }
-    return declared;
+    const moduleSymbol = checker.getSymbolAtLocation(scopeNode) ??
+      (scopeNode as ts.SourceFile & { symbol?: ts.Symbol }).symbol;
+    const exportedSymbol = moduleSymbol
+      ? checker.getExportsOfModule(moduleSymbol).find((candidate) =>
+        candidate.name === typeName
+      )
+      : undefined;
+    const candidate = exportedSymbol ?? symbol;
+    if (!candidate) return undefined;
+    return resolveNonGenericDeclaredType(candidate);
   }
 
   /**
@@ -981,4 +1115,21 @@ export class SchemaGenerator {
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
     return out as MutableJSONSchema;
   }
+}
+
+function containsAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node): void => {
+    if (found) return;
+    if (
+      current.kind === ts.SyntaxKind.AnyKeyword ||
+      current.kind === ts.SyntaxKind.UnknownKeyword
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
 }

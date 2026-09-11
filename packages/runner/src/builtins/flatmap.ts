@@ -36,6 +36,7 @@ import {
   type ElementContribution,
   resumeSettleRunKind,
 } from "./resume-republish.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 // Presence probe for the result container: slots resolve as cells, so the
 // coordinator can ask "is the container initialized?" without materializing
@@ -98,7 +99,6 @@ export function flatMap(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -164,6 +164,15 @@ function createFlatMapInstance(
   // Identity-based tracking: maps element address key → element run.
   // resultCell holds the per-element result array.
   const elementRuns = new Map<string, ElementRun>();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Cleared when the coordinator is torn down, so the asynchronous resume work
   // below stops writing to a result container nothing owns any more. The same
@@ -264,16 +273,26 @@ function createFlatMapInstance(
     // result container — is the plan the resume pre-sync shares, naming the
     // children this reconcile runs before the parent instantiates; its
     // reads and their rationale live in list-coordinator-plan.ts.
+    const factorySelection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "flatMap",
+    );
     const plan = listCoordinatorPlan(
       runtime,
       tx,
       "flatMap",
       inputsCell,
-      FLATMAP_INPUT_SCHEMA,
+      factorySelection,
       parentCell,
       outputBinding,
     );
-    const { opPattern, argumentUsage, list } = plan;
+    const {
+      opPattern,
+      factoryGeneration,
+      factorySelectionLink,
+      list,
+    } = plan;
     const outputScope = plan.scope;
 
     // Whether this reconcile issues the container's links: a container it
@@ -334,10 +353,9 @@ function createFlatMapInstance(
         fn,
       );
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: inputsCell.key("list"),
     });
 
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -445,7 +463,8 @@ function createFlatMapInstance(
         const previousIndex = existing.lastIndex;
         if (
           existing.needsSetup ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
+          existing.runGeneration !== factoryGeneration ||
+          existing.lastIndex !== i
         ) {
           if (awaitingResult(existing.resultCell)) {
             // This element's result document has not caught up, so setup
@@ -463,8 +482,10 @@ function createFlatMapInstance(
                 doNotUpdateOnPatternChange: true,
                 awaitSyncBeforeInitialRun: elementAwaitSync,
                 parentPieceRootId,
+                factorySelectionLink,
               },
             );
+            existing.runGeneration = factoryGeneration;
             // The whole setup, every time, because issuing it takes the debt
             // for it: an overlapping reconcile that wrote the links and has
             // not settled hands them to this one, and a partial issuance would
@@ -499,10 +520,16 @@ function createFlatMapInstance(
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
             parentPieceRootId,
+            factorySelectionLink,
           },
         );
         linkElementCell(boundResultCell);
-        const entry = { resultCell, lastIndex: i, needsSetup: false };
+        const entry = {
+          resultCell,
+          lastIndex: i,
+          needsSetup: false,
+          runGeneration: factoryGeneration,
+        };
         elementRuns.set(elementKey, entry);
         rollback.created(elementKey, entry);
       }

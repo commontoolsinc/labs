@@ -9,11 +9,13 @@ import {
   refuseFabricInstance,
   shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   type FabricExecPlainObject,
   type FabricExecValue,
   type FactoryInput,
+  isModule,
   isPattern,
   type Module,
   type Pattern,
@@ -25,7 +27,6 @@ import { getTopFrame } from "./pattern.ts";
 import {
   getArtifactEntryRef,
   getPatternProgram,
-  isKeylessPatternIdentity,
   noteDerivedCopy,
 } from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
@@ -39,6 +40,11 @@ import {
   hasEncodableForm,
   replaceArtifacts,
 } from "../encodable-form.ts";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./factory-traversal.ts";
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -72,6 +78,8 @@ export function withAliasBindings(
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
+  insideFactoryState = false,
 ): FabricExecValue {
   // Turn strongly typed builder values into the serialized binding structure:
   // cell references become `$alias` records, and data leaves come through as
@@ -137,6 +145,48 @@ export function withAliasBindings(
     }
   }
 
+  if (
+    insideFactoryState && typeof value === "function" &&
+    !isAdmittedFabricFactory(value)
+  ) {
+    throw new TypeError(
+      "Arbitrary functions are not valid factory state values",
+    );
+  }
+
+  // Factory values are callable, so their serializable captures live in the
+  // hidden Factory@1 state rather than in enumerable function properties.
+  if (isAdmittedFabricFactory(value)) {
+    // This helper's root-pattern form is the explicit legacy INTERNAL graph
+    // serializer. Durable Fabric boundaries encode the callable directly as
+    // Factory@1; only this root form retains the embedded graph fallback.
+    if (path.length === 0 && isPattern(value)) {
+      return withAliasBindings(
+        serializePatternGraph(value),
+        resolveCellAlias,
+        ignoreSelfAliases,
+        path,
+        seen,
+        factoryContext,
+        insideFactoryState,
+      );
+    }
+    return mapFactoryForTraversal(
+      value,
+      (nested, field) =>
+        withAliasBindings(
+          nested as FactoryInput<any>,
+          resolveCellAlias,
+          ignoreSelfAliases,
+          [...path, field],
+          seen,
+          factoryContext,
+          true,
+        ),
+      factoryContext,
+    );
+  }
+
   // If this is an INERT array, process each element recursively. A non-inert
   // array falls through to the sanctioned conversion below, which refuses it,
   // for the same reason a non-inert plain object is refused there: `.map()`
@@ -148,10 +198,18 @@ export function withAliasBindings(
   // produces one that does not satisfy it at all.
   if (isInertArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
-      withAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
-        ...path,
-        i,
-      ], seen)
+      withAliasBindings(
+        v,
+        resolveCellAlias,
+        ignoreSelfAliases,
+        [
+          ...path,
+          i,
+        ],
+        seen,
+        factoryContext,
+        insideFactoryState,
+      )
     );
   }
 
@@ -222,10 +280,8 @@ export function withAliasBindings(
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
 
-    // If this is a pattern, serialize it through the INTERNAL graph
-    // serializer (its toJSON under the internal-serialization context): this
-    // function builds the in-memory node representation, so embedded
-    // sub-pattern graphs must stay bare — no boundary `$patternRef`.
+    // If this is a pattern, serialize its full compatibility graph. Canonical
+    // Fabric boundaries admit callable factories before this legacy JSON path.
     const valueToProcess = (isPattern(value) && hasEncodableForm(value))
       ? serializePatternGraph(value as unknown as Pattern) as Record<
         string,
@@ -235,12 +291,24 @@ export function withAliasBindings(
 
     const result: any = {};
     for (const key in valueToProcess as any) {
+      const nestedValue = valueToProcess[key];
+      // A pattern node's module implementation is the other explicit legacy
+      // INTERNAL graph fallback. The current runner instantiates this graph;
+      // ordinary pattern factories carried as data stay callable Factory@1
+      // values and take the factory-first branch above.
+      const valueForTraversal = key === "implementation" &&
+          isModule(valueToProcess) && valueToProcess.type === "pattern" &&
+          isPattern(nestedValue) && !isAdmittedFabricFactory(nestedValue)
+        ? serializePatternGraph(nestedValue)
+        : nestedValue;
       const boundValue = withAliasBindings(
-        valueToProcess[key],
+        valueForTraversal,
         resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
+        factoryContext,
+        insideFactoryState,
       );
       if (boundValue !== undefined) {
         result[key] = boundValue;
@@ -399,24 +467,14 @@ export function moduleToEncodableForm(module: Module): FabricExecPlainObject {
   };
 }
 
-// Ambient context: true while serializing the runtime-INTERNAL graph
-// representation (builder-time node serialization via
-// `withAliasBindings`, and through it the `$opFallback` eviction
-// fallback graphs). The storage boundary (`Pattern.toEncodableForm()`, reached
-// by the runtime's artifact walk on the way into a cell write) adds
-// the content-addressed `$patternRef` on top of the graph; internal
-// serialization must NOT, or in-memory `Pattern.nodes` would grow refs for
-// any sub-pattern whose module is already indexed (e.g. builder calls inside
-// a running action referencing an imported, already-evaluated pattern) and
-// the eviction fallback would silently become a ref (design §7's $opFallback
-// trap). Synchronous push/pop — serialization never awaits.
+// Builder-time serialization consumes the raw graph so its enclosing artifact
+// walk can assign aliases, scopes, and causes exactly once. Direct `toJSON()`
+// compatibility performs that walk itself. Serialization is synchronous, so
+// this ambient flag cannot cross an asynchronous boundary.
 let internalGraphSerialization = false;
 
 /**
- * Serialize a pattern's full node-graph — the runtime-internal representation
- * (design §7: the graph is internal; the boundary speaks refs-first). Used by
- * `withAliasBindings` (builder-time node serialization, which the
- * `$opFallback` graphs descend from) and debug tooling.
+ * Serialize a pattern's raw node graph for builder internals and debug tooling.
  *
  * Asks the pattern for its own encodable form rather than calling
  * `patternToEncodableForm` directly: a factory's closure deliberately serializes the
@@ -471,34 +529,9 @@ export function patternToEncodableForm(
     nodes: pattern.nodes,
     ...(programIdentity ? { program: programIdentity } : {}),
   };
-  if (internalGraphSerialization) return graph;
-  // JSON boundary (cell writes, `JSON.stringify`): REFS-ONLY (design §7,
-  // identity E4). The ref is content-derived, so identical bytes re-emit the
-  // identical ref across sessions. Schemas ride along so consumers read them
-  // without resolving. Rehydration is by identity: the session-lifetime
-  // artifact index, or `loadPatternByIdentity` for an async reader.
-  //
-  // A pattern with NO entry ref serializes its full graph instead, since
-  // nothing could resolve its ref. That graph holds LIVE modules, so the walk
-  // replaces its artifacts here.
-  //
-  // A session-synthetic `keyless:` ref counts as NO entry ref at this
-  // boundary (L3(a), RULED 2026-08-27: keyless identities must never land
-  // durably). The mint (`ensureKeylessPatternIdentity`) sets the value's
-  // forward entry ref for in-session by-identity resolution; without this
-  // check, any later boundary write of the minted VALUE would emit a
-  // `$patternRef` no other session can ever resolve, in place of the designed
-  // full-graph fallback.
-  //
   // `moduleToEncodableForm` reads `getTopFrame()` to decide `$implRef`. A
   // frame inherits its parent's runtime (`builder/pattern.ts`), so
   // `frame.runtime` is the same at every point along one stack.
-  const entryRef = getArtifactEntryRef(pattern);
-  return entryRef && !isKeylessPatternIdentity(entryRef.identity)
-    ? {
-      $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
-      argumentSchema: pattern.argumentSchema,
-      resultSchema: pattern.resultSchema,
-    }
-    : replaceArtifacts(graph, noteDerivedCopy);
+  if (internalGraphSerialization) return graph;
+  return replaceArtifacts(graph, noteDerivedCopy);
 }

@@ -54,7 +54,7 @@ type AliasBindingBase = {
 // Named-cell aliases carry no scope: the referenced argument/result cell's
 // own link determines the scope when the binding is unwrapped.
 type AliasBindingNamedCell = AliasBindingBase & {
-  cell: "result" | "argument";
+  cell: "result" | "argument" | "params";
   partialCause?: never;
   scope?: never;
   defer?: number;
@@ -96,5 +96,6 @@ export function isAliasBinding(value: any): value is AliasBinding {
     isObjectNotArray(value.$alias) &&
     Array.isArray(value.$alias.path) &&
     (value.$alias.partialCause !== undefined ||
-      value.$alias.cell === "result" || value.$alias.cell === "argument");
+      value.$alias.cell === "result" || value.$alias.cell === "argument" ||
+      value.$alias.cell === "params");
 }

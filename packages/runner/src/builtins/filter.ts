@@ -35,6 +35,7 @@ import {
   createResumeRepublisher,
   resumeSettleRunKind,
 } from "./resume-republish.ts";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 // Presence probe for the result container: slots resolve as cells, so the
 // coordinator can ask "is the container initialized?" without materializing
@@ -80,7 +81,6 @@ export function filter(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -148,6 +148,15 @@ function createFilterInstance(
   // Identity-based tracking: maps element address key → element run.
   // resultCell holds the predicate boolean for this element.
   const elementRuns = new Map<string, ElementRun>();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Cleared when the coordinator is torn down, so the asynchronous resume work
   // below stops writing to a result container nothing owns any more. The same
@@ -257,16 +266,26 @@ function createFilterInstance(
     // result container — is the plan the resume pre-sync shares, naming the
     // children this reconcile runs before the parent instantiates; its
     // reads and their rationale live in list-coordinator-plan.ts.
+    const factorySelection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "filter",
+    );
     const plan = listCoordinatorPlan(
       runtime,
       tx,
       "filter",
       inputsCell,
-      FILTER_INPUT_SCHEMA,
+      factorySelection,
       parentCell,
       outputBinding,
     );
-    const { opPattern, argumentUsage, list } = plan;
+    const {
+      opPattern,
+      factoryGeneration,
+      factorySelectionLink,
+      list,
+    } = plan;
     const outputScope = plan.scope;
 
     // Whether this reconcile issues the container's links: a container it
@@ -331,10 +350,9 @@ function createFilterInstance(
         fn,
       );
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: inputsCell.key("list"),
     });
 
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -442,7 +460,8 @@ function createFilterInstance(
         const previousIndex = existing.lastIndex;
         if (
           existing.needsSetup ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
+          existing.runGeneration !== factoryGeneration ||
+          existing.lastIndex !== i
         ) {
           if (awaitingResult(existing.resultCell)) {
             // This predicate's document has not caught up, so setup written
@@ -459,8 +478,10 @@ function createFilterInstance(
                 doNotUpdateOnPatternChange: true,
                 awaitSyncBeforeInitialRun: elementAwaitSync,
                 parentPieceRootId,
+                factorySelectionLink,
               },
             );
+            existing.runGeneration = factoryGeneration;
             // The whole setup, every time, because issuing it takes the debt
             // for it: an overlapping reconcile that wrote the links and has
             // not settled hands them to this one, and a partial issuance would
@@ -495,11 +516,17 @@ function createFilterInstance(
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
             parentPieceRootId,
+            factorySelectionLink,
           },
         );
         linkElementCell(boundResultCell);
 
-        const entry = { resultCell, lastIndex: i, needsSetup: false };
+        const entry = {
+          resultCell,
+          lastIndex: i,
+          needsSetup: false,
+          runGeneration: factoryGeneration,
+        };
         elementRuns.set(elementKey, entry);
         rollback.created(elementKey, entry);
       }

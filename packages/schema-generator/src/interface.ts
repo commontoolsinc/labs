@@ -1,11 +1,10 @@
 import type ts from "typescript";
-import type { JSONSchema } from "@commonfabric/api";
-import { type Mutable } from "@commonfabric/utils/types";
+import type { JSONSchema, MutableJSONSchema } from "@commonfabric/api";
 
 /**
  * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
  */
-export type SchemaDefinition = Mutable<JSONSchema>;
+export type SchemaDefinition = MutableJSONSchema;
 
 /** File and optional content identity attached to a writer-binding claim. */
 export interface WriterSourceIdentity {
@@ -30,6 +29,17 @@ export interface UiContractHint {
  */
 export interface SchemaHint {
   readonly items?: unknown;
+  readonly factoryContracts?: readonly {
+    readonly kind: "pattern" | "module" | "handler";
+    readonly factoryType?: ts.Type;
+    readonly inputTypeNode: ts.TypeNode;
+    readonly inputType?: ts.Type;
+    readonly inputSchema?: unknown;
+    readonly outputTypeNode: ts.TypeNode;
+    readonly outputType?: ts.Type;
+    readonly outputSchema?: unknown;
+    readonly frameworkProvidedPaths?: readonly (readonly string[])[];
+  }[];
   readonly cfcUiContract?: UiContractHint;
 }
 

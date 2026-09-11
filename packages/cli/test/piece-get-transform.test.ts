@@ -5,6 +5,7 @@ import { spy, stub } from "@std/testing/mock";
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import {
   createLLMFriendlyLink,
   parseLLMFriendlyLink,
@@ -30,6 +31,12 @@ import {
 
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();
+
+const resumePresyncWarnings = () => {
+  const counts = getLoggerCountsBreakdown().runner ?? {};
+  return (counts as Record<string, { warn?: number }>)["resume-pre-sync"]
+    ?.warn ?? 0;
+};
 
 describe("cf cell get transforms", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -2148,6 +2155,26 @@ describe("cf cell get transforms", () => {
       expect(injected.calls).toHaveLength(1);
     });
   }
+
+  it("does not warn when projection pre-sync has no argument metadata", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "projection-presync-without-argument",
+      { type: "object", properties: { id: { type: "number" } } },
+      tx,
+    );
+    source.set({ id: 1 });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const before = resumePresyncWarnings();
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("id"),
+      }),
+    ).toEqual({ id: 1 });
+    expect(resumePresyncWarnings()).toBe(before);
+  });
 
   it("returns projection-ordered output without a storage-wide sync", async () => {
     const setup = runtime.edit();

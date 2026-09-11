@@ -1581,7 +1581,6 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       // The list runner supplies each linked record in its element field.
       // deno-lint-ignore no-explicit-any
       projectPublishedSession as any,
-      {},
     ) as PublishedSessionRow[];
     const pageSessionCells = slicePublishedSessionCells({
       values: projectedSessions,
@@ -1630,7 +1629,6 @@ const DebugView = pattern<DebugInput, DebugOutput>(
     const commandRows = (commandPageValues as any).mapWithPattern(
       // deno-lint-ignore no-explicit-any
       renderCommandTableRow as any,
-      {},
     ) as VNode[];
     const receiptPageCount = computed(() =>
       pageCountFor(receiptEntries.length)
@@ -1645,7 +1643,6 @@ const DebugView = pattern<DebugInput, DebugOutput>(
     const receiptRows = (receiptPageEntries as any).mapWithPattern(
       // deno-lint-ignore no-explicit-any
       renderReceiptTableRow as any,
-      {},
     ) as VNode[];
     const activityPageCount = computed(() =>
       pageCountFor(activityEntries.length)
@@ -1660,7 +1657,6 @@ const DebugView = pattern<DebugInput, DebugOutput>(
     const activityRows = (activityPageEntries as any).mapWithPattern(
       // deno-lint-ignore no-explicit-any
       renderActivityTableRow as any,
-      {},
     ) as VNode[];
     const status = computed(() => stringValue(health?.status, "waiting"));
     const sourceCount = computed(() => sources.length);

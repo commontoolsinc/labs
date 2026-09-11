@@ -11,7 +11,11 @@ import {
   dropQueuedEvent,
   queueSchedulerEvent,
 } from "../src/scheduler/events.ts";
-import type { QueuedEvent } from "../src/scheduler/types.ts";
+import type {
+  EventHandler,
+  EventHandlerRegistration,
+  QueuedEvent,
+} from "../src/scheduler/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   createSchedulerTestRuntime,
@@ -37,6 +41,19 @@ function eventKey(id: string): string {
 // these cases turn on: a started piece has its pattern graph installed.
 function pieceLoadVerdict(started: boolean): EnsurePieceVerdict {
   return { started, graphIsInstalled: () => started, observedDocIds: [] };
+}
+
+function eventHandlerRegistration(
+  ref: NormalizedFullLink,
+  handler: EventHandler,
+): EventHandlerRegistration {
+  return {
+    ref,
+    handler,
+    generation: 1,
+    readinessCancels: new Set(),
+    active: true,
+  };
 }
 
 describe("scheduler event identity", () => {
@@ -159,7 +176,7 @@ describe("scheduler event identity", () => {
 
     queueSchedulerEvent({
       runtime: {} as Runtime,
-      eventHandlers: [[eventLink, handler]],
+      eventHandlers: [eventHandlerRegistration(eventLink, handler)],
       eventQueue,
       backgroundTasks: new Set(),
       queueExecution: () => {},
@@ -219,7 +236,6 @@ describe("scheduler event identity", () => {
       env.runtime.scheduler.addEventHandler((_tx, value) => {
         handled.push(String(value));
       }, loadingLink);
-      finishPieceLoad(pieceLoadVerdict(true));
       await env.runtime.idle();
 
       expect(handled).toEqual(["first", "second"]);
@@ -305,6 +321,48 @@ describe("scheduler event identity", () => {
     expect(queued.handlerLoadPending).toBe(true);
   });
 
+  it("aborts a pending piece load and settles its event during runtime disposal", async () => {
+    const loadingLink: NormalizedFullLink = {
+      ...eventLink,
+      id: "of:dispose-loading-stream",
+      space,
+    };
+    const env = createSchedulerTestRuntime(import.meta.url);
+    const pieceLoad = Promise.withResolvers<EnsurePieceVerdict>();
+    const commitStatus = Promise.withResolvers<string>();
+    let loadSignal: AbortSignal | undefined;
+    let disposed = false;
+    try {
+      (env.runtime.scheduler.accessForTestingOnly.eventQueueState as {
+        loadPieceForEvent?: (
+          runtime: Runtime,
+          link: NormalizedFullLink,
+          options?: { signal?: AbortSignal },
+        ) => Promise<EnsurePieceVerdict>;
+      }).loadPieceForEvent = (_runtime, _link, options) => {
+        loadSignal = options?.signal;
+        return pieceLoad.promise;
+      };
+
+      env.runtime.scheduler.queueEvent(
+        loadingLink,
+        "payload",
+        true,
+        (commitTx) => commitStatus.resolve(commitTx.status().status),
+      );
+      expect(loadSignal?.aborted).toBe(false);
+
+      await disposeSchedulerTestRuntime(env);
+      disposed = true;
+
+      expect(await commitStatus.promise).toBe("error");
+      expect(loadSignal?.aborted).toBe(true);
+    } finally {
+      pieceLoad.resolve(pieceLoadVerdict(true));
+      if (!disposed) await disposeSchedulerTestRuntime(env);
+    }
+  });
+
   it("a served piece-start deferral carries the arrival-order barrier (events.md §2; review-6459 F1's sibling arm): later-arrived same-space durable served entries defer behind the failed head instead of staying queued to overtake it — cross-space entries and LT1 in-process copies stay queued", async () => {
     // Both piece-load failure modes take the same deferral disposition
     // (`started === false`, and the start THROWING); the barrier must
@@ -341,10 +399,10 @@ describe("scheduler event identity", () => {
         // No handler for the HEAD's link — it takes the piece-load path;
         // the three later arrivals are all ready-queued.
         eventHandlers: [
-          [followerLink, handler],
-          [crossSpaceLink, handler],
-          [lt1Link, handler],
-        ] as [NormalizedFullLink, typeof handler][],
+          eventHandlerRegistration(followerLink, handler),
+          eventHandlerRegistration(crossSpaceLink, handler),
+          eventHandlerRegistration(lt1Link, handler),
+        ],
         eventQueue,
         backgroundTasks,
         loadPieceForEvent: loadFailure,

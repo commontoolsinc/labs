@@ -4,6 +4,7 @@ export const META_LINK_FIELDS = Object.freeze(
   [
     "pattern",
     "argument",
+    "params",
     "result",
   ] as const,
 );
@@ -21,6 +22,7 @@ export type MetaLinkField = typeof META_LINK_FIELDS[number];
  * holds a manifest of links to derived internal cells. `schema` stores the
  * schema for a result cell. `patternSetupIdentity` records the pattern
  * identity whose complete setup state was installed on a result cell.
+ * `params` links a child result to its private pattern-closure parameter cell.
  * `result` lets a result cell link to its parent result cell, and lets the
  * argument and derived internal cells link back to the result cell.
  *

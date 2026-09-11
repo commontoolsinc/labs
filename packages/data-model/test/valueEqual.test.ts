@@ -292,7 +292,7 @@ describe("valueEqual()", () => {
     const other = (() => 1) as unknown as FabricValue;
     for (const [left, right] of [[fn, other], [fn, 1], [1, fn]]) {
       expect(() => valueEqual({ nested: [left] }, { nested: [right] }))
-        .toThrow("Cannot compare a function value.");
+        .toThrow("Cannot compare an arbitrary function value.");
     }
   });
 

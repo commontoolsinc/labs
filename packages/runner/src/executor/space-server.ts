@@ -4280,6 +4280,7 @@ export class SpaceServer implements TransactionSealDestination {
     // The STRUCTURE LOAD, per watch ROOT — unchanged in scope (flag 4)
     // and in mechanism (stage P2-F, the OW19 terminal state, the
     // commit-triggered re-arm); only the demand-walk install is gone.
+    const newlyResolvedRoots = new Set<string>();
     for (const key of rootKeys) {
       const root = rowByKey.get(key)!;
       const firstDemand = !this.#demandedRoots.has(key);
@@ -4327,6 +4328,7 @@ export class SpaceServer implements TransactionSealDestination {
               // actions (stage P2-F).
               this.#pieceRootByDemandKey.set(key, verdict.rootId);
               this.#indexResolvedRoot(key, verdict.rootId);
+              newlyResolvedRoots.add(verdict.rootId);
             }
           } else if (verdict.reason === "no-pattern-meta") {
             // The OW19 terminal class — but only ON CONFIRMED durable
@@ -4348,6 +4350,7 @@ export class SpaceServer implements TransactionSealDestination {
               ) {
                 this.#pieceRootByDemandKey.set(key, confirmed.rootId);
                 this.#indexResolvedRoot(key, confirmed.rootId);
+                newlyResolvedRoots.add(confirmed.rootId);
               }
             } else if (confirmed.reason === "no-pattern-meta") {
               this.#pendingStructureLoads.delete(key);
@@ -4401,6 +4404,15 @@ export class SpaceServer implements TransactionSealDestination {
           ]);
         }
       }
+    }
+    if (newlyResolvedRoots.size > 0) {
+      // A warm structure load can register and run an owning piece before a
+      // later demand key in this pass resolves to that root. Re-arm after all
+      // mappings are installed so run supply never depends on load timing.
+      runtime.scheduler.invalidateActionsForDemandRoots(
+        [...newlyResolvedRoots],
+        { includeUnfanned: true },
+      );
     }
     if (arrivals.size > 0) {
       // The ARRIVAL RE-ARM (design §A; RULED 2026-08-16): the narrowed

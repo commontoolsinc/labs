@@ -14,7 +14,11 @@ import type {
   JSONSchema,
 } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
+import { withPatternParamsSchema } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
@@ -35,9 +39,6 @@ describe("llmDialog", () => {
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
-  let patternTool: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
   let generateObject: ReturnType<
@@ -60,7 +61,6 @@ describe("llmDialog", () => {
       Cell,
       Writable,
       handler,
-      patternTool,
       generateObject,
     } = commonfabric);
   });
@@ -294,6 +294,7 @@ describe("llmDialog", () => {
       } as const satisfies JSONSchema,
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, getWeatherTool);
 
     const testPattern = pattern(
       () => {
@@ -301,9 +302,7 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: patternTool(
-              getWeatherTool,
-            ) as unknown as BuiltInLLMTool,
+            getWeather: getWeatherTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -481,15 +480,35 @@ describe("llmDialog", () => {
           },
         };
       },
+      getRaw() {
+        return this.get();
+      },
+      runtime: {},
       key(_name: string) {
-        return {
+        const cell: any = {
           get() {
             return {
               description: "Send an email.",
               inputSchema: {},
             };
           },
+          getRaw() {
+            return this.get();
+          },
+          resolveAsCell() {
+            return this;
+          },
+          key() {
+            return {
+              get: () => undefined,
+              getRaw: () => undefined,
+              resolveAsCell() {
+                return this;
+              },
+            };
+          },
         };
+        return cell;
       },
     } as any;
 
@@ -887,43 +906,66 @@ describe("llmDialog", () => {
     );
 
     const subAgentPattern = pattern<any, any>(
-      ({ prompt, resultSchema, body, emails, route }) => {
-        return generateObject({
-          prompt,
-          system: "Child worker.",
-          schema: resultSchema,
-          tools: {
-            readRawBriefing: {
-              description: "Read the nested body.",
-              inputSchema: {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              } as const satisfies JSONSchema,
-              handler: readRawBriefing({
-                title: "Briefing",
-                source: "https://example.invalid",
-                body,
-              }),
-            } as unknown as BuiltInLLMTool,
-            sendMail: {
-              description: "Send a nested email.",
-              inputSchema: {
-                type: "object",
-                properties: {
-                  recipient: { type: "string" },
-                  subject: { type: "string" },
-                  body: { type: "string" },
-                },
-                required: ["recipient", "subject", "body"],
-                additionalProperties: false,
-              } as const satisfies JSONSchema,
-              handler: sendMail({ sent: emails, route }),
-            } as unknown as BuiltInLLMTool,
+      withPatternParamsSchema(
+        (({ prompt, resultSchema }: any, {
+          body,
+          emails,
+          route,
+        }: any) => {
+          return generateObject({
+            prompt,
+            system: "Child worker.",
+            schema: resultSchema,
+            tools: {
+              readRawBriefing: {
+                description: "Read the nested body.",
+                inputSchema: {
+                  type: "object",
+                  properties: {},
+                  additionalProperties: false,
+                } as const satisfies JSONSchema,
+                handler: readRawBriefing({
+                  title: "Briefing",
+                  source: "https://example.invalid",
+                  body,
+                }),
+              } as unknown as BuiltInLLMTool,
+              sendMail: {
+                description: "Send a nested email.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    recipient: { type: "string" },
+                    subject: { type: "string" },
+                    body: { type: "string" },
+                  },
+                  required: ["recipient", "subject", "body"],
+                  additionalProperties: false,
+                } as const satisfies JSONSchema,
+                handler: sendMail({ sent: emails, route }),
+              } as unknown as BuiltInLLMTool,
+            },
+            observationMaxConfidentiality: ["internal"],
+          } as any).result;
+        }) as any,
+        {
+          type: "object",
+          properties: {
+            body: {
+              type: "object",
+              additionalProperties: true,
+              asCell: ["cell"],
+            },
+            emails: {
+              type: "object",
+              additionalProperties: true,
+              asCell: ["cell"],
+            },
+            route: { type: "string" },
           },
-          observationMaxConfidentiality: ["internal"],
-        } as any).result;
-      },
+          required: ["body", "emails", "route"],
+        },
+      ),
       {
         type: "object",
         properties: {
@@ -932,23 +974,13 @@ describe("llmDialog", () => {
             type: "object",
             additionalProperties: true,
           },
-          body: {
-            type: "object",
-            additionalProperties: true,
-            asCell: ["cell"],
-          },
-          emails: {
-            type: "object",
-            additionalProperties: true,
-            asCell: ["cell"],
-          },
-          route: { type: "string" },
         },
         required: ["prompt", "resultSchema"],
         additionalProperties: false,
       },
       true,
     );
+    installTestPatternArtifact(runtime, subAgentPattern);
 
     const testPattern = pattern(
       () => {
@@ -956,6 +988,13 @@ describe("llmDialog", () => {
         const sent = Cell.of({});
         const emails = Cell.of({});
         const hostileBody = Cell.of({ text: "hostile body" });
+        const boundSubAgent = (subAgentPattern as unknown as {
+          curry(params: unknown): typeof subAgentPattern;
+        }).curry({
+          body: hostileBody,
+          emails,
+          route: "safe-child",
+        });
         const dialog = llmDialog({
           system: "Safe demo parent.",
           messages,
@@ -981,11 +1020,7 @@ describe("llmDialog", () => {
             subAgent: {
               description:
                 "Run a higher-clearance worker and return schema-limited JSON.",
-              ...(patternTool(subAgentPattern, {
-                body: hostileBody,
-                emails,
-                route: "safe-child",
-              }) as unknown as BuiltInLLMTool),
+              pattern: boundSubAgent,
             },
             sendMail: {
               description: "Send an email.",
@@ -1022,14 +1057,8 @@ describe("llmDialog", () => {
     );
 
     const result = runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
-
-    const flattenedTools = await result.key("flattenedTools").pull();
-    expect(Object.keys(flattenedTools ?? {}).sort()).toEqual([
-      "readRawBriefing",
-      "sendMail",
-      "subAgent",
-    ]);
+    await tx.commit();
+    await runtime.idle();
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Start the safe workflow." });
@@ -1131,6 +1160,8 @@ describe("llmDialog", () => {
         required: ["ok"],
       } as const satisfies JSONSchema,
     );
+    installTestPatternArtifact(runtime, readInternal);
+    installTestPatternArtifact(runtime, publicOnly);
 
     const testPattern = pattern(
       () => {
@@ -1139,10 +1170,8 @@ describe("llmDialog", () => {
           messages,
           observationMaxConfidentiality: ["internal"],
           tools: {
-            readInternal: patternTool(
-              readInternal,
-            ) as unknown as BuiltInLLMTool,
-            publicOnly: patternTool(publicOnly) as unknown as BuiltInLLMTool,
+            readInternal: readInternal as unknown as BuiltInLLMTool,
+            publicOnly: publicOnly as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1692,6 +1721,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, pingTool);
 
     const testPattern = pattern(
       () => {
@@ -1701,7 +1731,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: pingTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1777,6 +1807,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, listItemsTool);
 
     // The dialog's own guidance describes what the dialog provides. A tool the
     // pattern supplies is the pattern's to introduce, in the system prompt it
@@ -1787,9 +1818,7 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            listItems: patternTool(
-              listItemsTool,
-            ) as unknown as BuiltInLLMTool,
+            listItems: listItemsTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1858,6 +1887,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, pingTool);
 
     const testPattern = pattern(
       () => {
@@ -1873,7 +1903,7 @@ describe("llmDialog", () => {
             required: ["answer"],
           },
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: pingTool as unknown as BuiltInLLMTool,
           },
         });
         return {
@@ -1949,6 +1979,7 @@ describe("llmDialog", () => {
       { type: "object" },
       { type: "string" },
     );
+    installTestPatternArtifact(runtime, pingTool);
 
     const testPattern = pattern(
       () => {
@@ -1958,7 +1989,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: pingTool as unknown as BuiltInLLMTool,
           },
         } as any);
         return {
@@ -2184,6 +2215,7 @@ describe("llmDialog", () => {
     });
     const ceilingTx = ceilingRuntime.edit();
     const { commonfabric } = createTrustedBuilder(ceilingRuntime);
+    installTestPatternArtifact(ceilingRuntime, readInternal);
 
     try {
       const testPattern = commonfabric.pattern(
@@ -2194,9 +2226,7 @@ describe("llmDialog", () => {
             // Generous pattern-supplied bound — would let "internal" ship.
             observationMaxConfidentiality: ["internal"],
             tools: {
-              readInternal: commonfabric.patternTool(
-                readInternal,
-              ) as unknown as BuiltInLLMTool,
+              readInternal: readInternal as unknown as BuiltInLLMTool,
             },
           });
           return {
@@ -2332,6 +2362,7 @@ describe("llmDialog", () => {
         additionalProperties: false,
       } as const satisfies JSONSchema,
     );
+    installTestPatternArtifact(runtime, helperTool);
 
     const resultSchema = {
       type: "object",
@@ -2346,31 +2377,32 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const subAgentPattern = pattern<any, any>(
-      ({ prompt, resultSchema }) => {
-        return generateObject({
-          prompt,
-          schema: resultSchema,
-          tools: {
-            helperTool: patternTool(
-              helperTool,
-            ) as unknown as BuiltInLLMTool,
-          },
-        } as any).result;
-      },
-      {
-        type: "object",
-        properties: {
-          prompt: { type: "string" },
-          resultSchema: {
-            type: "object",
-            additionalProperties: true,
-          },
+    const subAgentPattern = installTestPatternArtifact(
+      runtime,
+      pattern<any, any>(
+        ({ prompt, resultSchema }) => {
+          return generateObject({
+            prompt,
+            schema: resultSchema,
+            tools: {
+              helperTool: helperTool as unknown as BuiltInLLMTool,
+            },
+          } as any).result;
         },
-        required: ["prompt", "resultSchema"],
-        additionalProperties: false,
-      },
-      true,
+        {
+          type: "object",
+          properties: {
+            prompt: { type: "string" },
+            resultSchema: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+          required: ["prompt", "resultSchema"],
+          additionalProperties: false,
+        },
+        true,
+      ),
     );
 
     const testPattern = pattern(
@@ -2381,7 +2413,7 @@ describe("llmDialog", () => {
           tools: {
             delegate: {
               description: "Run a child agent and return schema-limited JSON.",
-              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+              pattern: subAgentPattern,
             },
           },
         });

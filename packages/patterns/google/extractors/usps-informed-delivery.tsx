@@ -24,7 +24,6 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  type PatternFactory,
   TILE_UI,
   UI,
   type VNode,
@@ -171,13 +170,6 @@ interface MailPieceAnalysisItem {
   error?: string;
   result?: MailAnalysis;
 }
-
-type ReactiveArray<T> = T[] & {
-  mapWithPattern<I, S>(
-    op: PatternFactory<I, S>,
-    params: Record<string, unknown>,
-  ): S[];
-};
 
 // =============================================================================
 // HELPERS
@@ -456,9 +448,9 @@ export default pattern<PatternInput, PatternOutput>(
     // Count of images to analyze
     const imageCount = computed(() => mailPieceImages?.length || 0);
 
-    const mailPieceAnalyses = (
-      mailPieceImages as ReactiveArray<MailPieceImageInfo>
-    ).mapWithPattern(analyzeMailPiece, {});
+    const mailPieceAnalyses = mailPieceImages.map((imageInfo) =>
+      analyzeMailPiece(imageInfo)
+    );
 
     // Count pending analyses
     const pendingCount = computed(
@@ -473,9 +465,9 @@ export default pattern<PatternInput, PatternOutput>(
         ).length || 0,
     );
 
-    const mailPieces = (
-      mailPieceAnalyses as ReactiveArray<MailPieceAnalysisItem>
-    ).mapWithPattern(extractMailPieceResult, {});
+    const mailPieces = mailPieceAnalyses.map((analysisItem) =>
+      extractMailPieceResult(analysisItem)
+    );
 
     // Derived counts from stored mailPieces
     const mailCount = computed(() => mailPieces?.length || 0);

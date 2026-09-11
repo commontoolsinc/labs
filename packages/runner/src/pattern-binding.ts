@@ -4,6 +4,7 @@ import {
   fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
+  FabricSpecialObject,
   isKeyableObjectOrArray,
   isWalkableObjectOrArray,
   toCompactDebugString,
@@ -11,12 +12,23 @@ import {
 } from "@commonfabric/data-model";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
 import {
+  factoryStateOf,
+  type FactoryStateView,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   type FabricExecValue,
+  isModule,
   isPattern,
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import {
+  createFactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -51,6 +63,8 @@ import type {
   DerivedInternalCellDescriptor,
 } from "./builder/types.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
 import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 
 /**
@@ -71,6 +85,12 @@ type UnwrapOneLevelOptions = {
   derivedInternalCells?: readonly DerivedInternalCellDescriptor[];
 
   /**
+   * Carry the runner-derived label view on resolved primitive links. This is
+   * used for hidden factory state written in the same transaction as its
+   * parent binding, before that parent's link-origin metadata is durable.
+   */
+  includeCfcLabelView?: boolean;
+  /**
    * The containing pattern's authored argument schema, used as the source of
    * declared cell scopes when serializing binding aliases (see
    * `foldDeclaredScopeIntoLinkSchema`). The argument cell LINK only carries a
@@ -84,8 +104,53 @@ type UnwrapOneLevelOptions = {
    */
   sourceSchemas?: {
     argument?: JSONSchema;
+    params?: JSONSchema;
   };
 };
+
+const ARBITRARY_FUNCTION_BINDING_ERROR =
+  "Arbitrary functions are not valid binding values";
+
+const FACTORY_VALUE_FIELDS = ["params", "spaceSelector"] as const;
+
+function isLegacyPatternGraphFunctionField(
+  container: unknown,
+  key: string,
+): boolean {
+  return ((isPattern(container) || isModule(container)) && key === "toJSON") ||
+    (isModule(container) && key === "implementation");
+}
+
+function factoryMetadataEqual(
+  left: FactoryStateView,
+  right: FactoryStateView,
+): boolean {
+  const leftRef = left.ref;
+  const rightRef = right.ref;
+  const leftIsLive = "rootToken" in left;
+  const rightIsLive = "rootToken" in right;
+  if (leftRef !== undefined || rightRef !== undefined) {
+    if (
+      leftRef === undefined || rightRef === undefined ||
+      leftRef.identity !== rightRef.identity ||
+      leftRef.symbol !== rightRef.symbol
+    ) {
+      return false;
+    }
+  } else {
+    if (!leftIsLive || !rightIsLive) return false;
+    if (left.rootToken !== right.rootToken) return false;
+  }
+
+  const metadata = (state: FactoryStateView): Record<string, unknown> => {
+    const result = { ...state } as Record<string, unknown>;
+    delete result.rootToken;
+    delete result.params;
+    delete result.spaceSelector;
+    return result;
+  };
+  return deepEqual(metadata(left), metadata(right));
+}
 
 /**
  * Folds the source slot's declared cell scope into the serialized alias link's
@@ -118,10 +183,9 @@ const foldDeclaredScopeIntoLinkSchema = (
   link: NormalizedFullLink,
   authoredRootSchema: JSONSchema | undefined,
   path: readonly string[],
+  authoredSlotFallback?: JSONSchema,
 ): NormalizedFullLink => {
-  if (authoredRootSchema === undefined || !isObjectOrArray(link.schema)) {
-    return link;
-  }
+  if (!isObjectOrArray(link.schema)) return link;
   const emittedSchema = sanitizeAliasSchemaForBinding(link.schema);
   if (
     !isObjectOrArray(emittedSchema) ||
@@ -129,7 +193,9 @@ const foldDeclaredScopeIntoLinkSchema = (
   ) {
     return link;
   }
-  const authoredSlotSchema = path.length > 0
+  const authoredSlotSchema = authoredRootSchema === undefined
+    ? authoredSlotFallback
+    : path.length > 0
     ? ContextualFlowControl.getSchemaAtPath(authoredRootSchema, [...path])
     : authoredRootSchema;
   const declaredCap = ContextualFlowControl.getSchemaScopeCap(
@@ -255,6 +321,42 @@ export function sendValueToBinding<T>(
   );
 }
 
+function sendFactoryToBinding<T>(
+  tx: IExtendedStorageTransaction,
+  cell: AnyCell<T>,
+  argumentCellLink: NormalizedFullLink,
+  binding: unknown,
+  value: unknown,
+  options: SendValueToBindingOptions,
+): void {
+  const bindingState = factoryStateOf(binding);
+  const valueState = factoryStateOf(value);
+  if (!factoryMetadataEqual(bindingState, valueState)) {
+    throw new Error("Factory binding metadata does not match value");
+  }
+
+  for (const field of FACTORY_VALUE_FIELDS) {
+    if (
+      Object.hasOwn(bindingState, field) !== Object.hasOwn(valueState, field)
+    ) {
+      throw new Error(`Factory binding field ${field} does not match value`);
+    }
+  }
+
+  const valueRecord = valueState as unknown as Record<string, unknown>;
+  mapFactoryStateValues(bindingState, (bindingFieldValue, field) => {
+    sendValueToBindingInner(
+      tx,
+      cell,
+      argumentCellLink,
+      bindingFieldValue,
+      valueRecord[field],
+      options,
+    );
+    return bindingFieldValue;
+  });
+}
+
 function sendValueToBindingInner<T>(
   tx: IExtendedStorageTransaction,
   cell: AnyCell<T>,
@@ -262,16 +364,45 @@ function sendValueToBindingInner<T>(
   binding: unknown,
   value: unknown,
   options: SendValueToBindingOptions = {},
+  allowLegacyImplementationFunction = false,
+  insideLegacyPatternGraph = false,
 ): void {
   if (argumentCellLink === undefined) {
     argumentCellLink = getMetaLink(cell as Cell<unknown>, "argument")!;
   }
-  // A binding reaches a write target either as a sigil write redirect or as
-  // an `$alias` record. The second is only meaningful because `binding` comes
-  // from a pattern node graph; the link predicates do not match it, so this
-  // function resolves it here against the instance's argument and result
-  // cells. This and `unwrapOneLevelAndBindToDoc` below are the only two
-  // places that do.
+  const bindingIsFactory = isAdmittedFabricFactory(binding);
+  const valueIsFactory = isAdmittedFabricFactory(value);
+  if (bindingIsFactory) {
+    if (typeof value === "function" && !valueIsFactory) {
+      throw new TypeError(ARBITRARY_FUNCTION_BINDING_ERROR);
+    }
+    if (!valueIsFactory) {
+      throw new Error("Factory binding does not match non-factory value");
+    }
+    sendFactoryToBinding(
+      tx,
+      cell,
+      argumentCellLink,
+      binding,
+      value,
+      options,
+    );
+    return;
+  }
+  if (typeof binding === "function") {
+    if (
+      allowLegacyImplementationFunction && binding === value
+    ) {
+      return;
+    }
+    throw new TypeError(ARBITRARY_FUNCTION_BINDING_ERROR);
+  }
+  if (typeof value === "function" && !valueIsFactory) {
+    throw new TypeError(ARBITRARY_FUNCTION_BINDING_ERROR);
+  }
+  // Handle both `$alias` bindings and sigil write redirects. `$alias` is
+  // meaningful here because `binding` comes from a Pattern object;
+  // `isWriteRedirectLink` itself deliberately does not match it.
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
     if (isAliasBinding(binding)) {
       const alias = binding.$alias;
@@ -308,6 +439,8 @@ function sendValueToBindingInner<T>(
           ? argumentCellLink
           : alias.cell === "result"
           ? cell.getAsNormalizedFullLink()
+          : alias.cell === "params"
+          ? getMetaLink(cell as Cell<unknown>, "params")
           : undefined;
         if (link === undefined) {
           throw new Error("Invalid pseudo-alias path: " + alias.path);
@@ -439,6 +572,15 @@ function sendValueToBindingInner<T>(
       { cell: cell.getAsNormalizedFullLink(), binding },
       { meta: ignoreReadForScheduling, schemaRole: "output" },
     );
+  } else if (valueIsFactory) {
+    throw new Error("Non-factory binding does not match factory value");
+  } else if (
+    binding instanceof FabricSpecialObject ||
+    value instanceof FabricSpecialObject
+  ) {
+    if (!fabricAwareEqual(binding, value)) {
+      throw new Error("Fabric special binding does not match value");
+    }
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
@@ -449,6 +591,8 @@ function sendValueToBindingInner<T>(
           binding[i],
           value[i],
           options,
+          false,
+          insideLegacyPatternGraph,
         );
       }
     }
@@ -458,8 +602,12 @@ function sendValueToBindingInner<T>(
   } else if (
     isWalkableObjectOrArray(binding) && isWalkableObjectOrArray(value)
   ) {
+    const childIsInsideLegacyPattern = insideLegacyPatternGraph ||
+      (isPattern(binding) && !isAdmittedFabricFactory(binding));
     for (const key of Object.keys(binding)) {
       if (key in value) {
+        const allowLegacyFunction = childIsInsideLegacyPattern &&
+          isLegacyPatternGraphFunctionField(binding, key);
         sendValueToBindingInner(
           tx,
           cell,
@@ -467,6 +615,8 @@ function sendValueToBindingInner<T>(
           binding[key],
           value[key],
           options,
+          allowLegacyFunction,
+          childIsInsideLegacyPattern,
         );
       }
     }
@@ -597,6 +747,26 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
     resultCell.getAsNormalizedFullLink(),
   )!;
   argumentCellLink = canonicalSchemaLink(argumentCellLink);
+  const factoryContext = createFactoryTraversalContext();
+
+  const createBoundLink = (link: NormalizedFullLink) => {
+    const sigil = createSigilLinkFromParsedLink(
+      link,
+      { includeSchema: true, overwrite: "redirect" },
+    );
+    if (options?.includeCfcLabelView) {
+      const sourceCell = resultCell.runtime.getCellFromLink(
+        link,
+        link.schema,
+        resultCell.tx,
+      );
+      const labelView = cfcLabelViewForCell(sourceCell);
+      if (labelView !== undefined) {
+        setLinkCfcLabelView(sigil, labelView);
+      }
+    }
+    return sigil;
+  };
 
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
@@ -639,8 +809,41 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   function convert(
     binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
+    allowLegacyImplementationFunction = false,
+    preserveIdentityWhenUnchanged = false,
+    insideLegacyPatternGraph = false,
   ): FabricExecValue {
-    if (isAliasBinding(binding)) {
+    if (isAdmittedFabricFactory(binding)) {
+      const state = factoryStateOf(binding);
+      return mapFactoryForTraversal(
+        binding,
+        (nested, field) => {
+          const nestedSchema = field === "params" && state.kind === "pattern"
+            ? state.paramsSchema
+            : undefined;
+          return convert(
+            nested as FabricExecValue,
+            nestedSchema,
+            false,
+            true,
+            false,
+          );
+        },
+        factoryContext,
+      );
+    } else if (typeof binding === "function") {
+      if (allowLegacyImplementationFunction) return binding;
+      throw new TypeError(
+        `${ARBITRARY_FUNCTION_BINDING_ERROR}: ${binding.name || "anonymous"}`,
+      );
+    } else if (binding instanceof FabricPrimitive) {
+      return binding;
+    } else if (binding instanceof FabricInstance) {
+      throw new Error(
+        `Cannot yet handle \`${binding.constructor.name}\` (a ` +
+          "`FabricInstance`) as a pattern binding.",
+      );
+    } else if (isAliasBinding(binding)) {
       const { defer: optDefer, ...aliasRest } = { ...binding.$alias };
       const defer = optDefer ?? 0;
       if (defer > 0) {
@@ -685,19 +888,27 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           : link.schema !== undefined
           ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return createBoundLink(
           scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
-          { includeSchema: true, overwrite: "redirect" },
         );
       } else {
-        // Resolve the special values for "argument" and "result" — the only
-        // `cell` values isAliasBinding admits.
+        // Resolve the special argument, result, and compiler-owned params
+        // pseudo-cells admitted by isAliasBinding.
         const link = alias.cell === "argument"
           ? argumentCellLink
-          : resultCellLink;
+          : alias.cell === "result"
+          ? resultCellLink
+          : alias.cell === "params"
+          ? getMetaLink(resultCell as Cell<unknown>, "params")
+          : undefined;
         if (link === undefined) {
+          if (alias.cell === "argument") {
+            throw new Error(
+              "Cannot bind argument alias: no argument cell link available",
+            );
+          }
           throw new Error(
-            "Cannot bind argument alias: no argument cell link available",
+            `Cannot bind ${alias.cell} alias: no cell link available`,
           );
         }
         const path = alias.path;
@@ -710,23 +921,45 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           : undefined;
         const authoredRootSchema = alias.cell === "argument"
           ? options?.sourceSchemas?.argument
+          : alias.cell === "params"
+          ? options?.sourceSchemas?.params
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return createBoundLink(
           foldDeclaredScopeIntoLinkSchema(
             scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
+            alias.schema,
           ),
-          { includeSchema: true, overwrite: "redirect" },
         );
       }
-    } else if (binding instanceof FabricPrimitive) {
-      return binding;
-    } else if (binding instanceof FabricInstance) {
-      throw new Error(
-        `Cannot yet handle \`${binding.constructor.name}\` (a ` +
-          "`FabricInstance`) as a pattern binding.",
+    } else if (isObjectOrArray(binding) && isPattern(binding)) {
+      // Object-shaped compatibility pattern graphs still need their deferred
+      // aliases decremented one level below. First-class factories take the
+      // admitted-factory branch above and remain callable values.
+      if (typeof binding !== "object") return binding;
+      const copy: Record<string | symbol, unknown> = Object.fromEntries(
+        Object.entries(binding).map(([key, value]) => {
+          const converted = convert(
+            value,
+            ContextualFlowControl.getSchemaAtPath(targetSchema, [key]),
+            isLegacyPatternGraphFunctionField(binding, key),
+            preserveIdentityWhenUnchanged,
+            true,
+          );
+          return [key, converted];
+        }),
       );
+      if (
+        preserveIdentityWhenUnchanged &&
+        Object.entries(binding).every(([key, value]) =>
+          Object.is(copy[key], value)
+        )
+      ) {
+        return binding;
+      }
+      noteDerivedCopy(copy, binding);
+      return copy as FabricExecValue;
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
       // else, so the shared path allocates nothing.
@@ -744,6 +977,9 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const next = convert(
           value,
           ContextualFlowControl.getSchemaAtPath(targetSchema, [String(i)]),
+          false,
+          preserveIdentityWhenUnchanged,
+          insideLegacyPatternGraph,
         );
         if (next === value) continue;
         // First change: copy the whole array, not just the prefix. `slice()`
@@ -763,11 +999,16 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       // `overlayUnreadableLinkPlaceholders()` in `stored-argument-validation.ts`
       // for the same idiom.
       let converted: Record<string, FabricExecValue> | undefined;
+      const childIsInsideLegacyPattern = insideLegacyPatternGraph;
       for (const key of Object.keys(binding)) {
         const value = binding[key];
         const next = convert(
           value,
           ContextualFlowControl.getSchemaAtPath(targetSchema, [key]),
+          childIsInsideLegacyPattern &&
+            isLegacyPatternGraphFunctionField(binding, key),
+          preserveIdentityWhenUnchanged,
+          childIsInsideLegacyPattern,
         );
         if (next === value) continue;
         converted ??= { ...binding };
@@ -839,12 +1080,31 @@ export function findAllWriteRedirectCells<T>(
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
+  const factoryContext = createFactoryTraversalContext();
   // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
   // does not depend on the cell's value type, so accept any cell. This lets the
   // redirect-chain recursion re-base onto the resolved `linkCell` (a
   // `Cell<unknown>`) rather than the original typed base.
-  function find(binding: unknown, baseCell: AnyCell<unknown>): void {
-    if (isAliasBinding(binding)) {
+  function find(
+    binding: unknown,
+    baseCell: AnyCell<unknown>,
+    allowLegacyImplementationFunction = false,
+    insideLegacyPatternGraph = false,
+  ): void {
+    if (isAdmittedFabricFactory(binding)) {
+      mapFactoryForTraversal(
+        binding,
+        (nested) => {
+          find(nested, baseCell);
+          return nested;
+        },
+        factoryContext,
+      );
+      return;
+    } else if (typeof binding === "function") {
+      if (allowLegacyImplementationFunction) return;
+      throw new TypeError(ARBITRARY_FUNCTION_BINDING_ERROR);
+    } else if (isAliasBinding(binding)) {
       // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
       // so a surviving `$alias` belongs to a nested level — it just crossed
       // its `defer` boundary, or sits inside an embedded Pattern value —
@@ -878,16 +1138,18 @@ export function findAllWriteRedirectCells<T>(
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;
-    } else if (isPattern(binding)) {
-      // Embedded Pattern values are opaque here: their `$alias` records and
-      // sigil links are the embedded pattern's own binding vocabulary,
-      // interpreted only when THAT pattern is instantiated (`defer`
-      // bookkeeping positions its aliases for that moment). Walking into them
-      // would declare reads at the wrong nesting level.
+    } else if (binding instanceof FabricSpecialObject) {
+      return;
+    } else if (isPattern(binding) && !insideLegacyPatternGraph) {
+      // Embedded Pattern values are opaque here: their links belong to the
+      // embedded pattern. A root legacy graph is still traversed so its named
+      // implementation fields can be validated below.
       return;
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
-      for (const value of binding) find(value, baseCell);
+      for (const value of binding) {
+        find(value, baseCell, false, insideLegacyPatternGraph);
+      }
       // A special object ends the walk. A `FabricPrimitive` is an opaque
       // scalar and can contain no redirect. An instance ends it here too; the
       // link arm above has already returned for every link, so this arm sees
@@ -898,7 +1160,17 @@ export function findAllWriteRedirectCells<T>(
       // nested inside is missed here.
     } else if (isKeyableObjectOrArray(binding)) {
       // If the binding is an object, recurse into each value.
-      for (const value of Object.values(binding)) find(value, baseCell);
+      const childIsInsideLegacyPattern = insideLegacyPatternGraph ||
+        isPattern(binding);
+      for (const [key, value] of Object.entries(binding)) {
+        find(
+          value,
+          baseCell,
+          childIsInsideLegacyPattern &&
+            isLegacyPatternGraphFunctionField(binding, key),
+          childIsInsideLegacyPattern,
+        );
+      }
     }
   }
   if (
@@ -912,7 +1184,7 @@ export function findAllWriteRedirectCells<T>(
       find(value, baseCell);
     }
   } else {
-    find(binding, baseCell);
+    find(binding, baseCell, false, isPattern(binding));
   }
   return seen;
 }

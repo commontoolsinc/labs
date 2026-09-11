@@ -12,6 +12,7 @@ import { emitElementAccessExpression } from "../src/transformers/expression-rewr
 import type { EmitterContext } from "../src/transformers/expression-rewrite/types.ts";
 import { findPreferredNestedLowerableExpressionSite } from "../src/transformers/expression-site-policy.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { registerTrustedCommonFabricTestSources } from "./trusted-commonfabric-sources.ts";
 
 // Each branch exercised here otherwise runs only while a pattern compiles cold
 // through the transformer in CI's pattern-integration jobs. When that pipeline's
@@ -74,6 +75,10 @@ function buildProgram(
       ),
   };
   const program = ts.createProgram(Object.keys(files), compilerOptions, host);
+  registerTrustedCommonFabricTestSources(program, [
+    "commonfabric.d.ts",
+    "cfc.ts",
+  ]);
   return { program, sourceFile: program.getSourceFile(fileName)! };
 }
 

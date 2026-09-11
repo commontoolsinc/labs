@@ -13,7 +13,6 @@ import {
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
 import type { URI } from "./sigil-types.ts";
-
 /**
  * Convert an entity ID to URI format. The scheme carries the entity kind:
  * no kind ⇒ `of:`, `kind: "computed"` ⇒ `computed:` (see `entity-kind.ts`).

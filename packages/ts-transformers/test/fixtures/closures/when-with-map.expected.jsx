@@ -94,7 +94,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "array",
                     items: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfPattern_1, {}))}
+        } as const satisfies __cfHelpers.JSONSchema, showItems, items.mapWithPattern(__cfPattern_1))}
       </div>),
     };
 }, {

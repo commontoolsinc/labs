@@ -1,6 +1,7 @@
 import type { Source } from "@commonfabric/js-compiler";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { toDocumentPath } from "@commonfabric/memory/v2";
 
 import {
   brandTrustedPattern,
@@ -13,6 +14,7 @@ import {
   KEYLESS_PATTERN_IDENTITY_PREFIX,
   resolveOriginal,
   setArtifactEntryRef,
+  setDurableArtifactEntryRef,
   setPatternProgram,
   setPatternSourcePath,
 } from "./builder/pattern-metadata.ts";
@@ -55,6 +57,7 @@ import type {
 import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
 
 import {
@@ -70,7 +73,11 @@ import {
 import type {
   CommitError,
   IExtendedStorageTransaction,
+  IStorageManager,
+  NativeStorageCommitOperation,
 } from "./storage/interface.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { V2StorageTransaction } from "./storage/v2-transaction.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
 /** The §2b delegated carriage a cross-space cache writeback rides (OW31
@@ -340,6 +347,27 @@ function uniqueCacheableImports(
   return out;
 }
 
+/** Source-only cache modules suitable for an atomic artifact publication. */
+function cacheableSourceModules(
+  docs: ReadonlyMap<string, SourceDoc>,
+): CacheableModule[] {
+  return [...docs].map(([identity, doc]) => ({
+    identity,
+    filename: doc.filename,
+    source: doc.code,
+    js: "",
+    imports: uniqueCacheableImports([
+      ...doc.imports
+        .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
+        .map((imp) => ({
+          specifier: imp.specifier,
+          targetIdentity: imp.identity,
+        })),
+      ...fabricImportRefsFromSource(doc),
+    ]),
+  }));
+}
+
 /**
  * The authored filenames an entry document's source-package edges point at, for
  * one edge kind — {@link SOURCE_ROOT_SPECIFIER} for attached source entry
@@ -591,6 +619,12 @@ export class PatternManager {
    */
   #persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
 
+  /** Verified source closures retained for synchronous by-value publication. */
+  #artifactPublicationModules = new Map<string, CacheableModule[]>();
+
+  /** Explicitly trusted hand-built identities have session authority only. */
+  #sessionOnlyArtifactIdentities = new Set<string>();
+
   /**
    * Failed replications _parked_ for event-driven re-supply
    * (`verification-coverage.md` OW45: the one supplier-timing geometry no await
@@ -650,6 +684,20 @@ export class PatternManager {
         this.#persistedClosureSpaces.set(identity, spaces);
       }
       spaces.add(space);
+      if (!isKeylessPatternIdentity(identity)) {
+        // A stored graph can associate its live root with the real artifact
+        // identity before this runtime has verified the corresponding source
+        // closure. Once verification records exact-space availability, that
+        // identity is no longer session-only, and every artifact already
+        // indexed from the module can expose its canonical durable ref.
+        this.#sessionOnlyArtifactIdentities.delete(identity);
+        for (
+          const [symbol, value] of this.#addressableByIdentity.get(identity) ??
+            []
+        ) {
+          setDurableArtifactEntryRef(value, { identity, symbol });
+        }
+      }
       const parked = this.#parkedFailedReplications.get(identity);
       if (parked === undefined) continue;
       for (const [key, record] of [...parked]) {
@@ -906,6 +954,268 @@ export class PatternManager {
     return { ...this.#esmCacheStats };
   }
 
+  /** Whether an artifact closure is known durable in this exact space. */
+  isArtifactAvailableInSpace(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): boolean {
+    return this.#persistedClosureSpaces.get(identity)?.has(artifactSpace) ??
+      false;
+  }
+
+  /** A trusted durable source for an artifact, excluding the destination. */
+  artifactSourceSpace(
+    identity: string,
+    destination?: MemorySpace,
+  ): MemorySpace | undefined {
+    for (const space of this.#persistedClosureSpaces.get(identity) ?? []) {
+      if (space !== destination) return space;
+    }
+    return undefined;
+  }
+
+  assertArtifactAvailableInSpace(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): void {
+    if (!this.isArtifactAvailableInSpace(identity, artifactSpace)) {
+      throw new Error(
+        `Factory artifact ${identity} is not available in space ${artifactSpace}`,
+      );
+    }
+  }
+
+  noteArtifactPublicationConfirmed(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): void {
+    this.#recordPersistedClosureSpaces([identity], artifactSpace);
+  }
+
+  #artifactPublicationKey(space: MemorySpace, identity: string): string {
+    return `${space}\0${identity}`;
+  }
+
+  #cacheArtifactPublicationModules(
+    space: MemorySpace,
+    identity: string,
+    modules: CacheableModule[],
+  ): void {
+    this.#artifactPublicationModules.set(
+      this.#artifactPublicationKey(space, identity),
+      modules,
+    );
+  }
+
+  #cacheArtifactPublicationClosures(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+  ): void {
+    const byIdentity = new Map(
+      modules.map((module) => [module.identity, module]),
+    );
+    for (const rootIdentity of byIdentity.keys()) {
+      if (rootIdentity === entryIdentity) {
+        this.#cacheArtifactPublicationModules(space, rootIdentity, modules);
+        continue;
+      }
+      const reachable = new Set<string>();
+      const pending = [rootIdentity];
+      while (pending.length > 0) {
+        const identity = pending.pop()!;
+        if (reachable.has(identity)) continue;
+        const module = byIdentity.get(identity);
+        if (module === undefined) continue;
+        reachable.add(identity);
+        for (const imp of module.imports) {
+          if (
+            !imp.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            byIdentity.has(imp.targetIdentity)
+          ) {
+            pending.push(imp.targetIdentity);
+          }
+        }
+      }
+      this.#cacheArtifactPublicationModules(
+        space,
+        rootIdentity,
+        modules.filter((module) => reachable.has(module.identity)),
+      );
+    }
+  }
+
+  async #loadVerifiedArtifactSourceModules(
+    artifactSpace: MemorySpace,
+    entryIdentity: string,
+  ): Promise<CacheableModule[] | undefined> {
+    const verified = new Map<string, SourceDoc>();
+    const visitedRoots = new Set<string>();
+    const pendingRoots = [entryIdentity];
+    const tx = this.#runtime.edit();
+    try {
+      while (pendingRoots.length > 0) {
+        const rootIdentity = pendingRoots.shift()!;
+        if (visitedRoots.has(rootIdentity)) continue;
+        visitedRoots.add(rootIdentity);
+        const closure = await loadVerifiedSourceClosure(
+          this.#runtime,
+          artifactSpace,
+          rootIdentity,
+          tx,
+        );
+        if (closure === undefined || !closure.has(rootIdentity)) {
+          return undefined;
+        }
+        for (const [identity, doc] of closure) {
+          if (!verified.has(identity)) verified.set(identity, doc);
+          for (const imp of fabricImportRefsFromSource(doc)) {
+            if (!visitedRoots.has(imp.targetIdentity)) {
+              pendingRoots.push(imp.targetIdentity);
+            }
+          }
+        }
+      }
+    } finally {
+      tx.abort?.("artifact source closure verification complete");
+    }
+
+    return cacheableSourceModules(verified);
+  }
+
+  /**
+   * Build atomic source-document ensures for a by-value factory publication.
+   * A warm verified closure stays synchronous; a cold source delays only wire
+   * submission while the containing value remains optimistically visible.
+   */
+  prepareArtifactPublication(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    sourcePublication?: Promise<readonly CacheableModule[] | undefined>,
+    onPrepared?: (modules: readonly CacheableModule[]) => void,
+  ):
+    | readonly NativeStorageCommitOperation[]
+    | Promise<readonly NativeStorageCommitOperation[]> {
+    if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
+    const cached = this.#artifactPublicationModules.get(
+      this.#artifactPublicationKey(fromSpace, entryIdentity),
+    );
+    if (cached !== undefined) {
+      onPrepared?.(cached);
+      return this.#buildArtifactPublicationOperations(
+        cached,
+        entryIdentity,
+        toSpace,
+      );
+    }
+
+    return (async () => {
+      const load = async () => {
+        await Promise.allSettled([...this.#pendingCacheWriteBacks]);
+        return await this.#loadVerifiedArtifactSourceModules(
+          fromSpace,
+          entryIdentity,
+        );
+      };
+      let modules = await load();
+      if (modules === undefined && sourcePublication !== undefined) {
+        const published = await sourcePublication;
+        if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
+        if (published !== undefined) modules = [...published];
+        else modules = await load();
+      }
+      if (modules === undefined) {
+        throw new Error(
+          `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
+        );
+      }
+      this.#cacheArtifactPublicationClosures(
+        fromSpace,
+        modules,
+        entryIdentity,
+      );
+      onPrepared?.(modules);
+      return this.#buildArtifactPublicationOperations(
+        modules,
+        entryIdentity,
+        toSpace,
+      );
+    })();
+  }
+
+  #buildArtifactPublicationOperations(
+    modules: CacheableModule[],
+    entryIdentity: string,
+    toSpace: MemorySpace,
+  ): readonly NativeStorageCommitOperation[] {
+    const emptyStorage = {
+      open: (space: MemorySpace) => ({
+        replica: {
+          did: () => space,
+          get: () => undefined,
+          getDocument: () => undefined,
+        },
+      }),
+    } as unknown as IStorageManager;
+    const base = new V2StorageTransaction(emptyStorage);
+    const draft = new ExtendedStorageTransaction(base);
+    try {
+      writeSourceDocs(this.#runtime, toSpace, modules, entryIdentity, draft);
+      const native = base.getNativeCommit(toSpace);
+      if (native === undefined) {
+        throw new Error(
+          `Artifact closure ${entryIdentity} produced no publication documents`,
+        );
+      }
+      return native.operations.map((operation) => {
+        if (operation.op === "delete" || operation.op === "ensure") {
+          throw new Error(
+            `Artifact closure ${entryIdentity} produced unexpected ${operation.op} draft operation`,
+          );
+        }
+        if (operation.id.startsWith("cid:")) {
+          if (operation.op !== "set") {
+            throw new Error(
+              `Artifact closure ${entryIdentity} produced unexpected ` +
+                `${operation.op} for content-addressed document ${operation.id}`,
+            );
+          }
+          return operation;
+        }
+        const document = operation.value;
+        const kind = isObjectNotArray(document) &&
+            isObjectNotArray(document.value)
+          ? document.value.kind
+          : undefined;
+        const carriesRoots = kind === "source" || kind === "compiled";
+        return {
+          op: "ensure" as const,
+          id: operation.id,
+          type: operation.type,
+          scope: operation.scope,
+          value: operation.value,
+          ignore: [
+            ...(kind === "source"
+              ? [toDocumentPath(["value", "annotations"])]
+              : []),
+            toDocumentPath(["cfc"]),
+          ],
+          ...(carriesRoots
+            ? {
+              addUnique: [
+                toDocumentPath(["value", "imports"]),
+                toDocumentPath(["value", "roots"]),
+              ],
+            }
+            : {}),
+        };
+      });
+    } finally {
+      draft.abort("artifact publication draft complete");
+    }
+  }
+
   /** Resolve once all in-flight compiled-cache write-backs have settled. */
   async flushCompileCacheWrites(): Promise<void> {
     await Promise.allSettled([...this.#compileCacheWrites]);
@@ -1001,6 +1311,7 @@ export class PatternManager {
     ref: { identity: string; symbol: string },
   ): void {
     brandTrustedPattern(pattern);
+    this.#sessionOnlyArtifactIdentities.add(ref.identity);
     this.#indexArtifact(ref.identity, ref.symbol, pattern);
   }
 
@@ -1039,7 +1350,7 @@ export class PatternManager {
       ]);
     }
     const identity = `${KEYLESS_PATTERN_IDENTITY_PREFIX}${
-      fromURI(toURI(createRef(root, "pattern")))
+      fromURI(toURI(createRef(flattenBuilderArtifacts(root), "pattern")))
     }`;
     const ref = { identity, symbol: "default" };
     this.associatePatternIdentity(root, ref);
@@ -1055,42 +1366,31 @@ export class PatternManager {
   keylessMintAnomalies = 0;
 
   /**
-   * Session-side resolution hints for _keyless_ list-builtin ops, keyed by the
-   * node's immutable inputs-doc address (`<space>\0<id>`). A keyless op's
-   * durable inputs carry its full embedded graph (the never-durable contract
-   * forbids the keyless `$patternRef` sentinel there), but the embedded
-   * round-trip corrupts nested output-alias defer levels, so the _same_ session
-   * that instantiated the node resolves the pristine artifact through this map
-   * instead. Entries are session-lifetime like the artifact index; a fresh
-   * session re-instantiates the node and re-registers. Content-addressed key,
-   * so two structurally identical nodes share one (equally valid) entry.
+   * Session-side resolution hints for constant list-builtin ops, keyed by the
+   * node's immutable inputs-doc address (`<space>\0<id>`). The current session
+   * already holds the exact bound callable from graph construction, so it can
+   * execute that trusted value without decoding its inline representation and
+   * imposing destination-space durability on an internal data-URI cell.
+   * Keyless callbacks additionally need the hint because their durable input
+   * fallback is an embedded graph. A fresh session has no hint and follows the
+   * ordinary Factory@1 or embedded-graph cold path.
    */
-  #keylessOpRefsByInputsDoc = new Map<
-    string,
-    { identity: string; symbol: string }
-  >();
+  #listOpPatternsByInputsDoc = new Map<string, Pattern>();
 
-  /** Record that the node whose immutable inputs doc is `inputsDocKey`
-   * carries a keyless op resolvable in-session as `ref` (already minted and
-   * indexed via {@link ensureKeylessPatternIdentity}). */
-  registerKeylessOpResolution(
+  /** Record the trusted live op used to construct one immutable inputs doc. */
+  registerListOpResolution(
     inputsDocKey: string,
-    ref: { identity: string; symbol: string },
+    pattern: Pattern,
   ): void {
-    this.#keylessOpRefsByInputsDoc.set(inputsDocKey, ref);
+    if (!isTrustedPattern(pattern)) {
+      throw new TypeError("List op resolution requires a trusted pattern");
+    }
+    this.#listOpPatternsByInputsDoc.set(inputsDocKey, pattern);
   }
 
-  /** The pristine in-session artifact for a keyless op registered under
-   * `inputsDocKey`, or undefined (no registration this session — the reader
-   * is not the instantiating session, so the embedded graph is all there
-   * is). */
-  keylessOpPatternFor(inputsDocKey: string): Pattern | undefined {
-    const ref = this.#keylessOpRefsByInputsDoc.get(inputsDocKey);
-    if (!ref) return undefined;
-    const live = this.artifactFromIdentitySync(ref.identity, ref.symbol);
-    return live !== undefined && isTrustedPattern(live)
-      ? live as Pattern
-      : undefined;
+  /** The exact in-session op for `inputsDocKey`, when this runtime built it. */
+  listOpPatternFor(inputsDocKey: string): Pattern | undefined {
+    return this.#listOpPatternsByInputsDoc.get(inputsDocKey);
   }
 
   /**
@@ -1710,7 +2010,7 @@ export class PatternManager {
    * lower-level `Engine.compileAndEvaluateModules` directly and skipped
    * registration (CT-1811): map/filter/flatMap ops then had no content-addressed
    * entry ref and fell back to a defer-corrupted embedded graph instead of their
-   * canonical `$patternRef` artifact.
+   * canonical content-addressed artifact.
    *
    * Registration is fused with evaluation here on purpose, so it cannot be
    * forgotten — mirroring what the runtime's own `compilePattern` /
@@ -1721,6 +2021,7 @@ export class PatternManager {
   async compileAndRegisterModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
+    cacheCtx?: { space: MemorySpace },
   ): Promise<EvaluateResult> {
     const patternCoverage = this.#patternCoverageFor(options);
     const effectiveOptions: TypeScriptHarnessProcessOptions = {
@@ -1734,7 +2035,10 @@ export class PatternManager {
         await getCompileCacheRuntimeVersion(),
         { patternCoverage: patternCoverage !== undefined },
       );
-    if (byteCache === undefined || runtimeVersion === undefined) {
+    if (
+      cacheCtx === undefined &&
+      (byteCache === undefined || runtimeVersion === undefined)
+    ) {
       const result = await this.#runtime.harness.compileAndEvaluateModules(
         program,
         effectiveOptions,
@@ -1743,13 +2047,30 @@ export class PatternManager {
       return result;
     }
 
-    const { id, graph, mainSpecifier, modules } = await this.#runtime.harness
+    const { id, graph, mainSpecifier, entryIdentity, modules } = await this
+      .#runtime.harness
       .compileToRecordGraph(program, {
         ...effectiveOptions,
-        precompiledModulesFor: ({ identities }) =>
-          Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
+        ...(cacheCtx === undefined
+          ? {}
+          : { fabricImports: { space: cacheCtx.space } }),
+        ...(byteCache === undefined || runtimeVersion === undefined ? {} : {
+          precompiledModulesFor: ({ identities }) =>
+            Promise.resolve(
+              byteCache.getCompleteSet(runtimeVersion, identities),
+            ),
+        }),
       });
-    byteCache.putAll(runtimeVersion, modules);
+    if (byteCache !== undefined && runtimeVersion !== undefined) {
+      byteCache.putAll(runtimeVersion, modules);
+    }
+    if (cacheCtx !== undefined) {
+      await this.#persistSourceCacheTracked(
+        cacheCtx.space,
+        modules,
+        entryIdentity,
+      );
+    }
     // Yield ahead of the synchronous SES evaluation (see compilePattern).
     await interleaveCompileYield();
     const result = this.#runtime.harness.evaluateRecordGraph(
@@ -1995,6 +2316,11 @@ export class PatternManager {
       // The per-space storage closure was just READ from this space, i.e. it is
       // already durable here — no write-back.
       this.#esmCacheStats.hits++;
+      this.#cacheArtifactPublicationClosures(space, modules, entryIdentity);
+      this.#recordPersistedClosureSpaces(
+        [entryIdentity, ...modules.map((module) => module.identity)],
+        space,
+      );
     } else {
       this.#esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
@@ -2145,6 +2471,16 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
+      const sourceModules = cacheableSourceModules(sourceClosure);
+      this.#cacheArtifactPublicationClosures(
+        space,
+        sourceModules,
+        entryIdentity,
+      );
+      this.#recordPersistedClosureSpaces(
+        [entryIdentity, ...sourceModules.map((module) => module.identity)],
+        space,
+      );
       return this.#patternFromEvaluation(result, program, entryIdentity);
     } catch (error) {
       // Incomplete/invalid cached closure — fall back to recompile.
@@ -2154,6 +2490,80 @@ export class PatternManager {
       ]);
       return undefined;
     }
+  }
+
+  /** Resolve any trusted builder artifact from an exact durable source space. */
+  async loadArtifactByIdentity(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<object | undefined> {
+    const indexed = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
+    if (
+      (this.isArtifactAvailableInSpace(entryIdentity, space) ||
+        this.#sessionOnlyArtifactIdentities.has(entryIdentity)) &&
+      indexed !== undefined && isTrustedBuilderArtifact(indexed)
+    ) {
+      this.#esmCacheStats.byIdentityHits++;
+      return indexed as object;
+    }
+    if (
+      this.isArtifactAvailableInSpace(entryIdentity, space) &&
+      this.#modulesByIdentity.has(entryIdentity)
+    ) {
+      return undefined;
+    }
+    if (isKeylessPatternIdentity(entryIdentity)) return undefined;
+    if (this.#runtime.cfcEnforcementMode === "disabled") return undefined;
+
+    const key = `${space}\0${entryIdentity}`;
+    let pending = this.#inProgressByIdentityLoads.get(key);
+    if (pending === undefined) {
+      pending = (async () => {
+        const modules = await this.#loadVerifiedArtifactSourceModules(
+          space,
+          entryIdentity,
+        );
+        if (modules === undefined) return undefined;
+
+        this.#cacheArtifactPublicationClosures(space, modules, entryIdentity);
+        this.#recordPersistedClosureSpaces(
+          modules.map((module) => module.identity),
+          space,
+        );
+        for (const module of modules) {
+          const bucket = this.#addressableByIdentity.get(module.identity);
+          if (bucket === undefined) continue;
+          for (const [registeredSymbol, value] of bucket) {
+            setDurableArtifactEntryRef(value, {
+              identity: module.identity,
+              symbol: registeredSymbol,
+            });
+          }
+        }
+
+        const warm = this.#addressableByIdentity.get(entryIdentity)?.get(
+          symbol,
+        );
+        if (warm !== undefined && isTrustedBuilderArtifact(warm)) {
+          return warm as Pattern;
+        }
+        return await this.#loadPatternByIdentityFromStorage(
+          entryIdentity,
+          symbol,
+          space,
+          {},
+          true,
+        );
+      })().finally(() => this.#inProgressByIdentityLoads.delete(key));
+      this.#inProgressByIdentityLoads.set(key, pending);
+    }
+
+    await pending.catch(() => {});
+    const loaded = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
+    return loaded !== undefined && isTrustedBuilderArtifact(loaded)
+      ? loaded as object
+      : undefined;
   }
 
   /**
@@ -2187,11 +2597,21 @@ export class PatternManager {
     // compiled cache (and of CFC enforcement), so it serves the same artifact
     // `artifactFromIdentitySync` would return.
     const indexed = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
+    const exactSpaceAvailable =
+      this.isArtifactAvailableInSpace(entryIdentity, space) ||
+      this.#sessionOnlyArtifactIdentities.has(entryIdentity);
     if (
-      !retryFailedRecovery && indexed !== undefined && isTrustedPattern(indexed)
+      !retryFailedRecovery && exactSpaceAvailable && indexed !== undefined &&
+      isTrustedPattern(indexed)
     ) {
       this.#esmCacheStats.byIdentityHits++;
       return indexed;
+    }
+    if (
+      !retryFailedRecovery && exactSpaceAvailable &&
+      this.#modulesByIdentity.has(entryIdentity)
+    ) {
+      return undefined;
     }
     // A keyless identity is session-only by construction: no source or
     // compiled closure exists behind it anywhere, so once the in-memory index
@@ -2214,7 +2634,7 @@ export class PatternManager {
     const live = retryFailedRecovery
       ? undefined
       : this.#patternFromEvaluatedModule(entryIdentity, symbol);
-    if (live) {
+    if (live && exactSpaceAvailable) {
       this.#esmCacheStats.byIdentityHits++;
       return live;
     }
@@ -2274,7 +2694,44 @@ export class PatternManager {
     symbol: string,
     space: MemorySpace,
     options: { repairCache?: boolean } = {},
+    sourceAlreadyVerified = false,
   ): Promise<Pattern | undefined> {
+    if (!sourceAlreadyVerified) {
+      const modules = await this.#loadVerifiedArtifactSourceModules(
+        space,
+        entryIdentity,
+      );
+      if (modules === undefined) return undefined;
+      this.#cacheArtifactPublicationClosures(space, modules, entryIdentity);
+      this.#recordPersistedClosureSpaces(
+        modules.map((module) => module.identity),
+        space,
+      );
+      for (const module of modules) {
+        const bucket = this.#addressableByIdentity.get(module.identity);
+        if (bucket === undefined) continue;
+        for (const [registeredSymbol, value] of bucket) {
+          setDurableArtifactEntryRef(value, {
+            identity: module.identity,
+            symbol: registeredSymbol,
+          });
+        }
+      }
+
+      const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
+      const retryFailedRecovery =
+        this.#failedCompileCacheRecoveries.has(recoveryKey) ||
+        (options.repairCache !== false &&
+          this.#unpersistedPatternRecoveries.has(recoveryKey));
+      const warm = this.#addressableByIdentity.get(entryIdentity)?.get(symbol);
+      if (
+        !retryFailedRecovery && warm !== undefined && isTrustedPattern(warm)
+      ) {
+        this.#esmCacheStats.byIdentityHits++;
+        return warm;
+      }
+    }
+
     const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
     // Select the same cached variant the compile path wrote. A coverage-on
@@ -2365,12 +2822,13 @@ export class PatternManager {
       }),
     );
 
+    let result: EvaluateResult;
     try {
       // Source-free: no sourceFiles. Sub-patterns fall back to identity.
       // Bodies came from the integrity-gated compiled-set read
       // (`loadCompiledClosure`, `requiredIntegrity`), so trust the CFC label and
       // skip redundant SES body re-verification.
-      const result = await harness.evaluateCachedModules(
+      result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
         {
@@ -2378,6 +2836,22 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
+    } catch (error) {
+      logger.warn("load-pattern-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        `symbol=${symbol}`,
+        String(error),
+      ]);
+      return await this.#tryColdLoadByIdentity(
+        entryIdentity,
+        symbol,
+        space,
+        cacheOpts,
+        options,
+      );
+    }
+
+    try {
       const pattern = this.#patternFromMain(result, symbol, entryIdentity);
       this.#failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
@@ -2393,13 +2867,7 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
-      return await this.#tryColdLoadByIdentity(
-        entryIdentity,
-        symbol,
-        space,
-        cacheOpts,
-        options,
-      );
+      return undefined;
     }
   }
 
@@ -2607,9 +3075,12 @@ export class PatternManager {
     // `isTrustedBuilderArtifact` — narrowing `#indexArtifact` would drop
     // exported lift/handler forward refs (the gap Codex flagged on an earlier
     // revision of #3912).
-    if (isTrustedPattern(pattern)) {
-      setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
+    if (!isTrustedPattern(pattern)) {
+      throw new Error(
+        `"${symbol}" is not a trusted pattern artifact in compiled module.`,
+      );
     }
+    setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
     return pattern;
   }
 
@@ -2723,7 +3194,14 @@ export class PatternManager {
     // the forward ref stays pinned to the original — acceptable because the
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
-    setArtifactEntryRef(value, { identity, symbol });
+    if (
+      isKeylessPatternIdentity(identity) ||
+      this.#sessionOnlyArtifactIdentities.has(identity)
+    ) {
+      setArtifactEntryRef(value, { identity, symbol });
+    } else {
+      setDurableArtifactEntryRef(value, { identity, symbol });
+    }
     // Note: content-addressed CFC provenance is recorded by the engine at
     // evaluation time (Engine.#recordModuleProvenance) — the single home, so it
     // covers every load path, not only ones routed through this indexing.
@@ -2867,6 +3345,11 @@ export class PatternManager {
           this.#failedCompileCacheRecoveries.delete(
             compileCacheRecoveryKey(space, entryIdentity),
           );
+          this.#cacheArtifactPublicationClosures(
+            space,
+            modules,
+            entryIdentity,
+          );
           this.#recordPersistedClosureSpaces(
             [entryIdentity, ...modules.map((module) => module.identity)],
             space,
@@ -2893,6 +3376,11 @@ export class PatternManager {
       );
       this.#failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
+      );
+      this.#cacheArtifactPublicationClosures(
+        space,
+        modules,
+        entryIdentity,
       );
       this.#recordPersistedClosureSpaces(
         [entryIdentity, ...modules.map((module) => module.identity)],
@@ -3021,6 +3509,11 @@ export class PatternManager {
     this.#trackCacheWriteBack(space, entryIdentity, writeBack);
     try {
       await writeBack;
+      this.#cacheArtifactPublicationClosures(
+        space,
+        modules,
+        entryIdentity,
+      );
       this.#recordPersistedClosureSpaces(
         [entryIdentity, ...modules.map((module) => module.identity)],
         space,
@@ -3080,8 +3573,8 @@ export class PatternManager {
    * `space`, on its own transaction, independent of the caller's. Uses
    * `editWithRetry` so a commit conflict (e.g. the cache write racing the
    * pattern's own space writes) retries rather than silently dropping the
-   * entry. A final failure throws because persisted refs-only pattern JSON
-   * requires a durable closure behind every `$patternRef`.
+   * entry. A final failure throws because every persisted factory ref requires
+   * a durable artifact closure.
    */
   async #writeBackCompileCache(
     space: MemorySpace,

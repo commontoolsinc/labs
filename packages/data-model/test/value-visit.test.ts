@@ -3,9 +3,11 @@ import { expect } from "@std/expect";
 
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { createFactoryShell } from "@/fabric-factory.ts";
 import {
   type FabricArray,
   type FabricContainerValue,
+  type FabricFactory,
   type FabricInstance,
   type FabricPlainObject,
   type FabricPrimitive,
@@ -59,6 +61,9 @@ class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
     tag: PrimitiveValueTag,
   ) => LeafVisitorResult<unknown, unknown>;
   onNonFabric?: (value: unknown) => LeafVisitorResult<unknown, unknown>;
+  onFactory?: (
+    value: FabricFactory,
+  ) => LeafVisitorResult<unknown, unknown>;
   onVisitedElement?: (
     index: number,
     value: unknown,
@@ -123,6 +128,13 @@ class Recorder extends ContainerIteratingVisitor<unknown, unknown> {
     // the default here is to stop.
     this.events.push(["instance", value]);
     return this.onInstance ? this.onInstance(value) : undefined;
+  }
+
+  override visitFabricFactory(
+    value: FabricFactory,
+  ): LeafVisitorResult<unknown, unknown> {
+    this.events.push(["factory", value]);
+    return this.onFactory ? this.onFactory(value) : undefined;
   }
 
   override visitPrimitive(
@@ -253,6 +265,17 @@ describe("value-visit", () => {
       expect(vis.visitCycle(1, 0, 1)).toBeUndefined();
       expect(vis.visitFabricArray([])).toBeUndefined();
       expect(vis.visitFabricContainer([])).toBeUndefined();
+      const factory = createFactoryShell({
+        kind: "pattern",
+        ref: {
+          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          symbol: "default",
+        },
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+      });
+      expect(vis.visitFabricFactory(factory)).toBeUndefined();
       expect(vis.visitFabricInstance(instance)).toBeUndefined();
       expect(vis.visitFabricPlainObject({})).toBeUndefined();
       expect(vis.visitNonFabricValue(new Date(0))).toBeUndefined();
@@ -282,6 +305,9 @@ describe("value-visit", () => {
   describe("ContainerIteratingVisitor", () => {
     class Iterating extends ContainerIteratingVisitor<never, never> {
       override visitCycle(): LeafVisitorResult<never, never> {
+        return undefined;
+      }
+      override visitFabricFactory(): LeafVisitorResult<never, never> {
         return undefined;
       }
       override visitNonFabricValue(): LeafVisitorResult<never, never> {
@@ -392,6 +418,26 @@ describe("value-visit", () => {
           ["value", instance],
           ["container", instance],
           ["instance", instance],
+        ]);
+      });
+
+      it("passes a `FabricFactory` to `visitFabricFactory()` as an atomic leaf", () => {
+        const rec = new Recorder();
+        const factory = createFactoryShell({
+          kind: "pattern",
+          ref: {
+            identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            symbol: "default",
+          },
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+        });
+
+        visitValue(factory, rec);
+        expect(rec.events).toEqual([
+          ["value", factory],
+          ["factory", factory],
         ]);
       });
 

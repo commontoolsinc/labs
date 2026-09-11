@@ -104,6 +104,18 @@ export declare const FabricPrimitive:
   & FabricPrimitiveConstructor
   & (abstract new (...args: any) => FabricPrimitive);
 
+/** Type-only brand for the narrow callable arm of `FabricValue`. */
+declare const FABRIC_FACTORY_TYPE: unique symbol;
+
+/** A pattern, module, or handler factory admitted by the Fabric protocol. */
+export interface FabricFactory<
+  Args extends unknown[] = [never],
+  Result = unknown,
+> {
+  (...args: Args): Result;
+  readonly [FABRIC_FACTORY_TYPE]: true;
+}
+
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch.
  * Wraps a `bigint` value.
@@ -402,6 +414,7 @@ export declare const FabricError: FabricErrorConstructor;
 export type FabricValue =
   | bigint
   | boolean
+  | FabricFactory
   | null
   | number
   | string

@@ -239,6 +239,7 @@ describe("trigger reads survive failed runs", () => {
     );
     return watchReactiveActionCommit({
       action,
+      generation: 0,
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
@@ -249,6 +250,7 @@ describe("trigger reads survive failed runs", () => {
       markInvalid: () => args.onMarkInvalid?.(),
       queueExecution: () => args.onQueueExecution?.(),
       getActionId: () => "test-action",
+      isActionGenerationCurrent: () => true,
       restoreInvalidCauses: args.onRestore,
     });
   }

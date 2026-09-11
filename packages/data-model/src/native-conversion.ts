@@ -52,7 +52,8 @@ import {
   isValidFabricNativeObject,
 } from "./validity-check.ts";
 import { cloneHelper } from "./value-clone.ts";
-import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { isAdmittedFabricFactory, sealFactoryState } from "./fabric-factory.ts";
 
 /**
  * Helper for `shallowFabricFromNativeObjectElseUndefined()`, which rejects
@@ -270,6 +271,8 @@ export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
+  if (isAdmittedFabricFactory(value)) return deepFreeze(value);
+
   const minted = shallowFabricFromNativeObjectElseUndefined(value);
 
   if (minted !== undefined) {
@@ -529,8 +532,13 @@ function isValidFabricConvertibleValueInternal(
     }
 
     case "function": {
-      // A function is live code, and has no fabric representation.
-      return false;
+      if (!isAdmittedFabricFactory(value)) return false;
+      try {
+        sealFactoryState(value, deepFreeze);
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     case "object": {
@@ -612,6 +620,15 @@ export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): FabricConvertibleValue {
+  if (typeof value === "function") {
+    if (!isAdmittedFabricFactory(value)) {
+      throw new TypeError(
+        "Cannot convert arbitrary function presented as a Fabric value",
+      );
+    }
+    return deepFreeze(value);
+  }
+
   if (value instanceof FabricError) {
     return deepUnwrapFabricError(value, frozen);
   }

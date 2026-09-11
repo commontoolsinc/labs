@@ -23,6 +23,12 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+  trySealedFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   type EntityRef,
   entityRefFromString,
   linkRefFrom,
@@ -62,6 +68,13 @@ import {
 } from "./builtins/collection-index-key.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  hasTraversableFabricInstanceState,
+  mapFabricInstanceStateForTraversal,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 import {
   type AnyCell,
   type AnyCellWrapping,
@@ -199,6 +212,20 @@ const markDocumentSynced = Symbol("markDocumentSynced");
 type SinkOptions = {
   changeGroup?: ChangeGroup;
 
+  /** Install the initial dependency set before invoking the callback. */
+  subscribeBeforeInitial?: boolean;
+
+  /**
+   * Run the initial callback inside a caller-owned setup transaction. This is
+   * runner-only wiring for effects whose first generation must be atomic with
+   * the graph that installs them; later callbacks receive their scheduler run
+   * transaction through the callback's third argument.
+   */
+  initialTx?: IExtendedStorageTransaction;
+
+  /** Observe the scheduler action backing this sink before its initial run. */
+  onActionRegistered?: (action: Action) => void;
+
   /**
    * Read the cell's display CFC label as part of the sink's tracked read set
    * and pass it to the callback as a second argument. Reading it on the sink's
@@ -207,6 +234,9 @@ type SinkOptions = {
    * reactive label delivery over a subscription. Off by default.
    */
   includeCfcLabel?: boolean;
+
+  /** Preserve inert Factory@1 shells for a runner-owned materializer. */
+  materializeFactories?: boolean;
 };
 
 export type RawCellReadOptions = IReadOptions & {
@@ -243,22 +273,30 @@ function createAggregate<T>(
   return result;
 }
 
+type ListPatternCallbackInput<T> = {
+  element: T extends Array<infer U> ? U : T;
+  index: number;
+  array: T;
+};
+
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
  * Reactive/Cell. These wrapped the callback in an anonymous inline pattern,
  * which has no stable content-addressed `{ identity, symbol }` and so cannot be
  * passed/persisted by identity (CT-1623). Authored pattern code is always
- * lowered by the TS transformer to the `*WithPattern(pattern(...), params)` form
- * (with the pattern hoisted to a module export); direct builder-API callers must
- * use the `*WithPattern` variant explicitly.
+ * lowered by the TS transformer to a bound factory passed to the
+ * `*WithPattern(pattern(...))` form (with the pattern hoisted to a module
+ * export); direct builder-API callers must use the `*WithPattern` variant
+ * explicitly.
  */
 function throwOpFunctionFormMessage(
   method: "map" | "filter" | "flatMap" | "count" | "minBy" | "maxBy",
 ): string {
   return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
-    `transformer to \`.${method}WithPattern(pattern(...), { params })\`; if you ` +
-    `are calling the builder API directly, use \`.${method}WithPattern(op, params)\`.`;
+    `transformer to a bound factory passed to \`.${method}WithPattern(op)\`; ` +
+    `if you are calling the builder API directly, pass a PatternFactory to ` +
+    `\`.${method}WithPattern(op)\`.`;
 }
 
 // WeakMap to store connected nodes for each cell instance
@@ -533,6 +571,7 @@ declare module "@commonfabric/api" {
       callback: (
         value: Readonly<T>,
         cfcLabel?: CfcLabelView | undefined,
+        tx?: IExtendedStorageTransaction,
       ) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
@@ -551,11 +590,16 @@ declare module "@commonfabric/api" {
       options?: SinkOptions,
     ): Cancel;
     sync(): Promise<Cell<T>>;
-    pull(): Promise<Readonly<T>>;
+    pull(options?: { materializeFactories?: boolean }): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
+      materializeFactories?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
+    /** @internal Dependency-only read for dynamic/scheduled factory selection. */
+    getWithoutFactoryMaterialization(
+      options?: { traverseCells?: boolean },
+    ): Readonly<StripDefaultBrand<T>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
       options?: {
@@ -1353,6 +1397,19 @@ export class CellImpl<T extends FabricValue>
     return value;
   }
 
+  getWithoutFactoryMaterialization(
+    options?: { traverseCells?: boolean },
+  ): Readonly<StripDefaultBrand<T>> {
+    if (!this.#synced) this.sync();
+    return validateAndTransform(
+      this.runtime,
+      this.tx,
+      this.#viewRef,
+      [],
+      { ...options, synced: this.#synced, materializeFactories: false },
+    );
+  }
+
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a handler won't cause the handler
@@ -1396,10 +1453,16 @@ export class CellImpl<T extends FabricValue>
    * const value = await cell.pull();
    * ```
    *
+   * Runner-owned state inspection may pass `materializeFactories: false` to
+   * preserve inert Factory@1 atoms while still converging link reads. Ordinary
+   * callers keep executable factory exposure by default.
+   *
    * @returns A promise that resolves to the cell's current value after all
    *          dependencies have been computed.
    */
-  pull(): Promise<Readonly<T>> {
+  pull(
+    options?: { materializeFactories?: boolean },
+  ): Promise<Readonly<T>> {
     if (!this.#synced) {
       // Register the kicked first sync in the settled pool the convergence
       // loop below drains. sync() resolves once the doc is confirmed —
@@ -1426,7 +1489,15 @@ export class CellImpl<T extends FabricValue>
     return new Promise((resolve) => {
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.runtime, tx, this.#viewRef);
+        const value = validateAndTransform(
+          this.runtime,
+          tx,
+          this.#viewRef,
+          [],
+          {
+            materializeFactories: options?.materializeFactories ?? true,
+          },
+        );
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
@@ -1456,7 +1527,7 @@ export class CellImpl<T extends FabricValue>
       // rounds is bounded by the reachable-doc depth; the fixed cap is only
       // a backstop against a pathological graph. Pulls that kicked nothing
       // take the zero-iteration path and keep their previous timing.
-      this.runtime.scheduler.idle().then(async () => {
+      this.runtime.scheduler.idleForPull().then(async () => {
         const storage = this.runtime.storageManager;
         // The pending pool is manager-global (same semantics as `synced()`):
         // this pull may also wait on loads kicked by concurrent readers.
@@ -1464,7 +1535,7 @@ export class CellImpl<T extends FabricValue>
         for (; round < 100; round++) {
           if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;
           await (storage.crossSpaceSettled?.() ?? Promise.resolve());
-          await this.runtime.scheduler.idle();
+          await this.runtime.scheduler.idleForPull();
         }
         if (
           round === 100 && (storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0
@@ -1486,7 +1557,11 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
-        resolve(validateAndTransform(this.runtime, undefined, this.#viewRef));
+        resolve(
+          validateAndTransform(this.runtime, undefined, this.#viewRef, [], {
+            materializeFactories: options?.materializeFactories ?? true,
+          }),
+        );
       });
     });
   }
@@ -1698,10 +1773,15 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
-        newValue as CellLinkInput,
+      const event = flattenBuilderArtifacts(
+        convertCellsToLinks(newValue as CellLinkInput),
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
+      assertFactoryArtifactsPublishableForWrite(
+        this.runtime,
+        event,
+        resolvedToValueLink.space,
+      );
 
       const mintedKeys = mintedRuntimeInjectedEventKeys(
         sendOptions?.runtimeInjectedEventKeys,
@@ -2194,6 +2274,11 @@ export class CellImpl<T extends FabricValue>
       // retry on conflict.
       if (!this.#synced) this.sync();
 
+      const transformedValue = flattenBuilderArtifacts(
+        prepareFactoryStatesForWrite(newValue),
+        { isLeaf: isCellResultForDereferencing },
+      );
+
       recordRelevantSchemaWritePolicyInput(
         this.tx,
         resolvedToValueLink,
@@ -2206,6 +2291,11 @@ export class CellImpl<T extends FabricValue>
         this.#link,
         "writeRedirect",
       );
+      assertFactoryArtifactsPublishableForWrite(
+        this.runtime,
+        transformedValue,
+        writeLink.space,
+      );
 
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       // The anchor id source makes sure each object in an array gets its own
@@ -2214,7 +2304,7 @@ export class CellImpl<T extends FabricValue>
         this.runtime,
         this.tx,
         writeLink,
-        newValue,
+        transformedValue,
         this.#frame?.cause,
         undefined,
         frameAnchorIds(this.#frame),
@@ -2456,12 +2546,20 @@ export class CellImpl<T extends FabricValue>
     const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
-    const combined = new Array(array.length + value.length);
+    const preparedValues = flattenBuilderArtifacts(
+      prepareFactoryStatesForWrite(value),
+    ) as typeof value;
+    assertFactoryArtifactsPublishableForWrite(
+      this.runtime,
+      preparedValues,
+      resolvedLink.space,
+    );
+    const combined = new Array(array.length + preparedValues.length);
     array.forEach((v, i) => {
       combined[i] = v;
     });
-    for (let i = 0; i < value.length; i++) {
-      combined[array.length + i] = value[i];
+    for (let i = 0; i < preparedValues.length; i++) {
+      combined[array.length + i] = preparedValues[i];
     }
     // The anchor id source makes sure each pushed object gets its own doc;
     // without a frame there is none, and such objects store inline.
@@ -2547,7 +2645,9 @@ export class CellImpl<T extends FabricValue>
     // Keep only the values not already present (by stored-value equality,
     // matching the server's add-unique dedup). The server re-dedups against
     // durable state, catching elements the local replica had not loaded.
-    const candidates = value;
+    const candidates = flattenBuilderArtifacts(
+      prepareFactoryStatesForWrite(value),
+    ) as FabricValue[];
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
@@ -2595,6 +2695,11 @@ export class CellImpl<T extends FabricValue>
     if (toAdd.length === 0) {
       return;
     }
+    assertFactoryArtifactsPublishableForWrite(
+      this.runtime,
+      toAdd,
+      resolvedLink.space,
+    );
     // The anchor id source makes sure each added object gets its own doc;
     // without a frame there is none, and such objects store inline.
     diffAndUpdate(
@@ -3048,6 +3153,7 @@ export class CellImpl<T extends FabricValue>
     callback: (
       value: Readonly<T>,
       cfcLabel?: CfcLabelView | undefined,
+      tx?: IExtendedStorageTransaction,
     ) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
@@ -3172,21 +3278,30 @@ export class CellImpl<T extends FabricValue>
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
+    materializeFactories = true,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.#synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
+    const stringPath = subPath.map((p) => p.toString());
     return createQueryResultProxy(
       this.runtime,
       tx ?? this.tx ?? this.runtime.edit(),
       {
         ...this.#link,
-        path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
+        path: [...this.path, ...stringPath] as string[],
+        schema: stringPath.length === 0
+          ? this.#link.schema
+          : ContextualFlowControl.getSchemaAtPath(
+            this.#link.schema,
+            stringPath,
+          ),
       },
       0,
       rebaseCfcLabelView(
         this.#cfcLabelView,
-        subPath.map((p) => p.toString()),
+        stringPath,
       ),
+      materializeFactories,
     );
   }
 
@@ -3254,18 +3369,22 @@ export class CellImpl<T extends FabricValue>
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
+    const resolvedLink = resolveLink(
+      this.runtime,
+      tx,
       // A raw read still resolves links on the way to the target, and those
       // crossings are content reads: the seam marks labeled hops.
-      resolveLink(this.runtime, tx, this.#link, lastNode, {
-        markIfcCrossings: true,
-      }),
-      readOptions,
+      this.#link,
+      lastNode,
+      { markIfcCrossings: true },
     );
+    const value = tx.readValueOrThrow(resolvedLink, readOptions);
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
-    return cloneIfNecessary(value, { frozen });
+    const result = cloneIfNecessary(value, { frozen });
+    this.runtime.noteFactoryArtifactSource(result, resolvedLink.space);
+    return result;
   }
 
   setRaw(value: (NoInfer<T> & FabricValue) | undefined): void {
@@ -3283,7 +3402,14 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.#synced) this.sync();
 
-    const inlined = findAndInlineDataUriLinks(value);
+    const inlined = findAndInlineDataUriLinks(
+      flattenBuilderArtifacts(value) as FabricValue,
+    );
+    assertFactoryArtifactsPublishableForWrite(
+      this.runtime,
+      inlined,
+      this.#link.space,
+    );
 
     // When asked to write only on change, read the current raw value and bail
     // out if it already equals what we'd write. `readValueOrThrow` mirrors the
@@ -3633,8 +3759,15 @@ export class CellImpl<T extends FabricValue>
    */
   mapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
+    op: PatternFactory<{
+      element: T extends Array<infer U> ? U : T;
+      index: number;
+      array: T;
+    }, S>,
+  ): Reactive<S[]>;
+  mapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S>,
   ): Reactive<S[]> {
     // Create the factory if it doesn't exist
     if (!mapFactory) {
@@ -3646,8 +3779,7 @@ export class CellImpl<T extends FabricValue>
 
     const result = mapFactory({
       list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
+      op,
     });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
@@ -3722,10 +3854,9 @@ export class CellImpl<T extends FabricValue>
   /** @inheritDoc */
   countWithPattern(
     this: AnyBrandedCell<unknown[]>,
-    op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, boolean>,
   ): Reactive<number> {
-    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op);
     return createAggregate(scores, "countTruthy", this);
   }
 
@@ -3744,10 +3875,9 @@ export class CellImpl<T extends FabricValue>
   /** @inheritDoc */
   minByWithPattern(
     this: AnyBrandedCell<unknown[]>,
-    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, number>,
   ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
-    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op);
     return createAggregate(scores, "minBy", this);
   }
 
@@ -3766,10 +3896,9 @@ export class CellImpl<T extends FabricValue>
   /** @inheritDoc */
   maxByWithPattern(
     this: AnyBrandedCell<unknown[]>,
-    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, number>,
   ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
-    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op);
     return createAggregate(scores, "maxBy", this);
   }
 
@@ -3844,8 +3973,15 @@ export class CellImpl<T extends FabricValue>
    */
   filterWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
+    op: PatternFactory<{
+      element: T extends Array<infer U> ? U : T;
+      index: number;
+      array: T;
+    }, S>,
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
@@ -3856,8 +3992,7 @@ export class CellImpl<T extends FabricValue>
 
     const result = filterFactory({
       list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
+      op,
     });
     result.setSchema(listResultSchema());
     return result;
@@ -3884,8 +4019,15 @@ export class CellImpl<T extends FabricValue>
    */
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
-    params: Record<string, any>,
+    op: PatternFactory<{
+      element: T extends Array<infer U> ? U : T;
+      index: number;
+      array: T;
+    }, S[]>,
+  ): Reactive<S[]>;
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S[]>,
   ): Reactive<S[]> {
     if (!flatMapFactory) {
       flatMapFactory = createNodeFactory({
@@ -3896,8 +4038,7 @@ export class CellImpl<T extends FabricValue>
 
     const result = flatMapFactory({
       list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
+      op,
     });
     result.setSchema(listResultSchema());
     return result;
@@ -3980,57 +4121,52 @@ function subscribeToReferencedDocs<T>(
   callback: (
     value: T,
     cfcLabel?: CfcLabelView | undefined,
+    tx?: IExtendedStorageTransaction,
   ) => Cancel | undefined | void,
   runtime: Runtime,
   ref: CellViewRef,
   options: SinkOptions = {},
 ): Cancel {
   const link = ref.link;
+  const readSinkValue = (
+    tx: IExtendedStorageTransaction,
+  ): { value: T; cfcLabel: CfcLabelView | undefined } => {
+    const extraTx = runtime.edit();
+    const wrappedTx = createChildCellTransaction(tx, extraTx);
+    const schema = link.schema;
+    const needsTraversal = schema === undefined ||
+      ContextualFlowControl.isTrueSchema(schema);
+    const value = validateAndTransform(runtime, wrappedTx, ref, undefined, {
+      synced: true,
+      materializeFactories: options.materializeFactories ?? true,
+    }) as T;
+    if (needsTraversal && value !== undefined && value !== null) {
+      deepTraverse(value);
+    }
+    const cfcLabel = options.includeCfcLabel
+      ? cfcLabelViewForCell(createCell(runtime, link, tx))
+      : undefined;
+    runtime.prepareTxForCommit(extraTx);
+    void extraTx.commit();
+    return { value, cfcLabel };
+  };
   const sink: SinkAction = {
     cleanup: undefined,
     action: (tx) => {
       if (isCancel(sink.cleanup)) sink.cleanup();
-
-      // Using a new transaction for child cells, as we're only interested in
-      // dependencies for the initial get, not further cells the callback might
-      // read. The callback is responsible for calling sink on those cells if it
-      // wants to stay updated.
-      const extraTx = runtime.edit();
-      const wrappedTx = createChildCellTransaction(tx, extraTx);
-      const schema = link.schema;
-      const needsTraversal = schema === undefined ||
-        ContextualFlowControl.isTrueSchema(schema);
-      // sink() always kicks off sync before subscribing. Preserve that state
-      // on asCell projections created for the callback, just as get() does, so
-      // nested sinks reuse the root query instead of opening one per cut point.
-      const newValue = validateAndTransform(runtime, wrappedTx, ref, [], {
-        synced: true,
-      });
-      if (needsTraversal && newValue !== undefined && newValue !== null) {
-        deepTraverse(newValue);
-      }
-      // Read the label on the SINK's transaction (`tx`), not the child `extraTx`,
-      // so the cfc-metadata read joins this sink's reactive dependency set: a
-      // later label-only write re-fires the sink. `cfcLabelViewForCell` is a
-      // pure store read (no sync); `internalVerifierRead` keeps it reactive but
-      // out of CFC taint. Raw here — the worker redacts before it leaves.
-      const cfcLabel = options.includeCfcLabel
-        ? cfcLabelViewForCell(createCell(runtime, link, tx))
-        : undefined;
-      sink.cleanup = callback(newValue, cfcLabel);
-
-      // no async await here, but that also means no retry. TODO(seefeld): Should
-      // we add a retry? So far all sinks are read-only, so they get re-triggered
-      // on changes already.
-      runtime.prepareTxForCommit(extraTx);
-      extraTx.commit();
+      const { value, cfcLabel } = readSinkValue(tx);
+      sink.cleanup = callback(value, cfcLabel, tx);
     },
   };
+  options.onActionRegistered?.(sink.action);
   return sinkHelper(
     sink,
     runtime,
     toMemorySpaceAddress(link),
     options,
+    (tx) => {
+      readSinkValue(tx);
+    },
   );
 }
 
@@ -4044,6 +4180,7 @@ function sinkHelper(
   runtime: Runtime,
   address: IMemorySpaceAddress,
   options: SinkOptions = {},
+  collectInitialDependencies?: (tx: IExtendedStorageTransaction) => void,
 ) {
   // Attach a name to the sink action
   const sinkName = `sink:${address.space}/${address.id}/${
@@ -4054,6 +4191,75 @@ function sinkHelper(
     configurable: true,
   });
   (sink.action as Action & { src?: string }).src = sinkName;
+
+  const subscriptionOptions = {
+    isEffect: true,
+    ...(options.changeGroup !== undefined && {
+      changeGroup: options.changeGroup,
+    }),
+  };
+
+  if (options.subscribeBeforeInitial) {
+    if (collectInitialDependencies === undefined) {
+      throw new Error(
+        "subscribeBeforeInitial requires an initial dependency collector",
+      );
+    }
+    const dependencyTx = runtime.edit();
+    collectInitialDependencies(dependencyTx);
+    const dependencyLog = txToReactivityLog(dependencyTx);
+    runtime.prepareTxForCommit(dependencyTx);
+    void dependencyTx.commit();
+    runtime.scheduler.resubscribe(
+      sink.action,
+      dependencyLog,
+      subscriptionOptions,
+    );
+
+    const initialTx = options.initialTx ?? runtime.edit();
+    const logBeforeInitial = txToReactivityLog(initialTx);
+    const readCountBeforeInitial = logBeforeInitial.reads.length;
+    const shallowReadCountBeforeInitial = logBeforeInitial.shallowReads.length;
+    const writeCountBeforeInitial = logBeforeInitial.writes.length;
+    runtime.scheduler.withExecutingAction(
+      sink.action,
+      () => sink.action(initialTx),
+    );
+    const logAfterInitial = txToReactivityLog(initialTx);
+    // A caller-owned setup transaction can already contain the enclosing
+    // pattern's reads and writes. Keep the dependencies collected before the
+    // callback, then add only activity introduced by this sink's initial run;
+    // attributing the whole setup transaction to the sink makes unrelated
+    // setup writes spuriously invalidate it.
+    const initialLog = options.initialTx === undefined ? logAfterInitial : {
+      reads: [
+        ...dependencyLog.reads,
+        ...logAfterInitial.reads.slice(readCountBeforeInitial),
+      ],
+      shallowReads: [
+        ...dependencyLog.shallowReads,
+        ...logAfterInitial.shallowReads.slice(
+          shallowReadCountBeforeInitial,
+        ),
+      ],
+      writes: logAfterInitial.writes.slice(writeCountBeforeInitial),
+    };
+    if (options.initialTx === undefined) {
+      runtime.prepareTxForCommit(initialTx);
+      void initialTx.commit();
+    }
+    runtime.scheduler.resubscribe(
+      sink.action,
+      initialLog,
+      subscriptionOptions,
+    );
+
+    return () => {
+      runtime.scheduler.unsubscribe(sink.action);
+      if (isCancel(sink.cleanup)) sink.cleanup();
+      sink.cleanup = undefined;
+    };
+  }
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to. Wrap with withExecutingAction so that any child sinks
@@ -4070,13 +4276,7 @@ function sinkHelper(
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
   // Use resubscribe because we've already run it once above
-  const resubscribeOptions = {
-    isEffect: true,
-    ...(options.changeGroup !== undefined && {
-      changeGroup: options.changeGroup,
-    }),
-  };
-  runtime.scheduler.resubscribe(sink.action, log, resubscribeOptions);
+  runtime.scheduler.resubscribe(sink.action, log, subscriptionOptions);
 
   return () => {
     runtime.scheduler.unsubscribe(sink.action);
@@ -4101,7 +4301,19 @@ function sinkHelper(
  */
 function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || value === undefined) return;
+
+  if (isAdmittedFabricFactory(value)) {
+    if (seen.has(value)) return;
+    seen.add(value);
+    mapFactoryStateValues(factoryStateOf(value), (nested) => {
+      deepTraverse(nested, seen);
+      return nested;
+    });
+    return;
+  }
+
   if (typeof value !== "object") return;
+  if (value instanceof FabricSpecialObject) return;
 
   // Avoid infinite loops with circular references
   if (seen.has(value)) return;
@@ -4290,6 +4502,15 @@ function validateStaticData(value: unknown): void {
       );
     }
 
+    if (typeof val === "function" && !isAdmittedFabricFactory(val)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a JavaScript function at path '${
+          path.join(".")
+        }'.\n` +
+          "help: only branded pattern, module, and handler factories are valid callable Fabric values",
+      );
+    }
+
     if (ancestors.has(obj)) {
       throw new Error(
         `Cell.of() does not accept circular references. Cycle detected at path '${
@@ -4304,6 +4525,14 @@ function validateStaticData(value: unknown): void {
     // Every way out of the descent, a refusal thrown from inside it included,
     // takes the object back off the stack.
     try {
+      if (isAdmittedFabricFactory(val)) {
+        mapFactoryStateValues(factoryStateOf(val), (nested, field) => {
+          traverse(nested, [...path, field]);
+          return nested;
+        });
+        return;
+      }
+
       // A `FabricPrimitive` reaches here and survives, correctly: it has zero
       // enumerable own properties, so `Object.keys()` is empty and the
       // descent ends -- and a leaf holds no cell for this validation to find.
@@ -4342,6 +4571,172 @@ function validateStaticData(value: unknown): void {
   }
 
   traverse(value, []);
+}
+
+/**
+ * Convert runner-owned values in hidden live Factory@1 state before the
+ * ordinary write boundary attempts to seal the callable.
+ */
+export function prepareFactoryStatesForWrite(
+  value: unknown,
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
+  seen: Map<object, unknown> = new Map(),
+): unknown {
+  if (isAdmittedFabricFactory(value)) {
+    if (trySealedFactoryState(value) !== undefined) return value;
+    return mapFactoryForTraversal(
+      value,
+      (nested) =>
+        convertCellsToLinks(
+          nested as CellLinkInput,
+          { includeSchema: true },
+          factoryContext,
+        ),
+      factoryContext,
+    );
+  }
+
+  if (
+    isCellResultForDereferencing(value) || isCell(value) || isCellLink(value)
+  ) {
+    return value;
+  }
+
+  if (hasTraversableFabricInstanceState(value)) {
+    const prior = seen.get(value);
+    if (prior !== undefined) return prior;
+    seen.set(value, value);
+    const prepared = mapFabricInstanceStateForTraversal(
+      value,
+      (state) =>
+        prepareFactoryStatesForWrite(
+          state,
+          factoryContext,
+          seen,
+        ) as FabricValue,
+    );
+    seen.set(value, prepared);
+    return prepared;
+  }
+
+  if (
+    value instanceof FabricSpecialObject || value === null ||
+    typeof value !== "object"
+  ) {
+    return value;
+  }
+
+  const prior = seen.get(value);
+  if (prior !== undefined) return prior;
+
+  if (Array.isArray(value)) {
+    const result = new Array<unknown>(value.length);
+    seen.set(value, result);
+    let changed = false;
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) continue;
+      const current = value[index];
+      const next = prepareFactoryStatesForWrite(
+        current,
+        factoryContext,
+        seen,
+      );
+      changed ||= !Object.is(next, current);
+      result[index] = next;
+    }
+    if (!changed) {
+      seen.set(value, value);
+      return value;
+    }
+    return result;
+  }
+
+  if (!isObjectNotArray(value)) return value;
+  const result: Record<string, unknown> = {};
+  seen.set(value, result);
+  let changed = false;
+  for (const [key, current] of Object.entries(value)) {
+    const next = prepareFactoryStatesForWrite(current, factoryContext, seen);
+    changed ||= !Object.is(next, current);
+    result[key] = next;
+  }
+  if (!changed) {
+    seen.set(value, value);
+    return value;
+  }
+  return result;
+}
+
+/**
+ * Fail closed before a by-value Factory@1 write unless its artifact can be
+ * published atomically into the destination space.
+ */
+function assertFactoryArtifactsPublishableForWrite(
+  runtime: Runtime,
+  value: unknown,
+  destinationSpace: MemorySpace,
+  seen: Set<object> = new Set(),
+): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object" && typeof value !== "function") return;
+
+  const object = value as object;
+  if (seen.has(object)) return;
+  seen.add(object);
+
+  if (isAdmittedFabricFactory(value)) {
+    const state = factoryStateOf(value);
+    if (state.ref === undefined) {
+      throw new Error(
+        `Factory has no durable artifact ref for space ${destinationSpace}`,
+      );
+    }
+    runtime.assertFactoryArtifactsPublishableForWrite(value, destinationSpace);
+    mapFactoryStateValues(state, (nested) => {
+      assertFactoryArtifactsPublishableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+      return nested;
+    });
+    return;
+  }
+
+  if (
+    isCell(value) || isCellResultForDereferencing(value) || isCellLink(value)
+  ) {
+    return;
+  }
+
+  if (hasTraversableFabricInstanceState(value)) {
+    mapFabricInstanceStateForTraversal(value, (state) => {
+      assertFactoryArtifactsPublishableForWrite(
+        runtime,
+        state,
+        destinationSpace,
+        seen,
+      );
+      return state;
+    });
+    return;
+  }
+  if (value instanceof FabricSpecialObject) return;
+
+  const children = Array.isArray(value)
+    ? value
+    : isObjectNotArray(value)
+    ? Object.values(value)
+    : [];
+  for (const nested of children) {
+    assertFactoryArtifactsPublishableForWrite(
+      runtime,
+      nested,
+      destinationSpace,
+      seen,
+    );
+  }
 }
 
 /**
@@ -4425,12 +4820,14 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
 export function convertCellsToLinks(
   value: CellLinkInput,
   options: CellLinkOptions = {},
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
 ): FabricValue {
   return convertOneToLinks(
     value,
     options,
     [],
     new IndexTrackingStack<object>(),
+    factoryContext,
   );
 }
 
@@ -4463,6 +4860,7 @@ function convertOneToLinks(
   options: CellLinkOptions,
   stack: string[],
   ancestors: IndexTrackingStack<object>,
+  factoryContext: FactoryTraversalContext,
 ): FabricValue {
   switch (typeof value) {
     case "object": {
@@ -4473,6 +4871,26 @@ function convertOneToLinks(
       break;
     }
     case "function": {
+      if (isAdmittedFabricFactory(value)) {
+        return mapFactoryForTraversal(
+          value,
+          (nested, field) => {
+            stack.push(field);
+            try {
+              return convertOneToLinks(
+                nested as CellLinkInput,
+                options,
+                stack,
+                ancestors,
+                factoryContext,
+              );
+            } finally {
+              stack.pop();
+            }
+          },
+          factoryContext,
+        ) as FabricValue;
+      }
       // No function has a fabric form, and none is a cell or a cell result
       // either, so it is refused before the tests below. The type admits no
       // function here either; this arm is for one that got past it. The
@@ -4612,6 +5030,7 @@ function convertOneToLinks(
           options,
           stack,
           ancestors,
+          factoryContext,
         );
 
         stack.pop();
@@ -4634,6 +5053,7 @@ function convertOneToLinks(
           options,
           stack,
           ancestors,
+          factoryContext,
         );
 
         stack.pop();

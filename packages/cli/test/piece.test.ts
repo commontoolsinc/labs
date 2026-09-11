@@ -2068,6 +2068,38 @@ describe("cli piece parsing", () => {
     ]);
   });
 
+  it("preserves inert factories for a plain cell read", async () => {
+    const factoryShell = { marker: "inert-factory" };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: {
+            get: (
+              path: (string | number)[],
+              options: { materializeFactories?: boolean },
+            ) => {
+              expect(path).toEqual([]);
+              expect(options).toEqual({ materializeFactories: false });
+              return Promise.resolve({ factory: factoryShell });
+            },
+          },
+        }),
+      stopPiece: () => Promise.resolve(),
+    };
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      {},
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      },
+    );
+
+    expect(value).toEqual({ factory: factoryShell });
+  });
+
   it("reports schema projection failure when raw result data exists", async () => {
     const rawCell = {
       schema: { type: "object" },
@@ -4760,6 +4792,7 @@ describe("cli piece parsing", () => {
     });
     try {
       const space = signer.did();
+      const inspectionReadOptions: unknown[] = [];
       const inspected = await inspectPiece(
         { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
         {
@@ -4772,12 +4805,18 @@ describe("cli piece parsing", () => {
                   name: () => "Notes",
                   getPatternRef: () => Promise.resolve(patternRef),
                   input: {
-                    get: () => Promise.resolve({ title: "Input" }),
+                    get: (_path: unknown, options: unknown) => {
+                      inspectionReadOptions.push(options);
+                      return Promise.resolve({ title: "Input" });
+                    },
                     getCell: () =>
                       Promise.resolve(runtime.getCell(space, "argument")),
                   },
                   result: {
-                    get: () => Promise.resolve({ title: "Result" }),
+                    get: (_path: unknown, options: unknown) => {
+                      inspectionReadOptions.push(options);
+                      return Promise.resolve({ title: "Result" });
+                    },
                     getCell: () =>
                       Promise.resolve(runtime.getCell(space, "result")),
                   },
@@ -4793,6 +4832,10 @@ describe("cli piece parsing", () => {
       expect(inspected.cachedResultFields).toEqual([]);
       expect(inspected.sourceCommit).toBeUndefined();
       expect(inspected.sourceSpace).toBe(space);
+      expect(inspectionReadOptions).toEqual([
+        { materializeFactories: false },
+        { materializeFactories: false },
+      ]);
     } finally {
       await runtime.dispose();
       await storageManager.close();

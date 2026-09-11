@@ -2,6 +2,7 @@ import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   FabricSpecialObject,
   isFabricObjectOrArray,
+  isValidFabricValue,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -243,6 +244,10 @@ const collectChangedPaths = (
     return;
   }
 
+  // Callable factories never enter the record walk above. Keep them atomic at
+  // their containing path and delegate both admission and canonical-state
+  // comparison to the shared Fabric equality protocol; arbitrary functions
+  // are rejected there rather than being treated as empty callable objects.
   if (!valueEqual(before, after)) {
     pushChangedPath(paths, currentPath, depth);
   }
@@ -254,6 +259,14 @@ const addStateChange = (
   before: State["is"] | undefined,
   after: State["is"] | undefined,
 ): void => {
+  if (
+    (before !== undefined && !isValidFabricValue(before)) ||
+    (after !== undefined && !isValidFabricValue(after))
+  ) {
+    throw new Error(
+      "Cannot compare an arbitrary function or other invalid Fabric value",
+    );
+  }
   if (valueEqual(before, after)) {
     return;
   }

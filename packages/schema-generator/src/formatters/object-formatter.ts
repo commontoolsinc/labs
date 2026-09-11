@@ -31,6 +31,7 @@ import {
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
 import { attachUiContract, getUiContractHint } from "../ui-contract.ts";
+import { containsFactoryType } from "./factory-formatter.ts";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,
@@ -222,6 +223,16 @@ function shouldSkipInternalProperty(
   );
 }
 
+function hasCompilerOwnedFactoryContract(
+  typeNode: ts.TypeNode | undefined,
+  context: GenerationContext,
+): boolean {
+  if (!typeNode) return false;
+  const contracts = context.schemaHints?.get(typeNode)?.factoryContracts ??
+    context.schemaHints?.get(ts.getOriginalNode(typeNode))?.factoryContracts;
+  return (contracts?.length ?? 0) > 0;
+}
+
 /**
  * `FabricExecPlainObject` is used as a compile-time constraint on internal
  * execution graph types. Its inherited index signature does not describe
@@ -334,7 +345,11 @@ export class ObjectFormatter implements TypeFormatter {
         propTypeNode,
       );
 
-      if (isFunctionLike(resolvedPropType)) {
+      if (
+        isFunctionLike(resolvedPropType) &&
+        !containsFactoryType(resolvedPropType, checker) &&
+        !hasCompilerOwnedFactoryContract(propTypeNode, context)
+      ) {
         // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
         // should generate { asCell: ["stream"] } or { asCell: ["cell"] } instead of being skipped
         const wrapperSchema = getWrapperSchemaFromCallable(

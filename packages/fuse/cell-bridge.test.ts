@@ -10,6 +10,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { FakeTime } from "@std/testing/time";
 
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { defer } from "@commonfabric/utils/defer";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
@@ -59,6 +60,23 @@ import {
 //
 
 const decoder = new TextDecoder();
+
+function patternFactoryValue(params: Record<string, unknown> = {}) {
+  return createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "search",
+    },
+    argumentSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    resultSchema: true,
+    paramsSchema: true,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  });
+}
 
 class IterationCountingMap<K, V> extends Map<K, V> {
   iteratedEntries = 0;
@@ -3259,15 +3277,7 @@ describe("cell-bridge", () => {
 
           const makeResultCell = (title: string): FakeCell => {
             const searchToolCell = makeCell(
-              {
-                pattern: {
-                  argumentSchema: {
-                    type: "object",
-                    properties: { query: { type: "string" } },
-                  },
-                },
-                extraParams: { title },
-              },
+              patternFactoryValue({ title }),
               undefined,
             );
             return makeCell(
@@ -3733,15 +3743,7 @@ describe("cell-bridge", () => {
           const state = buildTestSpace(bridge, "home", []);
 
           const initialToolCell = makeCell(
-            {
-              pattern: {
-                argumentSchema: {
-                  type: "object",
-                  properties: { query: { type: "string" } },
-                },
-              },
-              extraParams: { source: "before" },
-            },
+            patternFactoryValue({ source: "before" }),
             undefined,
           );
           const initialResultCell = makeCell(
@@ -3796,15 +3798,7 @@ describe("cell-bridge", () => {
           expect(initialToolIno).toBeDefined();
 
           const rebuiltToolCell = makeCell(
-            {
-              pattern: {
-                argumentSchema: {
-                  type: "object",
-                  properties: { query: { type: "string" } },
-                },
-              },
-              extraParams: { source: "after" },
-            },
+            patternFactoryValue({ source: "after" }),
             undefined,
           );
           const rebuiltResultCell = makeCell(

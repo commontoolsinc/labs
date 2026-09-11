@@ -1,10 +1,14 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
+import { decomposeSchema } from "@commonfabric/runner";
+import { toCell } from "../runner/src/back-to-cell.ts";
+import { registerSchemaDocument } from "../runner/src/schema-registry.ts";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
   classifyCallableEntry,
-  isPatternToolValue,
+  isPatternFactoryValue,
 } from "./callables.ts";
 import {
   buildFsProjection,
@@ -24,6 +28,23 @@ import {
 import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
+
+function patternFactoryValue(params: Record<string, unknown> = {}) {
+  return createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "search",
+    },
+    argumentSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    resultSchema: true,
+    paramsSchema: true,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  });
+}
 
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const ino = tree.lookup(parentIno, name);
@@ -987,15 +1008,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
   const tree = new FsTree();
   const data = {
     count: 3,
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactoryValue({ source: "items" }),
   };
 
   const resultIno = buildJsonTree(
@@ -1005,7 +1018,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     data,
     undefined,
     0,
-    (value) => isPatternToolValue(value),
+    (value) => isPatternFactoryValue(value),
   );
   const script = buildCallableScript("/tmp/cf-exec");
   const callableIno = tree.addCallable(
@@ -1035,15 +1048,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   const data = {
     count: 3,
     addItem: { $stream: true },
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactoryValue({ source: "items" }),
   };
 
   buildJsonTree(
@@ -1053,10 +1058,10 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     data,
     undefined,
     0,
-    (value) => isHandlerCell(value) || isPatternToolValue(value),
+    (value) => isHandlerCell(value) || isPatternFactoryValue(value),
     (_key, value) => {
       if (isHandlerCell(value) || isStreamValue(value)) return "handler";
-      return isPatternToolValue(value) ? "tool" : null;
+      return isPatternFactoryValue(value) ? "tool" : null;
     },
   );
 
@@ -1289,6 +1294,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   interface FakeCell {
     schema: Record<string, unknown> | undefined;
     get(): unknown;
+    getWithoutFactoryMaterialization(): unknown;
     getRaw(): unknown;
     asSchemaFromLinks(): FakeCell;
     key(segment: string): FakeCell;
@@ -1304,6 +1310,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     return {
       schema,
       get: () => value,
+      getWithoutFactoryMaterialization: () => value,
       getRaw: () => value,
       asSchemaFromLinks() {
         return this;
@@ -1317,15 +1324,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
 
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
+    patternFactoryValue({ source: "bound-source" }),
     undefined,
   );
   const resultCell = makeCell(
@@ -1389,6 +1388,7 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     true,
   );
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+  assertEquals(tree.lookup(resultIno!, "search"), undefined);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
   assertEquals(resultJson.recordMessage, { "/handler": "recordMessage" });
@@ -1402,6 +1402,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   interface FakeCell {
     schema: Record<string, unknown> | undefined;
     get(): unknown;
+    getWithoutFactoryMaterialization(): unknown;
     getRaw(): unknown;
     asSchemaFromLinks(): FakeCell;
     key(segment: string): FakeCell;
@@ -1417,6 +1418,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     return {
       schema,
       get: () => value,
+      getWithoutFactoryMaterialization: () => value,
       getRaw: () => value,
       asSchemaFromLinks() {
         return this;
@@ -1428,32 +1430,116 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     };
   }
 
-  const titleCell = makeCell("hello", { type: "string" });
+  const titleValueCell = makeCell("hello", { type: "string" });
+  const titleProjection = { [toCell]: () => titleValueCell };
+  const titleCell = makeCell(titleProjection, {
+    type: "string",
+    asCell: ["cell"],
+  });
+  const metadataProjection = {
+    note: "kept",
+    [toCell]: () => metadataCell,
+  };
+  const metadataCell = makeCell(metadataProjection, {
+    type: "object",
+    properties: { note: { type: "string" } },
+  });
+  const settingsPayloadProjection = {
+    theme: "dark",
+    [toCell]: () =>
+      makeCell(
+        { theme: "over-dereferenced" },
+        {
+          type: "object",
+          properties: { theme: { type: "string" } },
+        },
+      ),
+  };
+  const settingsValueCell = makeCell(settingsPayloadProjection, {
+    type: "object",
+    properties: { theme: { type: "string" } },
+  });
+  const settingsProjection = { [toCell]: () => settingsValueCell };
+  const settingsCell = makeCell(settingsProjection, {
+    type: "object",
+    properties: { theme: { type: "string" } },
+    asCell: ["cell"],
+  });
+  const preferencesSchema = {
+    anyOf: [
+      { type: "null" },
+      {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+    ],
+  } as const;
+  const profileSchema = {
+    oneOf: [
+      {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+      { type: "null" },
+    ],
+  } as const;
+  const accountSchema = {
+    anyOf: [{ type: "object" }],
+    oneOf: [
+      {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+    ],
+  } as const;
+  const preferencesCell = makeCell(
+    settingsProjection,
+    preferencesSchema,
+  );
+  const profileCell = makeCell(settingsProjection, profileSchema);
+  const accountCell = makeCell(settingsProjection, accountSchema);
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
+    patternFactoryValue({ source: "bound-source" }),
     undefined,
   );
+  const resultSchema = {
+    type: "object",
+    properties: {
+      title: { type: "string", asCell: ["cell"] },
+      metadata: {
+        type: "object",
+        properties: { note: { type: "string" } },
+      },
+      settings: {
+        type: "object",
+        properties: { theme: { type: "string" } },
+        asCell: ["cell"],
+      },
+      preferences: preferencesSchema,
+      profile: profileSchema,
+      account: accountSchema,
+      recordMessage: { type: "object" },
+      search: { type: "object" },
+    },
+  } as const;
+  const { rootRef, documents } = decomposeSchema(resultSchema);
+  for (const [hash, document] of documents) {
+    registerSchemaDocument(hash, document);
+  }
   const resultCell = makeCell(
     { title: "hello" },
-    {
-      type: "object",
-      properties: {
-        title: { type: "string" },
-        recordMessage: { type: "object" },
-        search: { type: "object" },
-      },
-    },
+    { $ref: rootRef },
     {
       title: titleCell,
+      metadata: metadataCell,
+      settings: settingsCell,
+      preferences: preferencesCell,
+      profile: profileCell,
+      account: accountCell,
       recordMessage: handlerCell,
       search: toolCell,
     },
@@ -1472,7 +1558,15 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     },
     result: {
       getCell: () => Promise.resolve(resultCell),
-      get: () => Promise.resolve({ title: "hello" }),
+      get: () =>
+        Promise.resolve({
+          title: titleProjection,
+          metadata: metadataProjection,
+          settings: settingsProjection,
+          preferences: settingsProjection,
+          profile: settingsProjection,
+          account: settingsProjection,
+        }),
     },
   };
 
@@ -1501,11 +1595,27 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
   assertEquals(getFileContent(tree, resultIno!, "title"), "hello");
+  const metadataIno = tree.lookup(resultIno!, "metadata");
+  assertEquals(metadataIno !== undefined, true);
+  assertEquals(getFileContent(tree, metadataIno!, "note"), "kept");
+  const settingsIno = tree.lookup(resultIno!, "settings");
+  assertEquals(settingsIno !== undefined, true);
+  assertEquals(getFileContent(tree, settingsIno!, "theme"), "dark");
+  const preferencesIno = tree.lookup(resultIno!, "preferences");
+  assertEquals(preferencesIno !== undefined, true);
+  assertEquals(getFileContent(tree, preferencesIno!, "theme"), "dark");
+  const profileIno = tree.lookup(resultIno!, "profile");
+  assertEquals(profileIno !== undefined, true);
+  assertEquals(getFileContent(tree, profileIno!, "theme"), "dark");
+  const accountIno = tree.lookup(resultIno!, "account");
+  assertEquals(accountIno !== undefined, true);
+  assertEquals(getFileContent(tree, accountIno!, "theme"), "dark");
   assertEquals(
     tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
     true,
   );
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
+  assertEquals(tree.lookup(resultIno!, "search"), undefined);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
   assertEquals(resultJson.title, "hello");

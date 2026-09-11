@@ -13,6 +13,11 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  sealFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   combineSchemaForLink,
   resolveSchemaRefsCanonical,
 } from "./traverse.ts";
@@ -69,6 +74,7 @@ import {
   createCell,
   isCell,
   markCellDocumentSynced,
+  prepareFactoryStatesForWrite,
   syncCellForIdentity,
 } from "./cell.ts";
 import {
@@ -78,15 +84,17 @@ import {
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
-import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
-import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
-import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
+import {
+  MAX_PATH_RESOLUTION_LENGTH,
+  resolveLink,
+  resolveLinkTracingDereferences,
+} from "./link-resolution.ts";
 import {
   listCoordinatorPlan,
   listElementResultCell,
   listSlotResolutions,
 } from "./builtins/list-coordinator-plan.ts";
-import { MAP_INPUT_SCHEMA } from "./builtins/map.ts";
+import { materializeListPatternSelection } from "./builtins/list-factory-materialization.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -120,7 +128,6 @@ import {
   navigateEventContextOf,
   setNavigateEventContext,
 } from "./builtins/navigate-context.ts";
-import { opInputsDocKey } from "./builtins/op-pattern-ref.ts";
 import {
   requireWaveAcceptance,
   waveRunContextOf,
@@ -138,7 +145,6 @@ import {
   PatternManager,
   type PreparedSourceUpdate,
 } from "./pattern-manager.ts";
-import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
 import {
   type Action,
@@ -146,6 +152,7 @@ import {
   ignoreReadForScheduling,
 } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
+import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
 import { isSchemaMismatchError } from "./schema-view.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -166,6 +173,12 @@ import {
   markDurableReadTx,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
+import {
+  isCellScope,
+  narrowestScope,
+  normalizeCellScope,
+  scopeRank,
+} from "./scope.ts";
 import {
   isCfcEnforcementRejection,
   isConflictRejection,
@@ -199,6 +212,21 @@ import {
   type ImplementationIdentity,
   runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import {
+  createFactoryTraversalContext,
+  visitFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
+import type { FactoryContract } from "./factory-contract.ts";
+import { materializeScheduledFactoryInputs } from "./factory-input-preparation.ts";
+import {
+  FactoryArtifactUnavailableError,
+  FactoryMaterializationSupersededError,
+  type MaterializedFactory,
+  materializeFactory,
+  prepareFactory,
+} from "./factory-materialization.ts";
+import { noteLegacyFactoryCompatibilityRead } from "./legacy-factory-compat.ts";
 import {
   prepareSourceClosureVerification,
   readVerifiedSourceClosure,
@@ -219,7 +247,6 @@ import {
   setRunnableName,
 } from "./runner-utils.ts";
 import { normalizeSandboxResult } from "./sandbox/result-normalization.ts";
-import { isCellScope, narrowestScope } from "./scope.ts";
 import { SigilLink } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { rawMetaWriteAuthorization } from "./meta-seam.ts";
@@ -263,6 +290,13 @@ const RESULT_SHORTCUT_LIMIT = 4096;
  * held for it is diagnosable.
  */
 const NAMING_PROBE_BUDGET = 256;
+
+class DynamicFactoryExecutionSpaceUnavailableError extends Error {
+  constructor(readonly spaceName: string) {
+    super(`Dynamic factory execution space is not ready: ${spaceName}`);
+    this.name = "DynamicFactoryExecutionSpaceUnavailableError";
+  }
+}
 
 const EAGER_RESULT_BUILTIN_REFS = new Set([
   "fetchBinary",
@@ -1400,12 +1434,14 @@ type ResolvedJavaScriptModule = {
 type JavaScriptNodeContext = BoundNodeIO & {
   tx: IExtendedStorageTransaction;
   module: Module;
+  processCell: Cell<any>;
   resultCell: Cell<any>;
   addCancel: AddCancel;
   pattern: Pattern;
   fn: (...args: any[]) => any;
   name: string | undefined;
   schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
+  factorySelectionLink?: NormalizedFullLink;
 };
 
 type JavaScriptActionResultCells = {
@@ -1467,12 +1503,6 @@ function defersInitialRunUntilSynced(
  * result cell it runs under. */
 type ResumePatternInstance = { pattern: Pattern; resultCell: Cell<any> };
 
-const LIST_OP_INPUT_SCHEMAS = {
-  map: MAP_INPUT_SCHEMA,
-  filter: FILTER_INPUT_SCHEMA,
-  flatMap: FLATMAP_INPUT_SCHEMA,
-} as const;
-
 // Options shared by `run()`, `#startWithTx()`, and
 // `#startAfterSuccessfulCommit()`.
 type RunnerRunOptions = {
@@ -1480,6 +1510,10 @@ type RunnerRunOptions = {
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
+  /** Reactive selector whose current Factory@1 state authorizes this graph. */
+  factorySelectionLink?: NormalizedFullLink;
+  /** Generation guard inherited by a dynamically selected child pattern. */
+  implementationSelection?: ImplementationSelection;
   // The piece root that INSTANTIATED this piece (a nested pattern node's
   // parent, a result-as-pattern child's producing piece). Its actions'
   // demand roots (`SchedulerObservationIdentity.demandRootIds`) become the
@@ -2452,7 +2486,6 @@ export class Runner {
   #createStorageSubscription(): IStorageSubscription {
     return {
       next: (notification) => {
-        const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
             // The notification names the DOC (scope arrives by NAME,
@@ -2468,7 +2501,9 @@ export class Runner {
             // eviction-on-notification CONTRACT is what the storage
             // subscription exists for and is pinned by the "clears
             // cached patterns when storage notifies of changes" test.
-            this.#evictResultPatternMemos(`${space}/${change.address.id}`);
+            this.#evictResultPatternMemos(
+              `${notification.space}/${change.address.id}`,
+            );
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
@@ -2510,9 +2545,21 @@ export class Runner {
     options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
     if (providedTx) {
+      // Factory kind is canonical carried state, so enforce the root boundary
+      // before deciding whether the value needs materialization. In particular,
+      // a trusted live HandlerFactory and its decoded shell must not diverge.
+      // Raw legacy Module/handler descriptors remain outside this first-class
+      // factory guard and retain their existing setup behavior.
+      if (isAdmittedFabricFactory(patternOrModule)) {
+        this.#assertSetupFactoryKind(patternOrModule as MaterializedFactory);
+      }
+      const prepared = this.#materializeSetupFactorySync(
+        patternOrModule,
+        resultCell,
+      );
       this.#setupInternal(
         providedTx,
-        patternOrModule,
+        prepared,
         argument,
         resultCell,
         options,
@@ -2523,12 +2570,25 @@ export class Runner {
       // we'll see the latest true value; it just lost the race against someone
       // else changing the pattern or argument. Correct action is anyhow similar
       // to what would have happened if the write succeeded and was immediately
-      // overwritten. Still surface real callback failures from
-      // `#setupInternal()` so callers don't silently continue after a broken
-      // setup.
-      return this.#runtime.editWithRetry((tx) => {
-        this.#setupInternal(tx, patternOrModule, argument, resultCell, options);
-      }).then(({ error }) => {
+      // overwritten. Still surface real callback failures from setupInternal so
+      // callers don't silently continue after a broken setup.
+      if (isAdmittedFabricFactory(patternOrModule)) {
+        try {
+          this.#assertSetupFactoryKind(patternOrModule as MaterializedFactory);
+        } catch (error) {
+          // Non-transactional setup is Promise-based, so retain its rejection
+          // contract even though carried factory kind is synchronously known.
+          return Promise.reject(error);
+        }
+      }
+      const setup = (prepared: Pattern | Module | undefined) =>
+        this.#runtime.editWithRetry((tx) => {
+          this.#setupInternal(tx, prepared, argument, resultCell, options);
+        });
+      const pending = this.#requiresSetupFactoryMaterialization(patternOrModule)
+        ? this.#prepareSetupFactory(patternOrModule, resultCell).then(setup)
+        : setup(patternOrModule);
+      return pending.then(({ error }) => {
         if (error) {
           if (
             error.name === "StorageTransactionAborted" &&
@@ -2560,6 +2620,58 @@ export class Runner {
         return resultCell;
       });
     }
+  }
+
+  #assertSetupFactoryKind(
+    factory: MaterializedFactory,
+  ): Pattern | Module {
+    const kind = factoryStateOf(factory).kind;
+    if (kind === "handler") {
+      throw new TypeError(
+        "Root setup requires a pattern or module factory, got handler",
+      );
+    }
+    return factory as Pattern | Module;
+  }
+
+  #requiresSetupFactoryMaterialization(
+    patternOrModule: Pattern | Module | undefined,
+  ): boolean {
+    return isAdmittedFabricFactory(patternOrModule) &&
+      !isTrustedBuilderArtifact(patternOrModule);
+  }
+
+  #materializeSetupFactorySync<R>(
+    patternOrModule: Pattern | Module | undefined,
+    resultCell: Cell<R>,
+  ): Pattern | Module | undefined {
+    if (!isAdmittedFabricFactory(patternOrModule)) {
+      return patternOrModule;
+    }
+    if (isTrustedBuilderArtifact(patternOrModule)) {
+      return this.#assertSetupFactoryKind(
+        patternOrModule as unknown as MaterializedFactory,
+      );
+    }
+    const factory = materializeFactory(patternOrModule, {
+      runtime: this.#runtime,
+      artifactSpace: resultCell.getAsNormalizedFullLink().space,
+    });
+    return this.#assertSetupFactoryKind(factory);
+  }
+
+  async #prepareSetupFactory<R>(
+    patternOrModule: Pattern | Module | undefined,
+    resultCell: Cell<R>,
+  ): Promise<Pattern | Module | undefined> {
+    if (!this.#requiresSetupFactoryMaterialization(patternOrModule)) {
+      return patternOrModule;
+    }
+    const factory = await prepareFactory(patternOrModule, {
+      runtime: this.#runtime,
+      artifactSpace: resultCell.getAsNormalizedFullLink().space,
+    });
+    return this.#assertSetupFactoryKind(factory);
   }
 
   /**
@@ -2668,15 +2780,7 @@ export class Runner {
       undefined,
       tx,
     );
-    // A sub-pattern's argument can carry a builder artifact -- a pattern
-    // handed to another pattern as an input. This is a storage boundary like
-    // any other, so the artifact is replaced on the way in, once, for every
-    // write below: they must agree on what was stored. A query result is a
-    // leaf here for the same reason it is one to the writes below, which each
-    // replace such a value with the sigil link it names.
-    const storable = flattenBuilderArtifacts(argument, {
-      isLeaf: isCellResultForDereferencing,
-    });
+    const storable = prepareFactoryStatesForWrite(argument) as T;
     argumentCell.set(storable);
     // The policy recorder sees the RAW argument, as its sibling in
     // `#updateResultProjection` does. Handing it the flattened one would walk
@@ -2711,6 +2815,42 @@ export class Runner {
       tx,
       argumentLink,
       argumentSchema,
+    );
+  }
+
+  #updatePatternParams(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<unknown>,
+    params: unknown,
+    paramsSchema: JSONSchema,
+    resultSchema: JSONSchema | undefined,
+  ): void {
+    const paramsCell = getMetaCell(
+      resultCell,
+      "params",
+      tx,
+      paramsSchema,
+    );
+    setResultCell(paramsCell, resultCell.asSchema(resultSchema));
+    const paramsLink = paramsCell.getAsWriteRedirectLink({
+      base: resultCell,
+      includeSchema: true,
+    });
+    const currentParamsLink = resultCell.withTx(tx).getMetaRaw("params", {
+      meta: ignoreReadForScheduling,
+    });
+    if (!deepEqual(currentParamsLink, paramsLink)) {
+      resultCell.withTx(tx).setMetaRaw(
+        "params",
+        paramsLink,
+        rawMetaWriteAuthorization,
+      );
+    }
+    this.#updateArgument(
+      tx,
+      paramsCell.getAsNormalizedFullLink(),
+      params,
+      paramsSchema,
     );
   }
 
@@ -2868,9 +3008,11 @@ export class Runner {
     const argumentCellLink = getMetaLink(resultCell.withTx(tx), "argument")!;
     // `Pattern` erases its authored result type to `JSONValue`, so validate
     // that actual execution value here, then restore its association with
-    // `Cell<R>`.
+    // `Cell<R>`. Builder artifacts must take their storage form before the
+    // binding walk, whose function branch admits only first-class factories
+    // and rejects arbitrary callables.
     let result = unwrapOneLevelAndBindToDoc(
-      pattern.result,
+      flattenBuilderArtifacts(pattern.result),
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
@@ -2899,7 +3041,7 @@ export class Runner {
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
     // actually store, which is the whole point of converting first.
-    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
+    const fabricResult = fabricFromNativeValue(result);
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -3373,6 +3515,24 @@ export class Runner {
     }
 
     const { pattern, entryRef, resolvedPatternOrModule } = resolvedPattern;
+    const invocationState = isAdmittedFabricFactory(resolvedPatternOrModule)
+      ? factoryStateOf(resolvedPatternOrModule)
+      : undefined;
+    let invocationParams:
+      | { params: unknown; paramsSchema: JSONSchema }
+      | undefined;
+    if (
+      invocationState?.kind === "pattern" &&
+      Object.hasOwn(invocationState, "paramsSchema")
+    ) {
+      if (!Object.hasOwn(invocationState, "params")) {
+        throw new Error("Pattern factory requires bound params");
+      }
+      invocationParams = {
+        params: invocationState.params,
+        paramsSchema: invocationState.paramsSchema!,
+      };
+    }
     // The reuse arms below write the argument without reaching
     // `#applySetupState`, which names these stores for every other setup
     // write. Naming them twice on one transaction costs a second marker
@@ -3455,6 +3615,16 @@ export class Runner {
           overwrite: "redirect",
         },
       ) as T;
+    }
+
+    if (invocationParams !== undefined) {
+      this.#updatePatternParams(
+        tx,
+        resultCell,
+        invocationParams.params,
+        invocationParams.paramsSchema,
+        pattern.resultSchema,
+      );
     }
 
     if (validationOptions.validateCurrentArgument !== undefined) {
@@ -3653,6 +3823,14 @@ export class Runner {
       this.#finishStartAttempt(attempt);
       return Promise.reject(error);
     }
+  }
+
+  /** @internal Pre-sync one deterministic sub-pattern subtree before resume. */
+  syncCellsForPatternResume(
+    resultCell: Cell<unknown>,
+    pattern: Pattern,
+  ): Promise<boolean> {
+    return this.#syncCellsForRunningPattern(resultCell, pattern);
   }
 
   /**
@@ -3917,11 +4095,21 @@ export class Runner {
         return;
       }
       const selection: ImplementationSelection = {
-        key,
+        key: options.implementationSelection === undefined
+          ? key
+          : hashStringOf({
+            pattern: key,
+            parent: options.implementationSelection.key,
+          }),
         actions: new Set(),
         instanceInitializers: new Set(),
         matches: (runTx) => {
-          if (!active) return false;
+          if (
+            !active ||
+            options.implementationSelection?.matches(runTx) === false
+          ) {
+            return false;
+          }
           const selected = readSelection(runTx);
           return selected !== undefined && patternIdentityKey(selected) === key;
         },
@@ -4053,6 +4241,8 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
+      factorySelectionLink?: NormalizedFullLink;
+      implementationSelection?: ImplementationSelection;
       // See RunnerRunOptions.parentPieceRootId.
       parentPieceRootId?: string;
     } = {},
@@ -4189,7 +4379,7 @@ export class Runner {
       // A boot snapshot belongs to exactly one pattern instantiation. A later
       // patternIdentity hot-swap must register fresh under the same durable
       // piece identity rather than replaying the old implementation's cache.
-      const schedulerRehydration = initialSchedulerRehydrationAvailable
+      const baseSchedulerRehydration = initialSchedulerRehydrationAvailable
         ? options.schedulerRehydration ?? this.#schedulerRehydrationOptions(
           resultCell,
           options.awaitSyncBeforeInitialRun,
@@ -4200,8 +4390,14 @@ export class Runner {
           undefined,
           options.parentPieceRootId,
         );
-      schedulerRehydration.implementationSelection = options.variantRegistration
-        ?.selection;
+      const schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {
+        ...baseSchedulerRehydration,
+        ...(options.variantRegistration?.selection !== undefined
+          ? { implementationSelection: options.variantRegistration.selection }
+          : options.implementationSelection !== undefined
+          ? { implementationSelection: options.implementationSelection }
+          : {}),
+      };
       initialSchedulerRehydrationAvailable = false;
       try {
         for (const node of pattern.nodes) {
@@ -4215,6 +4411,9 @@ export class Runner {
             addNodeCancel,
             pattern,
             schedulerRehydration,
+            undefined,
+            node.expectedFactory,
+            options.factorySelectionLink,
           );
         }
       } finally {
@@ -4540,6 +4739,19 @@ export class Runner {
           const newRef = asPatternIdentityRef(newValue);
           if (!newRef) return;
           const newKey = patternIdentityKey(newRef);
+          // Sink callbacks are scheduled work: an initial or intermediate
+          // pointer notification can still be queued after a newer dynamic
+          // generation has committed. Never let that stale callback swap the
+          // stable output identity back to superseded code.
+          const storedRef = getPatternIdentityRef(
+            resultCell.withTx(this.#runtime.readTx()),
+          );
+          if (
+            storedRef !== undefined &&
+            patternIdentityKey(storedRef) !== newKey
+          ) {
+            return;
+          }
           if (newKey === currentPatternKey) return; // No change
           currentPatternKey = newKey;
 
@@ -5163,6 +5375,15 @@ export class Runner {
     }
 
     const resolvedPattern = this.#resolveToPattern(pattern);
+    const retryStartWhenReady = (
+      error: unknown,
+    ): Promise<boolean> | undefined => {
+      if (!(error instanceof RetryWhenReady)) return undefined;
+      return error.readiness.then(() => {
+        if (!this.#isStartAttemptCurrent(attempt)) return false;
+        return this.#doStart(rootCell, seenCells, attempt);
+      });
+    };
 
     // Fast path for pieces prepared in the current runtime via setup()/run() or
     // explicitly restarted after stop(). Those writes are already present
@@ -5185,7 +5406,7 @@ export class Runner {
           givenPattern: resolvedPattern,
         });
       } catch (err) {
-        return Promise.reject(err);
+        return retryStartWhenReady(err) ?? Promise.reject(err);
       }
 
       return Promise.resolve(true);
@@ -5239,6 +5460,10 @@ export class Runner {
             true,
           ),
         });
+      } catch (error) {
+        const retry = retryStartWhenReady(error);
+        if (retry !== undefined) return await retry;
+        throw error;
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.
@@ -5272,6 +5497,8 @@ export class Runner {
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
+      factorySelectionLink: options.factorySelectionLink,
+      implementationSelection: options.implementationSelection,
       parentPieceRootId: options.parentPieceRootId,
     });
     // Selection settlement owns scoped setup rollback. The shared group is
@@ -6481,6 +6708,10 @@ export class Runner {
     options: RunnerRunOptions = {},
   ): RunResult<R> {
     const tx = providedTx ?? this.#runtime.edit();
+    const preparedPatternOrModule = this.#materializeSetupFactorySync(
+      patternOrModule,
+      resultCell,
+    );
     if (providedTx === undefined) {
       // Self-minted fallback arm (reached e.g. from wish's async
       // suggestion-pattern fetch continuation): setup + start writes
@@ -6496,7 +6727,7 @@ export class Runner {
     triggerFlowLogger.debug(`runner-run/${sourceKey}`, () => [
       `[RUN] source=${sourceKey}`,
       `result=${resultCell.getAsNormalizedFullLink().id}`,
-      `pattern=${describePatternOrModule(patternOrModule)}`,
+      `pattern=${describePatternOrModule(preparedPatternOrModule)}`,
       `providedTx=${Boolean(providedTx)}`,
     ]);
 
@@ -6535,7 +6766,7 @@ export class Runner {
       getPatternIdentityRef(resultCell.withTx(tx)) === undefined;
     const { needsStart, pattern } = this.#setupInternal(
       tx,
-      patternOrModule,
+      preparedPatternOrModule,
       argument,
       resultCell,
       creatingPiece
@@ -7136,13 +7367,23 @@ export class Runner {
    * pattern owns. The store delivers none of these with the result document,
    * and a write to a document this replica has not loaded replaces the
    * document the store holds, so a caller staging a setup over a stored piece
-   * names its family first. Resolves once the documents have arrived.
+   * names its family first. Before a piece's first setup, callers may allow the
+   * missing argument metadata so deterministic owned cells still load while
+   * argument-bound nodes are skipped without a resume diagnostic. Resolves
+   * once the documents have arrived.
    */
   syncStoredPieceCells(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
+    options: { allowMissingArgument?: boolean } = {},
   ): Promise<void> {
-    return this.#syncCellsForRunningPattern(resultCell, pattern).then(
+    return this.#syncCellsForRunningPattern(
+      resultCell,
+      pattern,
+      undefined,
+      undefined,
+      options.allowMissingArgument === true,
+    ).then(
       () => {},
     );
   }
@@ -7158,6 +7399,7 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
     identity = resultCell.tx?.tx.scopeKeyIdentity,
+    allowMissingArgument = false,
   ): Promise<boolean> {
     const capturedIdentity = identity === undefined
       ? undefined
@@ -7170,6 +7412,7 @@ export class Runner {
           pattern,
           inputs,
           capturedIdentity,
+          allowMissingArgument,
         );
       } finally {
         // Resume-boot decomposition: this is the dependency pre-sync a fresh
@@ -7192,6 +7435,7 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
     identity?: ScopeKeyIdentity,
+    allowMissingArgument = false,
   ): Promise<boolean> {
     const mentionedInputsStart = performance.now();
     const seen = new Set<Cell<any>>();
@@ -7254,7 +7498,7 @@ export class Runner {
     // collectResumeOwnedCells instead passes the possibly-missing link through
     // and skips per-node, since sub-pattern outputs rarely alias it.
     const argumentMetaLink = getMetaLink(resultCell, "argument");
-    if (argumentMetaLink === undefined) {
+    if (argumentMetaLink === undefined && !allowMissingArgument) {
       // Instrumentation for how often the meta link is missing here (fresh
       // first runs are expected to hit this; resumes should not).
       logger.warn("resume-pre-sync", () => [
@@ -7264,7 +7508,7 @@ export class Runner {
           nodes: pattern.nodes.length,
         },
       ]);
-    } else {
+    } else if (argumentMetaLink !== undefined) {
       for (const node of pattern.nodes) {
         let inputs: NormalizedFullLink[];
         let outputs: NormalizedFullLink[];
@@ -7805,12 +8049,18 @@ export class Runner {
                 pattern,
                 op,
               );
+              const factorySelection = materializeListPatternSelection(
+                this.#runtime,
+                planTx,
+                inputsCell.key("op"),
+                op,
+              );
               const plan = listCoordinatorPlan(
                 this.#runtime,
                 planTx,
                 op,
                 inputsCell,
-                LIST_OP_INPUT_SCHEMAS[op],
+                factorySelection,
                 resultCell,
                 outputBinding,
               );
@@ -7927,6 +8177,30 @@ export class Runner {
     seen.add(key);
     visited?.push({ pattern, resultCell });
 
+    const factoryState = isAdmittedFabricFactory(pattern)
+      ? factoryStateOf(pattern)
+      : undefined;
+    if (
+      factoryState?.kind === "pattern" &&
+      factoryState.paramsSchema !== undefined
+    ) {
+      // A resumed closure-bearing pattern is loaded by its unbound base
+      // identity; its invocation state lives in the deterministic params cell.
+      // Pull that cell before any node subscribes so setup/graph reads cannot
+      // race an absent cold-cache value and later conflict with the durable
+      // capture links.
+      const paramsCell = getMetaCell(
+        resultCell,
+        "params",
+        tx,
+        factoryState.paramsSchema,
+      );
+      out.push(this.#runtime.getCellFromLink(
+        paramsCell.getAsNormalizedFullLink(),
+        factoryState.paramsSchema,
+      ));
+    }
+
     for (const descriptor of pattern.derivedInternalCells ?? []) {
       out.push(getDerivedInternalCell(resultCell, descriptor));
     }
@@ -7942,11 +8216,45 @@ export class Runner {
 
     for (const [nodeIndex, node] of pattern.nodes.entries()) {
       const module = node.module;
-      if (module.type !== "pattern" || !isPattern(module.implementation)) {
-        continue;
+      let childPattern: Pattern;
+      let targetSpace = resultCell.space;
+      let moduleDefaultScope: CellScope | undefined;
+      if (isAdmittedFabricFactory(module)) {
+        const state = factoryStateOf(module);
+        if (state.kind !== "pattern") continue;
+        let materialized: MaterializedFactory;
+        try {
+          materialized = materializeFactory(module, {
+            runtime: this.#runtime,
+            artifactSpace: resultCell.space,
+          });
+        } catch (error) {
+          logger.warn("resume-owned-cells", () => [
+            "skipping a canonical sub-pattern whose artifact is not warm",
+            error,
+          ]);
+          continue;
+        }
+        if (!isPattern(materialized)) continue;
+        childPattern = materialized;
+        moduleDefaultScope = state.defaultScope;
+        if (
+          typeof state.spaceSelector === "string" &&
+          /^did:[^:]+:.+/.test(state.spaceSelector)
+        ) {
+          targetSpace = state.spaceSelector as MemorySpace;
+        }
+      } else {
+        if (
+          !isModule(module) || module.type !== "pattern" ||
+          !isPattern(module.implementation)
+        ) {
+          continue;
+        }
+        childPattern = module.implementation;
+        targetSpace = module.targetSpace ?? resultCell.space;
+        moduleDefaultScope = module.defaultScope;
       }
-      const childPattern = module.implementation;
-      const targetSpace = module.targetSpace ?? resultCell.space;
       // Resolve the node's reserved output spot the way instantiatePatternNode
       // does: unwrap one level (so a deferred-alias output is decremented and
       // followed) and follow the write-redirect chain to its resolved end (a
@@ -8033,7 +8341,7 @@ export class Runner {
         continue;
       }
       const childScope = patternDefaultScope(boundChildPattern) ??
-        module.defaultScope;
+        moduleDefaultScope;
       let childResultCell = this.#runtime.getCell(
         targetSpace,
         {
@@ -8326,7 +8634,7 @@ export class Runner {
 
   #instantiateNode(
     tx: IExtendedStorageTransaction,
-    module: Module,
+    module: Module | FabricValue,
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
@@ -8334,6 +8642,8 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
     moduleRefName?: string,
+    expectedFactory?: FactoryContract,
+    factorySelectionLink?: NormalizedFullLink,
   ) {
     if (isModule(module)) {
       switch (module.type) {
@@ -8359,6 +8669,8 @@ export class Runner {
             pattern,
             schedulerRehydration,
             refName,
+            expectedFactory,
+            factorySelectionLink,
           );
           break;
         }
@@ -8369,9 +8681,11 @@ export class Runner {
             inputBindings,
             outputBindings,
             resultCell,
+            resultCell,
             addCancel,
             pattern,
             schedulerRehydration,
+            factorySelectionLink,
           );
           break;
         case "raw":
@@ -8409,22 +8723,764 @@ export class Runner {
             addCancel,
             pattern,
             schedulerRehydration,
+            factorySelectionLink,
           );
           break;
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
+    } else if (isAdmittedFabricFactory(module)) {
+      const state = factoryStateOf(module);
+      if (state.kind !== "pattern") {
+        throw new Error(
+          `Static factory node requires a pattern factory, got ${state.kind}`,
+        );
+      }
+      this.#instantiatePatternNode(
+        tx,
+        {
+          type: "pattern",
+          implementation: module,
+          ...(state.defaultScope === undefined
+            ? {}
+            : { defaultScope: state.defaultScope }),
+        },
+        inputBindings,
+        outputBindings,
+        resultCell,
+        addCancel,
+        pattern,
+        schedulerRehydration,
+        factorySelectionLink,
+      );
     } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
-      // TODO(seefeld): Implement, a dynamic node
+      if (expectedFactory === undefined) {
+        throw new Error(
+          "Dynamic factory node is missing its call-site contract",
+        );
+      }
+      this.#instantiateDynamicFactoryNode(
+        tx,
+        module,
+        inputBindings,
+        outputBindings,
+        resultCell,
+        addCancel,
+        pattern,
+        schedulerRehydration,
+        expectedFactory,
+      );
     } else {
       throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
     }
+  }
+
+  #resolveFactoryExecutionSpace(
+    selector: unknown,
+    baseCell: Cell<unknown>,
+    resolvedSpaces?: ReadonlyMap<string, MemorySpace>,
+    anonymousName?: string,
+  ): MemorySpace | undefined {
+    if (typeof selector === "string" && /^did:[^:]+:.+/.test(selector)) {
+      return selector as MemorySpace;
+    }
+    const selectorLink = parseLink(selector, baseCell);
+    if (selectorLink?.space !== undefined) return selectorLink.space;
+    if (typeof selector !== "string") return undefined;
+
+    const name = selector.length > 0 ? selector : anonymousName;
+    if (name === undefined) return undefined;
+    const named = resolvedSpaces?.get(name) ??
+      this.#runtime.resolveSpaceNameSync(name);
+    if (named === undefined) {
+      throw new DynamicFactoryExecutionSpaceUnavailableError(name);
+    }
+    return named;
+  }
+
+  /**
+   * Supervise one symbolic factory binding. The binding stays the reactive
+   * dependency and output bindings stay fixed; selected artifacts are never
+   * folded into graph identity.
+   */
+  #instantiateDynamicFactoryNode(
+    tx: IExtendedStorageTransaction,
+    moduleBinding: FabricValue,
+    inputBindings: FabricExecValue,
+    outputBindings: FabricExecValue,
+    resultCell: Cell<any>,
+    addCancel: AddCancel,
+    pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+    expected: FactoryContract,
+  ): void {
+    const argumentCellLink = getMetaLink(resultCell, "argument")!;
+    const bound = unwrapOneLevelAndBindToDoc(
+      moduleBinding,
+      argumentCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
+    if (!isWriteRedirectLink(bound)) {
+      throw new Error(
+        "Dynamic factory module did not resolve to a cell binding",
+      );
+    }
+    const bindingLink = parseLink(bound, resultCell);
+    if (bindingLink === undefined || bindingLink.space === undefined) {
+      throw new Error("Dynamic factory module has an incomplete cell binding");
+    }
+    const bindingCell = this.#runtime.getCellFromLink<unknown>(bindingLink);
+
+    type CurrentSelection = {
+      selection: unknown;
+      artifactSpace: MemorySpace;
+      sourceLink: NormalizedFullLink;
+      dereferenceSources: readonly NormalizedFullLink[];
+      cfcLabel: unknown;
+      identity: ScopeKeyIdentity;
+      selectorScope: CellScope;
+      instanceKey: ScopeKey;
+    };
+    type InstanceState = {
+      instanceKey: ScopeKey;
+      identity: ScopeKeyIdentity;
+      selectorScope: CellScope;
+      owner: object;
+      generation: number;
+      currentCanonical: unknown;
+      currentSelectionLabel: unknown;
+      hasSelection: boolean;
+      selectionGenerationActive: boolean;
+      selectionReadinessPending: boolean;
+      selectionReadinessFailed: boolean;
+      fastPreemptedSelection: boolean;
+      childCancel: Cancel | undefined;
+      selectionSourceLinks: readonly NormalizedFullLink[];
+      selectionGenerationSourceLinks: readonly NormalizedFullLink[];
+    };
+
+    let active = true;
+    let sinkCancel: Cancel | undefined;
+    let coordinator: Action | undefined;
+    const instances = new Map<ScopeKey, InstanceState>();
+    const fastSelectionQueued = new Set<ScopeKey>();
+    let fastSelectionMicrotaskQueued = false;
+    const resolvedExecutionSpaces = new Map<string, MemorySpace>();
+    const callSiteLink = resultCell.getAsNormalizedFullLink();
+    const anonymousExecutionSpaceName = "dynamic-factory:" + hashOf({
+      result: {
+        space: callSiteLink.space,
+        id: callSiteLink.id,
+        path: [...callSiteLink.path],
+        scope: callSiteLink.scope ?? "space",
+      },
+      outputs: outputBindings,
+    }).hashString;
+
+    const canonicalSelection = (selection: unknown): unknown => {
+      if (!isAdmittedFabricFactory(selection)) return selection;
+      return sealFactoryState(selection);
+    };
+    const sameCanonicalSelection = (left: unknown, right: unknown): boolean =>
+      valueEqual(left as FabricValue, right as FabricValue);
+
+    const readCurrent = (
+      readTx: IExtendedStorageTransaction,
+    ): CurrentSelection => {
+      const resolution = resolveLinkTracingDereferences(
+        this.#runtime,
+        readTx,
+        bindingLink,
+        "value",
+      );
+      const resolved = resolution.link;
+      const dereferenceSources = resolution.traces.map((trace) => ({
+        ...trace.source,
+      } as NormalizedFullLink));
+      const resolvedCell = this.#runtime.getCellFromLink<unknown>(resolved)
+        .withTx(readTx);
+      const selectorScope = [
+        ...dereferenceSources.map((source) => normalizeCellScope(source.scope)),
+        normalizeCellScope(resolved.scope),
+      ].reduce((narrowest, candidate) =>
+        scopeRank(candidate) > scopeRank(narrowest) ? candidate : narrowest
+      );
+      const identity = readTx.tx.scopeKeyIdentity ??
+        this.#runtime.scopeKeyIdentity;
+      return {
+        selection: resolvedCell.getWithoutFactoryMaterialization(),
+        artifactSpace: resolved.space,
+        sourceLink: resolved,
+        dereferenceSources,
+        cfcLabel: cfcLabelViewForCell(bindingCell.withTx(readTx)),
+        identity,
+        selectorScope,
+        instanceKey: resolveScopeKey(selectorScope, identity),
+      };
+    };
+
+    const readCurrentFor = (state: InstanceState): CurrentSelection => {
+      const readTx = this.#familyReadTx(state.identity);
+      return readCurrent(readTx);
+    };
+
+    const cancelInstance = (state: InstanceState): void => {
+      state.generation++;
+      state.childCancel?.();
+      state.childCancel = undefined;
+      state.selectionGenerationActive = false;
+      state.selectionReadinessPending = false;
+      state.selectionReadinessFailed = false;
+      state.fastPreemptedSelection = false;
+    };
+
+    const instanceFor = (current: CurrentSelection): InstanceState => {
+      let state = instances.get(current.instanceKey);
+      if (state !== undefined) {
+        state.identity = current.identity;
+        state.selectorScope = current.selectorScope;
+        return state;
+      }
+      state = {
+        instanceKey: current.instanceKey,
+        identity: current.identity,
+        selectorScope: current.selectorScope,
+        owner: {},
+        generation: 0,
+        currentCanonical: undefined,
+        currentSelectionLabel: undefined,
+        hasSelection: false,
+        selectionGenerationActive: false,
+        selectionReadinessPending: false,
+        selectionReadinessFailed: false,
+        fastPreemptedSelection: false,
+        childCancel: undefined,
+        selectionSourceLinks: [],
+        selectionGenerationSourceLinks: [],
+      };
+      instances.set(current.instanceKey, state);
+      return state;
+    };
+
+    const moduleFor = (
+      factory: MaterializedFactory,
+      selection: unknown,
+    ): Module => {
+      if (expected.kind !== "pattern") {
+        if (!isModule(factory)) {
+          throw new Error(
+            `Materialized ${expected.kind} factory is not executable module metadata`,
+          );
+        }
+        return factory;
+      }
+      if (!isPattern(factory)) {
+        throw new Error("Materialized pattern factory is not a pattern");
+      }
+      const state = factoryStateOf(selection);
+      if (state.kind !== "pattern") {
+        throw new Error("Materialized pattern selection has another kind");
+      }
+      const dynamicModule: Module = {
+        type: "pattern",
+        implementation: factory,
+        ...(state.defaultScope === undefined
+          ? {}
+          : { defaultScope: state.defaultScope }),
+      };
+      if (Object.hasOwn(state, "spaceSelector")) {
+        dynamicModule.targetSpace = this.#resolveFactoryExecutionSpace(
+          state.spaceSelector,
+          bindingCell,
+          resolvedExecutionSpaces,
+          anonymousExecutionSpaceName,
+        );
+      }
+      return dynamicModule;
+    };
+
+    const instantiateSelection = (
+      state: InstanceState,
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
+      setupTx: IExtendedStorageTransaction,
+    ): void => {
+      if (!active || selectedGeneration !== state.generation) return;
+      const factory = materializeFactory(selection, {
+        runtime: this.#runtime,
+        artifactSpace,
+        expected,
+      });
+      if (!active || selectedGeneration !== state.generation) return;
+
+      const [cancelChild, addChildCancel] = useCancelGroup();
+      state.childCancel = cancelChild;
+      const failSetupIfCurrent = (error: unknown): void => {
+        if (
+          !active || selectedGeneration !== state.generation ||
+          state.childCancel !== cancelChild
+        ) {
+          return;
+        }
+        cancelChild();
+        state.childCancel = undefined;
+        state.selectionReadinessFailed = true;
+        const diagnostic = error instanceof Error ? error : new Error(
+          typeof (error as { message?: unknown })?.message === "string"
+            ? (error as { message: string }).message
+            : "Dynamic factory child setup failed",
+          { cause: error },
+        );
+        this.#runtime.scheduler.reportError(diagnostic, {
+          name: "dynamic-factory-setup",
+        });
+      };
+      const parentSelection = schedulerRehydration.implementationSelection;
+      const selectedCanonical = canonicalSelection(selection);
+      const implementationSelection: ImplementationSelection = {
+        key: hashStringOf({
+          callSite: callSiteLink,
+          instance: state.instanceKey,
+          generation: selectedGeneration,
+          selection: selectedCanonical,
+        }),
+        actions: new Set(),
+        instanceInitializers: new Set(),
+        matches: (runTx) => {
+          if (
+            !active || selectedGeneration !== state.generation ||
+            state.childCancel !== cancelChild ||
+            parentSelection?.matches(runTx) === false
+          ) {
+            return false;
+          }
+          const current = readCurrent(runTx);
+          return current.instanceKey === state.instanceKey &&
+            sameCanonicalSelection(
+              canonicalSelection(current.selection),
+              selectedCanonical,
+            );
+        },
+      };
+      try {
+        this.#instantiateNode(
+          setupTx,
+          moduleFor(factory, selection),
+          inputBindings,
+          outputBindings,
+          resultCell.withTx(setupTx),
+          addChildCancel,
+          pattern,
+          { ...schedulerRehydration, implementationSelection },
+          undefined,
+          undefined,
+          bindingLink,
+        );
+        setupTx.addCommitCallback(async (committed, { error }) => {
+          if (error !== undefined) {
+            failSetupIfCurrent(error);
+            return;
+          }
+          const settlement = waveSettlementOf(committed) ??
+            waveSettlementOf(setupTx);
+          if (settlement === undefined) return;
+          const settled = await settlement;
+          if (settled.error !== undefined) {
+            failSetupIfCurrent(settled.error);
+          }
+        });
+      } catch (error) {
+        cancelChild();
+        state.childCancel = undefined;
+        throw error;
+      }
+    };
+
+    const beginColdPreparation = (
+      state: InstanceState,
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
+    ): void => {
+      const task = prepareFactory(selection, {
+        runtime: this.#runtime,
+        artifactSpace,
+        expected,
+        fence: {
+          owner: state.owner,
+          generation: selectedGeneration,
+          currentOwner: () => active ? state.owner : undefined,
+          currentGeneration: () => active ? state.generation : undefined,
+          currentSelection: () => {
+            const current = readCurrentFor(state);
+            return current.instanceKey === state.instanceKey
+              ? current.selection
+              : undefined;
+          },
+        },
+      }).then(() => {
+        if (!active || state.generation !== selectedGeneration) return;
+        state.selectionReadinessPending = false;
+        state.selectionReadinessFailed = false;
+        if (coordinator !== undefined) {
+          this.#runtime.scheduler.invalidateAction(coordinator);
+        }
+      }).catch((error) => {
+        if (!active || state.generation !== selectedGeneration) return;
+        state.selectionReadinessPending = false;
+        if (error instanceof FactoryMaterializationSupersededError) {
+          return;
+        }
+        // The canonical selection remains installed, but it has no active
+        // child. A canonical change or source-chain retarget creates the next
+        // generation; replay through the same source remains a no-op.
+        state.selectionReadinessFailed = true;
+        this.#runtime.scheduler.reportError(error, {
+          name: "dynamic-factory-readiness",
+        });
+      });
+      // Deliberately do not register this promise as global scheduler
+      // background work. `idle()` prioritizes such work over reactive reruns;
+      // a cold A would therefore block the selector action that replaces it
+      // with warm B. Readiness is node-local and result consumers wait on the
+      // stable output cell instead.
+      void task;
+    };
+
+    const beginExecutionSpacePreparation = (
+      state: InstanceState,
+      spaceName: string,
+      selectedGeneration: number,
+    ): void => {
+      const task = this.#runtime.resolveSpaceName(spaceName).then(
+        (resolvedSpace) => {
+          if (!active || state.generation !== selectedGeneration) return;
+          state.selectionReadinessPending = false;
+          resolvedExecutionSpaces.set(spaceName, resolvedSpace);
+          if (coordinator !== undefined) {
+            this.#runtime.scheduler.invalidateAction(coordinator);
+          }
+        },
+        (error) => {
+          if (!active || state.generation !== selectedGeneration) return;
+          state.selectionReadinessPending = false;
+          // Name resolution is readiness for the installed canonical
+          // selection just like artifact loading. Keep the failed generation
+          // fenced; a canonical change or source-chain retarget may retry it.
+          state.selectionReadinessFailed = true;
+          this.#runtime.scheduler.reportError(error, {
+            name: "dynamic-factory-space-readiness",
+          });
+        },
+      );
+      // Name resolution is node-local readiness. A replacement selector must
+      // remain runnable while this promise is open.
+      void task;
+    };
+
+    const activateSelection = (
+      state: InstanceState,
+      selection: unknown,
+      artifactSpace: MemorySpace,
+      selectedGeneration: number,
+      setupTx: IExtendedStorageTransaction,
+    ): void => {
+      try {
+        instantiateSelection(
+          state,
+          selection,
+          artifactSpace,
+          selectedGeneration,
+          setupTx,
+        );
+      } catch (error) {
+        if (
+          error instanceof FactoryArtifactUnavailableError ||
+          error instanceof DynamicFactoryExecutionSpaceUnavailableError
+        ) {
+          state.selectionReadinessPending = true;
+          // Publish the selector dependency before exposing deterministic
+          // readiness gates; otherwise a replacement can land in that window.
+          queueMicrotask(() => {
+            if (!active || state.generation !== selectedGeneration) return;
+            if (error instanceof FactoryArtifactUnavailableError) {
+              beginColdPreparation(
+                state,
+                selection,
+                artifactSpace,
+                selectedGeneration,
+              );
+            } else {
+              beginExecutionSpacePreparation(
+                state,
+                error.spaceName,
+                selectedGeneration,
+              );
+            }
+          });
+          return;
+        }
+        throw error;
+      }
+    };
+
+    const select = (
+      current: CurrentSelection,
+      setupTx: IExtendedStorageTransaction,
+    ): void => {
+      if (!active) return;
+      const state = instanceFor(current);
+      const { selection, cfcLabel } = current;
+      const canonical = canonicalSelection(selection);
+      const currentSourceLinks = [
+        ...current.dereferenceSources,
+        current.sourceLink,
+      ];
+      if (
+        state.hasSelection &&
+        sameCanonicalSelection(canonical, state.currentCanonical) &&
+        deepEqual(cfcLabel, state.currentSelectionLabel)
+      ) {
+        let readinessSourceChanged = false;
+        if (
+          state.selectionReadinessPending || state.selectionReadinessFailed
+        ) {
+          readinessSourceChanged = !deepEqual(
+            currentSourceLinks,
+            state.selectionGenerationSourceLinks,
+          );
+          if (readinessSourceChanged) {
+            // Canonical Factory@1 state alone is sufficient for the active
+            // child no-op, but a pending readiness attempt is also owned by
+            // the source chain that supplied its artifact space. Retargeting
+            // that chain creates a fresh generation immediately so the old
+            // async completion can be fenced.
+            state.selectionSourceLinks = currentSourceLinks;
+            state.selectionReadinessPending = false;
+            state.selectionReadinessFailed = false;
+            state.fastPreemptedSelection = false;
+          }
+        }
+        if (!readinessSourceChanged) {
+          if (
+            state.childCancel !== undefined &&
+            !state.fastPreemptedSelection &&
+            !state.selectionReadinessFailed
+          ) {
+            state.selectionSourceLinks = currentSourceLinks;
+            return;
+          }
+          if (state.selectionReadinessPending) return;
+          state.fastPreemptedSelection = false;
+          if (!state.selectionReadinessFailed) {
+            if (selection === undefined) return;
+            state.selectionSourceLinks = currentSourceLinks;
+            state.selectionGenerationSourceLinks = currentSourceLinks;
+            activateSelection(
+              state,
+              selection,
+              current.artifactSpace,
+              state.generation,
+              setupTx,
+            );
+            return;
+          }
+          // A failed attempt is owned by the source chain that supplied it.
+          // Replaying equal state through that same chain is a no-op; a
+          // retarget above, or a different canonical selection below, creates
+          // the next retry generation.
+          return;
+        }
+      }
+
+      state.hasSelection = true;
+      state.currentCanonical = canonical;
+      state.currentSelectionLabel = cfcLabel;
+      state.selectionReadinessPending = false;
+      state.selectionReadinessFailed = false;
+      state.generation++;
+      const selectedGeneration = state.generation;
+      state.childCancel?.();
+      state.childCancel = undefined;
+      state.selectionGenerationActive = selection !== undefined;
+      if (selection === undefined) return;
+
+      state.selectionSourceLinks = currentSourceLinks;
+      state.selectionGenerationSourceLinks = currentSourceLinks;
+      activateSelection(
+        state,
+        selection,
+        current.artifactSpace,
+        selectedGeneration,
+        setupTx,
+      );
+    };
+
+    const preemptSelection = (
+      state: InstanceState,
+      selection: unknown,
+      cfcLabel?: unknown,
+    ): void => {
+      if (!active || !state.selectionGenerationActive) return;
+      const canonical = canonicalSelection(selection);
+      if (
+        state.hasSelection &&
+        sameCanonicalSelection(canonical, state.currentCanonical) &&
+        deepEqual(cfcLabel, state.currentSelectionLabel)
+      ) {
+        return;
+      }
+      state.hasSelection = true;
+      state.currentCanonical = canonical;
+      state.currentSelectionLabel = cfcLabel;
+      state.selectionReadinessPending = false;
+      state.selectionReadinessFailed = false;
+      state.generation++;
+      state.childCancel?.();
+      state.childCancel = undefined;
+      state.selectionGenerationActive = selection !== undefined;
+      state.fastPreemptedSelection = true;
+    };
+
+    sinkCancel = bindingCell.sink(
+      (_selection, _cfcLabel, selectionTx) => {
+        if (selectionTx === undefined) {
+          throw new Error("Dynamic factory sink is missing its transaction");
+        }
+        try {
+          // The sink value can stop at a cross-space link while its
+          // dependency walk is being established. Selection authority comes
+          // from the explicit resolved-source reread, which also provides the
+          // artifact space and complete CFC label view used by replacement.
+          select(readCurrent(selectionTx), selectionTx);
+        } catch (error) {
+          // Cell.sink invokes once before installing its subscription. Keep the
+          // supervisor alive across a preloaded invalid value so a later valid
+          // replacement can recover. Deliver the diagnostic only after this
+          // sink action settles: error listeners may synchronously replace the
+          // value, and a currently-running scheduler action cannot consume its
+          // own invalidation as the required later generation.
+          void this.#runtime.scheduler.idle().then(() => {
+            if (!active) return;
+            this.#runtime.scheduler.reportError(error, {
+              name: "dynamic-factory-selection",
+            });
+          });
+        }
+      },
+      {
+        includeCfcLabel: true,
+        subscribeBeforeInitial: true,
+        materializeFactories: false,
+        initialTx: tx,
+        onActionRegistered: (action) => {
+          coordinator = action;
+          if (schedulerRehydration.observationIdentity !== undefined) {
+            Object.assign(action, {
+              schedulerObservationIdentity:
+                schedulerRehydration.observationIdentity,
+            });
+          }
+        },
+      },
+    );
+
+    // A selector change must be able to cancel an async authored generation
+    // even while the scheduler's ordinary action lane is waiting for that
+    // promise. The scheduled sink above remains the authoritative reactive/CFC
+    // path; this exact-address storage listener is a narrow cancellation fast
+    // lane. It rereads the live selection, and instantiateSelection still
+    // performs the execution-authorizing read in its own transaction.
+    const fastSelectionSubscription: IStorageSubscription = {
+      next: (notification) => {
+        if (!active) return { done: true };
+        const touches = (
+          state: InstanceState,
+          link: NormalizedFullLink | undefined,
+        ): boolean => {
+          if (link === undefined || notification.space !== link.space) {
+            return false;
+          }
+          if (notification.type === "reset") return true;
+          if (!("changes" in notification)) return false;
+          return [...notification.changes].some((change) => {
+            if (
+              change.address.id !== link.id ||
+              normalizeCellScope(change.address.scope) !==
+                normalizeCellScope(link.scope)
+            ) {
+              return false;
+            }
+            return change.address.scopeKey === undefined ||
+              change.address.scopeKey ===
+                resolveScopeKey(normalizeCellScope(link.scope), state.identity);
+          });
+        };
+        for (const state of instances.values()) {
+          if (
+            touches(state, bindingLink) ||
+            state.selectionSourceLinks.some((link) => touches(state, link))
+          ) {
+            fastSelectionQueued.add(state.instanceKey);
+          }
+        }
+        if (fastSelectionQueued.size > 0 && !fastSelectionMicrotaskQueued) {
+          fastSelectionMicrotaskQueued = true;
+          queueMicrotask(() => {
+            fastSelectionMicrotaskQueued = false;
+            if (!active) return;
+            const queued = [...fastSelectionQueued];
+            fastSelectionQueued.clear();
+            for (const instanceKey of queued) {
+              const state = instances.get(instanceKey);
+              if (state === undefined) continue;
+              try {
+                const current = readCurrentFor(state);
+                state.selectionSourceLinks = [
+                  ...current.dereferenceSources,
+                  current.sourceLink,
+                ];
+                if (current.instanceKey !== state.instanceKey) {
+                  cancelInstance(state);
+                  instances.delete(state.instanceKey);
+                  continue;
+                }
+                preemptSelection(
+                  state,
+                  current.selection,
+                  current.cfcLabel,
+                );
+              } catch (error) {
+                this.#runtime.scheduler.reportError(error, {
+                  name: "dynamic-factory-fast-selection",
+                });
+              }
+            }
+          });
+        }
+        return { done: false };
+      },
+    };
+    this.#runtime.storageManager.subscribe(fastSelectionSubscription);
+    addCancel(() => {
+      if (!active) return;
+      active = false;
+      this.#runtime.storageManager.unsubscribe?.(fastSelectionSubscription);
+      sinkCancel?.();
+      sinkCancel = undefined;
+      for (const state of instances.values()) cancelInstance(state);
+      instances.clear();
+      fastSelectionQueued.clear();
+    });
   }
 
   #bindNodeIO(
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
+    baseCell: Cell<any>,
     pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -8443,8 +9499,8 @@ export class Runner {
     return {
       inputs,
       outputs,
-      reads: findAllWriteRedirectCells(inputs, resultCell),
-      writes: findAllWriteRedirectCells(outputs, resultCell),
+      reads: findAllWriteRedirectCells(inputs, baseCell),
+      writes: findAllWriteRedirectCells(outputs, baseCell),
     };
   }
 
@@ -8567,7 +9623,8 @@ export class Runner {
           ]);
         }
       }
-      this.#runtime.getCellFromLink(target, target.schema, depTx)?.get();
+      this.#runtime.getCellFromLink(target, target.schema, depTx)
+        ?.getWithoutFactoryMaterialization();
     }
   }
 
@@ -8598,19 +9655,22 @@ export class Runner {
       undefined,
       depTx,
     );
-    inputsCell.asSchema(eventDependencySchema).get({
-      traverseCells: true,
-    });
+    inputsCell.asSchema(eventDependencySchema)
+      .getWithoutFactoryMaterialization({
+        traverseCells: true,
+      });
   }
 
   #collectWritableCellArgumentLinks(
     argumentSchema: JSONSchema | undefined,
     value: unknown,
-    resultCell: Cell<any>,
+    processCell: Cell<any>,
     writeInputPaths?: readonly (readonly string[])[],
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<string>>();
+    const factoryContext = createFactoryTraversalContext();
+    const factoryAncestors = new Set<object>();
 
     const pathsOverlap = (
       left: readonly string[],
@@ -8628,39 +9688,34 @@ export class Runner {
       schema: unknown,
       currentValue: unknown,
       path: readonly string[],
+      insideFactoryState = false,
     ): void => {
-      if (!isObjectOrArray(schema)) return;
-      const pathKey = JSON.stringify(path);
-      const seenPaths = seen.get(schema);
-      if (seenPaths?.has(pathKey)) return;
-      if (seenPaths) {
-        seenPaths.add(pathKey);
-      } else {
-        seen.set(schema, new Set([pathKey]));
+      if (isAdmittedFabricFactory(currentValue)) {
+        const state = factoryStateOf(currentValue);
+        visitFactoryForTraversal(
+          currentValue,
+          (nested, field) => {
+            if (state.kind === "pattern") {
+              visit(
+                field === "params" ? state.paramsSchema : undefined,
+                nested,
+                path,
+                true,
+              );
+            }
+          },
+          factoryContext,
+        );
+        return;
       }
-
-      // Ahead of the `asCell` branch below, deliberately. That branch collects
-      // and returns, so a guard placed after it never sees a value standing at
-      // an `asCell` or `writeonly` node -- and a link nested in an instance
-      // there would be missed while the walk reported success.
-      //
-      // A `FabricSpecialObject` at a container position is INDEXED rather than
-      // rebuilt, so nothing is decomposed. For a `FabricPrimitive` that settles
-      // it: zero enumerable own properties, every keyed read yields
-      // `undefined`, and a leaf holds no link to collect anyway.
-      //
-      // A `FabricInstance` is refused. A write-redirect link nested in its
-      // codec contents is unreachable by property name, so passing one through
-      // _misses_ that link -- and over-collection is this walker's safe
-      // direction, which makes a miss the unsafe one.
-      //
-      // Nothing reaches this in production today, de facto rather than by
-      // construction: a `FabricError` is ungated and exposed to pattern
-      // authors, so what keeps this safe is that no action argument yet
-      // carries one.
-      //
-      // TODO(danfuzz): descend by codec-mediated traversal into instance
-      // state, at which point this becomes a walk rather than a refusal.
+      if (typeof currentValue === "function") {
+        if (insideFactoryState) {
+          throw new TypeError(
+            "Arbitrary functions are not valid factory state values",
+          );
+        }
+        return;
+      }
       if (currentValue instanceof FabricInstance) {
         refuseFabricInstance(
           currentValue,
@@ -8668,76 +9723,122 @@ export class Runner {
         );
       }
 
-      const asCell = schema.asCell;
-      if (
-        Array.isArray(asCell) &&
-        (asCell.includes("cell") || asCell.includes("writeonly"))
-      ) {
-        if (shouldCollectPath(path)) {
-          links.push(...findAllWriteRedirectCells(currentValue, resultCell));
+      const factoryContainer = insideFactoryState && currentValue !== null &&
+          typeof currentValue === "object" && !isCellLink(currentValue)
+        ? currentValue
+        : undefined;
+      if (factoryContainer !== undefined) {
+        if (factoryAncestors.has(factoryContainer)) {
+          throw new TypeError("Circular reference detected in factory state");
         }
-        return;
+        factoryAncestors.add(factoryContainer);
       }
 
-      // Keyword descent via the shared walk (a keyword missed here means
-      // asCell markers escaping write tracking — the prefixItems gap,
-      // CT-1895). The value-position keywords align value and path — a
-      // named property or undeclared-key (`additionalProperties`) at its
-      // key, a tuple slot at its index, `items` elements past the slots at
-      // theirs — falling back to the conservative same-value/same-path
-      // visit when value and schema misalign. Combinator branches and
-      // `not` genuinely describe the same position: same value, same path.
-      // `not` is included deliberately: a nested `not` (not-of-not)
-      // re-selects values that DO match the inner subschema, so skipping it
-      // could let an asCell marker escape tracking; over-collection is this
-      // walker's safe direction (mirrors joinSchema's `not` union).
-      //
-      forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
-        switch (keyword) {
-          case "properties":
-            if (isObjectOrArray(currentValue)) {
-              visit(child, currentValue[key!], [...path, key!]);
-            }
-            return;
-          case "prefixItems":
-            visit(
-              child,
-              Array.isArray(currentValue) ? currentValue[index!] : currentValue,
-              [...path, String(index!)],
-            );
-            return;
-          case "items":
+      try {
+        if (!isObjectOrArray(schema)) {
+          if (insideFactoryState) {
             if (Array.isArray(currentValue)) {
-              // `items` covers the elements past the tuple slots (2020-12).
-              const start = Array.isArray(schema.prefixItems)
-                ? schema.prefixItems.length
-                : 0;
-              for (let i = start; i < currentValue.length; i++) {
-                visit(child, currentValue[i], [...path, String(i)]);
+              for (const item of currentValue) {
+                visit(undefined, item, path, true);
               }
-            } else {
-              visit(child, currentValue, path);
-            }
-            return;
-          case "additionalProperties":
-            if (isObjectNotArray(currentValue)) {
-              // Covers only the keys `properties` does not declare.
-              const declaredKeys = isObjectOrArray(schema.properties)
-                ? new Set(Object.keys(schema.properties))
-                : undefined;
-              for (const [k, v] of Object.entries(currentValue)) {
-                if (declaredKeys?.has(k)) continue;
-                visit(child, v, [...path, k]);
+            } else if (isObjectNotArray(currentValue)) {
+              for (const nested of Object.values(currentValue)) {
+                visit(undefined, nested, path, true);
               }
-            } else {
-              visit(child, currentValue, path);
             }
-            return;
-          default:
-            visit(child, currentValue, path);
-            return;
+          }
+          return;
         }
-      });
+        const pathKey = JSON.stringify(path);
+        const seenPaths = seen.get(schema);
+        if (seenPaths?.has(pathKey)) return;
+        if (seenPaths) {
+          seenPaths.add(pathKey);
+        } else {
+          seen.set(schema, new Set([pathKey]));
+        }
+
+        const asCell = schema.asCell;
+        if (
+          Array.isArray(asCell) &&
+          (asCell.includes("cell") || asCell.includes("writeonly"))
+        ) {
+          if (shouldCollectPath(path)) {
+            links.push(...findAllWriteRedirectCells(currentValue, processCell));
+          }
+          return;
+        }
+
+        // Keyword descent via the shared walk (a keyword missed here means
+        // asCell markers escaping write tracking — the prefixItems gap,
+        // CT-1895). Value-position keywords align value and path; combinators
+        // and `not` describe the same position. Over-collection is the safe
+        // direction for write tracking.
+        forEachSubschema(
+          schema as JSONSchema,
+          (child, keyword, key, index) => {
+            switch (keyword) {
+              case "properties":
+                if (isObjectOrArray(currentValue)) {
+                  visit(
+                    child,
+                    currentValue[key!],
+                    [...path, key!],
+                    insideFactoryState,
+                  );
+                }
+                return;
+              case "prefixItems":
+                visit(
+                  child,
+                  Array.isArray(currentValue)
+                    ? currentValue[index!]
+                    : currentValue,
+                  [...path, String(index!)],
+                  insideFactoryState,
+                );
+                return;
+              case "items":
+                if (Array.isArray(currentValue)) {
+                  const start = Array.isArray(schema.prefixItems)
+                    ? schema.prefixItems.length
+                    : 0;
+                  for (let i = start; i < currentValue.length; i++) {
+                    visit(
+                      child,
+                      currentValue[i],
+                      [...path, String(i)],
+                      insideFactoryState,
+                    );
+                  }
+                } else {
+                  visit(child, currentValue, path, insideFactoryState);
+                }
+                return;
+              case "additionalProperties":
+                if (isObjectNotArray(currentValue)) {
+                  const declaredKeys = isObjectOrArray(schema.properties)
+                    ? new Set(Object.keys(schema.properties))
+                    : undefined;
+                  for (const [k, v] of Object.entries(currentValue)) {
+                    if (declaredKeys?.has(k)) continue;
+                    visit(child, v, [...path, k], insideFactoryState);
+                  }
+                } else {
+                  visit(child, currentValue, path, insideFactoryState);
+                }
+                return;
+              default:
+                visit(child, currentValue, path, insideFactoryState);
+                return;
+            }
+          },
+        );
+      } finally {
+        if (factoryContainer !== undefined) {
+          factoryAncestors.delete(factoryContainer);
+        }
+      }
     };
 
     visit(argumentSchema, value, []);
@@ -8754,21 +9855,45 @@ export class Runner {
   #collectArgumentSchedulerReadLinks(
     argumentSchema: JSONSchema | undefined,
     value: unknown,
-    resultCell: Cell<any>,
+    processCell: Cell<any>,
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
+    const factoryContext = createFactoryTraversalContext();
+    const factoryAncestors = new Set<object>();
     const rootDefinitions = isObjectOrArray(argumentSchema)
       ? argumentSchema.$defs
       : undefined;
 
-    const visit = (schema: unknown, currentValue: unknown): void => {
-      // Sigil-only: the value is post-unwrap, where the only `$alias`
-      // records left belong to embedded Pattern values (their `defer`
-      // bookkeeping resolves them at that pattern's own instantiation) —
-      // parsing one here would read it at the wrong nesting level.
+    const visit = (
+      schema: unknown,
+      currentValue: unknown,
+      insideFactoryState = false,
+    ): void => {
+      if (isAdmittedFabricFactory(currentValue)) {
+        const state = factoryStateOf(currentValue);
+        visitFactoryForTraversal(
+          currentValue,
+          (nested, field) => {
+            if (state.kind === "pattern") {
+              visit(
+                field === "params" ? state.paramsSchema : undefined,
+                nested,
+                true,
+              );
+            }
+          },
+          factoryContext,
+        );
+        return;
+      }
+      // Sigil-only, deliberately NOT paired with `isAliasBinding`: the value
+      // is post-unwrap, where the only `$alias` records left belong to
+      // embedded Pattern values (their `defer` bookkeeping resolves them at
+      // that pattern's own instantiation) — parsing one here would read it at
+      // the wrong nesting level.
       if (isWriteRedirectLink(currentValue)) {
-        const link = parseLink(currentValue, resultCell);
+        const link = parseLink(currentValue, processCell);
         links.push({
           ...link,
           schema: link.schema ??
@@ -8782,70 +9907,101 @@ export class Runner {
       if (isCellLink(currentValue)) {
         return;
       }
-      if (!isObjectOrArray(schema)) return;
-      const seenValues = seen.get(schema) ?? new Set<unknown>();
-      if (seenValues.has(currentValue)) return;
-      seenValues.add(currentValue);
-      seen.set(schema, seenValues);
-
-      // Indexed, not rebuilt. Right for a `FabricPrimitive`: zero enumerable
-      // own properties, and a leaf holds no link to collect.
-      //
-      // A `FabricInstance` is refused, for the same reason as the sibling walk
-      // in `collectWritableCellArgumentLinks()`: a link in its codec contents
-      // is unreachable by property name, so passing one through misses it, and
-      // a miss is the unsafe direction here.
-      //
-      // Nothing reaches this in production today, de facto rather than by
-      // construction.
-      //
-      // TODO(danfuzz): descend by codec-mediated traversal into instance
-      // state, at which point this becomes a walk rather than a refusal.
+      if (typeof currentValue === "function") {
+        if (insideFactoryState) {
+          throw new TypeError(
+            "Arbitrary functions are not valid factory state values",
+          );
+        }
+        return;
+      }
       if (currentValue instanceof FabricInstance) {
         refuseFabricInstance(
           currentValue,
           "when collecting scheduler read links from an argument",
         );
       }
-      if (isObjectOrArray(schema.properties) && isObjectOrArray(currentValue)) {
-        for (const [key, propertySchema] of Object.entries(schema.properties)) {
-          visit(propertySchema, currentValue[key]);
-        }
-      }
 
-      if (Array.isArray(currentValue)) {
-        // A tuple slot covers its exact index; `items` covers the indices
-        // past the slots (2020-12). prefixItems-only schemas previously
-        // skipped elements entirely.
-        const prefixItems = Array.isArray(schema.prefixItems)
-          ? schema.prefixItems
-          : undefined;
-        for (let index = 0; index < currentValue.length; index++) {
-          const slotSchema =
-            prefixItems !== undefined && index < prefixItems.length
-              ? prefixItems[index]
-              : schema.items;
-          if (slotSchema !== undefined) {
-            visit(slotSchema, currentValue[index]);
+      const factoryContainer = insideFactoryState && currentValue !== null &&
+          typeof currentValue === "object"
+        ? currentValue
+        : undefined;
+      if (factoryContainer !== undefined) {
+        if (factoryAncestors.has(factoryContainer)) {
+          throw new TypeError("Circular reference detected in factory state");
+        }
+        factoryAncestors.add(factoryContainer);
+      }
+      try {
+        if (!isObjectOrArray(schema)) {
+          if (insideFactoryState) {
+            if (Array.isArray(currentValue)) {
+              for (const item of currentValue) visit(undefined, item, true);
+            } else if (isObjectNotArray(currentValue)) {
+              for (const nested of Object.values(currentValue)) {
+                visit(undefined, nested, true);
+              }
+            }
           }
+          return;
         }
-      }
-      if (
-        schema.additionalProperties !== undefined &&
-        isObjectOrArray(currentValue)
-      ) {
-        const declaredKeys = isObjectOrArray(schema.properties)
-          ? new Set(Object.keys(schema.properties))
-          : undefined;
-        for (const [key, propertyValue] of Object.entries(currentValue)) {
-          if (declaredKeys?.has(key)) continue;
-          visit(schema.additionalProperties, propertyValue);
-        }
-      }
-      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-        const branches = schema[key];
-        if (Array.isArray(branches)) {
-          for (const branch of branches) visit(branch, currentValue);
+        const seenValues = seen.get(schema) ?? new Set<unknown>();
+        if (seenValues.has(currentValue)) return;
+        seenValues.add(currentValue);
+        seen.set(schema, seenValues);
+
+        forEachSubschema(
+          schema as JSONSchema,
+          (child, keyword, key, index) => {
+            switch (keyword) {
+              case "properties":
+                if (isObjectOrArray(currentValue)) {
+                  visit(child, currentValue[key!], insideFactoryState);
+                }
+                return;
+              case "prefixItems":
+                visit(
+                  child,
+                  Array.isArray(currentValue)
+                    ? currentValue[index!]
+                    : currentValue,
+                  insideFactoryState,
+                );
+                return;
+              case "items":
+                if (Array.isArray(currentValue)) {
+                  const start = Array.isArray(schema.prefixItems)
+                    ? schema.prefixItems.length
+                    : 0;
+                  for (let i = start; i < currentValue.length; i++) {
+                    visit(child, currentValue[i], insideFactoryState);
+                  }
+                } else {
+                  visit(child, currentValue, insideFactoryState);
+                }
+                return;
+              case "additionalProperties":
+                if (isObjectNotArray(currentValue)) {
+                  const declaredKeys = isObjectOrArray(schema.properties)
+                    ? new Set(Object.keys(schema.properties))
+                    : undefined;
+                  for (const [k, v] of Object.entries(currentValue)) {
+                    if (declaredKeys?.has(k)) continue;
+                    visit(child, v, insideFactoryState);
+                  }
+                } else {
+                  visit(child, currentValue, insideFactoryState);
+                }
+                return;
+              default:
+                visit(child, currentValue, insideFactoryState);
+                return;
+            }
+          },
+        );
+      } finally {
+        if (factoryContainer !== undefined) {
+          factoryAncestors.delete(factoryContainer);
         }
       }
     };
@@ -8928,6 +10084,7 @@ export class Runner {
     if (!ref) {
       return undefined;
     }
+    noteLegacyFactoryCompatibilityRead("implRef");
     const artifact = this.#runtime.patternManager.artifactFromIdentitySync(
       ref.identity,
       ref.symbol,
@@ -9063,8 +10220,10 @@ export class Runner {
   ): { argument: any; isValidArgument: boolean } {
     const argument = module.argumentSchema !== undefined
       ? options.bindTxToSchema
-        ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-        : inputsCell.asSchema(module.argumentSchema).get()
+        ? inputsCell.asSchema(module.argumentSchema).withTx(tx)
+          .getWithoutFactoryMaterialization()
+        : inputsCell.asSchema(module.argumentSchema)
+          .getWithoutFactoryMaterialization()
       : inputsCell.getAsQueryResult([], tx);
 
     return {
@@ -9072,6 +10231,17 @@ export class Runner {
       isValidArgument: module.argumentSchema === false ||
         argument !== undefined,
     };
+  }
+
+  #serializeQueryResult(
+    inputsCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+  ): string {
+    try {
+      return toCompactDebugString(inputsCell.getAsQueryResult([], tx, false));
+    } catch (_error) {
+      return "(Can't serialize to JSON)";
+    }
   }
 
   /**
@@ -9517,7 +10687,8 @@ export class Runner {
     pattern: Pattern,
   ): boolean {
     return pattern.nodes.some(({ module }) =>
-      module.type === "ref" && module.implementation === "navigateTo"
+      isModule(module) && module.type === "ref" &&
+      module.implementation === "navigateTo"
     );
   }
 
@@ -9568,7 +10739,10 @@ export class Runner {
       return false;
     }
     return pattern.nodes.some(({ module }) => {
-      if (module.type !== "ref" || typeof module.implementation !== "string") {
+      if (
+        !isModule(module) || module.type !== "ref" ||
+        typeof module.implementation !== "string"
+      ) {
         return false;
       }
       return EAGER_RESULT_BUILTIN_REFS.has(module.implementation);
@@ -9686,18 +10860,13 @@ export class Runner {
       resultCell = previousScopedResultCell;
     }
 
-    // The change key is a content hash of the pattern's encodable form, taken
-    // through the artifact walk so an artifact reached by any route --
-    // including a sub-graph under a node's `inputs` -- is serialized before it
-    // is hashed. A hash is canonical, so a difference in member order is not a
-    // difference in the key.
-    //
-    // `hashOf` throws on anything the data model refuses. That is a second
-    // line of defense rather than the first: `normalizeSandboxResult` runs on
-    // every route here and already rejects a bare function at any depth, with
-    // a better message than a hash could give.
-    const resultPatternKey = hashStringOf(
-      flattenBuilderArtifacts(resultPattern),
+    // An action result is wrapped in a keyless, session-only pattern. Derive
+    // its change key through createRef's deliberately narrow legacy graph
+    // fallback: nested canonical factories still hash through Factory@1 state,
+    // while the wrapper and its keyless node descriptors retain deterministic
+    // structural identity without becoming durable Fabric values.
+    const resultPatternKey = toURI(
+      createRef(resultPattern, "returned-pattern-cache"),
     );
     // Keyed doc-then-INSTANCE, the instance being the SAME per-run
     // resolved key that selected the byScope cell above (r3739139481):
@@ -9776,6 +10945,7 @@ export class Runner {
   #instantiateJavaScriptHandlerNode(
     {
       module,
+      processCell,
       resultCell,
       addCancel,
       pattern,
@@ -9785,6 +10955,7 @@ export class Runner {
       reads,
       writes,
       streamLink,
+      factorySelectionLink,
       schedulerRehydration,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
@@ -9796,6 +10967,13 @@ export class Runner {
 
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
       if (event?.preventDefault) event.preventDefault();
+      if (factorySelectionLink !== undefined) {
+        this.#runtime.getCellFromLink(
+          factorySelectionLink,
+          factorySelectionLink.schema,
+          tx,
+        ).getWithoutFactoryMaterialization();
+      }
 
       // The dispatch-side closed-world gate (verb contract WS-C, C5). A
       // present payload that cannot satisfy a closed event schema fails the
@@ -9850,13 +11028,20 @@ export class Runner {
           tx,
         );
         logger.timeStart("stream", "readInputs");
-        const { argument, isValidArgument } = (() => {
+        const { argument: unpreparedArgument, isValidArgument } = (() => {
           try {
             return this.#readJavaScriptArgument(module, inputsCell, tx);
           } finally {
             logger.timeEnd("stream", "readInputs");
           }
         })();
+        const argument = isValidArgument
+          ? materializeScheduledFactoryInputs(
+            unpreparedArgument,
+            module.argumentSchema,
+            { runtime: this.#runtime, tx, inputsCell },
+          )
+          : unpreparedArgument;
 
         this.#updateInvalidInputFlag(
           name,
@@ -9943,6 +11128,7 @@ export class Runner {
         // pending names and retry instead of surfacing the error.
         if (
           !(error instanceof RetryImmediately) &&
+          !(error instanceof RetryWhenReady) &&
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
@@ -10006,7 +11192,8 @@ export class Runner {
           undefined,
           tx,
         );
-        const argument = inputsCell.asSchema(module.argumentSchema!).get();
+        const argument = inputsCell.asSchema(module.argumentSchema!)
+          .getWithoutFactoryMaterialization();
         const promises: Promise<unknown>[] = [];
         const seen = new Set<unknown>();
         const collect = (value: unknown, depth: number): void => {
@@ -10048,9 +11235,9 @@ export class Runner {
 
     // Tag the handler with its owning pattern instance so the delivery shaper
     // can group a pattern's input across its several streams into one shaping
-    // window (per-pattern coalescing, W3). The result cell is stable per
+    // window (per-pattern coalescing, W3). The process cell is stable per
     // instance, so all of one instance's handlers share this id.
-    const instanceLink = resultCell.getAsNormalizedFullLink();
+    const instanceLink = processCell.getAsNormalizedFullLink();
     const wrappedHandler = Object.assign(handler, {
       implementationSelection: schedulerRehydration.implementationSelection,
       reads,
@@ -10074,17 +11261,18 @@ export class Runner {
     const schedulerReads = this.#collectArgumentSchedulerReadLinks(
       module.argumentSchema,
       inputs,
-      resultCell,
+      processCell,
     );
-    const declaredSchedulerReads = schedulerReads.length > 0
-      ? schedulerReads
-      : reads;
-    const populateDependencies = reads.length > 0
+    const declaredSchedulerReads = dedupeNormalizedLinks([
+      ...(schedulerReads.length > 0 ? schedulerReads : reads),
+      ...(factorySelectionLink === undefined ? [] : [factorySelectionLink]),
+    ]);
+    const populateDependencies = declaredSchedulerReads.length > 0
       ? (depTx: IExtendedStorageTransaction, event: any) => {
         this.#populateDeclaredSchedulerReads(declaredSchedulerReads, depTx);
         this.#populateHandlerEventSchedulerReads(
           module.argumentSchema,
-          resultCell,
+          processCell,
           event,
           depTx,
         );
@@ -10101,9 +11289,10 @@ export class Runner {
           undefined,
           depTx,
         );
-        inputsCell.asSchema(module.argumentSchema!).get({
-          traverseCells: true,
-        });
+        inputsCell.asSchema(module.argumentSchema!)
+          .getWithoutFactoryMaterialization({
+            traverseCells: true,
+          });
       }
       : undefined;
 
@@ -10120,6 +11309,7 @@ export class Runner {
     {
       tx,
       module,
+      processCell,
       resultCell,
       addCancel,
       pattern,
@@ -10130,6 +11320,7 @@ export class Runner {
       reads,
       writes,
       schedulerRehydration,
+      factorySelectionLink,
     }: JavaScriptNodeContext,
   ): void {
     if (isObjectOrArray(inputs) && "$event" in inputs) {
@@ -10149,6 +11340,10 @@ export class Runner {
     };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
+    const effectiveReads = dedupeNormalizedLinks([
+      ...reads,
+      ...(factorySelectionLink === undefined ? [] : [factorySelectionLink]),
+    ]);
     // See the handler's counterpart above: what names the node, reduced once
     // here rather than on every action invocation.
     const resultFor = {
@@ -10182,10 +11377,11 @@ export class Runner {
       }
 
       const handleErrorOutput = (error: unknown) => {
-        // RetryImmediately is an internal control-flow signal: re-throw it
-        // untouched so the scheduler re-runs the action instead of writing an
-        // error result into the binding.
-        if (error instanceof RetryImmediately) throw error;
+        // Scheduler retry signals are internal control flow: re-throw them
+        // untouched instead of writing an error result into the binding.
+        if (
+          error instanceof RetryImmediately || error instanceof RetryWhenReady
+        ) throw error;
         if (
           error !== null &&
           (typeof error === "object" || typeof error === "function")
@@ -10216,6 +11412,13 @@ export class Runner {
       // the body swallowed.
       let postRun: ((result: any) => any) | undefined;
       try {
+        if (factorySelectionLink !== undefined) {
+          this.#runtime.getCellFromLink(
+            factorySelectionLink,
+            factorySelectionLink.schema,
+            tx,
+          ).getWithoutFactoryMaterialization();
+        }
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
         // A lift reads its argument, and reads through it while it runs. Both
@@ -10225,7 +11428,7 @@ export class Runner {
         if (this.#runtime.experimental.lazyMaterialization) {
           tx.markLazyMaterialize(true);
         }
-        const { argument, isValidArgument } = (() => {
+        const { argument: unpreparedArgument, isValidArgument } = (() => {
           try {
             return this.#readJavaScriptArgument(
               module,
@@ -10237,6 +11440,13 @@ export class Runner {
             logger.timeEnd("action", "readInputs");
           }
         })();
+        const argument = isValidArgument
+          ? materializeScheduledFactoryInputs(
+            unpreparedArgument,
+            module.argumentSchema,
+            { runtime: this.#runtime, tx, inputsCell },
+          )
+          : unpreparedArgument;
 
         this.#updateInvalidInputFlag(
           name,
@@ -10349,6 +11559,7 @@ export class Runner {
         // instead of surfacing the error.
         if (
           !(error instanceof RetryImmediately) &&
+          !(error instanceof RetryWhenReady) &&
           frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
         ) {
           popFrameAfterReturn = false;
@@ -10387,8 +11598,8 @@ export class Runner {
     }
     const instanceKey = programActionInstanceKey(
       schedulerActionInstanceKey({
-        process: resultCell.getAsNormalizedFullLink(),
-        reads,
+        process: processCell.getAsNormalizedFullLink(),
+        reads: effectiveReads,
         writes,
       }),
       schedulerRehydration.implementationSelection,
@@ -10413,14 +11624,14 @@ export class Runner {
         ? this.#collectWritableCellArgumentLinks(
           module.argumentSchema,
           inputs,
-          resultCell,
+          processCell,
           module.materializerWriteInputPaths,
         )
         : this.#moduleHasOpaqueResult(module)
         ? this.#collectWritableCellArgumentLinks(
           module.argumentSchema,
           inputs,
-          resultCell,
+          processCell,
         )
         : []);
     const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
@@ -10453,7 +11664,7 @@ export class Runner {
       )
       : [];
     const wrappedAction = Object.assign(action, {
-      reads,
+      reads: effectiveReads,
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
       ...(module.completeSchedulerScopeSummary === true &&
@@ -10504,10 +11715,12 @@ export class Runner {
     module: Module,
     inputBindings: FabricExecValue,
     outputBindings: FabricExecValue,
+    processCell: Cell<any>,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
+    factorySelectionLink?: NormalizedFullLink,
   ) {
     // Binding resolution is op-wiring machinery: the write-redirect walk
     // reads alias shells and plumbing containers' child paths, and those
@@ -10520,6 +11733,7 @@ export class Runner {
           inputBindings,
           outputBindings,
           resultCell,
+          processCell,
           pattern,
         ),
     );
@@ -10527,18 +11741,20 @@ export class Runner {
     const context: JavaScriptNodeContext = {
       tx,
       module,
+      processCell,
       resultCell,
       addCancel,
       pattern,
       fn,
       name,
       schedulerRehydration,
+      ...(factorySelectionLink === undefined ? {} : { factorySelectionLink }),
       ...io,
     };
 
     const { streamLink, eventTarget } = this.#resolveJavaScriptStreamLink(
       io.inputs,
-      resultCell.getAsNormalizedFullLink(),
+      processCell.getAsNormalizedFullLink(),
       tx,
     );
     if (streamLink) {
@@ -10640,97 +11856,6 @@ export class Runner {
   }
 
   /**
-   * CT-1623: for the list builtins (`map`/`filter`/`flatMap`), annotate the `op`
-   * input with its content-addressed `{ identity, symbol }` entry ref (when
-   * known) so the builtin can resolve the live canonical pattern by identity
-   * instead of deserializing the embedded graph. Mutates `inputBindings` in
-   * place: `op` becomes `{ $patternRef }`.
-   *
-   * Only the `op` key is rewritten — it is the sole pattern-valued input the
-   * builtins rehydrate (`resolveOpPattern`). Rewriting other inputs (e.g. a
-   * pattern captured in `params`) would leave an unresolved `$patternRef` object
-   * that nothing reads back.
-   *
-   * The sentinel carries NO embedded fallback graph (identity E4): the artifact
-   * index is session-lifetime, and the op's module evaluated in this session by
-   * construction (the sentinel is stamped from its live artifact right here),
-   * so the builtin's sync resolution cannot miss short of a bug — and a bug
-   * should be loud, not silently served a stale graph.
-   *
-   * The `op` substitution below writes through `inputBindings`, so it needs
-   * that record to be a fresh copy rather than the node's own `inputs`.
-   * `unwrapOneLevelAndBindToDoc` shares structure — it returns the original for
-   * any container under which nothing rebound — so the copy is not guaranteed
-   * in general. It is guaranteed HERE: this path runs only for the list
-   * builtins, whose `list` input is an alias, so the root always rebinds and is
-   * always copied.
-   *
-   * Either way the ref resolves. A copied pattern value carries its derivation
-   * link (`noteDerivedCopy`), and a shared one simply IS the original, so
-   * `getArtifactEntryRef` finds the ref (assigned post-eval by
-   * `registerEvaluatedModules`) in both cases.
-   *
-   * An op with NO known ref but a LIVE trusted original is a KEYLESS pattern
-   * — hand-built through the in-process builder DSL, or evaluated through the
-   * bare non-registering `Engine.compileAndEvaluateModules` — whose serialized
-   * copy carries a derivation link to its pristine in-memory pattern. It is
-   * minted its content-hash session identity right here (the same pointer
-   * `#entryRefForPattern` mints for a keyless ROOT pattern) — but that
-   * identity is session-synthetic and must never land in the durable inputs
-   * doc (L3(a), RULED 2026-08-27; the sentinel here was one of the durable
-   * keyless writers the 2026-08-27 diagnosis named). So the op is LEFT IN
-   * PLACE — the boundary walk inside `getImmutableCell` serializes its full
-   * graph, readable by any session — and the minted ref is returned for the
-   * caller to register as a SESSION-side resolution hint keyed by the inputs
-   * doc (`registerKeylessOpResolution`): the builtin then resolves the
-   * pristine artifact in-session, so the embedded round-trip's defer
-   * corruption (CT-1812 — the CT-1811 corruption, reachable ref-lessly)
-   * still never engages for the instantiating session. The trust gate stays
-   * intact: minting BRANDS, so only a value whose original is already a
-   * trusted builder pattern is minted.
-   *
-   * An op with no ref AND no live original — a plain deserialized graph,
-   * i.e. a STORED no-entry-ref pattern value (the live keyless writer path
-   * pinned by stored-pattern-rehydration.test.ts) — is left embedded with no
-   * hint: there is no pristine artifact in existence to point at, and
-   * re-rooting the graph bind-free is exactly the defer surgery CT-1812
-   * records as the residual there. Such an op takes the builtin's legacy
-   * graph path.
-   */
-  #substituteOpPatternRefs(
-    moduleRefName: string | undefined,
-    inputBindings: FabricExecValue,
-  ): { identity: string; symbol: string } | undefined {
-    if (
-      moduleRefName !== "map" && moduleRefName !== "filter" &&
-      moduleRefName !== "flatMap"
-    ) {
-      return undefined;
-    }
-    if (!isObjectOrArray(inputBindings)) return undefined;
-    const op = (inputBindings as Record<string, unknown>).op;
-    if (!isObjectOrArray(op)) return undefined;
-    const ref = this.#runtime.patternManager.getArtifactEntryRef(
-      op as unknown as object,
-    );
-    if (ref && !PatternManager.isKeylessPatternIdentity(ref.identity)) {
-      (inputBindings as Record<string, unknown>).op = {
-        $patternRef: { identity: ref.identity, symbol: ref.symbol },
-      };
-      return undefined;
-    }
-    const original = resolveOriginal(op as unknown as object);
-    if (isTrustedBuilderArtifact(original) && isPattern(original)) {
-      // Keyless: session mint only — never substituted into the (durable)
-      // bindings; the caller registers the in-session hint.
-      return this.#runtime.patternManager.ensureKeylessPatternIdentity(
-        original as unknown as Pattern,
-      );
-    }
-    return undefined;
-  }
-
-  /**
    * A raw builtin node's bound inputs and output binding: what
    * `#instantiateRawNode` hands the builtin, derived from the node alone
    * so the resume pre-sync can derive the same for a list coordinator it
@@ -10743,7 +11868,7 @@ export class Runner {
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
-    moduleRefName: string | undefined,
+    moduleRefName?: string,
   ): {
     argumentCellLink: NormalizedFullLink;
     mappedOutputBindings: FabricExecValue;
@@ -10767,20 +11892,32 @@ export class Runner {
       { derivedInternalCells: pattern.derivedInternalCells },
     );
 
-    // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
-    // with a compact `{ $patternRef }` sentinel when its content-addressed entry
-    // ref is known. This is the post-eval moment where the in-memory op object
-    // (linked to its original via `noteDerivedCopy`, preserved through binding)
-    // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
-    // JSON round-trip, so the builtin resolves the live canonical pattern by
-    // identity instead of deserializing the embedded graph. A KEYLESS op is
-    // never substituted (its session identity must not land durably); the
-    // returned mint is registered below, once the inputs doc's address is
-    // known, as this session's resolution hint for the builtin.
-    const keylessOpRef = this.#substituteOpPatternRefs(
-      moduleRefName,
-      mappedInputBindings,
-    );
+    // Preserve a constant list callback under the immutable inputs document's
+    // address. This runtime can execute the exact trusted bound callable it
+    // used to build the inline document; a fresh runtime instead decodes its
+    // Factory@1 state and follows the ordinary cold path. A ref-less callback
+    // still serializes as its embedded-graph fallback and receives a session-
+    // only keyless identity for stable local bookkeeping.
+    let liveListOp: Pattern | undefined;
+    if (
+      (moduleRefName === "map" || moduleRefName === "filter" ||
+        moduleRefName === "flatMap") &&
+      isObjectOrArray(mappedInputBindings)
+    ) {
+      const op = (mappedInputBindings as Record<string, unknown>).op;
+      if (op !== null && (typeof op === "object" || typeof op === "function")) {
+        const original = resolveOriginal(op as object);
+        if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+          const ref = this.#runtime.patternManager.ensureKeylessPatternIdentity(
+            original as Pattern,
+          );
+          if (
+            PatternManager.isKeylessPatternIdentity(ref.identity) ||
+            isAdmittedFabricFactory(op)
+          ) liveListOp = op as Pattern;
+        }
+      }
+    }
 
     // Opaque forwarded references (argument keys the module's schema marks
     // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
@@ -10816,19 +11953,15 @@ export class Runner {
       mappedInputBindings,
       undefined,
       tx,
+      undefined,
     );
-    if (keylessOpRef !== undefined) {
-      // The keyless op's in-session resolution hint (see
-      // `#substituteOpPatternRefs`): the builtin reads the embedded graph from
-      // this immutable doc and resolves the pristine minted artifact through
-      // this registration instead (CT-1812 stays sealed in-session, with
-      // nothing keyless durable).
-      this.#runtime.patternManager.registerKeylessOpResolution(
-        opInputsDocKey(inputsCell),
-        keylessOpRef,
+    if (liveListOp !== undefined) {
+      const inputsLink = inputsCell.getAsNormalizedFullLink();
+      this.#runtime.patternManager.registerListOpResolution(
+        `${inputsLink.space}\0${inputsLink.id}`,
+        liveListOp,
       );
     }
-
     // CT-1623: the output spot this node writes through is reserved for this
     // node, so its fully-resolved coordinates are a stable, position-derived,
     // program-independent identity. Builtins that mint a result container
@@ -11177,16 +12310,59 @@ export class Runner {
     addCancel: AddCancel,
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
+    factorySelectionLink?: NormalizedFullLink,
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    const patternImpl = unwrapOneLevelAndBindToDoc(
+    const containingFactoryState = isAdmittedFabricFactory(pattern)
+      ? factoryStateOf(pattern)
+      : undefined;
+    const containingParamsSchema = containingFactoryState?.kind === "pattern"
+      ? containingFactoryState.paramsSchema
+      : undefined;
+    const boundPatternImpl: unknown = unwrapOneLevelAndBindToDoc(
       module.implementation,
       argumentCellLink,
       resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
+      {
+        derivedInternalCells: pattern.derivedInternalCells,
+        includeCfcLabelView: true,
+        sourceSchemas: {
+          argument: pattern.argumentSchema,
+          ...(containingParamsSchema === undefined
+            ? {}
+            : { params: containingParamsSchema }),
+        },
+      },
     );
+    let patternImpl: Pattern;
+    let hasBoundSpaceSelector = false;
+    let boundSpaceSelector: unknown;
+    if (isAdmittedFabricFactory(boundPatternImpl)) {
+      const state = factoryStateOf(boundPatternImpl);
+      if (state.kind !== "pattern") {
+        throw new Error(
+          `Static factory node requires a pattern factory, got ${state.kind}`,
+        );
+      }
+      const materialized = materializeFactory(boundPatternImpl, {
+        runtime: this.#runtime,
+        artifactSpace: parentResultCell.space,
+      });
+      if (!isPattern(materialized)) {
+        throw new Error("Materialized static pattern factory is not a pattern");
+      }
+      if (Object.hasOwn(state, "spaceSelector")) {
+        hasBoundSpaceSelector = true;
+        boundSpaceSelector = state.spaceSelector;
+      }
+      patternImpl = materialized;
+    } else if (isPattern(boundPatternImpl)) {
+      patternImpl = boundPatternImpl;
+    } else {
+      throw new Error("Invalid bound pattern");
+    }
     const inputs = unwrapOneLevelAndBindToDoc(
       inputBindings,
       argumentCellLink,
@@ -11232,7 +12408,6 @@ export class Runner {
     } else {
       const resultScope = patternDefaultScope(patternImpl) ??
         module.defaultScope;
-      const targetSpace = module.targetSpace ?? resultCell.space;
       // CT-1623: identify the result cell by the (fully resolved) output spot
       // reserved for this node — a stable, position-derived, program-independent
       // identity — rather than hashing the pattern object (which drags in the
@@ -11294,6 +12469,12 @@ export class Runner {
             "output binding to anchor a reload-stable identity",
         );
       }
+      const targetSpace = hasBoundSpaceSelector
+        ? this.#resolveFactoryExecutionSpace(
+          boundSpaceSelector,
+          parentResultCell,
+        ) ?? module.targetSpace ?? outputRedirect.space
+        : module.targetSpace ?? resultCell.space;
       const baseResultCell = this.#runtime.getCell(
         targetSpace,
         {
@@ -11361,6 +12542,25 @@ export class Runner {
             : undefined,
         );
       }
+      if (factorySelectionLink !== undefined) {
+        const selectedRef = getArtifactEntryRef(patternImpl);
+        if (
+          selectedRef !== undefined &&
+          !PatternManager.isKeylessPatternIdentity(selectedRef.identity)
+        ) {
+          // Dynamic replacement publishes the selected pointer before any
+          // named-family delay in the child's full setup. A reader entering
+          // during that delay follows the new factory and waits for its code
+          // instead of restarting the canceled generation with newer params.
+          childResultCell.withTx(instanceTx).setMetaRaw("patternIdentity", {
+            identity: selectedRef.identity,
+            symbol: selectedRef.symbol,
+          }, rawMetaWriteAuthorization);
+        }
+      }
+      // The child retains its own scoped implementation selection. The parent
+      // graph owns its lifetime through retain/release, so a shared child
+      // remains valid while any current parent owns it.
       const childRun = this.#runWithStartOwnership(
         instanceTx,
         patternImpl,
@@ -11370,9 +12570,17 @@ export class Runner {
           awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
             schedulerRehydration,
           ),
+          ...(factorySelectionLink === undefined
+            ? {}
+            : { factorySelectionLink }),
           parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
         },
       );
+
+      // A child whose named-family sync has not landed owns no installed
+      // registration yet. Its deferred start still belongs to this
+      // initializer and is canceled with the containing graph.
+      addCancel(childRun.cancelDeferredStart);
 
       if (sendToBindings) {
         sendValueToBinding(

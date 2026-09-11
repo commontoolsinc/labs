@@ -367,7 +367,6 @@ describe("pattern", () => {
               return { doubled: double(x) };
             }) as any)(element, index, array)
           ),
-          {},
         );
         return { doubled };
       },

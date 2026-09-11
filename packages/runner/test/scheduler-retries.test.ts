@@ -138,6 +138,7 @@ describe("reactive retries", () => {
         >;
     await watchReactiveActionCommit({
       action,
+      generation: 0,
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
       retries,
@@ -152,6 +153,7 @@ describe("reactive retries", () => {
         queued++;
       },
       getActionId: () => "test-action",
+      isActionGenerationCurrent: () => true,
       restoreInvalidCauses: options.restoreInvalidCauses ?? (() => {}),
       reportTerminalRejection: (terminalError) => {
         reported.push(terminalError);

@@ -620,6 +620,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     cfcInstrumentation: CfcInstrumentationHooks = {},
+    private beforeCommit?: (tx: IExtendedStorageTransaction) => void,
   ) {
     this.#cfcInstrumentation = cfcInstrumentation;
   }
@@ -2903,11 +2904,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#invalidateReadResultCache();
     if (options?.delete !== true) {
       this.#refuseMalformedSchemaMeta(address, value);
-    }
-    const result = this.tx.write(address, value, options);
-    if (result.ok) {
+      // Schema documents enter the speculative layer before the carrier. A
+      // write can synchronously wake another transaction, which must never see
+      // a reference during the interval before its closure is staged.
       this.#stageSchemaDocsForValue(address.space, address, value);
     }
+    const result = this.tx.write(address, value, options);
     return result;
   }
 
@@ -2925,6 +2927,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#invalidateReadResultCache();
     if (options?.delete !== true) {
       this.#refuseMalformedSchemaMeta(address, value);
+      // Keep speculative visibility causal: the closure is observable before
+      // the carrier can wake a reader that immediately follows its schema.
+      this.#stageSchemaDocsForValue(address.space, address, value);
     }
     const writeResult = this.tx.write(address, value, options);
     if (
@@ -2997,12 +3002,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
-    // The staged value may carry link schemas — or be, or carry, a
-    // `schema` metadata member — with external refs; stage their closure
-    // with it (the write-side delivery guarantee, and what makes a
-    // same-transaction read through the reference resolve). The `cid:`
-    // writes this issues recurse harmlessly: the stager skips them by id.
-    this.#stageSchemaDocsForValue(address.space, address, value);
   }
 
   writeValueOrThrow(
@@ -3071,24 +3070,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         cachesInvalidated = true;
         this.#invalidateReadResultCache();
       };
-      // Collected while the batch consumes the generator, staged after it
-      // returns: the schema-document closure behind each written link (the
-      // write-side delivery guarantee, and what makes a same-transaction
-      // read through the link resolve). Staging mid-batch would inject
-      // writes while `writeBatch` is applying runs.
-      const staged: { address: IMemorySpaceAddress; value: FabricValue }[] = [];
+      // Schema-document closure staging completes before the carrier batch
+      // begins, preserving causal visibility for synchronously awakened
+      // readers. Validate every write before staging any closure, then keep
+      // closure writes outside the generator while `writeBatch` applies its
+      // same-document runs.
+      const pendingWrites = [...writes];
+      for (const write of pendingWrites) {
+        if (write.delete) continue;
+        const address = toMemorySpaceAddress(write.address);
+        refuseMalformedSchemaMeta(address, write.value);
+      }
+      for (const write of pendingWrites) {
+        if (write.delete) continue;
+        const address = toMemorySpaceAddress(write.address);
+        this.#stageSchemaDocsForValue(address.space, address, write.value);
+      }
       const result = this.tx.writeBatch(
         (function* () {
-          for (const write of writes) {
+          for (const write of pendingWrites) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address, write.value);
             noteWriteIdentity();
-            if (!write.delete) {
-              refuseMalformedSchemaMeta(address, write.value);
-              if (getContentAddressedSchemasConfig()) {
-                staged.push({ address, value: write.value });
-              }
-            }
             // After the chokepoint, so a write it refuses leaves the caches
             // standing over a state it did not change.
             invalidateReadCaches();
@@ -3098,13 +3101,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       );
       if (result.error) {
         throw toThrowable(result.error);
-      }
-      for (const write of staged) {
-        this.#stageSchemaDocsForValue(
-          write.address.space,
-          write.address,
-          write.value,
-        );
       }
       return;
     }
@@ -3232,6 +3228,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.tx.clearReadOnly?.();
     }
     if (!readOnly) {
+      try {
+        // Runtime-owned boundary work must not be opt-in for callers. In
+        // particular, tx.commit() after Cell.set(factory) still has to attach
+        // the atomic artifact-publication preparation.
+        this.beforeCommit?.(this);
+      } catch (reason) {
+        return this.#rejectCommitBeforeStorage({
+          error: {
+            name: "StorageTransactionAborted",
+            message: `transaction preparation failed: ${reason}`,
+            reason,
+          },
+        });
+      }
       // Before the CFC probes and the prepared-digest recheck: writes added
       // here must precede any prepare, and the dedupe set makes this a
       // no-op for transactions prepareCfc() already covered.

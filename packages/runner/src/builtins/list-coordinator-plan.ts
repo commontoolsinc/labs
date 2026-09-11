@@ -1,4 +1,4 @@
-import type { JSONSchema, Pattern } from "../builder/types.ts";
+import type { Pattern } from "../builder/types.ts";
 import type { Cell } from "../cell.ts";
 import { resolveLink } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
@@ -6,11 +6,15 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { listElementKeys } from "./list-element-keys.ts";
 import { listElementLink } from "./list-element-link.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { ownedCell } from "./runtime-owned-store.ts";
-import { narrowestCellScope, outputSpotFromBinding } from "./scope-policy.ts";
+import {
+  boundPatternFactoryScope,
+  narrowestCellScope,
+  outputSpotFromBinding,
+} from "./scope-policy.ts";
+import type { MaterializedListPatternSelection } from "./list-factory-materialization.ts";
+import { narrowestScope } from "../scope.ts";
 
 /** The three list coordinators, by the builtin ref name each registers. */
 export type ListOp = "map" | "filter" | "flatMap";
@@ -24,7 +28,9 @@ export type ListOp = "map" | "filter" | "flatMap";
  */
 export type ListCoordinatorPlan = {
   opPattern: Pattern;
-  argumentUsage: ReturnType<typeof inferListOpArgumentUsage>;
+  factoryGeneration: number;
+  factorySelectionLink: NormalizedFullLink;
+  factorySourceLink: NormalizedFullLink;
   /** The list entity itself, the cell `array` callback arguments observe. */
   listCell: Cell<any>;
   /** One cell per slot, built from the slot links alone; undefined while the
@@ -69,11 +75,10 @@ export function listCoordinatorPlan(
   tx: IExtendedStorageTransaction,
   op: ListOp,
   inputsCell: Cell<any>,
-  inputSchema: JSONSchema,
+  selection: MaterializedListPatternSelection,
   parentCell: Cell<any>,
   outputBinding: NormalizedFullLink | undefined,
 ): ListCoordinatorPlan {
-  const opCell = inputsCell.asSchema(inputSchema).withTx(tx).key("op").get();
   const sourceListCell = inputsCell.key("list");
   const listTarget = op === "map"
     ? resolveLink(
@@ -95,22 +100,20 @@ export function listCoordinatorPlan(
     : !Array.isArray(rawList)
     ? rawList as unknown as Cell<any>[] // non-array: the caller's guard
     : slots.map((resolved) => runtime.getCellFromLink(resolved, undefined, tx));
-  // `.getRaw()` because the pattern itself is wanted, not what its aliases
-  // reach: a compact `{ $patternRef }` sentinel (resolved to the live
-  // canonical pattern by identity) or, on the legacy path, the embedded
-  // pattern graph itself.
-  const opPattern = resolveOpPattern(runtime, opCell.getRaw(), op, inputsCell);
-  const argumentUsage = inferListOpArgumentUsage(opPattern);
-  const scope = op === "map" ? listTarget!.scope : narrowestCellScope(
+  const opPattern = selection.pattern;
+  const callbackScope = boundPatternFactoryScope(
     runtime,
     tx,
-    [
-      inputsCell.key("list"),
-      ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
-      argumentUsage.usesArray ? inputsCell.key("list") : undefined,
-      argumentUsage.usesParams ? inputsCell.key("params") : undefined,
-    ],
+    opPattern,
+    selection.factorySourceLink,
   );
+  const scope = op === "map" ? listTarget!.scope : narrowestScope([
+    narrowestCellScope(runtime, tx, [
+      inputsCell.key("list"),
+      ...(Array.isArray(list) ? list : []),
+    ]),
+    callbackScope,
+  ]);
   const outputSpot = outputSpotFromBinding(outputBinding);
   if (!outputSpot) {
     throw new Error(
@@ -133,7 +136,9 @@ export function listCoordinatorPlan(
     : new Map<number, string>();
   return {
     opPattern,
-    argumentUsage,
+    factoryGeneration: selection.generation,
+    factorySelectionLink: selection.factorySelectionLink,
+    factorySourceLink: selection.factorySourceLink,
     listCell,
     list,
     scope,

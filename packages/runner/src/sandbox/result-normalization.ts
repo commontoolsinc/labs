@@ -2,6 +2,11 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
@@ -10,6 +15,11 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 
 import { isReactive } from "../builder/types.ts";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "../builder/factory-traversal.ts";
 import { hasEncodableForm } from "../encodable-form.ts";
 import { isCellLink } from "../link-utils.ts";
 
@@ -165,8 +175,28 @@ function adaptSandboxResult(
   actionName: string | undefined,
   path: string[],
   adapted: Map<object, unknown>,
+  factoryContext: FactoryTraversalContext,
 ): unknown {
   if (isReactive(value) || isCellLink(value)) return value;
+
+  if (isAdmittedFabricFactory(value)) {
+    try {
+      return mapFactoryForTraversal(
+        value,
+        (nested, field) =>
+          adaptSandboxResult(
+            nested,
+            actionName,
+            [...path, field],
+            adapted,
+            factoryContext,
+          ),
+        factoryContext,
+      );
+    } catch (cause) {
+      throw formatActionResultError(value, cause, actionName, path);
+    }
+  }
 
   if (!isSandboxResultContainer(value)) {
     try {
@@ -199,6 +229,7 @@ function adaptSandboxResult(
       actionName,
       [...path, valueIsArray ? `[${key}]` : key],
       adapted,
+      factoryContext,
     );
     Object.defineProperty(copy, key, {
       value: normalizedChild,
@@ -225,6 +256,26 @@ function prepareActionResultValidation(
   }
   if (isCellLink(value)) {
     return { value: undefined, hasReactive: false, hasOpaque: true };
+  }
+  if (isAdmittedFabricFactory(value)) {
+    const existing = prepared.get(value);
+    if (existing !== undefined) return existing;
+
+    const stateValues: Record<string, unknown> = {};
+    const result: PreparedValidation = {
+      value: stateValues,
+      hasReactive: false,
+      hasOpaque: true,
+    };
+    prepared.set(value, result);
+    mapFactoryStateValues(factoryStateOf(value), (nested, field) => {
+      const childResult = prepareActionResultValidation(nested, prepared);
+      result.hasReactive ||= childResult.hasReactive;
+      result.hasOpaque ||= childResult.hasOpaque;
+      stateValues[field] = childResult.value;
+      return nested;
+    });
+    return result;
   }
   if (!isSandboxResultContainer(value)) {
     return { value, hasReactive: false, hasOpaque: false };
@@ -309,7 +360,13 @@ export function normalizeSandboxResult(
   value: unknown,
   actionName?: string,
 ): NormalizedSandboxResult {
-  const adapted = adaptSandboxResult(value, actionName, [], new Map());
+  const adapted = adaptSandboxResult(
+    value,
+    actionName,
+    [],
+    new Map(),
+    createFactoryTraversalContext(),
+  );
   const prepared = prepareActionResultValidation(adapted);
   const normalized = validateFabricActionResult(
     prepared.value,

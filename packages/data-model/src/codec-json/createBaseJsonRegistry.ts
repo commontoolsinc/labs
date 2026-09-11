@@ -3,6 +3,7 @@ import { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
 import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { UndefinedCodec } from "./UndefinedCodec.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import { FactoryCodec } from "@/codec-common/FactoryCodec.ts";
 import { JSON_FORMAT, type JsonCodecValue } from "./interface.ts";
 
 /**
@@ -41,6 +42,7 @@ export function createBaseJsonRegistry(): CodecRegistry<JsonCodecValue> {
     new SymbolCodec<JsonCodecValue>((key) => key),
   );
   registry.registerPrimitive("undefined", new UndefinedCodec());
+  registry.registerCallable(new FactoryCodec());
 
   // Self-representing primitives: emitted as-is (their own wire form).
   // `number` is registered both ways -- finite numbers self-represent, while

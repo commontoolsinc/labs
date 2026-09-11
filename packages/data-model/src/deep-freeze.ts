@@ -20,6 +20,11 @@ import {
 } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 import { isValidFabricValue } from "./validity-check.ts";
+import {
+  isAdmittedFabricFactory,
+  sealFactoryState,
+  trySealedFactoryState,
+} from "./fabric-factory.ts";
 
 /** Cache of confirmed deep-frozen objects. */
 const deepFrozenCache = new WeakSet<object>();
@@ -97,7 +102,12 @@ function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
 export function isDeepFrozen(value: unknown): boolean {
   // Fast leaf paths first, so a primitive or already-cached value returns
   // without allocating the cycle-tracking set or the recursion closure below.
-  if (isNecessarilyOrKnownDeepFrozen(value)) {
+  if (isAdmittedFabricFactory(value)) {
+    if (isInDeepFrozenCache(value as object)) return true;
+    if (!Object.isFrozen(value) || trySealedFactoryState(value) === undefined) {
+      return false;
+    }
+  } else if (isNecessarilyOrKnownDeepFrozen(value)) {
     return true;
   } else if (!Object.isFrozen(value)) {
     return false;
@@ -108,7 +118,19 @@ export function isDeepFrozen(value: unknown): boolean {
   // layer rather than allocating an equivalent `(v) => …` per descent.
   const inProgress = new Set<object>();
   const check = (value: unknown): boolean => {
-    if (isNecessarilyOrKnownDeepFrozen(value)) {
+    if (isAdmittedFabricFactory(value)) {
+      const obj = value as object;
+      if (isInDeepFrozenCache(obj)) return true;
+      if (!Object.isFrozen(value)) return false;
+      const state = trySealedFactoryState(value);
+      if (state === undefined) return false;
+      if (inProgress.has(obj)) return true;
+      inProgress.add(obj);
+      const result = check(state);
+      inProgress.delete(obj);
+      if (result) addToDeepFrozenCache(obj);
+      return result;
+    } else if (isNecessarilyOrKnownDeepFrozen(value)) {
       return true;
     } else if (!Object.isFrozen(value)) {
       return false;
@@ -195,7 +217,11 @@ export function deepFreeze<T>(value: T): T {
   // `FabricPrimitive`s, and cached objects). Handling this here, before
   // allocating the cycle-tracking set or the recursion closure below, keeps
   // them off the heavyweight path.
-  if (isNecessarilyOrKnownDeepFrozen(value)) {
+  if (
+    isAdmittedFabricFactory(value)
+      ? isInDeepFrozenCache(value as object)
+      : isNecessarilyOrKnownDeepFrozen(value)
+  ) {
     return value;
   }
 
@@ -211,6 +237,17 @@ export function deepFreeze<T>(value: T): T {
   // cycle-arrival defers to it.
   const inProgress = new Set<object>();
   const freeze = <U>(value: U): U => {
+    if (isAdmittedFabricFactory(value)) {
+      const obj = value as object;
+      if (isInDeepFrozenCache(obj) || inProgress.has(obj)) return value;
+      inProgress.add(obj);
+      const state = sealFactoryState(value, freeze);
+      freeze(state);
+      if (!Object.isFrozen(value)) Object.freeze(value);
+      addToDeepFrozenCache(obj);
+      return value;
+    }
+
     // Leaf short-circuits, repeated for nested values reached by recursion.
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return value;
@@ -273,8 +310,9 @@ export function isValidDeepFrozenFabricValue(
   value: unknown,
 ): value is FabricValue {
   if (
-    typeof value === "object" && value !== null &&
-    deepFrozenFabricValueCache.has(value)
+    ((typeof value === "object" && value !== null) ||
+      typeof value === "function") &&
+    deepFrozenFabricValueCache.has(value as object)
   ) {
     return true;
   }
@@ -289,8 +327,12 @@ export function isValidDeepFrozenFabricValue(
   // subtree.
   const result = isDeepFrozen(value) && isValidFabricValue(value);
 
-  if (result && typeof value === "object" && value !== null) {
-    deepFrozenFabricValueCache.add(value);
+  if (
+    result &&
+    ((typeof value === "object" && value !== null) ||
+      typeof value === "function")
+  ) {
+    deepFrozenFabricValueCache.add(value as object);
   }
 
   return result;

@@ -143,9 +143,10 @@ export type EnsurePieceVerdict = {
 export async function ensurePieceRunningVerdict(
   runtime: Runtime,
   cellLink: NormalizedFullLink,
-  options?: { propagateErrors?: boolean },
+  options?: { propagateErrors?: boolean; signal?: AbortSignal },
 ): Promise<EnsurePieceVerdict> {
   const observedDocIds: string[] = [];
+  if (options?.signal?.aborted) return { started: false, observedDocIds };
   try {
     const tx = runtime.edit();
     tx.tx.immediate = true;
@@ -191,6 +192,9 @@ export async function ensurePieceRunningVerdict(
       // Commit the read transaction before starting the piece
       runtime.prepareTxForCommit(tx);
       await tx.commit();
+      if (options?.signal?.aborted) {
+        return { started: false, rootId, observedDocIds };
+      }
 
       // Load the pattern by its content identity.
       const pattern = await runtime.patternManager.loadPatternByIdentity(
@@ -198,6 +202,9 @@ export async function ensurePieceRunningVerdict(
         identityRef.symbol,
         cellLink.space,
       );
+      if (options?.signal?.aborted) {
+        return { started: false, rootId, observedDocIds };
+      }
 
       if (!pattern) {
         logger.debug("ensure-piece", () => [
@@ -217,6 +224,9 @@ export async function ensurePieceRunningVerdict(
 
       // Start the existing piece - this registers event handlers without
       // re-running setup and potentially allocating different metadata cells.
+      if (options?.signal?.aborted) {
+        return { started: false, rootId, observedDocIds };
+      }
       await runtime.start(resultCell);
 
       logger.debug("ensure-piece", () => [
@@ -276,13 +286,15 @@ export async function ensurePieceRunningVerdict(
  *   next cycle) from an actual load/start FAILURE (throw — counted
  *   `structureLoadFailures`); with the collapse, its failure arm was
  *   unreachable and real errors retried silently every input-driven cycle.
- *   Default stays best-effort for the event-recovery caller.
+ *   `signal` prevents a load continuation whose event owner was canceled from
+ *   starting a piece after teardown. Default stays best-effort for the
+ *   event-recovery caller.
  * @returns Promise<boolean> - true if a piece was started, false otherwise
  */
 export async function ensurePieceRunning(
   runtime: Runtime,
   cellLink: NormalizedFullLink,
-  options?: { propagateErrors?: boolean },
+  options?: { propagateErrors?: boolean; signal?: AbortSignal },
 ): Promise<boolean> {
   return (await ensurePieceRunningVerdict(runtime, cellLink, options)).started;
 }

@@ -12,6 +12,8 @@ import {
 } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
+import { isAdmittedFabricFactory, sealFactoryState } from "@/fabric-factory.ts";
 
 /**
  * Compares `FabricValue`s by logical content, preserving signed zero, sparse
@@ -32,6 +34,22 @@ import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
  * ignored, as they are by content hashing.
  */
 export function valueEqual(a: FabricValue, b: FabricValue): boolean {
+  if (typeof a === "function" || typeof b === "function") {
+    const aIsFactory = isAdmittedFabricFactory(a);
+    const bIsFactory = isAdmittedFabricFactory(b);
+    if (typeof a === "function" && !aIsFactory) {
+      throw new Error("Cannot compare an arbitrary function value.");
+    }
+    if (typeof b === "function" && !bIsFactory) {
+      throw new Error("Cannot compare an arbitrary function value.");
+    }
+    if (!aIsFactory || !bIsFactory) return false;
+    return valueEqual(
+      sealFactoryState(a, deepFreeze) as FabricValue,
+      sealFactoryState(b, deepFreeze) as FabricValue,
+    );
+  }
+
   if (Object.is(a, b)) return true;
   if (
     a === null || b === null ||
@@ -47,10 +65,23 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
 
   while (pending.length > 0) {
     const [left, right] = pending.pop()!;
-    if (Object.is(left, right)) continue;
     if (typeof left === "function" || typeof right === "function") {
-      throw new Error("Cannot compare a function value.");
+      const leftIsFactory = isAdmittedFabricFactory(left);
+      const rightIsFactory = isAdmittedFabricFactory(right);
+      if (typeof left === "function" && !leftIsFactory) {
+        throw new Error("Cannot compare an arbitrary function value.");
+      }
+      if (typeof right === "function" && !rightIsFactory) {
+        throw new Error("Cannot compare an arbitrary function value.");
+      }
+      if (!leftIsFactory || !rightIsFactory) return false;
+      pending.push([
+        sealFactoryState(left, deepFreeze) as FabricValue,
+        sealFactoryState(right, deepFreeze) as FabricValue,
+      ]);
+      continue;
     }
+    if (Object.is(left, right)) continue;
     if (
       left === null || right === null ||
       typeof left !== "object" || typeof right !== "object"

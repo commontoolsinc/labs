@@ -34,6 +34,7 @@ import {
 } from "./interface.ts";
 import { isFabricPlainObject } from "./type-check.ts";
 import { tagFromNativeBuiltinClassElseNull, VALUE_TAGS } from "./value-tags.ts";
+import { isAdmittedFabricFactory } from "./fabric-factory.ts";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting
@@ -88,7 +89,9 @@ export function isValidFabricValueLayer(
       return Symbol.keyFor(value) !== undefined;
     }
 
-    case "function":
+    case "function": {
+      return isAdmittedFabricFactory(value);
+    }
     default: {
       return false;
     }
@@ -300,7 +303,7 @@ export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
   // allocating the cycle-tracking set or the recursion closure below.
   if (typeof value === "function") {
-    return false;
+    return isAdmittedFabricFactory(value);
   } else if (typeof value === "symbol") {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, matching
@@ -315,7 +318,7 @@ export function isValidFabricValue(value: unknown): value is FabricValue {
   // the recursion callback once here, reusing the same closure at every layer.
   const seen = new Set<object>();
   const check = (item: unknown): boolean => {
-    if (typeof item === "function") return false;
+    if (typeof item === "function") return isAdmittedFabricFactory(item);
     if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
     if (item === null || typeof item !== "object") {
       // A non-function, non-symbol primitive.

@@ -218,7 +218,7 @@ export function inferParameterType(
  * Returns undefined if the type cannot be inferred
  */
 export function inferReturnType(
-  _fn: ts.ArrowFunction | ts.FunctionExpression,
+  _fn: ts.FunctionLikeDeclaration,
   signature: ts.Signature,
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
@@ -913,7 +913,7 @@ function extractElementFromArrayType(
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol, checker) &&
           innerAlias.aliasTypeArguments?.[0]
         ) {
           return extractElementFromArrayType(
@@ -1032,7 +1032,7 @@ export function inferArrayElementType(
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol, checker) &&
           innerAlias.aliasTypeArguments?.[0] &&
           checker.isArrayType(innerAlias.aliasTypeArguments[0])
         ) {
@@ -1115,7 +1115,8 @@ function isEffectiveArrayMember(
     aliasTypeArguments?: readonly ts.Type[];
   };
   if (
-    isDefaultAliasSymbol(alias.aliasSymbol) && alias.aliasTypeArguments?.[0]
+    isDefaultAliasSymbol(alias.aliasSymbol, checker) &&
+    alias.aliasTypeArguments?.[0]
   ) {
     const baseT = alias.aliasTypeArguments[0];
     return checker.isArrayType(baseT) || checker.isTupleType(baseT);
@@ -1165,7 +1166,7 @@ export function hasArrayTypeArgument(
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol, checker) &&
           innerAlias.aliasTypeArguments?.[0]
         ) {
           const baseT = innerAlias.aliasTypeArguments[0];
