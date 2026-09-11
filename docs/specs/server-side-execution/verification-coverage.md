@@ -2688,6 +2688,19 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   including when the reader excludes speculative pending layers. Authoritative
   frames prevent replay of accepted contributions, and withdrawing an earlier
   pending layer preserves already accepted sibling operations.
+  A received acceptance records its sequence before promotion resumes, so a
+  confirmed view covering that sequence does not replay the pending operation.
+  Frames alone do not prove coverage of unresolved or later-wave receipts;
+  those operations and speculative neighbors remain visible. The storage
+  controls cover both receipt/frame orders, cached reads, and notifications.
+
+  Standalone effect completions join the serving loop's own derived tail for
+  the drain-settle watermark advance. `executor-settle-advance.test.ts` covers
+  a completed request while another accepted request remains unresolved,
+  with an empty-completion control that creates no commit, a divergent client
+  overlay, and a completion arriving during an older advance's seal. The
+  completion itself retains the current watermark; a later quiescent cycle covers its
+  sequence without requiring another authored input.
 
   Remaining investigation obligations: tool-loop LLM requests, `llmDialog`,
   non-clearance SQLite instance keys, and the provider READ partition.

@@ -378,13 +378,17 @@ on drain-settle (TRUE quiescence: a settled non-exhausted cycle, no
 contributions, no pending events, the drain empty — S1, RULED
 2026-08-19; protocol.md §4's quiescence-advance amendment):
   additionally advance W over the space's own committed derived tail
-  (the wave commits contiguously above the input coverage point),
+  (own waves and standalone effect completions contiguously above the
+  input coverage point),
   sealed as an advance-only wave and pushed through the ordinary
   watermark-doc channel — client retirement floors that include a
   pushed derived commit's seq become reachable on a quiet space (the
   swatch-stall class fix). At most once per quiescence transition
-  (latched by content-carrying wave commits, consumed on seal); the
-  advance's own bookkeeping commit is never chased; any non-own seq
+  (latched by content-carrying own derived commits, consumed on seal); a
+  completion arriving after an advance chose its target keeps a later advance
+  owed. Each successful advance-only commit is counted even when that newer
+  completion keeps the latch armed. The advance's own bookkeeping commit
+  is never chased; any non-own seq
   above the coverage point stops the advance below it (fail-closed —
   its coverage arrives input-driven). Counted: settleAdvances.
 

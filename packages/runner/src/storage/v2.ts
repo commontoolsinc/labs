@@ -389,21 +389,27 @@ type MaterializedVersion = {
 };
 
 type PendingVersion =
-  | {
-    localSeq: number;
-    op: "set";
-    value: EntityDocument;
+  & {
+    /** A sealed verdict already accepted this operation at the store seq. */
+    acceptedSeq?: number;
   }
-  | {
-    localSeq: number;
-    op: "patch";
-    patches: PatchOp[];
-    value: EntityDocument;
-  }
-  | {
-    localSeq: number;
-    op: "delete";
-  };
+  & (
+    | {
+      localSeq: number;
+      op: "set";
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "patch";
+      patches: PatchOp[];
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "delete";
+    }
+  );
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
@@ -573,6 +579,14 @@ const applyPendingVersion = (
   }
 };
 
+/** Whether the confirmed view covers an accepted operation. */
+const isCoveredPendingVersion = (
+  confirmed: ConfirmedVersion,
+  pending: PendingVersion,
+): boolean =>
+  confirmed.localWavePromotion === undefined &&
+  pending.acceptedSeq !== undefined && pending.acceptedSeq <= confirmed.seq;
+
 /** Folds pending and locally accepted wave contributions in sealing order. */
 const materializePendingVersions = (
   confirmed: ConfirmedVersion,
@@ -588,6 +602,7 @@ const materializePendingVersions = (
     : pending;
   let value = interleaved ? promotion.base : confirmed.value;
   for (const entry of entries) {
+    if (isCoveredPendingVersion(confirmed, entry)) continue;
     value = applyPendingVersion(value, entry, logContext);
   }
   return value;
@@ -637,10 +652,15 @@ const materializedVersionThroughPending = (
       ? record.confirmed
       : cache.prefixes[nextIndex - 1]!;
     const pending = record.pending[nextIndex]!;
+    const covered = isCoveredPendingVersion(record.confirmed, pending);
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending, logContext),
-      transactionValue: UNCACHED_TRANSACTION_VALUE,
+      value: covered
+        ? base.value
+        : applyPendingVersion(base.value, pending, logContext),
+      transactionValue: covered
+        ? base.transactionValue
+        : UNCACHED_TRANSACTION_VALUE,
     });
   }
   return cache.prefixes[pendingCount - 1]!;
@@ -5270,6 +5290,58 @@ export class SpaceReplica
     return { localSeq, commit, settled };
   }
 
+  /** Records accepted sealed operations before their promotion continuation. */
+  #noteSealedReceipt(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    seq: number,
+    identity?: ScopeKeyIdentity,
+  ): void {
+    const touched = this.#touchedOf(operations, identity);
+    const changed = touched.filter(({ id, scope, scopeKey }) => {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      return record.confirmed.localWavePromotion === undefined &&
+        record.confirmed.seq >= seq &&
+        record.pending.some((entry) => entry.localSeq === localSeq);
+    });
+    const shouldNotifySubscribers = changed.length > 0 &&
+      this.#hasNotificationSubscribers();
+    const shouldNotifySinks = changed.length > 0 &&
+      this.#hasSinkSubscribers(changed);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        changed.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    // The confirmed view can advance between receipt and settlement, or
+    // already cover the receipt. Covered operations are present in that value;
+    // partial local wave promotions still need their pending contributions.
+    for (const { id, scope, scopeKey } of touched) {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      for (const entry of record.pending) {
+        if (entry.localSeq === localSeq) entry.acceptedSeq = seq;
+      }
+      record.materialized = undefined;
+    }
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        });
+        if (shouldNotifySinks) this.#notifySinks(changes);
+      }
+    } else if (shouldNotifySinks) {
+      this.#notifySinksForIds(changed);
+    }
+  }
+
   async #settleSealedCommit(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -5294,7 +5366,19 @@ export class SpaceReplica
     try {
       const outcome = await Promise.race([
         verdict.then(
-          (v) => ({ verdict: v }),
+          (v) => {
+            if (
+              "committed" in v && inFlight.localRejectionValue === undefined
+            ) {
+              this.#noteSealedReceipt(
+                localSeq,
+                operations,
+                v.committed.seq,
+                identity,
+              );
+            }
+            return { verdict: v };
+          },
           // The accumulator's contract is to resolve every verdict; a
           // rejection is a wave-machinery bug, mapped to a withdrawal so
           // the pending writes still roll back instead of stranding.
