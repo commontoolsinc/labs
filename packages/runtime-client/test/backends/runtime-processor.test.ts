@@ -3397,6 +3397,10 @@ describe("runtime-processor", () => {
             },
           },
         } as const;
+        // The piece schema placed under a property of the root: its `$defs`
+        // move to the root, which is where its `#/$defs/<name>` refs point
+        // once it sits below another root.
+        const { $defs: pieceDefinitions, ...pieceBody } = pieceSchema;
         const rootSchema = {
           type: "object",
           properties: {
@@ -3405,13 +3409,14 @@ describe("runtime-processor", () => {
               items: {
                 type: "object",
                 properties: {
-                  piece: pieceSchema,
+                  piece: pieceBody,
                 },
                 required: ["piece"],
               },
             },
           },
           required: ["messages"],
+          $defs: pieceDefinitions,
         } as const;
 
         const root = runtime.getCell(

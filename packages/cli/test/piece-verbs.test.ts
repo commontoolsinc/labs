@@ -411,8 +411,10 @@ describe("listPieceCallables", () => {
       }]);
     });
 
-    it(`preserves local definition scopes in an inline ${on} verb's event schema`, async () => {
-      const localAuthor: JSONSchema = { type: "string" };
+    it(`serves an inline ${on} verb's event schema with the root's definitions, not the property's own`, async () => {
+      // A `$defs` on the verb property, or on a schema below it, is inert
+      // under the root's map: `#/$defs/Author` names the root's definition at
+      // every depth, and the served event carries that one alone.
       const nested: JSONSchema = {
         type: "object",
         properties: { author: { $ref: "#/$defs/Author" } },
@@ -421,7 +423,7 @@ describe("listPieceCallables", () => {
       const event: JSONSchema = {
         type: "object",
         properties: { author: { $ref: "#/$defs/Author" }, nested },
-        $defs: { Author: localAuthor },
+        $defs: { Author: { type: "string" } },
       };
       const listing = await listPattern(compiledPattern({
         [schemaKey]: {
@@ -441,7 +443,48 @@ describe("listPieceCallables", () => {
         name: "add",
         kind: "handler",
         on,
-        inputSchema: event,
+        inputSchema: {
+          type: "object",
+          properties: {
+            author: { $ref: "#/$defs/Author" },
+            nested: {
+              type: "object",
+              properties: { author: { $ref: "#/$defs/Author" } },
+            },
+          },
+          $defs: { Author: { type: "boolean" } },
+        },
+      }]);
+    });
+  }
+
+  for (const on of ["result", "input"] as const) {
+    const schemaKey = on === "result" ? "resultSchema" : "argumentSchema";
+    it(`serves an inline ${on} verb's event schema without the property's own definitions under a root declaring none`, async () => {
+      // With no map on the root, `#/$defs/Author` names nothing, and the
+      // property's own `$defs` is not what it names.
+      const listing = await listPattern(compiledPattern({
+        [schemaKey]: {
+          type: "object",
+          properties: {
+            add: {
+              type: "object",
+              properties: { author: { $ref: "#/$defs/Author" } },
+              asCell: ["stream"],
+              $defs: { Author: { type: "string" } },
+            },
+          },
+        },
+      }));
+
+      expect(listing.verbs).toEqual([{
+        name: "add",
+        kind: "handler",
+        on,
+        inputSchema: {
+          type: "object",
+          properties: { author: { $ref: "#/$defs/Author" } },
+        },
       }]);
     });
   }

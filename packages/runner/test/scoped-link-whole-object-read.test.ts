@@ -269,24 +269,23 @@ describe("whole-object read over a session-scoped link", () => {
     }
   });
 
-  it("relaxes a required inside an inline child scope's own $defs", async () => {
-    // `inner` DECLARES its own `$defs`; the local reference under it
-    // resolves against inner, not the outer document. Losing that scope
-    // leaves the nested `required` unrelaxed, and strict traversal can
-    // void the containing read.
+  it("relaxes a required behind a nested object's ref into the root's $defs", async () => {
+    // The reference under `inner` names the root's definition. Resolving it
+    // there is what lets the nested `required` relax; left unrelaxed, strict
+    // traversal can void the containing read.
     const scopedSchema = {
       type: "object",
+      $defs: {
+        Nested: {
+          type: "object",
+          properties: { draft: { type: "string" } },
+          required: ["draft"],
+        },
+      },
       properties: {
         question: { type: "string" },
         inner: {
           type: "object",
-          $defs: {
-            Nested: {
-              type: "object",
-              properties: { draft: { type: "string" } },
-              required: ["draft"],
-            },
-          },
           properties: {
             value: { $ref: "#/$defs/Nested" },
           },

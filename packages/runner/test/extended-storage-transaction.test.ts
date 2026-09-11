@@ -20,6 +20,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
   runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -609,6 +610,156 @@ describe("extended-storage-transaction", () => {
           .toThrow("already configured");
       } finally {
         await tx.commit();
+      }
+    });
+  });
+
+  describe("the marking of a store no schema declares a policy on", () => {
+    // The §8.12.4 writer-fit measurement quantifies over the paths a schema
+    // could have declared a policy at. Two id classes it reads off the id;
+    // this is the answer for a document whose id says nothing, which the
+    // runtime names as it writes it. The marker lasts for the transaction
+    // that recorded it, with no enrollment beside it, because the
+    // measurement only ever runs over documents that transaction wrote.
+
+    const mark = (
+      tx: ReturnType<Runtime["edit"]>,
+      id: string,
+      { authorized = true, path = [] as readonly string[] } = {},
+    ) =>
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        target: { space, id, scope: "space", path: [...path] },
+        claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+        sources: [],
+      }, authorized ? runtimeWritePolicyAuthorization : undefined);
+
+    it("answers for a document this transaction marked", async () => {
+      const tx = runtime.edit();
+      try {
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+        mark(tx, "of:marked");
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+        // The marker names a document, not the transaction.
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:not-marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("answers `false` to a caller without the runtime's mark", async () => {
+      const tx = runtime.edit();
+      try {
+        mark(tx, "of:unmarked-reader");
+        expect(tx.isUndeclarablePolicyStore(space, "of:unmarked-reader"))
+          .toBe(false);
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:unmarked-reader",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("counts a marker recorded without the runtime's mark for nothing", async () => {
+      // The gate ACTS on this claim, and the recording method is public, so
+      // an input's own fields say only what its recorder wrote.
+      const tx = runtime.edit();
+      try {
+        mark(tx, "of:forged", { authorized: false });
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:forged",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("counts a marker naming a path inside the document for nothing", async () => {
+      // Whether a schema could have declared a policy is a question about the
+      // document, so the marker answers for the whole of one.
+      const tx = runtime.edit();
+      try {
+        mark(tx, "of:partly-marked", { path: ["delegatedModuleIdentities"] });
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:partly-marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("is answered through a wrapper as through what it wraps", async () => {
+      const tx = runtime.edit();
+      const wrapper = createNonReactiveTransaction(tx);
+      try {
+        mark(tx, "of:marked-through-a-wrapper");
+        expect(
+          wrapper.isUndeclarablePolicyStore(
+            space,
+            "of:marked-through-a-wrapper",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+        expect(
+          wrapper.isUndeclarablePolicyStore(
+            space,
+            "of:marked-through-a-wrapper",
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("does not answer for a store a previous transaction marked", async () => {
+      // The other half of "no enrollment beside it": a marker dies with its
+      // transaction, and nothing carries it forward.
+      const first = runtime.edit();
+      mark(first, "of:marked-earlier");
+      await first.commit();
+
+      const later = runtime.edit();
+      try {
+        expect(
+          later.isUndeclarablePolicyStore(
+            space,
+            "of:marked-earlier",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await later.commit();
       }
     });
   });

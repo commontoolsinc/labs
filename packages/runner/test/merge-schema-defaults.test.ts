@@ -251,28 +251,27 @@ describe("mergeSchemaDefaults", () => {
     expect(child).toEqual({});
   });
 
-  it("resolves the same reference separately under child-local schema roots", () => {
+  it("resolves the same reference text on both sides against the document root", () => {
     const child = {};
-    const defaults = { count: "one" };
     const ref: JSONSchema = { $ref: "#/$defs/Entry" };
-    const branch = (type: "string" | "number"): JSONSchema => ({
+    const branch: JSONSchema = {
+      type: "object",
+      properties: { child: ref },
+    };
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { left: branch, right: branch },
       $defs: {
         Entry: {
           type: "object",
           properties: { count: { $ref: "#/$defs/Count" } },
         },
-        Count: { type },
+        Count: { type: "string" },
       },
-      type: "object",
-      properties: { child: ref },
-    });
-    const schema: JSONSchema = {
-      type: "object",
-      properties: { left: branch("string"), right: branch("number") },
     };
     const result = mergeSchemaDefaults(
       { left: { child }, right: { child } },
-      { left: { child: defaults }, right: { child: defaults } },
+      { left: { child: { count: "one" } }, right: { child: { count: 2 } } },
       schema,
     );
 
