@@ -5,6 +5,8 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 
+import { expect } from "@std/expect";
+
 import type { FabricValue } from "@commonfabric/api";
 import { NullLiveEnvironment } from "@commonfabric/data-model/codec-common";
 import {
@@ -19,7 +21,9 @@ import {
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
+  resetServerExecutionConfig,
   type SessionSync,
+  setServerExecutionConfig,
   type SqliteOperation,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
@@ -37,10 +41,6 @@ import {
 } from "@commonfabric/utils/logger";
 
 import { applyPatch } from "../../memory/v2/patch.ts";
-import {
-  resetServerExecutionConfig,
-  setServerExecutionConfig,
-} from "@commonfabric/memory/v2";
 import {
   parentPath,
   parsePointer,
@@ -1906,6 +1906,23 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
         { id: DOCS.A, localSeq: [1, 2], path: ["value"] },
       ],
     );
+    const siblingReads = harness.replica.accessForTestingOnly.buildReads(
+      sourceFromReads(Array.from({ length: 100 }, (_, index) => ({
+        id: DOCS.A,
+        path: [`field-${index}`],
+      }))),
+      3,
+    );
+    expect(siblingReads.pending).toHaveLength(100);
+    expect(new Set(siblingReads.pending.map((read) => read.localSeq)).size)
+      .toBe(1);
+    expect(siblingReads.pending[0].localSeq).toEqual([1, 2]);
+    const earlierReads = harness.replica.accessForTestingOnly.buildReads(
+      sourceFromReads([{ id: DOCS.A, path: ["field-0"] }]),
+      2,
+    );
+    expect(earlierReads.pending[0].localSeq).toBe(1);
+    expect(siblingReads.pending[0].localSeq).toEqual([1, 2]);
     await assertResultOk(c1.promise);
     await assertResultOk(c2.promise);
   } finally {

@@ -131,6 +131,51 @@ a focused browser regression with a plain Deno unit test for any extracted
 policy or state machine, because code executed inside Chrome does not enter
 Deno's V8 coverage profile.
 
+### Browser row reconnect acceptance
+
+The row browser test can place real reader storage outages around remote color,
+profile, and removal writes. Its normal CI run covers connected readers. The
+reconnect mode requires a local relay and a shell compiled against that relay;
+the independent writer continues to use the toolshed directly.
+
+Start the local servers with offset 89, following
+[the local server procedure](LOCAL_DEV_SERVERS.md):
+
+```bash
+EXPERIMENTAL_SERVER_EXECUTION=false ./scripts/start-local-dev.sh --port-offset 89
+```
+
+This starts toolshed on port 8089 and the ordinary shell on port 5262. The test
+uses the separate relay-connected shell on port 5263 started below. Run this
+relay in another terminal from the repository root:
+
+```bash
+deno run -A packages/patterns/integration/storage-network-gate-server.ts http://127.0.0.1:8089 58848 58849
+```
+
+The relay accepts a loopback API URL, a relay port, and a control port. It binds
+both listeners to loopback. Dedicate the relay to this run; its socket count
+includes every connected reader. Use free ports and substitute them consistently.
+Start a separate shell against the relay in another terminal:
+
+```bash
+TOOLSHED_PORT=58848 SHELL_PORT=5263 EXPERIMENTAL_SERVER_EXECUTION=false deno task --cwd packages/shell dev-local
+```
+
+After the shell reports that it is listening, run the browser test:
+
+```bash
+API_URL=http://127.0.0.1:8089 FRONTEND_URL=http://127.0.0.1:5263/ EXPERIMENTAL_SERVER_EXECUTION=false CF_ROW_RECONNECT_CONTROL_URL=http://127.0.0.1:58849/ CF_ROW_REPRO_ARTIFACT_DIR=/tmp/row-reconnect deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+```
+
+Each outage asserts that the relay closed live socket endpoints before the
+writer changes data. Requests remain held until the test resumes the relay.
+The four cases cover nested and mapped rows with same-space and cross-space
+profiles, and assert rendered content after reconnect and after later updates.
+Captures include a `reconnect` field in their metadata. These are synthetic
+spaces; testing a live poll requires separate coordination. Stop the relay and
+the extra shell after testing.
+
 ### Running a test under a server-execution posture
 
 `serverExecution`'s first-party default is the constant

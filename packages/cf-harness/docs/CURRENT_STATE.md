@@ -193,12 +193,18 @@ The current package provides:
   reports `database` instead: its tables, one property per table whose own
   properties are that table's columns with their types, reduced by the same
   allowlist, and one label entry per column that declares an `ifc`, addressed by
-  table name and column name. That is the one place the tool reads a value, and
-  it is conditional on nothing being declared — a database's tables are the
-  contract it was created under, its rows are in the database file, and nothing
-  here opens one. Disclosure is permissive and fixed rather than configurable —
-  no setting narrows it — and is bounded to addresses in the session's own
-  space; that bound is on the handle's own address rather than on everything the
+  table name and column name. Beside those it reports `fill`: per table the rows
+  it holds, and per disclosed column how many of those rows are non-NULL there,
+  so a column filled on no row is visible before a query filters on it and comes
+  back empty. A table that could not be counted reports `unread` rather than
+  zero, and a run whose storage provider offers no query reports no `fill` at
+  all. That is the one place the tool reads a value, and it is conditional on
+  nothing being declared — a database's tables are the contract it was created
+  under, its rows are in the database file, and nothing here opens one; a count
+  is taken of a whole table and of whole columns, never under a caller's own
+  predicate. Disclosure is permissive and fixed rather than configurable — no
+  setting narrows it — and is bounded to addresses in the session's own space;
+  that bound is on the handle's own address rather than on everything the
   document reaches from it. Answering from the fabric establishes the run's
   fabric session despite the tool's `read` effect class;
 - bounded request-attribution headers on OpenAI-compatible gateway traffic,

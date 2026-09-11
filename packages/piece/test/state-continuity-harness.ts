@@ -58,6 +58,7 @@ import {
   isCell,
   isStream,
   parseExternalSchemaRef,
+  readResultSchemaMeta,
   Runtime,
   TILE_UI,
   UI,
@@ -861,7 +862,10 @@ export async function readStoredResultSchema(
       undefined as never,
     );
     await raw.sync();
-    return raw.getMetaRaw("schema");
+    // The inline form: a reference-form member is recomposed, so the
+    // relaxation below sees the schema's `unknown` positions rather than a
+    // bare `$ref` with none.
+    return readResultSchemaMeta(raw as Cell<unknown>);
   } catch {
     return undefined;
   }

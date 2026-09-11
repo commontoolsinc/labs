@@ -4,6 +4,24 @@ import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Cell types", () => {
+  for (const primitive of ["string", "number"] as const) {
+    it(`preserves Cell metadata beside a matching ${primitive} union member`, async () => {
+      const { type, checker } = await getTypeFromCode(
+        `interface X { value: ${primitive} | Cell<${primitive}>; }`,
+        "X",
+      );
+      const result = asObjectSchema(
+        new SchemaGenerator().generateSchema(type, checker),
+      );
+      const value = asObjectSchema(result.properties!.value!);
+      expect(value.anyOf).toHaveLength(2);
+      expect(value.anyOf).toEqual(expect.arrayContaining([
+        { type: primitive },
+        { type: primitive, asCell: ["cell"] },
+      ]));
+    });
+  }
+
   it("handles Cell<string>", async () => {
     const code = `
       interface X { name: Cell<string>; }

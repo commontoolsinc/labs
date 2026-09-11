@@ -2658,15 +2658,25 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Owed for the residuals: one- and two-demander request/completion regressions,
   without reopening those fixed SQLite cases or counting compile coverage twice.
 
-  A separate child-input residual remains: passing an uninitialized
-  `PerUser<Writable<Default<0>>>` value into a child can give both users the
-  same space-scoped writable handle. It also occurs with an ordinary nested
-  child without `compileAndRun`. Explicitly initializing each user's input
-  through the parent's schema produces separate user-scoped handles. The
-  served compile handler regression initializes those inputs; it establishes
-  program selection, not correct scope creation for an uninitialized default.
-  Owed: preserve the declared scope when that default writable handle is
-  materialized, with a two-user child-handler regression.
+  Child-input default creation is covered separately from builtin instance
+  identity. `executor-compile-and-run.test.ts` passes uninitialized
+  `PerUser<Writable<number | Default<0>>>` and `PerSession` inputs to static
+  and compiled children, then dispatches their handlers under separate users
+  or two sessions of the initializing user. Argument setup creates missing
+  declared scope redirects through whole-object input references.
+  `scoped-input-initialization.test.ts` preserves explicit values and
+  references, including references to missing targets, and rejects
+  initialization that races with an explicit write.
+  `scoped-default-writable.test.ts` covers direct projection of an absent
+  defaulted slot, its write destination, and its dependency behavior.
+
+  A separate session-initialization gap remains: after one user initializes
+  a `PerSession` input, a later user's intermediate user instance can lack
+  its session redirect. Completing that hop must preserve an explicitly
+  supplied reference to the same field in user scope; pointer shape alone
+  cannot distinguish that reference from an automatically created redirect.
+  Owed: durable initialization ownership and a later-user, two-session
+  handler regression, including explicit-reference and reload controls.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,
