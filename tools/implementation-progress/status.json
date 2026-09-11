@@ -1,9 +1,9 @@
 {
-  "updated": "2026-09-11T01:14:37.570886+00:00",
+  "updated": "2026-09-11T01:17:24.432078+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7257",
-  "activity": "Budget review repairs pass full compiler, runner, CLI, generated-pattern, vintage, type and docs validation. All three dependent scale fixtures retain their exact counts and pass limits. Integrating merged removal acceptance #7285 and index contract #7294 before fresh CI/Cubic.",
+  "activity": "Budget review repairs and integration with merged #7285/#7294 are validated. Full affected-package checks pass, including all 412 pattern type checks. Ready for fresh CI and Cubic in #7257; dependent scale limits remain in #7282.",
   "review": "Antagonistic review is clean for the compiler, event failure, contributor attribution, and initialization settlement repairs. Fresh published-head CI and Cubic remain required for #7257.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
@@ -218,5 +218,5 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "42e7c680ed36a375e84148fdb992d43b08afb60d"
+  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3"
 }
