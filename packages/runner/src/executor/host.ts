@@ -676,8 +676,17 @@ export class ExecutorHost {
     while (this.#activating.size > 0) {
       await Promise.allSettled([...this.#activating.values()]);
     }
+    // A server already parking on its own — a lost lease, a failed loop
+    // — has park() return at once, so its completion is awaited through
+    // whenParked: close() must not return while a tenure's runtime is
+    // still being disposed against a memory server the caller closes
+    // next. The park's own dispose deadline bounds this wait; a dispose
+    // it abandons is the crash-equivalent path the park logs and counts.
     await Promise.all(
-      [...this.#spaces.values()].map((server) => server.park("host-closed")),
+      [...this.#spaces.values()].map(async (server) => {
+        await server.park("host-closed");
+        await server.whenParked;
+      }),
     );
     this.#spaces.clear();
     this.#pendingNotices.clear();
