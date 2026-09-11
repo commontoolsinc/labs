@@ -820,6 +820,25 @@ function schemaSubsetIssue(
   if (pairIsActive(source, target, context)) return undefined;
   markPairActive(source, target, context);
   try {
+    // Semantic extensions describe the whole node and are compared here
+    // before its alternatives expand. `schemaAlternatives` omits the parent
+    // node's extensions from the fragments so a branch carrying only a type
+    // is not mistaken for a node that removed an extension. Extensions
+    // declared on branch and descendant nodes remain part of their proofs.
+    //
+    // The `ifc` extension is compared for exact equality except for a
+    // `writeAuthorizedBy` writer claim's volatile identity — its content hash
+    // and its resolver-dependent file spelling, which the runtime does not
+    // hold fixed either — and the derived per-value label annotations, which
+    // describe the label a write produces rather than the policy the store
+    // declares. `keywordValuesEqual` applies that reduction, the same one it
+    // applies to an `ifc` nested below a composite keyword.
+    for (const key of SEMANTIC_EXTENSION_KEYS) {
+      if (!keywordValuesEqual(key, source[key], target[key])) {
+        return `${path}: ${key} changed`;
+      }
+    }
+
     if (
       source.anyOf || target.anyOf ||
       Array.isArray(source.type) || Array.isArray(target.type)
@@ -866,19 +885,6 @@ function schemaSubsetIssue(
 
     const constraintIssue = scalarConstraintSubsetIssue(source, target, path);
     if (constraintIssue) return constraintIssue;
-
-    for (const key of SEMANTIC_EXTENSION_KEYS) {
-      // The `ifc` extension is compared for exact equality except for a
-      // `writeAuthorizedBy` writer claim's volatile identity — its content hash
-      // and its resolver-dependent file spelling, which the runtime does not
-      // hold fixed either — and the derived per-value label annotations, which
-      // describe the label a write produces rather than the policy the store
-      // declares. `keywordValuesEqual` applies that reduction, the same one it
-      // applies to an `ifc` nested below a composite keyword.
-      if (!keywordValuesEqual(key, source[key], target[key])) {
-        return `${path}: ${key} changed`;
-      }
-    }
 
     for (const key of COMPLEX_CONSTRAINT_KEYS) {
       const applicableTypes = COMPLEX_CONSTRAINT_TYPES[key];
@@ -936,7 +942,7 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   // Four of the five `SEMANTIC_EXTENSION_KEYS` say how a value is delivered,
   // stored, or written, not what shape it has, so a default inserted beneath
   // one cannot falsify it. A change to the marker itself is still refused by
-  // the exact comparison in `objectSubsetIssue`. `ifc` is left out on
+  // the exact comparison in `schemaSubsetIssue`. `ifc` is left out on
   // purpose: a label is policy the write-authority comparison reasons about
   // (`comparableIfc`), and whether a materialized default satisfies a
   // labeled node's floor is that comparison's question, not this one's, so
@@ -1533,21 +1539,50 @@ function schemaMayProduceType(
 }
 
 /**
- * Conjunctions for each alternative after the caller checks whole-schema
- * defaults. The root default is omitted from both sides, including a schema
- * with a single type, so branch comparisons concern their value constraints.
- * Descendant schemas and their defaults remain intact.
+ * Returns a conjunction of fragments for each alternative after the caller
+ * checks the node's own keywords ({@link NODE_LEVEL_KEYWORDS}). Fragments omit
+ * the parent node's default and extensions, including for a single-type node.
+ * Branch and descendant schemas retain their own defaults and extensions.
  */
 function schemaAlternatives(schema: SchemaObject): JSONSchema[][] {
-  const { default: _default, ...withoutDefault } = schema;
-  if (withoutDefault.anyOf) {
-    const { anyOf, ...base } = withoutDefault;
+  const fragment = withoutNodeLevelKeywords(schema);
+  if (fragment.anyOf) {
+    const { anyOf, ...base } = fragment;
     return anyOf.map((alternative) => [base, alternative]);
   }
-  if (Array.isArray(withoutDefault.type)) {
-    return withoutDefault.type.map((type) => [{ ...withoutDefault, type }]);
+  if (Array.isArray(fragment.type)) {
+    return fragment.type.map((type) => [{ ...fragment, type }]);
   }
-  return [[withoutDefault]];
+  return [[fragment]];
+}
+
+/**
+ * The keywords a node states about itself as a whole, which
+ * {@link schemaSubsetIssue} judges once at the node before it expands the
+ * node's alternatives: the `default`, checked for validity or for change
+ * there, and the semantic extensions, compared for exact equality there. A
+ * fragment entering a branch proof omits the parent node's occurrences.
+ */
+const NODE_LEVEL_KEYWORDS: ReadonlySet<string> = new Set([
+  "default",
+  ...SEMANTIC_EXTENSION_KEYS,
+]);
+
+/**
+ * Returns the schema without its node-level keywords, or the same object when
+ * it has none. Copies with {@link keep}, so a `__proto__` key read off the wire
+ * remains an own property.
+ */
+function withoutNodeLevelKeywords(schema: SchemaObject): SchemaObject {
+  const keys = Object.keys(schema);
+  if (!keys.some((key) => NODE_LEVEL_KEYWORDS.has(key))) return schema;
+  const fragment: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!NODE_LEVEL_KEYWORDS.has(key)) {
+      keep(fragment, key, (schema as Record<string, unknown>)[key]);
+    }
+  }
+  return fragment as SchemaObject;
 }
 
 /**
