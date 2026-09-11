@@ -25,7 +25,7 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Shared fetch user/session isolation and served `llm`, `generateText`, and direct `generateObject` supersession and isolation are covered. Other effect callers, provider reads, and later-user session initialization remain open. |
+| OW28-supersession-family / OW28-instance-family | Shared fetch user/session isolation, served `llm`, `generateText`, and direct `generateObject` supersession and isolation, and declared session input initialization for later users are covered. Other effect callers and provider reads remain open. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
@@ -2691,13 +2691,24 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   `scoped-default-writable.test.ts` covers direct projection of an absent
   defaulted slot, its write destination, and its dependency behavior.
 
-  A separate session-initialization gap remains: after one user initializes
-  a `PerSession` input, a later user's intermediate user instance can lack
-  its session redirect. Completing that hop must preserve an explicitly
-  supplied reference to the same field in user scope; pointer shape alone
-  cannot distinguish that reference from an automatically created redirect.
-  Owed: durable initialization ownership and a later-user, two-session
-  handler regression, including explicit-reference and reload controls.
+  Later-user session initialization is covered by the static and compiled
+  child host cases: the first user changes a missing or seeded `PerSession`
+  input, the serving runtime reloads, and two later sessions of another user
+  independently update their child inputs. Automatic space-to-user links carry
+  a non-addressing `scopeInitialization: "session"` declaration. A graph-owned
+  action discovers demanded user instances through reads and initializes only
+  absent continuations, after loading the actor's user document. Explicit
+  same-address reference replacement survives reload and keeps the later
+  user's sessions sharing their user input; the first user's initialized
+  session value remains intact.
+  `scoped-session-initialization.test.ts` covers declaration preservation and
+  removal, raw copies, modern and legacy wire forms, unchanged cause identity,
+  CFC integrity filtering, explicit values and undefined ancestors, and a
+  conflicting explicit replacement. Unmarked stored links remain conservative:
+  they are not automatically migrated based on pointer shape. The caller-driven
+  rematerialization path and this compatibility boundary are specified in
+  [scoped cell instances](../scoped-cell-instances.md).
+
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,

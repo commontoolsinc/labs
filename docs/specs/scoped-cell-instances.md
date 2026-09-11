@@ -362,6 +362,30 @@ including a reference to the same input field at a narrower scope. The reads
 that authorize initialization remain commit dependencies, so a concurrent
 explicit write cannot be overwritten silently.
 
+With server execution enabled, an automatically created space-to-user link for
+`PerSession` storage carries `scopeInitialization: "session"` in its link
+payload. This declaration permits argument setup to fill a missing user-to-session
+hop when another user demands the pattern. It applies only to the canonical
+same-document, same-path user target. Existing user values, references, and
+explicit `undefined` remain authoritative. A graph-owned setup action reads
+those user slots through the usual scheduler, so user instances are discovered
+from reads and active demand. Before initialization, the action loads the user
+document under the transaction's acting identity to preserve existing siblings.
+
+The declaration is part of the stored link value, not its address, cause identity,
+CFC label, or authority. Raw serialization and copying retain it; copying a
+relative declaration gives it the relative target at the destination. Writing an
+ordinary Cell or unmarked link to the same address clears the declaration, even
+though address equality is unchanged. Existing initialized user-to-session links
+and session values remain in place after that replacement.
+
+An unmarked stored user link is treated as an explicit reference. Setup does not
+infer initialization ownership from its shape, so older unmarked links do not
+receive automatic continuation. An author can deliberately reestablish declared
+session storage by writing content through the field's `PerSession` schema; that
+write creates the declaration and its acting user's redirect chain. It does not
+replace other users' existing values or references.
+
 ## TypeScript Authoring
 
 Scope wrappers are type-level annotations:

@@ -102,19 +102,19 @@ its output is narrower than the declared output address:
 - writes the value at the narrower-scope address — one address per
   principal at that scope; those addresses are the INSTANCES.
 
-A space→session narrowing writes CHAINED redirects,
-space→user→session — ALWAYS via user, even when discovery jumps
-straight to session, so every chain has the one uniform shape
-("just in case": a later user-level reader finds a well-formed user
-link to follow). **The eager double-hop is a v2 CHOICE, and it
-DIFFERS from main** — flag for implementation. Today each narrowing
-EVENT writes exactly ONE hop (`pattern-binding.ts:286-306`,
-`data-updating.ts:664-691`); chains only ACCUMULATE across
-successive events, because the write-redirect resolution starts
-from the current chain end (a later session-narrowing lands its
-redirect inside the user instance). No code on main emits both hops
-for a single space→session discovery; v2 implementations MUST add
-the eager via-user hop.
+With server execution enabled, a space→session narrowing writes chained
+redirects, space→user→session, even when discovery jumps straight to session.
+The user link gives user-level readers a stable intermediate instance. Both
+hops are emitted for the discovering actor; other users' instances materialize
+on their own demand.
+
+Declared session input storage carries a non-addressing initialization
+declaration on its automatic space→user link. A graph-owned setup action reads
+the demanded user's intermediate slot and fills it only when absent. Explicit
+references and values remain authoritative, including a same-address user link
+that replaces the automatic declaration. The link value, compatibility boundary,
+and reload behavior are specified in
+[scoped cell instances](../scoped-cell-instances.md).
 
 ```
 outDoc@space ─redirect─► outDoc@user(u) ─redirect─► outDoc@sess(u,s)
