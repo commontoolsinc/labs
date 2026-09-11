@@ -351,19 +351,34 @@ export function hasDependentPath(
   from: Action,
   to: Action,
 ): boolean {
-  const visited = new Set<Action>([from]);
-  const pending = [from];
+  return hasDependentPathFromSeeds(dependentsByAction, [from], to);
+}
 
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current === to) return true;
+/** Shares visited nodes across seeds, including overlapping downstream paths. */
+function hasDependentPathFromSeeds(
+  dependentsByAction: WeakMap<Action, Set<Action>>,
+  seeds: readonly Action[],
+  to: Action,
+): boolean {
+  const visited = new Set<Action>();
+  const pending: Action[] = [];
 
-    const dependents = dependentsByAction.get(current);
-    if (!dependents) continue;
-    for (const dependent of dependents) {
-      if (visited.has(dependent)) continue;
-      visited.add(dependent);
-      pending.push(dependent);
+  for (const seed of seeds) {
+    if (visited.has(seed)) continue;
+    visited.add(seed);
+    pending.push(seed);
+
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === to) return true;
+
+      const dependents = dependentsByAction.get(current);
+      if (!dependents) continue;
+      for (const dependent of dependents) {
+        if (visited.has(dependent)) continue;
+        visited.add(dependent);
+        pending.push(dependent);
+      }
     }
   }
 
@@ -374,8 +389,9 @@ export function hasDependentPath(
  * True when an invalid/never-ran node is transitively upstream of `action`.
  *
  * Seed from the maintained invalid-node set rather than walking `action`'s
- * whole upstream cone. {@link hasDependentPath} supplies the cycle-safe
- * downstream reachability check over the canonical writer-to-reader edges.
+ * whole upstream cone. One cycle-safe walk follows the canonical
+ * writer-to-reader edges from every candidate, sharing visits when their
+ * downstream paths overlap.
  * `action` itself is excluded: a resubscribe records a run that just completed,
  * so callers use this to decide whether newly-live upstream work needs a wake.
  */
@@ -383,15 +399,13 @@ export function hasInvalidUpstream(
   state: Pick<DependencyGraphState, "dependents" | "nodes">,
   action: Action,
 ): boolean {
-  for (const candidate of state.nodes.getInvalidNodes()) {
-    if (
-      candidate !== action &&
-      hasDependentPath(state.dependents, candidate, action)
-    ) {
-      return true;
-    }
-  }
-  return false;
+  const candidates = state.nodes.getInvalidNodes();
+  if (candidates.size === 0) return false;
+  return hasDependentPathFromSeeds(
+    state.dependents,
+    [...candidates].filter((candidate) => candidate !== action),
+    action,
+  );
 }
 
 export function collectDirectWritersForLog(state: {
