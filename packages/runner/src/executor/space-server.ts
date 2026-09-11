@@ -1049,9 +1049,10 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#watermark;
   }
 
-  /** Resolves when this SpaceServer has fully parked (lease released,
-   * runtime disposed). The host chains re-activation on it when a
-   * session-open or admission races a park in progress. */
+  /** Resolves when this SpaceServer has fully parked: its runtime
+   * disposed, and its lease released or the release's failure logged
+   * (the row expires by TTL either way). The host chains re-activation
+   * on it when a session-open or admission races a park in progress. */
   get whenParked(): Promise<void> {
     return this.#parked.promise;
   }

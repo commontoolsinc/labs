@@ -669,8 +669,9 @@ describe("engine-read-through", () => {
 
   /**
    * Installs a sink decorator on the next host that records every wave
-   * commit and holds one in flight: the first one after `arm()`. `held`
+   * commit and holds one in flight: the first one after `arm()`. `held()`
    * resolves once that commit is held, with it last in `commits`, and
+   * fails the test on the shared backstop if no commit ever arrives;
    * `release()` lets it land. Every seal opens a wave when none is open,
    * at that moment's serverSeq, so a seal landing inside the hold opens
    * one whose basis the held commit passes; what is authored inside the
@@ -681,14 +682,14 @@ describe("engine-read-through", () => {
    */
   const holdableWaveCommit = (): {
     arm: () => void;
-    held: Promise<void>;
+    held: () => Promise<void>;
     release: () => void;
     commits: ObservedWaveCommit[];
   } => {
-    const held = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const commits: ObservedWaveCommit[] = [];
     let armed = false;
+    let holding = false;
     decorateWaveCommitSink = (sink) => ({
       currentHeads: (space, docs) => sink.currentHeads(space, docs),
       concurrentWritePaths: (space, doc, sinceSeq) =>
@@ -698,7 +699,7 @@ describe("engine-read-through", () => {
         commits.push(observed);
         if (armed) {
           armed = false;
-          held.resolve();
+          holding = true;
           await release.promise;
         }
         const result = await sink.commitWave(batch);
@@ -710,7 +711,7 @@ describe("engine-read-through", () => {
       arm: () => {
         armed = true;
       },
-      held: held.promise,
+      held: () => waitUntil(() => holding, "the armed wave commit to be held"),
       release: () => release.resolve(),
       commits,
     };
@@ -756,7 +757,7 @@ describe("engine-read-through", () => {
     });
     await demandFromClient();
     const engine = await server.engineForSpace(space);
-    await hold.held;
+    await hold.held();
     const creation = hold.commits.at(-1)!;
     await sealReadProbe();
     const cell = clientRuntime.getCellFromLink<{ made: boolean }>({
@@ -807,7 +808,7 @@ describe("engine-read-through", () => {
     const input = clientRuntime.edit();
     clientArg.withTx(input).set({ n: 50 });
     expect((await input.commit()).error).toBeUndefined();
-    await hold.held;
+    await hold.held();
     const previous = hold.commits.at(-1)!;
     await sealReadProbe();
     const next = clientRuntime.edit();

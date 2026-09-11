@@ -680,7 +680,8 @@ export class ExecutorHost {
     // — has park() return at once, so its completion is awaited through
     // whenParked: close() must not return while a tenure's runtime is
     // still being disposed against a memory server the caller closes
-    // next.
+    // next. The park's own dispose deadline bounds this wait; a dispose
+    // it abandons is the crash-equivalent path the park logs and counts.
     await Promise.all(
       [...this.#spaces.values()].map(async (server) => {
         await server.park("host-closed");
