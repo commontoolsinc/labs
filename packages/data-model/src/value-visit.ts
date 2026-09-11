@@ -417,6 +417,16 @@ export abstract class BaseValueVisitor<
     const desc = toCompactDebugString(value, { backtickQuote: true });
     throw new Error(`Cannot visit cyclic value: ${desc}`);
   }
+
+  /**
+   * Throws a "shouldn't happen" error, indicating a particular method should
+   * not have been called.
+   */
+  protected throwShouldntCall(methodName: string): never {
+    const desc = `\`${methodName}()\``;
+    const thisDesc = toCompactDebugString(this, { backtickQuote: true });
+    throw new Error(`Shouldn't happen: ${desc} called on ${thisDesc}`);
+  }
 }
 
 /**
@@ -516,7 +526,12 @@ export class EmptyValueVisitor<DomainExtra = never, ResultType = FabricValue>
 /**
  * Visitor which handles all containers by requesting that the engine iterate
  * over their contents. This class leaves all non-container `visit*()` methods
- * `abstract`.
+ * `abstract`, and implements no-op (empty) `visited*()` methods. Recursion is
+ * as follows:
+ *
+ * * `FabricArray` -- all elements.
+ * * `FabricInstance` -- keys and values.
+ * * `FabricPlainObject`s -- values only.
  */
 export abstract class ContainerIteratingVisitor<
   DomainExtra = never,
@@ -530,35 +545,55 @@ export abstract class ContainerIteratingVisitor<
   visitFabricArray(
     _value: FabricArray,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    this.#throwShouldnt("visitFabricArray");
+    return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
   visitFabricInstance(
     _value: FabricInstance,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    this.#throwShouldnt("visitFabricInstance");
+    return DO_RECURSE_KEYS_VALUES;
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
     _value: FabricPlainObject,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    this.#throwShouldnt("visitFabricPlainObject");
+    return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
   visitFabricContainer(
     _value: FabricContainerValue,
   ): DispatchingVisitorResult<DomainExtra, ResultType> {
-    return DO_RECURSE_KEYS_VALUES;
+    return DO_VISIT_SUBTYPE;
   }
 
-  /** Throws a "shouldn't happen" error, as appropriate for this class. */
-  #throwShouldnt(methodName: string): never {
-    const desc = `\`${methodName}()\``;
-    const thisDesc = toCompactDebugString(this, { backtickQuote: true });
-    throw new Error(`Shouldn't happen: ${desc} called on ${thisDesc}`);
+  /** @inheritDoc */
+  visitedArrayElement(
+    _array: FabricArray,
+    _index: number,
+    _value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitedArrayGap(
+    _array: FabricArray,
+    _start: number,
+    _count: number,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitedMapping(
+    _container: FabricPlainObject | FabricInstance,
+    _key: DomainFor<DomainExtra>,
+    _value: DomainFor<DomainExtra>,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
   }
 }
 
