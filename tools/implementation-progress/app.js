@@ -131,6 +131,32 @@ async function refresh() {
     byId("provenance").textContent = `Recorded ${demo.date} · ${demo.revision}`;
     byId("budget-provenance").textContent = demo.budgets?.provenance ??
       "Recording budget enforcement demo…";
+    byId("browser-provenance").textContent = demo.browser?.provenance ?? "";
+    byId("browser-runs").replaceChildren(
+      ...(demo.browser?.runs ?? []).map((run) => {
+        const card = node("article", "", "card");
+        card.append(
+          node("h3", `${run.voteCount.toLocaleString()} votes`),
+          node(
+            "p",
+            `${run.sample.accesses.toLocaleString()} body accesses · ${run.sample.linkHops.toLocaleString()} link hops · ${run.sample.runs} runs · ${run.sample.maxAccesses.toLocaleString()} largest run`,
+          ),
+          node(
+            "p",
+            `${run.sample.eventCommits} successful event commits · ${run.sample.eventCommitErrors} errors · local p75 ${run.p75Ms} ms`,
+          ),
+        );
+        const link = node("a", "");
+        link.href = run.screenshot;
+        const img = node("img", "");
+        img.src = run.screenshot;
+        img.alt = `Rendered lunch poll after a vote, ${run.voteCount} votes`;
+        img.style.width = "100%";
+        link.append(img);
+        card.append(link);
+        return card;
+      }),
+    );
     byId("budget-runs").replaceChildren(
       ...(demo.budgets?.runs ?? []).map((run) => {
         const card = node("article", "", "card");

@@ -1,6 +1,10 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { hashStringOf, valueEqual } from "@commonfabric/data-model";
+import {
+  hashStringOf,
+  taggedHashStringOf,
+  valueEqual,
+} from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
@@ -5406,21 +5410,27 @@ const applyCommitTransaction = (
         `memory v2 commit cannot write content-addressed document ${operation.id} at ${operation.scope} scope`,
       );
     }
-    // A `cid:` set that IS a schema document (by content-addressed
-    // identity — `cid:` also holds blobs) contributes its own refs;
-    // anything else is scanned like an ordinary document. Schema content
-    // is never link-scanned: keywords such as `default` may carry
-    // link-shaped DATA.
+    // A `cid:` set must be the content its id names: the general content
+    // hash of its value, which is the identity of a code document's
+    // string, of any other content, and of a schema document alike (a
+    // schema's interned hash is this same hash over the deep-frozen
+    // schema, so nothing is interned here). Content that does not hash to
+    // its id is refused below, after the two comparisons that name a more
+    // specific fault, so the namespace holds nothing a reader cannot
+    // verify. A schema-shaped document contributes its own refs and is
+    // never link-scanned, since keywords such as `default` may carry
+    // link-shaped DATA; other content is scanned like an ordinary
+    // document.
     const installedInner = (operation.value as { value?: unknown })?.value;
-    if (
-      isSubschema(installedInner) &&
-      internSchemaAsTaggedHashString(installedInner as JSONSchema) ===
-        operation.id.slice("cid:".length)
-    ) {
+    const installedHash = operation.id.slice("cid:".length);
+    const installsSchemaShape = isSubschema(installedInner);
+    const installsVerifiedContent =
+      taggedHashStringOf(installedInner) === installedHash;
+    if (installsVerifiedContent && installsSchemaShape) {
       for (const hash of collectExternalSchemaRefHashes(installedInner)) {
         requiredSchemaRefs.add(hash);
       }
-    } else {
+    } else if (installsVerifiedContent) {
       collectLinkSchemaRefs(operation.value);
     }
     // `has()`, not a `get() !== undefined` check: a malformed set can carry
@@ -5460,6 +5470,11 @@ const applyCommitTransaction = (
       elidedOpIndexes.add(opIndex);
       elidableCidIds.add(operation.id);
     }
+    if (!installsVerifiedContent) {
+      throw new ProtocolError(
+        `memory v2 commit installs content-addressed document ${operation.id} whose content does not hash to its id`,
+      );
+    }
     (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
   }
 
@@ -5484,10 +5499,10 @@ const applyCommitTransaction = (
         ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
         : undefined;
       if (included !== undefined) {
-        if (
-          !isSubschema(included) ||
-          internSchemaAsTaggedHashString(included as JSONSchema) !== hash
-        ) {
+        // The set already verified its content against its id; what a
+        // schema reference additionally requires is that the content be a
+        // schema at all — a code document's string, say, is not.
+        if (!isSubschema(included)) {
           throw new ProtocolError(
             `memory v2 commit references schema document ${id} whose included content does not verify`,
           );

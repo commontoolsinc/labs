@@ -240,6 +240,15 @@ const recordLinkWritePolicyInput = (
   if (tx.getCfcState().enforcementMode === "disabled") {
     return;
   }
+  // A content-addressed document is a runtime surface outside labeling:
+  // immutable, named by its own content, and never given an envelope —
+  // the write-policy and flow-read passes exclude `cid:` ids on the same
+  // ground. A link to one carries nothing a label could describe, so it
+  // records no policy input; recording one would demand source metadata
+  // the document can never carry.
+  if (source.id.startsWith("cid:")) {
+    return;
+  }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
   let sourceMetadata: ReturnType<typeof readStoredCfcMetadata>;
   let sourceEnvelopeUninterpretable = false;

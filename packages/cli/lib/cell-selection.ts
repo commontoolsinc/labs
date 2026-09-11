@@ -84,7 +84,7 @@ export const LINK_MARKER_KEY = "$link";
 const CONCISE_ADDRESS_SUFFIX = "@";
 
 /** A phase of `deriveSelectedValue`, named for the operation like every other
- * label. The six are strict siblings, so they add up; what they must not be
+ * label. The phases are strict siblings, so they add up; what they must not be
  * added to is whichever phase encloses the selection — `getCellValue.selection`
  * on `cf cell get`, and on `cf piece call` and `cf wish` nothing yet. */
 const timeSelectionPhase = <T>(
@@ -3402,7 +3402,7 @@ export async function deriveSelectedValue(
   if (installedPattern === undefined) reads.patterns.set(readKey, mainPattern);
   const errors = runtimeErrorLog(runtime);
   const errorCountBefore = errors.length;
-  const result = runtime.run(
+  const result = await runtime.setup(
     tx,
     installedPattern ?? mainPattern,
     {
@@ -3425,6 +3425,27 @@ export async function deriveSelectedValue(
         `Could not apply get transform: ${committed.error}`,
       );
     }
+    // A session-local projection can reuse space-scoped mapped children.
+    // The committed argument lets synchronized startup resolve their identities
+    // and load their execution state before the coordinator initializes them.
+    await timeSelectionPhase("start", async () => {
+      const committedResult = result.withTx();
+      try {
+        await runtime.runner.syncStoredPieceCells(
+          committedResult,
+          installedPattern ?? mainPattern,
+        );
+        if (!await runtime.start(committedResult)) {
+          throw new Error("projection did not start");
+        }
+      } catch (error) {
+        throw new CellSelectionError(
+          `Could not apply get transform: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    });
     // pull() is the readiness boundary for this output: it drives transitive
     // computations, waits for linked documents those reads discover, and
     // re-idles after each arrival. Nothing downstream re-checks it: the

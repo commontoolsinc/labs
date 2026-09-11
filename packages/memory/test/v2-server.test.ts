@@ -1,6 +1,9 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
-import { toCompactDebugString } from "@commonfabric/data-model";
+import {
+  taggedHashStringOf,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/api";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
@@ -931,7 +934,8 @@ Deno.test("memory v2 server direct writes schedule dirty refreshes without conne
     1,
   );
   const space = "did:key:z6Mk-memory-v2-server-direct-write-no-connections";
-  const id = "cid:fid1:direct-write-no-connections";
+  const contents = { type: "text/plain", body: "hello" };
+  const id = `cid:${taggedHashStringOf(contents)}`;
   const originalFlush = server.flushSessions.bind(server);
   let flushCalls = 0;
 
@@ -970,11 +974,11 @@ Deno.test("memory v2 server direct writes schedule dirty refreshes without conne
 Deno.test("memory v2 server direct document helpers round-trip values", async () => {
   const server = createServer("memory://memory-v2-server-direct-documents");
   const space = "did:key:z6Mk-memory-v2-server-direct-documents";
-  const id = "cid:fid1:direct-document";
   const contents = {
     type: "image/png",
     body: new FabricBytes(new Uint8Array([1, 2, 3, 4])),
   };
+  const id = `cid:${taggedHashStringOf(contents)}`;
 
   try {
     await server.writeDocument(space, id, contents);

@@ -3,6 +3,7 @@ import {
   cloneIfNecessary,
   hashStringOf,
   isKeyableObjectOrArray,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
@@ -1456,11 +1457,13 @@ export class StorageManager implements IStorageManager {
     this.#providers.get(space)?.noteAclChanged();
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
     // Already-open replicas only: creating a provider is a session-level
     // side effect no elision probe should carry. A space this manager has
     // not opened answers false, and false stages.
-    return this.#providers.get(space)?.replica.isSchemaDocPersisted(hash) ??
+    return this.#providers.get(space)?.replica.isContentAddressedDocPersisted(
+      hash,
+    ) ??
       false;
   }
 
@@ -2838,7 +2841,7 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     // ids, and session-resume replay all see one selector form.
     const normalizedSelector = externalizeSyncSelector(
       normalizeSyncSelector(selector),
-      (hash) => this.replica.isSchemaDocPersisted(hash),
+      (hash) => this.replica.isContentAddressedDocPersisted(hash),
     );
     // Replay requests are per (doc, instance): an instance-named load
     // (stage A) must replay as that instance on a replacement replica.
@@ -6995,7 +6998,8 @@ export class SpaceReplica
 
   /**
    * Whether this replica holds SERVER-CONFIRMED verified content for
-   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * `cid:<hash>` — the emission gate for selector references and the
+   * elision seam for staged content-addressed documents: a confirmed
    * document arrived by delivery or by an acknowledged commit, so the
    * space's server holds it, and content addressing means it can never
    * change. The confirmed layer specifically: a pending local write is
@@ -7005,13 +7009,13 @@ export class SpaceReplica
    * relies on the provisional route not changing after observable reads
    * (CT-2046 tracks enforcing that broadly).
    */
-  isSchemaDocPersisted(hash: string): boolean {
+  isContentAddressedDocPersisted(hash: string): boolean {
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
-    const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    const value = doc.value;
+    // A content-addressed document's value must hash to the id it sits under.
+    return taggedHashStringOf(value) === hash;
   }
 
   /**
