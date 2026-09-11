@@ -89,7 +89,17 @@ export function readResultSchemaMeta(
   cell: Cell<unknown>,
   options?: IReadOptions,
 ): JSONSchema | undefined {
-  const stored = cell.getMetaRaw(SCHEMA_META_MEMBER, options);
+  return inlineResultSchemaMeta(cell.getMetaRaw(SCHEMA_META_MEMBER, options));
+}
+
+/**
+ * {@link readResultSchemaMeta} over an already-read member value: the
+ * inline form, the stored reference while its closure is incomplete, or
+ * a throw for the malformed form.
+ */
+export function inlineResultSchemaMeta(
+  stored: unknown,
+): JSONSchema | undefined {
   const form = classifySchemaMetaValue(stored);
   switch (form.kind) {
     case "absent":

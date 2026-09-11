@@ -13,6 +13,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import { getResultCellWithSourceSchema } from "../src/piece-helpers.ts";
 import {
+  inlineResultSchemaMeta,
   readResultSchemaMeta,
   resultSchemaMetaSpelling,
   writeResultSchemaMeta,
@@ -21,8 +22,10 @@ import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import {
   classifySchemaMetaValue,
   collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
   MalformedSchemaMetaError,
   parseExternalSchemaRef,
+  recomposeSchemaRefs,
 } from "../src/schema-decompose.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { resetContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
@@ -277,6 +280,26 @@ describe("result-schema-meta", () => {
       kind: "inline",
       schema: true,
     });
+  });
+
+  it("throws on a malformed member wherever it is read", () => {
+    // State the boundary refuses can still be met by a reader — a store
+    // that predates the enforcement, or one written out of band — and
+    // every reader treats it as a defect rather than as a schema.
+    const hybrid = { $ref: "cid:fid1:hybrid-target", title: "sibling" };
+    expect(() => inlineResultSchemaMeta(hybrid)).toThrow(
+      MalformedSchemaMetaError,
+    );
+    expect(() => collectSchemaMetaRefHashes({ schema: hybrid })).toThrow(
+      MalformedSchemaMetaError,
+    );
+    expect(() => recomposeSchemaRefs(hybrid, lookupSchemaDocument)).toThrow(
+      MalformedSchemaMetaError,
+    );
+    // The inline and absent forms pass straight through.
+    expect(inlineResultSchemaMeta(undefined)).toBeUndefined();
+    expect(inlineResultSchemaMeta(resultSchema)).toBe(resultSchema);
+    expect(collectSchemaMetaRefHashes({ schema: resultSchema }).size).toBe(0);
   });
 
   it("refuses a malformed member at write time", async () => {
