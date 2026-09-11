@@ -419,7 +419,8 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Finish review and publication of C3 acceptance, then continue the collection-operator work. C4's repository migration is
+Continue the collection-operator implementation and its measured acceptance.
+C4's repository migration is
 implemented and validated; updating any deployed poll requires coordination
 with Mike. The first-materialization cases in
 [PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four

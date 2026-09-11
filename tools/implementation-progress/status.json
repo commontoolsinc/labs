@@ -30,7 +30,10 @@
     "#7329 merged as 593c341b27a8baff681374bd01b3125a70ffeca8: all 69 exact-head checks succeeded or were skipped; Cubic run 103258387302 reported zero issues on 9e28f27015; antagonistic review was clean. Client remote-row identity and narrow-invalidation acceptance is landed.",
     "#7328 merged as 26de7f96079d1b4c87eaa44296cc9a453f5f2b9d: all 69 exact-head checks succeeded or were skipped; Cubic 103273903333 reported zero issues on c003f349e8; antagonistic review was clean.",
     "#7330 merged as 06942589ab4825d260e5d8acf64219bdb5d48854: all 69 exact-head gates passed or skipped; Cubic 103278783473 reviewed all five files with zero issues on fe53a2d97d; antagonistic review clean.",
-    "#7332 merged as 881bda4ba1c0805ca88c3e5d2046cfefbcba5e4a: all 69 exact-head gates passed or skipped; Cubic 103278889723 reviewed both files with zero issues on db78661841; antagonistic review clean. C2 acceptance reconciliation is complete."
+    "#7332 merged as 881bda4ba1c0805ca88c3e5d2046cfefbcba5e4a: all 69 exact-head gates passed or skipped; Cubic 103278889723 reviewed both files with zero issues on db78661841; antagonistic review clean. C2 acceptance reconciliation is complete.",
+    "#7317 merged as 3e55b4e42dfd70fef3bd1cf4346fa706c4f2d87c: Restore reactive lunch-poll option and voter rows. All 69 exact-head gates passed or skipped on c2e63c1306da1723547b72d98e7c78fc16b878e5; clean Cubic and antagonistic reviews preceded merge.",
+    "#7320 merged as 3f2401638594bdca616906816a6c06011a39b643: Separate list coordinator state across serving principals and sessions. All 69 exact-head gates passed or skipped on d843b3be374d9b999f3cbd4975ae9f75d4f5e9c1; clean Cubic and antagonistic reviews preceded merge.",
+    "#7321 merged as 2fda18e1acc435f0c6642ff93809d14cd1ecc543: Index pending schema policies to bound document lookup work. All 69 exact-head gates passed or skipped on 8d9937f7192f16fc70cc01641bcae8b24ad83551; clean Cubic and antagonistic reviews preceded merge."
   ],
   "stages": [
     {
