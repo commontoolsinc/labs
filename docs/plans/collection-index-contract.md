@@ -3,8 +3,11 @@
 Status: B1/B2 implementation and acceptance contract for the
 [computation-cost implementation](pattern-computation-cost-implementation.md).
 The [feature documentation](../features/collection-indexes.md) describes index
-producers and lookup. The remaining acceptance work covers isolation, scale
-measurements, and joins.
+producers and lookup. The remaining acceptance work includes mixed primitive/Cell `keys()`
+enumeration: the runtime union materializer can wrap a primitive alternative as
+a Cell. Membership and lookup preserve the distinction; the enumeration output
+representation remains pending. Isolation, scale measurements, and joins have
+implementation evidence in #7323 and remain subject to its final review gates.
 
 ## Key domain and equality
 
@@ -49,6 +52,10 @@ An absent group lookup returns an empty collection. An absent unique lookup
 returns undefined. A lookup with a missing key has the corresponding absent
 result. An invalid lookup key produces the same diagnostic as an invalid
 extracted key.
+
+The intended enumeration contract below still requires mixed primitive/Cell
+representation acceptance. It must not be read as a claim that the current
+runtime preserves both alternatives through `keys()`.
 
 Group enumeration contains occupied keys only and has deterministic typed-key
 order: booleans, numbers, strings, then Cell addresses. Within a domain use

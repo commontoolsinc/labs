@@ -304,8 +304,11 @@ passed before merge, with clean Cubic and antagonistic reviews.
         retargeting a key link without editing its containing element.
   - [x] Duplicate-key handling that remains deterministic for unordered input;
         missing extracted keys and absent lookups.
-  - [x] Group membership order, group enumeration order, output types, lookup
+  - [x] Group membership order, homogeneous-key enumeration order, lookup
         surface, and identity across removal/reinsertion.
+  - [ ] Mixed primitive/Cell enumeration representation and output acceptance.
+        The runtime union materializer can wrap primitive alternatives as
+        Cells; the API decision is tracked as Q7 on the dashboard.
   - [ ] Bound invalidation to affected keys; state initialization, update,
         lookup, and storage complexity.
 - [x] **B2 contract — Specify lookup and join.** The index contract defines

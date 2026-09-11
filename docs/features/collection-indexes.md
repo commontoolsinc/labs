@@ -55,6 +55,13 @@ Keys are strings, finite numbers, booleans, or Cell references. Primitive domain
 are distinct, and positive and negative zero share a numeric key. Nullish keys
 omit an occurrence. Unsupported keys fail through the shared key resolver.
 
+Mixed primitive/Cell selectors are supported for membership and lookup, but
+mixed-key `keys()` enumeration is not accepted yet. The runtime can materialize
+a primitive alternative as a Cell when the result schema admits both. Do not
+rely on enumeration preserving that distinction until the
+[index contract](../plans/collection-index-contract.md) resolves its output
+representation.
+
 A Cell key denotes its resolved space, document, path, and scope. Its schema and
 stored contents do not participate in equality. Selecting a Cell preserves that
 identity before serialization; selecting a primitive field reads the field's

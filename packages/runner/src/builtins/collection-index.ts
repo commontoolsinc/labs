@@ -288,16 +288,23 @@ function createCollectionIndexInstance(
         },
       );
       if (keysEntry.needsSetup) {
-        runtime.runner.run(
-          tx,
-          getKeysPattern(),
-          { state },
-          keysEntry.resultCell,
-          {
-            doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: awaitSync,
-            parentPieceRootId: parent.getAsNormalizedFullLink().id,
-          },
+        const keysResultCell = keysEntry.resultCell;
+        // Child setup reads its stored result links as graph structure. The
+        // coordinator does not consume the enumeration those links name.
+        tx.runWithAmbientReadMeta(
+          { ...ignoreReadForScheduling, ...machineryRead },
+          () =>
+            runtime.runner.run(
+              tx,
+              getKeysPattern(),
+              { state },
+              keysResultCell,
+              {
+                doNotUpdateOnPatternChange: true,
+                awaitSyncBeforeInitialRun: awaitSync,
+                parentPieceRootId: parent.getAsNormalizedFullLink().id,
+              },
+            ),
         );
         setResultCell(keysEntry.resultCell.withTx(tx), parent);
         setPatternCell(keysEntry.resultCell.withTx(tx), parent.key("pattern"));

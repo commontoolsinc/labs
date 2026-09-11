@@ -11003,6 +11003,9 @@ export class Runner {
     const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.useDeclaredReadsAsDependencies
       : false;
+    const deferUntilDemand = isRawBuiltinResult(builtinResult)
+      ? builtinResult.deferUntilDemand
+      : undefined;
     const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
       ? builtinResult.onActionRegistered
       : undefined;
@@ -11095,6 +11098,7 @@ export class Runner {
         : undefined);
     const schedulerOptions = {
       isEffect,
+      deferUntilDemand,
       debounce,
       noDebounce,
       throttle,
