@@ -49,6 +49,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
@@ -1491,11 +1492,16 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     // transaction layer elides a write it can compare and find
     // unchanged).
     const installer = openClient(spaceSigner);
-    const identicalId = "cid:6304-identical" as never;
-    const divergentId = "cid:6304-divergent" as never;
+    // The two installed documents are named by their content, so their
+    // stored values differ in a field the assertions never read; the
+    // unstored one is never committed, so its id is free.
+    const identicalStored = { v: "stored" };
+    const divergentStored = { v: "stored", doc: "divergent" };
+    const identicalId = `cid:${taggedHashStringOf(identicalStored)}` as never;
+    const divergentId = `cid:${taggedHashStringOf(divergentStored)}` as never;
     const unstoredId = "cid:6304-unstored" as never;
     const cellFor = (runtime: Runtime, id: never) =>
-      runtime.getCellFromLink<{ v: string }>({
+      runtime.getCellFromLink<{ v: string; doc?: string }>({
         space,
         id,
         scope: "space",
@@ -1507,8 +1513,8 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       await installedIdentical.sync();
       await installedDivergent.sync();
       const tx = installer.edit();
-      installedIdentical.withTx(tx).set({ v: "stored" });
-      installedDivergent.withTx(tx).set({ v: "stored" });
+      installedIdentical.withTx(tx).set(identicalStored);
+      installedDivergent.withTx(tx).set(divergentStored);
       expect((await tx.commit()).error).toBeUndefined();
       await installer.storageManager.synced();
     }
