@@ -899,12 +899,21 @@ export class CommonFabricFormatter implements TypeFormatter {
       | undefined,
     targetKind: WrapperKind,
   ): ts.TypeReferenceNode | undefined {
-    // Alias declaration arguments can be unbound or describe a different
-    // parameter list. Only direct wrapper syntax names the resolved payload.
     if (
-      resolvedWrapper?.kind === targetKind &&
-      resolvedWrapper.node === originalNode
+      originalNode && ts.isTypeReferenceNode(originalNode) &&
+      originalNode.typeArguments
     ) {
+      // A generic Cell alias can map its parameters into a larger payload.
+      // Only direct Cell syntax names that payload in its first argument.
+      if (
+        isCellCapabilityKind(targetKind) &&
+        resolvedWrapper?.node !== originalNode
+      ) {
+        return undefined;
+      }
+      return originalNode;
+    }
+    if (resolvedWrapper?.kind === targetKind) {
       return resolvedWrapper.node;
     }
     return undefined;
