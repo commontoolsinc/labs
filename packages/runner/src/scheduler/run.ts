@@ -458,6 +458,7 @@ export interface SchedulerActionRunState {
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
   readonly getReadStatsEnabled: () => boolean;
+  readonly getReadAttemptAccountingEnabled: () => boolean;
   readonly retries: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
@@ -515,6 +516,7 @@ export async function runSchedulerAction(
   action: Action,
 ): Promise<any> {
   const readStatsEnabled = state.getReadStatsEnabled();
+  const readAttemptsEnabled = state.getReadAttemptAccountingEnabled();
   logger.timeStart("scheduler", "run");
   const generation = state.getActionGeneration(action);
   const actionId = state.getActionId(action);
@@ -623,7 +625,20 @@ export async function runSchedulerAction(
         }
         : {}),
     });
-    const finishReads = readStatsEnabled ? startReadStats(tx) : undefined;
+    const finishReads = readStatsEnabled
+      ? startReadStats(
+        tx,
+        readAttemptsEnabled
+          ? (reads) =>
+            state.runtime.telemetry.submit({
+              type: "scheduler.read-attempt",
+              kind: "reactive",
+              actionId,
+              reads,
+            })
+          : undefined,
+      )
+      : undefined;
     const actionStartTime = performance.now();
 
     let result: any;

@@ -171,7 +171,12 @@ import {
   markDurableReadTx,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
-import { normalizeCellScope, scopeRank } from "./scope.ts";
+import {
+  isCellScope,
+  narrowestScope,
+  normalizeCellScope,
+  scopeRank,
+} from "./scope.ts";
 import {
   isCfcEnforcementRejection,
   isConflictRejection,
@@ -237,7 +242,6 @@ import {
   setRunnableName,
 } from "./runner-utils.ts";
 import { normalizeSandboxResult } from "./sandbox/result-normalization.ts";
-import { isCellScope, narrowestScope } from "./scope.ts";
 import { SigilLink } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { rawMetaWriteAuthorization } from "./meta-seam.ts";
@@ -11163,7 +11167,11 @@ export class Runner {
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined
-      ? async (event: any, identity?: ScopeKeyIdentity): Promise<void> => {
+      ? async (
+        event: any,
+        identity: ScopeKeyIdentity | undefined,
+        tx: IExtendedStorageTransaction,
+      ): Promise<void> => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -11172,6 +11180,7 @@ export class Runner {
           resultCell.space,
           eventInputs,
           undefined,
+          tx,
         );
         const argument = inputsCell.asSchema(module.argumentSchema!)
           .getWithoutFactoryMaterialization();

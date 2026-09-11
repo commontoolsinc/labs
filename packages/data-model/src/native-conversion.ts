@@ -52,8 +52,7 @@ import {
   isValidFabricNativeObject,
 } from "./validity-check.ts";
 import { cloneHelper } from "./value-clone.ts";
-import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { deepFreeze } from "./deep-freeze.ts";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { isAdmittedFabricFactory, sealFactoryState } from "./fabric-factory.ts";
 
 /**

@@ -32,6 +32,16 @@ both single-runtime and multi-user tests. Verification stays enabled by default;
 a measurement with it disabled does not establish idempotency. Read-cost tables
 currently cover the single-runtime runner.
 
+Single-user test modules can export `readBudgets` with separate `initialization`
+and default `steps` limits. Each accepts `total` (settled transaction-attempt
+proxy accesses) and `perRun` (maximum reactive-body proxy accesses). An
+executable step's `readBudget` replaces the default limits. Zero is valid,
+equality passes, and a violation fails the test with attributed diagnostics even
+when functional assertions pass. Limits require module-level opt-in; multi-user
+declarations are rejected. See the
+[budget contract](../../docs/features/read-accounting.md#pattern-test-budgets)
+for measured transactions, exclusions, and settlement behavior.
+
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source

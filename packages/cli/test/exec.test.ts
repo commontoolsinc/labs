@@ -6,7 +6,10 @@ import {
   createFactoryShell,
   factoryStateOf,
 } from "@commonfabric/data-model/fabric-factory";
-import { undeclaredVerbFieldError } from "../lib/callable.ts";
+import {
+  CF_RUNTIME_ERROR_LOG,
+  undeclaredVerbFieldError,
+} from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
@@ -23,7 +26,6 @@ import {
   resolveMountedCallableFile,
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
-import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import type { SpaceConfig } from "../lib/piece.ts";
 import { cf, relevantStderr } from "./utils.ts";
 

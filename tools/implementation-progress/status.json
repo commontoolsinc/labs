@@ -1,16 +1,24 @@
 {
-  "updated": "2026-09-10T23:47:28.440003+00:00",
+  "updated": "2026-09-11T03:19:26.733170+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
-  "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Row invalidation fix #7265 merged after all 69 gates and clean reviews. A4 count-limit work exposed a separate union-branch schema-scope issue; its isolated fix passes focused tests.",
-  "review": "Latest Cubic and antagonistic reviews are clean for the dashboard. The merged #7265 tracker update is being revalidated before landing this checkpoint.",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7257",
+  "activity": "Current #7257 implementation validation at 2b24f0823f passes: 1,428 runner tests / 8,909 steps, full CLI suites, 46 type groups, 599 documentation blocks, and four browser row cases. Cubic documentation findings are repaired; refreshed review and CI are required.",
+  "review": "Antagonistic implementation review is clean. Cubic identified execution-boundary wording and competing dashboard totals; both are corrected for rereview.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
-    "#7257: full runner passed 1,410 tests / 8,765 steps. Full CLI completed: 1,821 tests passed and two known baseline color tests failed. Rebased focused tests and all 46 type-check groups pass.",
     "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
-    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review."
+    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review.",
+    "#7264: merged as 5d23bc5ba9 after all 69 CI gates and clean latest Cubic/antagonistic reviews.",
+    "#7259: named incremental aggregates merged as d9b45371ef; contracts and measurements are linked from the implementation tracker.",
+    "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review.",
+    "#7289: merged as b18d90b6aa with clean CI and Cubic/antagonistic reviews.",
+    "#7285: merged as 1407825b0c after all current-head CI gates, zero-issue Cubic review, and clean antagonistic review.",
+    "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews.",
+    "#7302 merged as 360d07680f after all 69 current-head CI gates and clean Cubic/antagonistic reviews.",
+    "#7300 merged as efc91a38b6 after all 69 current-head checks and clean Cubic/antagonistic reviews; generic Cell aliases preserve resolved payload types.",
+    "#7257 current implementation validation (2b24f0823f): 1,428 runner tests / 8,909 steps; full CLI suites; 1,168 transformer tests / 961 steps; 46 type groups; 599 documentation blocks; four synthetic browser row cases; formatting and lint pass. Generated-pattern, vintage, and scale acceptance checkpoints are detailed in the PR."
   ],
   "stages": [
     {
@@ -35,13 +43,13 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "review",
-      "detail": "Six initial findings fixed. Current-main integration passes 1,417 runner tests / 8,843 steps plus new guard accounting and selector-failure regressions. Fresh publication, CI, and review remain."
+      "detail": "Complete Cell reads and all reviewed failure paths are repaired. Full validation passes; publishing for fresh CI and Cubic in #7257."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
       "status": "active",
-      "detail": "Browser benchmark landed in #7261 with three recorded sizes. Remaining A4 work: assert read-count regression limits after A3 lands."
+      "detail": "Browser benchmark landed in #7261. Read limits and optimized fixture published in draft #7282; all three sizes and one-over-limit probe pass. Awaiting prerequisite #7257."
     },
     {
       "id": "A5",
@@ -53,19 +61,19 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
+      "detail": "Remote edits, removal, and restoration landed in #7285; first-browser-materialization acceptance landed in #7302. Four nested/mapped \u00d7 same/cross-space cases pass, with local demos. Reconnect remains pending."
     },
     {
       "id": "B1",
       "title": "Grouping and unique-key indexing",
-      "status": "todo",
-      "detail": "Settle key, duplicate, ordering, identity, and complexity contracts."
+      "status": "active",
+      "detail": "Contract merged in #7294 and generic Cell alias support in #7300. Typed handles and key resolution are being prototyped. Operator lowering, bucket maintenance, and runtime integration remain pending."
     },
     {
       "id": "B2",
       "title": "Keyed lookup and join",
       "status": "todo",
-      "detail": "Specify cardinality and invalidation, then implement."
+      "detail": "Keyed lookup contract recorded in #7294; runtime implementation remains pending."
     },
     {
       "id": "B3",
@@ -177,9 +185,9 @@
     },
     {
       "id": "Q5",
-      "title": "Push coverage fix and dashboard checkpoint to GitHub?",
+      "title": "Push and merge implementation PRs after review?",
       "status": "Approved",
-      "proposal": "Mike authorized pushing the coverage fix and dashboard checkpoint to the existing PR #7241 branch in commontoolsinc/labs.",
+      "proposal": "Mike authorized continued implementation pushes and merges, including #7257, after antagonistic review, clean Cubic review, and passing CI.",
       "blocks": "None."
     },
     {
@@ -203,8 +211,8 @@
     },
     {
       "title": "See remote updates",
-      "state": "Planned \u00b7 C1\u2013C4",
-      "detail": "Show two participants and the affected row updating correctly."
+      "state": "Available \u00b7 C1/C3",
+      "detail": "The row demo shows remote membership, colors, ranking, cross-space profiles, and first browser materialization. Reconnect acceptance remains pending."
     },
     {
       "title": "Compare optimized vote updates",
@@ -212,5 +220,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "7aaac0b7fe"
+  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+  "validationProvenance": {
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+    "scope": "Local package, type, pattern, browser, and vintage validation of the integrated implementation. This is the parent of published dashboard checkpoint d67c923566146faa6f7b2493b1828140295f7d47. It does not identify the separately recorded browser baseline capture."
+  }
 }

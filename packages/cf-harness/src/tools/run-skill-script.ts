@@ -4,6 +4,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
 
 import {
+  normalizeCdpOrigin,
   redactCdpEndpoint,
   validateBrowserAccessLeaseFreshness,
 } from "../contracts/browser-access.ts";
@@ -21,7 +22,6 @@ import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
 } from "../skills/scripts.ts";
-import { normalizeCdpOrigin } from "../contracts/browser-access.ts";
 import { createClearedHostProcessEnv } from "./host-process-env.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 

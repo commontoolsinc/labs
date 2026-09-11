@@ -10,6 +10,7 @@ import {
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import type {
+  Frame,
   InternalPatternFactory,
   JSONSchema,
 } from "../src/builder/types.ts";
@@ -21,7 +22,6 @@ import {
   pushFrame,
   withPatternParamsSchema,
 } from "../src/builder/pattern.ts";
-import type { Frame } from "../src/builder/types.ts";
 import {
   FactoryArtifactUnavailableError,
   type FactoryContract,

@@ -25,8 +25,8 @@ import {
   updatePatternBuilderCallbackArgument,
 } from "../../src/ast/call-kind.ts";
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
-import { registerTrustedCommonFabricTestSources } from "../trusted-commonfabric-sources.ts";
 import {
+  registerTrustedCommonFabricTestSources,
   TRUSTED_COMMONFABRIC_GLOBALS,
   TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
 } from "../trusted-commonfabric-sources.ts";

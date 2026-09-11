@@ -50,7 +50,15 @@ import {
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { applyInputIfcToOutput, connectInputAndOutputs } from "./node-utils.ts";
-import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
+import {
+  bindFactoryRootToken,
+  brandTrustedPattern,
+  type FrameworkProvidedPath,
+  getDurableArtifactRefForRootToken,
+  noteDerivedCopy,
+  registerFactoryStateDeriver,
+  setFrameworkProvidedPaths,
+} from "./pattern-metadata.ts";
 import { reactive } from "./reactive.ts";
 import {
   type CellAliasResolver,
@@ -85,13 +93,6 @@ import {
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
-import {
-  bindFactoryRootToken,
-  type FrameworkProvidedPath,
-  getDurableArtifactRefForRootToken,
-  registerFactoryStateDeriver,
-  setFrameworkProvidedPaths,
-} from "./pattern-metadata.ts";
 import { assertValidPatternParams } from "./factory-params.ts";
 
 type CompilerPatternCallback = (...args: any[]) => unknown;

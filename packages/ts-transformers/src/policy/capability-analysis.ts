@@ -3428,6 +3428,9 @@ export function analyzeFunctionCapabilities(
               // itself retain the receiver Cell in every synthesized closure
               // shape, so record the receiver read explicitly without
               // widening the root to wildcard.
+              if (!resolvedGetCalls.has(node)) {
+                trackFullShapeReadRef(receiver);
+              }
               if (ts.isCallChain(node) || !resolvedGetCalls.has(node)) {
                 trackReadRef(receiver);
                 recordMergeableReadSite(receiver, node);
