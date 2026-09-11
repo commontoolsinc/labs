@@ -127,6 +127,10 @@ away from the slot labels that accompany them. Admission validates the retained
 dependencies before accepting the edit. Array edits with unchanged metadata
 retain their mergeable operations.
 
+Local confirmation retains every accepted contribution when several sealed
+writes share a wave commit sequence. An arriving full document supplies the
+complete committed value and supersedes that local reconstruction.
+
 Mutable content assertions across spaces are rejected when their evidence cannot
 be bound atomically to A's commit. Reference-only forwarding does not require a
 content assertion. The implementation has no persistent target-evidence cache.

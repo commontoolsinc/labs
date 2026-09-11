@@ -5664,3 +5664,81 @@ Deno.test("memory v2 stacked commits: an accepted sealed snapshot remains visibl
     await harness.close();
   }
 });
+
+for (const coveringFrame of ["none", "before", "between"] as const) {
+  Deno.test(`memory v2 stacked commits: same-wave array seals retain every accepted contribution (coveringFrame=${coveringFrame})`, async () => {
+    const harness = createHarness();
+    const firstVerdict = Promise.withResolvers<
+      { committed: { seq: number } }
+    >();
+    const secondVerdict = Promise.withResolvers<
+      { committed: { seq: number } }
+    >();
+    let first: ReturnType<SpaceReplica["sealNative"]> | undefined;
+    let second: ReturnType<SpaceReplica["sealNative"]> | undefined;
+    try {
+      await seedAccepted(harness, DOCS.A, { items: ["a"], labels: ["a"] });
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]);
+      const append = (index: number, value: string, labels: string[]) => {
+        const tx = harness.storageManager.edit();
+        assert(
+          tx.write({
+            space,
+            id: DOCS.A,
+            type: DOCUMENT_MIME,
+            path: ["value", "items", String(index)],
+          }, value).ok,
+        );
+        assert(
+          tx.write({
+            space,
+            id: DOCS.A,
+            type: DOCUMENT_MIME,
+            path: ["value", "labels"],
+          }, labels).ok,
+        );
+        const draft = tx.getNativeCommit!(space)!;
+        tx.abort();
+        return draft;
+      };
+      first = harness.replica.sealNative(
+        append(1, "b", ["a", "b"]),
+        undefined,
+        firstVerdict.promise,
+      );
+      second = harness.replica.sealNative(
+        append(2, "c", ["a", "b", "c"]),
+        undefined,
+        secondVerdict.promise,
+      );
+      const accepted = { items: ["a", "b", "c"], labels: ["a", "b", "c"] };
+      const cover = async () => {
+        harness.model.injectRemote({
+          label: "complete wave document",
+          operations: [{ op: "set", id: DOCS.A, value: accepted }],
+        });
+        harness.pushSync({
+          upserts: [{ id: DOCS.A, seq: 2, value: accepted }],
+        });
+        await clock.settle();
+        assertEquals(currentSeq(harness, DOCS.A), 2);
+      };
+      if (coveringFrame === "before") await cover();
+      firstVerdict.resolve({ committed: { seq: 2 } });
+      await first.settled;
+      if (coveringFrame === "between") await cover();
+      secondVerdict.resolve({ committed: { seq: 2 } });
+      await second.settled;
+      assertEquals(visibleValue(harness.provider, DOCS.A), accepted);
+    } finally {
+      firstVerdict.resolve({ committed: { seq: 2 } });
+      secondVerdict.resolve({ committed: { seq: 2 } });
+      await first?.settled;
+      await second?.settled;
+      await harness.close();
+    }
+  });
+}

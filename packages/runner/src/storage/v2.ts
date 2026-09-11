@@ -411,6 +411,13 @@ type ConfirmedVersion = MaterializedVersion & {
   seq: number;
 
   /**
+   * Last locally promoted contribution to this derived commit. A wave can
+   * confirm several seals at one sequence; an arrived full document clears
+   * this marker because it already contains every contribution.
+   */
+  promotedLocalSeq?: number;
+
+  /**
    * The class of the covering commit — the commit whose write produced
    * `seq` (speculation.md §4's arrival-witness predicate, RULED
    * 2026-08-22). From the frame's `coverClass` on integrate (populated
@@ -7933,7 +7940,13 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      if (record.confirmed.seq < applied.seq) {
+      if (
+        record.confirmed.seq < applied.seq ||
+        (record.confirmed.seq === applied.seq &&
+          coverClass === "derived" &&
+          record.confirmed.promotedLocalSeq !== undefined &&
+          record.confirmed.promotedLocalSeq < localSeq)
+      ) {
         const hasLocalReplay = pendingIndexes.some((index) => {
           const entry = record.pending[index]!;
           return entry.op === "patch" && entry.replayPatches !== undefined;
@@ -7972,6 +7985,7 @@ export class SpaceReplica
             coverClass,
           );
         }
+        if (coverClass === "derived") promoted.promotedLocalSeq = localSeq;
       }
 
       record.pending = record.pending.filter((entry) =>

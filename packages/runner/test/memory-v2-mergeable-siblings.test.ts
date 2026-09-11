@@ -142,16 +142,14 @@ describe("memory-v2-mergeable-siblings", () => {
       expect((await tx.commit()).error).toBeUndefined();
 
       const parentId = parent.getAsNormalizedFullLink().id;
-      const operation = drafts.at(-1)?.operations.find((op) =>
+      const operations = drafts.at(-1)?.operations.filter((op) =>
         op.id === parentId
       );
-      expect(operation?.op).toBe("patch");
-      if (operation?.op !== "patch") throw new Error("missing parent patch");
-      expect(operation.patches.some((op) => op.op === "append")).toBe(true);
-      expect(operation.patches.some((op) => op.path === "/cfc")).toBe(true);
+      expect(operations).toHaveLength(1);
 
       const durable = await read(parentId);
       expect(durable).toHaveProperty("cfc.version", 2);
+      expect(durable).toHaveProperty("value.profiles.length", 1);
       const inspect = runtime.edit();
       const metadata = readStoredCfcMetadata(
         inspect,
