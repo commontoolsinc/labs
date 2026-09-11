@@ -260,6 +260,23 @@ describe("result-schema-meta", () => {
         properties: { nested: { $ref: ref } },
       }).kind,
     ).toBe("malformed");
+    // A `cid:` string that does not parse names no document at all, at the
+    // root or nested; a non-schema value is not inline metadata either.
+    expect(classifySchemaMetaValue({ $ref: "cid:" }).kind).toBe("malformed");
+    expect(
+      classifySchemaMetaValue({
+        type: "object",
+        properties: { nested: { $ref: `${ref}#/not/a/def` } },
+      }).kind,
+    ).toBe("malformed");
+    expect(classifySchemaMetaValue("not a schema").kind).toBe("malformed");
+    expect(classifySchemaMetaValue([{ type: "string" }]).kind).toBe(
+      "malformed",
+    );
+    expect(classifySchemaMetaValue(true)).toEqual({
+      kind: "inline",
+      schema: true,
+    });
   });
 
   it("refuses a malformed member at write time", async () => {

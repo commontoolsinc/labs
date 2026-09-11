@@ -891,7 +891,9 @@ Deno.test("validates the schema document a result's `schema` metadata references
     // addressing hashes `.value` alone, so a schema document and a blob
     // whose value happens to be schema-shaped are indistinguishable, and
     // the member is validated like an ordinary document's on both. Backed
-    // lands; unbacked is refused; a forged backing is refused with it.
+    // lands; unbacked is refused. A forged backing cannot exist: the install
+    // that would supply it is itself refused by the content identity check,
+    // which is what the commit below trips.
     const blob = { bytes: "not a schema" };
     const blobId = `cid:${taggedHashStringOf(blob)}`;
     assertThrows(
@@ -927,6 +929,7 @@ Deno.test("validates the schema document a result's `schema` metadata references
           }),
         }),
       ProtocolError,
+      "whose content does not hash to its id",
     );
     const blobWithMeta = {
       op: "set",

@@ -2270,13 +2270,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   /**
    * Refuses a write that would land a `schema` metadata member in the
-   * malformed form — a `cid:` reference outside a single root `$ref`
-   * (`MalformedSchemaMetaError`). This runs BEFORE the underlying write
-   * on every write entry, so a refused member never reaches the
-   * transaction's staged state; it is the writer's half of the grammar the
-   * commit boundary enforces, and it holds whatever the
+   * malformed form — a `cid:` reference outside a single root `$ref`, or a
+   * value that is not a schema (`MalformedSchemaMetaError`). This runs
+   * BEFORE the underlying write on every write entry, so a refused member
+   * never reaches the transaction's staged state; it is the writer's half
+   * of the grammar the commit boundary enforces, and it holds whatever the
    * `contentAddressedSchemas` flag says, since the grammar is a property
-   * of stored documents rather than of any one writer.
+   * of stored documents rather than of any one writer. A delete carries
+   * no value to classify and is never refused: removing a malformed or
+   * legacy member is the remedy, not another violation.
    */
   #refuseMalformedSchemaMeta(
     address: Pick<IMemorySpaceAddress, "id" | "path">,
@@ -2865,7 +2867,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.#invalidateReadResultCache();
-    this.#refuseMalformedSchemaMeta(address, value);
+    if (options?.delete !== true) {
+      this.#refuseMalformedSchemaMeta(address, value);
+    }
     const result = this.tx.write(address, value, options);
     if (result.ok) {
       this.#stageSchemaDocsForValue(address.space, address, value);
@@ -2885,7 +2889,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.#invalidateReadResultCache();
-    this.#refuseMalformedSchemaMeta(address, value);
+    if (options?.delete !== true) {
+      this.#refuseMalformedSchemaMeta(address, value);
+    }
     const writeResult = this.tx.write(address, value, options);
     if (
       writeResult.error &&

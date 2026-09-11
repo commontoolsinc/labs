@@ -273,23 +273,36 @@ export function classifySchemaMeta(document: unknown): SchemaMetaForm {
  */
 export function classifySchemaMetaValue(schema: unknown): SchemaMetaForm {
   if (schema === undefined || schema === null) return { kind: "absent" };
+  if (typeof schema === "boolean") return { kind: "inline", schema };
   if (!isObjectNotArray(schema)) {
-    return { kind: "inline", schema: schema as JSONSchema };
+    return {
+      kind: "malformed",
+      reason: "the member holds a value that is not a schema",
+    };
   }
   const obj = schema as JSONSchemaObj;
-  if (typeof obj.$ref === "string") {
+  if (typeof obj.$ref === "string" && isCidPrefixedRef(obj.$ref)) {
     const parsed = parseExternalSchemaRef(obj.$ref);
-    if (parsed !== undefined) {
-      if (Object.keys(obj).length !== 1) {
-        return {
-          kind: "malformed",
-          reason: "a `cid:` root reference carries sibling keywords",
-        };
-      }
-      return { kind: "reference", ref: obj.$ref, ...parsed };
+    if (parsed === undefined) {
+      return {
+        kind: "malformed",
+        reason:
+          `the root \`$ref\` is not a well-formed \`cid:\` reference: \`${obj.$ref}\``,
+      };
     }
+    if (Object.keys(obj).length !== 1) {
+      return {
+        kind: "malformed",
+        reason: "a `cid:` root reference carries sibling keywords",
+      };
+    }
+    return { kind: "reference", ref: obj.$ref, ...parsed };
   }
-  if (containsExternalSchemaRef(obj)) {
+  // Any `cid:`-prefixed ref below the root is outside the grammar, whether
+  // or not it parses: an unparseable one names no document at all, and a
+  // classifier that let it through as inline would persist metadata whose
+  // closure nothing can install.
+  if (containsCidPrefixedRef(obj)) {
     return {
       kind: "malformed",
       reason:
@@ -298,6 +311,29 @@ export function classifySchemaMetaValue(schema: unknown): SchemaMetaForm {
     };
   }
   return { kind: "inline", schema: obj };
+}
+
+/** Whether `ref` claims the `cid:` scheme, well-formed or not. */
+function isCidPrefixedRef(ref: string): boolean {
+  return ref.startsWith(SCHEMA_DOCUMENT_REF_PREFIX);
+}
+
+/**
+ * Whether any `$ref` anywhere in `schema` — subschemas and `$defs` bodies
+ * included — claims the `cid:` scheme, parseable or not. Broader than
+ * {@link containsExternalSchemaRef} by design: this is the grammar check,
+ * and a `cid:` string that does not parse is exactly the kind of member
+ * the grammar exists to keep out.
+ */
+function containsCidPrefixedRef(schema: JSONSchemaObj): boolean {
+  return anySchema(
+    schema,
+    (node) =>
+      isObjectNotArray(node.schema) &&
+      typeof node.schema.$ref === "string" &&
+      isCidPrefixedRef(node.schema.$ref),
+    { includeDefs: true, includeUnused: true },
+  );
 }
 
 /**
