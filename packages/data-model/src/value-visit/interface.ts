@@ -191,7 +191,7 @@ export type DispatchingVisitorResult<
  */
 export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   /**
-   * Indicates whether or not the given value is compatible with the the
+   * Indicates whether or not the given value is compatible with the
    * `DomainExtra` type defined by the visitor. This is a type predicate for
    * `DomainExtra`. The visitor engine calls it before dispatching to
    * `visitNonFabricValue()`, and will instead `throw` an error if this method

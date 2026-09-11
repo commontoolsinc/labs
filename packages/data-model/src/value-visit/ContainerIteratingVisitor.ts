@@ -23,7 +23,7 @@ import {
  *
  * * `FabricArray` -- all elements.
  * * `FabricInstance` -- keys and values.
- * * `FabricPlainObject`s -- values only.Methods:
+ * * `FabricPlainObject`s -- values only.
  *
  * The implementation includes a definition for all container-specific `visit()`
  * methods per the above description, and also implements no-op (empty)
