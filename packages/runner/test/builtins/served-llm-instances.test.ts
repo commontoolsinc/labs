@@ -77,8 +77,12 @@ describe("served-llm-instances", () => {
   afterEach(async () => {
     for (const tx of transactions.splice(0)) tx.abort();
     await manager.synced();
-    await runtime.dispose();
-    await manager.close();
+    try {
+      await runtime.dispose();
+    } catch (error) {
+      await manager.close();
+      throw error;
+    }
   });
 
   /** Stages two requests without allowing network work or the first transaction to settle. */
