@@ -2,6 +2,7 @@ import { defer } from "@commonfabric/utils/defer";
 
 import { resolveLink } from "../src/link-resolution.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { readResultSchemaMeta } from "../src/result-schema-meta.ts";
 // The durable `schema` metadata a settled handler dispatch records on its
 // receipt cell alongside the value (`handleJavaScriptHandlerResult`,
 // `src/runner.ts`). It is descriptive — the root container kind, plus the
@@ -131,7 +132,7 @@ describe("receipt schema", () => {
       await dispatch(stream, {}, "evt:receipt-schema:record"),
     );
 
-    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    const declared = readResultSchemaMeta(receipt) as JSONSchema;
     expect(declared).toEqual({
       type: "object",
       properties: { topic: true, count: true },
@@ -153,7 +154,7 @@ describe("receipt schema", () => {
     // `{}` is what a value-less verb's receipt holds — the existence-only
     // witness — and a record carrying no properties is what describes it.
     expect(receipt.get()).toEqual({});
-    expect(receipt.getMetaRaw("schema")).toEqual({
+    expect(readResultSchemaMeta(receipt)).toEqual({
       type: "object",
       properties: {},
     });
@@ -171,7 +172,7 @@ describe("receipt schema", () => {
     // The root kind is the half a selection needs before it can become a
     // fetch selector, since the same selection means different things over a
     // record and over an array.
-    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    const declared = readResultSchemaMeta(receipt) as JSONSchema;
     expect(declared).toEqual({ type: "array" });
     expect(receipt.asSchema(declared).get()).toEqual(["a", "b"]);
   });
@@ -190,7 +191,7 @@ describe("receipt schema", () => {
       await dispatch(stream, {}, "evt:receipt-schema:data-uri"),
     );
 
-    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    const declared = readResultSchemaMeta(receipt) as JSONSchema;
     expect(declared).toEqual({
       type: "object",
       properties: { topic: true, count: true },
@@ -209,7 +210,7 @@ describe("receipt schema", () => {
       await dispatch(stream, {}, "evt:receipt-schema:data-uri-array"),
     );
 
-    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    const declared = readResultSchemaMeta(receipt) as JSONSchema;
     expect(declared).toEqual({ type: "array" });
     expect(receipt.asSchema(declared).get()).toEqual(["a", "b"]);
   });
@@ -235,7 +236,7 @@ describe("receipt schema", () => {
     // assert a writable handle on a document nothing can be written through.
     // An unconstrained position reads through to the referenced value the
     // same way an undeclared one does.
-    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    const declared = readResultSchemaMeta(receipt) as JSONSchema;
     expect(declared).toEqual({
       type: "object",
       properties: { note: true, tag: true },
@@ -255,7 +256,7 @@ describe("receipt schema", () => {
     // A scalar has no container kind, and no selection has anything to narrow
     // against it.
     expect(receipt.get()).toBe(42);
-    expect(receipt.getMetaRaw("schema")).toBeUndefined();
+    expect(readResultSchemaMeta(receipt)).toBeUndefined();
   });
 
   it("declares nothing for an incidental cell return", async () => {
@@ -280,7 +281,7 @@ describe("receipt schema", () => {
       await dispatch(stream, {}, "evt:receipt-schema:cell"),
     );
 
-    expect(receipt.getMetaRaw("schema")).toBeUndefined();
+    expect(readResultSchemaMeta(receipt)).toBeUndefined();
     expect(receipt.get()).toBe(1);
 
     // The stored link still addresses the returned cell.
@@ -333,7 +334,7 @@ describe("receipt schema", () => {
 
     const receipt = await receiptOf(winner);
     expect(receipt.get()).toEqual({ first: true });
-    expect(receipt.getMetaRaw("schema")).toEqual({
+    expect(readResultSchemaMeta(receipt)).toEqual({
       type: "object",
       properties: { first: true },
     });

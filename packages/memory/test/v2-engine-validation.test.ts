@@ -713,6 +713,291 @@ Deno.test("a replayed eliding commit reports its elision again", async () => {
   });
 });
 
+Deno.test("validates the schema document a result's `schema` metadata references", async () => {
+  await withEngine((engine) => {
+    const resultSchema = {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    } as const;
+    const resultHash = internSchemaAsTaggedHashString(resultSchema);
+    const docWithSchemaMeta = (id: string, hash: string) =>
+      ({
+        op: "set",
+        id,
+        value: { value: { title: "v" }, schema: { $ref: `cid:${hash}` } },
+      }) as never;
+
+    // The reserved root `schema` member is a schema position in the link
+    // spelling: a reference nothing backs is the same broken closure a
+    // dangling link `$ref` would create.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [docWithSchemaMeta("of:result-carrier", resultHash)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The document included in the SAME commit is accepted...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          docWithSchemaMeta("of:result-carrier", resultHash),
+          setOp(`cid:${resultHash}`, resultSchema),
+        ],
+      }),
+    });
+
+    // ...and once stored, it satisfies later metadata by itself.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [docWithSchemaMeta("of:result-carrier-2", resultHash)],
+      }),
+    });
+
+    // A patch landing a reference AT the member is validated through the
+    // post-patch document, like a patch landing a CFC envelope.
+    const missingSchema = {
+      type: "object",
+      properties: { later: { type: "number" } },
+    } as const;
+    const missingHash = internSchemaAsTaggedHashString(missingSchema);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(4, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:result-carrier",
+                patches: [{
+                  op: "replace",
+                  path: "/schema",
+                  value: { $ref: `cid:${missingHash}` },
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // Moving document content into the member is the same landing.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(5, {
+        operations: [{
+          op: "set",
+          id: "of:move-result-carrier",
+          value: { value: { hoard: { $ref: `cid:${missingHash}` } } },
+        } as never],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(6, {
+            operations: [
+              {
+                op: "patch",
+                id: "of:move-result-carrier",
+                patches: [{
+                  op: "move",
+                  from: "/value/hoard",
+                  path: "/schema",
+                }],
+              } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The same move with the document backing it lands.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(7, {
+        operations: [
+          setOp(`cid:${missingHash}`, missingSchema),
+          {
+            op: "patch",
+            id: "of:move-result-carrier",
+            patches: [{ op: "move", from: "/value/hoard", path: "/schema" }],
+          } as never,
+        ],
+      }),
+    });
+    assertEquals(
+      (read(engine, { id: "of:move-result-carrier" } as never) as {
+        schema?: unknown;
+      })?.schema,
+      { $ref: `cid:${missingHash}` },
+    );
+
+    // The member's grammar has two forms. A `cid:` reference in any other
+    // position — nested inside an inline schema, or a root reference with
+    // sibling keywords — is refused outright, whether a set or a patch
+    // lands it, before any backing is consulted.
+    const hybridNested = {
+      type: "object",
+      properties: { nested: { $ref: `cid:${resultHash}` } },
+    };
+    const hybridSiblings = { $ref: `cid:${resultHash}`, title: "sibling" };
+    for (const hybrid of [hybridNested, hybridSiblings]) {
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "s:a",
+            commit: commit(8, {
+              operations: [{
+                op: "set",
+                id: "of:hybrid-carrier",
+                value: { value: { title: "v" }, schema: hybrid },
+              } as never],
+            }),
+          }),
+        ProtocolError,
+        "malformed schema metadata",
+      );
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "s:a",
+            commit: commit(8, {
+              operations: [{
+                op: "patch",
+                id: "of:result-carrier",
+                patches: [{ op: "replace", path: "/schema", value: hybrid }],
+              } as never],
+            }),
+          }),
+        ProtocolError,
+        "malformed schema metadata",
+      );
+    }
+
+    // Every `cid:` document carries the member the same way: content
+    // addressing hashes `.value` alone, so a schema document and a blob
+    // whose value happens to be schema-shaped are indistinguishable, and
+    // the member is validated like an ordinary document's on both. Backed
+    // lands; unbacked is refused. A forged backing cannot exist: the install
+    // that would supply it is itself refused by the content identity check,
+    // which is what the commit below trips.
+    const blob = { bytes: "not a schema" };
+    const blobId = `cid:${taggedHashStringOf(blob)}`;
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(9, {
+            operations: [{
+              op: "set",
+              id: blobId,
+              value: { value: blob, schema: { $ref: "cid:fid1:unbacked" } },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+    const forgedSchema = { type: "object", title: "forged" } as const;
+    const forgedHash = internSchemaAsTaggedHashString(forgedSchema);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(9, {
+            operations: [
+              {
+                op: "set",
+                id: blobId,
+                value: { value: blob, schema: { $ref: `cid:${forgedHash}` } },
+              } as never,
+              setOp(`cid:${forgedHash}`, { ...forgedSchema, title: "other" }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "whose content does not hash to its id",
+    );
+    const blobWithMeta = {
+      op: "set",
+      id: blobId,
+      value: { value: blob, schema: { $ref: `cid:${resultHash}` } },
+    } as never;
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(9, { operations: [blobWithMeta] }),
+    });
+    const schemaShaped = { type: "boolean", title: "schema-shaped" } as const;
+    const schemaShapedId = `cid:${
+      internSchemaAsTaggedHashString(schemaShaped)
+    }`;
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(10, {
+            operations: [{
+              op: "set",
+              id: schemaShapedId,
+              value: {
+                value: schemaShaped,
+                schema: { $ref: "cid:fid1:unbacked" },
+              },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(10, {
+        operations: [{
+          op: "set",
+          id: schemaShapedId,
+          value: { value: schemaShaped, schema: { $ref: `cid:${resultHash}` } },
+        } as never],
+      }),
+    });
+
+    // The member rides the `cid:` immutability rule with the rest of the
+    // envelope: an identical re-set is the idempotent install, a re-set
+    // that changes the member is a change to a content-addressed document.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(11, { operations: [blobWithMeta] }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(12, {
+            operations: [{
+              op: "set",
+              id: blobId,
+              value: { value: blob, schema: { $ref: `cid:${missingHash}` } },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "cannot change content-addressed document",
+    );
+  });
+});
+
 Deno.test("validates the schema document a CFC envelope's schemaHash references", async () => {
   await withEngine((engine) => {
     const envelopeSchema = {
