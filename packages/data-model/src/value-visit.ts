@@ -943,9 +943,9 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         }
 
         if (doValues) {
-          const keyResult = this.#visitValue(key);
-          if (keyResult?.type === "mainResult") {
-            return keyResult;
+          const valueResult = this.#visitValue(value);
+          if (valueResult?.type === "mainResult") {
+            return valueResult;
           }
         }
 
