@@ -2,13 +2,20 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+} from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { SessionFactory } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("resume node plan presync");
 const space = signer.did();
@@ -163,6 +170,71 @@ function presyncSkipCount(): number {
     ?.total ?? 0;
 }
 
+/**
+ * Sessions on the shared server, except that one space answers every watch
+ * request with a permanent authorization denial: a pull into it fails, so
+ * a document there never arrives and never confirms absent either.
+ */
+class DenyingSpaceSessionFactory implements SessionFactory {
+  readonly #server: MemoryV2Server.Server;
+  readonly #denied: MemorySpace;
+
+  constructor(server: MemoryV2Server.Server, denied: MemorySpace) {
+    this.#server = server;
+    this.#denied = denied;
+  }
+
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions: MemoryV2Client.MountOptions = {},
+  ) {
+    const base = MemoryV2Client.loopback(this.#server);
+    let receive: (payload: string) => void = () => {};
+    const transport: MemoryV2Client.Transport = space !== this.#denied
+      ? base
+      : {
+        send: (payload: string) => {
+          const message = decodeMemoryBoundary(payload) as {
+            type?: string;
+            requestId?: string;
+          };
+          if (message.type === "session.watch.add") {
+            receive(encodeMemoryBoundary({
+              type: "response",
+              requestId: message.requestId!,
+              error: {
+                name: "AuthorizationError",
+                message: `Principal lacks READ on space ${space}`,
+              },
+            }));
+            return Promise.resolve();
+          }
+          return base.send(payload);
+        },
+        close: () => base.close(),
+        setReceiver: (r) => {
+          receive = r;
+          base.setReceiver(r);
+        },
+        setCloseReceiver: (r) => base.setCloseReceiver?.(r),
+      };
+    const client = await MemoryV2Client.connect({ transport });
+    const session = await client.mount(
+      space,
+      mountOptions,
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: signer?.did() },
+      }),
+    );
+    return { client, session };
+  }
+}
+
 describe("resume node plan pre-sync", () => {
   let server: MemoryV2Server.Server;
   let managerA: EmulatedStorageManager;
@@ -206,6 +278,7 @@ describe("resume node plan pre-sync", () => {
     program: RuntimeProgram,
     argument: Record<string, unknown>,
     resultCause: string,
+    resumeOn: Runtime = rt2,
   ): Promise<Cell<Record<string, unknown>>> {
     const tx1 = rt1.edit();
     const compiled = await rt1.patternManager.compilePattern(program, {
@@ -229,11 +302,11 @@ describe("resume node plan pre-sync", () => {
     await rt1.idle();
     await rt1.storageManager.synced();
 
-    const parentCell2 = rt2.getCellFromLink<Record<string, unknown>>(
+    const parentCell2 = resumeOn.getCellFromLink<Record<string, unknown>>(
       r1.getAsNormalizedFullLink(),
     );
     await parentCell2.sync();
-    expect(await rt2.start(parentCell2)).toBeTruthy();
+    expect(await resumeOn.start(parentCell2)).toBeTruthy();
     return parentCell2;
   }
 
@@ -528,6 +601,106 @@ describe("resume node plan pre-sync", () => {
       rt2.runner.accessForTestingOnly.dependencySyncer = undefined;
     }
     expect(commitConflictCount()).toBe(before);
+  });
+
+  it("ends the cross-space pass when the far document never arrives", async () => {
+    // The link into the other space names a document nothing ever wrote.
+    // A cross-space hop kicks its load on every resolution, so a pass that
+    // ends only when a round kicks nothing would never end here.
+    const txP = rt1.edit();
+    const missingLeaf = rt1.getCell<{ name?: string }>(
+      spaceP,
+      "cross-space missing leaf",
+      undefined,
+      txP,
+    );
+    const tx1 = rt1.edit();
+    const midDoc = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space mid to missing",
+      undefined,
+      tx1,
+    );
+    midDoc.withTx(tx1).set({ next: missingLeaf });
+    const top = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space top to missing",
+      undefined,
+      tx1,
+    );
+    top.withTx(tx1).set({ next: midDoc });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    const resumed = await createAndResume(
+      DEEP_READ_PROGRAM,
+      { def: top },
+      "cross-space parent of missing",
+    );
+    await rt2.idle();
+    const label = resumed.key("label");
+    await label.pull();
+    expect(label.get()).toBe("n:none");
+  });
+
+  it("ends the cross-space pass when the far space denies the read", async () => {
+    // The resuming runtime may not read the space the link crosses into:
+    // every pull there fails, so the far document neither arrives nor
+    // confirms absent, and each read of the link kicks its load again.
+    const txP = rt1.edit();
+    const leafDoc = rt1.getCell<{ name?: string }>(
+      spaceP,
+      "cross-space denied leaf",
+      undefined,
+      txP,
+    );
+    leafDoc.withTx(txP).set({ name: "Ada" });
+    rt1.prepareTxForCommit(txP);
+    expect((await txP.commit()).error).toBeUndefined();
+    const tx1 = rt1.edit();
+    const midDoc = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space mid to denied",
+      undefined,
+      tx1,
+    );
+    midDoc.withTx(tx1).set({ next: leafDoc });
+    const top = rt1.getCell<{ next?: unknown }>(
+      space,
+      "cross-space top to denied",
+      undefined,
+      tx1,
+    );
+    top.withTx(tx1).set({ next: midDoc });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    const managerD = TestStorageManager.create(
+      { as: signer, memoryHost: new URL("memory://") },
+      new DenyingSpaceSessionFactory(server, spaceP),
+    );
+    const rtD = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: managerD,
+    });
+    try {
+      const resumed = await createAndResume(
+        DEEP_READ_PROGRAM,
+        { def: top },
+        "cross-space parent of denied",
+        rtD,
+      );
+      await rtD.idle();
+      expect(managerD.authorizationError(spaceP)?.name).toBe(
+        "AuthorizationError",
+      );
+      const label = resumed.key("label");
+      await label.pull();
+      expect(label.get()).toBe("n:none");
+    } finally {
+      await rtD.dispose();
+      await managerD.close();
+    }
   });
 
   it("names a document a body reads three links deep", async () => {
