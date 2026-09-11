@@ -341,6 +341,13 @@ describe("collection-index", () => {
         restored.key("index").key("buckets").key(bucket).sink(() => {}),
       );
       expect(await second.start(restored)).toBe(true);
+      // The coordinator holds its resume reconciliation until each durable
+      // input has confirmed, through syncs it tracks in the storage manager's
+      // settled pool, and re-runs when they land. idle() waits for reactive
+      // quiescence only, so it can return between the confirmations and the
+      // re-run they schedule (docs/development/waiting-in-tests.md); the
+      // storage barrier is what covers the confirmations.
+      await second.storageManager.synced();
       await second.idle();
       expect(keyRuns[1]).toBe(0);
       expect(restored.key("index").resolveAsCell().getRawUntyped())
