@@ -2181,14 +2181,10 @@ function toolInputValueIntegrity(
   if (!isCell(cellified)) {
     return [];
   }
-  try {
-    const { view, readFailed } = cfcLabelViewForCellWithStatus(
-      cellified.resolveAsCell(),
-    );
-    return readFailed ? [] : [...cfcIntegrityForObservationNode(view)];
-  } catch {
-    return [];
-  }
+  const { view, readFailed } = cfcLabelViewForCellWithStatus(
+    cellified.resolveAsCell(),
+  );
+  return readFailed ? [] : [...cfcIntegrityForObservationNode(view)];
 }
 
 // Walk a tool's `inputSchema` for fields declaring `ifc.requiredIntegrity` and

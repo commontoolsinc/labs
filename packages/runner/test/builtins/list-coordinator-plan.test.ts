@@ -34,7 +34,7 @@ describe("list-coordinator-plan", () => {
 
   afterEach(async () => {
     await storage.synced();
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await storage.close();
   });
 

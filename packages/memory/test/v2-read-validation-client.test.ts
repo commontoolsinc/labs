@@ -22,7 +22,7 @@ import {
 /** Overrides only the advertised capability and can drop one unissued commit. */
 function validationTransport(
   server: Server,
-  capable: boolean,
+  capable: boolean | ((connection: number) => boolean),
   dropFirst: boolean,
 ): {
   transport: Transport;
@@ -47,7 +47,9 @@ function validationTransport(
                 ...message,
                 flags: {
                   ...message.flags,
-                  readValidation: capable && connectionCount === 1,
+                  readValidation: typeof capable === "function"
+                    ? capable(connectionCount)
+                    : capable && connectionCount === 1,
                 },
               }
               : message,
@@ -157,6 +159,31 @@ describe("v2-read-validation-client", () => {
       }
     });
   }
+
+  it("queues required reads while disconnected and checks the new capability", async () => {
+    const server = new Server(testSessionOpenServerOptions);
+    const scripted = validationTransport(
+      server,
+      (connection) => connection > 1,
+      false,
+    );
+    const client = await connect({ transport: scripted.transport });
+    try {
+      const session = await client.mount(
+        "did:key:read-validation",
+        {},
+        testSessionOpenAuthFactory,
+      );
+      scripted.disconnect();
+      expect((await session.transact(writeCommit("required"))).seq)
+        .toBeGreaterThan(0);
+      expect(scripted.sent()).toBe(1);
+      expect(scripted.hellos()).toBe(2);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
 
   it("refuses before send when the connection changes during request readiness", async () => {
     const server = new Server(testSessionOpenServerOptions);

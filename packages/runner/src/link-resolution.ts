@@ -20,10 +20,7 @@ import {
   type ScopeCapAtDepth,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import type {
-  IExtendedStorageTransaction,
-  INotFoundError,
-} from "./storage/interface.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { linkResolutionProbe } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
@@ -624,8 +621,17 @@ export function resolveLinkTracingDereferences(
         kind: hopKindForLink(nextLink),
         depth: link.path.length,
       };
-    } else if (sigilProbe.error?.name === "NotFoundError") {
-      const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
+    } else if (
+      sigilProbe.error?.name === "NotFoundError" ||
+      sigilProbe.error?.name === "TypeMismatchError"
+    ) {
+      // A modern FabricLink is a leaf, so probing past it reports a type
+      // mismatch. Both errors locate the attempted child of a possible link.
+      const lastValid = [
+        ...(sigilProbe.error.name === "NotFoundError"
+          ? sigilProbe.error.path
+          : sigilProbe.error.address.path),
+      ];
       if (lastValid.length === 0) deadEndDocMissing = true;
 
       if (lastValid.length > 0) {

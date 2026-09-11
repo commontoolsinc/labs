@@ -260,15 +260,18 @@ Deno.test("worker reconciler CFC denials", async (t) => {
         return read(address, options);
       };
       const collector = collectOps();
-      const said = await mounted({
-        type: "vnode",
-        name: "div",
-        props: {},
-        children: [unreadable as never],
-      }, { collector, ceiling: true, debug: true });
-      expect(collector.texts()).toContain("Content hidden by policy");
-      expect(said).toContain("unreadable");
-      inspection.abort();
+      try {
+        const said = await mounted({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [unreadable as never],
+        }, { collector, ceiling: true, debug: true });
+        expect(collector.texts()).toContain("Content hidden by policy");
+        expect(said).toContain("unreadable");
+      } finally {
+        inspection.abort();
+      }
     });
 
     // A boundary whose props arrive as a cell has no policy on its first pass,

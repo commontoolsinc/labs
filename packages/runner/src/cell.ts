@@ -1746,6 +1746,7 @@ export class CellImpl<T extends FabricValue>
       const { payload: event, runtimeReferenceContext } = serializeRuntimeEvent(
         newValue as CellLinkInput,
         this.runtime.readTx(this.tx),
+        resolvedToValueLink.space,
       );
       propagateRendererTrustedEvent(newValue, event);
 
@@ -4801,6 +4802,13 @@ type CellLinkOptions = {
     path: readonly string[],
   ) => SigilLink;
 
+  /** Transforms only backlinks synthesized from a value cycle. */
+  transformCycle?: (
+    link: SigilLink,
+    path: readonly string[],
+    targetPath: readonly string[],
+  ) => SigilLink;
+
   /** The source of a read, used to acquire absolute links for value cycles. */
   cycleRoot?: Cell<unknown>;
 
@@ -4927,7 +4935,11 @@ function convertOneToLinks(
         : options.cycleRoot.key(...stack.slice(0, depth));
       return linkToCell(target, options, [...stack]);
     }
-    return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
+    const targetPath = stack.slice(0, depth);
+    const link = linkRefFrom({ path: targetPath });
+    return deepFreeze(
+      options.transformCycle?.(link, [...stack], targetPath) ?? link,
+    );
   }
 
   // Early-return cases

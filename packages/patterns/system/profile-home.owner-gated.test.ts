@@ -87,7 +87,7 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
     // every supported screen representation through an opaque UI reference.
     expect(home).toContain("[UI]: VNode;");
     expect(home).toMatch(
-      /export type BackwardsCompatibleProfile = PartialBy<[\s\S]*?\[UI\]: unknown\s*[;}]/,
+      /export type BackwardsCompatibleProfile = PartialBy<\s*&?\s*Omit<ProfileHomeOutput, typeof UI>\s*&\s*\{\s*\[UI\]: unknown\s*[;}]/,
     );
   });
 

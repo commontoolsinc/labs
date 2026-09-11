@@ -68,7 +68,7 @@ describe("event-reference-context", () => {
 
   afterEach(async () => {
     await storage.synced();
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await storage.close();
     resetModernCellRepConfig();
     resetContentAddressedSchemasConfig();
@@ -103,10 +103,53 @@ describe("event-reference-context", () => {
     return held.withTx(undefined);
   }
 
+  for (const modern of [false, true]) {
+    for (const nested of [false, true]) {
+      it(`retains acquired references through a cyclic event payload (modern=${modern}, nested=${nested})`, async () => {
+        setModernCellRepConfig(modern);
+        const held = await selectedReference();
+        type CyclicInput = { item: typeof held; self?: CyclicInput };
+        const input: CyclicInput = { item: held };
+        input.self = input;
+        const deliverySpace =
+          (await Identity.fromPassphrase("event-cycle-destination")).did();
+        const send = runtime.edit();
+        const event = serializeRuntimeEvent(
+          nested ? { nested: input } : input,
+          send,
+          deliverySpace,
+        );
+        send.abort();
+        const payload = restoreRuntimeEventReferences(
+          roundtrip(event.payload),
+          event.runtimeReferenceContext,
+        );
+        const read = runtime.edit();
+        try {
+          const inputs = runtime.getImmutableCell(
+            deliverySpace,
+            payload,
+            undefined,
+            read,
+          );
+          const branch = nested ? inputs.key("nested") : inputs;
+          expect(branch.key("self").key("item").get()).toBe("public value");
+          expect(deriveFlowJoin(read).confidentiality).toContainEqual(secret);
+        } finally {
+          read.abort();
+        }
+      });
+    }
+  }
+
   it("retains selection confidentiality through a durable payload roundtrip", async () => {
     const held = await selectedReference();
     const send = runtime.edit();
-    const event = serializeRuntimeEvent({ item: held.withTx(send) }, send);
+    const event = serializeRuntimeEvent(
+      { item: held.withTx(send) },
+      send,
+      space,
+    );
     send.abort();
     const payload = restoreRuntimeEventReferences(
       roundtrip(event.payload),
@@ -131,7 +174,11 @@ describe("event-reference-context", () => {
     expect((await write.commit()).ok).toBeDefined();
     const send = runtime.edit();
     sensitive.withTx(send).get();
-    const event = serializeRuntimeEvent({ item: target.withTx(send) }, send);
+    const event = serializeRuntimeEvent(
+      { item: target.withTx(send) },
+      send,
+      space,
+    );
     for (
       const payload of [
         event.payload,
@@ -164,7 +211,7 @@ describe("event-reference-context", () => {
       undefined,
       create,
     );
-    const event = serializeRuntimeEvent({ box: outer }, create);
+    const event = serializeRuntimeEvent({ box: outer }, create, space);
     create.abort();
     const read = runtime.edit();
     const payload = restoreRuntimeEventReferences(
@@ -194,7 +241,7 @@ describe("event-reference-context", () => {
     const held = source.withTx(send).asSchema({ scope: "space" }).asSchema({
       scope: "session",
     });
-    const event = serializeRuntimeEvent({ item: held }, send);
+    const event = serializeRuntimeEvent({ item: held }, send, space);
     send.abort();
     const read = runtime.edit();
     const payload = restoreRuntimeEventReferences(
@@ -222,7 +269,11 @@ describe("event-reference-context", () => {
       undefined,
       send,
     );
-    const event = serializeRuntimeEvent({ box: outer.key("nested") }, send);
+    const event = serializeRuntimeEvent(
+      { box: outer.key("nested") },
+      send,
+      space,
+    );
     send.abort();
     const read = runtime.edit();
     const payload = restoreRuntimeEventReferences(
@@ -266,7 +317,7 @@ describe("event-reference-context", () => {
       ) {
         const held = source.withTx(send).asSchema(schema);
         expect(getCfcReferenceProvenance(held)?.scopeCaps).toBeUndefined();
-        const event = serializeRuntimeEvent({ item: held }, send);
+        const event = serializeRuntimeEvent({ item: held }, send, space);
         // A source-only content-addressed schema cannot add a schema-document
         // dependency to admission in the destination space.
         expect(parseLink((event.payload as { item: never }).item)?.schema)
@@ -307,7 +358,7 @@ describe("event-reference-context", () => {
     expect(getCfcReferenceProvenance(redirected)?.binding.overwrite).toBe(
       "redirect",
     );
-    const event = serializeRuntimeEvent({ item: redirected }, send);
+    const event = serializeRuntimeEvent({ item: redirected }, send, space);
     send.abort();
     const payload = restoreRuntimeEventReferences(
       roundtrip(event.payload),
@@ -329,7 +380,7 @@ describe("event-reference-context", () => {
     const held = await selectedReference();
     const raw = roundtrip(held.getAsLink());
     const send = runtime.edit();
-    expect(() => serializeRuntimeEvent({ item: raw }, send)).toThrow(
+    expect(() => serializeRuntimeEvent({ item: raw }, send, space)).toThrow(
       "authenticated acquisition",
     );
     send.abort();
@@ -348,7 +399,7 @@ describe("event-reference-context", () => {
     const send = runtime.edit();
     expect(getCfcReferenceProvenance(changed)?.confidentiality)
       .toContainEqual(secret);
-    expect(() => serializeRuntimeEvent({ item: changed }, send)).toThrow(
+    expect(() => serializeRuntimeEvent({ item: changed }, send, space)).toThrow(
       "Invalid Runtime event reference context",
     );
     expect(() =>
@@ -367,7 +418,7 @@ describe("event-reference-context", () => {
       undefined,
       send,
     );
-    expect(() => serializeRuntimeEvent({ box }, send)).toThrow(
+    expect(() => serializeRuntimeEvent({ box }, send, space)).toThrow(
       "Invalid Runtime event reference context",
     );
     send.abort();
@@ -379,7 +430,7 @@ describe("event-reference-context", () => {
       item: roundtrip(held.getAsLink()),
     });
     const send = runtime.edit();
-    const event = serializeRuntimeEvent(input, send);
+    const event = serializeRuntimeEvent(input, send, space);
     send.abort();
     const restored = restoreRuntimeEventReferences(
       roundtrip(event.payload),
@@ -399,7 +450,7 @@ describe("event-reference-context", () => {
       box: roundtrip(box.getAsLink()),
     });
     const send = runtime.edit();
-    expect(() => serializeRuntimeEvent(acquired, send)).toThrow(
+    expect(() => serializeRuntimeEvent(acquired, send, space)).toThrow(
       "Invalid Runtime event reference context",
     );
     send.abort();
@@ -408,7 +459,7 @@ describe("event-reference-context", () => {
   it("rejects altered payloads, binding substitutions and missing slot records", async () => {
     const held = await selectedReference();
     const send = runtime.edit();
-    const event = serializeRuntimeEvent({ item: held }, send);
+    const event = serializeRuntimeEvent({ item: held }, send, space);
     send.abort();
     const context = cloneIfNecessary(
       fabricFromJsonValue(event.runtimeReferenceContext!),
@@ -440,7 +491,7 @@ describe("event-reference-context", () => {
   it("does not trust payload-owned context fields or a missing attestation", async () => {
     const held = await selectedReference();
     const send = runtime.edit();
-    const event = serializeRuntimeEvent({ item: held }, send);
+    const event = serializeRuntimeEvent({ item: held }, send, space);
     send.abort();
     const raw = cloneIfNecessary(roundtrip(event.payload), {
       frozen: false,
@@ -460,7 +511,7 @@ describe("event-reference-context", () => {
   it("rejects malformed acquisition and view records", async () => {
     const held = await selectedReference();
     const send = runtime.edit();
-    const event = serializeRuntimeEvent({ item: held }, send);
+    const event = serializeRuntimeEvent({ item: held }, send, space);
     send.abort();
     const context = fabricFromJsonValue(event.runtimeReferenceContext!) as {
       version: number;
@@ -532,7 +583,7 @@ describe("event-reference-context", () => {
       undefined,
       send,
     );
-    const event = serializeRuntimeEvent({ box }, send);
+    const event = serializeRuntimeEvent({ box }, send, space);
     send.abort();
     const context = fabricFromJsonValue(event.runtimeReferenceContext!) as {
       version: number;
@@ -585,7 +636,7 @@ describe("event-reference-context", () => {
 
   it("keeps primitive events free of reference metadata", () => {
     const tx = runtime.edit();
-    const event = serializeRuntimeEvent({ amount: 3 }, tx);
+    const event = serializeRuntimeEvent({ amount: 3 }, tx, space);
     expect(event).toEqual({ payload: { amount: 3 } });
     expect(restoreRuntimeEventReferences(roundtrip(event.payload), undefined))
       .toEqual({ amount: 3 });

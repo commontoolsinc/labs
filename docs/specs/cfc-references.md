@@ -164,7 +164,10 @@ carrier, permits descendant paths, and preserves scope restrictions. Rebinding
 identity, space, scope, or overwrite mode rejects. Persistence rejects a schema
 projection that cannot encode the acquisition's retained scope caps. Stripped,
 stale, or foreign tokens cannot recreate trusted acquisition through arbitrary
-CellRef operations.
+CellRef operations. Generated durable schemas enforce the narrowest retained
+scope cap at every hop; they can reject a projection earlier than the live
+handle. The stored link format cannot represent inherited cap positions, so
+serialization preserves the restriction conservatively.
 
 Subscriptions and cached values are keyed by acquisition token as well as
 address and projection, so identical reference bytes with different private
@@ -186,6 +189,10 @@ Runtime validates completeness and restores confidentiality, scope caps, and
 private immutable reference tables onto an isolated payload before dispatch.
 This conveys no target-content integrity. The handler owns value projection;
 links carry only an inline scope restriction needed to retain their caps.
+Converter-generated cycles retain a proof bound to their ancestor path inside
+the exact immutable payload. Their reference table includes every payload slot,
+so following a cycle retains the acquisitions reachable through that ancestor.
+Raw relative links cannot claim that cycle proof.
 
 The context has the same admitted producer trust as renderer and
 runtime-injected event attestations. It is not a signature, and a payload field
@@ -259,3 +266,8 @@ Diagnostic or disabled settings do not establish enforcement guarantees.
 `enforce-strict`, persistent flow labels, enforcing floors, and enabled trigger
 gating remain separate deployment choices described in the
 [enforcement matrix](cfc-enforcement-matrix.md).
+
+Legacy aggregate combine states encode selected addresses as ordinary data.
+The non-precise profile resolves those addresses for `minBy` and `maxBy`.
+Before enabling precise CFC, those states must be recomputed into acquired
+reference slots; the precise profile refuses an unproven legacy address.

@@ -313,6 +313,8 @@ export const canonicalizeWritePolicyInput = (
             ...input.reference,
             binding: {
               ...input.reference.binding,
+              // Reference bindings carry logical Cell paths, including a
+              // possible payload field named "value", not envelope paths.
               path: [...input.reference.binding.path],
             },
             confidentiality: canonicalizeCfcLabel({
@@ -510,7 +512,16 @@ export const canonicalizePreparedDigestInput = (
     }
     : {}),
   ...(input.referenceObservations?.length
-    ? { referenceObservations: [...input.referenceObservations] }
+    ? {
+      referenceObservations: [...input.referenceObservations].sort((a, b) => {
+        if (a.journalIndex !== b.journalIndex) {
+          return a.journalIndex - b.journalIndex;
+        }
+        const left = hashStringOf(a);
+        const right = hashStringOf(b);
+        return left < right ? -1 : left > right ? 1 : 0;
+      }),
+    }
     : {}),
 });
 

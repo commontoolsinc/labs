@@ -3111,7 +3111,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (options?.delete !== true) {
       this.#refuseMalformedSchemaMeta(address, value);
     }
+    const deleteWriteCount = options?.delete === true
+      ? getTransactionWriteAttempts(this.tx)?.length
+      : undefined;
     const result = this.tx.write(address, value, options);
+    if (
+      deleteWriteCount !== undefined &&
+      deleteWriteCount === getTransactionWriteAttempts(this.tx)?.length
+    ) {
+      return result;
+    }
     if (result.ok) {
       this.#recordValueWriteIdentity(
         address,
@@ -3137,6 +3146,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (options?.delete !== true) {
       this.#refuseMalformedSchemaMeta(address, value);
     }
+    const deleteWriteCount = options?.delete === true
+      ? getTransactionWriteAttempts(this.tx)?.length
+      : undefined;
     const writeResult = this.tx.write(address, value, options);
     if (
       writeResult.error &&
@@ -3208,6 +3220,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     } else if (writeResult.error) {
       throw toThrowable(writeResult.error);
     }
+    if (
+      deleteWriteCount !== undefined &&
+      deleteWriteCount === getTransactionWriteAttempts(this.tx)?.length
+    ) return;
     this.#recordValueWriteIdentity(
       address,
       this.#cfcState.implementationIdentity,

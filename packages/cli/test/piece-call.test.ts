@@ -1203,7 +1203,7 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.syncedCalls).toBe(0);
   });
 
-  it("waits for issued commits after receipt readback before returning", async () => {
+  it("propagates issued-commit failure after receipt readback", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "register",
@@ -1232,18 +1232,16 @@ describe("executePieceCallable", () => {
       },
     );
     try {
-      expect(
-        await Promise.race([
-          waiting.promise,
-          execution.then(() => "returned"),
-        ]),
-      ).toBe("waiting");
+      await waiting.promise;
+      const rejected = expect(execution).rejects.toThrow("confirmation failed");
+      confirmation.reject(new Error("confirmation failed"));
+      await rejected;
       expect(harness.tracker.receiptLinkRequested?.id).toBe("of:receipt-1");
       expect(harness.tracker.idleCalls).toBe(0);
       expect(harness.tracker.syncedCalls).toBe(0);
     } finally {
       confirmation.resolve();
-      await execution;
+      await execution.catch(() => {});
     }
   });
 

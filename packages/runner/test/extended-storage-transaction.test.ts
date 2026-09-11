@@ -41,7 +41,7 @@ describe("extended-storage-transaction", () => {
     runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
   });
   afterEach(async () => {
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -53,6 +53,18 @@ describe("extended-storage-transaction", () => {
     tx.markLazyMaterialize(true);
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
+
+  for (const method of ["write", "writeOrThrow"] as const) {
+    it(`${method} does not attribute deletion of an absent payload slot`, async () => {
+      const { tx, cell } = await seeded(`absent-delete-${method}`);
+      const link = { ...cell.getAsNormalizedFullLink(), path: ["absent"] };
+      tx[method]({ ...link, path: ["value", "absent"] }, undefined, {
+        delete: true,
+      });
+      expect(tx.getCfcValueWriteAuthor(link)).toBeUndefined();
+      tx.abort();
+    });
+  }
 
   describe("content-addressed document staging", () => {
     const code = "export const staged = 1;";
@@ -233,7 +245,7 @@ describe("extended-storage-transaction", () => {
       // rebuild the action's dependencies, so the probe has work to walk
       // there; a settled one does not.
       beforeEach(async () => {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
         storageManager = StorageManager.emulate({ as: signer });
         runtime = new Runtime({

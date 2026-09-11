@@ -1485,6 +1485,60 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "retains a value endorsement on the selected text slot",
+      async () => {
+        const selectionTx = runtime.edit();
+        const selected = runtime.getCell(
+          signer.did(),
+          "cfc-render-endorsed-slot",
+          undefined,
+          selectionTx,
+        );
+        writeSeedEnvelopeDoc(selectionTx, signer.did());
+        selectionTx.writeOrThrow({
+          ...selected.getAsNormalizedFullLink(),
+          path: [],
+        }, {
+          value: unsignedReleaseText.getAsLink(),
+          cfc: {
+            version: 2,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                observes: "value",
+                label: { integrity: [signedReleaseAtom] },
+              }],
+            },
+          },
+        });
+        await selectionTx.commit();
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
+          },
+          children: [selected.withTx(undefined) as never],
+        });
+        try {
+          await t.settle();
+          const text = collector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          expect(text).toContain("Unsigned release note");
+          expect(text).not.toContain("Content hidden by integrity policy");
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "strict text integrity blocks unsigned child text",
       async () => {
         const collector = createOpsCollector();

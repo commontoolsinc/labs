@@ -611,6 +611,41 @@ describe("reference-registry", () => {
     expect(uncapped.get()).toBe("private session");
   });
 
+  it("retains explicit scope caps when acquiring a host address", async () => {
+    const tx = runtime.edit();
+    const session = runtime.getCell(
+      space,
+      "acquire-session",
+      undefined,
+      tx,
+      "session",
+    );
+    session.set("private session");
+    const holder = runtime.getCell(
+      space,
+      "acquire-capped-holder",
+      undefined,
+      tx,
+    );
+    holder.set(session);
+    expect((await tx.commit()).error).toBeUndefined();
+    const processor = buildProcessor({ runtime, identity: signer, space });
+    const ref = processor.handleAcquireCell({
+      type: RequestType.AcquireCell,
+      address: {
+        ...holder.getAsNormalizedFullLink(),
+        schema: { type: "string", scope: "session" },
+        scopeCaps: [{ depth: 0, scope: "space" }],
+      },
+    }).cell;
+    expect(
+      processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: wireCopy(ref),
+      }).value,
+    ).toBeUndefined();
+  });
+
   it("roundtrips an acquired VDOM binding through a real event handler", async () => {
     const acquired = (await acquireSelected()).key("public");
     await seed("vdom-source", {

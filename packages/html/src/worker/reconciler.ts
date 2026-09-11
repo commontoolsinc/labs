@@ -901,10 +901,7 @@ export class WorkerReconciler {
     const link = cell.getAsNormalizedFullLink();
     let labelView: CfcLabelView | undefined;
     try {
-      labelView = cfcLabelViewForCell(cell);
-      if (labelView === undefined) {
-        labelView = cfcLabelViewForCell(cell.resolveAsCell());
-      }
+      labelView = this.#resolveCellLabelView(cell);
     } catch {
       labelView = undefined;
     }
@@ -1667,11 +1664,6 @@ export class WorkerReconciler {
       return false;
     }
 
-    try {
-      labelView = cfcLabelViewForCell(cell.resolveAsCell());
-    } catch {
-      return false;
-    }
     const integrity = cfcIntegrityForObservationNode(labelView);
     return textIntegrity.requiredIntegrity.every((required) =>
       integrity.some((atom) => deepEqual(atom, required))

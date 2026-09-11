@@ -44,7 +44,7 @@ describe("cfc-aggregate-reference", () => {
 
   afterEach(async () => {
     await storage.synced();
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await storage.close();
   });
 
@@ -85,6 +85,46 @@ describe("cfc-aggregate-reference", () => {
     await (typeof action === "function" ? action : action.action)(tx);
     return result;
   };
+
+  for (const flowLabels of ["off", "persist"] as const) {
+    it(`${flowLabels === "off" ? "resumes" : "refuses"} legacy normalized-address combine state in ${flowLabels} mode`, async () => {
+      await runtime.dispose({ closeStorage: false });
+      runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager: storage,
+        cfcFlowLabels: flowLabels,
+      });
+      const target = await seed("legacy-selected", "selected value");
+      const state = await seed("legacy-state", {
+        candidate: {
+          score: 1,
+          key: "selected",
+          element: target.getAsNormalizedFullLink(),
+        },
+      });
+      const tx = runtime.edit();
+      try {
+        const result = runNode(tx, {
+          operation: "minBy",
+          mode: "combine",
+          final: true,
+          left: state,
+          right: state,
+        });
+        if (flowLabels === "persist") {
+          await expect(result).rejects.toThrow(
+            "Legacy aggregate references require recomputation",
+          );
+        } else {
+          const selected = await result;
+          if (!isCell(selected)) throw new Error("Expected selected Cell");
+          expect(selected.get()).toBe("selected value");
+        }
+      } finally {
+        tx.abort();
+      }
+    });
+  }
 
   for (const operation of ["minBy", "maxBy"] as const) {
     it(`retains nested immutable ${operation} references after an aborted selection`, async () => {

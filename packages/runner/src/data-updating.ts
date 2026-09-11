@@ -261,9 +261,7 @@ const recordLinkWritePolicyInput = (
     if (source.id.startsWith("cid:")) return;
     let sourceRelevant = false;
     try {
-      sourceRelevant = readStoredCfcMetadata(tx, source, {
-        authorization: false,
-      }) !== undefined;
+      sourceRelevant = readStoredCfcMetadata(tx, source) !== undefined;
     } catch (error) {
       if (!(error instanceof UnknownCfcMetadataVersionError)) throw error;
       sourceRelevant = true;

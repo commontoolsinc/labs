@@ -181,11 +181,15 @@ interface ConfirmedRead {
   branch?: BranchId;
   path: ReadPath;
   seq: number;
+  // Omission requires validation; only explicit elidable reads may be waived.
+  validation?: "required" | "elidable";
 }
 
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
+  // Omission requires validation; only explicit elidable reads may be waived.
+  validation?: "required" | "elidable";
   // The dependency set: every pending layer the read's materialized view
   // sat on. Each element must have resolved to an ACCEPTED commit for this
   // commit to be applicable; the staleness check (§3.6.1) runs once per

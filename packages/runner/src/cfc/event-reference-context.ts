@@ -13,10 +13,12 @@ import {
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import {
+  dataUriFromValue,
   isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
-import type { URI } from "@commonfabric/memory/interface";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { type CellLinkInput, convertCellsToLinks } from "../cell.ts";
@@ -51,6 +53,7 @@ import {
 
 type EventReference = {
   path: readonly string[];
+  relativeCycle?: true;
   reference: CfcReferenceProvenance;
   view?: CfcLabelView;
   viewConfidentiality: readonly CfcConfClause[];
@@ -190,13 +193,21 @@ function verifyImmutableReferenceTree(
 export function serializeRuntimeEvent(
   value: CellLinkInput,
   tx: IExtendedStorageTransaction,
+  space: MemorySpace,
 ): { payload: FabricValue; runtimeReferenceContext?: string } {
   if (tx.getCfcState().flowLabelsMode !== "persist") {
     return { payload: convertCellsToLinks(value) };
   }
   const references: EventReference[] = [];
+  const cycles: Array<
+    { path: readonly string[]; targetPath: readonly string[] }
+  > = [];
   const payload = convertCellsToLinks(value, {
     allowLinkFreeFabricInstances: true,
+    transformCycle(link, path, targetPath) {
+      cycles.push({ path, targetPath });
+      return link;
+    },
     transformLink(cell, link, path) {
       const acquired = getCfcReferenceProvenance(link);
       if (acquired === undefined) {
@@ -248,6 +259,43 @@ export function serializeRuntimeEvent(
   });
   if (references.length === 0) return { payload };
   const flow = deriveFlowJoin(tx).confidentiality;
+  if (cycles.length > 0) {
+    // A cycle names an ancestor inside these exact immutable payload bytes.
+    // Its proof covers the payload's slots, including cycles back to itself.
+    const payloadId = dataUriFromValue(
+      inlineExternalSchemaRefsInValue(payload),
+    );
+    const cycleConfidentiality = joinCfcObservedConfidentiality([
+      flow,
+      ...references.map((record) => record.reference.confidentiality),
+    ]);
+    const cycleRecords: EventReference[] = cycles.map((
+      { path, targetPath },
+    ) => ({
+      path,
+      relativeCycle: true,
+      reference: {
+        binding: { space, id: payloadId, scope: "space", path: targetPath },
+        confidentiality: cycleConfidentiality,
+      },
+      viewConfidentiality: cycleConfidentiality,
+      immutableReferences: [],
+    }));
+    const payloadReferences: CfcImmutableReference[] = [
+      ...references,
+      ...cycleRecords,
+    ].map((record) => ({
+      source: { space, id: payloadId, scope: "space", path: record.path },
+      reference: record.reference,
+    }));
+    const nestedReferences = references.flatMap((record) =>
+      record.immutableReferences
+    );
+    references.push(...cycleRecords.map((record) => ({
+      ...record,
+      immutableReferences: [...payloadReferences, ...nestedReferences],
+    })));
+  }
   const context: EventReferenceContext = {
     version: 1,
     payloadHash: hashStringOf(payload),
@@ -297,19 +345,43 @@ function restoreAttestedReferences(
   ) invalidContext();
   const records = new Map<string, EventReference>();
   for (const record of context.references) {
-    if (!stringPath(record.path) || !validReference(record.reference)) {
+    if (
+      !stringPath(record.path) || !validReference(record.reference) ||
+      (record.relativeCycle !== undefined && record.relativeCycle !== true)
+    ) {
       invalidContext();
     }
     const key = JSON.stringify(record.path);
     if (records.has(key)) invalidContext();
     records.set(key, deepFreeze(record));
   }
+  const payloadId = context.references.some((record) => record.relativeCycle)
+    ? dataUriFromValue(inlineExternalSchemaRefsInValue(payload))
+    : undefined;
   const restored = convertCellsToLinks(payload, {
     allowLinkFreeFabricInstances: true,
     transformLink(_cell, link, path): SigilLink {
       const key = JSON.stringify(path);
       const record = records.get(key);
-      const binding = parseLink(link);
+      if (record?.relativeCycle) {
+        const target = record.reference.binding;
+        if (
+          target.id !== payloadId ||
+          target.scope !== "space" || target.path.length >= path.length ||
+          !target.path.every((part, index) => path[index] === part) ||
+          !deepEqual(link, linkRefFrom({ path: target.path }))
+        ) invalidContext();
+      }
+      const binding = parseLink(
+        link,
+        record?.relativeCycle
+          ? {
+            ...record.reference.binding,
+            id: record.reference.binding.id as URI,
+            path: [],
+          }
+          : undefined,
+      );
       if (
         record === undefined || binding === undefined ||
         !deepEqual(record.reference.binding, {

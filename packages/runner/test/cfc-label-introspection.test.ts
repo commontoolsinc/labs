@@ -46,6 +46,17 @@ const derivedBodyEntry = (atom: CfcAtom = caveatAtom(SOURCE_A)) => ({
 });
 
 describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
+  it("retains concrete shape confidentiality for a wildcard target", () => {
+    const metadata = metadataWith([{
+      path: ["items", "0"],
+      origin: "derived",
+      label: { confidentiality: ["private selection"] },
+    }]);
+    const evaluation = evaluateConfLabelQuery(metadata, ["items", "*"], {});
+    expect(evaluation.result.status).toBe("ok");
+    expect(evaluation.consumedConfidentiality).toEqual(["private selection"]);
+  });
+
   it("keeps legacy link fields unavailable in an upgraded envelope", () => {
     for (const complete of [false, true]) {
       const entry = {

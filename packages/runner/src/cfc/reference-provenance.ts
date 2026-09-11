@@ -9,7 +9,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { ScopeCapAtDepth } from "../link-types.ts";
-import type { CfcConfClause } from "./clause.ts";
+import { type CfcConfClause, clausesEqual } from "./clause.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
 import type { CfcAddress } from "./types.ts";
 
@@ -132,7 +132,7 @@ export function withCfcReferenceConfidentiality(
         : []
     ) ?? [];
   const covered = confidentiality.every((clause) =>
-    existing.some((candidate) => deepEqual(candidate, clause))
+    existing.some((candidate) => clausesEqual(candidate, clause))
   );
   const result: CfcLabelView = covered && view !== undefined ? view : {
     version: 1,
@@ -149,7 +149,7 @@ export function joinCfcReferenceConfidentiality(
   const joined: CfcConfClause[] = [];
   for (const view of sources) {
     for (const clause of cfcReferenceConfidentialityForView(view)) {
-      if (!joined.some((existing) => deepEqual(existing, clause))) {
+      if (!joined.some((existing) => clausesEqual(existing, clause))) {
         joined.push(clause);
       }
     }

@@ -927,7 +927,11 @@ export class SpaceSession {
     ) {
       throw protocolError("memory server does not support apply-op");
     }
-    this.#assertReadValidationCapability(commit);
+    if (
+      this.#client.isConnected() && this.#readyOnConnection && !this.#restoring
+    ) {
+      this.#assertReadValidationCapability(commit);
+    }
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;

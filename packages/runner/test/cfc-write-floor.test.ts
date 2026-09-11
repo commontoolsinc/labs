@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { FabricValue } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
@@ -522,6 +523,57 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       ).toContain("write floor failed at /items/0");
     } finally {
       await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("checks wildcard floors on a whole-document replacement", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({
+      storageManager,
+      cfcWriteFloor: "enforce",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: { type: "string", ifc: { requiredIntegrity: [ADMIN_ATOM] } },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const initial = runtime.edit();
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-document-root",
+        schema,
+        initial,
+      );
+      sink.set({ items: [] });
+      expect((await initial.commit()).error).toBeUndefined();
+      const tx = runtime.edit();
+      const address = { ...sink.getAsNormalizedFullLink(), path: [] };
+      const document = tx.readOrThrow(address) as Record<string, FabricValue>;
+      tx.writeOrThrow(address, {
+        ...document,
+        value: { items: ["unendorsed"] },
+      });
+      const declared = internSchema(schema, true);
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: address,
+        schemaHash: declared.taggedHashString,
+        schema: declared.schema,
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String(result.error?.message ?? "")).toContain(
+        "write floor failed at /items/0",
+      );
+    } finally {
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });

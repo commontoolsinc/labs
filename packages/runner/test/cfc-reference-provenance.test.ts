@@ -33,6 +33,7 @@ import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import {
   carryCfcReferenceProvenance,
   getCfcReferenceProvenance,
+  joinCfcReferenceConfidentiality,
   withCfcReferenceConfidentiality,
 } from "../src/cfc/reference-provenance.ts";
 import {
@@ -86,7 +87,7 @@ describe("cfc-reference-provenance", () => {
   afterEach(async () => {
     resetModernCellRepConfig();
     await storage.synced();
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await storage.close();
   });
 
@@ -242,6 +243,16 @@ describe("cfc-reference-provenance", () => {
   }
 
   describe("external input acquisition", () => {
+    it("does not authenticate references hidden inside raw immutable bytes", async () => {
+      const { selected } = await selectedTarget();
+      const held = selected.resolveAsCell();
+      const original = runtime.getImmutableCell(space, { held });
+      const raw = cloneIfNecessary(original.getAsLink(), { frozen: false });
+      const acquired = runtime.acquireExternalInput(space, { item: raw });
+      const input = runtime.getImmutableCell(space, acquired);
+      expect(() => input.key("item").key("held").get()).toThrow();
+    });
+
     it("acquires an explicit address without importing the target's confidentiality", async () => {
       const { target } = await selectedTarget();
       const raw = cloneIfNecessary(target.getAsLink(), { frozen: false });
@@ -1643,6 +1654,43 @@ describe("cfc-reference-provenance", () => {
       ?.confidentiality;
     expect(confidentiality).toContainEqual(selection);
     expect(confidentiality).toContainEqual(content);
+  });
+
+  it("deduplicates equivalent clauses in carried reference views", () => {
+    const first = withCfcReferenceConfidentiality(undefined, [{
+      anyOf: ["a", "b"],
+    }, "c"]);
+    const equivalent = [{ anyOf: ["b", "a"] }, { anyOf: ["c"] }];
+    expect(withCfcReferenceConfidentiality(first, equivalent)).toBe(first);
+    const second = withCfcReferenceConfidentiality(undefined, equivalent);
+    expect(joinCfcReferenceConfidentiality([first, second])).toHaveLength(2);
+  });
+
+  it("keeps a derived alias separate from a same-path result projection", () => {
+    const tx = runtime.edit();
+    try {
+      const result = runtime.getCell(space, "derived-alias-result", {
+        type: "object",
+        properties: { field: { type: "string", scope: "space" } },
+      }, tx);
+      const bound = unwrapOneLevelAndBindToDoc(
+        {
+          value: { $alias: { partialCause: "derived", path: ["field"] } },
+        },
+        undefined,
+        result,
+        { derivedInternalCells: [{ partialCause: "derived" }] },
+      );
+      const reference = getCfcReferenceProvenance(bound.value);
+      expect(reference).toBeDefined();
+      expect(reference!.binding.id).not.toBe(
+        result.getAsNormalizedFullLink().id,
+      );
+      expect(reference!.binding.path).toEqual(["field"]);
+      expect(reference!.scopeCaps ?? []).toEqual([]);
+    } finally {
+      tx.abort();
+    }
   });
 
   it("preserves a minted sigil and refuses an altered binding", async () => {

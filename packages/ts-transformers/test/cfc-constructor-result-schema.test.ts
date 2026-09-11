@@ -27,6 +27,31 @@ export default pattern<{ initialName: string }, { name: Protected<string, typeof
 `;
 
 describe("CFC constructor result schemas", () => {
+  it("retains the exact writer binding on a static factory", async () => {
+    const output = parseModule(
+      await transformSource(
+        source
+          .replace("import { Writable,", "import { Cell, Writable,")
+          .replace(
+            'new Writable<Protected<string, typeof setName>>(initialProfileName).for("name")',
+            "Cell.for<Protected<string, typeof setName>>(initialProfileName)",
+          ),
+        { types: COMMONFABRIC_TYPES },
+      ),
+    );
+    const factorySchema = callsNamed(output, "asSchema").find((call) =>
+      collect(call.expression, ts.isPropertyAccessExpression)
+        .some((access) => access.name.text === "for")
+    );
+    expect(factorySchema).toBeDefined();
+    expect(literalToValue(factorySchema!.arguments[0]!)).toMatchObject({
+      type: "string",
+      ifc: {
+        writeAuthorizedBy: { __ctWriterIdentityOf: { path: ["setName"] } },
+      },
+    });
+  });
+
   it("retains the scalar and exact writer binding on the synthesized reference result", async () => {
     const output = parseModule(
       await transformSource(source, {

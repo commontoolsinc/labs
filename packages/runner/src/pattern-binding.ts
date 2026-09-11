@@ -638,9 +638,9 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         resultCell.tx,
       );
       const sourceLink = sourceCell.getAsNormalizedFullLink();
-      const underSource = sourceLink.path.every((part, index) =>
-        link.path[index] === part
-      );
+      const underSource = sourceLink.space === link.space &&
+        sourceLink.id === link.id && sourceLink.scope === link.scope &&
+        sourceLink.path.every((part, index) => link.path[index] === part);
       const projected = (underSource
         ? sourceCell.key(...link.path.slice(sourceLink.path.length))
         : sourceCell).asSchema(link.schema);

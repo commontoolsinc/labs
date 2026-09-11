@@ -2064,7 +2064,8 @@ export class RuntimeProcessor {
 
   /** Acquires a fresh host address without accepting serialized provenance. */
   handleAcquireCell(request: AcquireCellRequest): CellResponse {
-    const { space, id, scope, path, schema, overwrite } = request.address;
+    const { space, id, scope, path, schema, overwrite, scopeCaps } =
+      request.address;
     const cell = this.#runtime.getCellFromLink({
       space,
       id,
@@ -2072,6 +2073,7 @@ export class RuntimeProcessor {
       path,
       ...(schema !== undefined && { schema }),
       ...(overwrite !== undefined && { overwrite }),
+      ...(scopeCaps !== undefined && { scopeCaps }),
     });
     return { cell: createCellRef(cell, undefined, this.#referenceRegistry) };
   }

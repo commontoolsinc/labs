@@ -3805,12 +3805,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // living past its traversal would answer a later traversal that never
       // recorded its reads, under a `TransformObjectCreator` whose base link
       // and CFC label view belong to a different materialization.
-      const memo = this.traverseCells ? this.#activeMemo : this.#schemaMemo;
-      const memoKey = this.traverseCells
+      // Reference context ids belong to one creator, so its entries cannot
+      // be shared with a second creator even under the same acting identity.
+      const memo = this.traverseCells &&
+          this.objectCreator.referenceContextKey === undefined
+        ? this.#activeMemo
+        : this.#schemaMemo;
+      const addressKey = this.traverseCells
         ? schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema)
         : schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema) + "|" +
-          schemaMemoLinkKey(link) + "|" +
-          (this.objectCreator.referenceContextKey?.() ?? 0);
+          schemaMemoLinkKey(link);
+      const memoKey = addressKey + "|" +
+        (this.objectCreator.referenceContextKey?.() ?? 0);
       const cached = memo.get(memoKey);
       if (cached !== undefined) {
         this.schemaMemoHits++;

@@ -88,7 +88,7 @@ it. A public card that displays confidential contents keeps the classification
 on those contents and lets the render boundary govern their observation.
 
 Lifts and handlers apply argument-schema policy to their result schemas through
-`applyArgumentIfcToResult` in `packages/runner/src/builder/module.ts`. Every
+`applyArgumentIfcToResult` in `packages/runner/src/builder/node-utils.ts`. Every
 module's output cells also carry the join of its input cells' schema labels
 through `connectInputAndOutputs` in `packages/runner/src/builder/node-utils.ts`,
 including LLM builtins whose results are written at runtime. This static join

@@ -11,7 +11,10 @@ import { pattern } from "../builder/pattern.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { MAX_PATH_RESOLUTION_LENGTH } from "../link-resolution.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
+import {
+  isNormalizedFullLink,
+  type NormalizedFullLink,
+} from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
@@ -207,13 +210,32 @@ export function aggregateNode(
         const source = args.key(side);
         const state = source.get() as AggregateState | undefined;
         if (!selectingElement || !state?.candidate) return state;
+        const elementSlot = source.key("candidate").key("element");
+        const storedElement = elementSlot.getRawUntyped();
+        // Legacy combine states store a normalized address as ordinary data.
+        // Precise acquisition requires a live reference slot, so those states
+        // must be recomputed before enabling the precise profile.
+        if (isNormalizedFullLink(storedElement)) {
+          if (tx.getCfcState().flowLabelsMode === "persist") {
+            throw new Error(
+              "Legacy aggregate references require recomputation before precise CFC",
+            );
+          }
+          return {
+            candidate: {
+              score: state.candidate.score,
+              key: state.candidate.key,
+              element: runtime.getCellFromLink(storedElement, undefined, tx),
+            },
+          };
+        }
         // Score and identity are values. The element remains a live reference
         // slot so child-state serialization retains its acquisition evidence.
         return {
           candidate: {
             score: state.candidate.score,
             key: state.candidate.key,
-            element: source.key("candidate").key("element"),
+            element: elementSlot,
           },
         };
       };

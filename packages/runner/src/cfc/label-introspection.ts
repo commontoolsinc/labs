@@ -483,7 +483,8 @@ export const evaluateConfLabelQuery = (
       cfcEntryHasDerivedContainment(entry, metadata.version) &&
         canonicalizeLogicalPath(entry.path).every((part, index) =>
           index < targetPath.length &&
-          (part === "*" || part === targetPath[index])
+          (part === "*" || targetPath[index] === "*" ||
+            part === targetPath[index])
         )
         ? entry.label.confidentiality ?? []
         : []

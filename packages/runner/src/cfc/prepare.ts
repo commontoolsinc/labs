@@ -2912,7 +2912,8 @@ export const writeDetailValueForTarget = (
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-    if (write.address.path[0] !== "value") {
+    const wholeDocument = write.address.path.length === 0;
+    if (!wholeDocument && write.address.path[0] !== "value") {
       continue;
     }
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
@@ -2934,7 +2935,9 @@ export const writeDetailValueForTarget = (
       matchingWrite === undefined ||
       (matchingWritePath?.length ?? -1) < writePath.length
     ) {
-      matchingWrite = write;
+      matchingWrite = wholeDocument
+        ? { ...write, [key]: getValueAtPath(write[key], ["value"]) }
+        : write;
       matchingWritePath = writePath;
     }
   }
@@ -5885,8 +5888,9 @@ const sinkCeilingRefusal = (
  *
  * `attributedTo` is the read set the refusal is EXPLAINED in terms of, which
  * a host narrows to the reads its caller can act on. A clause carried by no
- * read of `attributedTo` is reported as unattributed. Passing one transaction
- * for both asks the boundary's own question.
+ * read of `attributedTo` is reported as unattributed. Several transactions
+ * retain independent input snapshots without joining their acquisition flows.
+ * Passing one transaction for both asks the boundary's own question.
  *
  * The join is what `released` has read, and a label on a field is consumed
  * where that field is read: a read that resolves a document root and stops
@@ -5898,11 +5902,13 @@ const sinkCeilingRefusal = (
  * `released` read, with no exchange-rule rewriting applied to it, so a clause
  * a policy evaluation would have discharged is refused here.
  *
- * Neither transaction is committed, written, or recorded against.
+ * None of the transactions is committed, written, or recorded against.
  */
 export const describeSinkReleaseRefusal = (
   released: IExtendedStorageTransaction,
-  attributedTo: IExtendedStorageTransaction,
+  attributedTo:
+    | IExtendedStorageTransaction
+    | readonly IExtendedStorageTransaction[],
   sink: string,
   ceiling: readonly CfcConfClause[],
 ): CfcRefusalDetail | undefined => {
@@ -5913,7 +5919,9 @@ export const describeSinkReleaseRefusal = (
   return offending.length === 0 ? undefined : sinkCeilingRefusal(
     sink,
     offending,
-    collectConsumedLabel(attributedTo).sources,
+    ("getCfcState" in attributedTo ? [attributedTo] : attributedTo).flatMap(
+      (tx) => collectConsumedLabel(tx).sources,
+    ),
   );
 };
 
@@ -6243,7 +6251,8 @@ const verifyWriteFloor = (
       .filter((write) =>
         write.address.id === target.id &&
         normalizeCellScope(write.address.scope) === target.scope &&
-        write.address.path[0] === "value" &&
+        (write.address.path.length === 0 ||
+          write.address.path[0] === "value") &&
         (isPrefix(entry.path, write.address.path.slice(1)) ||
           isPrefix(write.address.path.slice(1), entry.path))
       );
