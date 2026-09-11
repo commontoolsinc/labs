@@ -1802,6 +1802,14 @@ export async function executeResolvedCallable(
           resolved.space,
         );
       }
+      // Receipt readback drives local handlers, including nested sends. Their
+      // writes may still await confirmation after the reactive read completes;
+      // exiting this process would abandon those issued commits. Confirm the
+      // current batch without waiting for further downstream recomputation.
+      await timeCliPhase(
+        "executeCallable.readback.confirmWrites",
+        () => resolved.pieces.runtime.storageManager.pendingCommitsSettled(),
+      );
     }
 
     return {

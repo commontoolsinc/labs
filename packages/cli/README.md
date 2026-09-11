@@ -1228,6 +1228,13 @@ no longer say which positions they came from, and an address names a position.
 
 #### What a selection means for a call
 
+A handler call acknowledges its own transaction before reading the receipt.
+After readback, it waits for the storage commits already issued in that runtime
+to finish, so process exit cannot abandon a nested handler's pending write. This
+confirmation barrier does not start or await further downstream recomputation.
+`--no-wait` skips readback and this barrier, returning after the invoked
+handler's own commit is acknowledged.
+
 A selection shapes a result that already exists. It does not narrow what the
 call fetches: the readback materializes the whole receipt before the selection
 runs. (A plain result's receipt does carry a descriptive schema of what it holds
