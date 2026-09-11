@@ -4,7 +4,8 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { PreparedSourceUpdate } from "../src/pattern-manager.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
@@ -19,6 +20,11 @@ import {
   writeCompiledDocs,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import {
+  getPieceSourceSnapshot,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
+} from "../src/runner.ts";
 
 await ensureCompilerStack();
 
@@ -769,6 +775,142 @@ describe("module identity delegation", () => {
       expect(
         runtime.grantsModuleDelegation(space, successor.identity, oldIdentity),
       ).toBe(false);
+    });
+  });
+  describe("a successor another runtime moved a piece to", () => {
+    // `runtime` moves the piece from v1 to v2 through a source update.
+    // `observer` shares its store and compiled v2 beforehand, so it resolves
+    // the piece's new pattern from memory, without the closure load that
+    // would register v2's grant from v1. Events queue in the runtime that
+    // sends them, so the observer's own handler run is what is checked.
+    const writerProgram = (version: string): RuntimeProgram => ({
+      main: "/app/main.tsx",
+      files: [
+        {
+          name: "/app/main.tsx",
+          contents: [
+            "/// <cts-enable />",
+            "import {",
+            "  handler,",
+            "  pattern,",
+            "  Writable,",
+            "  WriteAuthorizedBy,",
+            '} from "commonfabric";',
+            'import { revision } from "../shared/revision.ts";',
+            "",
+            "const setName = handler<",
+            "  { name: string },",
+            "  { name: Writable<string> }",
+            ">((event, state) => {",
+            '  state.name.set(revision + ":" + event.name);',
+            "});",
+            "",
+            "export default pattern<{ seed?: string }>(() => {",
+            "  const name = new Writable<",
+            "    WriteAuthorizedBy<string, typeof setName>",
+            '  >("initial").for("name");',
+            "  return { name, setName: setName({ name }) };",
+            "});",
+          ].join("\n"),
+        },
+        {
+          name: "/shared/revision.ts",
+          contents: `export const revision = ${JSON.stringify(version)};`,
+        },
+      ],
+    });
+
+    let observer: Runtime;
+    let v2: Pattern;
+    let piece: Cell<any>;
+    let observed: Cell<any>;
+
+    beforeEach(async () => {
+      observer = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+      });
+      const v1 = await runtime.patternManager.compilePattern(
+        writerProgram("v1"),
+        { space },
+      );
+      v2 = await runtime.patternManager.compilePattern(writerProgram("v2"), {
+        space,
+      });
+      await observer.patternManager.compilePattern(writerProgram("v2"), {
+        space,
+      });
+      piece = runtime.getCell(
+        space,
+        "module-delegation-moved-piece",
+        v1.resultSchema,
+      );
+      await runtime.runSynced(piece, v1, {});
+      observed = observer.getCellFromLink(
+        piece.getAsNormalizedFullLink(),
+        v1.resultSchema,
+      );
+    });
+
+    afterEach(async () => {
+      // The storage manager belongs to `runtime`, which the outer
+      // `afterEach` disposes after this one.
+      await observer.dispose({ closeStorage: false });
+    });
+
+    const setName = async (
+      target: Runtime,
+      cell: Cell<any>,
+      name: string,
+    ): Promise<unknown> => {
+      await target.editWithRetry((tx) =>
+        cell.key("setName").withTx(tx).send({ name })
+      );
+      await target.idle();
+      return await cell.key("name").pull();
+    };
+
+    const moveToV2 = async (): Promise<void> => {
+      const expected = getPieceSourceSnapshot(
+        piece,
+        runtime.runner.sessionPatternPointerFor(piece),
+      )!;
+      const transition: PieceSourceTransition = {
+        revisionId: crypto.randomUUID(),
+        baseline: await preparePieceSourceTransitionBaseline(
+          runtime,
+          piece,
+          expected,
+        ),
+        timestamp: Date.now(),
+        operation: "edit",
+        origin: null,
+        expected,
+      };
+      await runtime.runSynced(piece, v2, {}, {
+        expectedPatternIdentity: expected.pattern,
+        pieceSourceTransition: transition,
+      });
+    };
+
+    it("lets the successor write its predecessor's fields after swapping a running piece", async () => {
+      await observer.start(observed);
+      expect(await setName(observer, observed, "before")).toBe("v1:before");
+
+      await moveToV2();
+      await observer.idle();
+      await observer.runner.idlePointerMaintenance();
+
+      expect(await setName(observer, observed, "after")).toBe("v2:after");
+    });
+
+    it("lets the successor write its predecessor's fields after starting the piece", async () => {
+      expect(await setName(runtime, piece, "before")).toBe("v1:before");
+      await moveToV2();
+
+      await observer.start(observed);
+
+      expect(await setName(observer, observed, "after")).toBe("v2:after");
     });
   });
 });
