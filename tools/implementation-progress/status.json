@@ -3,7 +3,7 @@
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
   "pr": "https://github.com/commontoolsinc/labs/pull/7307",
-  "activity": "D3 verification is published in #7307: full runner validation, 46 type groups, 599 docs blocks, and six exact benchmark-count checks pass. CI and Cubic review are running.",
+  "activity": "D3 validation passes. Cubic identified two dashboard ledger inconsistencies; both are repaired for a fresh review.",
   "review": "Antagonistic D3 review is clean after correcting status wording and verifying reentry of both metadata scopes. The D3 PR requires its own CI and Cubic review before landing.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
@@ -21,11 +21,9 @@
     "#7257 current implementation validation (2b24f0823f): 1,428 runner tests / 8,909 steps; full CLI suites; 1,168 transformer tests / 961 steps; 46 type groups; 599 documentation blocks; four synthetic browser row cases; formatting and lint pass. Generated-pattern, vintage, and scale acceptance checkpoints are detailed in the PR.",
     "#7257 merged as c122d6a9fc after all 69 current-head checks and zero-issue full Cubic review across 43 files, with clean antagonistic review.",
     "#7282 main integration: all six functional assertions and declared budgets, 413 authoritative pattern checks, full pattern package including browser tests, and all 46 type groups pass.",
-    "#7302 merged as 360d07680f: all 69 current-head CI gates, clean Cubic review, and clean antagonistic review.",
-    "#7300 merged as efc91a38b6: all 69 CI gates; clean full Cubic review across 6 files; clean antagonistic review; all 327 stored contracts remain compatible.",
-    "#7257 merged as c122d6a9fc: all 69 exact-head checks passed, full Cubic review found zero issues across 43 files, and antagonistic review passed.",
     "#7304 merged as c0454ab24e after all 69 exact-head checks, zero issues in the full nine-file Cubic rereview, and clean antagonistic review.",
-    "D3 local validation: 1,431 runner tests / 8,923 steps; 46 type groups; 599 documentation blocks; history index, formatting, lint, and six exact reuse/control benchmark counts pass. Antagonistic review is clean."
+    "D3 local validation: 1,431 runner tests / 8,923 steps; 46 type groups; 599 documentation blocks; history index, formatting, lint, and six exact reuse/control benchmark counts pass. Antagonistic review is clean.",
+    "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass."
   ],
   "stages": [
     {
