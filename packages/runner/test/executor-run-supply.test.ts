@@ -232,7 +232,13 @@ describe("stage P2-F per-(action × instance) run supply", () => {
         },
       },
     );
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] });
+    // Registered as an effect, so the scheduler runs it on subscription
+    // rather than waiting for a reader to demand it.
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
     await runtime.idle();
     expect(invocations).toBe(1);
     expect(stamped.filter((info) => info.kind === "derivation").length).toBe(
