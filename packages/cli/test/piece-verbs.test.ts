@@ -458,6 +458,37 @@ describe("listPieceCallables", () => {
     });
   }
 
+  for (const on of ["result", "input"] as const) {
+    const schemaKey = on === "result" ? "resultSchema" : "argumentSchema";
+    it(`serves an inline ${on} verb's event schema without the property's own definitions under a root declaring none`, async () => {
+      // With no map on the root, `#/$defs/Author` names nothing, and the
+      // property's own `$defs` is not what it names.
+      const listing = await listPattern(compiledPattern({
+        [schemaKey]: {
+          type: "object",
+          properties: {
+            add: {
+              type: "object",
+              properties: { author: { $ref: "#/$defs/Author" } },
+              asCell: ["stream"],
+              $defs: { Author: { type: "string" } },
+            },
+          },
+        },
+      }));
+
+      expect(listing.verbs).toEqual([{
+        name: "add",
+        kind: "handler",
+        on,
+        inputSchema: {
+          type: "object",
+          properties: { author: { $ref: "#/$defs/Author" } },
+        },
+      }]);
+    });
+  }
+
   it("reports a handler's declared result as its outputSchema", async () => {
     // A handler's declared result is not on its property — it rides the
     // module of the node the handler compiled to. The listing finds that node

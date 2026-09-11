@@ -1202,6 +1202,58 @@ describe("hoistNestedCfcSchemaDefs()", () => {
     });
   });
 
+  it("lifts a scope nested inside another against the map that owned it", () => {
+    // Under the layout being lifted, the inner scope's ref named the inner
+    // `Value` and the outer scope's ref named the outer one.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        outer: {
+          type: "object",
+          properties: {
+            value: { $ref: "#/$defs/Value" },
+            inner: {
+              $ref: "#/$defs/Value",
+              $defs: { Value: { type: "number" } },
+            },
+          },
+          $defs: { Value: { type: "string" } },
+        },
+      },
+    };
+
+    expect(hoistNestedCfcSchemaDefs(schema)).toEqual({
+      type: "object",
+      properties: {
+        outer: {
+          type: "object",
+          properties: {
+            value: { $ref: "#/$defs/__cfc_legacy_scope_1_Value" },
+            inner: { $ref: "#/$defs/__cfc_legacy_scope_0_Value" },
+          },
+        },
+      },
+      $defs: {
+        __cfc_legacy_scope_0_Value: { type: "number" },
+        __cfc_legacy_scope_1_Value: { type: "string" },
+      },
+    });
+  });
+
+  it("returns a document whose root `$defs` is not a map as the same object", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        nested: {
+          $ref: "#/$defs/Inner",
+          $defs: { Inner: { type: "string" } },
+        },
+      },
+      $defs: "not a map",
+    } as unknown as JSONSchema;
+    expect(hoistNestedCfcSchemaDefs(schema)).toBe(schema);
+  });
+
   it("returns a boolean schema as it is", () => {
     expect(hoistNestedCfcSchemaDefs(true)).toBe(true);
   });

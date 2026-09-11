@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -12,7 +13,12 @@ import {
   uiContractFromSchema,
   uiContractsFromSchema,
 } from "../src/cfc/ui-contract.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -340,6 +346,40 @@ describe("CFC UI contract matching", () => {
         requiredEventIntegrity: ["TrustedDirectCommandSurface"],
       },
     }]);
+  });
+
+  it("resolves a contract inside an external document against that document's $defs", () => {
+    // The `Panel` definition is a `cid:` ref: everything below it belongs to
+    // the registered document, whose `$defs` is where `#/$defs/Action` names
+    // the contract.
+    const release = acquireSchemaRegistryLease();
+    try {
+      const document = {
+        type: "object",
+        properties: { action: { $ref: "#/$defs/Action" } },
+        $defs: { Action: trustedPatternUiActionSchema },
+      } as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(document);
+      registerSchemaDocument(hash, document);
+
+      const contracts = uiContractsFromSchema({
+        type: "object",
+        properties: { panel: { $ref: "#/$defs/Panel" } },
+        $defs: { Panel: { $ref: `cid:${hash}` } },
+      } as unknown as JSONSchema);
+
+      expect(contracts).toEqual([{
+        path: ["panel", "action"],
+        contract: {
+          helper: "UiAction",
+          action: "SubmitDirectCommand",
+          trustedPattern: "TrustedDirectCommandSurface",
+          requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+        },
+      }]);
+    } finally {
+      release();
+    }
   });
 });
 

@@ -2433,10 +2433,10 @@ const VERB_PROPERTY_KEYS: readonly string[] = [
  * The input schema a declared verb serves: the property's event type, made
  * self-contained. A property written as a reference resolves to its
  * definition, with the property's own keys merged over it; the keys that
- * describe the verb rather than its event are then dropped. The event's active
- * definition scope is attached and cut to the definitions the event reaches
- * within it. Nested scopes retain `$defs: {}` when pruning removes all their
- * definitions, preserving the scope boundary. A `Stream<void>` verb serves an
+ * describe the verb rather than its event are then dropped. The definitions of
+ * the event's document are attached in place of any `$defs` the property
+ * carries of its own, and cut to the ones the event reaches; under a document
+ * declaring none, the event serves none. A `Stream<void>` verb serves an
  * empty object schema rather than a stream marker with the verb's prose hung
  * on it, and a referenced event serves its definition alone. A reference that
  * does not resolve serves `true`: the surface cannot invent structure.
@@ -2449,7 +2449,7 @@ function declaredVerbInput(
     ? resolveCfcSchemaRefs(property, root)
     : property;
   if (!isObjectOrArray(resolved)) return true;
-  const event = Object.fromEntries(
+  const { $defs: _own, ...event } = Object.fromEntries(
     Object.entries(resolved).filter(([key]) =>
       !VERB_PROPERTY_KEYS.includes(key)
     ),
@@ -2588,14 +2588,15 @@ export function handlerVerbEvents(
         : undefined;
       if (!isObjectOrArray(event)) continue;
       // An inline event is a fragment of the argument document: it carries
-      // that document's definitions, in place of any `$defs` of its own.
+      // that document's definitions — none, under a root declaring none — in
+      // place of any `$defs` of its own.
       eventSchema = typeof event.$ref === "string"
         ? resolveCfcSchemaRefs(event, argumentSchema as JSONSchema)
         : pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
           event as JSONSchema,
           isObjectNotArray(argumentSchema.$defs)
             ? argumentSchema.$defs as Record<string, JSONSchema>
-            : undefined,
+            : {},
         ));
     }
     if (matched === 0) continue;
@@ -2666,14 +2667,15 @@ export function declaredVerbProse(
       ? property.description
       : undefined;
     // An inline property is a fragment of the result document: it carries
-    // that document's definitions, in place of any `$defs` of its own.
+    // that document's definitions — none, under a root declaring none — in
+    // place of any `$defs` of its own.
     const eventSchema = typeof property.$ref === "string"
       ? resolveCfcSchemaRefs(property, declaredRoot)
       : pruneCfcSchemaDefinitions(cfcSchemaWithInheritedDefs(
         property as JSONSchema,
         isObjectOrArray(declaredRoot) && isObjectNotArray(declaredRoot.$defs)
           ? declaredRoot.$defs as Record<string, JSONSchema>
-          : undefined,
+          : {},
       ));
     if (description === undefined && eventSchema === undefined) continue;
     prose.set(name, {

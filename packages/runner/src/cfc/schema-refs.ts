@@ -205,27 +205,36 @@ const namespaceLocalDefinitionScope = (
     renamed.set(name, candidate);
   }
 
-  const rewrite = (fragment: JSONSchema): JSONSchema => {
-    if (!isObjectOrArray(fragment)) return fragment;
-    let result = fragment;
-    if (typeof fragment.$ref === "string") {
-      const name = localDefinitionName(fragment.$ref);
-      const nextName = name === undefined ? undefined : renamed.get(name);
-      if (nextName !== undefined) {
-        result = { ...result, $ref: encodedLocalDefinitionRef(nextName) };
-      }
-    }
-    return mapSubschemas(result, rewrite, ALL_SUBSCHEMAS);
-  };
-
-  const rewritten = rewrite(schema) as JSONSchemaObj;
+  const rewritten = renameLocalDefinitionRefs(schema, renamed) as JSONSchemaObj;
   const rewrittenDefinitions = Object.fromEntries(
     Object.entries(definitions).map(([name, definition]) => [
       renamed.get(name)!,
-      rewrite(definition),
+      renameLocalDefinitionRefs(definition, renamed),
     ]),
   );
   return { ...rewritten, $defs: rewrittenDefinitions };
+};
+
+// `schema` with every `#/$defs/<name>` ref below it whose name `renamed`
+// maps rewritten to the mapped name.
+const renameLocalDefinitionRefs = (
+  schema: JSONSchema,
+  renamed: ReadonlyMap<string, string>,
+): JSONSchema => {
+  if (!isObjectOrArray(schema)) return schema;
+  let result = schema;
+  if (typeof schema.$ref === "string") {
+    const name = localDefinitionName(schema.$ref);
+    const nextName = name === undefined ? undefined : renamed.get(name);
+    if (nextName !== undefined) {
+      result = { ...result, $ref: encodedLocalDefinitionRef(nextName) };
+    }
+  }
+  return mapSubschemas(
+    result,
+    (child) => renameLocalDefinitionRefs(child, renamed),
+    ALL_SUBSCHEMAS,
+  );
 };
 
 /**
@@ -293,36 +302,68 @@ export const hoistCfcSchemaDefs = (
  * map's names are renamed apart within the subtree that declared them, refs
  * included, and the renamed definitions join the root's map, so every ref
  * resolves to the definition it did under that layout. A document declaring
- * no `$defs` below its root is returned as it is.
+ * no `$defs` below its root is returned as it is, and so is one whose root
+ * `$defs` is not a map: lifting beside that value would replace it, and
+ * validation is what refuses it.
  */
 export const hoistNestedCfcSchemaDefs = (schema: JSONSchema): JSONSchema => {
   if (!isObjectOrArray(schema)) return schema;
+  const { $defs: rootDefinitions, ...rootBody } = schema;
+  if (rootDefinitions !== undefined && !isObjectNotArray(rootDefinitions)) {
+    return schema;
+  }
   const merged = new Map<string, JSONSchema>(
-    isObjectNotArray(schema.$defs) ? Object.entries(schema.$defs) : [],
+    rootDefinitions === undefined ? [] : Object.entries(rootDefinitions),
   );
+  // Every name any map in the document declares. A lifted name is chosen
+  // apart from all of them, so that no scope lifted later declares the name
+  // a ref below it was already rewritten to.
+  const reserved = new Set(merged.keys());
+  const collect = (fragment: JSONSchema): JSONSchema => {
+    if (!isObjectOrArray(fragment)) return fragment;
+    if (isObjectNotArray(fragment.$defs)) {
+      for (const [name, definition] of Object.entries(fragment.$defs)) {
+        reserved.add(name);
+        collect(definition);
+      }
+    }
+    mapSubschemas(fragment, collect, ALL_SUBSCHEMAS);
+    return fragment;
+  };
+  collect(schema);
   let lifted = false;
   const lift = (fragment: JSONSchema): JSONSchema => {
     if (!isObjectOrArray(fragment)) return fragment;
-    let body: JSONSchemaObj = fragment;
-    if (isObjectNotArray(fragment.$defs)) {
-      lifted = true;
-      const { $defs: map, ...rest } = fragment;
-      const { $defs: renamed, ...renamedBody } = namespaceLocalDefinitionScope(
-        rest,
-        map,
-        new Set(merged.keys()),
-        "legacy_scope",
-      );
-      for (const [name, definition] of Object.entries(renamed!)) {
-        merged.set(name, lift(definition));
-      }
-      body = renamedBody;
+    if (!isObjectNotArray(fragment.$defs)) {
+      return mapSubschemas(fragment, lift, ALL_SUBSCHEMAS);
     }
-    return mapSubschemas(body, lift, ALL_SUBSCHEMAS);
+    lifted = true;
+    // The scopes below this one lift first, so that every ref under them
+    // carries a lifted name of its own before this scope's names are
+    // rewritten; a ref this scope owned is then the only kind left naming
+    // one of its definitions.
+    const { $defs: map, ...rest } = fragment;
+    const body = mapSubschemas(rest, lift, ALL_SUBSCHEMAS);
+    const renamed = new Map<string, string>();
+    let suffix = 0;
+    for (const name of Object.keys(map).toSorted(utf8Compare)) {
+      let candidate: string;
+      do candidate = `__cfc_legacy_scope_${suffix++}_${name}`; while (
+        reserved.has(candidate)
+      );
+      reserved.add(candidate);
+      renamed.set(name, candidate);
+    }
+    for (const [name, definition] of Object.entries(map)) {
+      merged.set(
+        renamed.get(name)!,
+        renameLocalDefinitionRefs(lift(definition), renamed),
+      );
+    }
+    return renameLocalDefinitionRefs(body, renamed);
   };
-  const { $defs: rootDefinitions, ...rootBody } = schema;
   const body = mapSubschemas(rootBody as JSONSchemaObj, lift, ALL_SUBSCHEMAS);
-  if (isObjectNotArray(rootDefinitions)) {
+  if (rootDefinitions !== undefined) {
     for (const [name, definition] of Object.entries(rootDefinitions)) {
       merged.set(name, lift(definition));
     }
