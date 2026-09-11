@@ -1,16 +1,17 @@
 {
-  "updated": "2026-09-10T23:47:28.440003+00:00",
+  "updated": "2026-09-11T00:51:20.497860+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
-  "pr": "https://github.com/commontoolsinc/labs/pull/7241",
-  "activity": "Row invalidation fix #7265 merged after all 69 gates and clean reviews. A4 count-limit work exposed a separate union-branch schema-scope issue; its isolated fix passes focused tests.",
-  "review": "Latest Cubic and antagonistic reviews are clean for the dashboard. The merged #7265 tracker update is being revalidated before landing this checkpoint.",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7285",
+  "activity": "Remote-removal acceptance and local before/after demo pass in #7285. Integrated supporting memory-fixture fix #7289; refreshed package tests, type checks, formatting, and lint pass.",
+  "review": "Remote-removal changes have clean antagonistic and Cubic reviews. Main integration is being checked on the current PR head.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
     "#7257: full runner passed 1,410 tests / 8,765 steps. Full CLI completed: 1,821 tests passed and two known baseline color tests failed. Rebased focused tests and all 46 type-check groups pass.",
     "#7261 merged as c8a64af840: all CI gates passed; latest Cubic reported zero issues; antagonistic review clean. Browser recordings remain available below.",
-    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review."
+    "#7265: merged as 3aee034aff after all 69 CI gates, zero-issue latest Cubic review, and clean antagonistic review.",
+    "#7289: merged as b18d90b6aa after clean exact-head CI, zero-issue Cubic review, and antagonistic review."
   ],
   "stages": [
     {
@@ -53,7 +54,7 @@
       "id": "C1",
       "title": "Multi-replica reproductions",
       "status": "active",
-      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions, and ranking. Cold-materialization verification, removal, and reconnect cases remain."
+      "detail": "Four synthetic browser cases pass: nested filters and mapped swatches, with same-space and cross-space profiles, remote colors, profile-only edits, membership additions/removal/restoration, and ranking. Exact row text and swatch assertions cover empty rows. Cold-materialization verification and reconnects remain."
     },
     {
       "id": "B1",
