@@ -1824,18 +1824,18 @@ describe("piece pull materialization", () => {
       source: { ref: `cf:pattern:${identityRef.identity}` },
     };
     const originalLookup = runtime.patternManager
-      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+      .getPatternSourceEntryByIdentity.bind(runtime.patternManager);
 
     try {
-      runtime.patternManager.getPatternSourceProgramByIdentity = () =>
+      runtime.patternManager.getPatternSourceEntryByIdentity = () =>
         Promise.resolve(undefined);
       expect(await controller.getPatternRef()).toEqual(contentOnlyRef);
 
-      runtime.patternManager.getPatternSourceProgramByIdentity = () =>
+      runtime.patternManager.getPatternSourceEntryByIdentity = () =>
         Promise.reject(new Error("source unavailable"));
       expect(await controller.getPatternRef()).toEqual(contentOnlyRef);
     } finally {
-      runtime.patternManager.getPatternSourceProgramByIdentity = originalLookup;
+      runtime.patternManager.getPatternSourceEntryByIdentity = originalLookup;
     }
   });
 

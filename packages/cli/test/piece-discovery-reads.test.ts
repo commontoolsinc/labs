@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { Cell } from "@commonfabric/runner";
-import { Runtime } from "@commonfabric/runner";
+import { parseLink, Runtime, sourceDocKey } from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -100,6 +100,9 @@ interface ColdDiscovery<T> {
   /** The collection documents the reader's replica held once every load it
    * registered had been answered. Empty is the property under test. */
   itemsHeld: string[];
+
+  /** Whether discovery loaded the authored entry's content-addressed code. */
+  sourceCodeHeld: boolean;
 }
 
 /**
@@ -169,6 +172,17 @@ async function readsOfColdDiscovery<T>(
       PROGRAM as never,
       { space },
     );
+    const patternRef = writerRuntime.patternManager.getArtifactEntryRef(
+      compiled,
+    )!;
+    const sourceRecord = writerRuntime.getCell(
+      space,
+      sourceDocKey(patternRef.identity),
+    );
+    const sourceCodeUri = parseLink(
+      (sourceRecord.getRaw() as { code?: unknown } | undefined)?.code,
+      sourceRecord,
+    )?.id;
 
     // One document per member, each holding a value of its own, handed to the
     // pattern as cells so the piece's result reaches them through links.
@@ -233,8 +247,10 @@ async function readsOfColdDiscovery<T>(
     const itemsHeld = itemUris.filter((uri) =>
       provider.get?.(uri) !== undefined
     );
+    const sourceCodeHeld = sourceCodeUri !== undefined &&
+      provider.get?.(sourceCodeUri) !== undefined;
 
-    return { result, syncs, itemsHeld };
+    return { result, syncs, itemsHeld, sourceCodeHeld };
   } finally {
     await release();
   }
@@ -295,7 +311,7 @@ describe("piece discovery reads", () => {
   });
 
   it("lists the verb without syncing under the declared result type", async () => {
-    const { result, syncs, itemsHeld } = await readsOfColdDiscovery((
+    const discovery = await readsOfColdDiscovery((
       pieces,
       piece,
       space,
@@ -307,6 +323,7 @@ describe("piece discovery reads", () => {
         space,
       }, { loadPieces: () => Promise.resolve(pieces as never) })
     );
+    const { result, syncs, itemsHeld } = discovery;
 
     // The listing is the whole point of paying anything at all, so it is
     // asserted beside the reads: a discovery that syncs nothing and lists
@@ -322,12 +339,13 @@ describe("piece discovery reads", () => {
     });
 
     expect(itemsHeld).toEqual([]);
+    expect(discovery.sourceCodeHeld).toBe(false);
     expect(syncs.filter((sync) => isDeclaredResultType(sync.schema)))
       .toEqual([]);
   });
 
   it("describes the piece without syncing under the declared result type", async () => {
-    const { result, syncs, itemsHeld } = await readsOfColdDiscovery((
+    const discovery = await readsOfColdDiscovery((
       pieces,
       piece,
       space,
@@ -339,6 +357,7 @@ describe("piece discovery reads", () => {
         space,
       }, { loadPieces: () => Promise.resolve(pieces as never) })
     );
+    const { result, syncs, itemsHeld } = discovery;
 
     // `describe`'s STATE section comes from the compiled pattern, not from a
     // projection of the piece, so it names every non-callable property of the
@@ -354,6 +373,7 @@ describe("piece discovery reads", () => {
     ]);
 
     expect(itemsHeld).toEqual([]);
+    expect(discovery.sourceCodeHeld).toBe(false);
     expect(syncs.filter((sync) => isDeclaredResultType(sync.schema)))
       .toEqual([]);
   });

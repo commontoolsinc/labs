@@ -33,6 +33,7 @@ import {
   planCompileCacheWriteChunks,
   recordUndeclarablePolicyStore,
   ROOT_LINK_SPECIFIER,
+  SOURCE_DOC_ENTRY_SCHEMA,
   type SourceDoc,
   sourceDocKey,
   stageModuleDelegations,
@@ -3532,6 +3533,29 @@ export class PatternManager {
       ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
       ...(dataFiles.length === 0 ? {} : { dataFiles }),
     };
+  }
+
+  /** Read a stored pattern's entry filename without loading its source closure. */
+  async getPatternSourceEntryByIdentity(
+    entryIdentity: string,
+    space: MemorySpace,
+  ): Promise<string | undefined> {
+    const readTx = this.#runtime.edit();
+    try {
+      const entry = this.#runtime.getCell(
+        space,
+        sourceDocKey(entryIdentity),
+        SOURCE_DOC_ENTRY_SCHEMA,
+        readTx,
+      );
+      await entry.sync();
+      const value = entry.get();
+      return isObjectOrArray(value) && typeof value.filename === "string"
+        ? value.filename
+        : undefined;
+    } finally {
+      readTx.abort?.("get-pattern-source-entry read complete");
+    }
   }
 
   /**

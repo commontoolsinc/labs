@@ -3853,14 +3853,14 @@ export class PieceController<T = unknown> {
     if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
-      const program = await this.#pieces.runtime.patternManager
-        .getPatternSourceProgramByIdentity(
+      const entry = await this.#pieces.runtime.patternManager
+        .getPatternSourceEntryByIdentity(
           ref.identity,
           this.#pieces.getSpace(),
         );
-      return program?.main === undefined
+      return entry === undefined
         ? { ...ref, source }
-        : { ...ref, source: { ...source, entry: program.main } };
+        : { ...ref, source: { ...source, entry } };
     } catch {
       // The content pointer remains useful even if the source closure is
       // unavailable or unreadable in this space.
