@@ -172,7 +172,7 @@ export type DispatchingVisitorResult<
   | VisitSubtypeForm;
 
 //
-// Visitor interface and exported implementations thereof
+// Visitor interface
 //
 
 /**
