@@ -42,7 +42,7 @@ import {
   type SpaceServerPolicy,
   STORE_REFRESH_ATTEMPTS,
 } from "../src/executor/space-server.ts";
-import { readWatermarkSeq, waitForSettled } from "../src/executor/watermark.ts";
+import { waitForSettled } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
 
@@ -241,11 +241,9 @@ describe("engine-read-through", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
-    await waitUntil(
-      () => readWatermarkSeq(engine) >= authoredSeq,
-      "watermark to reach the authored commit",
-    );
+    const authoredSeq = Engine.readState(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    })!.seq;
     const settled = await waitForSettled(clientRuntime, space, authoredSeq, {
       timeoutMs: 10_000,
     });
@@ -671,15 +669,15 @@ describe("engine-read-through", () => {
       space,
       path: [],
     });
+    const refreshesBefore = host.stats().storeRefreshes;
     const creating = clientRuntime.edit();
     cell.withTx(creating).set({ made: true });
     expect((await creating.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
-    const refreshesBefore = host.stats().storeRefreshes;
-    await waitUntil(
-      () => readWatermarkSeq(engine) >= authoredSeq,
-      "the watermark to cover the creating commit",
-    );
+    // The document's revision names this input even if the host already
+    // committed a watermark update above it. That bookkeeping needs no cover.
+    const authoredSeq = Engine.readState(engine, { id })!.seq;
+    const settled = await waitForSettled(clientRuntime, space, authoredSeq);
+    expect(settled).toBeGreaterThanOrEqual(authoredSeq);
     expect(host.stats().storeRefreshes).toBeGreaterThan(refreshesBefore);
     // Held by the refresh: this read costs the engine nothing.
     const readsBeforeHeld = host.stats().storeReads;
