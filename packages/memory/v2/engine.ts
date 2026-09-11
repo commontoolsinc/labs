@@ -10,6 +10,7 @@ import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import {
   collectExternalSchemaRefHashes,
   collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
   SCHEMA_META_MEMBER,
 } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
@@ -5294,12 +5295,28 @@ const applyCommitTransaction = (
     requiredSchemaRefs.add(schemaHash);
   };
   // A document's reserved `schema` metadata member is a schema position
-  // in the link spelling — inline, or `{ "$ref": "cid:…" }` — and its
-  // refs are collected exactly as a link schema's are.
-  const collectSchemaMetaRefs = (document: unknown): void => {
-    for (const hash of collectSchemaMetaRefHashes(document)) {
-      requiredSchemaRefs.add(hash);
+  // in the link spelling — a self-contained inline schema, or a single
+  // `{ "$ref": "cid:…" }` root — and its refs are collected exactly as a
+  // link schema's are. The member's grammar has no third form: a `cid:`
+  // reference nested inside an inline schema, or a root reference with
+  // sibling keywords, is refused here, so no reader ever has to merge
+  // two schema-resource scopes. Every document class carries the member
+  // the same way, `cid:` documents included: content addressing hashes
+  // `.value` alone, so the member is immutable and first-writer-wins
+  // under the `cid:` rule below without being hash-bound, and nothing
+  // distinguishes a schema document from a blob whose value happens to
+  // be schema-shaped — so nothing here treats one differently.
+  const collectSchemaMetaRefs = (id: string, document: unknown): void => {
+    let hashes: ReadonlySet<string>;
+    try {
+      hashes = collectSchemaMetaRefHashes(document);
+    } catch (error) {
+      if (!(error instanceof MalformedSchemaMetaError)) throw error;
+      throw new ProtocolError(
+        `memory v2 commit writes document ${id} with malformed schema metadata: ${error.message}`,
+      );
     }
+    for (const hash of hashes) requiredSchemaRefs.add(hash);
   };
   // The metadata positions a patch sequence can land a reference at —
   // directly (`/cfc`, `/cfc/schemaHash`, `/schema`), through a root-level
@@ -5383,7 +5400,7 @@ const applyCommitTransaction = (
             stagedMetadataDocs.set(docKey, patched);
             if (patchTouchesMetadata(operation.patches)) {
               collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
-              collectSchemaMetaRefs(patched);
+              collectSchemaMetaRefs(operation.id, patched);
             }
           } catch (error) {
             if (!(error instanceof PatchApplyError)) throw error;
@@ -5397,7 +5414,7 @@ const applyCommitTransaction = (
         collectCfcEnvelopeRef(
           (operation.value as { cfc?: unknown } | null)?.cfc,
         );
-        collectSchemaMetaRefs(operation.value);
+        collectSchemaMetaRefs(operation.id, operation.value);
         if (metadataPatchDocKeys.size > 0) {
           const docKey = opDocKey(opIndex, operation);
           if (metadataPatchDocKeys.has(docKey)) {
@@ -5451,6 +5468,12 @@ const applyCommitTransaction = (
       }
     } else if (installsVerifiedContent) {
       collectLinkSchemaRefs(operation.value);
+    }
+    // The envelope's `schema` metadata member is validated for every
+    // `cid:` document alike (see collectSchemaMetaRefs): the identity
+    // check above covers `.value` and nothing beside it.
+    if (installsVerifiedContent) {
+      collectSchemaMetaRefs(operation.id, operation.value);
     }
     // `has()`, not a `get() !== undefined` check: a malformed set can carry
     // an omitted value, and treating it as absent would let a later set of

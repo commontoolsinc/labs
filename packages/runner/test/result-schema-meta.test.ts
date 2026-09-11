@@ -17,8 +17,11 @@ import {
   resultSchemaMetaSpelling,
   writeResultSchemaMeta,
 } from "../src/result-schema-meta.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import {
+  classifySchemaMetaValue,
   collectExternalSchemaRefHashes,
+  MalformedSchemaMetaError,
   parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
 import { resolveSchema } from "../src/schema.ts";
@@ -187,6 +190,111 @@ describe("result-schema-meta", () => {
       },
     };
     expect(resultSchemaMetaSpelling(refused)).toEqual(refused);
+  });
+
+  it("resolves the reference in a session that never wrote it", async () => {
+    const tx = writer.edit();
+    const cell = writer.getCell(
+      space,
+      "result-schema-meta fresh reader",
+      undefined,
+      tx,
+    );
+    cell.set({ title: "Ada", detail: { count: 1 } });
+    writeResultSchemaMeta(cell, resultSchema);
+    const stored = cell.getMetaRaw("schema") as JSONSchemaObj;
+    const rootHash = parseExternalSchemaRef(stored.$ref!)!.taggedHash;
+    expect((await tx.commit()).error).toBeUndefined();
+    const link = cell.getAsNormalizedFullLink();
+
+    // The writer's session ends before the reader's begins, and it held
+    // the realm registry's only leases: the registry clears, so the reader
+    // starts cold and everything it resolves came through delivery.
+    await writer.dispose();
+    await writerStorage.close();
+    await readerStorage.close();
+    expect(lookupSchemaDocument(rootHash)).toBeUndefined();
+
+    readerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+    writerStorage = readerStorage;
+    writer = new Runtime({
+      storageManager: readerStorage,
+      apiUrl: new URL(import.meta.url),
+      experimental: { contentAddressedSchemas: true },
+    });
+    const arrived = writer.getCellFromLink<unknown>(link);
+    await arrived.sync();
+    // One round trip delivered the document with its closure: arrival
+    // registered the documents, and the inline form resolves from them.
+    expect(lookupSchemaDocument(rootHash)).toBeDefined();
+    const inline = readResultSchemaMeta(arrived) as JSONSchemaObj;
+    expect(inline.$ref).toBeUndefined();
+    expect(inline.required).toEqual(["title", "detail"]);
+  });
+
+  it("classifies the member's grammar", () => {
+    const ref = "cid:fid1:grammar-target";
+    expect(classifySchemaMetaValue(undefined)).toEqual({ kind: "absent" });
+    expect(classifySchemaMetaValue({ $ref: ref })).toEqual({
+      kind: "reference",
+      ref,
+      taggedHash: "fid1:grammar-target",
+    });
+    expect(classifySchemaMetaValue({ $ref: `${ref}#/$defs/Member` })).toEqual({
+      kind: "reference",
+      ref: `${ref}#/$defs/Member`,
+      taggedHash: "fid1:grammar-target",
+      defName: "Member",
+    });
+    expect(classifySchemaMetaValue(resultSchema)).toEqual({
+      kind: "inline",
+      schema: resultSchema,
+    });
+    // The two shapes the grammar excludes: a root reference with sibling
+    // keywords, and a reference nested inside an inline schema.
+    expect(classifySchemaMetaValue({ $ref: ref, title: "sibling" }).kind)
+      .toBe("malformed");
+    expect(
+      classifySchemaMetaValue({
+        type: "object",
+        properties: { nested: { $ref: ref } },
+      }).kind,
+    ).toBe("malformed");
+  });
+
+  it("refuses a malformed member at write time", async () => {
+    const tx = writer.edit();
+    const cell = writer.getCell(
+      space,
+      "result-schema-meta malformed write",
+      undefined,
+      tx,
+    );
+    cell.set({ title: "Ada", detail: { count: 1 } });
+    expect(() =>
+      cell.setMetaRaw(
+        "schema",
+        {
+          type: "object",
+          properties: { nested: { $ref: "cid:fid1:nested-target" } },
+        },
+        rawMetaWriteAuthorization,
+      )
+    ).toThrow(MalformedSchemaMetaError);
+    expect(() =>
+      cell.setMetaRaw(
+        "schema",
+        { $ref: "cid:fid1:sibling-target", title: "sibling" },
+        rawMetaWriteAuthorization,
+      )
+    ).toThrow(MalformedSchemaMetaError);
+    // Nothing staged: the refusal came before the write.
+    expect(
+      [...tx.getWriteDetails?.(space) ?? []].some((detail) =>
+        detail.address.path[0] === "schema"
+      ),
+    ).toBe(false);
+    expect((await tx.commit()).error).toBeUndefined();
   });
 
   it("writes the schema inline with the flag off", async () => {

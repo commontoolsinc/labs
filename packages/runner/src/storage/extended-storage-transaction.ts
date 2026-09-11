@@ -9,8 +9,10 @@ import {
 } from "@commonfabric/data-model";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
+  classifySchemaMeta,
   collectExternalSchemaRefHashes,
   collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
   SCHEMA_META_MEMBER,
 } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
@@ -2267,6 +2269,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
+   * Refuses a write that would land a `schema` metadata member in the
+   * malformed form — a `cid:` reference outside a single root `$ref`
+   * (`MalformedSchemaMetaError`). This runs BEFORE the underlying write
+   * on every write entry, so a refused member never reaches the
+   * transaction's staged state; it is the writer's half of the grammar the
+   * commit boundary enforces, and it holds whatever the
+   * `contentAddressedSchemas` flag says, since the grammar is a property
+   * of stored documents rather than of any one writer.
+   */
+  #refuseMalformedSchemaMeta(
+    address: Pick<IMemorySpaceAddress, "id" | "path">,
+    value: FabricValue | undefined,
+  ): void {
+    const form = classifySchemaMeta(schemaMetaCarrierOf(address, value));
+    if (form.kind === "malformed") {
+      throw new MalformedSchemaMetaError(form.reason);
+    }
+  }
+
+  /**
    * Stages the schema-document closure behind one written value (see
    * `#materializeReferencedSchemaDocuments` for the contract). Deliberately
    * per-transaction: two concurrent transactions writing the same schema
@@ -2280,7 +2302,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue | undefined,
   ): void {
     if (!getContentAddressedSchemasConfig()) return;
-    if (address.id.startsWith("cid:")) return;
     if (value === undefined) return;
     const hashes = new Set<string>();
     // Link positions, and the document's `schema` metadata member — the
@@ -2289,27 +2310,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // transaction's written values they are plain data, and scanning them
     // here would treat data that merely looks like a binding as a schema
     // carrier. Binding schemas externalized by the pattern serializer
-    // resolve through the realm registry.
-    mapLinkSchemas(value, (schema) => {
-      for (
-        const hash of collectExternalSchemaRefHashes(
-          schema as SchemaDocJSONSchema,
-        )
-      ) {
-        hashes.add(hash);
-      }
-      return schema;
-    });
-    // The member is reached by a whole-document write or by a write AT the
-    // member (`setMetaRaw`). A write below it edits inside a stored schema,
-    // which the runner never issues; the commit boundary's own scan leaves
-    // that shape to read-side assembly as well.
-    const metaSchema = address.path.length === 0
-      ? value
-      : address.path.length === 1 && address.path[0] === SCHEMA_META_MEMBER
-      ? { [SCHEMA_META_MEMBER]: value }
-      : undefined;
-    for (const hash of collectSchemaMetaRefHashes(metaSchema)) {
+    // resolve through the realm registry. A `cid:` document is not
+    // link-scanned (the closure writes this very method issues are `cid:`
+    // installs, and a schema document's keywords may carry link-shaped
+    // data); its `schema` member is read like any other document's.
+    if (!address.id.startsWith("cid:")) {
+      mapLinkSchemas(value, (schema) => {
+        for (
+          const hash of collectExternalSchemaRefHashes(
+            schema as SchemaDocJSONSchema,
+          )
+        ) {
+          hashes.add(hash);
+        }
+        return schema;
+      });
+    }
+    // The member's own form was refused ahead of the write
+    // (`#refuseMalformedSchemaMeta`), so what remains here is a reference
+    // to stage or an inline schema with nothing to stage.
+    for (
+      const hash of collectSchemaMetaRefHashes(
+        schemaMetaCarrierOf(address, value),
+      )
+    ) {
       hashes.add(hash);
     }
     for (const hash of hashes) {
@@ -2841,6 +2865,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.#invalidateReadResultCache();
+    this.#refuseMalformedSchemaMeta(address, value);
     const result = this.tx.write(address, value, options);
     if (result.ok) {
       this.#stageSchemaDocsForValue(address.space, address, value);
@@ -2860,6 +2885,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.invalidateCfc("write-after-prepare");
     }
     this.#invalidateReadResultCache();
+    this.#refuseMalformedSchemaMeta(address, value);
     const writeResult = this.tx.write(address, value, options);
     if (
       writeResult.error &&
@@ -2989,6 +3015,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
       const noteWriteIdentity = () => this.#noteWriteIdentity();
+      const refuseMalformedSchemaMeta = (
+        address: IMemorySpaceAddress,
+        value: FabricValue | undefined,
+      ) => this.#refuseMalformedSchemaMeta(address, value);
       // The read caches go the same way: dropped ahead of the first write the
       // batch yields, and kept when it yields none. A `set()` whose diff
       // finds nothing to write arrives here as an empty batch, and a lift
@@ -3013,8 +3043,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address, write.value);
             noteWriteIdentity();
-            if (!write.delete && getContentAddressedSchemasConfig()) {
-              staged.push({ address, value: write.value });
+            if (!write.delete) {
+              refuseMalformedSchemaMeta(address, write.value);
+              if (getContentAddressedSchemasConfig()) {
+                staged.push({ address, value: write.value });
+              }
             }
             // After the chokepoint, so a write it refuses leaves the caches
             // standing over a state it did not change.
@@ -4045,4 +4078,25 @@ export function getTransactionForChildCells(
     return tx.getTransactionForChildCells();
   }
   return tx;
+}
+
+/**
+ * The document-shaped carrier of the `schema` metadata member a write
+ * reaches, for the writer-side grammar check and closure staging: a
+ * whole-document write carries the member as it is, and a write AT the
+ * member (`setMetaRaw`) carries the member's value. A write below the
+ * member edits inside a stored schema, which the runner never issues; the
+ * commit boundary's own scan leaves that shape to read-side assembly as
+ * well. `undefined` for any other write.
+ */
+function schemaMetaCarrierOf(
+  address: Pick<IMemorySpaceAddress, "path">,
+  value: FabricValue | undefined,
+): unknown {
+  if (value === undefined) return undefined;
+  if (address.path.length === 0) return value;
+  if (address.path.length === 1 && address.path[0] === SCHEMA_META_MEMBER) {
+    return { [SCHEMA_META_MEMBER]: value };
+  }
+  return undefined;
 }

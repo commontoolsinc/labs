@@ -845,22 +845,153 @@ Deno.test("validates the schema document a result's `schema` metadata references
       { $ref: `cid:${missingHash}` },
     );
 
-    // A `cid:` document's own `schema` member is not a metadata position:
-    // a content-addressed install carrying one names no obligation.
-    const ownSchema = { type: "boolean", title: "own-schema-member" } as const;
+    // The member's grammar has two forms. A `cid:` reference in any other
+    // position — nested inside an inline schema, or a root reference with
+    // sibling keywords — is refused outright, whether a set or a patch
+    // lands it, before any backing is consulted.
+    const hybridNested = {
+      type: "object",
+      properties: { nested: { $ref: `cid:${resultHash}` } },
+    };
+    const hybridSiblings = { $ref: `cid:${resultHash}`, title: "sibling" };
+    for (const hybrid of [hybridNested, hybridSiblings]) {
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "s:a",
+            commit: commit(8, {
+              operations: [{
+                op: "set",
+                id: "of:hybrid-carrier",
+                value: { value: { title: "v" }, schema: hybrid },
+              } as never],
+            }),
+          }),
+        ProtocolError,
+        "malformed schema metadata",
+      );
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "s:a",
+            commit: commit(8, {
+              operations: [{
+                op: "patch",
+                id: "of:result-carrier",
+                patches: [{ op: "replace", path: "/schema", value: hybrid }],
+              } as never],
+            }),
+          }),
+        ProtocolError,
+        "malformed schema metadata",
+      );
+    }
+
+    // Every `cid:` document carries the member the same way: content
+    // addressing hashes `.value` alone, so a schema document and a blob
+    // whose value happens to be schema-shaped are indistinguishable, and
+    // the member is validated like an ordinary document's on both. Backed
+    // lands; unbacked is refused; a forged backing is refused with it.
+    const blob = { bytes: "not a schema" };
+    const blobId = `cid:${taggedHashStringOf(blob)}`;
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(9, {
+            operations: [{
+              op: "set",
+              id: blobId,
+              value: { value: blob, schema: { $ref: "cid:fid1:unbacked" } },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+    const forgedSchema = { type: "object", title: "forged" } as const;
+    const forgedHash = internSchemaAsTaggedHashString(forgedSchema);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(9, {
+            operations: [
+              {
+                op: "set",
+                id: blobId,
+                value: { value: blob, schema: { $ref: `cid:${forgedHash}` } },
+              } as never,
+              setOp(`cid:${forgedHash}`, { ...forgedSchema, title: "other" }),
+            ],
+          }),
+        }),
+      ProtocolError,
+    );
+    const blobWithMeta = {
+      op: "set",
+      id: blobId,
+      value: { value: blob, schema: { $ref: `cid:${resultHash}` } },
+    } as never;
     applyCommit(engine, {
       sessionId: "s:a",
-      commit: commit(8, {
+      commit: commit(9, { operations: [blobWithMeta] }),
+    });
+    const schemaShaped = { type: "boolean", title: "schema-shaped" } as const;
+    const schemaShapedId = `cid:${
+      internSchemaAsTaggedHashString(schemaShaped)
+    }`;
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(10, {
+            operations: [{
+              op: "set",
+              id: schemaShapedId,
+              value: {
+                value: schemaShaped,
+                schema: { $ref: "cid:fid1:unbacked" },
+              },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(10, {
         operations: [{
           op: "set",
-          id: `cid:${internSchemaAsTaggedHashString(ownSchema)}`,
-          value: {
-            value: ownSchema,
-            schema: { $ref: "cid:fid1:nothing-backs-this" },
-          },
+          id: schemaShapedId,
+          value: { value: schemaShaped, schema: { $ref: `cid:${resultHash}` } },
         } as never],
       }),
     });
+
+    // The member rides the `cid:` immutability rule with the rest of the
+    // envelope: an identical re-set is the idempotent install, a re-set
+    // that changes the member is a change to a content-addressed document.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(11, { operations: [blobWithMeta] }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(12, {
+            operations: [{
+              op: "set",
+              id: blobId,
+              value: { value: blob, schema: { $ref: `cid:${missingHash}` } },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "cannot change content-addressed document",
+    );
   });
 });
 

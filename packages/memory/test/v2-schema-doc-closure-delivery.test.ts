@@ -37,6 +37,7 @@ import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   collectExternalSchemaRefHashes,
@@ -420,6 +421,9 @@ describe("schema document closure delivery", () => {
   });
 });
 
+const BLOB = { bytes: "closure-blob" } as const;
+const BLOB_ID = `cid:${taggedHashStringOf(BLOB)}`;
+
 describe("schema document closure delivery for `schema` metadata", () => {
   // A result document's `schema` metadata member is a schema position in
   // the link spelling, and assembly ships its closure the same way: the
@@ -462,6 +466,18 @@ describe("schema document closure delivery for `schema` metadata", () => {
                 schema: { $ref: `cid:${rootHash}` },
               },
             },
+            // A content-addressed carrier: its identity hashes `.value`
+            // alone, and its `schema` member is shipped like any other's.
+            {
+              op: "set",
+              id: `cid:${mentionedHash}`,
+              value: { value: mentionedSchema },
+            },
+            {
+              op: "set",
+              id: BLOB_ID,
+              value: { value: BLOB, schema: { $ref: `cid:${mentionedHash}` } },
+            },
           ],
         },
       } as Parameters<Server["transact"]>[0],
@@ -475,7 +491,10 @@ describe("schema document closure delivery for `schema` metadata", () => {
       requestId: nextRequestId("watch"),
       space: SPACE,
       sessionId: readerSession,
-      watches: [watchOn("of:result-with-schema-meta", "w-schema-meta")],
+      watches: [
+        watchOn("of:result-with-schema-meta", "w-schema-meta"),
+        watchOn(BLOB_ID, "w-blob-schema-meta"),
+      ],
     }) as ResponseMessage<WatchSetResult>;
     assert(watchSet.ok !== undefined, JSON.stringify(watchSet.error));
     ledger = new DeliveryLedger();
@@ -491,7 +510,8 @@ describe("schema document closure delivery for `schema` metadata", () => {
 
   it("ships the closure a delivered document's `schema` metadata references, in the frame that delivers it", () => {
     expect(carriedCids(upserts)).toEqual(
-      [`cid:${leafHash}`, `cid:${rootHash}`].toSorted(),
+      [`cid:${leafHash}`, `cid:${rootHash}`, `cid:${mentionedHash}`, BLOB_ID]
+        .toSorted(),
     );
   });
 

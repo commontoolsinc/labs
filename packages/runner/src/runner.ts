@@ -9285,9 +9285,7 @@ export class Runner {
           const receipt = receiptCell.withTx(tx);
           receipt.set(receiptValue);
           const shape = receiptShapeSchema(receiptValue);
-          if (shape !== undefined) {
-            receipt.setMetaRaw("schema", shape, rawMetaWriteAuthorization);
-          }
+          if (shape !== undefined) writeResultSchemaMeta(receipt, shape);
         }
       }
       return result;

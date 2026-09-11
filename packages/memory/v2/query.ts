@@ -23,6 +23,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   collectExternalSchemaRefHashes,
   collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
 } from "../../runner/src/schema-decompose.ts";
 import {
   lookupSchemaDocument,
@@ -987,9 +988,17 @@ const EMPTY_SCHEMA_REFS: ReadonlySet<string> = new Set();
  * hash is the single ref, and the closure walk verifies it and follows
  * its refs; its value is not link-scanned, because schema keywords such
  * as `default` may carry link-shaped DATA that is not a link position.
- * Every other document is scanned for link schemas anywhere in its value,
- * and for its reserved `schema` metadata member, a schema position in the
- * same spelling.
+ * Every other document is scanned for link schemas anywhere in its value.
+ * Every document, `cid:` or not, also contributes its reserved `schema`
+ * metadata member, a schema position in the same spelling: content
+ * addressing hashes `.value` alone, and a blob whose value is
+ * schema-shaped is indistinguishable from a schema document, so the
+ * member is read the same way on all of them. A malformed member — a
+ * `cid:` reference outside a single root `$ref` — is state the commit
+ * boundary refuses, so one found here predates that enforcement or was
+ * written out of band; assembly fails the query on it
+ * ({@link SchemaClosureError}) rather than deliver a document whose
+ * schema no reader can resolve.
  */
 const scanSnapshotSchemaRefs = (
   engine: Engine.Engine,
@@ -1047,7 +1056,17 @@ const scanSnapshotSchemaRefs = (
         }
         return schema;
       });
+    }
+    try {
       for (const hash of collectSchemaMetaRefHashes(doc)) refs.add(hash);
+    } catch (error) {
+      if (!(error instanceof MalformedSchemaMetaError)) throw error;
+      throw new SchemaClosureError(
+        `Query result delivers document ${id} with malformed schema ` +
+          `metadata: ${error.message}. The commit boundary refuses this ` +
+          `form, so the stored document predates that enforcement or was ` +
+          `written out of band (docs/specs/content-addressed-schemas.md).`,
+      );
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;

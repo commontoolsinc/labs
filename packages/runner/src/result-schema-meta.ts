@@ -19,9 +19,17 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
 import { externalizeSchema } from "./link-utils.ts";
 import { rawMetaWriteAuthorization } from "./meta-seam.ts";
-import { recomposeSchemaRefs, SCHEMA_META_MEMBER } from "./schema-decompose.ts";
+import {
+  classifySchemaMetaValue,
+  MalformedSchemaMetaError,
+  recomposeSchemaRefs,
+  SCHEMA_META_MEMBER,
+} from "./schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
-import { lookupSchemaDocument } from "./schema-registry.ts";
+import {
+  isSchemaDocumentClosureComplete,
+  lookupSchemaDocument,
+} from "./schema-registry.ts";
 import type { IReadOptions } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 
@@ -68,22 +76,31 @@ export function writeResultSchemaMeta(
 /**
  * The `schema` metadata of `cell`'s document in the inline form every
  * consumer walks, recomposed through the realm registry when stored as a
- * reference. A reference whose closure the registry cannot supply yet is
- * returned as stored: the read-time resolver fails closed on it (a
- * `{ "$ref": "cid:…" }` root resolves to nothing until its document
- * arrives), which is the same posture a reference-bearing link takes.
- * `undefined` when the document carries no schema metadata.
+ * reference. A reference whose closure the registry does not yet hold in
+ * full is returned as stored: the read-time resolver fails closed on it (a
+ * `{ "$ref": "cid:…" }` root resolves to nothing until its documents
+ * arrive), which is the same posture a reference-bearing link takes. That
+ * is the one condition tolerated here; a malformed member, or a
+ * recomposition that fails over a complete closure, throws — both are
+ * defects, not delivery states. `undefined` when the document carries no
+ * schema metadata.
  */
 export function readResultSchemaMeta(
   cell: Cell<unknown>,
   options?: IReadOptions,
 ): JSONSchema | undefined {
   const stored = cell.getMetaRaw(SCHEMA_META_MEMBER, options);
-  if (stored === undefined || stored === null) return undefined;
-  const schema = stored as JSONSchema;
-  try {
-    return recomposeSchemaRefs(schema, lookupSchemaDocument);
-  } catch {
-    return schema;
+  const form = classifySchemaMetaValue(stored);
+  switch (form.kind) {
+    case "absent":
+      return undefined;
+    case "inline":
+      return form.schema;
+    case "reference":
+      return isSchemaDocumentClosureComplete(form.taggedHash)
+        ? recomposeSchemaRefs(stored as JSONSchema, lookupSchemaDocument)
+        : stored as JSONSchema;
+    case "malformed":
+      throw new MalformedSchemaMetaError(form.reason);
   }
 }

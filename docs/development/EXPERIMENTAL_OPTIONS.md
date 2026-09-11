@@ -189,6 +189,9 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Status on 2026-08-19.** Phases 1 and 2 implemented (#5878, #6011), on
   by default. The flag-off behaviors stay pinned by runner tests that pass
   `false` explicitly, which is also the rollback override.
+- **Status on 2026-09-11.** A result document's `schema` metadata takes the
+  reference form under the flag (#7299), delivered and validated like a
+  link position; the flag-off path keeps it inline.
 
 ### `plainResultReceipts`
 
