@@ -54,6 +54,7 @@ import {
   type ScopeKeyIdentity,
   type SessionHolding,
   type SessionSync,
+  type SetOperation,
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
@@ -2277,7 +2278,7 @@ export class StorageManager implements IStorageManager {
         )
       ) {
         if (
-          this.isSchemaDocPersisted(space, hash) &&
+          this.isContentAddressedDocPersisted(space, hash) &&
           lookupSchemaDocument(hash) !== undefined
         ) {
           continue;
@@ -3143,7 +3144,7 @@ type NativeCommitOperation =
   }
   | { op: "delete"; id: URI; scope?: CellScope };
 
-type WireOnlyOperation = EnsureOperation;
+type WireOnlyOperation = EnsureOperation | SetOperation;
 
 const isPromiseLike = <T>(value: T | Promise<T>): value is Promise<T> =>
   typeof (value as { then?: unknown })?.then === "function";
@@ -3154,21 +3155,31 @@ const normalizeWireOnlyOperations = (
   operations
     .filter((operation) => operation.type === DOCUMENT_MIME)
     .map((operation) => {
-      if (operation.op !== "ensure") {
-        throw new Error(
-          `native commit preparation may only produce ensure operations, got ${operation.op}`,
-        );
+      if (operation.op === "set" && operation.id.startsWith("cid:")) {
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        };
       }
-      return {
-        op: "ensure" as const,
-        id: operation.id,
-        scope: operation.scope,
-        value: toExplicitDocument(operation.value),
-        ...(operation.ignore?.length ? { ignore: [...operation.ignore] } : {}),
-        ...(operation.addUnique?.length
-          ? { addUnique: [...operation.addUnique] }
-          : {}),
-      };
+      if (operation.op === "ensure") {
+        return {
+          op: "ensure" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+          ...(operation.ignore?.length
+            ? { ignore: [...operation.ignore] }
+            : {}),
+          ...(operation.addUnique?.length
+            ? { addUnique: [...operation.addUnique] }
+            : {}),
+        };
+      }
+      throw new Error(
+        `native commit preparation may only produce ensure operations or content-addressed sets, got ${operation.op}`,
+      );
     });
 
 interface WireSendReservation {
@@ -5747,8 +5758,9 @@ export class SpaceReplica
       (): ClientCommit => ({
         localSeq,
         reads: this.#buildReads(source, localSeq),
-        // Artifact ensures first, containing cell ops next, folded SQLite ops
-        // last. Ensures are wire-only and never enter the optimistic replica.
+        // Artifact publication operations first, containing cell ops next,
+        // folded SQLite ops last. Publication operations are wire-only and
+        // never enter the optimistic replica.
         operations: [
           ...wireOperations,
           ...operations.map((operation) => {

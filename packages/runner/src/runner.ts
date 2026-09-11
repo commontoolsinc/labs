@@ -12538,6 +12538,9 @@ export class Runner {
           }, rawMetaWriteAuthorization);
         }
       }
+      // The child retains its own scoped implementation selection. The parent
+      // graph owns its lifetime through retain/release, so a shared child
+      // remains valid while any current parent owns it.
       const childRun = this.#runWithStartOwnership(
         instanceTx,
         patternImpl,
@@ -12550,7 +12553,6 @@ export class Runner {
           ...(factorySelectionLink === undefined
             ? {}
             : { factorySelectionLink }),
-          implementationSelection: schedulerRehydration.implementationSelection,
           parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
         },
       );

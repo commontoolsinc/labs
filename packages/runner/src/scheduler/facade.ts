@@ -1216,13 +1216,25 @@ export class Scheduler {
    * the arriving principal's instances are not clean, so only those run
    * (B7 — the siblings stay current). A node that has not narrowed needs
    * nothing (its one output is shared); a node that never ran will run
-   * for everyone when demanded. Returns the number of nodes re-armed.
+   * for everyone when demanded. A newly resolved non-root demand may set
+   * `includeUnfanned` because a warm structure load can complete its narrowed
+   * probe before that mapping exists; that arm re-runs every matching action
+   * so it can create the newly known demanded instance. Returns the number of
+   * nodes re-armed.
    */
-  invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
+  invalidateActionsForDemandRoots(
+    rootIds: readonly string[],
+    options: { includeUnfanned?: boolean } = {},
+  ): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
+      if (
+        !options.includeUnfanned &&
+        (record.fanOut === undefined || !record.fanOut.narrowed)
+      ) {
+        continue;
+      }
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??

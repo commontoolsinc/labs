@@ -1175,6 +1175,15 @@ export class PatternManager {
             `Artifact closure ${entryIdentity} produced unexpected ${operation.op} draft operation`,
           );
         }
+        if (operation.id.startsWith("cid:")) {
+          if (operation.op !== "set") {
+            throw new Error(
+              `Artifact closure ${entryIdentity} produced unexpected ` +
+                `${operation.op} for content-addressed document ${operation.id}`,
+            );
+          }
+          return operation;
+        }
         const document = operation.value;
         const kind = isObjectNotArray(document) &&
             isObjectNotArray(document.value)

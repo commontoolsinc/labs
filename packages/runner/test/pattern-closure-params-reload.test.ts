@@ -168,7 +168,12 @@ describe("invocation-owned pattern params cold resume", () => {
         rootArgumentSchemaRef!,
       )?.taggedHash;
       expect(rootArgumentSchemaHash).toBeDefined();
-      expect(storage.isSchemaDocPersisted(space, rootArgumentSchemaHash!))
+      expect(
+        storage.isContentAddressedDocPersisted(
+          space,
+          rootArgumentSchemaHash!,
+        ),
+      )
         .toBe(true);
       runtime.runner.stop(root);
       await runtime.dispose();

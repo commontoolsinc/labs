@@ -232,6 +232,13 @@ non-transactional Promise-based `setup(undefined, ...)` is the exception: its
 code is intrinsically required before the parent graph can be constructed.
 Synchronous `run()` and transaction-bound setup remain warm-only.
 
+On a serving runtime, warm materialization may register and initially run a
+piece's actions while the structure-demand pass is still resolving another
+demanded argument or internal document back to that piece's result root. A new
+resolved-root mapping re-arms the owning root's actions after the pass installs
+the mapping. Demander identity and scope therefore do not depend on demand-row
+order or on whether factory preparation was warm or cold.
+
 ### Nested patterns close over values
 
 Authors write ordinary lexical closures:
@@ -673,8 +680,14 @@ notification that re-drives consumers. There is no valid state where an
 artifact lands later, independently of an already-durable ref, so factory input
 preparation does not poll or sleep waiting for such an arrival.
 
-An artifact ensure is resolved against durable server state, not expressed as
-a compare-and-swap read of the destination cache document:
+Publication installs exact `cid:` code and schema leaves with idempotent `set`
+operations. The memory engine verifies that each document's inner value hashes
+to its id; an equal re-set is a no-op and different content is an integrity
+failure. Source, compiled, and cache-root documents use `ensure` because their
+identity-bearing core is content-addressed while their import/root sets may
+grow and incidental annotations may differ. An artifact ensure is resolved
+against durable server state, not expressed as a compare-and-swap read of the
+destination cache document:
 
 ```text
 ensure(id, expected)
@@ -683,11 +696,13 @@ ensure(id, expected)
   different identity payload  -> integrity failure
 ```
 
-The equality payload is the canonical content-addressed artifact content;
+The equality payload is the canonical identity-bearing artifact content;
 incidental annotations, cache metadata, and CFC representation are handled by
 their owning layers and cannot turn an identical artifact into a conflict.
-Concurrent publication of the same closure is therefore idempotent and does not
-reject either containing write. Different content under one content identity is
+Both operation forms remain wire-only preparation for the containing write and
+never enter the speculative replica independently. Concurrent publication of
+the same closure is therefore idempotent and does not reject either containing
+write. Different content under one content identity is
 not a harmless race and must fail closed.
 
 Synthetic `cf:cache-root/` edges are closure-load topology, not authored module
@@ -1610,9 +1625,15 @@ ordinary synchronous speculative commit, but a commit refusal or serving-wave
 withdrawal cancels that exact child generation, reports the failure through the
 runner's node diagnostic channel, and prevents its subscriptions from writing
 again. A settlement from an older generation cannot cancel or report against a
-newer child. Every scheduled action and handler below a selected pattern
-inherits the same generation guard, composed with any scoped program-selection
-guard, so a nested action cannot outlive the dynamic factory that admitted it.
+newer child. Every scheduled action and handler owned directly by the selected
+graph inherits the same generation guard, composed with any scoped
+program-selection guard, so it cannot outlive the dynamic factory that admitted
+it. A statically nested child piece retains its own pattern identity and scoped
+program selection. The selected parent generation owns one retain/release
+reference to that registration; replacement releases that ownership, while a
+child shared by another current parent remains live until its final owner
+releases it. Actions and handlers inside the child are governed by the child's
+active registration rather than by one parent's selection generation.
 
 The same fence applies to the selected child's pattern-identity watcher. A
 queued initial or intermediate pointer notification verifies that it still
