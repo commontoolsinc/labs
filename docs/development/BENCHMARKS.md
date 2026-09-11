@@ -202,7 +202,7 @@ settling happens before the timings start.
 `packages/patterns/integration/topic-board-navigation.bench.ts` measures what a
 person waits for rather than what a component costs: a browser loading a topic
 board carrying dozens of topics, signing in, the cards appearing, opening a
-topic, and following a crossref to a sibling. Its `topic board` group charts
+topic, and following a crossref to a sibling. Its `topic board (index demand)` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
 
@@ -239,6 +239,15 @@ Three things follow from it being an end-to-end measurement:
 
 `packages/patterns/integration/topic-board-seed.ts` builds a board on its own,
 which is how to get one for a profiling session without running the benchmark.
+The seeder holds a subscription to the board's index using its durable result
+schema. This keeps the current list demanded without subscribing to each
+topic's full result. Set `CF_TOPIC_BOARD_DEMAND=full` in either board benchmark,
+or pass `--demand=full` to the seeder, to run the full-result stress workload.
+The fixture records `seedDemand`, diagnostics name it, and benchmark groups
+include `index demand` or `full demand`; compare execution arms with the same
+setting. An unqualified `topic board` series is a separate workload series.
+These subscriptions do not bound every seeding read: controller writes also
+pull their result to complete, and citation creation addresses the topics.
 
 ## The board scaling benchmark
 
@@ -247,9 +256,12 @@ change that is flat at thirty topics and quadratic at three hundred looks the
 same on the navigation benchmark's `board` series.
 `packages/patterns/integration/topic-board-scale.bench.ts` measures that same
 thing — a signed-in cold load, timed until every card has rendered — across
-board sizes of 100, 1000, and 10000, in a `topic board scale` group whose
+board sizes of 100, 1000, and 10000, in a `topic board scale (index demand)` group whose
 series are named for the sizes. The boards carry no crossrefs, so the numbers
 describe the cost of the list rather than of the join over it.
+`CF_TOPIC_BOARD_DEMAND=full` selects the separately labeled full-demand group.
+The navigation fixture's citations and the scale fixture's lack of citations
+are distinct workloads, so their timings do not form a size-only comparison.
 
 Only the 100-topic board runs today. The other two are declared and skipped,
 because a board of that size cannot be built:

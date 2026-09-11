@@ -11,7 +11,11 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "@commonfabric/piece/ops";
 
-import { describePiece, listPieceCallables } from "../lib/piece.ts";
+import {
+  describePiece,
+  getCellValue,
+  listPieceCallables,
+} from "../lib/piece.ts";
 
 /**
  * A pattern shaped like the piece this file is about: one verb, a collection
@@ -237,6 +241,59 @@ async function readsOfColdDiscovery<T>(
 }
 
 describe("piece discovery reads", () => {
+  it("reads one result field without loading its linked siblings", async () => {
+    const { result, itemsHeld } = await readsOfColdDiscovery((
+      pieces,
+      piece,
+      space,
+    ) =>
+      getCellValue(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece,
+          space,
+        },
+        ["title"],
+        {},
+        {
+          loadPieces: () => Promise.resolve(pieces as never),
+        },
+      )
+    );
+
+    expect(result).toBe("Board");
+    expect(itemsHeld).toEqual([]);
+  });
+
+  it("loads the linked members when reading their collection", async () => {
+    const { result, itemsHeld } = await readsOfColdDiscovery((
+      pieces,
+      piece,
+      space,
+    ) =>
+      getCellValue(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece,
+          space,
+        },
+        ["items"],
+        {},
+        {
+          loadPieces: () => Promise.resolve(pieces as never),
+        },
+      )
+    );
+
+    expect(result).toEqual(Array.from({ length: ITEM_COUNT }, (_, index) => ({
+      title: `Item ${index}`,
+      body: `body ${index}`,
+    })));
+    expect(itemsHeld).toHaveLength(ITEM_COUNT);
+  });
+
   it("lists the verb without syncing under the declared result type", async () => {
     const { result, syncs, itemsHeld } = await readsOfColdDiscovery((
       pieces,
