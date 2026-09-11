@@ -254,10 +254,9 @@ export interface MarkInvalidOptions {
    * output, while a refused run left nothing durable and its wait was its
    * delay — so the retry is queued past both: the debounce is not re-armed,
    * and an armed debounce or throttle readiness is released (the
-   * convergence backoff stays). Behind its debounce a retry ran only when a
-   * live demander armed the expiry wake; a one-shot `pull()` has none once
-   * it resolves, and a cold `cf wish` lookup sat on its refused first run
-   * for good (2026-09-11). A re-queue that waited on nothing — a local
+   * convergence backoff stays). Held behind its debounce, a retry would run
+   * only when a live demander armed the expiry wake, and a one-shot `pull()`
+   * has none once it resolves. A re-queue that waited on nothing — a local
    * inconsistency, a transport error — keeps its gates: there the debounce
    * is the spacing between the re-run and the local writer it raced.
    *

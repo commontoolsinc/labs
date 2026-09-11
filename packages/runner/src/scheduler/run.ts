@@ -290,12 +290,12 @@ export function watchReactiveActionCommit(state: {
       // run left nothing durable behind. So it is queued past the node's
       // freshness gates — `retry` skips the trailing-debounce re-arm and
       // releases an armed debounce or throttle readiness (§8.3; the
-      // convergence backoff stays). Behind its debounce that retry became a
-      // deferred re-run of an "already-ran" computation, which is not idle
-      // work and gets its expiry wake only from a live demander; a one-shot
-      // `pull()` has none once it resolves, so a cold `cf wish` lookup never
-      // re-ran and its refused first output stood in for the answer
-      // (2026-09-11). A local inconsistency waited on nothing, so its re-run
+      // convergence backoff stays). Held behind its debounce, the retry would
+      // be a deferred re-run of an "already-ran" computation, which is not
+      // idle work and gets its expiry wake only from a live demander; a
+      // one-shot `pull()` has none once it resolves, so the refused first
+      // output would stand in for the answer. A local inconsistency waited
+      // on nothing, so its re-run
       // keeps the debounce: that is the spacing between it and the local
       // writer it raced (an interval `#now` tick's own write, for one).
       state.markInvalid(state.action, { retry: waitedForCatchUp });
