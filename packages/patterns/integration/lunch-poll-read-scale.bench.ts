@@ -195,12 +195,18 @@ async function vote(page: Page, color: "green" | "yellow"): Promise<void> {
       probe.collect(
         `[data-option-title="Lunch 0"] cf-button[data-vote="${expected}"]`,
       ).some((button) => getComputedStyle(button).fontWeight === "700") &&
-      probe.collect('[data-vote-swatch-name="Voter 0"]').some((swatch) =>
-        getComputedStyle(swatch).backgroundColor ===
-          (expected === "green" ? "rgb(47, 138, 100)" : "rgb(212, 168, 47)") &&
-        swatch.parentElement?.parentElement?.firstElementChild?.textContent
-            ?.trim() === "Lunch 0"
-      ),
+      probe.collect('[data-vote-swatch-name="Voter 0"]').some((swatch) => {
+        if (
+          getComputedStyle(swatch).backgroundColor !==
+            (expected === "green" ? "rgb(47, 138, 100)" : "rgb(212, 168, 47)")
+        ) return false;
+        for (let row = swatch.parentElement; row; row = row.parentElement) {
+          if (row.firstElementChild?.textContent?.trim() === "Lunch 0") {
+            return true;
+          }
+        }
+        return false;
+      }),
     { args: [color] },
   );
   await settleView(page);
