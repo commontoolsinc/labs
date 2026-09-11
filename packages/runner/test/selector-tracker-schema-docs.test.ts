@@ -114,7 +114,7 @@ describe("selector-tracker-schema-docs", () => {
     expect(SelectorTracker.checkAnyOf(parent, childHash)).toBe(false);
   });
 
-  it("inherits parent definitions when a union branch has no local scope", () => {
+  it("resolves a union branch that declares no `$defs` against the union's definitions", () => {
     const definitions = { Entry: { type: "string" } } as const;
     const parent = internSchema({
       anyOf: [{ $ref: "#/$defs/Entry" }],
