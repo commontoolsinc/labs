@@ -246,11 +246,11 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /**
-   * Visits a value determined to _not_ be a valid `FabricValue`.
-   *
-   * **Note:** When this visitor is called using a function that allows for
-   * non-`FabricValue`s, the visitor engine will call this method on an
-   * ostensible `FabricValue` that did not pass its type check.
+   * Visits a value determined to _not_ be a valid `FabricValue`. Before calling
+   * this method, the visitor engine will call `isDomainExtra()`, and will only
+   * call this method if `isDomainExtra()` returned a truthy value (`throw`ing
+   * if not). So, as long as that method tells the truth, this method will only
+   * ever get called with a value which is truly compatible with `DomainExtra`.
    */
   visitNonFabricValue(
     value: DomainExtra,
