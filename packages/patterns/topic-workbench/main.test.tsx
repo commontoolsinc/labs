@@ -260,6 +260,7 @@ export default pattern(() => {
       ) === JSON.stringify([
         { label: "claude  (claude-agent-sdk)", value: "claude" },
         { label: "acp-lab  (acp)", value: "acp-lab" },
+        { label: "gemini  (acp, not on this Mac)", value: "gemini" },
       ]) &&
     findNode(
         wb[UI],
@@ -393,7 +394,17 @@ export default pattern(() => {
     firstCommand(commands.get())?.payload?.cwd === "/w/labs" &&
     firstCommand(commands.get())?.payload?.title ===
       "topic #7: Workbench topic" &&
-    firstCommand(commands.get())?.payload?.text === wb.kickoff
+    firstCommand(commands.get())?.payload?.text === wb.kickoff &&
+    firstCommand(commands.get())?.payload?.mode === "acceptEdits"
+  );
+  // The shown-but-unconfigured harness is offered and starts nothing.
+  const action_start_shown = action(() => {
+    wb.spawnSource.set("gemini");
+    wb.startSession.send();
+  });
+  const assert_shown_is_inert = assert(() =>
+    commands.get().length === 1 &&
+    wb.attachedSessions.length === 2
   );
   const assert_start_pending = assert(() =>
     wb.attachedSessions.length === 1 &&
