@@ -321,6 +321,40 @@ describe("SpaceServer", () => {
     });
   }
 
+  it("processes a pending legacy entry after sequenced arrivals", async () => {
+    const fixture = await openFixture();
+    await fixture.admit();
+    // Pending legacy rows retain their event identity without an admission
+    // sequence. The durable consequence must retire them after modern rows.
+    Engine.applyCommit(fixture.engine, {
+      space,
+      sessionId: "visibility-legacy-pending",
+      principal: service.did(),
+      commitClass: "system",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: sidecars[0],
+          patches: [{ op: "remove", path: "/value/entries/0/seq" }],
+        }],
+      },
+    });
+    expect(fixture.entries()[0].seq).toBeUndefined();
+    server.markSpaceDirty(space, [toDirtyKey(sidecars[0])]);
+    await fixture.drain();
+    expect(fixture.called).toEqual(["B", "A"]);
+    expect(fixture.storedLog()).toEqual(["B", "A"]);
+    expect(fixture.entries().map((entry) => entry.consequenced)).toEqual([
+      true,
+      true,
+    ]);
+    expect(Engine.selectPendingStreamEventDocs(fixture.engine)).toEqual([]);
+    await fixture.drain();
+    expect(fixture.called).toEqual(["B", "A"]);
+  });
+
   it("processes a re-admission after a consequenced legacy entry with no sequence", async () => {
     const fixture = await openFixture();
     await fixture.admit();
@@ -472,52 +506,76 @@ describe("SpaceServer", () => {
     }
   }
 
-  it("skips an entry whose durable consequence arrives during synchronization", async () => {
-    const fixture = await openFixture();
-    await fixture.admit();
-    const provider = fixture.runtime.storageManager.open(space);
-    const pull = provider.pullToServerHead!.bind(provider);
-    using _pull = stub(provider, "pullToServerHead", async () => {
-      Engine.applyCommit(fixture.engine, {
-        space,
-        sessionId: "visibility-consequence",
-        principal: service.did(),
-        commitClass: "system",
-        commit: {
-          localSeq: 1,
-          reads: { confirmed: [], pending: [] },
-          operations: [{
-            op: "patch",
-            id: sidecars[0],
-            patches: [{
-              op: "add",
-              path: "/value/entries/0/consequenced",
-              value: true,
+  for (const phase of ["initial sync", "visibility response"] as const) {
+    const description = phase === "initial sync"
+      ? "skips an entry whose durable consequence arrives during initial sidecar synchronization"
+      : "skips an entry whose durable consequence arrives during synchronization";
+    it(description, async () => {
+      const fixture = await openFixture();
+      await fixture.admit();
+      const provider = fixture.runtime.storageManager.open(space);
+      const pull = provider.pullToServerHead!.bind(provider);
+      const consequence = async () => {
+        Engine.applyCommit(fixture.engine, {
+          space,
+          sessionId: "visibility-consequence",
+          principal: service.did(),
+          commitClass: "system",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id: sidecars[0],
+              patches: [{
+                op: "add",
+                path: "/value/entries/0/consequenced",
+                value: true,
+              }, {
+                op: "add",
+                path: "/value/eventWatermark",
+                value: fixture.entries()[0].seq!,
+              }],
             }, {
-              op: "add",
-              path: "/value/eventWatermark",
-              value: fixture.entries()[0].seq!,
+              op: "set",
+              id: logId,
+              value: { value: ["A"] },
             }],
-          }, {
-            op: "set",
-            id: logId,
-            value: { value: ["A"] },
-          }],
-        },
+          },
+        });
+        server.markSpaceDirty(
+          space,
+          [sidecars[0], logId].map((id) => toDirtyKey(id)),
+        );
+        await server.flushSessions([space]);
+        await pull();
+      };
+      const sync = provider.sync.bind(provider);
+      let consumed = false;
+      using _sync = stub(provider, "sync", async (uri, ...args) => {
+        const result = await sync(uri, ...args);
+        if (phase === "initial sync" && uri === sidecars[0] && !consumed) {
+          consumed = true;
+          await consequence();
+        }
+        return result;
       });
-      server.markSpaceDirty(
-        space,
-        [sidecars[0], logId].map((id) => toDirtyKey(id)),
-      );
-      await server.flushSessions([space]);
-      await pull();
+      using _pull = stub(provider, "pullToServerHead", async () => {
+        if (phase === "visibility response" && !consumed) {
+          consumed = true;
+          await consequence();
+        } else {
+          await pull();
+        }
+      });
+      await fixture.drain();
+      expect(consumed).toBe(true);
+      expect(fixture.called).toEqual(["B"]);
+      expect(fixture.storedLog()).toEqual(["A", "B"]);
+      expect(fixture.entries().map((entry) => entry.consequenced === true))
+        .toEqual([true, true]);
     });
-    await fixture.drain();
-    expect(fixture.called).toEqual(["B"]);
-    expect(fixture.storedLog()).toEqual(["A", "B"]);
-    expect(fixture.entries().map((entry) => entry.consequenced === true))
-      .toEqual([true, true]);
-  });
+  }
 
   for (
     const pending of [
