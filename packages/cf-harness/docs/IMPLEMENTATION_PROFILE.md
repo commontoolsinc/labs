@@ -130,7 +130,7 @@ readiness.
 - CFC authority: Common Fabric runner/runtime evidence and trusted sandbox
   sidecars. Harness-local policy logic is conservative transport/enforcement,
   not the source of label meaning.
-- Host execution: no parent-run shell reaches the host. Two bounded host-side
+- Host execution: no parent-run shell reaches the host. Bounded host-side
   surfaces exist beside the sandbox: the browser child profile's typed `browser`
   tool and allowlisted skill scripts, bound to an explicit local CDP lease the
   harness attaches itself, and the `run_pattern` tool, which compiles
@@ -140,7 +140,10 @@ readiness.
   `assign_slug` tool registers a piece the run holds a handle to in that space's
   piece list under a caller-chosen slug. Neither surface admits arbitrary host
   commands, and both fabric-session tools are present only when a fabric session
-  is configured.
+  is configured. Dedicated Loom tools additionally invoke three fixed command
+  ids through an operator-configured host CLI, using argv and stdin with pinned
+  routing and attribution. This is an authority-only host boundary, not a new
+  flow-aware store commit gate; see [LOOM_AUTHORING.md](LOOM_AUTHORING.md).
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.
@@ -164,13 +167,15 @@ Current selectable parent tools are `bash`, `read_file`, `view_image`,
 `web_fetch`, `read_skill_resource`, `run_skill_script`, `edit_file`,
 `write_file`, `delegate_task`, `describe_handle`, `run_pattern`, `assign_slug`,
 `search_patterns`, `record_feedback`, `search_skills`, `acquire_skill`, and
-`query_docs`. Individual runs receive only their configured subset; `web_fetch`
-and `run_skill_script` are not in the ordinary default surface. The last seven
-are gated on the backing a run can supply — a fabric session for `run_pattern`,
+`query_docs`, `loom_compose`, `loom_inspect`, and `loom_authoring_context`.
+Individual runs receive only their configured subset; `web_fetch` and
+`run_skill_script` are not in the ordinary default surface. Optional tools are
+gated on the backing a run can supply — a fabric session for `run_pattern`,
 `assign_slug`, and `acquire_skill`, the pattern index for `search_patterns` and
 `record_feedback`, configured skills.sh discovery for `search_skills`, and a
-resolved documentation corpus for `query_docs` — and a tool the run cannot back
-is absent from the surface rather than present and failing, so an explicit
+resolved documentation corpus for `query_docs`, and explicit host Loom
+configuration for the three Loom tools — and a tool the run cannot back is
+absent from the surface rather than present and failing, so an explicit
 allowlist naming it does not conjure it. `run_pattern` additionally requires the
 three `--fabric-*` session flags. `browser` exists only as a built-in used by
 the authorized browser child profile and cannot be selected as a parent CLI
@@ -345,7 +350,6 @@ in-flight external side effect.
 ## Test evidence
 
 - `deno task test` — package contract suite.
-- `deno task test:integration` — environment-gated real `runsc-cfc` paths.
 - Handle-table, prompt-loop-handle, cross-agent-handle, `describe_handle`,
   schema-shape, image-attachment, compaction, provenance, provider/auth,
   `run_pattern`, Fabric-session-CFC, and local-Loom-host suites — model

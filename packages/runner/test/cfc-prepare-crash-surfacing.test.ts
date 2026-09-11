@@ -45,7 +45,6 @@ import {
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -174,7 +173,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         observed.push(result.error);
       });
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("CommitPreparationError");
       expect(String(result.error?.message)).toMatch(/divergent anyOf/);
       // ...and commit callbacks observed the same failure (rollback ran).
       expect(observed.length).toBe(1);
@@ -230,7 +229,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
         const tx = secondWriterTx(runtime, id);
         runtime.prepareTxForCommit(tx);
         const result = await tx.commit();
-        expect(result.error).toBeDefined();
+        expect(result.error?.name).toBe("CommitPreparationError");
       } finally {
         console.error = realConsoleError;
       }
@@ -310,7 +309,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
 
     const makeServer = () =>
       new MemoryV2Server.Server({
-        sessions: new SessionRegistry({ ttlMs: 600_000 }),
+        sessions: new MemoryV2Server.SessionRegistry({ ttlMs: 600_000 }),
         subscriptionRefreshDelayMs: 0,
         authorizeSessionOpen(message) {
           const principal = (message.authorization as { principal?: unknown })

@@ -57,6 +57,25 @@ describe(
       expect(failed).toBeGreaterThan(0);
     });
 
+    it("disables verification only when requested for a measurement", async () => {
+      const { passed, failed } = await runTests(
+        fixture("unexpected-violation.test.tsx"),
+        { root: FIXTURES, noIdempotencyCheck: true },
+      );
+      expect(passed).toBe(1);
+      expect(failed).toBe(0);
+    });
+
+    it("disables the participant workers' verification for a measurement", async () => {
+      const { failed } = await runTests(
+        fixture("multi-user-expected-one-violation.test.tsx"),
+        { root: FIXTURES, noIdempotencyCheck: true },
+      );
+      // This fixture requires a detected violation, so disabling detection
+      // must leave its expectation unmet.
+      expect(failed).toBe(1);
+    });
+
     it("multi-user: fails when no flagged participant saw a violation", async () => {
       const { passed, failed } = await runTests(
         fixture("multi-user-expected-but-idempotent.test.tsx"),

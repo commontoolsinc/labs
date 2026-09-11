@@ -443,17 +443,18 @@ describe("run-pattern over the pattern index", () => {
     });
 
   /**
-   * Runs the tool and then sends what the session staged for the index, which
-   * is what the prompt loop does when a session ends. A publication is held
-   * until then so a session that iterates retains one candidate per capability
-   * rather than one per successful run.
+   * Runs the tool and then sends what the session owes the index, which is
+   * what the prompt loop does when a session ends. A publication is held until
+   * then so a session that iterates retains one candidate per capability
+   * rather than one per successful run, and a run's events are waited for
+   * there because a run does not wait for them itself.
    */
   const runAndFlush = async (
     engine: CfHarnessEngine,
     input: Record<string, unknown>,
   ) => {
     const result = await engine.invokeBuiltinTool("run_pattern", input);
-    await engine.flushPatternIndexPublications();
+    await engine.flushPatternIndexLedger();
     return result;
   };
 
@@ -914,6 +915,52 @@ describe("run-pattern over the pattern index", () => {
         index.calls.filter((call) => call.fn === "recordEvent")
           .map((call) => call.body.eventType),
       ).toEqual(["instantiated", "run_failed"]);
+    });
+
+    it("waits at the session's flush for the events a finished run reported", async () => {
+      // Holding the first event signature keeps every event this run reports
+      // queued behind it, so what has reached the index when the run is over
+      // is a fact rather than a race. Identify event requests from the proof
+      // itself so changes to how the lookup is signed cannot silently bypass
+      // the gate.
+      const firstEventSignature = Promise.withResolvers<void>();
+      let recordEventSignatureCount = 0;
+      const patternIndexSigner: FirstPartyHttpSigner = {
+        did: () => signer.did(),
+        async sign(payload) {
+          const proof = new TextDecoder().decode(payload);
+          if (!proof.includes("\npath: /recordEvent\n")) {
+            return { ok: new Uint8Array(64) };
+          }
+          recordEventSignatureCount += 1;
+          if (recordEventSignatureCount === 1) {
+            await firstEventSignature.promise;
+          }
+          return { ok: new Uint8Array(64) };
+        },
+      };
+      const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
+      const engine = createEngine(index, { patternIndexSigner });
+      await engine.invokeBuiltinTool("run_pattern", {
+        patternId: "pat-doubler",
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+
+      // The run is over and both of its events are still in flight: reporting
+      // is not part of the run.
+      expect(index.calls.filter((call) => call.fn === "recordEvent")).toEqual(
+        [],
+      );
+
+      // The session's flush is what waits for them, and it is the last thing
+      // that runs before the harness process exits.
+      firstEventSignature.resolve();
+      await engine.flushPatternIndexLedger();
+      expect(
+        index.calls.filter((call) => call.fn === "recordEvent")
+          .map((call) => call.body.eventType),
+      ).toEqual(["instantiated", "run_succeeded"]);
     });
 
     it("publishes nothing when the run opted out of publishing", async () => {

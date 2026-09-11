@@ -29,8 +29,8 @@ Package exports (`deno.jsonc`): `.` → `src/index.ts` (no `mod.ts`), plus
 five subpaths — `./cell-brand`, `./wrapper-names`, `./property-optionality`,
 `./property-name`, `./numeric-expression`.
 `src/index.ts` exports the `SchemaGenerator` class, the
-`SchemaGenerationOptions` and `WriterSourceIdentity` types, and re-exports
-`MutableJSONSchemaObj`.
+`SchemaGenerationOptions`, `SchemaGenerationDiagnostic`, and
+`WriterSourceIdentity` types, and re-exports `MutableJSONSchemaObj`.
 
 Consumers, as of this writing (verified by import grep): the only external
 consumer package is `@commonfabric/ts-transformers`, along two axes:
@@ -54,13 +54,13 @@ instance (`anonymousNames` WeakMap + counter, `src/schema-generator.ts`)
 
 ## 2. Generation Entry Points And Analysis-Path Selection
 
-Two public methods (`src/interface.ts`, implemented in
-`src/schema-generator.ts`): `generateSchema(type, checker, typeNode?,
-{widenLiterals?}?, schemaHints?, sourceFile?)` — the normal,
+Two public methods on `SchemaGenerator` (`src/schema-generator.ts`):
+`generateSchema(type, checker, typeNode?,
+options?: SchemaGenerationOptions, schemaHints?, sourceFile?)` — the normal,
 type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
-typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
-passes `checker.getAnyType()` as the type, forcing the auto-detection
-below onto the node-based path.
+typeRegistry?, schemaHints?, sourceFile?, options?: SchemaGenerationOptions)`,
+a thin wrapper that passes `checker.getAnyType()` as the type, forcing the
+auto-detection below onto the node-based path.
 
 **Path selection** (`shouldUseNodeBasedAnalysis`,
 `src/schema-generator.ts`): node-based analysis is used iff a
@@ -83,13 +83,21 @@ triggers are documented in the ts-transformers behavior spec §12.
 `src/schema-generator.ts`) handles: `TypeLiteral` nodes (properties
 with `questionToken` optionality; string/number index signatures →
 `additionalProperties`, first non-undefined wins, no JSDoc),
-`ArrayTypeNode`, unions (`true` member short-circuits, `false`
+`readonly` type-operator nodes (analyze the wrapped type), `ArrayTypeNode`,
+unions (`true` member short-circuits, `false`
 members filtered, singletons unwrapped), literal nodes
 `TypeReference` nodes (wrapper detection first, then a
 scope-based name-resolution fallback for unbindable synthetic references via
 `checker.getSymbolsInScope` — plus a `Date`-by-name
 special case), keyword types, and a final
 resolve-else-`true` fallback.
+
+`readonly` marks mutability and contributes no JSON Schema keyword. A
+synthetic `readonly T[]` therefore has the same schema as its wrapped `T[]`.
+In particular, `readonly unknown[]` emits
+`{ type: "array", items: { type: "unknown" } }`, preserving the element's
+reference-only semantics. The synthetic readonly array cases in
+`test/schema-generator.test.ts` cover unknown, string, and object elements.
 
 **Observed node/type divergence — literal encodings.** The node path emits
 `const` (`{ type: "string", const: "x" }`); the type path emits
@@ -457,16 +465,52 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
 1. **Node-based** (`extractDefaultValueFromNode` + expression walk,
    `common-fabric-formatter.ts`; union-side twin
    `union-formatter.ts`): literal nodes, tuple nodes, object-literal
-   type nodes, `Record<K, never>` → `{}`, and `typeof CONST` queries resolved
+   type nodes, and `typeof CONST` queries resolved
    through import aliases to the variable initializer (unwrapping
    `as`/`satisfies`/parens/type assertions; shorthand properties via
-   `getShorthandAssignmentValueSymbol`).
-2. **Brand-payload fallback**: `Default<T,V>` carries V in a
+   `getShorthandAssignmentValueSymbol`). Inline object and tuple types are
+   extracted as a whole: an unresolved member at any depth makes the entire
+   value unresolved. Non-property type members require the complete type to
+   qualify as an empty record; they cannot be silently skipped. The applicable
+   type/brand fallbacks still run before an unresolved-default warning is emitted.
+2. **Type-based extraction** (both formatters): literal values, symbol value
+   declarations, empty object-literal types, and empty records. An alias of `{}`
+   yields `{}`, including through alias chains and imports, without requiring a
+   symbol value declaration. Empty interfaces, classes, and the broad `object`
+   type do not qualify as empty object-literal types. A record with no named
+   properties or call or construct signatures, and at least one index signature,
+   yields `{}` when
+   every index value type is `never`. This includes `Record<string, never>`,
+   `Record<PropertyKey, never>`, their intersections, and aliases of these types,
+   in both `T | Default<V>` and `Default<T, V>`. The record check does not require
+   a symbol value declaration. Every intersection constituent must be an object
+   type; a primitive intersected with an empty record does not qualify. A
+   propertyless record with `string` or `unknown` values does not qualify either.
+   Nor does a type that merely carries a `never` type argument:
+   `Record<"required", never>` and `Array<never>` both have named properties, so
+   neither yields a default. An inline `Record<K, never>` in
+   `Default<T, V>` reaches this rule through the node route's type fallback;
+   there is no name-based shortcut.
+3. **Brand-payload fallback**: `Default<T,V>` carries V in a
    `DEFAULT_MARKER`-branded payload; when the alias is resolved away
    (`T | (T & DefaultMarker<V>)`), the payload is read back type-structurally
    (`type-utils.ts`). Union-distributed brands must **agree**;
-   disagreement bails to no-default. Tested:
-   brand-payload-defaults.test.ts (12 tests).
+   disagreement bails to no-default with a warning. Only an actual
+   `DEFAULT_MARKER` property triggers this recovery; ordinary empty objects and
+   unrelated symbol brands do not. Non-`never` index signatures cannot provide a
+   literal default. Tested: brand-payload-defaults.test.ts and
+   schema/default-diagnostics.test.ts.
+
+After the applicable extraction routes for `Default<>` or `DeepDefault<>`
+return no value, the generator reports
+**Warning** `schema-default:unresolved` and attaches no default for that
+annotation. `SchemaGenerationOptions.onDiagnostic` receives the message and the
+authored node when available; without a callback the generator logs the warning.
+The transformer forwards it to its diagnostic collector, deduplicated by source
+location. An imported declaration is reported at the local schema use.
+Successful fallback extraction and valid falsy defaults (`null`, `false`, `0`,
+`""`) do not warn. Existing invalid-arity and `Default<undefined>` errors still
+throw.
 
 `default` may sit as a sibling of `$ref` (Draft 2020-12 rationale in comment,
 `common-fabric-formatter.ts`); boolean schemas become `{ default }` /
@@ -479,8 +523,10 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
   `Default`'s T as a branch (`isDefaultCoveredByUnion`).
 - An object default that would *widen* an existing object member **throws**,
   pointing at `DeepDefault`.
-- `DeepDefault<V>` requires an object target and object default (else
-  **throws**), then applies nested per-property defaults, resolving
+- `DeepDefault<V>` requires an object target and an object default type (else
+  **throws**). An unrecoverable object value emits `schema-default:unresolved`
+  with `DeepDefault<>` in the message and attaches no defaults. A recovered value
+  applies nested per-property defaults, resolving
   through local `$refs` and single-object-candidate `anyOf`s; unknown keys
   **throw**.
 - Expanded empty-array arms (`[]`/`never[]`) riding along expanded
@@ -771,8 +817,10 @@ way into the emitted schema. Lookups always try the node and
 
 ## 14. Options
 
-Exactly one generation option exists as of this writing: `widenLiterals`
-(`interface.ts`, plumbed at `schema-generator.ts`). Effects:
+`SchemaGenerationOptions` (`interface.ts`, plumbed at `schema-generator.ts`)
+supports `onDiagnostic` for recoverable generation problems (§7),
+`writerIdentityForSourceFile` for writer claims (§11), and `widenLiterals`.
+The effects of `widenLiterals` are:
 (1) single literal types emit bare base types instead of one-value enums
 (`primitive-formatter.ts`; bigint literals → `{ type: "integer" }`);
 (2) structurally-identical-modulo-enum union members merge recursively
@@ -834,9 +882,8 @@ synthetic node resolution failure → `any` → `true`
    pinned by `test/widen-literals.test.ts`): all-literal unions stay enums
    under the flag while the same literals DO widen inside mixed unions, and a
    single-literal property widens next to an unwidened literal-union sibling.
-   Compounding: `generateSchemaFromSyntheticTypeNode` takes no options, so
-   the flag is silently dropped whenever the consumer routes node-based; and
-   the transformer-side `widenLiteralType` (same name, schema-injection
+   Both generation entry points receive the same options. The transformer-side
+   `widenLiteralType` (same name, schema-injection
    pre-widening) DOES widen literal unions — the two mechanisms disagree.
    Decide the policy (including nested enum-typed properties) before changing
    the in-package behavior.
@@ -918,7 +965,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 | CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts`) | cfc-authoring tests |
 | `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts`) | — |
 | Hint shape (§13) | `SchemaHint` / `UiContractHint` (`src/interface.ts`) | — |
-| Generation options (§14) | `GenerationContext["widenLiterals"]` (`src/interface.ts`) | sole option as of this writing |
+| Generation options (§14) | `SchemaGenerationOptions` (`src/interface.ts`) | widening, writer identity, and diagnostics |
 | Throw inventory (§15) | grep `throw new Error` under `src/` | messages quoted above verified this snapshot |
 | Fixture env knobs (§17) | `test/fixtures-runner.test.ts`; `packages/test-support/src/fixture-runner.ts` | — |
 

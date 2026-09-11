@@ -2,7 +2,20 @@ import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
+
+import createApp from "@/lib/create-app.ts";
+import router from "./llm.index.ts";
 import { MessageSchema } from "./llm.routes.ts";
+
+/** The request body schema this route publishes, as JSON Schema. */
+function publishedRequestSchema(path: string): Record<string, any> {
+  const document = createApp().route("/", router).getOpenAPIDocument({
+    openapi: "3.0.0",
+    info: { version: "1.0.0", title: "Toolshed API" },
+  });
+  const operation = (document.paths as Record<string, any>)[path].post;
+  return operation.requestBody.content["application/json"].schema;
+}
 
 /**
  * `BuiltInLLMMessage`'s roles written out as values. The `satisfies` clause
@@ -23,6 +36,33 @@ type EveryRoleIsListed = AssertNever<
 >;
 
 describe("llm.routes", () => {
+  describe("LLMRequestSchema", () => {
+    // `cache` is the one field of a request whose absence means something
+    // other than "leave it alone", so what the document says about it when it
+    // is left out is part of the contract rather than an implementation
+    // detail.
+
+    it("publishes `cache` as optional, with a default of `true`", () => {
+      const schema = publishedRequestSchema("/api/ai/llm");
+      expect(schema.required).not.toContain("cache");
+      expect(schema.properties.cache).toEqual({
+        type: "boolean",
+        default: true,
+      });
+    });
+  });
+
+  describe("GenerateObjectRequestSchema", () => {
+    it("publishes `cache` as optional, with a default of `true`", () => {
+      const schema = publishedRequestSchema("/api/ai/llm/generateObject");
+      expect(schema.required).not.toContain("cache");
+      expect(schema.properties.cache).toEqual({
+        type: "boolean",
+        default: true,
+      });
+    });
+  });
+
   describe("MessageSchema", () => {
     it("accepts the roles `BuiltInLLMMessage` carries and no others", () => {
       // The route's validator is the fourth declaration of the role set, after

@@ -14,8 +14,10 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { prepareAndCommit } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-privileged-system-write",
@@ -74,7 +76,7 @@ describe("CFC privileged system write (S18)", () => {
       // rather than the generic relevant-but-unprepared guard.
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "unprivileged write to protected cfc path",
       );
@@ -227,7 +229,7 @@ describe("CFC privileged system write (S18)", () => {
       tx.setCfcEnforcementMode("enforce-explicit");
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error).toBeDefined();
+      expect(isCfcEnforcementRejection(result.error)).toBe(true);
       expect(String((result.error as Error).message)).toContain(
         "unprivileged write to protected cfc path",
       );
@@ -426,11 +428,11 @@ describe("CFC privileged system write (S18)", () => {
         `${address.id}/cfc`,
       ]);
 
-      const result = await tx.commit();
-      expect(result.error).toBeDefined();
-      expect(String((result.error as Error).message).toLowerCase()).toContain(
-        "cfc",
+      const { reasons, result } = await prepareAndCommit(tx);
+      expect(reasons).toContain(
+        `unprivileged write to protected cfc path ${address.id}/cfc`,
       );
+      expect(result.error?.name).toBe("CfcCommitRefusalError");
 
       // The stored label map survives the refused commit.
       const after = runtime.edit();
@@ -559,7 +561,8 @@ describe("CFC privileged system write (S18)", () => {
     // Carrying the key is not carrying the map. `cfc: null` — and every other
     // value `readStoredCfcMetadata` reports as absent — leaves the document
     // reading as an unlabeled one, so it erases the stored map exactly as an
-    // envelope with no `cfc` member does.
+    // envelope with no `cfc` member does. The shapes here are the ones the
+    // prepare pass can also read; the case below takes the one it cannot.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -570,7 +573,6 @@ describe("CFC privileged system write (S18)", () => {
         const [name, malformed] of [
           ["s18-root-null", null],
           ["s18-root-scalar", "not-an-envelope"],
-          ["s18-root-versionless", { labelMap: { version: 1, entries: [] } }],
         ] as const
       ) {
         const address = await seedLabeledDocument(runtime, name);
@@ -579,8 +581,55 @@ describe("CFC privileged system write (S18)", () => {
         expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
           `${address.id}/cfc`,
         ]);
-        expect((await tx.commit()).error).toBeDefined();
+        const { reasons, result } = await prepareAndCommit(tx);
+        expect(reasons).toContain(
+          `unprivileged write to protected cfc path ${address.id}/cfc`,
+        );
+        expect(result.error?.name).toBe("CfcCommitRefusalError");
       }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("refuses the commit as a preparation crash when the stored `cfc` member cannot be walked", async () => {
+    // A record at the reserved position with no `version` is one
+    // `readStoredCfcMetadata` reports as absent, so the erasure lands in
+    // `unprivilegedSystemWrites` like the shapes above. Prepare reads the same
+    // member through `storedMetadataFor`, which refuses a record it cannot
+    // walk, and that refusal replaces every reason the pass had collected, the
+    // S18 verdict among them. `CommitPreparationError` is not a terminal
+    // rejection, so the scheduler spends its bounded retry budget on a commit
+    // that refuses identically every time, where the verdict would have
+    // stopped it at the first attempt.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+    try {
+      const address = await seedLabeledDocument(
+        runtime,
+        "s18-root-versionless",
+      );
+      const tx = runtime.edit();
+      tx.writeOrThrow(address, {
+        value: { note: "two" },
+        cfc: { labelMap: { version: 1, entries: [] } },
+      });
+      expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
+        `${address.id}/cfc`,
+      ]);
+
+      const { reasons, result } = await prepareAndCommit(tx);
+      expect(reasons.join(" ")).toContain(
+        "carries no label map this build can read",
+      );
+      expect(reasons.join(" ")).not.toContain(
+        "unprivileged write to protected cfc path",
+      );
+      expect(result.error?.name).toBe("CommitPreparationError");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -656,11 +705,11 @@ describe("CFC privileged system write (S18)", () => {
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
 
       tx.setCfcEnforcementMode("enforce-explicit");
-      const result = await tx.commit();
-      expect(result.error).toBeDefined();
-      expect(String((result.error as Error).message).toLowerCase()).toContain(
-        "cfc",
+      const { reasons, result } = await prepareAndCommit(tx);
+      expect(reasons).toContain(
+        `unprivileged write to protected cfc path ${address.id}/cfc`,
       );
+      expect(result.error?.name).toBe("CfcCommitRefusalError");
     } finally {
       await runtime.dispose();
       await storageManager.close();

@@ -10,7 +10,7 @@ import {
   isStoredArgumentSchemaRefusal,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "../src/index.ts";
-import { readStoredLinkChainRaw } from "../src/runner.ts";
+import { readStoredLinkChainRaw } from "../src/stored-argument-validation.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
@@ -1108,9 +1108,21 @@ describe("pattern update validates the stored argument", () => {
         new Set(),
       );
       expect(reading.value).toBeUndefined();
+      expect(reading.cyclic).toBe(true);
+      const midPathCycle = readStoredLinkChainRaw(
+        tx,
+        cycleA.key("beyond").getAsNormalizedFullLink(),
+        new Set(),
+      );
+      expect(midPathCycle.value).toBeUndefined();
+      expect(midPathCycle.cyclic).toBe(true);
       // The other no-tree dead ends, exercised at the same seam: a doc the
       // store has never held, and a path that reads through a primitive.
       const absent = rt.getCell<unknown>(space, "walk-absent-target");
+      expect(
+        readStoredLinkChainRaw(tx, absent.getAsNormalizedFullLink(), new Set())
+          .cyclic,
+      ).toBeUndefined();
       expect(
         readStoredLinkChainRaw(
           tx,

@@ -8,9 +8,10 @@
  * A **chosen** dial is a decision somebody made, and editing it is how the
  * decision changes. A **measured** dial is worked out from the data and
  * written back by the publisher, so the value here is only the seed used
- * before there is anything to measure. The two look identical in a source
- * file, which is why `DIALS` says which each one is: somebody who tunes a
- * measured value is arguing with a tape measure.
+ * before there is anything to measure. A **derived** dial is computed from
+ * other dials, and editing it means editing those. The three look
+ * identical in a source file, which is why `DIALS` says which each one is:
+ * somebody who tunes a measured value is arguing with a tape measure.
  */
 
 /** How many jobs a pull request's tests are packed into. */
@@ -111,13 +112,20 @@ export const CHURN_HALF_LIFE_DAYS = 14;
 /** Days of decayed failure counts the churn term reads. */
 export const CHURN_WINDOW_DAYS = 60;
 
-/** Days of history the flake rate is measured over. */
+/**
+ * Runs after a disagreement over which its weight halves. Runs rather
+ * than days, because what shows a test has settled is running without
+ * disagreeing; a test that has not run has shown nothing.
+ */
+export const FLAKE_HALF_LIFE_RUNS = 200;
+
+/** Days of flake counts the flake rate reads at all. */
 export const FLAKE_WINDOW_DAYS = 60;
 
 /** Days of durations an item's cost estimate reads. */
 export const COST_WINDOW_DAYS = 7;
 
-/** The share of a lane's budget spent in descending value. */
+/** The share of the run's budget spent in descending value. */
 export const FILL_VALUE_SHARE = 0.60;
 
 /** The share spent in descending value per second. */
@@ -127,18 +135,28 @@ export const FILL_DENSITY_SHARE = 0.25;
 export const FILL_EXPLORATION_SHARE = 0.15;
 
 /** The flake rate above which an item leaves the selectable set. */
-export const FLAKE_EXCLUSION_RATE = 0.05;
+export const FLAKE_EXCLUSION_RATE = 0.005;
 
 /**
- * The flake rates at which an item is run twice and three times. Below
- * the first it runs once. Every band has to stay under
- * `FLAKE_EXCLUSION_RATE`, or an item reaches the exclusion before it
- * reaches the band and the band never fires.
+ * What an item that has ever disagreed with itself runs, however rarely
+ * it does. One execution cannot tell a pass from a lucky pass, so an
+ * item with any flake rate at all is run at least twice.
  */
-export const FLAKE_REPEAT_RATES: readonly number[] = [0.01, 0.03];
+export const FLAKE_MIN_EXECUTIONS = 2;
+
+/**
+ * The flake rate the execution count is anchored at, with
+ * `FLAKE_ANCHOR_EXECUTIONS`. Between that point and
+ * `FLAKE_MIN_EXECUTIONS` at a rate of nothing, and beyond it, the count
+ * is the line through the two.
+ */
+export const FLAKE_ANCHOR_RATE = 0.01;
+
+/** What an item at `FLAKE_ANCHOR_RATE` runs. */
+export const FLAKE_ANCHOR_EXECUTIONS = 5;
 
 /** The most times one item is run inside a lane. */
-export const MAX_REPEATS = 3;
+export const MAX_EXECUTIONS = 10;
 
 /** The suite flake rate above which a suite's new items are repeated. */
 export const SUITE_FLAKE_PRIOR_RATE = 0.02;
@@ -206,8 +224,26 @@ export const SAME_COMMIT_REACH_DAYS = 2;
  */
 export const FLAKE_COMMIT_REACH = 8;
 
-/** Days before the coverage attribution map is rebuilt. */
-export const ATTRIBUTION_MAP_DAYS = 7;
+/**
+ * How alike two test names have to be before one is offered as the
+ * other's new name, between zero and one. A rename usually keeps most of
+ * a name, and below this the pairing is a guess: a wrong bridge silently
+ * credits one test with another's record, and the whole score rests on
+ * catch attribution, so there is no downstream check that would notice.
+ */
+export const RENAME_SIMILARITY = 0.7;
+
+/**
+ * How far ahead of the next candidate the best pairing has to be before
+ * a rename is offered, in the same units. Test names share a describe
+ * chain, so several leaves under one chain are alike; what separates a
+ * rename from a deletion beside an unrelated addition is that a rename's
+ * new name is clearly closer than anything else that arrived.
+ */
+export const RENAME_MARGIN = 0.1;
+
+/** The most rename suggestions one comment carries. */
+export const RENAME_SUGGESTIONS = 5;
 
 /**
  * Catches a rename may discard before the alias gate fails a pull
@@ -266,7 +302,7 @@ export const EXCLUDED_FROM_COVERAGE_GATE: ReadonlyMap<string, string> = new Map(
   ],
 );
 
-/** Whether a dial is a decision or a measurement. */
+/** Whether a dial is a decision, a measurement, or computed. */
 export type DialSource = "chosen" | "measured" | "derived";
 
 /** One dial, as `deno task test-selection dials` prints it. */
@@ -280,11 +316,20 @@ export interface Dial {
   why: string;
 }
 
+/** Returns `dial`'s value as one line of text. */
+export function dialValue(dial: Dial): string {
+  return Array.isArray(dial.value)
+    ? dial.value.join(", ")
+    : dial.value === undefined
+    ? "off"
+    : String(dial.value);
+}
+
 /**
  * Every dial, with the unit its value counts and the reason to move it.
  * The units matter because several dials are bare fractions that do not
  * mean the same thing: `WEIGHT_BREADTH` is a share of a test's score and
- * `FILL_DENSITY_SHARE` is a share of a lane's budget, and naming the unit
+ * `FILL_DENSITY_SHARE` is a share of the run's budget, and naming the unit
  * is what keeps them from being compared to each other.
  */
 export const DIALS: readonly Dial[] = [
@@ -306,8 +351,8 @@ export const DIALS: readonly Dial[] = [
       "Up when more should fit in a lane; down when five minutes is longer " +
       "than anybody will wait for a first answer. The lane jobs that this " +
       "bounds do not exist yet; when they do, their work-step and job " +
-      "timeouts in deno.yml have to move with it, and nothing checks that " +
-      "until they are written.",
+      "timeouts in `deno.yml` have to move with it, and nothing checks " +
+      "that until they are written.",
   },
   {
     name: "LANE_PROLOGUE_SECONDS",
@@ -350,9 +395,9 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "derived",
     why: "Nothing edits this. It is the full run's bound less the same " +
-      "prologue and safety margin a pull request's lane pays, so a lane of " +
-      "either run is packed against what is left after the parts the " +
-      "packer does not control.",
+      "prologue and safety margin a pull request's lane pays, since a lane " +
+      "of either run is the same job doing the same setup on the same " +
+      "runner.",
   },
   {
     name: "FULL_RUN_LABEL",
@@ -413,9 +458,9 @@ export const DIALS: readonly Dial[] = [
     value: PROVEN_SATURATION,
     unit: "catches",
     setBy: "chosen",
-    why:
-      "Up when four catches should outrank one by more; down when one catch " +
-      "should already be worth nearly everything a test can earn.",
+    why: "Where the `proven` term reaches half its ceiling. Up when the " +
+      "term should go on telling eight catches from four; down when one " +
+      "catch should already be worth nearly everything a test can earn.",
   },
   {
     name: "FRESHNESS_HALF_LIFE_DAYS",
@@ -468,18 +513,19 @@ export const DIALS: readonly Dial[] = [
     value: BREADTH_SATURATION,
     unit: "sources",
     setBy: "chosen",
-    why:
-      "Up when four sources should outrank one by more; down when one source " +
-      "should already be worth nearly all the breadth term can give.",
+    why: "Where the `breadth` term reaches half its ceiling. Up when the " +
+      "term should go on telling eight sources from four; down when one " +
+      "source should already be worth nearly all it can give.",
   },
   {
     name: "ENVIRONMENTAL_MIN_SOURCES",
     value: ENVIRONMENTAL_MIN_SOURCES,
     unit: "sources",
     setBy: "chosen",
-    why: "Up when a genuinely broad regression is being written off as the " +
-      "environment; down when a broken runner's failures are still being " +
-      "counted as catches.",
+    why: "How many distinct sources a failure must span inside " +
+      "`CATCH_BREADTH_WINDOW_DAYS` before it reads as the environment. Up " +
+      "when a genuinely broad regression is written off; down when a " +
+      "broken runner's failures still count as catches.",
   },
   {
     name: "CHURN_HALF_LIFE_DAYS",
@@ -500,13 +546,25 @@ export const DIALS: readonly Dial[] = [
       "rather than a policy one.",
   },
   {
+    name: "FLAKE_HALF_LIFE_RUNS",
+    value: FLAKE_HALF_LIFE_RUNS,
+    unit: "runs",
+    setBy: "chosen",
+    why: "How many runs without disagreeing halve what a disagreement counts " +
+      "for. It is also how much evidence the share is measured over, so far " +
+      "below one over `FLAKE_EXCLUSION_RATE` the share swings about on too " +
+      "little: up when it does; down when a test that has plainly settled " +
+      "is still judged by what it did.",
+  },
+  {
     name: "FLAKE_WINDOW_DAYS",
     value: FLAKE_WINDOW_DAYS,
     unit: "days",
     setBy: "chosen",
-    why:
-      "Up when a flake rate swings about on too little evidence; down when a " +
-      "test that has since been fixed stays excluded.",
+    why: "How far back the counts are read at all. The weight decays by " +
+      "runs rather than by days, so this bounds what is remembered rather " +
+      "than marking where the weight has faded: a test that runs rarely can " +
+      "still be carrying weight when its days fall off the end.",
   },
   {
     name: "COST_WINDOW_DAYS",
@@ -520,7 +578,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_VALUE_SHARE",
     value: FILL_VALUE_SHARE,
-    unit: "share of the budget",
+    unit: "share of the run's budget",
     setBy: "chosen",
     why: "Up when expensive high-value tests are crowded out by cheap ones; " +
       "down when a lane spends its budget on a few slow tests and runs " +
@@ -529,7 +587,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_DENSITY_SHARE",
     value: FILL_DENSITY_SHARE,
-    unit: "share of the budget",
+    unit: "share of the run's budget",
     setBy: "chosen",
     why: "Up when more of the cheap tail should run; down when the tail is " +
       "displacing tests with a record.",
@@ -537,7 +595,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_EXPLORATION_SHARE",
     value: FILL_EXPLORATION_SHARE,
-    unit: "share of the budget",
+    unit: "share of the run's budget",
     setBy: "chosen",
     why:
       "Up when the unselected corpus is going stale; down when lanes spend " +
@@ -553,23 +611,40 @@ export const DIALS: readonly Dial[] = [
       "flakes are still blocking people.",
   },
   {
-    name: "FLAKE_REPEAT_RATES",
-    value: FLAKE_REPEAT_RATES,
-    unit: "share of runs",
+    name: "FLAKE_MIN_EXECUTIONS",
+    value: FLAKE_MIN_EXECUTIONS,
+    unit: "runs of one item",
     setBy: "chosen",
-    why: "Up when repeats cost more lane time than the intermittent failures " +
-      "they catch are worth; down when intermittent failures are still " +
-      "slipping through. Every band stays under FLAKE_EXCLUSION_RATE, so " +
-      "raising one past that rate means raising the rate too.",
+    why: "What an item that has ever disagreed runs. Down to one when the " +
+      "cheapest evidence of intermittency is not worth a second execution; " +
+      "nowhere useful above two, since the line through the anchor covers " +
+      "everything flakier.",
   },
   {
-    name: "MAX_REPEATS",
-    value: MAX_REPEATS,
+    name: "FLAKE_ANCHOR_RATE",
+    value: FLAKE_ANCHOR_RATE,
+    unit: "share of runs",
+    setBy: "chosen",
+    why: "With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes " +
+      "through. Down to make the count climb faster with the rate; up to " +
+      "make it climb slower.",
+  },
+  {
+    name: "FLAKE_ANCHOR_EXECUTIONS",
+    value: FLAKE_ANCHOR_EXECUTIONS,
+    unit: "runs of one item",
+    setBy: "chosen",
+    why: "What an item at `FLAKE_ANCHOR_RATE` runs. Up when intermittent " +
+      "regressions still get through; down when executions crowd a lane.",
+  },
+  {
+    name: "MAX_EXECUTIONS",
+    value: MAX_EXECUTIONS,
     unit: "runs of one item",
     setBy: "chosen",
     why:
-      "Up when intermittent regressions still get through; down when repeats " +
-      "are crowding a lane.",
+      "Where the line stops. Up when the flakiest items a change forces in " +
+      "still are not proven by what runs; down when they crowd a lane.",
   },
   {
     name: "SUITE_FLAKE_PRIOR_RATE",
@@ -653,29 +728,53 @@ export const DIALS: readonly Dial[] = [
     value: SAME_COMMIT_REACH_DAYS,
     unit: "days",
     setBy: "chosen",
-    why: "Up when reruns are landing far enough behind the run they repeat " +
-      "that their disagreement is being counted as a catch; down when the " +
-      "fold's memory is the thing that will not fit. It costs the number " +
-      "of identities that have failed times the number of commits, so it " +
-      "is the dial to check first when a run runs out of memory.",
+    why: "How far back the fold remembers a commit's outcomes, so that a " +
+      "rerun landing in a later batch than the run it repeats is still read " +
+      "as the test disagreeing with itself. Up when reruns land far enough " +
+      "behind that their disagreement is being counted as a catch; down " +
+      "when the fold's memory is the thing that will not fit. It costs the " +
+      "number of identities that have failed times the number of commits, " +
+      "so it is the dial to check first when a run runs out of memory.",
   },
   {
     name: "FLAKE_COMMIT_REACH",
     value: FLAKE_COMMIT_REACH,
     unit: "commits",
     setBy: "chosen",
-    why: "Up when reruns of a commit arrive far enough behind the run they " +
-      "repeat that their disagreement is being counted as a catch; down " +
-      "when the fold's memory is the thing that will not fit.",
+    why: "How many of the most recently observed commits the fold keeps " +
+      "every identity's outcomes at. Past that a commit keeps only the " +
+      "identities that have already failed, so this bounds a test's first " +
+      "failure: up when one lands more commits after the pass it disagrees " +
+      "with than this and is counted as a catch; down when the fold's " +
+      "memory is the thing that will not fit.",
   },
   {
-    name: "ATTRIBUTION_MAP_DAYS",
-    value: ATTRIBUTION_MAP_DAYS,
-    unit: "days",
+    name: "RENAME_SIMILARITY",
+    value: RENAME_SIMILARITY,
+    unit: "share of the longer name's own part",
+    setBy: "chosen",
+    why: "Up when the run report offers rename pairings nobody meant; down " +
+      "when a rename that discarded history goes unoffered. It only " +
+      "decides what is suggested — nothing is written to the alias file " +
+      "without somebody appending it.",
+  },
+  {
+    name: "RENAME_MARGIN",
+    value: RENAME_MARGIN,
+    unit: "share of the longer name's own part",
     setBy: "chosen",
     why:
-      "Up when rebuilding the map costs more than its staleness does; down " +
-      "when changed lines keep resolving to tests that have moved.",
+      "Up when the run report pairs a deletion with an unrelated addition; " +
+      "down when a rename made alongside another rename in the same area " +
+      "goes unoffered.",
+  },
+  {
+    name: "RENAME_SUGGESTIONS",
+    value: RENAME_SUGGESTIONS,
+    unit: "suggestions in one comment",
+    setBy: "chosen",
+    why: "Up when a change that renamed many tests has its later suggestions " +
+      "cut off; down when a comment carrying this many is one nobody reads.",
   },
   {
     name: "ALIAS_GATE_MIN_CATCHES",

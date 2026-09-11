@@ -314,6 +314,31 @@ Deno.test("Codex waits for failed startup cleanup before retrying", async () => 
   }
 });
 
+Deno.test("stopping Codex twice at once settles both calls together", async () => {
+  const dir = await Deno.makeTempDir();
+  const server = `${dir}/deferred-codex`;
+  await Deno.writeTextFile(server, DEFERRED_SERVER);
+  await Deno.chmod(server, 0o755);
+  const client = new CodexJsonlClient([server]);
+  try {
+    await client.start();
+    const first = client.stop();
+    const second = client.stop();
+    // A second call while a stop is in flight settles no later than the
+    // first does. That the two are one stop is not observable from here.
+    let secondSettled = false;
+    const observed = second.then(() => {
+      secondSettled = true;
+    });
+    await first;
+    assertEquals(secondSettled, true);
+    await observed;
+  } finally {
+    await client.stop();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("stopping Codex rejects pending requests and notification waits", async () => {
   const dir = await Deno.makeTempDir();
   const server = `${dir}/deferred-codex`;

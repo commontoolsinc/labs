@@ -102,6 +102,16 @@ is not a substitute for it.
 `docs/development/pr-review-comments.md` covers reading and answering the review
 comments a pull request collects.
 
+### Running the CLI
+
+The `cf` CLI runs from source through `bin/cf`, which `deno task install-cf`
+puts on PATH once per machine, and `skills/cf/SKILL.md` covers invoking it.
+`deno task cf …` runs the same CLI from any directory inside the checkout and
+needs nothing on PATH, which makes it the spelling for a shell where `cf` is not
+found, as an agent's non-interactive shell is on a machine that never ran the
+install. The two differ in one respect: `cf which`, which reports the checkout a
+`cf` would run, is answered by `bin/cf` alone.
+
 ### Avoid timeouts, retry loops, and sleeps
 
 Timeouts cause flakiness because they put an upper bound on success: anything
@@ -165,7 +175,8 @@ If you are developing runtime code, start with:
   poll is the honest tool
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime
   coverage and transformer-based pattern coverage), which CI job collects which,
-  and why the pattern integration jobs do not set `CF_PATTERN_COVERAGE_DIR`
+  and why only one of the two pattern integration arms collects authored-pattern
+  coverage
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
 - `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
@@ -330,7 +341,8 @@ Each of these gates fails CI on its own, and none of them run as part of
   string is identical; written as the byte, a single NUL makes the whole file
   read as binary, so `grep` skips it silently
 - `deno task check-skill-facts` — a path or import cited by a skill, an
-  `AGENTS.md`, or a rule that stopped resolving
+  `AGENTS.md`, a rule, or a hook script under `.claude/scripts/` that stopped
+  resolving
 - `deno task check-verb-session-sync` — a `cf` command or act reference in
   `docs/common/verbs/the-verb-session.md` or
   `docs/common/verbs/session-walkthrough.md` that its demo script does not back;

@@ -1,10 +1,9 @@
-import { FabricInstance } from "@commonfabric/data-model";
+import { FabricInstance, refuseFabricInstance } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { isCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -51,13 +50,16 @@ export function connectInputAndOutputs(node: NodeRef) {
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
 
-  // We will also apply ifc tags from inputs to outputs, unless the module has
-  // precise built-in flow handling for its result.
-  if (
-    !isObjectOrArray(node.module) || node.module.propagateInputIfc !== false
-  ) {
-    applyInputIfcToOutput(node.inputs, node.outputs);
-  }
+  // Every module's outputs carry the join of its inputs' ifc tags. The graph is
+  // assembled before anything is read, so the join over-approximates what any
+  // one attempt goes on to consume, and it stays the floor: it mints a
+  // `declared` entry, and a path's effective label is the join of all its
+  // components, so no later measurement narrows it. Labeling an output below
+  // the join is the flow-precision claim of CFC §8.9.1, which that section
+  // holds to trust in the executing implementation for `flow-taint-precision`
+  // under the acting user, and this seam names no user.
+  // `docs/specs/cfc-render-boundary-composition.md` states the rest.
+  applyInputIfcToOutput(node.inputs, node.outputs);
 }
 
 export function applyArgumentIfcToResult(

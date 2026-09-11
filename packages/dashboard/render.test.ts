@@ -110,14 +110,14 @@ Deno.test("renderTile: label and sub are escaped — a hostile label cannot inje
 Deno.test("renderTile: value, extra and aside are trusted html; hint is escaped", () => {
   const html = renderTile(view({
     value: `<b>42</b>`,
-    aside: `<span class="hmtd">$12</span>`,
+    aside: `<span class="hfacet">$12</span>`,
     extra: `<svg viewBox="0 0 1 1"></svg>`,
     hint: `commits ↗ <not a tag>`,
   }));
   // A tile builds these itself, escaping any data it puts in them.
   assertStringIncludes(html, `<p class="big good"><b>42</b></p>`);
   assert(!html.includes(`title="&lt;b&gt;42&lt;/b&gt;"`));
-  assertStringIncludes(html, `<span class="hmtd">$12</span>`);
+  assertStringIncludes(html, `<span class="hfacet">$12</span>`);
   assertStringIncludes(html, `<svg viewBox="0 0 1 1"></svg>`);
   // The hint is plain text from the tile, so the renderer escapes it.
   assertStringIncludes(

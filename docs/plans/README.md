@@ -10,6 +10,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Collection indexes and keyed lookup](collection-index-contract.md) defines
+  proposed B1/B2 semantics and acceptance tests before implementation.
+
+- [Pattern-test read budgets](read-cost-budgets.md) specifies opt-in limits,
+  execution coverage, failure diagnostics, and the A3 demonstration.
+
+- [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
+  executes the design in PR #7155 with checkable measurement, collection
+  operator, multi-replica correctness, and authoring-guidance stages.
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement
   through lint and new-source admission.
@@ -62,6 +71,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
+- [Making pattern computation cost declarable and visible](pattern-computation-cost.md)
+  pairs two repairs to the same gap: the collection algebra has incremental
+  `map`, `filter`, and `flatMap` but no `groupBy`, keyed lookup, join, or
+  incremental `reduce`, so a group-by is written as nested scans over a
+  reactive array; and a scheduler node records how often an action ran but not
+  how much it read, so the cost is invisible until somebody profiles. Carries
+  the access counter, the missing operators, the replication failures that
+  currently push authors off the incremental path, and the authoring guidance
+  that steers them into the expensive construct.
 - [Choosing which tests a pull request runs](pull-request-test-selection.md)
   replaces the sixty-seven pull-request jobs with five, each running a subset
   chosen from what the record store knows about which tests have caught real

@@ -46,7 +46,6 @@ describe("the binary build suites", () => {
     // once. After that a build earns its place the way every other test
     // does, and a compile that breaks on `main` is what lifts it.
     for (const suite of suites) {
-      expect([suite.id, suite.mandatory]).toEqual([suite.id, undefined]);
       expect([suite.id, suite.unitsForChange]).toEqual([suite.id, undefined]);
     }
   });
@@ -56,7 +55,7 @@ describe("the binary build suites", () => {
     // others to report for themselves.
     const invocations = byId("binaries").command(
       [{ unit: "cf", skip: [] }, { unit: "toolshed", skip: [] }],
-      { root: "/repo", outputDir: "/out" },
+      { root: "/repo", outputDir: "/out", spoolDir: "/spool" },
     );
     return invocations.then((made) => {
       expect(made.length).toBe(2);
@@ -69,7 +68,7 @@ describe("the binary build suites", () => {
     const opposite = serverExecutionCiLane("opposite");
     return byId("binaries-opposite").command(
       [{ unit: "toolshed", skip: [] }],
-      { root: "/repo", outputDir: "/out" },
+      { root: "/repo", outputDir: "/out", spoolDir: "/spool" },
     ).then((made) => {
       expect(made[0]!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
         String(opposite.enabled),

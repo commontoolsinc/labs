@@ -21,6 +21,8 @@ import {
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
@@ -302,10 +304,14 @@ describe("generateObject outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.markCfcRelevant("generateObject retry regression");
+      refuseAtCommitBoundary(
+        rejectedTx,
+        space,
+        "generateObject retry regression",
+      );
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       await runtime.idle();
       expect(generateObjectCalls).toEqual([]);
 
@@ -402,10 +408,14 @@ describe("generateObject outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.markCfcRelevant("generateObject tool retry regression");
+      refuseAtCommitBoundary(
+        rejectedTx,
+        space,
+        "generateObject tool retry regression",
+      );
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(isCfcEnforcementRejection(rejectedResult.error)).toBe(true);
       await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 

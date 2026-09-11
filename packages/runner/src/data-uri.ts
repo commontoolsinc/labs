@@ -27,6 +27,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  refuseFabricInstance,
 } from "@commonfabric/data-model";
 import {
   dataUriFromValue,
@@ -37,7 +38,6 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,

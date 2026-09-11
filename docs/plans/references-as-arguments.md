@@ -100,6 +100,7 @@ At the CLI that table now reads:
 | --- | --- |
 | the address a read emits (`/of:…`) | converted to the link envelope; the edge lands on the target |
 | the runtime link envelope | accepted (#5880); the edge lands on the target |
+| the `{"$link": "/of:…"}` object a marked read renders, alone or with projected contents beside it | converted as the address inside it; the edge lands on the target |
 | a string in no address form | refused naming the position and the `/of:…` form |
 | a literal shape-matching object | refused — an inline copy would store a detached document |
 
