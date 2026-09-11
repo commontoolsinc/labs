@@ -15,7 +15,7 @@
     "#7279: merged as 6472ea93df after all 69 CI gates, zero-issue Cubic review, and clean antagonistic review.",
     "#7289: merged as b18d90b6aa with clean CI and Cubic/antagonistic reviews.",
     "#7285: merged as 1407825b0c after all current-head CI gates, zero-issue Cubic review, and clean antagonistic review.",
-    "#7257: 1,423 runner tests / 8,892 steps; 1,167 transformer tests / 960 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
+    "#7257: 1,423 runner tests / 8,895 steps; 1,167 transformer tests / 960 steps; full CLI passes all three runs; 146 generated patterns; eight vintages; all six scale assertions; 46 type groups and 599 docs blocks pass.",
     "#7294: index/lookup contract merged as 039e8aecb0 after clean CI and Cubic/antagonistic reviews.",
     "Full-review follow-up: runner 1423 tests/8895 steps, CLI 1824 tests/2932 steps plus serial groups, all 46 type groups, 599 documentation blocks, all three scale budgets, and all four browser row cases pass. Skipped-step regression covers 27 previously uncovered CLI lines."
   ],
