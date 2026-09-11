@@ -1,10 +1,10 @@
 {
-  "updated": "2026-09-11T03:39:35.462449+00:00",
+  "updated": "2026-09-11T04:49:55.656447+00:00",
   "title": "Pattern computation cost",
   "design": "https://github.com/commontoolsinc/labs/pull/7155",
-  "pr": "https://github.com/commontoolsinc/labs/pull/7282",
-  "activity": "#7257 landed with all 69 checks and clean reviews. #7282 scale limits pass all six assertions, 413 pattern checks, the full pattern package, and 46 type groups against main; preparing its own CI and review. The lookup foundation is under review in #7304.",
-  "review": "#7257 is merged with clean Cubic/antagonistic reviews. #7282 requires its own current-head CI and clean Cubic review before landing.",
+  "pr": "https://github.com/commontoolsinc/labs/pull/7307",
+  "activity": "D3 validation passes. Cubic identified two dashboard ledger inconsistencies; both are repaired for a fresh review.",
+  "review": "Antagonistic D3 review is clean after correcting status wording and verifying reentry of both metadata scopes. The D3 PR requires its own CI and Cubic review before landing.",
   "checks": [
     "#7241: all 69 CI gates passed; latest Cubic run reported zero issues; merged as e70704f206.",
     "#7256: all 69 CI gates passed with clean Cubic/antagonistic reviews; merged as 8d3c7dbc3c.",
@@ -20,7 +20,10 @@
     "#7300 merged as efc91a38b6 after all 69 current-head checks and clean Cubic/antagonistic reviews; generic Cell aliases preserve resolved payload types.",
     "#7257 current implementation validation (2b24f0823f): 1,428 runner tests / 8,909 steps; full CLI suites; 1,168 transformer tests / 961 steps; 46 type groups; 599 documentation blocks; four synthetic browser row cases; formatting and lint pass. Generated-pattern, vintage, and scale acceptance checkpoints are detailed in the PR.",
     "#7257 merged as c122d6a9fc after all 69 current-head checks and zero-issue full Cubic review across 43 files, with clean antagonistic review.",
-    "#7282 main integration: all six functional assertions and declared budgets, 413 authoritative pattern checks, full pattern package including browser tests, and all 46 type groups pass."
+    "#7282 main integration: all six functional assertions and declared budgets, 413 authoritative pattern checks, full pattern package including browser tests, and all 46 type groups pass.",
+    "#7304 merged as c0454ab24e after all 69 exact-head checks, zero issues in the full nine-file Cubic rereview, and clean antagonistic review.",
+    "D3 local validation: 1,431 runner tests / 8,923 steps; 46 type groups; 599 documentation blocks; history index, formatting, lint, and six exact reuse/control benchmark counts pass. Antagonistic review is clean.",
+    "#7282 merged as be92af0510 after all 69 exact-head checks, zero-issue Cubic review, and clean antagonistic review; all six scale assertions pass."
   ],
   "stages": [
     {
@@ -45,13 +48,13 @@
       "id": "A3",
       "title": "Read budgets and whole-step coverage",
       "status": "done",
-      "detail": "Read budgets and whole-step attempt coverage landed in #7257 after all CI and review gates passed."
+      "detail": "Read budgets and whole-step attempt accounting landed in #7257 after all CI and review gates passed."
     },
     {
       "id": "A4",
       "title": "Read-side benchmark",
-      "status": "review",
-      "detail": "Browser benchmark landed in #7261. Scale-limit fixtures at 74, 296, and 1,184 votes are implemented and validated in #7282; its CI and reviews remain before merge."
+      "status": "done",
+      "detail": "Browser benchmark landed in #7261. Scale assertions for 74, 296, and 1,184 votes landed in #7282 after all six assertions, full package/type checks, CI, and clean reviews."
     },
     {
       "id": "A5",
@@ -69,13 +72,13 @@
       "id": "B1",
       "title": "Grouping and unique-key indexing",
       "status": "active",
-      "detail": "Contract and compiler support landed in #7294/#7300. Typed lookup foundation is under review in #7304. Group/key producers and bucket maintenance remain pending."
+      "detail": "Typed lookup and key-resolution foundation landed in #7304. GroupBy/keyBy producers, bucket maintenance, and ownership work continue."
     },
     {
       "id": "B2",
       "title": "Keyed lookup and join",
       "status": "todo",
-      "detail": "Lookup foundation in #7304 demonstrates bucket isolation, Cell identity, and durable resume. Join implementation remains pending."
+      "detail": "Typed lookup landed in #7304 with bucket isolation, Cell identity, linked rows, and durable resume. Join implementation remains pending."
     },
     {
       "id": "B3",
@@ -134,8 +137,8 @@
     {
       "id": "D3",
       "title": "Scoped snapshot memo verification",
-      "status": "todo",
-      "detail": "Implementation exists; verify isolation and measure reuse."
+      "status": "review",
+      "detail": "Implemented and validated: 41 snapshot-memo steps, full runner suite, and exact reuse counts at three sizes in metadata and historical scopes. Awaiting D3 PR gates."
     },
     {
       "id": "E1",
@@ -222,9 +225,9 @@
       "detail": "Compare the same interaction before and after migration, with read work and measured time."
     }
   ],
-  "validatedRevision": "21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
+  "validatedRevision": "4f2057b0d64c95e35558ff224786f4b7712fa173",
   "validationProvenance": {
-    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/21fc2fb6a9c0055a2d2e3055dcd7e1fba1bbeed3",
-    "scope": "Local package, type, pattern, browser, and vintage validation of the integrated implementation. This is the parent of published dashboard checkpoint d67c923566146faa6f7b2493b1828140295f7d47. It does not identify the separately recorded browser baseline capture."
+    "revisionUrl": "https://github.com/commontoolsinc/labs/commit/4f2057b0d64c95e35558ff224786f4b7712fa173",
+    "scope": "D3 tests, benchmark, and documentation checkpoint. Full runner and final focused snapshot tests pass; this revision does not identify separately recorded browser captures."
   }
 }

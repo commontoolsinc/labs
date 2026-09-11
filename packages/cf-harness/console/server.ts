@@ -73,6 +73,7 @@ import {
 import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest.ts";
 import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
+import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
@@ -110,6 +111,7 @@ import {
 } from "../src/sandbox/docker-runsc.ts";
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import { parseConnectorGrants } from "./connector-grants.ts";
 import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import { liveCanonicalRedirect } from "./src/mount.ts";
 import {
@@ -334,6 +336,30 @@ const parseTaskInputCells = (
     specs.push(spec);
   }
   return specs;
+};
+
+/**
+ * Refuses a task whose input cells collide with the console's own connector
+ * grants. Both reach the model as a name paired with a token, so two of the
+ * same name is a prompt that says one word for two references — and the caller
+ * cannot see the grants to avoid them, which is why the refusal names the
+ * connection the grant came from rather than only the word.
+ *
+ * @throws Error naming both sides, which the route answers 400 with.
+ */
+const checkTaskInputCellNames = (
+  inputCells: readonly HarnessInputCellSpec[],
+  connectorGrants: readonly HarnessConnectorGrantSpec[],
+): void => {
+  for (const cell of inputCells) {
+    const grant = connectorGrants.find((entry) => entry.name === cell.name);
+    if (grant !== undefined) {
+      throw new Error(
+        `inputCells names \`${cell.name}\`, which is already this console's ` +
+          `grant for the \`${grant.source.connection}\` connector handle`,
+      );
+    }
+  }
 };
 
 /**
@@ -703,6 +729,12 @@ export const resolveConsoleConfig = async (
     skillScriptExecutionTarget: "sandbox",
     handleValueOrigins: [],
     inputCells: [],
+    // The exception: the connector handles the launcher resolved off the loom
+    // instance behind this fabric. They belong to the console rather than to a
+    // task, so every session it runs is granted them at start.
+    connectorGrants: parseConnectorGrants(
+      nonEmpty(env.CF_HARNESS_CONNECTOR_GRANTS),
+    ),
     patternRefs: [],
     // The tool surface is left to the session's own backing rather than
     // listed here, so a tool the harness gains reaches this surface with it.
@@ -1322,6 +1354,7 @@ export class ConsoleServer {
     let patternRefs: readonly HarnessPatternRefSpec[];
     try {
       inputCells = parseTaskInputCells(body.inputCells);
+      checkTaskInputCellNames(inputCells, this.#config.connectorGrants);
       patternRefs = parseTaskPatternRefs(body.patternRefs);
     } catch (error) {
       return Response.json({

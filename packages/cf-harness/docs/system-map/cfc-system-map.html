@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-11", sha: "9eb5400fef" };
+    const SNAPSHOT = { date: "2026-09-11", sha: "1d4bfda3de" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2295,7 +2295,7 @@
       e_conn_sqlite:
         `<p>Today: rows stop in <code>source-records.db</code> and <code>msgvault.db</code>. Intended: <code>loom-daemon</code> injects a read-only <code>SqliteDb</code> handle cell and a freshness cell into the target space.</p>`,
       e_sqlite_spaces:
-        `<p>Once the handle cell exists it is an ordinary same-space cell, so <code>--input-cell</code> and <code>/api/task inputCells</code> carry it into a harness session with no new transport.</p><p>An input on this path that does not read back as a handle settles as the query's own error rather than killing the reactive action, so the result carries the error for the pattern to render and a later pass can still succeed once the handle reads.</p>`,
+        `<p>Once the handle cell exists it is an ordinary same-space cell, so <code>--input-cell</code> and <code>/api/task inputCells</code> carry it into a harness session with no new transport. A console launched with <code>--instance</code> also grants it to every session it runs, without a caller attaching anything: the launcher reads loom's injection receipt and names each grant by the CFC class loom's own table contract declares for that handle's columns, so a bare task opens holding <code>email</code> and <code>finance</code>.</p><p>An input on this path that does not read back as a handle settles as the query's own error rather than killing the reactive action, so the result carries the error for the pattern to render and a later pass can still succeed once the handle reads.</p>`,
       e_parent_child:
         `<p>Delegation seeds the child's handle table with the parent entries the brief names, and nothing else. The brief itself is prose.</p>`,
       e_child_parent:
@@ -2441,7 +2441,7 @@
             ],
             sel: "handles",
             h: "Mint the handle",
-            t: "The input cell becomes cfh:a:… in the model's world. The model sees the cell's schema and label through describe_handle — or, for a database, its tables, its columns' labels and how full each table is — never the rows.",
+            t: "The input cell — or the console's own connector grant — becomes cfh:a:… in the model's world. The model sees the cell's schema and label through describe_handle — or, for a database, its tables, its columns' labels and how full each table is — never the rows.",
           },
           {
             f: ["parent", "e_parent_child", "g_deleg", "child_pa"],
@@ -2515,7 +2515,7 @@
             ],
             sel: "spaces",
             h: "A labeled cell like any other",
-            t: "Once the handle cell exists, /api/task inputCells carries it into a session with no new transport. The path is identical to demo 1 from here.",
+            t: "Once the handle cell exists, a console launched against the instance grants it to every session, and /api/task inputCells still carries it explicitly. The path is identical to demo 1 from here.",
           },
           {
             f: ["child_pa", "e_run_pattern", "runner", "spaces", "g_write"],
