@@ -12,6 +12,7 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type {
   ConsoleHandler,
   ErrorHandler,
@@ -200,6 +201,9 @@ type FilterStatsState = { filtered: number; executed: number };
 
 type SchedulerRegistrationInput = ReactivityLog;
 type SchedulerRegisterOptions = {
+  /** Request initial currency from the server plan for this bound source. */
+  adoptViewIdentity?: string;
+
   isEffect?: boolean;
   debounce?: number;
   noDebounce?: boolean;
@@ -717,9 +721,9 @@ export class Scheduler {
   /**
    * Subscribes an action to run when its dependencies change.
    *
-   * The action will be scheduled to run immediately. After running, the
-   * scheduler automatically re-subscribes using the reactivity log from the
-   * run.
+   * A matching settled view basis establishes initial currency and wake
+   * dependencies. Otherwise the action is scheduled immediately. After running,
+   * the scheduler re-subscribes using the run's reactivity log.
    *
    * @param action The action to subscribe
    * @param dependencies Optional callback or immediate ReactivityLog for
@@ -745,7 +749,15 @@ export class Scheduler {
     if (options.observationIdentity) {
       this.#setActionObservationIdentity(action, options.observationIdentity);
     }
+    const initialDependencies = options.adoptViewIdentity === undefined ||
+        options.isEffect === true || this.#nodes.get(action) !== undefined
+      ? undefined
+      : this.#initialViewDependencies(action, options.adoptViewIdentity);
     const subscribeOptions = {
+      initialViewState: initialDependencies === undefined ? undefined : {
+        dependencies: initialDependencies,
+        identity: options.adoptViewIdentity!,
+      },
       isEffect: options.isEffect,
       debounce: options.debounce,
       noDebounce: options.noDebounce,
@@ -1915,13 +1927,53 @@ export class Scheduler {
       outcome.registration === node.registrationToken;
   }
 
-  /** Reconsiders parked computations after an accepted view generation changes. */
-  wakeViewReplication(space: MemorySpace): void {
+  /** Collects server currency only for negotiated view computations. */
+  #initialViewDependencies(
+    action: Action,
+    identity: string,
+  ): ReactivityLog | undefined {
+    const { viewPiece, viewNodeId, viewLocalOnly } = action as Partial<
+      TelemetryAnnotations
+    >;
+    if (
+      !this.runtime.viewScopedReplicationRequested || viewLocalOnly !== true ||
+      viewPiece === undefined || viewNodeId === undefined
+    ) return undefined;
+    return this.runtime.viewReplication.initialViewDependencies(
+      viewPiece,
+      viewNodeId,
+      identity,
+    );
+  }
+
+  /** Rechecks adopted evidence and parked work when plans or coverage change. */
+  wakeViewReplication(
+    space: MemorySpace,
+    { parked = true }: { parked?: boolean } = {},
+  ): void {
     for (const node of this.#nodes.nodes()) {
       const metadata = node.action as Partial<TelemetryAnnotations>;
-      if (
-        metadata.viewPiece?.space !== space || node.status !== "unavailable"
-      ) continue;
+      if (metadata.viewPiece?.space !== space) continue;
+      if (node.adoptedViewIdentity !== undefined) {
+        const log = this.#initialViewDependencies(
+          node.action,
+          node.adoptedViewIdentity,
+        );
+        if (log !== undefined) {
+          const writes = sortAndCompactPaths([
+            ...(this.getMightWrite(node.action) ?? []),
+            ...log.writes,
+          ]);
+          this.#writeIndex.setSurface(node.action, writes);
+          registerDependentsForWriterSurface(
+            this.#dependencyGraphState,
+            node.action,
+            writes,
+          );
+          this.resubscribe(node.action, log);
+          continue;
+        }
+      } else if (!parked || node.status !== "unavailable") continue;
       this.#markActionInvalid(node.action);
       this.#pending.add(node.action);
     }
@@ -1946,6 +1998,8 @@ export class Scheduler {
 
   /** Revokes authority evidence while the next invocation is unresolved. */
   beginViewAction(action: Action): void {
+    const node = this.#nodes.get(action);
+    if (node !== undefined) node.adoptedViewIdentity = undefined;
     const metadata = action as Partial<TelemetryAnnotations>;
     if (
       metadata.viewNodeId !== undefined &&

@@ -21,9 +21,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   shared component read contracts, and the server's scoped dependency graph. It
   separates execution demand from delivery and stages document selection before
   optional field projections.
-- [Initialize view computations from settled server evidence](view-replication-server-currency.md)
-  sizes optional initial scheduler state adoption, its proof and invalidation
-  requirements, and the tests and measurements required before rollout.
 
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement

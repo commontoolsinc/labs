@@ -73,6 +73,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Executed plans and work orders
 
+- [view-replication-server-currency.md](plans/view-replication-server-currency.md) — executed plan for initial client view currency from settled server input/output evidence, with provenance, wake dependencies, and registration-only adoption.
+
 - [server-pattern-verbs-seed.md](plans/server-pattern-verbs-seed.md) — the seed that recorded the ruled 2026-08-24 direction for the pattern lifecycle verbs as server calls, executed September 2026 for `upload` and `instantiate`, which run on the space's serving runtime under `EXPERIMENTAL_SERVER_EXECUTION` with `cf` requesting them, while `setsrc` stays client-side because a source update's module authority needs a transaction that commits to storage itself; the live contract is `docs/features/server-pattern-lifecycle.md`.
 - [read-cost-budgets.md](plans/read-cost-budgets.md) — completed A3 plan for opt-in pattern-test read budgets, transaction-attempt coverage, failure diagnostics, and executable pass/fail demonstrations; shipped in #7257, September 2026.
 
@@ -158,6 +160,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) — reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ## Investigations, journals, and working notes
+
+- [2026-09-11-view-replication-server-currency.md](development/performance/2026-09-11-view-replication-server-currency.md) — initial server-currency adoption removes 121 authored startup executions in each of three enabled trials; records proof and revalidation cost, browser checks, and a preexisting feature-off CFC control failure.
+- [2026-09-11-view-replication-server-currency.results.json](development/performance/2026-09-11-view-replication-server-currency.results.json) — source hashes, exact commands, alternating startup counters and timings, profile hashes, validation failures and passes, and cleanup evidence.
 
 - [Scoped snapshot memo verification](development/performance/2026-09-10-scoped-snapshot-memo.md) — D3 metadata/epoch isolation regressions and exact label-view reuse counts at three sizes.
 

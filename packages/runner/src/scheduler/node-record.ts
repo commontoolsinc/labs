@@ -36,6 +36,9 @@ export interface SchedulerNode {
   /** Identity of the current registration lifetime, including reactivation. */
   registrationToken: object;
 
+  /** Bound source whose server proof justifies this initial clean state. */
+  adoptedViewIdentity?: string;
+
   /** Releases the residency wake of a parked local computation. */
   cancelLocalReadWake?: () => void;
   declaredReads: IMemorySpaceAddress[];
@@ -156,6 +159,7 @@ export class NodeRegistry {
   remove(action: Action): SchedulerNode | undefined {
     const record = this.#records.get(action);
     if (!record) return undefined;
+    record.adoptedViewIdentity = undefined;
     record.cancelLocalReadWake?.();
     record.cancelLocalReadWake = undefined;
     this.#all.delete(record);
@@ -200,6 +204,7 @@ export class NodeRegistry {
   setStatus(action: Action, status: NodeStatus): void {
     const record = this.#records.get(action);
     if (!record) return;
+    if (status !== "clean") record.adoptedViewIdentity = undefined;
     record.status = status;
     this.#syncInvalidIndex(record);
   }

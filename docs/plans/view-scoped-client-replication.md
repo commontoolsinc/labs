@@ -5,10 +5,10 @@ rollout remains gated on workload correctness and performance. The
 implementation includes session-owned view interests, observed read selection,
 shared component schemas, and guarded stored-graph registration. Successful
 partial graph bindings retain their scheduler state across coverage updates and
-plan generations for the same source. The
-[server-currency startup proposal](view-replication-server-currency.md) sizes
-the separate optimization of adopting settled server results as initial local
-state; it is not implemented.
+plan generations for the same source. Eligible computations adopt settled server
+evidence at initial registration; the
+[executed startup plan](../history/plans/view-replication-server-currency.md)
+records its proof and invalidation requirements.
 [The feature document](../features/view-scoped-client-replication.md) describes
 the implemented protocol and its conservative preview limits. The rollout,
 recovery, and adversarial verification work below remains part of this plan. The
@@ -759,12 +759,14 @@ let the server process the edit. Do not manufacture an undefined subtotal, and
 do not compute a new total using the old subtotal as if the edit had propagated.
 Independent eligible branches may still preview.
 
-### What a server freshness indication would mean
+### What server currency proves
 
-A compact scheduler baseline may be useful to seed dependency indexes and skip
-unnecessary initial runs. Evaluate it after the unavailable-read rule is pinned;
-it is not a replacement for that rule. A branch can discover a new missing read
-after the scheduler's initial eligibility check.
+Initial adoption uses the settled input/output fingerprints and recursive
+producer evidence in the view plan. Registration seeds wake dependencies and
+writer indexes before establishing clean state. A later invalidation retires
+adoption and uses guarded execution, where a branch can discover a new missing
+read after the scheduler's initial eligibility check. A broader scheduler
+snapshot or wire protocol is outside this optimization.
 
 Distinguish three facts: the revision that last changed the output, the input
 basis through which the server has established that output as current, and the

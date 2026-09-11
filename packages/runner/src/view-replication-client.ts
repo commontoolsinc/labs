@@ -11,7 +11,7 @@ import type {
 import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
 import { COMPONENT_READ_CONTRACT_VERSION } from "./component-read-contract.ts";
-import type { NormalizedFullLink } from "./link-utils.ts";
+import { type NormalizedFullLink, toMemorySpaceAddress } from "./link-utils.ts";
 import {
   getPatternIdentityRef,
   patternIdentityKey,
@@ -20,7 +20,7 @@ import {
 import type { Runtime } from "./runtime.ts";
 import { entityNameKey } from "./scheduler/keys.ts";
 import { forEachOverlappingWriter } from "./scheduler/scheduling-writes.ts";
-import type { SpaceScopeAndURI } from "./scheduler/types.ts";
+import type { ReactivityLog, SpaceScopeAndURI } from "./scheduler/types.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import type {
   IMemorySpaceAddress,
@@ -107,9 +107,10 @@ export class ViewReplicationClient {
       state.cancelPlans = replica.subscribeViewPlans!((plans) =>
         this.#accept(space, state, plans)
       );
-      state.cancelCoverage =
-        replica.subscribeLocalCoverage?.(() => this.#install(space, state)) ??
-          (() => {});
+      state.cancelCoverage = replica.subscribeLocalCoverage?.(() => {
+        this.#runtime.scheduler.wakeViewReplication(space, { parked: false });
+        this.#install(space, state);
+      }) ?? (() => {});
       try {
         await lease.set([]);
       } catch (error) {
@@ -312,21 +313,81 @@ export class ViewReplicationClient {
     return current;
   }
 
+  /**
+   * Collects the complete wake basis for an initially current computation.
+   * Its own values must be resident; omitted ancestors use the server proof.
+   */
+  initialViewDependencies(
+    piece: NormalizedFullLink,
+    id: string,
+    expectedIdentity: string,
+  ): ReactivityLog | undefined {
+    const state = this.#spaces.get(piece.space);
+    const basis = state?.producers.get(id)?.basis;
+    if (
+      state === undefined || basis === undefined ||
+      !this.eligible(piece.space, id)
+    ) return undefined;
+    const generation = state.version;
+    const reads: IMemorySpaceAddress[] = [];
+    const observe = (address: IMemorySpaceAddress) => reads.push(address);
+    if (!this.pieceCurrent(piece, expectedIdentity, observe)) return undefined;
+    if (
+      basis.reads.some((value) =>
+        !this.permits({
+          ...value,
+          id: value.id as IMemorySpaceAddress["id"],
+          space: piece.space,
+          type: "application/json",
+        })
+      )
+    ) return undefined;
+    for (const value of [...basis.reads, ...basis.outputs]) {
+      if (value.id.startsWith("data:")) continue;
+      if (
+        state.replica.hasLocalDocumentCoverage?.(
+          value.id as IMemorySpaceAddress["id"],
+          value.scope,
+        ) !== true
+      ) return undefined;
+    }
+    // Server provenance must remain independent of successful local outcomes.
+    // Each node collects its own closure, including shared ancestors.
+    if (
+      !this.producerCurrent(piece.space, id, () => false, observe) ||
+      state.version !== generation || !this.active(piece.space)
+    ) return undefined;
+    return {
+      reads,
+      shallowReads: [],
+      writes: [...(state.producerWrites.get(id) ?? [])],
+    };
+  }
+
   /** Checks the stored source against the manifest without acquiring a watch. */
-  pieceCurrent(piece: NormalizedFullLink): boolean {
+  pieceCurrent(
+    piece: NormalizedFullLink,
+    expectedIdentity?: string,
+    observe?: (address: IMemorySpaceAddress) => void,
+  ): boolean {
     const planned = this.#currentPlans(this.#spaces.get(piece.space)).flatMap((
       plan,
     ) => plan.pieces)
       .find((candidate) =>
         candidate.id === piece.id && candidate.scope === piece.scope
       );
-    if (planned?.patternIdentity === undefined) return false;
+    if (
+      planned?.patternIdentity === undefined ||
+      (expectedIdentity !== undefined &&
+        planned.patternIdentity !== expectedIdentity)
+    ) return false;
     const tx = this.#runtime.readTx();
     restrictToLocalReads(tx.tx);
     try {
       const ref = getPatternIdentityRef(
         this.#runtime.getCellFromLink(piece, undefined, tx),
       );
+      observe?.({ ...toMemorySpaceAddress(piece), path: ["patternIdentity"] });
       return ref !== undefined &&
         patternIdentityKey(ref) === planned.patternIdentity;
     } catch {

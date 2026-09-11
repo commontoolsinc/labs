@@ -16,7 +16,7 @@ without replacing authoritative output with an accidental `undefined`.
 This removes the repeated successful bindings identified in the
 [startup investigation](2026-09-11-view-replication-startup.md). It does not
 initialize a computation as current from server evidence; that remains a
-[separately sized proposal](../../../plans/view-replication-server-currency.md).
+[separately sized proposal](../../plans/view-replication-server-currency.md).
 
 ## Change and regression evidence
 

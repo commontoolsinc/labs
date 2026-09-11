@@ -59,6 +59,9 @@ export type SchedulerSubscriptionState =
   & SchedulerParentChildState;
 
 export interface SchedulerSubscribeOptions {
+  /** Validated synchronously with registration, before any action can run. */
+  initialViewState?: { dependencies: ReactivityLog; identity: string };
+
   isEffect?: boolean;
   debounce?: number;
   noDebounce?: boolean;
@@ -175,7 +178,17 @@ export function subscribePullSchedulerAction(
     ],
   );
 
-  const surface = resolveRegistrationSurface(action, immediateLog);
+  const initialViewState = actionIsEffect
+    ? undefined
+    : options.initialViewState;
+  immediateLog = initialViewState?.dependencies ?? immediateLog;
+  const declaredSurface = resolveRegistrationSurface(action, immediateLog);
+  const surface = initialViewState === undefined
+    ? declaredSurface
+    : sortAndCompactPaths([
+      ...declaredSurface,
+      ...initialViewState.dependencies.writes,
+    ]);
   if (!actionIsEffect && surface.length > 0) {
     state.writeIndex.setSurface(action, surface);
     state.registerWriterDependents(action, surface);
@@ -202,7 +215,13 @@ export function subscribePullSchedulerAction(
     );
   }
 
-  state.markInvalid(action);
+  if (initialViewState !== undefined && record !== undefined) {
+    record.adoptedViewIdentity = initialViewState.identity;
+    state.subscriptionState.nodes.setStatus(action, "clean");
+    state.pending.delete(action);
+  } else {
+    state.markInvalid(action);
+  }
 
   const actionId = state.getActionId(action);
   state.submitSubscribeTelemetry({

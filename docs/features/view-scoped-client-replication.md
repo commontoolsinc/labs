@@ -146,6 +146,22 @@ nodes, including when an input link changes before its former target arrives. A
 source change or removal from the view retires the registration. Installation is
 serialized so an older asynchronous load cannot displace a newer registration.
 
+An eligible computation can start clean when its settled server read and output
+basis matches the replica. Its own observed values require complete local
+coverage and its reads must belong to the admitted input union. The bound source
+must match both the manifest and stored identity. Registration installs the
+observed writer surface and wake dependencies before establishing currency.
+Those dependencies include the source identity, the computation's reads and
+outputs, and the complete transitive producer basis.
+
+This initial state retains server provenance: it does not count as a successful
+local attempt. Plan and coverage changes revalidate clean adopted nodes,
+including evidence for ancestors omitted from the replica. Value changes or a
+failed proof retire adoption and use ordinary guarded execution. Later plans
+cannot adopt a node that has already been invalidated or run. Missing or cyclic
+proof uses the same fallback, without requesting more documents solely to enable
+adoption. The existing view-replication flags govern this behavior.
+
 A speculative transaction must satisfy all of these conditions through commit
 preparation:
 

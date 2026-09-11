@@ -374,7 +374,7 @@ describe("view replication client", () => {
         replica.hasLocalDocumentCoverage?.(hidden.getAsNormalizedFullLink().id),
       ).toBe(false);
       expect(hiddenRuns).toBe(initialHiddenRuns);
-      expect(visibleRuns).toBeGreaterThan(initialVisibleRuns);
+      expect(visibleRuns).toBe(initialVisibleRuns);
       expect(rendered).toBe(10);
       expect(sideRuns).toBe(initialSideRuns);
       await viewer.editWithRetry((tx) =>
@@ -382,7 +382,7 @@ describe("view replication client", () => {
           .set(5)
       );
       await viewer.idle();
-      expect(visibleRuns).toBeGreaterThan(initialVisibleRuns + 1);
+      expect(visibleRuns).toBe(initialVisibleRuns + 1);
       expect(rendered).toBe(14);
       expect(sideRuns).toBe(initialSideRuns);
       expect(hiddenRuns).toBe(initialHiddenRuns);

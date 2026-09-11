@@ -1445,6 +1445,7 @@ function programActionInstanceKey(
 }
 
 type SchedulerRehydrationSubscriptionOptions = {
+  adoptViewIdentity?: string;
   implementationSelection?: ImplementationSelection;
   viewNodeId?: string;
   viewLocalOnly?: boolean;
@@ -5129,6 +5130,7 @@ export class Runner {
                 index,
               ),
               viewLocalOnly: true,
+              adoptViewIdentity: expectedIdentity,
             },
           );
           const unavailable = validateLocalReadBasis(tx);

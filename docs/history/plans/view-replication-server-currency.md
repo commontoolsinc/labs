@@ -1,9 +1,17 @@
+---
+status: historical
+created: 2026-09-11
+archived: 2026-09-11
+reason: "Executed initial server-currency adoption and its regression, browser, and alternating startup validation; records an existing feature-off CFC control failure."
+---
+
 # Initialize view computations from settled server evidence
 
-Status: sized proposal; implementation has not started. This is an optional
-startup optimization within
-[view-scoped client replication](../features/view-scoped-client-replication.md).
-It uses that feature's existing global default and client-class overrides.
+Status: executed. Initial server-currency adoption uses the existing global
+default and client-class view-replication overrides. The
+[execution report](../development/performance/2026-09-11-view-replication-server-currency.md)
+records passing regression and enabled browser checks, six startup diagnostics,
+and an existing feature-off CFC failure reproduced on the previous PR head.
 
 ## Result
 
@@ -109,24 +117,24 @@ before expanding implementation.
 
 ## Implementation and evidence gates
 
-- [ ] Add failing tests for an eligible computation whose settled server inputs
+- [x] Add failing tests for an eligible computation whose settled server inputs
       and outputs match: initial client body count is zero; first input edit
       runs it and produces the correct preview.
-- [ ] Reject adoption for a changed input, changed output/overlay, absent
+- [x] Reject adoption for a changed input, changed output/overlay, absent
       producer proof, cyclic proof, source mismatch, or incomplete coverage.
-- [ ] Prove wakeups for direct and transitive input changes, output changes,
+- [x] Prove wakeups for direct and transitive input changes, output changes,
       same-value producer settlement, coverage loss, and plan changes whose
       upstream documents are not replicated.
-- [ ] Fence delayed plans, source replacement, remounts, runtime replacement,
+- [x] Fence delayed plans, source replacement, remounts, runtime replacement,
       and edits racing initial registration. Confirm that server-adopted state
       never takes the successful-local-outcome shortcut.
-- [ ] Implement the registration option and lifecycle changes. Preserve handler
+- [x] Implement the registration option and lifecycle changes. Preserve handler
       intent, noneligible computations, effect cut points, and unavailable-read
       poisoning.
-- [ ] Run runner and runtime-client tests, browser flag propagation checks,
+- [x] Run runner and runtime-client tests, browser flag propagation checks,
       topic startup/navigation, and lunch-poll edits. Check both first and
       subsequent interactions and wait for durable completion.
-- [ ] Measure headless startup with server execution on in both arms,
+- [x] Measure headless startup with server execution on in both arms,
       alternating adoption enabled and disabled against the same source and
       fresh fixtures. Report initial computation counts, proof cost,
       registration cost, registry readiness, total startup, and errors/pending
