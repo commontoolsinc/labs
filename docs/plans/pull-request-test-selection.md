@@ -1481,11 +1481,16 @@ publisher computes:
   halved every 14 days as they age.
 - `flakeRate` — how often it disagrees with itself; see
   [Flakes and repeats](#flakes-and-repeats).
-- `cost` — the ninetieth percentile of its measured durations over the
-  last seven days. The ninetieth percentile rather than the maximum,
-  because one unlucky runner should not permanently inflate an estimate,
-  and rather than the mean, because a cost model that under-estimates
-  blows the time budget.
+- `cost` — the ninetieth percentile of its passing durations on the
+  worst of the last seven days. The ninetieth percentile rather than the
+  maximum, because one unlucky runner should not permanently inflate an
+  estimate, and rather than the mean, because a cost model that
+  under-estimates blows the time budget. A day is held as its slowest
+  executions and the count of all of them, so that the parts a day
+  arrives in combine into the percentile of the whole. Only passing
+  executions are measured: a failure ended where the failure was
+  reached, and where a wait's safety net ended it, its duration is that
+  net's bound.
 
 Variants never fold into one another for scoring. A default test and its
 `server-execution` counterpart have independent catches, flake rates, and
