@@ -419,6 +419,16 @@ export type ServerRunInfo = {
    * it directly. */
   kind: "derivation" | "event-handler" | "bookkeeping";
 
+  /**
+   * The transaction commits to the store on its own, ahead of the wave the
+   * serving loop would otherwise seal it into, so its `commit()` result is
+   * the store's verdict and nothing the wave later decides can withdraw it
+   * (docs/features/server-pattern-lifecycle.md). Only a `bookkeeping` run
+   * asks for this; off the serving posture the stamp is inert and the
+   * transaction commits as it would anyway.
+   */
+  directCommit?: boolean;
+
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
 

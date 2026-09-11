@@ -10,6 +10,7 @@ import { createSession, type Identity } from "@commonfabric/identity";
 import type { DID, MemorySpace } from "@commonfabric/memory/interface";
 import {
   confirmServedInstantiate,
+  confirmServedSetSource,
   PiecesController,
   servedInstantiatePiece,
   type ServedInstantiateReceipt,
@@ -17,6 +18,8 @@ import {
   type ServedLifecycleRefusalCode,
   type ServedPatternRef,
   type ServedPatternSource,
+  servedSetPieceSource,
+  type ServedSetSourceReceipt,
   servedUploadPattern,
 } from "@commonfabric/piece/ops";
 import type { Runtime, RuntimeProgram } from "@commonfabric/runner";
@@ -91,6 +94,9 @@ const REFUSAL_STATUS: Record<
   "setup-failed": 422,
   "slug-taken": 409,
   "no-space-root": 422,
+  "piece-not-found": 404,
+  "incompatible": 422,
+  "source-moved": 409,
 };
 
 /** The document a piece id names — the root the serving loop demands. */
@@ -237,6 +243,74 @@ export function processInstantiate(
       }),
     confirm: (runtime, receipt) =>
       confirmServedInstantiate(runtime, input.space as MemorySpace, receipt),
+    ...(input.start === false
+      ? {}
+      : { demandRoots: (receipt) => [pieceRootDocId(receipt.pieceId)] }),
+  });
+}
+
+/**
+ * The `setsrc` verb: replace a piece's source with the request's pattern.
+ * A program is compiled as a verb of its own first, so its closure is
+ * durable at that verb's wave commit before the update's setup transaction
+ * reads and extends it; the update then commits directly to the store,
+ * outside the wave. Unless `start` is `false`, the piece's root is named as
+ * the loop's demand, so a piece nothing runs derives under its new source
+ * in the cycle after; a piece the loop runs is swapped by its pointer
+ * watcher either way.
+ */
+export async function processSetSource(
+  deps: LifecycleDeps,
+  callerDid: string,
+  input: WireSource & {
+    space: string;
+    piece: string;
+    repository?: string;
+    dangerouslyAllowIncompatibleSchema?: boolean;
+    expectedPattern?: ServedPatternRef;
+    start?: boolean;
+  },
+): Promise<LifecycleResult<ServedSetSourceReceipt>> {
+  const source = wireSource(input);
+  if (source === undefined) {
+    return refuse(
+      400,
+      "invalid-source",
+      "Supply exactly one of `program` and `pattern`.",
+    );
+  }
+  let pattern = source.pattern;
+  if (source.program !== undefined) {
+    const program = source.program;
+    const uploaded = await runServedVerb(deps, callerDid, input.space, {
+      name: "upload",
+      run: async (pieces) => (await servedUploadPattern(pieces, program)).ref,
+      confirm: undefined,
+    });
+    if (uploaded.status !== 200) return uploaded;
+    pattern = uploaded.body;
+  }
+  const candidate = pattern!;
+  return await runServedVerb(deps, callerDid, input.space, {
+    name: "setsrc",
+    run: (pieces) =>
+      servedSetPieceSource(pieces, {
+        pieceId: input.piece,
+        pattern: candidate,
+        ...(input.repository === undefined
+          ? {}
+          : { repository: input.repository }),
+        ...(input.dangerouslyAllowIncompatibleSchema === undefined ? {} : {
+          dangerouslyAllowIncompatibleSchema:
+            input.dangerouslyAllowIncompatibleSchema,
+        }),
+        ...(input.expectedPattern === undefined
+          ? {}
+          : { expectedPattern: input.expectedPattern }),
+        actingUser: callerDid,
+      }),
+    confirm: (runtime, receipt) =>
+      confirmServedSetSource(runtime, input.space as MemorySpace, receipt),
     ...(input.start === false
       ? {}
       : { demandRoots: (receipt) => [pieceRootDocId(receipt.pieceId)] }),

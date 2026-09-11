@@ -52,7 +52,10 @@ wave, and once the wave has committed re-announces the documents the
 verb staged to itself as a warm-marked notice — the same carrier as the
 provisioning path's — so the next cycle loads and derives the staged
 piece; the request settles at the verb's own wave commit —
-[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).
+AMENDED 2026-09-11: a verb's transaction stamped `directCommit` commits
+to the store on its own instead of sealing, ahead of the wave; the source
+update's setup transaction is one, per §3e.)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -1145,7 +1148,18 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. Root creation and explicit wish-sidecar opens
+under the writing principal. A served source update (the `setsrc`
+lifecycle verb, [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md))
+moves the pointer in a setup transaction that COMMITS DIRECTLY to the
+store rather than sealing — the serving loop's own derived-class commit,
+serialized with the wave's seals, its written docs re-verified against
+the seq it was stamped at — because module-loading.md lets update
+authority publish only from a transaction that commits to storage
+itself. A wave open at that commit takes a contribution sealed AFTER it
+as having observed the docs it wrote (§3d's conflict set exempts them
+for that contribution, and the sink holds the store to that exact
+head), so the swap's first derivation under the new pattern lands in the
+same cycle. Root creation and explicit wish-sidecar opens
 fetch system source through the serving runtime's API URL. Those fetches remain
 within verification-coverage.md OW55's source-trust obligation; root ensuring
 adds no source-following probe for an existing root.

@@ -17,6 +17,7 @@ import {
   type LifecycleDeps,
   type LifecycleResult,
   processInstantiate,
+  processSetSource,
   processUpload,
 } from "./pattern-lifecycle.utils.ts";
 
@@ -28,6 +29,20 @@ const PROGRAM = {
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ seed?: string }, { label: string }>(",
       "  ({ seed }) => ({ label: seed ?? 'unset' }),",
+      ");",
+      "",
+    ].join("\n"),
+  }],
+};
+
+const NUMERIC_SEED_PROGRAM = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { pattern } from 'commonfabric';",
+      "export default pattern<{ seed?: number }, { label: string }>(",
+      "  ({ seed }) => ({ label: String(seed ?? 0) }),",
       ");",
       "",
     ].join("\n"),
@@ -207,6 +222,67 @@ describe("pattern-lifecycle verbs (transport half)", () => {
       await processUpload(deps, alice.did(), { space, program: PROGRAM }),
     );
     expect(uploaded.pattern).toEqual(created.pattern);
+  });
+
+  it("replaces a piece's source for a writer, and maps its refusals to their statuses", async () => {
+    const created = ok(
+      await processInstantiate(deps, alice.did(), {
+        space,
+        program: PROGRAM,
+      }),
+    );
+    const updated = ok(
+      await processSetSource(deps, bob.did(), {
+        space,
+        piece: created.pieceId,
+        program: NUMERIC_SEED_PROGRAM,
+        dangerouslyAllowIncompatibleSchema: true,
+      }),
+    );
+    expect(updated.pieceId).toBe(created.pieceId);
+    expect(updated.pattern.identity).not.toBe(created.pattern.identity);
+    expect(updated.revisionId).toMatch(/\S/);
+    expect(updated.detachedOrigin).toBeNull();
+
+    const incompatible = refused(
+      await processSetSource(deps, alice.did(), {
+        space,
+        piece: created.pieceId,
+        program: PROGRAM,
+      }),
+    );
+    expect(incompatible.status).toBe(422);
+    expect(incompatible.code).toBe("incompatible");
+
+    const missing = refused(
+      await processSetSource(deps, alice.did(), {
+        space,
+        piece: "no-such-piece",
+        program: PROGRAM,
+      }),
+    );
+    expect(missing.status).toBe(404);
+    expect(missing.code).toBe("piece-not-found");
+
+    const moved = refused(
+      await processSetSource(deps, alice.did(), {
+        space,
+        piece: created.pieceId,
+        program: PROGRAM,
+        expectedPattern: created.pattern,
+      }),
+    );
+    expect(moved.status).toBe(409);
+    expect(moved.code).toBe("source-moved");
+
+    const reader = refused(
+      await processSetSource(deps, mallory.did(), {
+        space,
+        piece: created.pieceId,
+        program: PROGRAM,
+      }),
+    );
+    expect(reader.status).toBe(403);
   });
 
   it("maps a compile failure to 422", async () => {

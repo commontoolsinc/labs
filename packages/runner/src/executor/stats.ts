@@ -557,11 +557,11 @@ export type ServingLoopStats = {
 
   /**
    * Pattern-lifecycle verbs the serving loop ran on a requester's behalf
-   * (docs/features/server-pattern-lifecycle.md): an `upload` or
-   * `instantiate` request routed to the space's serving runtime. `runs`
-   * counts verbs whose run step completed, any outcome; `failures` those
-   * whose run threw, or whose durable confirmation after the wave commit
-   * failed.
+   * (docs/features/server-pattern-lifecycle.md): an `upload`,
+   * `instantiate`, or `setsrc` request routed to the space's serving
+   * runtime. `runs` counts verbs whose run step completed, any outcome;
+   * `failures` those whose run threw, or whose durable confirmation after
+   * the wave commit failed.
    */
   lifecycleVerbs: {
     runs: number;

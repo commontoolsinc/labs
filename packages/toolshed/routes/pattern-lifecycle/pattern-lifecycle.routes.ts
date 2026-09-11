@@ -1,8 +1,9 @@
 // The pattern-lifecycle verbs as server calls
 // (docs/features/server-pattern-lifecycle.md): a client sends the source
-// it resolved, and the space's serving runtime compiles, materializes, and
-// commits. Every verb is a POST at its own prefix, the shape the first-party
-// request proof signs and the ingest control plane established.
+// it resolved, and the space's serving runtime compiles, materializes or
+// replaces, and commits. Every verb is a POST at its own prefix, the shape
+// the first-party request proof signs and the ingest control plane
+// established.
 
 import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
@@ -72,11 +73,13 @@ const commonResponses = {
   },
   [HttpStatusCodes.NOT_FOUND]: {
     ...jsonError,
-    description: "The named pattern is not in the space",
+    description: "The named pattern or piece is not in the space",
   },
   [HttpStatusCodes.CONFLICT]: {
     ...jsonError,
-    description: "The requested slug is taken",
+    description:
+      "The requested slug is taken, or the piece is not on the pattern the " +
+      "update was proved against",
   },
   [HttpStatusCodes.REQUEST_TOO_LONG]: {
     ...jsonError,
@@ -85,8 +88,8 @@ const commonResponses = {
   [HttpStatusCodes.UNPROCESSABLE_ENTITY]: {
     ...jsonError,
     description:
-      "Body failed schema validation, the program did not compile, or " +
-      "setup refused it",
+      "Body failed schema validation, the program did not compile, the " +
+      "candidate is incompatible with the piece, or setup refused it",
   },
   [HttpStatusCodes.TOO_MANY_REQUESTS]: {
     ...jsonError,
@@ -186,5 +189,69 @@ export const instantiate = createRoute({
   },
 });
 
+export const setsrc = createRoute({
+  path: `${BASE}/setsrc`,
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            space: spaceField,
+            piece: z.string().describe(
+              "The id of the piece whose source is replaced.",
+            ),
+            ...sourceFields,
+            repository: z.string().optional().describe(
+              "Repository locator stored with the piece's source.",
+            ),
+            dangerouslyAllowIncompatibleSchema: z.boolean().optional()
+              .describe(
+                "Replace the source even when pattern or retained-link " +
+                  "schema compatibility cannot be proven, or when the " +
+                  "current pattern cannot be loaded at all.",
+              ),
+            expectedPattern: patternRefSchema.optional().describe(
+              "The pattern the update was proved against; a piece on " +
+                "another pattern refuses the update.",
+            ),
+            start: z.boolean().optional().describe(
+              "Have the serving loop derive the updated piece once the " +
+                "update commits (the default); `false` leaves it to the " +
+                "first demand.",
+            ),
+          }).refine(
+            (body) =>
+              (body.program === undefined) !== (body.pattern === undefined),
+            { message: "Supply exactly one of `program` and `pattern`." },
+          ),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            pieceId: z.string(),
+            pattern: patternRefSchema,
+            revisionId: z.string().describe(
+              "The source revision the update appended.",
+            ),
+            detachedOrigin: z.string().nullable().describe(
+              "The origin the update detached; null when the piece had none.",
+            ),
+          }),
+        },
+      },
+      description: "The piece's source is replaced",
+    },
+    ...commonResponses,
+  },
+});
+
 export type UploadRoute = typeof upload;
 export type InstantiateRoute = typeof instantiate;
+export type SetSourceRoute = typeof setsrc;

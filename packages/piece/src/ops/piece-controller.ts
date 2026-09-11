@@ -515,6 +515,31 @@ export interface PatternCompatibilityReport {
   candidate: { identity: string; symbol: string };
 }
 
+/** What {@link PieceController.setPattern} takes beside the candidate. */
+export interface PatternUpdateOptions {
+  /** Repository locator written atomically with the setup. */
+  repository?: string;
+
+  /**
+   * Replace the source even when compatibility cannot be proven, or when
+   * the current pattern cannot be loaded at all.
+   */
+  dangerouslyAllowIncompatibleSchema?: boolean;
+
+  /** The pattern the update was proved against; a piece on another refuses. */
+  expectedPattern?: { identity: string; symbol: string };
+
+  /**
+   * The update as a serving runtime performs it on a requester's behalf
+   * (docs/features/server-pattern-lifecycle.md): the setup transaction
+   * commits directly to the store rather than sealing into the serving
+   * wave, the piece is not started here, and no post-commit refresh runs.
+   * The loop's own swap watcher replaces a running piece's graph, and its
+   * demand pass runs an unrun one; the receipt's `refresh` is `deferred`.
+   */
+  served?: boolean;
+}
+
 /** Result of a pattern update accepted by the setup transaction. */
 export interface PatternUpdateReceipt extends PieceSourceSetResult {
   /** Stable outcome code for a successful setup transaction. */
@@ -523,9 +548,14 @@ export interface PatternUpdateReceipt extends PieceSourceSetResult {
   ref: { identity: string; symbol: string };
   /** Source-history revision written atomically with `.ref`. */
   revisionId: string;
-  /** Outcome of work which refreshes the running piece after commit. */
+  /**
+   * Outcome of work which refreshes the running piece after commit;
+   * `deferred` when this call ran none, leaving the piece to its runtime's
+   * own means — a serving runtime's swap watcher, or its demand pass.
+   */
   refresh:
     | { status: "completed" }
+    | { status: "deferred" }
     | { status: "failed"; warning: string };
 }
 
@@ -4635,11 +4665,37 @@ export class PieceController<T = unknown> {
    */
   async setPattern(
     program: RuntimeProgram,
-    options?: {
-      repository?: string;
-      dangerouslyAllowIncompatibleSchema?: boolean;
-      expectedPattern?: { identity: string; symbol: string };
-    },
+    options?: PatternUpdateOptions,
+  ): Promise<PatternUpdateReceipt> {
+    return await this.#updatePattern(
+      () => compileProgram(this.#pieces, program),
+      options,
+    );
+  }
+
+  /**
+   * Like {@link setPattern}, except the candidate is a pattern already
+   * compiled into the space — the result of an earlier compile whose
+   * closure the space holds — so nothing is compiled or persisted here
+   * before the setup transaction. Everything else, the pin and the
+   * compatibility checks included, is the same.
+   */
+  async setCompiledPattern(
+    pattern: Pattern,
+    options?: PatternUpdateOptions,
+  ): Promise<PatternUpdateReceipt> {
+    return await this.#updatePattern(() => Promise.resolve(pattern), options);
+  }
+
+  /**
+   * Helper for `setPattern()` and `setCompiledPattern()`, which runs the
+   * update over the candidate `compile` produces at the point in the flow
+   * where the candidate is needed: after the current pattern and the
+   * transition's baseline are in hand, ahead of the compatibility checks.
+   */
+  async #updatePattern(
+    compile: () => Promise<Pattern>,
+    options?: PatternUpdateOptions,
   ): Promise<PatternUpdateReceipt> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
@@ -4708,7 +4764,7 @@ export class PieceController<T = unknown> {
             ? { allowUnavailable: true }
             : {},
         );
-        const pattern = await compileProgram(this.#pieces, program);
+        const pattern = await compile();
         const candidate = this.#pieces.runtime.patternManager
           .getArtifactEntryRef(pattern);
         if (candidate === undefined) {
@@ -4762,6 +4818,7 @@ export class PieceController<T = unknown> {
                   ),
               repository: options?.repository,
               sourceTransition: transition,
+              ...(options?.served === true ? { served: true } : {}),
             },
           );
           committedRef = result.commit.pattern;
@@ -4809,7 +4866,7 @@ export class PieceController<T = unknown> {
       ref: committedRef!,
       revisionId: transition!.revisionId,
       detachedOrigin: transition!.expected.origin,
-      refresh: { status: "completed" },
+      refresh: { status: options?.served === true ? "deferred" : "completed" },
     };
   }
 
@@ -5282,6 +5339,7 @@ async function executePatternUpdate(
     ) => void;
     repository?: string;
     sourceTransition: PieceSourceTransition;
+    served?: boolean;
   },
 ): Promise<{
   cell: Cell<unknown>;

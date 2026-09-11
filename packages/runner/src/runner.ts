@@ -1182,6 +1182,25 @@ export interface RunSyncedOptions {
   patternRepository?: string;
   /** Source lifecycle change written atomically with ordinary pattern setup. */
   pieceSourceTransition?: PieceSourceTransition;
+
+  /**
+   * Commit the setup transaction to the store directly rather than sealing
+   * it into a serving wave, so its verdict is the store's own. A serving
+   * runtime's transactions otherwise seal into the cycle's wave, whose
+   * acceptance a later withdrawal can undo, and a receipt or source-update
+   * authority requires the durable verdict. Inert where no seal destination
+   * is installed.
+   */
+  directCommit?: boolean;
+
+  /**
+   * Whether to start the piece once its setup has committed; `true` when
+   * absent. `false` leaves the piece set up under its new pattern and not
+   * run here, for a runtime that runs pieces on demand: a serving runtime's
+   * swap watcher replaces a running piece's graph on the pointer write, and
+   * its demand pass runs an unrun one.
+   */
+  start?: boolean;
 }
 
 /** Options for a pattern setup whose fresh source revision proves a commit. */
@@ -6726,10 +6745,12 @@ export class Runner {
    *   superseded, requeued, lease lost — can undo it. Such a contribution
    *   cannot back a receipt that says `committed`, and waiting for the wave to
    *   settle from inside the action that feeds it can deadlock, so the answer
-   *   is a refusal at the boundary rather than a weaker word for durable. A
-   *   flag-ON client speculating installs no destination and is unaffected;
-   *   its setup is stamped as bookkeeping, which the overlay passes through to
-   *   the real store;
+   *   is a refusal at the boundary rather than a weaker word for durable —
+   *   unless the caller asks for a direct commit (`directCommit`), which the
+   *   serving loop commits to the store outside the wave, its verdict the
+   *   store's own. A flag-ON client speculating installs no destination and
+   *   is unaffected; its setup is stamped as bookkeeping, which the overlay
+   *   passes through to the real store;
    * - a commit that storage rejects throws, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
    * - the required source transition appends a fresh revision, so the setup
@@ -6757,7 +6778,9 @@ export class Runner {
     // which is where it decides anything: a destination installed while the
     // synchronization below is in flight would pass this check and still seal
     // the transaction the receipt would describe.
-    if (this.#runtime.sealDestinationInstalled) {
+    if (
+      this.#runtime.sealDestinationInstalled && options.directCommit !== true
+    ) {
       throw new Error(SEALING_RECEIPT_REFUSAL);
     }
     if (options.pieceSourceTransition === undefined) {
@@ -6880,11 +6903,14 @@ export class Runner {
       const outcome = await this.#runtime.editWithRetry(
         (tx) => {
           // Receipts and source-update authority require this transaction's
-          // durable acceptance. Check each attempt because a seal destination
-          // can be installed during synchronization or between retries.
+          // durable acceptance, which a direct commit supplies and a seal
+          // into the wave does not. Check each attempt because a seal
+          // destination can be installed during synchronization or between
+          // retries.
           if (
             (requireCommit || sourceUpdate !== undefined) &&
-            this.#runtime.sealDestinationInstalled
+            this.#runtime.sealDestinationInstalled &&
+            options?.directCommit !== true
           ) {
             throw new Error(
               requireCommit
@@ -6905,6 +6931,7 @@ export class Runner {
           this.#runtime.stampServerRun(tx, {
             actionId: `piece-run-synced/${resultCell.sourceURI}`,
             kind: "bookkeeping",
+            ...(options?.directCommit === true ? { directCommit: true } : {}),
           });
           assertExpectedPatternIdentity(resultCell.withTx(tx));
           return this.#setupInternal(
@@ -6974,7 +7001,7 @@ export class Runner {
         await this.#syncCellsForRunningPattern(resultCell, pattern);
       }
 
-      if (setupRes?.needsStart) {
+      if (setupRes?.needsStart && options?.start !== false) {
         if (givenTx) {
           this.#startWithTx(
             givenTx,

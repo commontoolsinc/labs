@@ -14,6 +14,7 @@ import {
   type LifecycleClientConfig,
   lifecycleUrl,
   ServedLifecycleError,
+  setPieceSourceOnServer,
   wireProgram,
 } from "../lib/pattern-lifecycle.ts";
 
@@ -180,6 +181,80 @@ describe("pattern-lifecycle client", () => {
           expect(failure).toBeInstanceOf(ServedLifecycleError);
           expect(failure.code).toBe("http-502");
           expect(failure.message).toContain("instantiate failed (502)");
+        },
+      );
+    });
+  });
+
+  describe("setPieceSourceOnServer", () => {
+    it("signs the request, names the piece, and carries the override and the start flag only when set", async () => {
+      const cfg = await configured();
+      await withStubbedFetch(
+        {
+          body: {
+            pieceId: "p1",
+            pattern: { identity: "i", symbol: "s" },
+            revisionId: "r1",
+            detachedOrigin: null,
+          },
+        },
+        async (calls) => {
+          const receipt = await setPieceSourceOnServer(cfg, {
+            space: SPACE_DID,
+            piece: "p1",
+            program: PROGRAM,
+            repository: "https://example.invalid/repo",
+          });
+          expect(receipt.revisionId).toBe("r1");
+          expect(calls).toHaveLength(1);
+          const [call] = calls;
+          expect(call.url.pathname).toBe(
+            "/fabric/api/pattern-lifecycle/setsrc",
+          );
+          expect(call.headers.get(AUTH_HEADER)).toMatch(/^CF1 /);
+          expect(call.headers.get(BODY_SHA256_HEADER)).toBe(
+            await bodySha256(call.body),
+          );
+          expect(JSON.parse(call.body)).toEqual({
+            space: SPACE_DID,
+            piece: "p1",
+            program: PROGRAM,
+            repository: "https://example.invalid/repo",
+          });
+          await setPieceSourceOnServer(cfg, {
+            space: SPACE_DID,
+            piece: "p1",
+            program: PROGRAM,
+            dangerouslyAllowIncompatibleSchema: true,
+            start: false,
+          });
+          expect(JSON.parse(calls[1].body)).toEqual({
+            space: SPACE_DID,
+            piece: "p1",
+            program: PROGRAM,
+            dangerouslyAllowIncompatibleSchema: true,
+            start: false,
+          });
+        },
+      );
+    });
+
+    it("raises the server's refusal with its code", async () => {
+      const cfg = await configured();
+      await withStubbedFetch(
+        {
+          status: 409,
+          body: { error: "the piece moved", code: "source-moved" },
+        },
+        async () => {
+          const failure = await setPieceSourceOnServer(cfg, {
+            space: SPACE_DID,
+            piece: "p1",
+            program: PROGRAM,
+          }).then(() => undefined, (error) => error);
+          expect(failure).toBeInstanceOf(ServedLifecycleError);
+          expect(failure.code).toBe("source-moved");
+          expect(failure.status).toBe(409);
         },
       );
     });

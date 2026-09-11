@@ -378,6 +378,69 @@ const toExplicitDocument = (value: FabricValue): EntityDocument => {
   return value as EntityDocument;
 };
 
+/**
+ * The document operations of a native commit, with every root an explicit
+ * document: the shape the replica applies as pending state.
+ */
+const documentOperationsOf = (
+  transaction: NativeStorageCommit,
+): NativeCommitOperation[] =>
+  transaction.operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) =>
+      operation.op === "delete"
+        ? {
+          op: "delete" as const,
+          id: operation.id,
+          scope: operation.scope,
+        }
+        : operation.op === "patch"
+        ? {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+          value: toExplicitDocument(operation.value),
+        }
+        : {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        }
+    );
+
+/**
+ * The operations a commit hands the store: cell operations first, a patch
+ * carrying its patches alone, and folded SQLite operations last.
+ */
+const storeOperationsOf = (
+  operations: readonly NativeCommitOperation[],
+  sqliteOps: readonly SqliteOperation[],
+): ClientCommit["operations"] => [
+  ...operations.map((operation) => {
+    switch (operation.op) {
+      case "delete":
+        return operation;
+      case "patch":
+        return {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+        };
+      case "set":
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: operation.value,
+        };
+    }
+  }),
+  ...sqliteOps,
+];
+
 type CachedTransactionValue =
   | FabricValue
   | typeof UNCACHED_TRANSACTION_VALUE
@@ -4988,31 +5051,7 @@ export class SpaceReplica
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => documentOperationsOf(transaction),
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
@@ -5062,39 +5101,34 @@ export class SpaceReplica
     verdict: Promise<SealedCommitVerdict>,
     options?: { readonly speculative?: boolean },
   ): SealedNativeCommit {
-    const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? {
-            op: "delete" as const,
-            id: operation.id,
-            scope: operation.scope,
-          }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            scope: operation.scope,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            scope: operation.scope,
-            value: toExplicitDocument(operation.value),
-          }
-      );
     return this.#sealOperations(
-      operations,
+      documentOperationsOf(transaction),
       source,
-      preconditions,
+      activeCommitPreconditions(transaction.preconditions),
       transaction.sqliteOps ?? [],
       verdict,
       options,
     );
+  }
+
+  /**
+   * The operations and preconditions `transaction` hands the store, as
+   * {@link sealNative} builds them into a sealed commit, without applying
+   * anything here: for a committer that commits to the store ahead of
+   * sealing the same transaction into this replica, which needs the store's
+   * shape before the replica has seen the writes.
+   */
+  storeCommitOf(transaction: NativeStorageCommit): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+  } {
+    return {
+      operations: storeOperationsOf(
+        documentOperationsOf(transaction),
+        transaction.sqliteOps ?? [],
+      ),
+      preconditions: activeCommitPreconditions(transaction.preconditions),
+    };
   }
 
   #sealOperations(
@@ -5125,29 +5159,7 @@ export class SpaceReplica
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
-      operations: [
-        ...operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
-        ...sqliteOps,
-      ],
+      operations: storeOperationsOf(operations, sqliteOps),
       ...(preconditions.length > 0
         ? { preconditions: [...preconditions] }
         : {}),

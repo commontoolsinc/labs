@@ -139,7 +139,10 @@ import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
-import { instantiatePieceOnServer } from "./pattern-lifecycle.ts";
+import {
+  instantiatePieceOnServer,
+  setPieceSourceOnServer,
+} from "./pattern-lifecycle.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
 import {
   deriveDiskHandleId,
@@ -472,6 +475,7 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
   instantiatePieceOnServer?: typeof instantiatePieceOnServer;
+  setPieceSourceOnServer?: typeof setPieceSourceOnServer;
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -1919,7 +1923,63 @@ async function resolveSlugSourceCell(
   return holder.getCell().key(...path);
 }
 
-/** Replaces the piece's source and returns its setup transaction receipt. */
+/**
+ * The served half of `setPiecePattern`: the serving runtime replaces the
+ * source and commits the update, and this connection then refreshes the
+ * piece it holds the way a client-side update does after its own commit —
+ * starting it, which under the flag runs the graph as speculation while
+ * the serving loop serves the derived values — and reports that outcome in
+ * the receipt's `refresh`, since the commit is durable whatever the refresh
+ * did.
+ */
+async function updateOnServer(
+  config: PieceConfig,
+  pieces: PiecesController,
+  pieceId: string,
+  program: RuntimeProgram,
+  entry: EntryConfig,
+  options: SetPiecePatternOptions,
+  deps: PieceOperationDependencies,
+): Promise<PatternUpdateReceipt> {
+  const receipt = await (deps.setPieceSourceOnServer ??
+    setPieceSourceOnServer)(await lifecycleClient(config, deps), {
+      space: pieces.getSpace(),
+      piece: pieceId,
+      program,
+      ...(entry.repository === undefined
+        ? {}
+        : { repository: entry.repository }),
+      ...(options.dangerouslyAllowIncompatibleSchema
+        ? { dangerouslyAllowIncompatibleSchema: true }
+        : {}),
+    });
+  noteWroteTo(config.space);
+  let refresh: PatternUpdateReceipt["refresh"];
+  try {
+    const cell = await pieces.getPieceCell(receipt.pieceId, false);
+    await pieces.startPiece(cell);
+    refresh = { status: "completed" };
+  } catch (error) {
+    refresh = {
+      status: "failed",
+      warning: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return {
+    status: "committed",
+    ref: receipt.pattern,
+    revisionId: receipt.revisionId,
+    detachedOrigin: receipt.detachedOrigin,
+    refresh,
+  };
+}
+
+/**
+ * Replaces the piece's source and returns its setup transaction receipt.
+ * Against a serving deployment the update is the serving runtime's to
+ * commit; a piece addressed at a scope keeps the client-side path, since
+ * the served verb takes the piece's id alone.
+ */
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
@@ -1934,6 +1994,19 @@ export async function setPiecePattern(
   );
   const program = await (deps.getPinnedProgramFromFile ??
     getPinnedProgramFromFile)(pieces, entry);
+  if (
+    servesLifecycleVerbs(pieces) && resolvedConfig.pieceScope === undefined
+  ) {
+    return await updateOnServer(
+      config,
+      pieces,
+      resolvedConfig.piece,
+      program,
+      entry,
+      options,
+      deps,
+    );
+  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,

@@ -2826,6 +2826,18 @@ export interface ISpaceReplica extends ISpace {
   ): SealedNativeCommit;
 
   /**
+   * The operations and preconditions `transaction` would hand the store,
+   * as {@link sealNative} builds them into a sealed commit, without applying
+   * anything to this replica. A committer that commits to the store ahead
+   * of sealing the transaction here (the serving loop's direct commit) reads
+   * the store's shape from this. Optional, as {@link sealNative} is.
+   */
+  storeCommitOf?(transaction: NativeStorageCommit): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+  };
+
+  /**
    * Resolves when the accepted commit at `localSeq` has been APPLIED to
    * this replica's settled view — immediately when the accept confirmed
    * at verdict time, else when its parked accept promotes (catch-up

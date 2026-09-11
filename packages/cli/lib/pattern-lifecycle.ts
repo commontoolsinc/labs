@@ -1,10 +1,10 @@
 // HTTP client for the toolshed's pattern-lifecycle verbs
 // (docs/features/server-pattern-lifecycle.md). Under server execution the
-// serving runtime compiles, materializes, and commits a pattern; what `cf`
-// keeps is resolving the program from disk and sending it. Every call
-// carries a CF1 first-party request proof signed with the user's own
-// identity key, and the server admits a caller the space's ACL names as a
-// writer.
+// serving runtime compiles, materializes or replaces, and commits a
+// pattern; what `cf` keeps is resolving the program from disk and sending
+// it. Every call carries a CF1 first-party request proof signed with the
+// user's own identity key, and the server admits a caller the space's ACL
+// names as a writer.
 
 import type { Identity } from "@commonfabric/identity";
 import type { RuntimeProgram } from "@commonfabric/runner";
@@ -157,6 +157,43 @@ export async function instantiatePieceOnServer(
     ...(input.slug === undefined ? {} : { slug: input.slug }),
     ...(input.force === undefined ? {} : { force: input.force }),
     ...(input.register === undefined ? {} : { register: input.register }),
+    ...(input.start === undefined ? {} : { start: input.start }),
+  });
+}
+
+/**
+ * Replace `piece`'s source in `space` with `program`, through the same
+ * compatibility checks a client-side update runs, in a setup transaction
+ * the serving runtime commits to the store on its own. The receipt is that
+ * transaction's: the pointer the piece now holds, the revision it appended,
+ * and the origin it detached. Unless `start` is `false`, the serving loop
+ * derives the updated piece in the cycle after.
+ */
+export async function setPieceSourceOnServer(
+  config: LifecycleClientConfig,
+  input: {
+    space: string;
+    piece: string;
+    program: RuntimeProgram;
+    repository?: string;
+    dangerouslyAllowIncompatibleSchema?: boolean;
+    start?: boolean;
+  },
+): Promise<{
+  pieceId: string;
+  pattern: PatternRef;
+  revisionId: string;
+  detachedOrigin: string | null;
+}> {
+  return await call(config, "setsrc", {
+    space: input.space,
+    piece: input.piece,
+    program: wireProgram(input.program),
+    ...(input.repository === undefined ? {} : { repository: input.repository }),
+    ...(input.dangerouslyAllowIncompatibleSchema === undefined ? {} : {
+      dangerouslyAllowIncompatibleSchema:
+        input.dangerouslyAllowIncompatibleSchema,
+    }),
     ...(input.start === undefined ? {} : { start: input.start }),
   });
 }
