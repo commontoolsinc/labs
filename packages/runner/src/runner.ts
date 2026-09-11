@@ -58,12 +58,7 @@ import {
   useCancelGroup,
   useDeferredCancelOwnership,
 } from "./cancel.ts";
-import {
-  type Cell,
-  createCell,
-  isCell,
-  syncCellForIdentity,
-} from "./cell.ts";
+import { type Cell, createCell, isCell, syncCellForIdentity } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
