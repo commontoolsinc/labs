@@ -789,6 +789,16 @@ extension owed and WHEN it earns its cost:
   scopes §5). One C6-style negative.
 - OW2 — a lease renewal is NEVER a commit (serving-loop §2): renew
   transition asserts zero commit records.
+  Implementation coverage in `executor/activation-lease.test.ts` verifies renewal
+  without commits while the
+  runtime factory and delegated append recovery are held beyond the lease's
+  initial lifetime, then checks the first derived commit's actual wave verdict
+  and stored value. Controlled-clock refusal cases cover takeover before and
+  at renewal, lease-store errors, factory and runtime validation failures,
+  disposal despite observer cleanup errors, and host shutdown waiting for the
+  returning runtime's disposal. A factory read-through control verifies that
+  another user's stored instance becomes unavailable after lease takeover.
+
 - OW9 — the §3d rebase arm: the model's conflict machinery requeues
   EVERY raced consequence — it has no field-level-merge disposition —
   so the impl's three-way drop/rebase/requeue split (serving-loop

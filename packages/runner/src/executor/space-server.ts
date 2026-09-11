@@ -506,6 +506,7 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #options: SpaceServerOptions;
   readonly #holder: string;
   #lease: ExecutionLeaseCycle | undefined;
+  #initializing = false;
   #runtime: Runtime | undefined;
   #disposeRuntime: (() => Promise<void>) | undefined;
   #sink: WaveCommitSink | undefined;
@@ -1091,6 +1092,28 @@ export class SpaceServer implements TransactionSealDestination {
     this.#lastRenewAt = Date.now();
     this.#options.stats.lease.held += 1;
 
+    // Initialization includes asynchronous factory and recovery work. The
+    // lease protects those reads before a serving loop can become active.
+    this.#initializing = true;
+    const renewMs = this.#options.policy?.renewIntervalMs ??
+      EXECUTION_LEASE_RENEW_INTERVAL_MS;
+    this.#renewTimer = setInterval(() => this.#renew(), renewMs);
+    let activated = false;
+    try {
+      activated = await this.#initializeRuntime(lease);
+      return activated;
+    } finally {
+      this.#initializing = false;
+      if (!activated) {
+        await this.#parkResources(
+          lease.held ? "activation-failed" : "lease-lost",
+        );
+      }
+    }
+  }
+
+  async #initializeRuntime(lease: ExecutionLeaseCycle): Promise<boolean> {
+    const { engine, space } = this.#options;
     // The tenure's store read-through, handed to the factory so a factory
     // that reads the home space before returning installs it first, and
     // installed again below for one that does not: the tenure's first
@@ -1106,33 +1129,20 @@ export class SpaceServer implements TransactionSealDestination {
         }),
       )
       : undefined;
-    let runtime: Runtime;
-    let dispose: () => Promise<void>;
-    try {
-      ({ runtime, dispose } = await this.#options.createRuntime(
-        storeReadThrough === undefined ? {} : { storeReadThrough },
-      ));
-    } catch (error) {
-      // A failed activation must not strand the acquired lease row for
-      // the TTL — a successor (or this host's retry) should be able to
-      // acquire immediately.
-      lease.release();
-      this.#lease = undefined;
-      throw error;
-    }
+    const { runtime, dispose } = await this.#options.createRuntime(
+      storeReadThrough === undefined ? {} : { storeReadThrough },
+    );
+    this.#runtime = runtime;
+    this.#disposeRuntime = dispose;
+    this.#renew();
+    if (!lease.held) return false;
     if (runtime.experimental.serverExecution !== true) {
-      await dispose();
-      lease.release();
-      this.#lease = undefined;
       throw new Error(
         "SpaceServer runtime must run with serverExecution enabled " +
           "(serving-loop.md §3: flag ON, server posture)",
       );
     }
     if (runtime.servingPosture !== true) {
-      await dispose();
-      lease.release();
-      this.#lease = undefined;
       throw new Error(
         "SpaceServer runtime must be constructed with servingPosture " +
           "(serving-loop.md §3): without it the Phase-2 speculation " +
@@ -1141,8 +1151,6 @@ export class SpaceServer implements TransactionSealDestination {
           "committing through the loopback plane",
       );
     }
-    this.#runtime = runtime;
-    this.#disposeRuntime = dispose;
     if (storeReadThrough !== undefined) {
       runtime.storageManager.installStoreReadThrough?.(space, storeReadThrough);
     }
@@ -1333,6 +1341,8 @@ export class SpaceServer implements TransactionSealDestination {
         ]);
       }
     }
+    this.#renew();
+    if (!lease.held) return false;
     logger.info?.("activate", () => [
       `space ${space} activated: W=${this.#watermark} scanHead=${scanHead} ` +
       `staleInstances=${stale.length}`,
@@ -1414,15 +1424,13 @@ export class SpaceServer implements TransactionSealDestination {
     // scheduler consults it at the reactive-action choke point and runs
     // a demanded action once per instance, stamped from the demand
     // registry through the seam above.
+    this.#renew();
+    if (!lease.held) return false;
     runtime.installSealDestination(this, {
       runStamper: (tx, info) => this.#stampRun(tx, info),
       runDemanderResolver: (pieceRootIds) => this.#demandersFor(pieceRootIds),
     });
 
-    // Stage B's renew cadence, finally driven (serving-loop.md §2).
-    const renewMs = this.#options.policy?.renewIntervalMs ??
-      EXECUTION_LEASE_RENEW_INTERVAL_MS;
-    this.#renewTimer = setInterval(() => this.#renew(), renewMs);
     // The MID-WAVE renew (stage C tuning T3, serving-loop.md §2): the
     // renew timer above rides the macrotask queue a long settle used to
     // starve (the attribution's t2: renew gaps to 10 s against the 15-s
@@ -2490,17 +2498,11 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /**
-   * Helper for `activate()`, which holds the tenure's store read-through
-   * to protocol.md §3's lease-holder delivery rule: another principal's
-   * instance is served only to the live holder of the space's lease. A
-   * read of one that finds the lease row lapsed runs the renew arm first
-   * — the lost-then-reacquire step the renew timer takes, taken at the
-   * moment the lapse is found — and is served under the reacquired
-   * tenure, or withheld when the lease is not regained, as the tenure
-   * parks. Space-scoped documents and the service's own instances are
-   * delivered to any session, so they are read without consulting the
-   * row. A closed engine answers nothing, as the read-through itself
-   * does: the row must not be queried through a finalized statement.
+   * Holds store read-through to protocol.md §3's lease-holder delivery rule.
+   * Another principal's instance requires a live lease. An active loop can
+   * renew and reacquire a lapsed tenure; initialization loss instead refuses
+   * the read and invalidates activation. Space-scoped documents and the
+   * service's own instances need no lease. A closed engine supplies nothing.
    */
   #leaseHolderReadThrough(
     engine: Engine.Engine,
@@ -2516,7 +2518,9 @@ export class SpaceServer implements TransactionSealDestination {
         liveExecutionLeaseHolder(engine, this.#options.space) !== this.#holder
       ) {
         this.#renew();
-        if (this.#lease?.held !== true) return undefined;
+        if (
+          liveExecutionLeaseHolder(engine, this.#options.space) !== this.#holder
+        ) return undefined;
       }
       return read(address);
     };
@@ -2537,12 +2541,37 @@ export class SpaceServer implements TransactionSealDestination {
 
   #renew(): void {
     const lease = this.#lease;
-    if (lease === undefined || !this.#active) return;
+    if (
+      lease === undefined || (!this.#active && !this.#initializing) ||
+      (this.#initializing && !lease.held)
+    ) return;
     // Stamped before the outcome is known: a FAILED renew ends the tenure
     // (park or reacquire below), and a reacquire is itself a fresh
     // tenure start.
     this.#lastRenewAt = Date.now();
-    if (!lease.renew()) {
+    let renewed: boolean;
+    try {
+      renewed = lease.renew();
+    } catch (error) {
+      if (!this.#initializing || this.#active) throw error;
+      // A failed lease-store operation leaves initialization without an
+      // authority proof. Release ends the in-process tenure even if the
+      // unavailable store also rejects removal of the row.
+      try {
+        lease.release();
+      } catch (releaseError) {
+        logger.warn("activation-lease-release-failed", () => [
+          `space ${this.#options.space}: lease release failed during initialization`,
+          releaseError,
+        ]);
+      }
+      logger.warn("activation-lease-renew-failed", () => [
+        `space ${this.#options.space}: lease renewal threw during initialization`,
+        error,
+      ]);
+      renewed = false;
+    }
+    if (!renewed) {
       // Stop committing immediately (serving-loop.md §2's MUST): the
       // tenure ended inside renew(), so an in-flight wave aborts at its
       // commit step. Then re-acquire or park. The reacquire keeps this
@@ -2557,6 +2586,14 @@ export class SpaceServer implements TransactionSealDestination {
         `space ${this.#options.space}: lease renewal failed; ` +
         "in-flight wave aborts (serving-loop.md §2)",
       ]);
+      if (this.#initializing && !this.#active) {
+        // A factory or recovery read may belong to the expired tenure.
+        // Finish its outstanding await, then dispose without launching it.
+        clearInterval(this.#renewTimer);
+        this.#renewTimer = undefined;
+        this.#outbox?.close();
+        return;
+      }
       if (!lease.acquire()) {
         void this.park("lease-lost");
         return;
@@ -5780,12 +5817,19 @@ export class SpaceServer implements TransactionSealDestination {
     if (!this.#active) {
       return this.#parkRequested ? this.#parked.promise : undefined;
     }
+    await this.#parkResources(reason);
+  }
+
+  async #parkResources(reason: string): Promise<void> {
+    const wasActive = this.#active;
     this.#active = false;
     this.#parkRequested = true;
-    this.#options.stats.activeSpaces = Math.max(
-      0,
-      this.#options.stats.activeSpaces - 1,
-    );
+    if (wasActive) {
+      this.#options.stats.activeSpaces = Math.max(
+        0,
+        this.#options.stats.activeSpaces - 1,
+      );
+    }
     if (this.#renewTimer !== undefined) {
       clearInterval(this.#renewTimer);
       this.#renewTimer = undefined;
@@ -5882,6 +5926,13 @@ export class SpaceServer implements TransactionSealDestination {
           .shadowFlipObserver = undefined;
       }
       this.#runtime?.clearSealDestination();
+    } catch (error) {
+      logger.warn("park-runtime-cleanup-failed", () => [
+        "runtime observer cleanup during park failed",
+        error,
+      ]);
+    }
+    try {
       await this.#disposeRuntimeTimeboxed(reason);
     } catch (error) {
       logger.warn("park-dispose-failed", () => [

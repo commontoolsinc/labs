@@ -49,6 +49,9 @@ installFakeClock({
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
     "executor-space-server",
+    // The activation lease suite controls Date and renewal intervals itself,
+    // while scheduler and transport dispatch use ordinary zero-delay timers.
+    "activation-lease",
     // The OW45 arm-B stage-1 space-root ensure suite drives a real
     // SpaceServer directly under the same wall-clock policies (renew
     // interval, flush deadline); auto-advance turns the renew cadence
