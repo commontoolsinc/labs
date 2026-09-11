@@ -65,7 +65,7 @@ export interface ValueRendering {
  * (`schema-view.ts`). A function and a unique symbol are not bounds here,
  * because neither survives to be read out of a cell. The fabric's
  * value-admission test refuses both on the way in
- * (`assertValidFabricValueLayer`, `packages/data-model/src/type-check.ts`),
+ * (`assertValidFabricValueLayer`, `packages/data-model/src/validity-check.ts`),
  * and its codec has no form for either at the commit that would store one
  * (`BaseEncodeAct`), so the raw write that skips the first still meets the
  * second.

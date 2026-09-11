@@ -120,7 +120,19 @@ export interface WorkflowRun {
   id: number;
   html_url: string;
   head_sha: string;
+
+  /** The branch the run's head commit is on. */
+  head_branch?: string;
+
   created_at: string;
+
+  /**
+   * When the latest attempt started. A re-run moves this and leaves
+   * `created_at` where it was, so the two straddle a UTC midnight for a
+   * run re-run the next day.
+   */
+  run_started_at?: string;
+
   conclusion: string;
   event: string;
 }
@@ -241,6 +253,14 @@ export interface PRFile {
 export interface IssueComment {
   id: number;
   body: string;
+
+  /**
+   * The login the comment was written under. A token that may comment may
+   * also edit any comment on the pull request, and every review app on it
+   * writes as a bot, so anything that edits its own comment in place has
+   * to know which login is its own.
+   */
+  author?: string;
 }
 
 export interface CurrentPRBody {
@@ -329,6 +349,17 @@ function githubApiError(
   const statusText = resp.statusText ? ` ${resp.statusText}` : "";
   return new Error(
     `GitHub API ${method} ${resp.status}${statusText}: ${path}`,
+  );
+}
+
+/**
+ * Whether a thrown GitHub error is the interface saying the thing asked
+ * for is not there, as against saying it could not answer. The two call
+ * for different things, and only the first is an answer.
+ */
+export function isNotFound(error: unknown): boolean {
+  return /^GitHub API (?:GET|POST|PATCH) 404\b/.test(
+    error instanceof Error ? error.message : String(error),
   );
 }
 
@@ -782,7 +813,39 @@ export function coverageMetricGroupName(metric: string): string | null {
   const suffix = " uncovered lines";
   if (!metric.startsWith(prefix) || !metric.endsWith(suffix)) return null;
 
-  return metric.slice(prefix.length, -suffix.length);
+  const name = metric.slice(prefix.length, -suffix.length);
+  // A package's own-tests figure carries the package's name and is not a
+  // source group. Whatever iterates the coverage metrics of a run sees
+  // both, and reading one as the other would ratchet the wrong number.
+  return name.endsWith(OWN_TESTS_MARKER) ? null : name;
+}
+
+/** What separates a covered package's own-tests metric from its group. */
+const OWN_TESTS_MARKER = " own-tests";
+
+/**
+ * The metric one covered package's own tests are counted in.
+ *
+ * A different quantity from the source group of the same name: that one
+ * is the package's source measured by every test in the run, and this one
+ * is the same source measured by only the package's own tests. The two
+ * come apart under test selection, because a run that samples the corpus
+ * measures a sample of the first and the whole of the second. That is
+ * what makes this the figure a per-package gate can compare and the other
+ * one a trend.
+ */
+export function ownTestsCoverageMetric(member: string): string {
+  return `${COVERAGE_METRIC_PREFIX} ${member}` +
+    `${OWN_TESTS_MARKER} uncovered lines`;
+}
+
+/** The covered package one own-tests metric names, or null for anything else. */
+export function ownTestsCoverageMember(metric: string): string | null {
+  const prefix = `${COVERAGE_METRIC_PREFIX} `;
+  const suffix = `${OWN_TESTS_MARKER} uncovered lines`;
+  if (!metric.startsWith(prefix) || !metric.endsWith(suffix)) return null;
+  const member = metric.slice(prefix.length, -suffix.length);
+  return member.length === 0 ? null : member;
 }
 
 /** The metric a source group's uncovered lines are counted in. */
@@ -1525,11 +1588,19 @@ export async function fetchIssueComments(
   const perPage = 100;
 
   for (let page = 1;; page++) {
-    const data = await githubGet<{ id: number; body: string | null }[]>(
+    const data = await githubGet<
+      { id: number; body: string | null; user?: { login?: string } }[]
+    >(
       `/repos/${REPO}/issues/${issueNumber}/comments?per_page=${perPage}&page=${page}`,
     );
     for (const comment of data) {
-      comments.push({ id: comment.id, body: comment.body ?? "" });
+      comments.push({
+        id: comment.id,
+        body: comment.body ?? "",
+        ...(comment.user?.login === undefined
+          ? {}
+          : { author: comment.user.login }),
+      });
     }
     if (data.length < perPage) break;
   }

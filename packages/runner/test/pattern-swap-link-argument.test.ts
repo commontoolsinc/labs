@@ -196,6 +196,9 @@ describe("pattern swap with a link-valued argument slot", () => {
     }, rawMetaWriteAuthorization);
     await tx2.commit();
     await rt.idle();
+    // The watcher names the cold argument document before the swap reads
+    // it; the swap lands once that name-sync has settled.
+    await rt.runner.idlePointerMaintenance();
     await cell.pull();
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
   });

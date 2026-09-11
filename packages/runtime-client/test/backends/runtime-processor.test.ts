@@ -124,7 +124,10 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
   }
 }
 
-const createRuntime = (actingPrincipal?: string) => {
+const createRuntime = (
+  actingPrincipal?: string,
+  apiUrl = new URL("http://localhost/"),
+) => {
   const server = new MemoryV2Server.Server({
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
@@ -140,7 +143,7 @@ const createRuntime = (actingPrincipal?: string) => {
     memoryHost: new URL("memory://"),
   }, server);
   const runtime = new Runtime({
-    apiUrl: new URL("http://localhost/"),
+    apiUrl,
     storageManager,
     ...(actingPrincipal === undefined ? {} : {
       trustSnapshotProvider: () => ({
@@ -1054,12 +1057,17 @@ describe("runtime-processor", () => {
       "space"
     ];
 
+    /**
+     * A cell over `ref`. `resultSchema` is the `schema` meta of its document
+     * and `linkedSchema` the schema the links along its path carry, which
+     * `asSchemaFromLinks()` adopts; a cell reached through `key()` keeps both.
+     */
     function mockCell(ref: CellRef, options: {
       raw?: unknown;
-      schemaCell?: unknown;
-      onPull?: () => void;
       patternLink?: unknown;
       patternIdentity?: unknown;
+      resultSchema?: unknown;
+      linkedSchema?: CellRef["schema"];
       onSync?: () => void;
     } = {}) {
       return {
@@ -1067,20 +1075,28 @@ describe("runtime-processor", () => {
           options.onSync?.();
           return Promise.resolve();
         },
-        pull: () => {
-          options.onPull?.();
-          return Promise.resolve(options.raw);
-        },
         getRaw: () => options.raw,
         getMetaRaw: (metaField: string) =>
           metaField === "patternIdentity"
             ? options.patternIdentity
             : metaField === "pattern"
             ? options.patternLink
+            : metaField === "schema"
+            ? options.resultSchema
             : undefined,
         getAsLink: () => cellRefToSigilLink(ref),
         getAsNormalizedFullLink: () => ref,
-        asSchemaFromLinks: () => options.schemaCell,
+        key: (...keys: string[]) =>
+          mockCell({ ...ref, path: [...ref.path, ...keys] }, options),
+        asSchemaFromLinks: () =>
+          mockCell(
+            options.linkedSchema === undefined
+              ? ref
+              : { ...ref, schema: options.linkedSchema },
+            options,
+          ),
+        asSchema: (schema: CellRef["schema"]) =>
+          mockCell({ ...ref, schema }, options),
       };
     }
 
@@ -1148,19 +1164,45 @@ describe("runtime-processor", () => {
       expect(managerCalls.map(([, runIt]) => runIt)).toEqual([true, true]);
     });
 
-    it("renders slug redirects to output cells directly", async () => {
+    /**
+     * A runtime resolving a redirect into a document: `landing` for the
+     * document's root, `target` for the cell the redirect names inside it.
+     * Which of the two the handler syncs is what the cases below pin.
+     */
+    function runtimeLandingIn(
+      slugCell: unknown,
+      landing: { ref: CellRef; cell: unknown },
+      target: unknown,
+    ) {
+      return {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: (link: CellRef) =>
+          link.path.length === 0 && link.id === landing.ref.id
+            ? landing.cell
+            : target,
+      };
+    }
+
+    it("returns a cell inside a document that is no piece, syncing that document's root alone", async () => {
       const targetRef: CellRef = {
         id: "of:fid1-sub-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["capture"],
       };
+      const landingRef: CellRef = { ...targetRef, path: [] };
       const slugRef: CellRef = {
         id: "of:fid1-slug-doc" as CellRef["id"],
         space,
         scope: "space",
         path: [],
       };
+      let landingSynced = false;
+      const landingCell = mockCell(landingRef, {
+        onSync: () => {
+          landingSynced = true;
+        },
+      });
       let targetSynced = false;
       const targetCell = mockCell(targetRef, {
         onSync: () => {
@@ -1177,10 +1219,11 @@ describe("runtime-processor", () => {
         },
       };
       const processor = buildProcessor({
-        runtime: {
-          getCellFromEntityId: () => slugCell,
-          getCellFromLink: () => targetCell,
-        },
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
         cc: pieces,
         space,
       });
@@ -1192,50 +1235,51 @@ describe("runtime-processor", () => {
         runIt: true,
       });
 
-      expect(targetSynced).toBe(true);
+      expect(landingSynced).toBe(true);
+      expect(targetSynced).toBe(false);
       expect(result.piece.cell).toMatchObject(targetRef);
+      expect(result.piece.cell.schema).toBeUndefined();
     });
 
-    it("renders slug redirects to nested output cells directly", async () => {
+    it("returns a cell inside a piece under the piece's result schema at its path when its links carry none, syncing the piece's root alone", async () => {
       const targetRef: CellRef = {
         id: "of:fid1-parent-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["activityTab"],
       };
+      const landingRef: CellRef = { ...targetRef, path: [] };
       const slugRef: CellRef = {
         id: "of:fid1-slug-doc" as CellRef["id"],
         space,
         scope: "space",
         path: [],
       };
-      const schemaRef: CellRef = {
-        ...targetRef,
-        schema: {
-          type: "object",
-          properties: {
-            "$NAME": { type: "string" },
-            "$UI": { type: "object" },
-          },
-          required: ["$NAME", "$UI"],
+      const activityTabSchema = {
+        type: "object",
+        properties: {
+          "$NAME": { type: "string" },
+          "$UI": { type: "object" },
+        },
+        required: ["$NAME", "$UI"],
+      };
+      const resultSchema = {
+        type: "object",
+        properties: {
+          activityTab: activityTabSchema,
+          other: { type: "string" },
         },
       };
-      // If we don't have a pattern identity, the processor won't pull the cell and
-      // thus won't pull the schema, so include the current piece marker.
-      const patternIdentity = {
-        identity: "pattern-identity",
-        symbol: "default",
-      };
-      let schemaPulled = false;
-      const schemaCell = mockCell(schemaRef, {
-        onPull: () => {
-          schemaPulled = true;
+      let landingSynced = false;
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema,
+        onSync: () => {
+          landingSynced = true;
         },
       });
       let targetSynced = false;
       const targetCell = mockCell(targetRef, {
-        schemaCell,
-        patternIdentity,
         onSync: () => {
           targetSynced = true;
         },
@@ -1250,10 +1294,11 @@ describe("runtime-processor", () => {
         },
       };
       const processor = buildProcessor({
-        runtime: {
-          getCellFromEntityId: () => slugCell,
-          getCellFromLink: () => targetCell,
-        },
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
         cc: pieces,
         space,
       });
@@ -1265,9 +1310,119 @@ describe("runtime-processor", () => {
         runIt: true,
       });
 
-      expect(targetSynced).toBe(true);
-      expect(schemaPulled).toBe(true);
-      expect(result.piece.cell).toMatchObject(schemaRef);
+      expect(landingSynced).toBe(true);
+      expect(targetSynced).toBe(false);
+      expect(result.piece.cell).toMatchObject({
+        ...targetRef,
+        schema: activityTabSchema,
+      });
+    });
+
+    it("returns a cell inside a piece under the schema the links along its path carry, over the result schema at that path", async () => {
+      // What a stored link on the path says it is read under wins, as it
+      // does for a piece cell `getPieceCell()` resolves: the result schema
+      // is what the piece declared, and the link is what is there.
+      const targetRef: CellRef = {
+        id: "of:fid1-parent-piece" as CellRef["id"],
+        space,
+        scope: "space",
+        path: ["activityTab"],
+      };
+      const landingRef: CellRef = { ...targetRef, path: [] };
+      const slugRef: CellRef = {
+        id: "of:fid1-slug-doc" as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const linkedSchema: NonNullable<CellRef["schema"]> = {
+        type: "object",
+        properties: { entries: { type: "array" } },
+      };
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema: {
+          type: "object",
+          properties: { activityTab: { type: "object" } },
+        },
+        linkedSchema,
+      });
+      const targetCell = mockCell(targetRef);
+      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+      const processor = buildProcessor({
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
+        cc: { getSpace: () => space },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
+
+      expect(result.piece.cell).toMatchObject({
+        ...targetRef,
+        schema: linkedSchema,
+      });
+    });
+
+    it("returns a cell inside a piece under the schema the redirect carries when the links along its path carry none", async () => {
+      const redirectSchema: NonNullable<CellRef["schema"]> = {
+        type: "object",
+        properties: { entries: { type: "array" } },
+      };
+      const targetRef: CellRef = {
+        id: "of:fid1-parent-piece" as CellRef["id"],
+        space,
+        scope: "space",
+        path: ["activityTab"],
+        schema: redirectSchema,
+      };
+      const landingRef: CellRef = {
+        id: targetRef.id,
+        space,
+        scope: "space",
+        path: [],
+      };
+      const slugRef: CellRef = {
+        id: "of:fid1-slug-doc" as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema: {
+          type: "object",
+          properties: { activityTab: { type: "object" } },
+        },
+      });
+      const targetCell = mockCell(targetRef);
+      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+      const processor = buildProcessor({
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
+        cc: { getSpace: () => space },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
+
+      expect(result.piece.cell).toMatchObject(targetRef);
     });
 
     it("loads slug redirects to piece cells through the pieces controller", async () => {
@@ -5314,6 +5469,189 @@ describe("runtime-processor", () => {
             .toBe(false);
           expect(runtime.mappedHostFor(tableRoute)).toBe(
             "http://host-a-new.test/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
+      it("leaves a loopback entry on apiUrl when the page did not reach loopback", async () => {
+        // loom's daemon writes its own toolshed URL into the table, so a space
+        // it serves reads as `http://localhost:8001`. A page served over the
+        // tailnet cannot reach that, and WebKit refuses the ws:// socket it
+        // implies from an https page — every pane then fails with "No data at
+        // cell". The entry means "the toolshed this runtime is talking to".
+
+        const { runtime } = createRuntime(
+          undefined,
+          new URL("https://host.ts.net:8001/"),
+        );
+        const registered: Array<[string, string]> = [];
+        let sawRemote = () => {};
+        const remoteRegistered = new Promise<void>((resolve) => {
+          sawRemote = resolve;
+        });
+        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        const loopbackSpace = "did:key:z6Mk-loopback" as MemorySpace;
+        const remoteSpace = "did:key:z6Mk-remote" as MemorySpace;
+        Object.assign(runtime, {
+          registerSpaceHost: (space: string, host: string) => {
+            registered.push([space, host]);
+            if (space === remoteSpace) sawRemote();
+            return registerSpaceHost(space as MemorySpace, host);
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: loopbackSpace, host: "http://localhost:8001/" },
+          { did: remoteSpace, host: "http://host-remote.test/" },
+        ]);
+        await tx.commit();
+
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          // The non-loopback entry still registers, and the loop decides both
+          // in one pass, so its arrival is when the loopback one has been
+          // decided too.
+          await remoteRegistered;
+          expect(registered).toEqual([[
+            remoteSpace,
+            "http://host-remote.test/",
+          ]]);
+          expect(registered.map(([space]) => space)).not.toContain(
+            loopbackSpace,
+          );
+          expect(runtime.hostForSpace(loopbackSpace).toString()).toBe(
+            "https://host.ts.net:8001/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
+      it("lets a later loopback row retire an earlier route for the same space", async () => {
+        // The table is last-row-wins. A space that has moved to the writer's own
+        // toolshed says so with a loopback row, and the earlier row must not go
+        // on being applied — skipping the loopback row alone would leave it.
+
+        const { runtime } = createRuntime(
+          undefined,
+          new URL("https://host.ts.net:8001/"),
+        );
+        const registered: Array<[string, string]> = [];
+        let sawOther = () => {};
+        const otherRegistered = new Promise<void>((resolve) => {
+          sawOther = resolve;
+        });
+        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        const movedSpace = "did:key:z6Mk-moved" as MemorySpace;
+        const otherSpace = "did:key:z6Mk-other" as MemorySpace;
+        Object.assign(runtime, {
+          registerSpaceHost: (space: string, host: string) => {
+            registered.push([space, host]);
+            if (space === otherSpace) sawOther();
+            return registerSpaceHost(space as MemorySpace, host);
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: movedSpace, host: "http://was-remote.test/" },
+          { did: movedSpace, host: "http://localhost:8001/" },
+          { did: otherSpace, host: "http://host-other.test/" },
+        ]);
+        await tx.commit();
+
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          await otherRegistered;
+          expect(registered).toEqual([[otherSpace, "http://host-other.test/"]]);
+          expect(runtime.hostForSpace(movedSpace).toString()).toBe(
+            "https://host.ts.net:8001/",
+          );
+        } finally {
+          await processor.dispose();
+        }
+      });
+
+      it("registers a loopback entry when the page reached loopback too", async () => {
+        const { runtime } = createRuntime();
+        const registered: Array<[string, string]> = [];
+        let sawLoopback = () => {};
+        const loopbackRegistered = new Promise<void>((resolve) => {
+          sawLoopback = resolve;
+        });
+        const registerSpaceHost = runtime.registerSpaceHost.bind(runtime);
+        Object.assign(runtime, {
+          registerSpaceHost: (space: string, host: string) => {
+            registered.push([space, host]);
+            sawLoopback();
+            return registerSpaceHost(space as MemorySpace, host);
+          },
+        });
+        const userDid = runtime.userIdentityDID;
+        const loopbackSpace = "did:key:z6Mk-loopback-local" as MemorySpace;
+        const table = runtime.getCell(
+          userDid,
+          siteTableCause(userDid),
+          siteTableSchema,
+        );
+        const tx = runtime.edit();
+        table.withTx(tx).set([
+          { did: loopbackSpace, host: "http://localhost:8001/" },
+        ]);
+        await tx.commit();
+
+        const cc = new PiecesController(
+          { as: cfcSigner, space: userDid },
+          runtime,
+        );
+        const processor = buildProcessor({
+          runtime,
+          cc,
+          space: userDid,
+          identity: cfcSigner,
+        });
+        try {
+          processor.watchSiteTable();
+          await loopbackRegistered;
+          expect(registered).toEqual([[
+            loopbackSpace,
+            "http://localhost:8001/",
+          ]]);
+          expect(runtime.hostForSpace(loopbackSpace).toString()).toBe(
+            "http://localhost:8001/",
           );
         } finally {
           await processor.dispose();

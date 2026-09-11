@@ -327,7 +327,7 @@ export const gcpSpend: Tile = {
       status,
       value,
       valueLabel: value,
-      aside: `<span class="hmtd" title="${mtd}">${mtd}</span>`,
+      aside: `<span class="hfacet" title="${mtd}">${mtd}</span>`,
       sub: "billing account spend",
       extra: chart.chart,
       duration: chart.duration,

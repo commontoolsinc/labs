@@ -286,6 +286,30 @@ pressure people into gaming it, leave it off. This is a quiet instrument panel a
 tired person should be able to trust at 2am, not a scoreboard and not a
 surveillance tool.
 
+A tile is about as wide as a business card, and every line on it is set without
+wrapping. A line longer than that width is not shortened by the renderer so much
+as cut off by it, and a line that ends in an ellipsis has taken the whole line
+and delivered none of it. So the headline figure and the sub line under it are
+what a tile has room to say. Text can go below them — the host names down the
+production tile, the run list on the full-width recent runs — but only text
+short enough to be read whole at the width the tile is actually given. Something
+longer is not a longer tile, it is a page.
+
+That page is an ordinary drill-down — a route the tile declares, reached through
+the tile's `href`, and named on the tile by its `hint` so that a person can see
+there is something behind it. `/bench` holds the histories behind the benchmark
+and duration tiles, and `/test-selection` holds the manifest behind the two test
+tiles. A page has the width to spell a test's whole name, so nothing on one has
+to be abbreviated.
+
+Where a tile has more than one candidate for its sub line, the one that explains
+the color it is wearing wins. The test selection tile carries the count of the
+corpus a pull request would run under its headline share, and gives that line
+up to whichever of two conditions is in force: the lane past its budget where
+there is one, and otherwise the count of tests no lane can hold. A stale
+manifest colors the tile too and competes for neither line, because its own
+figure is the age badge in the header.
+
 ### The `TileView` a tile returns
 
 | field | meaning |
@@ -311,13 +335,16 @@ surveillance tool.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
+| flaky tests | how many tests the test-selection publisher measured disagreeing with themselves often enough to keep off pull requests, read from the newest selection manifest. The headline names what it counts, so it reads `25 flaky tests`, or `no flaky tests` when there are none. The line under it says what the count was drawn from: the span of history a flake share is measured over, which the manifest's `FLAKE_WINDOW_DAYS` dial names, and how long ago the publisher measured. Which tests they are is on the page behind it. Amber from one, red from ten | none |
+| test selection | what share of the corpus the newest selection manifest would have a pull request run, read from the same manifest. The manifest's packing is built with nothing mandatory, so the share is the one a pull request touching no test would get; a real one re-packs against its own diff and spends part of the same budget on what that diff makes mandatory. Amber once that manifest is over eight hours old, because selection quality decays with it, and amber too while the corpus holds a test costing more on its own than a whole lane's budget, since no packing can place one and a pull request then runs it only where its own diff makes it mandatory. Red when a lane's projected work is past the budget the manifest was packed to. Both of the last two take the sub line off the corpus count, the red one first | none |
+| test selection detail → `/test-selection` | the manifest behind both test tiles, at full width: every lane against its budget and how many tests it holds, every test held back as flaky with the rate it was measured at, and every test no lane can hold. Both tiles link here, the flaky tests tile straight to its flaky section | none |
 | coverage debt | the repository's whole uncovered-line count and what a median day does to it, read from the `perf-metrics` artifact of each day's newest successful `main` run (`docs/development/COVERAGE.md`). The headline is the count; under it a signed rate gives the median day's move over the last three weeks, and the chart shows eight weeks with those days picked out. Amber means that median is a rise, which takes more than half the days in the window, so a day that added debt says nothing on its own. It never turns red, and it goes gray rather than stand on a stale number: when five days have passed with nothing measured, and until the window holds a week of days to take a median over. A run whose pattern compile cache missed is passed over, because a cold run reaches branches a warm one does not and reads about a tenth of a percent low. It looks for a landing every five minutes, which costs one request when none has happened; the figure itself cannot exist until a run's Coverage Check uploads it, about twelve minutes after the commit lands | `GH_TOKEN` |
 | production | a direct synthetic HTTP check of the public common.tools site, synthetic HTTP checks of `/_health` on estuary and rapids, plus a name or reachability check for all three and for the bastion, the production and staging shells, the LLM gateway, and the sandbox service. When every host is well the headline counts them up. When a host has nothing behind it at all, the headline names that host, as in `bastion down`, and counts them when there is more than one, as in `2 hosts down`. Otherwise it names the worst condition seen, such as a response time or an HTTP status. Estuary and rapids keep their response times in the body while the tile is green or orange. Common.tools stays out of the body while it is good. Hosts without a health request stay out for as long as they answer, and a red tile drops all the green hosts. Red means the tile found nothing at the other end — a name with no A or AAAA record, a tailnet host the proxy cannot reach, or an HTTP request that never connected — and it also means a server health response other than 200, a health response over 1000 ms, or a common.tools 5xx response. Orange means a health response over 500 ms, a common.tools 4xx response or response over 2500 ms, or a resolver that failed, which leaves the tile unable to say either way. Hosts outside the tailnet are looked up by the dashboard itself. Tailnet hosts go through `PROD_PROXY`, because a dashboard that needs that proxy has no view of Tailscale's MagicDNS. Estuary and rapids are covered there by their health requests. The bastion has no health endpoint, so it gets a SOCKS5 connect that leaves the name for the proxy to resolve. The bastion records that connect in its own logs, so a bastion that answers is left alone for an hour and counts as reachable in between. One that does not answer is asked again on the next refresh, since a connect that reaches nothing leaves nothing behind. With no `PROD_PROXY` set, every host is looked up locally | optional `COMMON_TOOLS_URL`, `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | github spend | the organization's whole metered GitHub bill, projected to month-end in USD: every product its billing report carries, added into one figure. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0. "What the GitHub figure covers" below says which spend reaches the API | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
 | cubic spend | the spend row's slot for Cubic, the code review service. Cubic's API reports no billing figure, so the tile stays green and says why it shows none | none |
-| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), with a `failed (was <trend>)` headline when cached measurements are available and `failed` otherwise; orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
@@ -757,8 +784,13 @@ Notes:
   and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
   with no readable benchmark data**. A successful run with no usable output is
-  treated as failed. Either failure takes over that second line, in place of the
-  count and the window. A run that failed outright dates the outage and counts
+  treated as failed. Either failure sets the headline to `failed (was <trend>)`
+  when cached measurements are available. Its trend window and eligible CPUs
+  are determined as of the latest measurements, even when those measurements
+  are older than twelve hours. With no measurements, the headline is **failed**.
+  The tile links to the benchmark history. The second line describes the failure
+  in place of the count and the window. A run that
+  failed outright dates the outage and counts
   it: **last good 2 days ago · 12 runs failed**. The count reads back through
   the newest-first run list. It stops at the first completed run that did not
   fail, so a cancelled run ends it. The date comes from the newest run that
@@ -779,9 +811,10 @@ Notes:
   `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`, whichever set
   is larger. This matches the window rule used for the CI duration median. The
   corresponding line still spans the full ~45 days. Its trend window is
-  brighter. Green means every eligible established CPU is flat or falling. If
-  no CPU has been measured in the preceding twelve hours, the tile turns gray
-  and reports **no recent benchmark data**. A benchmark runs either to a fixed
+  brighter. Green means every eligible established CPU is flat or falling. When
+  no CPU has been measured in the preceding twelve hours and the tile is not in
+  the failed state, it turns gray and reports **no recent benchmark data**.
+  A benchmark runs either to a fixed
   time budget or for a fixed number of iterations, and neither is a
   measurement. The run's wall clock therefore barely moves with performance.
   The per-operation times do move, so the tile trends those values instead.
@@ -1141,6 +1174,12 @@ workflows are independent — neither waits for the other, and this one cannot
 read CI's verdict — so its own test job is the only thing standing between a
 dashboard that fails its tests and the `latest` tag. Leave it in place even
 though it looks redundant.
+
+What that test job does not do is record what it runs. CI records the same
+task on the same commit, so a second recording here would file each of those
+tests twice against one commit. The job therefore sets no spool directory,
+wraps nothing in `run-recorded`, and ships no test-records artifact, and the
+relay does not follow this workflow.
 
 No image is built or published for a pull request.
 

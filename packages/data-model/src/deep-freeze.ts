@@ -19,7 +19,7 @@ import {
   IS_DEEP_FROZEN,
 } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
-import { isValidFabricValue } from "./type-check.ts";
+import { isValidFabricValue } from "./validity-check.ts";
 
 /** Cache of confirmed deep-frozen objects. */
 const deepFrozenCache = new WeakSet<object>();

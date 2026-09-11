@@ -98,10 +98,11 @@ async function withMockModel<T>(
 async function post(
   path: string,
   requestBody: unknown,
+  contentType = "application/json",
 ): Promise<{ status: number; error: string }> {
   const response = await app.request(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": contentType },
     body: typeof requestBody === "string"
       ? requestBody
       : JSON.stringify(requestBody),
@@ -183,6 +184,22 @@ Deno.test("a tool the model cannot serve is the caller's mistake", async () => {
   assertStringIncludes(error, "is not supported by model");
 });
 
+Deno.test("a request that leaves `cache` out reaches the provider", async () => {
+  // `cache` is optional, so the status is the provider's refusal rather than
+  // the guard's. The body posted here is the one the OpenAPI document
+  // publishes as valid: a model and a conversation, and nothing else.
+
+  const { status } = await withMockModel(
+    rejectingWith(429, "Rate limit exceeded"),
+    () =>
+      post("/api/ai/llm", {
+        model: MOCK_MODEL_NAME,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+  );
+  assertEquals(status, 429);
+});
+
 //
 // A body sent as JSON is parsed by the route's own validator, which answers
 // its own 422 before the handler runs. A body sent as anything else reaches
@@ -251,4 +268,46 @@ Deno.test("a model generateObject does not carry is the caller's mistake", async
     (await response.json()).error,
     "Unsupported model: mock:no-such-model",
   );
+});
+
+//
+// The two routes read their bodies with `c.req.json()`, which parses whatever
+// arrives, while the route validator only reads `application/json`. A body
+// sent as anything else meets the handler's own guard and nothing before it,
+// which is the path these three cover.
+//
+
+Deno.test("a system-role message sent as text is refused by generateObject", async () => {
+  const { status, error } = await post(
+    "/api/ai/llm/generateObject",
+    {
+      messages: [{ role: "system", content: "Be brief" }],
+      schema: { type: "object" },
+      cache: false,
+    },
+    "text/plain",
+  );
+  assertEquals(status, 400);
+  assertStringIncludes(error, "Message 0");
+  assertStringIncludes(error, "'system' field");
+});
+
+Deno.test("a generateObject body that is not an object is the caller's mistake", async () => {
+  const { status, error } = await post(
+    "/api/ai/llm/generateObject",
+    null,
+    "text/plain",
+  );
+  assertEquals(status, 400);
+  assertStringIncludes(error, "must be an object");
+});
+
+Deno.test("an empty conversation sent to generateObject is the caller's mistake", async () => {
+  const { status, error } = await post(
+    "/api/ai/llm/generateObject",
+    { messages: [], schema: { type: "object" }, cache: false },
+    "text/plain",
+  );
+  assertEquals(status, 400);
+  assertStringIncludes(error, "'messages'");
 });

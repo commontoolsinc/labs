@@ -19,6 +19,9 @@
  * contention burst. If the window elapses without the write landing, the failure
  * surfaces as a terminal error rather than vanishing.
  */
+
+import { EVENT_DEFERRAL_DROP_THRESHOLD } from "./constants.ts";
+
 export interface CommitBackpressurePolicy {
   /**
    * Delay before the first retry, in milliseconds. Small by default so the
@@ -132,5 +135,52 @@ export class CommitConvergenceError extends Error {
     this.attempts = options.attempts;
     this.elapsedMs = options.elapsedMs;
     this.cause = options.cause;
+  }
+}
+
+/**
+ * How many times a client dispatch whose handler body did not run is re-run
+ * after a backoff step — a re-run with no load to park on — before the
+ * handling fails. A re-run parked on a load waits for that load and is not
+ * counted: what the count bounds is waiting for a change nothing has
+ * announced, which a permanently unresolvable argument never gets. The
+ * requeued event holds the event queue's head while it waits, so this bound
+ * is what keeps one such argument from blocking every later event for the
+ * whole retry window. It is the serving drain's deferral threshold, so the
+ * two budgets move together.
+ */
+export const HANDLER_NOT_RUN_BACKOFF_LIMIT = EVENT_DEFERRAL_DROP_THRESHOLD;
+
+/**
+ * Terminal failure raised when a client event's handler body never ran: every
+ * dispatch found the handler's argument unresolved
+ * (`tx.dispatchedHandlerNotRun`), so the event was re-run rather than sealed
+ * as a skip, and either the retry window is spent or the re-runs with nothing
+ * to park on reached `HANDLER_NOT_RUN_BACKOFF_LIMIT`. Surfaced through the scheduler error
+ * channel, so a dispatch that never had its effect is an error the caller
+ * sees instead of a commit that looks like success.
+ */
+export class EventHandlerNotRunError extends Error {
+  readonly reason: string;
+  readonly attempts: number;
+  readonly elapsedMs: number;
+
+  constructor(
+    options: {
+      handlerId?: string;
+      reason: string;
+      attempts: number;
+      elapsedMs: number;
+    },
+  ) {
+    const handlerPart = options.handlerId ? ` for ${options.handlerId}` : "";
+    super(
+      `Event handler${handlerPart} did not run in ${options.attempts} ` +
+        `dispatches over ${Math.round(options.elapsedMs)}ms: ${options.reason}`,
+    );
+    this.name = "EventHandlerNotRunError";
+    this.reason = options.reason;
+    this.attempts = options.attempts;
+    this.elapsedMs = options.elapsedMs;
   }
 }

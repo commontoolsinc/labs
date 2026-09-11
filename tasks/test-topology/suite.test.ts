@@ -1,6 +1,9 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { SKIP_LIST_VARIABLE } from "@commonfabric/test-support/records";
+import {
+  preloadArgument,
+  SKIP_LIST_VARIABLE,
+} from "@commonfabric/test-support/records";
 import {
   fileSuite,
   unavailableFrom,
@@ -77,7 +80,7 @@ describe("reading a configuration's skip registry", () => {
 });
 
 describe("a suite of deno test files over several packages", () => {
-  const context = { root: "/repo", outputDir: "/out" };
+  const context = { root: "/repo", outputDir: "/out", spoolDir: "/spool" };
 
   it("runs one invocation per package, each with its own report", async () => {
     // A real directory, because the leaf this configuration skips means
@@ -144,6 +147,59 @@ describe("a suite of deno test files over several packages", () => {
     ).toBeUndefined();
   });
 
+  it("grants the batch's spool to a part that cannot already write it", async () => {
+    // The preload leaves its name map there, and that map is what gives
+    // each identity its file once the preload has taken the class names.
+    const narrow = fileSuite({
+      id: "narrow",
+      needs: ["deno"],
+      parts: [{
+        packageDir: "packages/oven",
+        flags: ["--allow-read", "--allow-write=/tmp"],
+        junit: { kind: "unit", scope: "oven" },
+        files: ["packages/oven/a.test.ts"],
+      }],
+    });
+    const [invocation] = await narrow.command(
+      [{ unit: "packages/oven/a.test.ts", skip: [] }],
+      context,
+    );
+    expect(invocation!.command).toContain("--allow-write=/spool");
+  });
+
+  it("grants nothing to a part that already writes anywhere", async () => {
+    // This one runs under `-A`, which Deno refuses to take beside an
+    // `--allow-write` path list at all, ending the run before it starts.
+    const [blanket] = await twoParts().command(
+      [{ unit: "packages/mill/integration/grind.test.ts", skip: [] }],
+      context,
+    );
+    expect(blanket!.command).not.toContain("--allow-write=/spool");
+    expect(blanket!.command).toContain(preloadArgument());
+  });
+
+  it("grants nothing to a part that cannot read the tree", async () => {
+    // Writing the spool is what makes the preload take the class names,
+    // and reading is what finds the files that replace them, so a part
+    // holding one permission without the other records no file at all.
+    const unreadable = fileSuite({
+      id: "unreadable",
+      needs: ["deno"],
+      parts: [{
+        packageDir: "packages/oven",
+        flags: ["--no-check", "--allow-env", "--allow-run", "--allow-net"],
+        junit: { kind: "integration", scope: "oven" },
+        files: ["packages/oven/a.test.ts"],
+      }],
+    });
+    const [invocation] = await unreadable.command(
+      [{ unit: "packages/oven/a.test.ts", skip: [] }],
+      context,
+    );
+    expect(invocation!.command).not.toContain("--allow-write=/spool");
+    expect(invocation!.command).toContain(preloadArgument());
+  });
+
   it("builds nothing for a unit it does not hold", async () => {
     expect(await twoParts().command([{ unit: "elsewhere", skip: [] }], context))
       .toEqual([]);
@@ -200,7 +256,7 @@ describe("grouping a batch across the packages it spans", () => {
     const made = await suite.command([
       { unit: "packages/oven/a.test.ts", skip: [] },
       { unit: "packages/oven/b.test.ts", skip: [] },
-    ], { root: "/repo", outputDir: "/out" });
+    ], { root: "/repo", outputDir: "/out", spoolDir: "/spool" });
     expect(made.length).toBe(1);
     expect(made[0]!.command.filter((arg) => arg.endsWith(".test.ts")))
       .toEqual(["a.test.ts", "b.test.ts"]);

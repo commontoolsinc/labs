@@ -9,6 +9,7 @@ import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   acquireServerExecutionEnabler,
+  type CellScope,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -46,8 +47,10 @@ import type {
   DID,
   IExtendedStorageTransaction,
   IStorageManager,
+  IStorageProvider,
   MemorySpace,
   TransactionSealDestination,
+  UnexaminedAbsence,
   URI,
 } from "./storage/interface.ts";
 import type {
@@ -76,6 +79,7 @@ import {
 import { EffectsChannel } from "./speculation/effects-channel.ts";
 import { waveRunContextOf } from "./executor/wave.ts";
 import { Action, Scheduler } from "./scheduler.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -112,9 +116,6 @@ import {
   type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
-  externalIngestStamp,
-  flowLabelWorkExists,
-  gatedSinkRequestExists,
   linkCfcLabelView,
   type PolicySnapshot,
   resolveCfcDials,
@@ -131,7 +132,10 @@ import type { CompiledModuleArtifact } from "./harness/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import { PatternManager } from "./pattern-manager.ts";
+import {
+  PatternManager,
+  type PreparedSourceUpdate,
+} from "./pattern-manager.ts";
 import { SourceReconciler } from "./source-reconciler.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
@@ -1171,7 +1175,7 @@ export class Runtime {
     }
   }
 
-  #moduleDelegationSnapshot(): Map<
+  #moduleDelegationSnapshot(sourceUpdate?: PreparedSourceUpdate): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>
   > {
@@ -1179,7 +1183,24 @@ export class Runtime {
       MemorySpace,
       ReadonlyMap<string, readonly string[]>
     >();
-    for (const [space, spaceDelegations] of this.#moduleDelegations) {
+    const delegations = new Map(this.#moduleDelegations);
+    if (sourceUpdate !== undefined) {
+      const proposal = this.patternManager.sourceUpdateDelegations(
+        sourceUpdate,
+      );
+      const combined = new Map(delegations.get(proposal.space));
+      for (const [identity, predecessors] of proposal.delegations) {
+        combined.set(
+          identity,
+          new Set([
+            ...(combined.get(identity) ?? []),
+            ...predecessors,
+          ]),
+        );
+      }
+      delegations.set(proposal.space, combined);
+    }
+    for (const [space, spaceDelegations] of delegations) {
       const spaceSnapshot = new Map<string, readonly string[]>();
       for (const identity of spaceDelegations.keys()) {
         const inherited = new Set<string>();
@@ -1747,15 +1768,11 @@ export class Runtime {
   asyncWorkObserver: ((work: Promise<unknown>) => void) | undefined;
 
   /**
-   * Serving-loop observer of effect-memo hits (server-execution v2
-   * stage G, serving-loop.md §4's hit rule / §7's `memo.hits`): the
-   * effectful builtins report an evaluation that resolved from the
-   * stored request hash — no effect fired. Installed by the
-   * SpaceServer on the serving runtime; undefined everywhere else (the
-   * OFF arm pays one optional call).
+   * Observer of memo hits and completions whose request has been superseded.
+   * The serving loop uses these events for its memo and outbox counters.
    */
   effectMemoObserver:
-    | ((event: { kind: "hit"; id: string }) => void)
+    | ((event: { kind: "hit" | "superseded"; id: string }) => void)
     | undefined;
 
   /**
@@ -2160,7 +2177,10 @@ export class Runtime {
    * multiple spaces but writing only to one space.
    */
   edit(
-    options: { changeGroup?: ChangeGroup } = {},
+    options: {
+      changeGroup?: ChangeGroup;
+      sourceUpdate?: PreparedSourceUpdate;
+    } = {},
   ): IExtendedStorageTransaction {
     const tx = this.storageManager.edit();
     if (options.changeGroup !== undefined) {
@@ -2257,7 +2277,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
-    wrapped.setCfcModuleDelegations(this.#moduleDelegationSnapshot());
+    wrapped.setCfcModuleDelegations(
+      this.#moduleDelegationSnapshot(options.sourceUpdate),
+    );
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
@@ -2612,13 +2634,20 @@ export class Runtime {
   }
 
   /**
-   * Creates a storage transaction that can be used to read / write data into
-   * locally replicated memory spaces. Transaction allows reading from many
-   * multiple spaces but writing only to one space.
+   * Runs `fn` in a storage transaction over locally replicated memory spaces.
+   * The transaction can read from multiple spaces but write to only one.
    *
-   * If the transaction fails with a RETRYABLE commit rejection, it will be
-   * retried up to maxRetries times. Retryability is decided by the shared
-   * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
+   * After `fn` returns, while retry budget remains, the runtime may load
+   * documents read as absent that the replica has not examined. If any exist,
+   * it aborts the staged attempt and invokes `fn` with a fresh transaction
+   * before sending a commit. These reconciliation re-runs and retries after
+   * commit rejection share one `maxRetries` budget, in addition to the initial
+   * invocation. With no budget left, reconciliation is skipped and the current
+   * transaction proceeds to ordinary commit validation.
+   *
+   * A retryable commit rejection also re-runs `fn` while budget remains.
+   * Retryability is decided by the shared rejection vocabulary
+   * (`isRetryableCommitRejection`, `storage/rejection.ts`),
    * which is an allow-list: a stale basis (server conflict or the local
    * inconsistency guard), a liveness failure the memory client heals on its own
    * (a transport failure, an undecodable frame), a discarded attempt
@@ -2628,10 +2657,10 @@ export class Runtime {
    * authorization denial, a precondition failure, a commit-rule violation, a
    * CFC boundary refusal (`CfcCommitRefusalError`, a deterministic verdict on
    * the transaction's own reads and writes), a `SessionError` (nothing on this
-   * path remounts the session, so
-   * every attempt reuses the handle the server just refused) — is returned on
-   * the FIRST attempt, because re-running cannot change the outcome and each
-   * doomed attempt costs a round-trip plus a subscriber revert notification.
+   * path remounts the session, so every attempt reuses the handle the server
+   * just refused) — is returned without another retry, because re-running
+   * cannot change the outcome and each doomed attempt costs a round-trip plus
+   * a subscriber revert notification.
    *
    * Every retry invokes `fn` again with a fresh transaction. Aborting an
    * attempt discards only the operations staged in that transaction; an effect
@@ -2648,7 +2677,8 @@ export class Runtime {
    * stages nothing before it declines.
    *
    * @param fn - Function to execute with the transaction.
-   * @param maxRetries - Maximum number of retries.
+   * @param maxRetries - Maximum combined number of reconciliation re-runs and
+   *   commit-rejection retries after the initial invocation.
    * @returns `{ ok }` once the transaction commits, carrying whatever `fn`
    *   returned, or `{ error }` when it does not commit: a rejection that is not
    *   retryable, a retryable one whose retries are spent, or `fn` itself
@@ -2657,6 +2687,7 @@ export class Runtime {
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries: number = DEFAULT_MAX_RETRIES,
+    options: { sourceUpdate?: PreparedSourceUpdate } = {},
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
@@ -2671,7 +2702,7 @@ export class Runtime {
       },
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
-    const tx = this.edit();
+    const tx = this.edit(options);
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2706,7 +2737,7 @@ export class Runtime {
               this.#writeTeardown.signal,
             );
             if (this.#tearingDownWrites) return teardownResult();
-            return this.editWithRetry<T>(fn, maxRetries - 1);
+            return this.editWithRetry<T>(fn, maxRetries - 1, options);
           } else {
             return { error };
           }
@@ -2730,19 +2761,21 @@ export class Runtime {
     // and `fn` re-runs here anyway, after a server round trip, the
     // conflict's catch-up gate, and a rebuilt commit — once per LAYER of
     // cold documents, since each re-run can follow the arrived layer's links
-    // into the next. Loading the whole cohort up front and re-running
-    // locally is the same convergence, minus the wire: each round consumes a
-    // retry from the same budget a rejection would.
+    // into the next. The reads that found those documents absent also
+    // started loading them, so waiting for those loads and re-running
+    // locally is the same convergence, minus the wire: each round consumes
+    // a retry from the same budget a rejection would.
     //
-    // Two gates on the load. Budget: loading the documents without re-running
-    // would let the commit export their REAL seqs under a traversal that read
-    // them as absent — an accepted commit derived from an absence that was
-    // never there — so with no budget to re-run, the honest move is the
-    // unexamined claim itself, judged by the server as before. Synchrony: a
-    // transaction with nothing to examine commits on the same synchronous
-    // path as ever, which the commit-gated runner start depends on.
+    // Two gates on the wait. Budget: a document that lands and turns out to
+    // exist fails the transaction's commit-time claim check (the snapshot
+    // read it as absent, and the replica now holds it), so with no budget to
+    // re-run, the wait can only turn the server's verdict into a local
+    // rejection; the unexamined claim goes to the server, judged as before.
+    // Synchrony: a transaction with nothing in flight commits on the same
+    // synchronous path as ever, which the commit-gated runner start depends
+    // on.
     const reconciliation = maxRetries > 0
-      ? this.#loadUnexaminedAbsences(tx)
+      ? this.#awaitUnexaminedAbsences(tx)
       : 0;
     if (typeof reconciliation === "number") return commitPrepared();
     return reconciliation.then((present) => {
@@ -2755,50 +2788,87 @@ export class Runtime {
           `editWithRetry re-run: ${present} document(s) read as absent ` +
             "are present; the action re-runs against them",
         );
-        return this.editWithRetry<T>(fn, maxRetries - 1);
+        return this.editWithRetry<T>(fn, maxRetries - 1, options);
       }
       return commitPrepared();
     });
   }
 
   /**
-   * Load every document `tx` read as absent that no involved replica has
-   * examined, resolving with how many exist after all — the signal that the
-   * transaction's reads ran against documents it did not hold. One call per
-   * space the transaction read from, each answered by that space's provider
-   * ({@link IStorageProvider.loadUnexaminedAbsences}); a provider without
-   * the capability contributes zero and keeps the server-judged path.
+   * Wait for the loads in flight for every document `tx` read as absent that
+   * no involved replica has examined, resolving with how many exist after
+   * all — the signal that the transaction's reads ran against documents it
+   * did not hold. A cell read of a document the replica never synced starts
+   * a load as a side effect — `Cell.get()` and `Cell.getRaw()` sync the cell
+   * they read, and a link followed during traversal is kicked by
+   * `ensureLinkedDocLoaded` — so the wait sends nothing of its own. A
+   * document read by address alone starts no load and is left as the absence
+   * claim it is, for the server to judge. Each space's provider names its
+   * unexamined absences ({@link IStorageProvider.unexaminedAbsences}) and
+   * counts the present ones afterwards; a provider without the capability
+   * contributes zero. Synchronous zero when nothing is in flight, so a
+   * round with no cold reads never leaves the synchronous path.
    */
-  #loadUnexaminedAbsences(
+  #awaitUnexaminedAbsences(
     tx: IExtendedStorageTransaction,
   ): number | Promise<number> {
     const reads = getDirectTransactionReadActivities(tx.tx);
     if (!reads) return 0;
+    const manager = this.storageManager;
+    if (
+      manager.loadsSettled === undefined ||
+      manager.pendingLoadGeneration === undefined
+    ) {
+      return 0;
+    }
     const spaces = new Set<MemorySpace>();
     for (const read of reads) spaces.add(read.space);
-    // A synchronous answer is always zero — anything unexamined needs a
-    // pull — so a round with no cold reads never leaves the synchronous
-    // path, and only the spaces that owe a pull contribute a promise.
-    const pending: Promise<number>[] = [];
+    const absencesPerProvider: {
+      presentCount: NonNullable<IStorageProvider["presentCount"]>;
+      absences: readonly UnexaminedAbsence[];
+    }[] = [];
+    const keys: string[] = [];
     for (const space of spaces) {
-      const provider = this.storageManager.open(space);
-      if (provider.loadUnexaminedAbsences === undefined) continue;
+      const provider = manager.open(space);
+      if (
+        provider.unexaminedAbsences === undefined ||
+        provider.presentCount === undefined
+      ) {
+        continue;
+      }
+      let absences: readonly UnexaminedAbsence[];
       try {
-        const answer = provider.loadUnexaminedAbsences(tx.tx);
-        if (typeof answer !== "number") {
-          // Reconciliation only front-runs the authoritative commit verdict.
-          // A provider that cannot perform the best-effort load leaves the
-          // transaction's original absence claim for the server to judge.
-          pending.push(answer.catch(() => 0));
-        }
+        absences = provider.unexaminedAbsences(tx.tx);
       } catch {
-        // Same fallback for providers that fail before returning a promise.
+        // Reconciliation only front-runs the authoritative commit verdict. A
+        // provider that cannot name its absences leaves the transaction's
+        // claims for the server to judge.
+        continue;
+      }
+      if (absences.length === 0) continue;
+      absencesPerProvider.push({
+        presentCount: provider.presentCount.bind(provider),
+        absences,
+      });
+      for (const absence of absences) {
+        // An absence naming a foreign instance carries its key; the rest are
+        // this runtime's own instances, the way the loads were registered.
+        const key = entityKey(absence, this.scopeKeyIdentity);
+        if (manager.pendingLoadGeneration(key) !== undefined) keys.push(key);
       }
     }
-    if (pending.length === 0) return 0;
-    return Promise.all(pending).then((counts) =>
-      counts.reduce((total, count) => total + count, 0)
-    );
+    if (keys.length === 0) return 0;
+    // `loadsSettled` settles only once every key has, and a load that failed
+    // leaves its document absent, so the count is taken the same way on
+    // either outcome: what landed is present, and a failure is the
+    // sync-failure log's to report while the commit's own verdict decides
+    // what that absence claim was worth.
+    const countPresent = () =>
+      absencesPerProvider.reduce(
+        (total, { presentCount, absences }) => total + presentCount(absences),
+        0,
+      );
+    return manager.loadsSettled(keys).then(countPresent, countPresent);
   }
 
   /**
@@ -2821,9 +2891,11 @@ export class Runtime {
    * this replica never READ does not arrive with it — and a conflicted blind
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So the named doc is pulled
-   * too, and the retry's write carries its true version instead of
-   * re-asserting seq 0.
+   * docs the serving side was materializing). So every document named by the
+   * rejection is pulled concurrently in its scope, and the retry's writes
+   * carry their true versions instead of re-asserting seq 0. Entries without
+   * scope use the default space instance. If no array entry names a usable
+   * address, the singular conflict supplies the recovery target.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2862,24 +2934,48 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const conflict = (error as {
-      conflict?: { space?: MemorySpace; of?: string };
-    })?.conflict;
-    if (
-      conflict?.space !== undefined &&
-      typeof conflict.of === "string" &&
-      conflict.of !== "of:unknown"
-    ) {
+    type ConflictAddress = { space: MemorySpace; of: URI; scope?: CellScope };
+    const isPullableConflict = (value: unknown): value is ConflictAddress => {
+      const conflict = value as Partial<ConflictAddress> | null | undefined;
+      return typeof conflict?.space === "string" &&
+        typeof conflict.of === "string" && conflict.of !== "of:unknown" &&
+        (conflict.scope === undefined || isCellScope(conflict.scope));
+    };
+    const rejection = error as { conflict?: unknown; conflicts?: unknown };
+    const listedConflicts = Array.isArray(rejection?.conflicts)
+      ? rejection.conflicts.filter(isPullableConflict)
+      : [];
+    const conflicts = listedConflicts.length > 0
+      ? listedConflicts
+      : isPullableConflict(rejection?.conflict)
+      ? [rejection.conflict]
+      : [];
+    const pulls: Promise<unknown>[] = [];
+    const seen = new Set<string>();
+    for (const conflict of conflicts) {
+      const key = entityNameKey({
+        space: conflict.space,
+        id: conflict.of,
+        scope: conflict.scope,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await waitUnlessTeardown(
-          this.storageManager.open(conflict.space).sync(
-            conflict.of as unknown as URI,
-            { path: [], schema: false },
-          ),
+        pulls.push(
+          Promise.resolve(
+            this.storageManager.open(conflict.space).sync(
+              conflict.of,
+              { path: [], schema: false },
+              conflict.scope,
+            ),
+          ).catch(() => undefined),
         );
       } catch {
-        // Pull failed — the retry's commit decides.
+        // A synchronous pull failure leaves the retry's commit to decide.
       }
+    }
+    if (pulls.length > 0) {
+      await waitUnlessTeardown(Promise.all(pulls));
     }
   }
 
@@ -3036,59 +3132,24 @@ export class Runtime {
     }
   }
 
+  /**
+   * Settles whether `tx` is CFC-relevant and prepares it when it is, by
+   * forwarding to `tx.prepareForCommit()`, which carries the step.
+   *
+   * `commit()` runs the same step, so calling this is never what decides
+   * whether the transaction is enforced. Call it where the commit's caller
+   * reads what prepare produces before the commit runs: the CFC outbox the
+   * scheduler counts as post-commit work, and the label-map writes that a
+   * reactivity log built before the commit carries.
+   *
+   * It stays a method on the runtime because a caller's prepare is
+   * replaceable per runtime instance through it: the scheduler's backstop
+   * for a throw out of prepare, and the cases that stand in for a caller
+   * that never prepares, are exercised by replacing it here rather than by
+   * patching every transaction the process makes.
+   */
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
-    // A transaction that is no longer open takes no prepare work, because it
-    // can no longer commit. Everything below reaches storage through the
-    // transaction: the flow probe reads stored metadata, and prepareCfc reads
-    // and writes the derived label map. A settled transaction refuses both,
-    // and its commit reports the terminal state as the result.
-    if (tx.status().status !== "ready") {
-      return;
-    }
-    const state = tx.getCfcState();
-    if (state.enforcementMode === "disabled") {
-      // A vouched ingest still needs its provenance mark minted even where CFC
-      // enforcement is disabled (an explicit `cfcEnforcementMode: "disabled"`
-      // opt-in — no shipped host today; toolshed passes no CFC options and so
-      // runs the enforce-explicit default). The mint
-      // is a builtin-authored boundary-commit step that never rejects, so run
-      // prepare for it explicitly rather than forcing the enforcement dial up
-      // (which would desync ingest txs from the runtime's real mode). The
-      // stamp already marked the tx relevant; nothing else here applies when
-      // disabled, so fall straight through to prepareCfc.
-      if (externalIngestStamp(tx) !== undefined) {
-        if (state.prepare.status === "unprepared") {
-          tx.prepareCfc();
-        }
-      }
-      return;
-    }
-    // Flow-label relevance is computed, not caller-marked (S16): the
-    // laundering txs are exactly the ones nothing marked relevant.
-    // Stage C tuning T1: probed ONCE per transaction activity epoch — the
-    // commit chokepoint re-uses this call's negative verdict (see
-    // IExtendedStorageTransaction.probeFlowLabelWork).
-    if (
-      !state.relevant &&
-      state.flowLabelsMode !== "off" &&
-      (tx.probeFlowLabelWork?.() ?? flowLabelWorkExists(tx))
-    ) {
-      tx.markCfcRelevant("flow-labels");
-    }
-    // Sink-request ceiling relevance is also computed, not caller-marked
-    // (audit item 21): a request assembled from a value pulled through a
-    // schema-less link marks nothing, so without this the egress commits
-    // without `prepareCfc` and the ceiling is never checked. Independent of
-    // the flow dial — the ceiling enforces even when flow labels are off.
-    if (!state.relevant && gatedSinkRequestExists(tx)) {
-      tx.markCfcRelevant("sink-request-ceiling");
-    }
-    if (!state.relevant) {
-      return;
-    }
-    if (state.prepare.status === "unprepared") {
-      tx.prepareCfc();
-    }
+    tx.prepareForCommit();
   }
 
   /**

@@ -6,12 +6,13 @@
  * the bounds on how a history is scaled to a chart.
  */
 
+import { DETAIL_PAGE_STYLES } from "./detail-page.ts";
 import { escapeHtml } from "./lib.ts";
 import {
   STATUS_EDGE,
   STATUS_WASH,
 } from "./palette.ts";
-import { DASHBOARD_THEME_STYLES, statusLayer } from "./theme.ts";
+import { statusLayer } from "./theme.ts";
 
 export type PerformanceView = "runtime" | "ci" | "gantt";
 
@@ -46,11 +47,7 @@ export const PERFORMANCE_PROGRESS_STYLES = `
   #fetch-detail{font-size:11px;margin:0}`;
 
 export const PERFORMANCE_VIEW_STYLES = `
-  ${DASHBOARD_THEME_STYLES}
-  body{box-sizing:border-box;width:100%;margin:0 auto;background:var(--page);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px}
-  .top{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .top b{font-size:16px;font-weight:600}.top span{font-size:12px;color:var(--text-faint)}
-  a.back{color:var(--accent);text-decoration:none;font-size:13px}
+  ${DETAIL_PAGE_STYLES}
   .views{display:flex;gap:6px;margin:0 0 14px}
   .views a,.controls a{font-size:13px;color:var(--text-secondary);text-decoration:none;border:1px solid var(--border-strong);border-radius:6px;padding:4px 10px}
   .controls a{font-variant-numeric:tabular-nums}.controls a:hover{border-color:var(--border-hover)}
@@ -66,7 +63,6 @@ export const PERFORMANCE_VIEW_STYLES = `
   .legend{font-size:11px;color:var(--text-subtle);margin:0 0 12px}
   ${PERFORMANCE_PROGRESS_STYLES}
   .axisrow{display:flex;gap:18px;margin:0 14px 4px}.timeaxis{flex:0 0 42%;display:flex;justify-content:space-between;color:var(--text-faint);font-size:10px}
-  h2{font-size:12px;letter-spacing:.04em;color:var(--text-subtle);font-weight:600;margin:20px 0 8px;font-family:ui-monospace,Menlo,monospace}
   .blist,.clist{display:flex;flex-direction:column;gap:7px}
   .brow,.crow{display:flex;align-items:center;gap:18px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px}
 ${ROW_RULES}
@@ -76,8 +72,7 @@ ${ROW_RULES}
   .bname,.cname{font-size:13px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bval,.cval{color:var(--text);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
   .btrend,.ctrend{font-size:11px;font-weight:400;color:var(--text-muted)}
-  .empty,.refresh-error{color:var(--text-muted);font-size:14px}.refresh-error{color:var(--status-warn-text)}
-  .note{font-size:11px;color:var(--text-faint);margin-top:22px}.note a{color:var(--accent);text-decoration:none}
+  .refresh-error{color:var(--status-warn-text);font-size:14px}
   @media(max-width:640px){.timeaxis{flex:1}.brow,.crow{align-items:stretch;gap:7px;flex-wrap:wrap}.bspark,.cspark{flex:1 0 100%}.controls .field,.controls .choice-group{flex:1 1 100%}.controls input[type=range]{flex:1;width:auto;min-width:0}.controls label.trailing{margin-left:0}}`;
 
 const labels: Record<PerformanceView, string> = {

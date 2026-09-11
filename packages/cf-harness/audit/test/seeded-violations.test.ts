@@ -34,7 +34,10 @@ import type { PromptSlotBinding } from "../../src/contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "../../src/contracts/run-report.ts";
 import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
-import type { HarnessRunState } from "../../src/run-state.ts";
+import type {
+  HarnessFabricSessionCfcPosture,
+  HarnessRunState,
+} from "../../src/run-state.ts";
 import { BUILTIN_TOOL_REGISTRY } from "../../src/tools/registry.ts";
 import { RUN_CHECKS } from "../checks/registry.ts";
 import {
@@ -42,7 +45,6 @@ import {
   HOST_AUTHORED_OUTPUT_WRITERS,
 } from "../checks/structural.ts";
 import { harnessFabricSessionPosture } from "../../src/cfc-posture.ts";
-import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
 import {
   loadRunFamily,
   type RunEvidence,

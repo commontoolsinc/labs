@@ -2075,7 +2075,7 @@ describe("piece pull materialization", () => {
     });
   });
 
-  it("preserves missing-path diagnostics through the narrow fallback", async () => {
+  it("refuses an undeclared path without pulling the input root", async () => {
     const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
@@ -2088,7 +2088,7 @@ describe("piece pull materialization", () => {
       await expect(controller.input.get(["missing"])).rejects.toThrow(
         'Cannot access path "missing" - property "missing" not found',
       );
-      expect(rootPulls()).toBe(1);
+      expect(rootPulls()).toBe(0);
     });
   });
 
@@ -6718,7 +6718,18 @@ describe("piece pull materialization", () => {
     const controller = new PieceController(pieces, piece);
     const previousRef = getPatternIdentityRef(piece);
 
-    await controller.input.set(sourcePiece.key("value"), ["mode"]);
+    // Seed a retained link written before the pattern declared this input.
+    // Piece IO refuses new writes through such a hidden path.
+    const inputCell = await controller.input.getCell();
+    const write = await runtime.editWithRetry((tx) => {
+      inputCell.withTx(tx).key("mode").setRawUntyped(
+        sourcePiece.key("value").getAsLink({
+          base: inputCell,
+          includeSchema: true,
+        }),
+      );
+    });
+    expect(write.error).toBeUndefined();
     await expect(
       controller.setPattern(compiledOptionalNumberFieldProgram(2)),
     ).rejects.toThrow(/input link.*schema is not compatible/);
@@ -7741,6 +7752,79 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       // that threw "piece missing argument cell" pre-fix, so exercise it first.
       expect(await piece.input.get(["input"])).toBe(5);
       expect(await piece.result.get(["output"])).toBe(10);
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("a fresh replica's pattern reference loads the piece document alone", async () => {
+    // The piece's result reaches a second document through its argument. A
+    // meta read registers a load under the reading cell's schema, and the
+    // cell `getPieceCell` hands out carries the result schema, so a
+    // reference read through it would load that second document too — on a
+    // board, every row of its index. The reader replica asks for the
+    // reference and nothing else, and the second document must stay cold.
+    const items = writerRuntime.getCell<number[]>(
+      writerPieces.getSpace(),
+      "items-" + crypto.randomUUID(),
+      { type: "array", items: { type: "number" } },
+    );
+    await writerRuntime.editWithRetry((tx) => {
+      items.withTx(tx).set([1, 2, 3]);
+    });
+    const piece = await writerPieces.runPersistent(
+      trustPattern(writerRuntime, {
+        argumentSchema: {
+          type: "object",
+          properties: { items: { type: "array", items: { type: "number" } } },
+        },
+        resultSchema: {
+          type: "object",
+          properties: { items: { type: "array", items: { type: "number" } } },
+        },
+        result: { items: { $alias: { cell: "argument", path: ["items"] } } },
+        nodes: [],
+      }),
+      { items },
+      undefined,
+      { start: true },
+    );
+    await writerPieces.synced();
+    const pieceId = entityRefToString(piece.entityId);
+    const itemsUri = items.getAsNormalizedFullLink().id;
+
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerPieces = new PiecesController(readerSession, readerRuntime);
+    try {
+      await readerPieces.synced();
+      const cell = await readerPieces.getPieceCell(pieceId, {
+        reconcile: true,
+        start: false,
+      });
+      const reader = new PieceController(readerPieces, cell);
+      const ref = await reader.getPatternRef();
+      // Every load the reads registered has been issued and answered, so a
+      // document still absent here was never asked for.
+      await readerPieces.synced();
+
+      expect(ref?.identity).toBe(
+        getPatternIdentityRef(piece)?.identity,
+      );
+      // The replica's own record of what it holds: absent means never
+      // loaded, where any read through a cell would register the load this
+      // test is about.
+      const provider = readerStorage.open(readerPieces.getSpace()) as {
+        get?: (uri: string) => unknown;
+      };
+      expect(provider.get?.(itemsUri)).toBeUndefined();
     } finally {
       await readerRuntime.dispose();
       await readerStorage.close();

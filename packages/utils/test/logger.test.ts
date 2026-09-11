@@ -1,23 +1,21 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  clearTimingMeasures,
+  detailOfMeasure,
   getGlobalLogFloor,
   getLogger,
   getLoggerCountsBreakdown,
+  getTimingMeasuresState,
   getTimingStatsBreakdown,
   getTotalLoggerCounts,
   log,
   LOG_COLORS,
+  parseTimingMeasureCap,
   resetAllLoggerCounts,
   resetAllTimingStats,
-  setGlobalLogFloor,
-} from "../src/logger.ts";
-import {
-  clearTimingMeasures,
-  detailOfMeasure,
-  getTimingMeasuresState,
-  parseTimingMeasureCap,
   resetTimingMeasureBudget,
+  setGlobalLogFloor,
   setTimingMeasuresEnabled,
   TIMING_MEASURE_PREFIX,
 } from "../src/logger.ts";

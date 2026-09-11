@@ -304,6 +304,18 @@ clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Two items stay
 open on the confidentiality side: (a) the standard-profile default, and (d)
 the residency half of the write ceiling, recorded next.
 
+The spec has since taken (b) and (c). §18.6.3 lists the writer-fit misfit
+among `enforce-strict`'s strict-only rejects, and §18.6.3.1 carries the
+bullet, the rule that an absent declaration is the empty ceiling and fails
+closed, and the stable-reason requirement. What this entry still owes the
+spec is the narrowings below. §18.6.3.1 states the measurement over its
+targets with no exempt class named, and the addresses §18.6.2 excludes —
+`/cfc/...` label metadata, `cid:`-addressed schema documents, program text —
+do not reach them; that section is also where the shape belongs, since it
+already calls its own exclusion "a profile decision, not a core-semantics
+fact" and mirrors it to "the write-side rule that the same addresses are not
+value-write targets".
+
 One narrowing landed alongside: the measurement quantifies over paths a
 schema could have declared a policy at, and the raw meta seam is not one.
 `setMetaRaw` lands on a document-root sibling of `value` (`schema`,
@@ -342,16 +354,33 @@ pattern names the data it declares policy on, and does not name the
 intermediates the reactive graph materializes for it — so its ceiling is the
 empty one, and measuring it refuses every derivation that reads labeled data
 and writes its result. That is ordinary reactive computation, so the refusal
-reaches product flows and not only tests. The id class is outside the check
-at every rung, through the same predicate the meta seam uses, and the skip is
-scoped to a join the target's own space produced: the join records the space
-each contributing document lived in, and a computed target whose join drew a
-clause from elsewhere is measured like any other document. The residency half
-of the ceiling therefore still holds for the direction it was written for,
-while a derivation over its own space's data proceeds — within one space the
-source and the computed cell share a replica set.
+reaches product flows and not only tests.
 
-Nothing is laundered here either. The join still lands on the computed
+A stream's entries document is the second id class the narrowing covers. It
+holds a stream's durable event entries and the marks recording which have
+been handled, at an id derived from the stream's link
+(`STREAM_ENTRIES_DOC_PREFIX`) so that every party addresses the same document
+with no coordination. No pattern names it and no value schema describes it,
+so its ceiling is the empty one, and measuring it refuses every mark a served
+run writes to record that it handled an event. Route 2 below is not open to
+it: that route declares out of one piece's flow join and is keyed on that
+piece's own nodes, while an entries document is keyed on the stream, is
+written by every party that can reach the stream, and outlives all of them.
+
+Both id classes are outside the check at every rung, through the same
+predicate the meta seam uses, and the skip is scoped to a join the target's
+own space produced: the join records the space each contributing document
+lived in, and a target whose join drew a clause from elsewhere is measured
+like any other document. The residency half of the ceiling therefore still
+holds for the direction it was written for, while work over its own space's
+data proceeds — within one space a computed cell shares a replica set with
+its source, and an entries document with the document holding its stream.
+
+Two id classes is what this is, rather than a rule about documents the
+runtime mints: the document anchoring splits out of a value has an id derived
+from its parent's, which no author named either, and it is measured.
+
+Nothing is laundered here either. The join still lands on the exempt
 document as its `derived` component, so a later read of it is tainted and a
 later write of what it read misfits on the original clause. What the
 exemption gives up is a refusal that was doing an egress gate's work by
