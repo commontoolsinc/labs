@@ -696,10 +696,16 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     } else if (result.type === "mainResult") {
       return result;
     } else {
+      // deno-coverage-ignore-start
+
+      // This is a defense-in-depth protection against bugs in this file:
+      // `#visitValue()` consumes every iterate form, so nothing but a
+      // `mainResult` can reach here.
       throw new Error(
         `Shouldn't happen: Got result type \`${result.type}\` from top-level visit.`,
       );
     }
+    // deno-coverage-ignore-stop
   }
 
   /**
