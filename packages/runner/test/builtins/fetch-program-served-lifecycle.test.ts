@@ -55,8 +55,11 @@ describe("fetch-program-served-lifecycle", () => {
   let manager: EmulatedStorageManager;
   let runtime: Runtime;
   let commitBatch: (
-    txs: IExtendedStorageTransaction[],
+    txs: Array<
+      IExtendedStorageTransaction | (() => IExtendedStorageTransaction)
+    >,
     withdraw?: boolean,
+    afterSettlement?: () => void,
   ) => Promise<void>;
   const transactions: IExtendedStorageTransaction[] = [];
 
@@ -111,7 +114,7 @@ describe("fetch-program-served-lifecycle", () => {
         return sealed;
       },
     });
-    commitBatch = async (txs, withdraw = false) => {
+    commitBatch = async (txs, withdraw = false, afterSettlement) => {
       const wave = new WaveAccumulator({
         space,
         basisSeq: serverSeq(engine),
@@ -121,7 +124,8 @@ describe("fetch-program-served-lifecycle", () => {
       });
       heldWave = wave;
       try {
-        for (const tx of txs) {
+        for (const staged of txs) {
+          const tx = typeof staged === "function" ? staged() : staged;
           runtime.prepareTxForCommit(tx);
           expect((await tx.commit()).error).toBeUndefined();
         }
@@ -138,6 +142,7 @@ describe("fetch-program-served-lifecycle", () => {
         heldWave = undefined;
         wave.abandon("fixture cleanup");
       }
+      afterSettlement?.();
       await runtime.settled();
     };
   });
@@ -611,6 +616,72 @@ describe("fetch-program-served-lifecycle", () => {
         expect(edits.calls).toHaveLength(0);
       } finally {
         gate.resolve();
+        outbox.close();
+        await outbox.settle();
+        runtime.asyncWorkObserver = observer;
+        f.cancels[0]();
+        await runtime.settled();
+      }
+    });
+  }
+
+  for (const rejected of [[0], [0, 1]]) {
+    it(`owns same-wave attachments at the serving handoff when release rejects ${rejected.map((index) => index + 1).join(" and ")}`, async () => {
+      const f = fixture();
+      await f.seed(aliceOne, "user");
+      const attachments = [f.stage(aliceOne)];
+      const refusals: Array<ReturnType<typeof rejectRelease>> = [];
+      using network = stub(globalThis, "fetch", () =>
+        Promise.resolve(
+          new Response('export default { result: "done" };', {
+            headers: { "content-type": "application/javascript" },
+          }),
+        ));
+      const outbox = new SpaceOutbox({
+        stats: emptyServingLoopStats(),
+        server,
+        engine: await server.engineForSpace(space),
+        space,
+        sessionId: executionLeaseHolder(service.did()),
+        localSeqRef: { value: 0 },
+      });
+      const observer = runtime.asyncWorkObserver;
+      runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
+      try {
+        // SpaceServer hands off after wave settlement, without a runtime-wide
+        // settlement wait. Both ordinary commit callbacks must own the claim.
+        await commitBatch(
+          [
+            attachments[0],
+            () => {
+              const later = Date.now() + 10_001;
+              using _clock = stub(Date, "now", () => later);
+              const second = f.stage(aliceOne);
+              attachments.push(second);
+              return second;
+            },
+          ],
+          false,
+          () => {
+            expect(f.effectBatches).toHaveLength(2);
+            for (const index of rejected) {
+              refusals.push(rejectRelease(attachments[index]));
+            }
+            outbox.admitSealedEffects(f.effectBatches);
+          },
+        );
+        await outbox.settle();
+        await runtime.settled();
+        expect(network.calls).toHaveLength(rejected.length === 2 ? 0 : 1);
+        expect(f.cacheState(aliceOne, "user")).toBe(
+          rejected.length === 2 ? "idle" : "success",
+        );
+        expect(outbox.inflightCount).toBe(0);
+        using edits = spy(runtime, "edit");
+        f.cancels[0]();
+        expect(edits.calls).toHaveLength(0);
+      } finally {
+        for (const refusal of refusals) refusal.restore();
         outbox.close();
         await outbox.settle();
         runtime.asyncWorkObserver = observer;

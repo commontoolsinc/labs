@@ -1301,7 +1301,12 @@ the durable rows of §5 carry APPENDS, never effect state).
   a newer frame also takes
   precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
   space, user, and session instances, including reordered verdict delivery,
-  withdrawal, and noncommutative appends.
+  withdrawal, and noncommutative appends. Foreign provisioning groups
+  contributions by actor and grant, so one wave can commit several batches
+  to a foreign space in a different order from local sealing. Accepted verdicts
+  for each space follow that space's server sequence, retaining sealing order
+  within each batch. The settled replica therefore matches the engine when
+  nonadjacent contributions share a foreign batch.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.

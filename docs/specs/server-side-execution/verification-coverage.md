@@ -2686,7 +2686,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   The program lifecycle controls also admit duplicate accepted contributions
   through the real `SpaceOutbox` under a held dispatch budget. A release refusal
   selects a surviving accepted attachment; refusing every attachment releases
-  the claim. `executor-outbox-budget.test.ts` covers the selected run context,
+  the claim. Component handoff controls also admit immediately after real wave
+  settlement, before runtime-wide settlement, and cover one surviving attachment
+  and complete refusal. The serving loop waits for wave settlement before
+  admitting its effects, so publication acceptance precedes release checks.
+  `executor-outbox-budget.test.ts` covers the selected run context,
   readable-completion deduplication, immediate re-admission after all refusals,
   and the absence of fallback after a dispatched request fails.
   `cfc-sink-release-reject-surfaced.test.ts` checks that inline release refusals
@@ -2704,6 +2708,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   Frames alone do not prove coverage of unresolved or later-wave receipts;
   those operations and speculative neighbors remain visible. The storage
   controls cover both receipt/frame orders, cached reads, and notifications.
+  Real wave and engine controls cover consecutive home waves and foreign
+  contributions grouped by actor and grant: accepted verdicts follow each
+  space's server sequence, retaining sealing order within a batch. Nonadjacent
+  contributions sharing a foreign batch produce the same settled value in the
+  replica and engine, while delegated user instances remain separate.
 
   Standalone effect completions join the serving loop's own derived tail for
   the drain-settle watermark advance. `executor-settle-advance.test.ts` covers

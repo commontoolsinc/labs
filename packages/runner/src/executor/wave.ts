@@ -3029,6 +3029,10 @@ export class WaveAccumulator
     orphanRefused: ReadonlySet<number> = new Set(),
   ): void {
     this.#reportRequeuedEvents(outcome, (idx) => requeued.has(idx));
+    const acceptedBySpace = new Map<
+      MemorySpace,
+      Array<{ contribution: SealedSpaceContribution; seq: number }>
+    >();
     for (const contribution of this.#contributions) {
       const idx = contribution.index;
       const context = contribution.context;
@@ -3104,7 +3108,18 @@ export class WaveAccumulator
         const seq = space.space === this.#space ? homeSeq : foreignSeqs.get(
           this.#foreignBatchKeyFor(space.space, context),
         ) ?? homeSeq;
-        space.resolveVerdict({ committed: { seq } });
+        const accepted = acceptedBySpace.get(space.space) ?? [];
+        accepted.push({ contribution: space, seq });
+        acceptedBySpace.set(space.space, accepted);
+      }
+    }
+    // Foreign batches group by actor and grant, so their server order can
+    // differ from contribution order. Each replica promotes accepted
+    // batches in server order, preserving seal order within one batch.
+    for (const accepted of acceptedBySpace.values()) {
+      accepted.sort((a, b) => a.seq - b.seq);
+      for (const { contribution, seq } of accepted) {
+        contribution.resolveVerdict({ committed: { seq } });
       }
     }
   }
