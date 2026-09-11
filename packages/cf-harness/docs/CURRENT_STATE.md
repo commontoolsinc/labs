@@ -202,9 +202,9 @@ The current package provides:
   nothing being declared — a database's tables are the contract it was created
   under, its rows are in the database file, and nothing here opens one; a count
   is taken of a whole table and of whole columns, never under a caller's own
-  predicate. Disclosure is permissive and fixed rather than configurable —
-  no setting narrows it — and is bounded to addresses in the session's own
-  space; that bound is on the handle's own address rather than on everything the
+  predicate. Disclosure is permissive and fixed rather than configurable — no
+  setting narrows it — and is bounded to addresses in the session's own space;
+  that bound is on the handle's own address rather than on everything the
   document reaches from it. Answering from the fabric establishes the run's
   fabric session despite the tool's `read` effect class;
 - bounded request-attribution headers on OpenAI-compatible gateway traffic,

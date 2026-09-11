@@ -131,6 +131,13 @@ export interface DescribeHandleTableFill {
    * zero rows and unknown rows are the two readings these counts exist to
    * separate, and collapsing them would make an unreadable table look like an
    * empty one.
+   *
+   * This is text from the database or the provider rather than from this tool,
+   * and it is the one such channel in the reply — the reason a count is worth
+   * having is the reason a refused count is, and a bare "uncounted" leaves a
+   * caller with nothing to correct. It crosses on the same terms property
+   * names do: the prompt loop scrubs bare fabric identifiers out of the whole
+   * reply, keys included, before any of it reaches model context.
    */
   unread?: string;
 }
@@ -492,6 +499,12 @@ const countOf = (value: unknown): number | undefined =>
  * counted on its own, so one that cannot be read — a declared table the file
  * does not hold, a statement the server refused — costs its own counts and
  * none of the others, and says so in place of them.
+ *
+ * One statement per table, and a count over a column is a scan of it, so the
+ * work here grows with the database rather than with the reply. That is the
+ * price of the reading: what a count buys is the difference between a column a
+ * query can filter on and one that is NULL throughout, and nothing cheaper
+ * than reading the column establishes it.
  */
 const readDatabaseFill = async (
   provider: { sqliteQuery?: SqliteQueryRunner },
