@@ -2,7 +2,11 @@
 
 Complete the six recommendation dispositions in order **5, 3, 1, 2, 4, 6**.
 Each PR must pass self-review, local validation, CI, and actionable review
-feedback. Leave all PRs open and unmerged. Preserve the investigation worktree,
+feedback. Passing current-head CI establishes functional acceptance, including
+the browser integration lanes. Track the independent local Chrome teardown
+investigation separately. Report latency as unquantified until eligible paired
+measurements exist. Leave all PRs open and unmerged. Preserve the investigation
+worktree,
 unrelated local work, production data, and the server-execution default.
 
 ## Durable ledger and reproducibility
@@ -80,8 +84,9 @@ The campaign remains open until the following gates pass:
   files. Keep marginal mechanism effects distinct from cumulative effects and
   from unrelated upstream changes. Validate cold/warm rendering, seeding,
   durability, watermark behavior, and multi-user controls.
-- Obtain eligible quiet-machine latency pairs. Loaded correctness runs and
-  profiles do not satisfy this gate.
+- Obtain eligible quiet-machine latency pairs before claiming latency gains.
+  Loaded correctness runs and profiles establish no latency result; leave the
+  effect unquantified when eligible measurements are unavailable.
 - Use gh-stack for dependent PRs; propagate ancestor changes and revalidate the
   affected descendants. Refresh exact heads, bases, mergeability, checks, and
   review threads before reporting delivery.

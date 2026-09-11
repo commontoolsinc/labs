@@ -89,6 +89,13 @@ describe(
       expect(result.passed).toBe(1);
     });
 
+    it("demands rendered children without evaluating unrelated VNode metadata", async () => {
+      const result = await withCoverage("bounded-root-render.test.tsx");
+      expect(result.lateHitCount).toBeGreaterThan(0);
+      expect(result.afterRenderHitCount).toBe(0);
+      expect(result.passed).toBe(1);
+    });
+
     it("accepts primitive VDOM roots", async () => {
       const { failed, passed } = await runTests(
         fixture("primitive-render.test.tsx"),

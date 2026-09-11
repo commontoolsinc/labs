@@ -169,6 +169,38 @@ const SPENDING_PATTERN_SOURCE = [
 /** One `COUNT("<column>") AS "<alias>"` clause of a count statement. */
 const COUNT_CLAUSE = /COUNT\("([^"]+)"\) AS "([^"]+)"/g;
 
+/**
+ * A database whose one table carries a per-row label rule. The rule reads
+ * `status`, which a query must project or the read is refused, and `status` is
+ * a disclosed column so the disclosure may name it.
+ */
+const BANK_DB_HANDLE = {
+  id: "db-bank",
+  rev: 1,
+  tables: {
+    rows_txn: {
+      type: "object",
+      properties: {
+        amount: {
+          type: "number",
+          ifc: { confidentiality: ["https://cfc.test/atom/finance"] },
+        },
+        status: {
+          type: "string",
+          ifc: { confidentiality: ["https://cfc.test/atom/finance"] },
+        },
+      },
+      rowLabel: {
+        version: 1,
+        integrity: {
+          when: { match: { field: "status", source: "^posted$", flags: "" } },
+          then: { constant: "posted" },
+        },
+      },
+    },
+  },
+};
+
 const MAIL_DB_HANDLE = {
   id: "db-mail",
   rev: 3,
@@ -1172,6 +1204,250 @@ describe("describe_handle", () => {
         expect(statements[0]).toContain('SELECT COUNT(*) AS "n"');
         expect(statements[0]).toContain('FROM "messages"');
         expect(statements[0]).not.toContain("WHERE");
+      });
+
+      it("names the columns a table's per-row label rule reads", async () => {
+        // The fact that decides whether a query succeeds at all: a projection
+        // missing `status` is refused rather than returned unlabeled, and
+        // nothing else in the reply says so.
+
+        const ref = await seedUndeclaredCell(BANK_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery((_db, sql) => {
+          const row: Record<string, number> = { n: 30 };
+          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = 30;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "rows_txn",
+          rows: 30,
+          nonNull: { amount: 30, status: 30 },
+          rowLabelReads: ["status"],
+        }]);
+      });
+
+      it("names no rule columns for a table that declares no rule", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery((_db, sql) => {
+          const row: Record<string, number> = { n: 1 };
+          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = 1;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill?.[0]).not.toHaveProperty("rowLabelReads");
+        expect(output.database?.fill?.[0]).not.toHaveProperty(
+          "rowLabelReadsIncomplete",
+        );
+      });
+
+      it("names a table's rule columns even when it could not be counted", async () => {
+        // What a query must project is a property of the declaration, so a
+        // table nothing could count still has to be queried correctly.
+
+        const ref = await seedUndeclaredCell(BANK_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() =>
+          Promise.reject(new Error("no such table: rows_txn"))
+        );
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "rows_txn",
+          rowLabelReads: ["status"],
+          unread: "no such table: rows_txn",
+        }]);
+      });
+
+      it("says so when the rule reads a column this reply does not name", async () => {
+        // A partial list reads as the recipe for a query that works, and a
+        // query built from it is refused anyway. The withheld mark is what
+        // separates "select these" from "these and something you cannot see".
+
+        const hidden = {
+          ...BANK_DB_HANDLE,
+          id: "db-bank-hidden",
+          tables: {
+            rows_txn: {
+              ...BANK_DB_HANDLE.tables.rows_txn,
+              rowLabel: {
+                version: 1,
+                integrity: {
+                  when: {
+                    match: { field: "settled_at", source: "^y$", flags: "" },
+                  },
+                  then: { constant: "posted" },
+                },
+              },
+            },
+          },
+        };
+        const ref = await seedUndeclaredCell(hidden);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery((_db, sql) => {
+          const row: Record<string, number> = { n: 30 };
+          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = 30;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        const entry = output.database?.fill?.[0];
+        expect(entry).not.toHaveProperty("rowLabelReads");
+        expect(entry?.rowLabelReadsIncomplete).toBe(true);
+      });
+
+      it("reports a rule it cannot read as incomplete, the way the runner treats it", async () => {
+        // `rowLabel: []` is present but not an object. The runner counts the
+        // table as rule-bearing and refuses its queries as an invalid rule, so
+        // reporting no rule here would describe a refused query as a working
+        // one — the failure this disclosure exists to prevent.
+
+        const malformed = {
+          ...BANK_DB_HANDLE,
+          id: "db-bank-malformed",
+          tables: {
+            rows_txn: {
+              ...BANK_DB_HANDLE.tables.rows_txn,
+              rowLabel: [],
+            },
+          },
+        };
+        const ref = await seedUndeclaredCell(malformed);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery((_db, sql) => {
+          const row: Record<string, number> = { n: 30 };
+          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = 30;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        const entry = output.database?.fill?.[0];
+        expect(entry).not.toHaveProperty("rowLabelReads");
+        expect(entry?.rowLabelReadsIncomplete).toBe(true);
+      });
+
+      it("reports a rule the runner would reject as incomplete, not as absent", async () => {
+        // An object `rowLabel` that `rowLabelSpecOf` hands back but
+        // `validateRowLabelSpec` refuses — here an unsupported version. The
+        // runner counts the table as rule-bearing and refuses its queries, so
+        // naming no requirement would again describe a refused query as one
+        // that works.
+
+        const unsupported = {
+          ...BANK_DB_HANDLE,
+          id: "db-bank-unsupported",
+          tables: {
+            rows_txn: {
+              ...BANK_DB_HANDLE.tables.rows_txn,
+              rowLabel: {
+                version: 99,
+                integrity: {
+                  when: {
+                    match: { field: "status", source: "^p$", flags: "" },
+                  },
+                  then: { constant: "posted" },
+                },
+              },
+            },
+          },
+        };
+        const ref = await seedUndeclaredCell(unsupported);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery((_db, sql) => {
+          const row: Record<string, number> = { n: 30 };
+          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = 30;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        const entry = output.database?.fill?.[0];
+        expect(entry).not.toHaveProperty("rowLabelReads");
+        expect(entry?.rowLabelReadsIncomplete).toBe(true);
       });
 
       it("reports a table it could not count as unread rather than as empty", async () => {

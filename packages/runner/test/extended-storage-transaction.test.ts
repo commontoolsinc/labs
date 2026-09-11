@@ -319,6 +319,79 @@ describe("extended-storage-transaction", () => {
     });
   });
 
+  describe("document schema-policy inputs", () => {
+    it("includes later inputs across scopes while excluding other documents", async () => {
+      const otherSpace = (await Identity.fromPassphrase("policy-input-other"))
+        .did();
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      const target = {
+        space,
+        id: "of:policy",
+        scope: "space",
+        path: [],
+      } as const;
+      expect(wrapped.getCfcSchemaPolicyInputs(space, target.id)).toEqual([]);
+      const first = { kind: "schema", target, schema: SCHEMA } as const;
+      tx.recordCfcWritePolicyInput(first);
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, id: "of:other" },
+        schema: SCHEMA,
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, space: otherSpace },
+        schema: SCHEMA,
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "custom",
+        target,
+        name: "other-kind",
+        value: null,
+      });
+      const second = {
+        kind: "schema",
+        target: { ...target, scope: "user", path: ["title"] },
+        schema: { type: "string" },
+      } as const;
+      wrapped.recordCfcWritePolicyInput(second);
+      expect(tx.getCfcSchemaPolicyInputs(space, target.id)).toEqual([
+        first,
+        second,
+      ]);
+      expect(wrapped.getCfcSchemaPolicyInputs(space, target.id)).toEqual([
+        first,
+        second,
+      ]);
+      expect(tx.getCfcState().writePolicyInputs).toHaveLength(5);
+      tx.abort();
+      const fresh = runtime.edit();
+      expect(fresh.getCfcSchemaPolicyInputs(space, target.id)).toEqual([]);
+      fresh.abort();
+    });
+
+    it("protects the indexed inputs and their nested schema from mutation", () => {
+      const tx = runtime.edit();
+      const target = {
+        space,
+        id: "of:immutable-policy",
+        scope: "space",
+        path: [],
+      } as const;
+      tx.recordCfcWritePolicyInput({ kind: "schema", target, schema: SCHEMA });
+      const inputs = tx.getCfcSchemaPolicyInputs(space, target.id);
+      expect(() => Reflect.set(inputs, "length", 0)).toThrow("read-only");
+      expect(Reflect.set(inputs[0].target, "id", "of:corrupted")).toBe(false);
+      expect(Reflect.set(SCHEMA.properties.title, "type", "number")).toBe(
+        false,
+      );
+      expect(tx.getCfcSchemaPolicyInputs(space, target.id)).toHaveLength(1);
+      expect(tx.getCfcState().writePolicyInputs).toHaveLength(1);
+      tx.abort();
+    });
+  });
+
   describe("a write-policy input's recorder", () => {
     // A gate that ACTS on a write-policy input asks who recorded it, because
     // this method is on the public interface and pattern-authored code
