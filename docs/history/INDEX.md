@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [2026-09-11-computed-lift-collection-loops.md](development/performance/2026-09-11-computed-lift-collection-loops.md) — E1 compiled computed/broad-lift/narrow-lift comparison at 32/128/512 linked rows, identical default-posture read counts, and unread-field invalidation controls.
+
 - [2026-09-11-pending-schema-policy-index.md](development/performance/2026-09-11-pending-schema-policy-index.md) — document-indexed pending schema-policy lookup CPU attribution and 1,184-vote fixture acceptance with unchanged read budgets.
 - [2026-09-11-reactive-lunch-rows.md](development/performance/2026-09-11-reactive-lunch-rows.md) — repository-only reactive lunch-row acceptance: 93 assertions, unchanged budgets at three sizes, matched two-browser voting, and headless settlement limits.
 

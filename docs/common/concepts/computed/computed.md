@@ -288,3 +288,25 @@ const stats = computed(() => ({
 
 For the hierarchical summary string convention used by container patterns, see
 [Summary Convention](../../conventions/summary.md).
+
+## Collection-loop cost
+
+Choose `computed` for an inline derivation and a module-level `lift` for a
+reusable derivation. Changing that spelling alone does not make a collection
+scan incremental. With lazy argument materialization enabled by default, the
+callback reads the paths it touches; a broadly declared argument does not by
+itself imply that every declared payload field is read.
+
+The [collection-loop comparison](../../../history/development/performance/2026-09-11-computed-lift-collection-loops.md)
+measured identical reductions under computed, broad lift, and narrow lift at
+three sizes. All three ignored edits to an unread field, and all three scanned
+the collection when a summed field changed. The measurement covers action-body
+reads, not network traffic or elapsed-time equivalence.
+
+A scan inside another scan can still perform work proportional to both
+collection sizes. Measure the reads and update behavior of the demanded result.
+For supported operations, consider the
+[named incremental aggregates](../../../features/collection-aggregates.md),
+checking their numeric, ordering, and membership-update contracts first.
+Ordinary `reduce` remains appropriate when its order-dependent semantics are
+required.
