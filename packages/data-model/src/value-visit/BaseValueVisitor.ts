@@ -78,14 +78,14 @@ export abstract class BaseValueVisitor<
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
-  abstract visitedArrayElement(
+  abstract visitedFabricArrayElement(
     array: FabricArray,
     index: number,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
-  abstract visitedArrayGap(
+  abstract visitedFabricArrayGap(
     array: FabricArray,
     start: number,
     count: number,

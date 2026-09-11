@@ -65,8 +65,8 @@ describe("ContainerIteratingValueVisitor", () => {
       it("return `undefined`", () => {
         const vis = new Iterating();
 
-        expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
-        expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
+        expect(vis.visitedFabricArrayElement([1], 0, 1)).toBeUndefined();
+        expect(vis.visitedFabricArrayGap([], 0, 1)).toBeUndefined();
         expect(vis.visitedFabricInstance(new FabricMap(new Map()), {}))
           .toBeUndefined();
         expect(vis.visitedFabricPlainObjectEntry({}, "k", 1)).toBeUndefined();

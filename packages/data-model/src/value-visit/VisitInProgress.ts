@@ -399,7 +399,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         if (idxNumber !== (lastIdx + 1)) {
           // There's a gap just before this element.
-          const result = vis.visitedArrayGap(
+          const result = vis.visitedFabricArrayGap(
             array,
             lastIdx + 1,
             idxNumber - lastIdx - 1,
@@ -419,8 +419,8 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value from `elemResult` into
-        // `visitedArrayElement()` and not the original `element`.
-        const result = vis.visitedArrayElement(array, idxNumber, element);
+        // `visitedFabricArrayElement()` and not the original `element`.
+        const result = vis.visitedFabricArrayElement(array, idxNumber, element);
         if (result?.type === "mainResult") {
           return result;
         }
@@ -428,7 +428,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       if (array.length !== (lastIdx + 1)) {
         // There's a gap at the end of the array.
-        const result = vis.visitedArrayGap(
+        const result = vis.visitedFabricArrayGap(
           array,
           lastIdx + 1,
           array.length - lastIdx - 1,

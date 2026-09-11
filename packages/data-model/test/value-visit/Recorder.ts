@@ -151,7 +151,7 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
     return this.onNonFabric ? this.onNonFabric(value) : undefined;
   }
 
-  override visitedArrayElement(
+  override visitedFabricArrayElement(
     array: FabricArray,
     index: number,
     value: unknown,
@@ -162,7 +162,7 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
       : undefined;
   }
 
-  override visitedArrayGap(
+  override visitedFabricArrayGap(
     array: FabricArray,
     start: number,
     count: number,

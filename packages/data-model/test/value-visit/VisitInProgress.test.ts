@@ -188,7 +188,7 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("reports the original element, not its replacement, to `visitedArrayElement()`", () => {
+        it("reports the original element, not its replacement, to `visitedFabricArrayElement()`", () => {
           const rec = new Recorder();
           rec.onValue = (v) => (v === "x") ? replace(42) : DO_VISIT_SUBTYPE;
           const array = ["x"];
@@ -288,7 +288,7 @@ describe("VisitInProgress", () => {
       });
 
       describe("`mainResult` results", () => {
-        it("ends the visit from `visitedArrayElement()`, skipping later elements", () => {
+        it("ends the visit from `visitedFabricArrayElement()`, skipping later elements", () => {
           const rec = new Recorder();
           rec.onVisitedElement = (i) =>
             (i === 1) ? mainResult("at 1") : undefined;
@@ -329,7 +329,7 @@ describe("VisitInProgress", () => {
           expect(rec.names).not.toContain("visitedFabricPlainObjectEntry");
         });
 
-        it("ends the visit from `visitedArrayGap()`, for a gap before an element", () => {
+        it("ends the visit from `visitedFabricArrayGap()`, for a gap before an element", () => {
           const rec = new Recorder();
           rec.onVisitedGap = () => mainResult("gap");
 
@@ -338,7 +338,7 @@ describe("VisitInProgress", () => {
           expect(rec.names).not.toContain("visitedElement");
         });
 
-        it("ends the visit from `visitedArrayGap()`, for a gap at the end", () => {
+        it("ends the visit from `visitedFabricArrayGap()`, for a gap at the end", () => {
           const rec = new Recorder();
           rec.onVisitedGap = () => mainResult("gap");
 

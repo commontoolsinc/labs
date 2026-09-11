@@ -68,7 +68,7 @@ export abstract class ContainerIteratingValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedArrayElement(
+  visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
     _value: DomainFor<DomainExtra>,
@@ -77,7 +77,7 @@ export abstract class ContainerIteratingValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedArrayGap(
+  visitedFabricArrayGap(
     _array: FabricArray,
     _start: number,
     _count: number,

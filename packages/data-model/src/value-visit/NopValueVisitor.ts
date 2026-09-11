@@ -92,7 +92,7 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   }
 
   /** @inheritDoc */
-  visitedArrayElement(
+  visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
     _value: DomainFor<DomainExtra>,
@@ -101,7 +101,7 @@ export class NopValueVisitor<DomainExtra = never, ResultType = FabricValue>
   }
 
   /** @inheritDoc */
-  visitedArrayGap(
+  visitedFabricArrayGap(
     _array: FabricArray,
     _start: number,
     _count: number,
