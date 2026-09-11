@@ -3086,8 +3086,7 @@ export class CellImpl<T extends FabricValue>
       readTx,
       readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
     );
-    const nonReactiveTx = createNonReactiveTransaction(readTx);
-    link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
+    link = maybeConvertArrayPathToDataURILink(readTx, link);
     return createCell(
       this.runtime,
       link,
@@ -4085,6 +4084,10 @@ function maybeConvertArrayPathToDataURILink(
     ...link,
     path: candidate.path,
   };
+
+  // The snapshot identity depends on this inline element's content. A reader
+  // must resolve it again when the mutable source changes.
+  tx.readValueOrThrow(baseLink);
 
   return {
     ...link,
