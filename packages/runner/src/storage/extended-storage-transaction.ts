@@ -4004,6 +4004,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.#wrapped.status();
   }
 
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.#wrapped.committedSeq?.(space);
+  }
+
   #transformReadOptions(options?: IReadOptions): IReadOptions {
     if (!this.#options.nonReactive) {
       return options ?? {};

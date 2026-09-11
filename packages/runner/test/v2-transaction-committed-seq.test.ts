@@ -1,3 +1,10 @@
+/**
+ * The seq a committed transaction reports is verified against storage rather
+ * than against the code that recorded it: a second session reads the document
+ * at that seq and one seq earlier, so the number has to be the commit's real
+ * position in the space's log, not merely a number the replica remembered.
+ */
+
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
