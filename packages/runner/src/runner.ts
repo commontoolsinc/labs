@@ -10078,6 +10078,34 @@ export class Runner {
         // link into another space kicks that document's load here rather
         // than in the body.
         inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
+        // TEMP-INSTRUMENTATION (PR #7287): remove before merge.
+        if (typeof Deno !== "undefined" && isObjectOrArray(inputs)) {
+          const summary: Record<string, string> = {};
+          for (const key of Object.keys(inputs)) {
+            const link = parseLink(
+              (inputs as Record<string, unknown>)[key],
+              resultCell,
+            );
+            if (link === undefined) {
+              summary[key] = `plain:${typeof (inputs as any)[key]}`;
+              continue;
+            }
+            let raw: unknown;
+            try {
+              raw = this.#runtime.getCellFromLink({
+                ...link,
+                schema: undefined,
+              })
+                .withTx(tx).getRaw({ meta: ignoreReadForScheduling });
+            } catch (error) {
+              raw = `threw:${String(error).slice(0, 60)}`;
+            }
+            summary[key] = `${link.id.slice(0, 24)}/${link.path.join(".")} => ${
+              JSON.stringify(raw)?.slice(0, 60)
+            }`;
+          }
+          tempTrace("TEMP-PRESYNC-INPUTS", JSON.stringify(summary));
+        }
       }
       : undefined;
 
