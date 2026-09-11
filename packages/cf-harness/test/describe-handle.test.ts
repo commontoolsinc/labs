@@ -1397,6 +1397,59 @@ describe("describe_handle", () => {
         expect(entry?.rowLabelReadsIncomplete).toBe(true);
       });
 
+      it("reports a rule the runner would reject as incomplete, not as absent", async () => {
+        // An object `rowLabel` that `rowLabelSpecOf` hands back but
+        // `validateRowLabelSpec` refuses — here an unsupported version. The
+        // runner counts the table as rule-bearing and refuses its queries, so
+        // naming no requirement would again describe a refused query as one
+        // that works.
+
+        const unsupported = {
+          ...BANK_DB_HANDLE,
+          id: "db-bank-unsupported",
+          tables: {
+            rows_txn: {
+              ...BANK_DB_HANDLE.tables.rows_txn,
+              rowLabel: {
+                version: 99,
+                integrity: {
+                  when: {
+                    match: { field: "status", source: "^p$", flags: "" },
+                  },
+                  then: { constant: "posted" },
+                },
+              },
+            },
+          },
+        };
+        const ref = await seedUndeclaredCell(unsupported);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery((_db, sql) => {
+          const row: Record<string, number> = { n: 30 };
+          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
+            row[alias] = 30;
+          }
+          return Promise.resolve({ rows: [row] });
+        });
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        const entry = output.database?.fill?.[0];
+        expect(entry).not.toHaveProperty("rowLabelReads");
+        expect(entry?.rowLabelReadsIncomplete).toBe(true);
+      });
+
       it("reports a table it could not count as unread rather than as empty", async () => {
         const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
         const minted = await mintAddressHandle(

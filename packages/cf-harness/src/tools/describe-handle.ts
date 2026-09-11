@@ -9,6 +9,7 @@ import {
 import {
   rowLabelSpecOf,
   ruleInputFields,
+  validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
 import { type Cell, readResultSchemaMeta } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
@@ -553,9 +554,19 @@ const rowLabelReadsOf = (
     return {};
   }
   const spec = rowLabelSpecOf(declared);
-  if (spec === undefined) {
-    // Declared, and not a rule this build can read. There is a requirement
-    // and no column to name for it, which is the incomplete case.
+  // Validated with the runner's own validator, against the table's DECLARED
+  // columns rather than the disclosed ones — the rule may legitimately read a
+  // column this reply withholds, and judging it against what was disclosed
+  // would call a good rule invalid. Its own contract is the reason this runs
+  // at all: "couldn't validate" is never "no label", and a rule this build
+  // cannot validate is one the runner refuses queries over.
+  const columns = declaredColumns(tables ?? {}, table);
+  if (
+    spec === undefined ||
+    validateRowLabelSpec(spec, Object.keys(columns), columns) !== undefined
+  ) {
+    // Declared, and not a rule this build can read or accept. There is a
+    // requirement and no column to name for it: the incomplete case.
     return { rowLabelReadsIncomplete: true };
   }
   const named = new Set(disclosed);
