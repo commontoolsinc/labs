@@ -1147,9 +1147,42 @@ Deno.test("applyShrinkAndWrap preserves a parenthesized capture while narrowing 
     sourceFile,
     ts.factory,
   );
-  const { node, props: members } = shrunkProps(result, sourceFile);
+  const { node } = shrunkProps(result, sourceFile);
   expect(ts.isParenthesizedTypeNode(node)).toBe(true);
-  expect(hasQualifiedRef(node, "__cfHelpers", "ReadonlyCell")).toBe(true);
-  expect(members.get("count")?.type).toBe("number");
-  expect(members.get("other")?.type).toBe("string");
+  if (!ts.isParenthesizedTypeNode(node) || !ts.isTypeLiteralNode(node.type)) {
+    throw new Error("Expected a parenthesized object capture");
+  }
+  const outer = node.type.members.filter(ts.isPropertySignature);
+  expect(
+    outer.map((member) =>
+      ts.isIdentifier(member.name) ? member.name.text : undefined
+    ),
+  )
+    .toEqual(["value", "other"]);
+  const value = outer[0]!;
+  const other = outer[1]!;
+  expect(other.type?.kind).toBe(ts.SyntaxKind.StringKeyword);
+  if (!value.type || !ts.isTypeReferenceNode(value.type)) {
+    throw new Error("Expected the value property to carry the Cell wrapper");
+  }
+  if (
+    !ts.isQualifiedName(value.type.typeName) ||
+    !ts.isIdentifier(value.type.typeName.left)
+  ) {
+    throw new Error("Expected a qualified Cell wrapper");
+  }
+  expect(value.type.typeName.left.text).toBe("__cfHelpers");
+  expect(value.type.typeName.right.text).toBe("ReadonlyCell");
+  expect(value.type.typeArguments).toHaveLength(1);
+  const payload = value.type.typeArguments![0]!;
+  if (!ts.isTypeLiteralNode(payload)) {
+    throw new Error("Expected a Cell payload object");
+  }
+  expect(payload.members).toHaveLength(1);
+  const count = payload.members[0]!;
+  if (!ts.isPropertySignature(count) || !ts.isIdentifier(count.name)) {
+    throw new Error("Expected the Cell payload's count property");
+  }
+  expect(count.name.text).toBe("count");
+  expect(count.type?.kind).toBe(ts.SyntaxKind.NumberKeyword);
 });
