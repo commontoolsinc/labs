@@ -15,8 +15,8 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import { commandWriterAuthorization } from "../src/command-authorization.ts";
 import {
-  debugCommandWriterAuthorization,
   defaultDebugPatternLocation,
   deployAgentSessionsDebugView,
   describeAgentFabricTarget,
@@ -34,7 +34,7 @@ import {
 
 Deno.test("debug command authorization resolves local schema definitions", () => {
   assertEquals(
-    debugCommandWriterAuthorization({
+    commandWriterAuthorization({
       resultSchema: {
         type: "object",
         properties: {

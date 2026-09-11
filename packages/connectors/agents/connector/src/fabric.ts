@@ -220,6 +220,23 @@ export function agentFabricCauses(spaceDid: string, ownerDid: string) {
   } as const;
 }
 
+/**
+ * The cause of the command queue bound to the producer pattern `producerId`,
+ * distinct from the owner's queue that the debug view writes.
+ */
+export function producerCommandsCause(
+  spaceDid: string,
+  ownerDid: string,
+  producerId: string,
+) {
+  return {
+    spaceDid,
+    ownerDid,
+    agentConnector: "commands",
+    producer: producerId,
+  } as const;
+}
+
 function fullLink(cell: Cell<unknown>): CellLink {
   const link = cell.getAsNormalizedFullLink();
   return {
@@ -803,6 +820,7 @@ export class AgentFabricTarget implements CommandTarget {
   readonly #latestDescriptorObservationBySource = new Map<string, number>();
   #nextObservationSequence = 1;
   #commandCellBound = false;
+  readonly #producerQueues = new Map<string, Cell<unknown>>();
   #storageClaimed: boolean;
 
   private constructor(
@@ -1292,6 +1310,71 @@ export class AgentFabricTarget implements CommandTarget {
     ) {
       throw new Error("command cell is not the connector's owner-scoped queue");
     }
+    await this.#bindQueue(cell, writerAuthorization, "owner");
+    this.cells.commands = cell;
+    this.#commandCellBound = true;
+  }
+
+  /**
+   * Creates the queue for the producer pattern `producerId`, protects it for
+   * the owner with the producer's verified command-sending handler as its only
+   * writer, and adds it to the queues commands are read from. Returns the
+   * bound cell, which the producer piece receives as its `commands` input.
+   */
+  async bindProducerCommandCell(
+    producerId: string,
+    writerAuthorization: unknown,
+  ): Promise<Cell<unknown>> {
+    this.#assertStorageClaimed();
+    const cell = this.conn.runtime.getCell(
+      this.conn.spaceDid,
+      producerCommandsCause(
+        this.conn.spaceDid,
+        this.conn.ownerDid,
+        producerId,
+      ),
+      agentOwnerSchema(this.conn.ownerDid, false),
+    );
+    await cell.sync();
+    await this.conn.runtime.storageManager.synced();
+    await this.#bindQueue(cell, writerAuthorization, `producer ${producerId}`);
+    this.#producerQueues.set(producerId, cell);
+    return cell;
+  }
+
+  commandsAreBound(): boolean {
+    this.#assertStorageClaimed();
+    return this.#commandCellBound || this.#producerQueues.size > 0;
+  }
+
+  /** The bound producer queues' cell IDs, keyed by producer ID. */
+  producerCommandCellIds(): Record<string, string> {
+    this.#assertStorageClaimed();
+    return Object.fromEntries(
+      [...this.#producerQueues].map((
+        [producerId, cell],
+      ) => [producerId, stableCellId(cell.resolveAsCell())]),
+    );
+  }
+
+  #boundQueues(): Cell<unknown>[] {
+    return [
+      ...(this.#commandCellBound ? [this.cells.commands] : []),
+      ...this.#producerQueues.values(),
+    ];
+  }
+
+  #assertCommandCellBound(): void {
+    if (!this.#commandCellBound && this.#producerQueues.size === 0) {
+      throw new Error("owner command cell has not been bound");
+    }
+  }
+
+  async #bindQueue(
+    cell: Cell<unknown>,
+    writerAuthorization: unknown,
+    label: string,
+  ): Promise<void> {
     const authorization = isRecord(writerAuthorization) &&
         isRecord(writerAuthorization.__ctWriterIdentityOf)
       ? writerAuthorization.__ctWriterIdentityOf
@@ -1340,22 +1423,9 @@ export class AgentFabricTarget implements CommandTarget {
     const result = await tx.commit();
     if (result.error) {
       throw new Error(
-        `could not protect the owner command cell: ${result.error.message}`,
+        `could not protect the ${label} command cell: ${result.error.message}`,
         { cause: result.error },
       );
-    }
-    this.cells.commands = cell;
-    this.#commandCellBound = true;
-  }
-
-  commandsAreBound(): boolean {
-    this.#assertStorageClaimed();
-    return this.#commandCellBound;
-  }
-
-  #assertCommandCellBound(): void {
-    if (!this.#commandCellBound) {
-      throw new Error("owner command cell has not been bound");
     }
   }
 
@@ -1421,17 +1491,28 @@ export class AgentFabricTarget implements CommandTarget {
   ): Promise<Cancel> {
     this.#assertStorageClaimed();
     this.#assertCommandCellBound();
-    return await subscribeStableActions(
-      this.conn,
-      this.cells.commands,
-      callback,
-    );
+    const cancels: Cancel[] = [];
+    try {
+      for (const queue of this.#boundQueues()) {
+        cancels.push(await subscribeStableActions(this.conn, queue, callback));
+      }
+    } catch (error) {
+      for (const cancel of cancels) cancel();
+      throw error;
+    }
+    return () => {
+      for (const cancel of cancels) cancel();
+    };
   }
 
   async pollCommands(): Promise<unknown[]> {
     this.#assertStorageClaimed();
     this.#assertCommandCellBound();
-    return await readStableActions(this.conn, this.cells.commands);
+    const values: unknown[] = [];
+    for (const queue of this.#boundQueues()) {
+      values.push(...await readStableActions(this.conn, queue));
+    }
+    return values;
   }
 
   async publishReceipt(

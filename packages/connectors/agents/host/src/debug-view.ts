@@ -20,6 +20,8 @@ import {
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import type { AgentsHostTargetDescription } from "./host.ts";
+import { commandWriterAuthorization } from "./command-authorization.ts";
+import type { BoundCommandProducer } from "./command-producers.ts";
 
 const AGENT_SESSIONS_DEBUG_CAUSE_PREFIX = "agent-sessions-debug";
 const SHALLOW_PIECE_LINK_LIST_SCHEMA = internSchema({
@@ -36,24 +38,6 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
-}
-
-export function debugCommandWriterAuthorization(
-  pattern: Pattern,
-): unknown | undefined {
-  const root = recordValue(pattern.resultSchema);
-  const properties = recordValue(root?.properties);
-  let authorization = recordValue(properties?.commandAuthorization);
-  const reference = authorization?.$ref;
-  if (typeof reference === "string" && reference.startsWith("#/$defs/")) {
-    const definitions = recordValue(root?.$defs);
-    authorization = recordValue(
-      definitions?.[decodeURIComponent(reference.slice("#/$defs/".length))],
-    );
-  }
-  const ifc = recordValue(authorization?.ifc);
-  const writers = ifc?.writeAuthorizedBy;
-  return writers === null ? undefined : writers;
 }
 
 async function protectOwnerDebugCells(
@@ -831,14 +815,11 @@ async function deployAgentSessionsDebugViewNow(
     pattern,
   );
   if (!patternRef) throw new Error("debug view pattern has no identity");
-  const commandWriterAuthorization = debugCommandWriterAuthorization(pattern);
-  if (commandWriterAuthorization === undefined) {
+  const writerAuthorization = commandWriterAuthorization(pattern);
+  if (writerAuthorization === undefined) {
     throw new Error("debug view has no verified command writer authorization");
   }
-  await target.bindCommandCell(
-    target.cells.commands,
-    commandWriterAuthorization,
-  );
+  await target.bindCommandCell(target.cells.commands, writerAuthorization);
   const cause = debugPieceCause(target.conn.ownerDid, patternRef);
   const setupArguments = {
     ownerDid: target.conn.ownerDid,
@@ -974,11 +955,15 @@ export function describeAgentFabricTarget(
   target: AgentFabricTarget,
   spaceDid: string,
   debugPieceId?: string,
+  commandProducers: readonly BoundCommandProducer[] = [],
 ): AgentsHostTargetDescription {
   return {
     spaceDid,
     ownerDid: target.conn.ownerDid,
     ...(debugPieceId ? { debugPieceId } : {}),
+    ...(commandProducers.length > 0
+      ? { commandProducers: [...commandProducers] }
+      : {}),
     cells: {
       recentIndex: stableCellId(target.cells.index),
       allIndex: stableCellId(target.cells.allIndex),
