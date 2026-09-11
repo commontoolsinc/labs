@@ -718,6 +718,8 @@ const cellMethods = new Set<
   | "flatMapWithPattern"
   | "exec"
   | "query"
+  | "lookup"
+  | "keys"
 >([
   "get",
   "sample",
@@ -768,6 +770,8 @@ const cellMethods = new Set<
   "setSelfRef",
   "exec",
   "query",
+  "lookup",
+  "keys",
 ]);
 
 // The schema for one element of an array schema, suitable for a standalone
@@ -3490,6 +3494,7 @@ export class CellImpl<T extends FabricValue>
           // Check if this is a method on the cell. `query`/`exec` are gated to
           // SqliteDb cells so they don't shadow same-named data fields.
           const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          const isIndexOnlyMethod = prop === "lookup" || prop === "keys";
           // Array-only method names remain ordinary data fields on non-array refs,
           // including schemaless builder objects. Callable projections cannot
           // be persisted as data because their method/value meaning is ambiguous.
@@ -3503,6 +3508,9 @@ export class CellImpl<T extends FabricValue>
           if (
             cellMethods.has(prop as keyof ICell<T>) &&
             (!isSqliteOnlyMethod || cellKind === "sqlite") &&
+            (!isIndexOnlyMethod ||
+              (self as unknown as Cell<{ kind?: string }>).key("kind").get() ===
+                "collection-index") &&
             (!arrayOnlyMethods.has(String(prop)) || isArrayMethodReceiver)
           ) {
             return nestedCell.getAsReactiveProxy(

@@ -181,38 +181,6 @@ function createPatternCallWithParams(
       return { ...info, keyExpression };
     });
 
-  const selectorFamily = classifyArrayMethodCall(methodCall)?.family;
-  const bodyWithKeyValues =
-    selectorFamily === "groupBy" || selectorFamily === "keyBy"
-      ? tagSelectorReturns(transformedBody, context, "evaluate")
-      : transformedBody;
-  const bodyForRewrite = options.rewriteTransformedBody
-    ? options.rewriteTransformedBody(bodyWithKeyValues, context)
-    : bodyWithKeyValues;
-
-  const rewrittenBody = rewriteCallbackBody(
-    bodyForRewrite,
-    {
-      bindingName: elementAnalysis.bindingName,
-      elementIdentifier: elementAnalysis.elementIdentifier,
-      destructureStatement: elementAnalysis.destructureStatement,
-      computedAliases: visitedAliases,
-    },
-    context,
-  );
-
-  const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
-  context.markAsArrayMethodCallback(newCallback);
-
-  const callbackParamTypeNode = createArrayMethodCallbackSchema(
-    methodCall,
-    elemParam,
-    indexParam,
-    arrayParam,
-    filteredCaptureTree,
-    context,
-  );
-
   const { checker } = context;
   const typeRegistry = context.state.typeRegistry;
   let resultTypeNode: ts.TypeNode | undefined;
@@ -268,6 +236,38 @@ function createPatternCallWithParams(
       ),
     ]);
   }
+
+  const selectorFamily = classifyArrayMethodCall(methodCall)?.family;
+  const bodyWithKeyValues =
+    selectorFamily === "groupBy" || selectorFamily === "keyBy"
+      ? tagSelectorReturns(transformedBody, context, "evaluate", resultTypeNode)
+      : transformedBody;
+  const bodyForRewrite = options.rewriteTransformedBody
+    ? options.rewriteTransformedBody(bodyWithKeyValues, context)
+    : bodyWithKeyValues;
+
+  const rewrittenBody = rewriteCallbackBody(
+    bodyForRewrite,
+    {
+      bindingName: elementAnalysis.bindingName,
+      elementIdentifier: elementAnalysis.elementIdentifier,
+      destructureStatement: elementAnalysis.destructureStatement,
+      computedAliases: visitedAliases,
+    },
+    context,
+  );
+
+  const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
+  context.markAsArrayMethodCallback(newCallback);
+
+  const callbackParamTypeNode = createArrayMethodCallbackSchema(
+    methodCall,
+    elemParam,
+    indexParam,
+    arrayParam,
+    filteredCaptureTree,
+    context,
+  );
 
   const typeArgs = [callbackParamTypeNode];
   if (resultTypeNode) {
@@ -347,6 +347,7 @@ function tagSelectorReturns(
   body: ts.ConciseBody,
   context: TransformationContext,
   phase: "tag" | "evaluate" = "tag",
+  resultTypeNode?: ts.TypeNode,
 ): ts.ConciseBody {
   const tag = (value: ts.Expression) => {
     if (phase === "evaluate") {
@@ -358,6 +359,7 @@ function tagSelectorReturns(
       return createReactiveWrapperForExpression(value, reads, context, {
         allowDirectExpressionWrap: true,
         preferInputBoundWrapper: true,
+        resultTypeNode,
       }) ?? value;
     }
     const call = context.cfHelpers.createHelperCall(
@@ -375,7 +377,12 @@ function tagSelectorReturns(
     if (ts.isReturnStatement(node)) {
       return context.factory.updateReturnStatement(
         node,
-        tag(node.expression ?? context.factory.createIdentifier("undefined")),
+        tag(
+          node.expression ??
+            context.factory.createVoidExpression(
+              context.factory.createNumericLiteral(0),
+            ),
+        ),
       );
     }
     return visitEachChildWithJsx(node, visitor, context.tsContext);
@@ -389,7 +396,11 @@ function tagSelectorReturns(
     return context.factory.updateBlock(rewritten, [
       ...rewritten.statements,
       context.factory.createReturnStatement(
-        tag(context.factory.createIdentifier("undefined")),
+        tag(
+          context.factory.createVoidExpression(
+            context.factory.createNumericLiteral(0),
+          ),
+        ),
       ),
     ]);
   }

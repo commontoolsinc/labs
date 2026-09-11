@@ -16,7 +16,6 @@ import {
 import {
   collectionKeyBucket,
   type CollectionKeyIdentity,
-  compareCollectionKeys,
   type ResolvedCollectionKey,
 } from "./collection-index-key.ts";
 
@@ -55,7 +54,7 @@ export interface CollectionIndexMembership {
   /** Members of each bucket, independently addressed from other buckets. */
   members: Record<string, Record<string, IndexMember> | undefined>;
 
-  /** Occupied key metadata, read only when occupancy changes. */
+  /** Occupied key metadata used by demanded enumeration. */
   occupied: Record<string, OccupiedKey | undefined>;
 }
 
@@ -113,7 +112,6 @@ export function maintainCollectionIndexMembership(
     () => {
       const previous = stored.key("assignments").key(memberId).get()?.bucket;
       const affected = new Set([previous, next]);
-      let occupancyChanged = false;
       for (const bucket of affected) {
         if (bucket === undefined) continue;
         const membersCell = stored.key("members").key(bucket);
@@ -143,7 +141,6 @@ export function maintainCollectionIndexMembership(
           deleteIndexSlot(tx, output.key("buckets").key(bucket));
         }
         if (wasOccupied !== (ordered.length > 0)) {
-          occupancyChanged = true;
           if (ordered.length) {
             stored.key("occupied").key(bucket).set({
               identity: key!.identity,
@@ -165,20 +162,6 @@ export function maintainCollectionIndexMembership(
           bucket: next,
           occurrence,
         });
-      }
-      if (occupancyChanged) {
-        const occupied = Object.values(
-          snapshotQueryResult(stored.key("occupied").get() ?? {}),
-        )
-          .filter((entry) => entry !== undefined)
-          .sort((a, b) => compareCollectionKeys(a.identity, b.identity));
-        output.key("keys").set(
-          occupied.map((entry) =>
-            entry.cell
-              ? runtime.getCellFromLink(entry.cell, undefined, tx)
-              : entry.identity.value
-          ),
-        );
       }
     },
   );

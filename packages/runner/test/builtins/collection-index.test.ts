@@ -28,9 +28,11 @@ describe("collection-index", () => {
         type: "ref",
         implementation: "collectionIndex",
       });
-      const producer = pattern<{ list: unknown[]; elements: unknown[] }>(
-        ({ list, elements }) => ({
-          index: build({ list, elements, mode: "group" }),
+      const producer = pattern<
+        { list: unknown[]; elements: unknown[]; mode: "group" | "key" }
+      >(
+        ({ list, elements, mode }) => ({
+          index: build({ list, elements, mode }),
         }),
       );
       let tx = runtime.edit();
@@ -76,10 +78,17 @@ describe("collection-index", () => {
         tx,
       );
       elements.set([first, second]);
+      const mode = runtime.getCell<"group" | "key">(
+        signer.did(),
+        "mode",
+        undefined,
+        tx,
+      );
+      mode.set("group");
       const result = runtime.run(
         tx,
         producer,
-        { list, elements },
+        { list, elements, mode },
         runtime.getCell<{ index: MaintainedCollectionIndex }>(
           signer.did(),
           "result",
@@ -127,13 +136,23 @@ describe("collection-index", () => {
       expect((await tx.commit()).error).toBeUndefined();
       await runtime.idle();
       expect(observed.at(-1)).toBeUndefined();
-      expect(result.key("index").key("keys").get()).toEqual([]);
+      expect(await result.key("index").key("keys").pull()).toEqual([]);
       tx = runtime.edit();
       elements.withTx(tx).set([first]);
       list.withTx(tx).set([firstKey]);
       expect((await tx.commit()).error).toBeUndefined();
       await runtime.idle();
       expect(observed.at(-1)).toEqual([{ title: "Changed" }]);
+      for (const nextMode of ["key", "group"] as const) {
+        tx = runtime.edit();
+        mode.withTx(tx).set(nextMode);
+        expect((await tx.commit()).error).toBeUndefined();
+        await runtime.idle();
+        expect(observed.at(-1)).toEqual(
+          nextMode === "key" ? { title: "Changed" } : [{ title: "Changed" }],
+        );
+        expect(await result.key("index").key("keys").pull()).toEqual(["A"]);
+      }
     } finally {
       cancel?.();
       await storage.synced();

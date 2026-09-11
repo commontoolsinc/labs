@@ -52,8 +52,10 @@ leaves membership intact; a later input change can start confirmation again.
 
 Membership reconciliation scans source occurrence identities. Updating one key
 rebuilds and sorts each affected bucket; a bucket with M members can require
-O(M log M) work. Changing occupancy enumerates and sorts K occupied keys, which
-can require O(K log K) work. Retained live membership records are proportional
+O(M log M) work. Occupied-key metadata is maintained with membership. A separate
+child enumerates and sorts K occupied keys when `keys()` is demanded, which can
+require O(K log K) work. Lookup-only demand does not rebuild this enumeration
+for membership updates. Retained live membership records are proportional
 to source occurrences and occupied keys; storage history follows the ordinary
 storage retention policy.
 

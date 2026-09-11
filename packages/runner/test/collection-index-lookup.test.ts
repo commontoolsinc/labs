@@ -1,4 +1,4 @@
-import type { CollectionIndexData } from "@commonfabric/api";
+import type { CollectionIndexData, GroupIndex } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { expect } from "@std/expect";
@@ -30,6 +30,44 @@ describe("collection index lookup", () => {
     await storage.synced();
     await runtime.dispose();
     await storage.close();
+  });
+
+  it("forwards index proxy methods while preserving ordinary same-named fields", () => {
+    const tx = runtime.edit();
+    const index = runtime.getCell<CollectionIndexData<string, number[]>>(
+      space,
+      "proxy-index",
+      undefined,
+      tx,
+    );
+    index.set({
+      kind: "collection-index",
+      mode: "group",
+      keys: ["a"],
+      buckets: {
+        [collectionKeyBucket({ kind: "string", value: "a" })]: [1],
+      },
+    });
+    const proxy = index.getAsReactiveProxy() as unknown as GroupIndex<
+      string,
+      number
+    >;
+    expect(proxy.lookup("a")).toEqual([1]);
+    expect(proxy.keys()).toEqual(["a"]);
+    const data = runtime.getCell<{ lookup: string; keys: string }>(
+      space,
+      "proxy-data",
+      undefined,
+      tx,
+    );
+    data.set({ lookup: "ordinary lookup", keys: "ordinary keys" });
+    expect(
+      (data.getAsReactiveProxy().lookup as unknown as { get(): string }).get(),
+    ).toBe("ordinary lookup");
+    expect(
+      (data.getAsReactiveProxy().keys as unknown as { get(): string }).get(),
+    ).toBe("ordinary keys");
+    tx.abort();
   });
 
   it("compiles keyed reads and observes bucket and enumeration updates", async () => {

@@ -61,6 +61,22 @@ function getMemberPattern() {
   );
 }
 
+/** Shared graph for the independently demanded key enumeration. */
+let keysPattern: Pattern | undefined;
+
+/** Builds the graph that projects occupied membership into public keys. */
+function getKeysPattern() {
+  return keysPattern ??= pattern<{ state: CollectionIndexMembership }>(
+    (input) =>
+      createNodeFactory({
+        type: "ref",
+        implementation: "collectionIndexKeys",
+      })(input),
+    { type: "object", additionalProperties: true },
+    true,
+  );
+}
+
 /** Parallel source and tagged-selector arrays supplied by compiler lowering. */
 export interface CollectionIndexInput {
   /** Tagged keys, aligned with the original source collection. */
@@ -207,6 +223,26 @@ function createCollectionIndexInstance(
         });
         setup.needsSetup = true;
       }
+      const keysRunKey = JSON.stringify(["keys", scope, mode]);
+      const needed = new Set<string>([keysRunKey]);
+      let keysEntry = runs.get(keysRunKey);
+      if (!keysEntry) {
+        const child = scopedCell(
+          runtime,
+          tx,
+          runtime.getCell(
+            parent.space,
+            { collectionIndexKeys: index },
+            undefined,
+            tx,
+          ),
+          scope,
+        ).withTx();
+        keysEntry = { resultCell: child, lastIndex: -1, needsSetup: true };
+        runs.set(keysRunKey, keysEntry);
+        rollback.created(keysRunKey, keysEntry);
+        keysEntry.needsSetup = true;
+      }
       const occurrences = listElementKeys(elements);
       const neededOccurrences = new Set(occurrences.values());
       tx.runWithAmbientReadMeta(
@@ -216,7 +252,7 @@ function createCollectionIndexInstance(
             index.set({
               kind: "collection-index",
               mode,
-              keys: [],
+              keys: keysEntry.resultCell,
               buckets: {},
             });
           }
@@ -245,6 +281,22 @@ function createCollectionIndexInstance(
           }
         },
       );
+      if (keysEntry.needsSetup) {
+        runtime.runner.run(
+          tx,
+          getKeysPattern(),
+          { state },
+          keysEntry.resultCell,
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: awaitSync,
+            parentPieceRootId: parent.getAsNormalizedFullLink().id,
+          },
+        );
+        setResultCell(keysEntry.resultCell.withTx(tx), parent);
+        setPatternCell(keysEntry.resultCell.withTx(tx), parent.key("pattern"));
+        rollback.setupIssued(keysEntry);
+      }
       if (setup.needsSetup) {
         issueResultContainerSetup(
           tx,
@@ -255,10 +307,10 @@ function createCollectionIndexInstance(
           setup,
         );
       }
-      const needed = new Set<string>();
       for (const [position, occurrence] of occurrences) {
         const key = JSON.stringify([
           scope,
+          mode,
           occurrence,
           cellIdentityKey(extracted[position]).linkKey,
         ]);

@@ -8,6 +8,7 @@ import {
   compareCollectionKeys,
   resolveCollectionKey,
 } from "../../src/builtins/collection-index-key.ts";
+import { readCollectionIndexKeys } from "../../src/builtins/collection-index-keys.ts";
 import {
   type CollectionIndexMembership,
   maintainCollectionIndexMembership,
@@ -101,6 +102,16 @@ describe("collection-index-membership", () => {
     }
   }
 
+  /** Reads occupied membership through the enumeration projection. */
+  function readKeys(): unknown[] {
+    const tx = runtime.edit();
+    try {
+      return readCollectionIndexKeys(tx, state);
+    } finally {
+      tx.abort("key enumeration assertion");
+    }
+  }
+
   it("moves one occurrence between buckets and preserves linked source updates", async () => {
     await update("z", "B", first);
     await update("a", "A", second);
@@ -109,7 +120,7 @@ describe("collection-index-membership", () => {
     expect(readBucket("A")).toEqual([{ title: "Second" }, {
       title: "First",
     }]);
-    expect(index.key("keys").get()).toEqual(["A"]);
+    expect(readKeys()).toEqual(["A"]);
     const tx = runtime.edit();
     first.withTx(tx).key("title").set("Changed");
     expect((await tx.commit()).error).toBeUndefined();
@@ -129,7 +140,7 @@ describe("collection-index-membership", () => {
     expect(readBucket("A")).toEqual({ title: "First" });
     await update("z", undefined, first, "key");
     expect(readBucket("A")).toBeUndefined();
-    expect(index.key("keys").get()).toEqual([]);
+    expect(readKeys()).toEqual([]);
     await update("z", "A", first, "key");
     expect(readBucket("A")).toEqual({ title: "First" });
   });
@@ -139,11 +150,11 @@ describe("collection-index-membership", () => {
     await update("a", "B", first, "group", true);
     expect(readBucket("A")).toEqual([{ title: "First" }]);
     expect(readBucket("B")).toBeUndefined();
-    expect(index.key("keys").get()).toEqual(["A"]);
+    expect(readKeys()).toEqual(["A"]);
     await update("a", "B");
     expect(readBucket("A")).toBeUndefined();
     expect(readBucket("B")).toEqual([{ title: "First" }]);
-    expect(index.key("keys").get()).toEqual(["B"]);
+    expect(readKeys()).toEqual(["B"]);
   });
 
   it("maintains an unwatched source bucket when only its future destination is observed", async () => {
@@ -180,8 +191,8 @@ describe("collection-index-membership", () => {
       { type: "boolean" },
       {
         materializerWriteInputPaths: [["output", "buckets"], [
-          "output",
-          "keys",
+          "stored",
+          "occupied",
         ]],
       },
     );
@@ -232,7 +243,7 @@ describe("collection-index-membership", () => {
       await runtime.idle();
       expect(observed.at(-1)).toEqual([{ title: "First" }]);
       expect(readBucket("B")).toBeUndefined();
-      expect(index.key("keys").get()).toEqual(["A"]);
+      expect(readKeys()).toEqual(["A"]);
     } finally {
       cancel();
     }
@@ -308,7 +319,7 @@ describe("collection-index-membership", () => {
       expect((await tx.commit()).error).toBeUndefined();
       await runtime.idle();
       expect(observed.at(-1)).toBeUndefined();
-      expect(index.key("keys").get()).toEqual([]);
+      expect(readKeys()).toEqual([]);
     } finally {
       cancel();
     }
@@ -323,7 +334,7 @@ describe("collection-index-membership", () => {
     await update("one", undefined);
     expect(state.get()).toEqual({ assignments: {}, members: {}, occupied: {} });
     expect(index.key("buckets").get()).toEqual({});
-    expect(index.key("keys").get()).toEqual([]);
+    expect(readKeys()).toEqual([]);
   });
 
   it("records deleted bucket targets without scheduling on maintenance reads", async () => {
@@ -386,16 +397,15 @@ describe("collection-index-membership", () => {
     expect(readBucket(second)).toEqual([{ title: "Second" }]);
     expect(readBucket("1")).toEqual([{ title: "First" }]);
     expect(readBucket(1)).toEqual([{ title: "Second" }]);
-    expect(index.key("keys").get().slice(0, 3)).toEqual([true, 1, "1"]);
-    expect(index.key("keys").get().length).toBe(5);
+    expect(readKeys().slice(0, 3)).toEqual([true, 1, "1"]);
+    expect(readKeys().length).toBe(5);
     const tx = runtime.edit();
     try {
       const expected = [first, second].map((cell) =>
         resolveCollectionKey(runtime, tx, cell)!.identity
       ).sort(compareCollectionKeys);
       const actual = [3, 4].map((position) => {
-        const cell = index.withTx(tx).key("keys").key(position)
-          .asSchema({ asCell: ["cell"] }).get();
+        const cell = readCollectionIndexKeys(tx, state)[position];
         return resolveCollectionKey(runtime, tx, cell)!.identity;
       });
       expect(actual).toEqual(expected);

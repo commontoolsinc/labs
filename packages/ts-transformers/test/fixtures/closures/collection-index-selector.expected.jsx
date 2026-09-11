@@ -26,7 +26,10 @@ const __cfLift_1 = __cfHelpers.lift<{
         owner: __cfHelpers.Cell<string>;
         label: string;
     };
-}, any>(({ row }) => __cfHelpers.tagCollectionKey(row.useOwner ? row.owner : row.label), {
+}, {
+    isCell: boolean;
+    value: string | __cfHelpers.Cell<string>;
+}>(({ row }) => __cfHelpers.tagCollectionKey(row.useOwner ? row.owner : row.label), {
     type: "object",
     properties: {
         row: {
@@ -47,7 +50,18 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["row"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        isCell: {
+            type: "boolean"
+        },
+        value: {
+            type: "string"
+        }
+    },
+    required: ["isCell", "value"]
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     return __cfLift_1({ row: {
@@ -97,7 +111,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     row: {
         label: string;
     };
-}, any>(({ row }) => __cfHelpers.tagCollectionKey(row.label !== "" ? row.label : undefined), {
+}, {
+    isCell: boolean;
+    value: string | undefined;
+}>(({ row }) => __cfHelpers.tagCollectionKey(row.label !== "" ? row.label : undefined), {
     type: "object",
     properties: {
         row: {
@@ -111,7 +128,18 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     },
     required: ["row"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        isCell: {
+            type: "boolean"
+        },
+        value: {
+            type: ["string", "undefined"]
+        }
+    },
+    required: ["isCell", "value"]
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     return __cfLift_2({ row: {

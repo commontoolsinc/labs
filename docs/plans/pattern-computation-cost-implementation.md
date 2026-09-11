@@ -273,7 +273,10 @@ passed before merge, with clean Cubic and antagonistic reviews.
 
 - [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
       [index contract](collection-index-contract.md) records semantic decisions
-      and acceptance tests. Producers and typed lookup are implemented;
+      and acceptance tests, agreed in
+      [PR #7294](https://github.com/commontoolsinc/labs/pull/7294). Typed lookup
+      landed in [PR #7304](https://github.com/commontoolsinc/labs/pull/7304);
+      producers are under review in [PR #7323](https://github.com/commontoolsinc/labs/pull/7323);
       measured initialization and maintenance bounds remain open.
   - [x] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
@@ -289,7 +292,7 @@ passed before merge, with clean Cubic and antagonistic reviews.
 - [ ] **B1 implementation — Build grouping and unique-key indexing.**
   - [ ] Reuse collection element-identity/reconciliation rules from existing
         builtins; cover primitives, linked elements, and inline values.
-  - [x] Wire builtin registration, replayability, `Cell` methods and reactive
+  - [ ] Wire builtin registration, replayability, `Cell` methods and reactive
         operation list, author-facing types, and transformer lowering.
   - [ ] Test inserts, edits, moves between keys, removals, reorder, duplicate
         keys, link retargeting, replay, and teardown. Assert unaffected-key
@@ -388,18 +391,11 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete merge review for C1's rendered reconnect acceptance in #7312. Complete
-C3's remaining acceptance checks while retaining the
-production workaround. The first-materialization cases in
-[PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
-nested/mapped and same/cross-space browser combinations.
-A4's browser benchmark and count limits are available. A5 still
-needs cross-space and deployed measurements before product performance claims.
-Live poll access requires coordination with Mike.
-
-For the pending collection operators, build on the typed lookup foundation in
-[PR #7304](https://github.com/commontoolsinc/labs/pull/7304), implement
-`groupBy`/`keyBy` and bucket maintenance against the
-[agreed index contract](collection-index-contract.md), then build the left join. Their
-measurements use the shipped counters and the aggregate comparison method; A4/A5
-gate deployed-product claims rather than operator implementation.
+Complete scale acceptance and review for the producer implementation in
+[PR #7323](https://github.com/commontoolsinc/labs/pull/7323), then build and
+measure the left lookup join from the [index contract](collection-index-contract.md).
+The [512-row measurements](../history/development/performance/2026-09-11-demanded-index-enumeration.md)
+separate initialization, bucket maintenance, key enumeration, and lookup costs.
+Mixed primitive/Cell key enumeration still needs an API/runtime decision; it
+is not an accepted producer capability. A5 still needs cross-space and deployed measurements before product
+performance claims. Live poll access requires coordination with Mike.

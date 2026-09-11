@@ -22,6 +22,58 @@ interface Row {
 }
 
 describe("collection index producers", () => {
+  it("omits bare and fallthrough selector returns when undefined is shadowed", async () => {
+    const signer = await Identity.fromPassphrase("index-shadowed-undefined");
+    const storage = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    let cancel: (() => void) | undefined;
+    try {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: `
+          import {pattern, Writable} from "commonfabric";
+          export default pattern<{rows: Writable<{label: string}[]>}>(({rows}) => {
+            const bare = rows.groupBy((row): undefined => {
+              const undefined = row.label;
+              return;
+            });
+            const fallthrough = rows.keyBy((row): undefined => {
+              const undefined = row.label;
+            });
+            return {bare: bare.keys(), fallthrough: fallthrough.keys()};
+          });
+        `,
+        }],
+      });
+      const tx = runtime.edit();
+      const result = runtime.run(
+        tx,
+        compiled,
+        { rows: [{ label: "" }, { label: "A" }] },
+        runtime.getCell<{ bare: string[]; fallthrough: string[] }>(
+          signer.did(),
+          "result",
+          compiled.resultSchema,
+          tx,
+        ),
+      );
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+      cancel = result.sink(() => {});
+      await runtime.idle();
+      expect(await result.pull()).toEqual({ bare: [], fallthrough: [] });
+    } finally {
+      cancel?.();
+      await runtime.dispose({ closeStorage: false });
+      await storage.close();
+    }
+  });
+
   it("keeps primitive and Cell keys distinct and preserves a unique winner on reorder", async () => {
     const signer = await Identity.fromPassphrase("authored-index-producers");
     const storage = StorageManager.emulate({ as: signer });
@@ -106,7 +158,11 @@ describe("collection index producers", () => {
         compiled,
         { rows, owner },
         runtime.getCell<
-          { members: string[]; names: string[]; winner: string | undefined }
+          {
+            members: string[];
+            names: string[];
+            winner: string | undefined;
+          }
         >(signer.did(), "result", compiled.resultSchema, tx),
       );
       runtime.prepareTxForCommit(tx);

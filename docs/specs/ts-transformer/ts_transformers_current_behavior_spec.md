@@ -1124,6 +1124,9 @@ serialization. Primitive fields are read as values; Cell fields retain their
 identity without reading their contents. A nullish selected value omits that
 source occurrence. The pattern-owned expression pass skips synthetic computation
 callbacks, preserving ordinary JavaScript conditionals inside the key tagger.
+The computation carries the tagged selector output type into its lift schema.
+Bare terminal returns and fallthrough emit `void 0`, preserving omitted keys
+when a selector binds a local variable named `undefined`.
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves

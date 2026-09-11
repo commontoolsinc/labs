@@ -32,7 +32,7 @@ describe("collection index confidentiality", () => {
             import {pattern, Writable} from "commonfabric";
             export default pattern<{rows: Writable<{title: string; category: string}[]>}>(({rows}) => {
               const index = rows.${operator}(row => row.category);
-              return {titles: ${
+              return {keys: index.keys(), titles: ${
                 operator === "groupBy"
                   ? 'index.lookup("A").map(row => row.title)'
                   : '[index.lookup("A")?.title]'
@@ -73,7 +73,9 @@ describe("collection index confidentiality", () => {
             tx,
             compiled,
             { rows: rows.withTx() },
-            runtime.getCell<{ titles: string[]; present: boolean }>(
+            runtime.getCell<
+              { titles: string[]; present: boolean; keys: string[] }
+            >(
               signer.did(),
               "result",
               compiled.resultSchema,
@@ -92,6 +94,16 @@ describe("collection index confidentiality", () => {
               : [undefined],
           );
           expect(output.key("present").get()).toBe(initialCategory === "A");
+          expect(await output.key("keys").pull()).toEqual([initialCategory]);
+          const keysLabel = cfcLabelViewForResolvedCellWithStatus(
+            output.key("keys"),
+          );
+          expect(
+            (keysLabel.view?.entries ?? []).flatMap((entry) =>
+              entry.label.confidentiality ?? []
+            ),
+          )
+            .toContain("private-category");
           const { view } = cfcLabelViewForResolvedCellWithStatus(
             output.key("present"),
           );

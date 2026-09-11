@@ -75,12 +75,13 @@ describe("collection index serving", () => {
             const actorStorage = EmulatedStorageManager.connectTo(server, {
               as: actor,
             });
-            const actorRuntime = new Runtime({
-              apiUrl: new URL(import.meta.url),
-              storageManager: actorStorage,
-              experimental: { serverExecution: false },
-            });
+            let actorRuntime: Runtime | undefined;
             try {
+              actorRuntime = new Runtime({
+                apiUrl: new URL(import.meta.url),
+                storageManager: actorStorage,
+                experimental: { serverExecution: false },
+              });
               const identity = { ...actorRuntime.scopeKeyIdentity };
               identities.push(identity);
               const tx = actorRuntime.edit();
@@ -110,7 +111,7 @@ describe("collection index serving", () => {
                 );
               }
             } finally {
-              await actorRuntime.dispose({ closeStorage: false });
+              await actorRuntime?.dispose({ closeStorage: false });
               await actorStorage.close();
             }
           }
@@ -122,6 +123,7 @@ describe("collection index serving", () => {
           }
           const indexNames: string[] = [];
           const memberNames: string[] = [];
+          const keysNames: string[] = [];
           const coordinator = collectionIndex(
             inputs,
             (tx, result) => {
@@ -133,9 +135,13 @@ describe("collection index serving", () => {
               expect(result.withTx(tx).getRaw()).toEqual({
                 kind: "collection-index",
                 mode,
-                keys: [],
+                keys: expect.anything(),
                 buckets: {},
               });
+              const keysLink = result.withTx(tx).key("keys").resolveAsCell()
+                .getAsNormalizedFullLink();
+              expect(keysLink.scope).toBe(scope);
+              keysNames.push(keysLink.id);
               const ownership = tx.getCfcState().writePolicyInputs.find((
                 input,
               ) =>
@@ -164,8 +170,19 @@ describe("collection index serving", () => {
             expect(
               childRuns.calls.length - before,
               `missing member setup for identity ${position}`,
-            ).toBe(1);
-            const call = childRuns.calls[before];
+            ).toBe(2);
+            const keysChild = childRuns.calls[before].args[3];
+            expect(isCell(keysChild)).toBe(true);
+            if (!isCell(keysChild)) throw new Error("Expected keys Cell");
+            expect(keysChild.getAsNormalizedFullLink().scope).toBe(scope);
+            expect(
+              keysChild.withTx(tx).resolveAsCell().getAsNormalizedFullLink().id,
+            ).toBe(keysNames[position]);
+            expect(
+              getMetaCell(keysChild, "argument", tx).key("state")
+                .resolveAsCell().getAsNormalizedFullLink().scope,
+            ).toBe(scope);
+            const call = childRuns.calls[before + 1];
             const child = call.args[3];
             expect(isCell(child)).toBe(true);
             if (!isCell(child)) throw new Error("Expected member Cell");
@@ -198,6 +215,7 @@ describe("collection index serving", () => {
           expect(indexNames).toHaveLength(2);
           expect(indexNames[0]).toBe(indexNames[1]);
           expect(memberNames[0]).toBe(memberNames[1]);
+          expect(keysNames[0]).toBe(keysNames[1]);
         } finally {
           cancel();
           await runtime.dispose({ closeStorage: false });

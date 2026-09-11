@@ -35,7 +35,7 @@ export interface CollectionIndexMemberInput {
 
 /**
  * Resolves a tagged selector and updates its occurrence in one transaction.
- * Bucket and enumeration materializer envelopes keep extraction demanded
+ * Bucket and occupancy materializer envelopes keep extraction demanded
  * when only an absent destination bucket is observed.
  */
 export function collectionIndexMember(
@@ -68,7 +68,8 @@ export function collectionIndexMember(
   }, {
     materializerWriteEnvelopes: [
       index.key("buckets").getAsNormalizedFullLink(),
-      index.key("keys").getAsNormalizedFullLink(),
+      inputs.key("state").resolveAsCell().key("occupied")
+        .getAsNormalizedFullLink(),
     ],
   });
 }

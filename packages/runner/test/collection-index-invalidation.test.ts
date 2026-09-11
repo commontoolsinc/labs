@@ -110,7 +110,10 @@ describe("collection index invalidation", () => {
         expect((await tx.commit()).error).toBeUndefined();
         await runtime.settled(Infinity);
         expect(consumerRuns).toBe(0);
-        expect(producer.key("index").key("keys").get()).toEqual(["A", "C"]);
+        expect(await producer.key("index").key("keys").pull()).toEqual([
+          "A",
+          "C",
+        ]);
         expect(output.get()).toBe(1);
         tx = runtime.edit();
         first.withTx(tx).key("label").set("D");
