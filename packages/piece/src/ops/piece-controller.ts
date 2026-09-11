@@ -40,6 +40,7 @@ import {
   type PieceSourceTransition,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
+  readResultSchemaMeta,
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
@@ -1537,9 +1538,7 @@ export function durableSourceContract(
     linkedCell.tx,
   );
 
-  const resultSchema = sourceRoot.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
+  const resultSchema = readResultSchemaMeta(sourceRoot);
   if (resultSchema !== undefined) {
     return {
       schemas: [{
@@ -1648,9 +1647,7 @@ export function durableSourceContract(
   // public result projections. Every current projection is an additional
   // producer-owned constraint: a write must preserve the argument/internal
   // contract and all public result contracts simultaneously.
-  const ownerSchema = ownerResult.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
+  const ownerSchema = readResultSchemaMeta(ownerResult);
   const projected: DurableSchemaPath[] = [];
   if (ownerSchema !== undefined) {
     const rawResult = ownerResult.getRawUntyped({ lastNode: "top" });
@@ -3153,9 +3150,7 @@ class PiecePropIo implements PieceCellIo {
         assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
-        const durableSchema = resultCell.getMetaRaw("schema") as
-          | JSONSchema
-          | undefined;
+        const durableSchema = readResultSchemaMeta(resultCell);
         targetCell = durableSchema === undefined
           ? resultCell
           : resultCell.asSchema(durableSchema);

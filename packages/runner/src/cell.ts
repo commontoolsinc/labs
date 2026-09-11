@@ -1,4 +1,9 @@
-import type { AnyBrandedCell, ReadonlyCell } from "@commonfabric/api";
+import type {
+  AnyBrandedCell,
+  CollectionIndexData,
+  CollectionIndexKey,
+  ReadonlyCell,
+} from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -30,6 +35,7 @@ import {
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {
+  type ScopeKeyIdentity,
   type SqliteDbRef,
   type SqliteParamsWire,
   streamEntriesDocId,
@@ -50,6 +56,10 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
+import {
+  collectionKeyBucket,
+  resolveCollectionKey,
+} from "./builtins/collection-index-key.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import {
@@ -923,6 +933,18 @@ export function markCellDocumentSynced(cell: Cell<any>): void {
     throw new TypeError("Expected a runner CellImpl handle");
   }
   cell[markDocumentSynced]();
+}
+
+/** Loads a document for a captured resolution identity without retaining a transaction. */
+export function syncCellForIdentity<T>(
+  cell: Cell<T>,
+  identity: ScopeKeyIdentity | undefined,
+): Promise<Cell<T>> {
+  if (identity === undefined) return cell.sync();
+  markCellDocumentSynced(cell);
+  return cell.runtime.storageManager.syncCell(cell, {
+    scopeKeyIdentity: identity,
+  });
 }
 
 /**
@@ -3579,6 +3601,42 @@ export class CellImpl<T extends FabricValue>
     });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
+  }
+
+  /** Reads one index bucket while retaining dependencies on key resolution. */
+  lookup(
+    key: CollectionIndexKey | null | undefined,
+  ): T extends CollectionIndexData<CollectionIndexKey, infer V> ? V : unknown {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("lookup requires a collection index");
+    }
+    const resolved = resolveCollectionKey(
+      this.runtime,
+      this.runtime.readTx(this.tx),
+      key,
+    );
+    const value = resolved
+      ? index.key("buckets").key(collectionKeyBucket(resolved.identity)).get()
+      : undefined;
+    return (value === undefined
+      ? (index.key("mode").get() === "group" ? [] : undefined)
+      : value) as T extends CollectionIndexData<CollectionIndexKey, infer V> ? V
+        : unknown;
+  }
+
+  /** Reads occupied-key enumeration separately from bucket lookup. */
+  keys(): T extends CollectionIndexData<infer K, unknown> ? K[] : unknown[] {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("keys requires a collection index");
+    }
+    return index.key("keys").get() as T extends
+      CollectionIndexData<infer K, unknown> ? K[] : unknown[];
   }
 
   /** @inheritDoc */

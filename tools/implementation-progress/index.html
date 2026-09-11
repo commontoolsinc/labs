@@ -244,10 +244,20 @@
         <h2>Remote row updates · C1/C3</h2>
         <p>Four synthetic browser cases pass for nested filters and mapped rows,
           with same-space and cross-space profiles. Assertions cover remote color
-          changes, profile-only edits, membership additions, and ranking.</p>
+          changes, profile-only edits, membership additions, removal/restoration,
+          ranking, and first materialization after remote writes.</p>
         <p
-          class="muted">The runtime fix landed in PR #7265 after CI and review. Cold-materialization verification, removals,
-          and reconnects remain. No live poll was accessed.</p>
+          class="muted">The runtime fix landed in PR #7265 after CI and review. Reconnect verification
+          remains. No live poll was accessed.</p>
+        <figure>
+          <a
+            href="/mapped-cross-space-cold.png"><img src="/mapped-cross-space-cold.png"
+            alt="First browser render after a remote vote and cross-space profile edit: one red vote and an empty second row"
+            style="width: 100%; max-width: 756px"></a>
+          <figcaption>First browser render after remote edits: the linked red vote
+            is present, and the test verifies the updated profile name in the row
+            attributes. No earlier browser view materialized these values.</figcaption>
+        </figure>
         <figure>
           <a href="/mapped-cross-space.png"><img src="/mapped-cross-space.png"
             alt="Mapped rows after cross-space profile and remote vote updates: two green votes rank above one yellow vote"
@@ -255,6 +265,15 @@
           <figcaption>Recorded synthetic cross-space result: two green votes rank
             above one yellow vote. The test also checks profile names in the
             rendered row attributes.</figcaption>
+        </figure>
+        <figure>
+          <a
+            href="/mapped-cross-space-removed.png"><img src="/mapped-cross-space-removed.png"
+            alt="After remote vote removal, one yellow vote ranks above an empty second row"
+            style="width: 100%; max-width: 756px"></a>
+          <figcaption>After removing both green votes remotely, the second row has
+            no swatches and moves below the yellow vote. Restoring a keyed vote
+            produces exactly one green swatch.</figcaption>
         </figure>
       </section>
       <section id="budget-demo">

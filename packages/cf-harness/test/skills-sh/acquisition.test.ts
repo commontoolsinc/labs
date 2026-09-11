@@ -12,6 +12,7 @@ import {
   acquireSkillsShPinnedSkill,
   cacheHarnessSkillsShAcquisitionClientFactory,
   createHarnessSkillsShAcquisitionClientFactory,
+  SKILLS_SH_MAX_SCRIPTS,
   SKILLS_SH_MAX_SKILL_BYTES,
   SkillsShAcquisitionClient,
   SkillsShAcquisitionError,
@@ -106,6 +107,7 @@ describe("skills.sh pinned acquisition", () => {
       sourceUrl: MEMBRANE_SKILL_URL,
       text: "# Plaid\n",
       valueDigest: "sha256:4Br5o34ECSRnIW_OAU598G_sKD7zw23POdRQ6mexrTk",
+      scripts: [],
       loadedPaths: ["SKILL.md"],
     });
     expect(membraneTree._capture.reportedEntryCount).toBe(6_154);
@@ -116,7 +118,7 @@ describe("skills.sh pinned acquisition", () => {
     ).toBe(true);
   });
 
-  it("refuses every extra path in the buildgreat candidate root", async () => {
+  it("refuses every path of the buildgreat candidate root outside its scripts", async () => {
     const { fetch, urls } = fixtureFetch({
       tree: buildgreatTree,
       treeUrl: BUILDGREAT_TREE_URL,
@@ -130,16 +132,230 @@ describe("skills.sh pinned acquisition", () => {
 
     expect(urls).toEqual([BUILDGREAT_TREE_URL]);
     expect(refusal.code).toBe("instructions_only");
-    expect(refusal.offendingCount).toBe(22);
     expect(refusal.offendingPaths).toEqual(
       buildgreatTree.tree
         .map(({ path }) => path)
-        .filter((path) => path !== "SKILL.md"),
+        .filter((path) =>
+          path !== "SKILL.md" && path !== "scripts" &&
+          !path.startsWith("scripts/")
+        ),
     );
-    expect(refusal.message).toContain("22 offending paths");
+    expect(refusal.offendingCount).toBe(20);
+    expect(refusal.message).toContain("refused 20 paths");
     expect(refusal.offendingPaths).toContain("assets/vision-template.json");
     expect(refusal.offendingPaths).toContain("references/plan.md");
-    expect(refusal.offendingPaths).toContain("scripts/validate-vision.js");
+    // The script is the payload the widened whitelist admits; the refusal is
+    // about everything beside it, and naming it here would put the old rule
+    // back under a new name.
+    expect(refusal.offendingPaths).not.toContain("scripts/validate-vision.js");
+  });
+
+  //
+  // The scripts a skill ships
+  //
+  // A skill is a directory, and the scripts its prose tells a model to run are
+  // part of it. They are acquired at the one pinned commit under the same size
+  // cap as the instructions, and every path beside them still refuses.
+  //
+
+  /**
+   * A tree holding `SKILL.md` at the repository root plus `entries`, and a
+   * fetch answering every raw URL with the path it names.
+   */
+  const scriptFixture = (
+    entries: readonly { path: string; mode?: string; type?: string }[],
+  ): { fetch: HarnessFetch; urls: string[] } => {
+    const tree = {
+      sha: BUILDGREAT_SHA,
+      truncated: false,
+      tree: [
+        { path: "SKILL.md", mode: "100644", type: "blob" },
+        ...entries.map((entry) => ({
+          path: entry.path,
+          mode: entry.mode ?? "100644",
+          type: entry.type ?? "blob",
+        })),
+      ],
+    };
+    const urls: string[] = [];
+    const fetch: HarnessFetch = (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url === BUILDGREAT_TREE_URL) {
+        return Promise.resolve(Response.json(tree));
+      }
+      const raw =
+        `https://raw.githubusercontent.com/buildgreatproducts/plaid/${BUILDGREAT_SHA}/`;
+      if (url.startsWith(raw)) {
+        return Promise.resolve(new Response(`# ${url.slice(raw.length)}\n`));
+      }
+      return Promise.resolve(
+        Response.json({ message: "Not Found" }, { status: 404 }),
+      );
+    };
+    return { fetch, urls };
+  };
+
+  it("acquires the skill's scripts beside its instructions, in path order", async () => {
+    const { fetch, urls } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/second.sh", mode: "100755" },
+      { path: "scripts/first.py" },
+    ]);
+
+    const acquired = await acquireSkillsShPinnedSkill(BUILDGREAT_PIN, {
+      fetch,
+    });
+
+    expect(acquired.loadedPaths).toEqual([
+      "SKILL.md",
+      "scripts/first.py",
+      "scripts/second.sh",
+    ]);
+    expect(acquired.scripts.map((script) => script.path)).toEqual([
+      "scripts/first.py",
+      "scripts/second.sh",
+    ]);
+    expect(acquired.scripts[0].text).toBe("# scripts/first.py\n");
+    // Every fetch names the one pinned commit, the instructions first.
+    expect(urls).toEqual([
+      BUILDGREAT_TREE_URL,
+      `https://raw.githubusercontent.com/buildgreatproducts/plaid/${BUILDGREAT_SHA}/SKILL.md`,
+      `https://raw.githubusercontent.com/buildgreatproducts/plaid/${BUILDGREAT_SHA}/scripts/first.py`,
+      `https://raw.githubusercontent.com/buildgreatproducts/plaid/${BUILDGREAT_SHA}/scripts/second.sh`,
+    ]);
+    expect(acquired.scripts[0].valueDigest).toMatch(/^sha256:/);
+  });
+
+  it("refuses a script nested below the scripts directory", async () => {
+    // The admitted shape is one segment under `scripts/`. A deeper path is a
+    // directory the whitelist never judged.
+    const { fetch } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/inner", mode: "040000", type: "tree" },
+      { path: "scripts/inner/deep.sh" },
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("instructions_only");
+    expect(refusal.offendingPaths).toEqual([
+      "scripts/inner",
+      "scripts/inner/deep.sh",
+    ]);
+  });
+
+  it("refuses a script whose filename carries a control codepoint", async () => {
+    // An admitted path is reported — it reaches `loadedPaths`, the tool output
+    // and the run record, none of which sanitize on the way out — so a name
+    // the publisher chose is refused here rather than carried and cleaned
+    // later.
+    const { fetch, urls } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/re\u001b[2Kport.sh" },
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("instructions_only");
+    expect(refusal.offendingCount).toBe(1);
+    expect(urls).toEqual([BUILDGREAT_TREE_URL]);
+  });
+
+  it("refuses a script whose filename opens with a dot", async () => {
+    const { fetch } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/.hidden.sh" },
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("instructions_only");
+    expect(refusal.offendingPaths).toEqual(["scripts/.hidden.sh"]);
+  });
+
+  it("refuses a symlink under the scripts directory instead of fetching its target", async () => {
+    const { fetch, urls } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/link.sh", mode: "120000" },
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("instructions_only");
+    expect(refusal.offendingPaths).toEqual(["scripts/link.sh"]);
+    expect(urls).toEqual([BUILDGREAT_TREE_URL]);
+  });
+
+  it("refuses a skill shipping more scripts than one acquisition admits", async () => {
+    const { fetch, urls } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      ...Array.from(
+        { length: SKILLS_SH_MAX_SCRIPTS + 1 },
+        (_unused, index) => ({
+          path: `scripts/step-${index}.sh`,
+        }),
+      ),
+    ]);
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch }),
+    );
+
+    expect(refusal.code).toBe("too_many_scripts");
+    expect(refusal.message).toContain(`${SKILLS_SH_MAX_SCRIPTS + 1} scripts`);
+    // Refused off the inventory, so no script was fetched.
+    expect(urls).toEqual([BUILDGREAT_TREE_URL]);
+  });
+
+  it("refuses script bytes that are not UTF-8", async () => {
+    const { fetch } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/binary.sh" },
+    ]);
+    const withBinaryScript: HarnessFetch = (input, init) => {
+      const url = String(input);
+      return url.endsWith("/scripts/binary.sh")
+        ? Promise.resolve(new Response(new Uint8Array([0xff, 0xfe, 0xfd])))
+        : fetch(input, init);
+    };
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch: withBinaryScript }),
+    );
+
+    expect(refusal.code).toBe("invalid_skill_text");
+    expect(refusal.message).toContain("scripts/binary.sh");
+  });
+
+  it("refuses a script that exceeds the byte cap while streaming", async () => {
+    const { fetch } = scriptFixture([
+      { path: "scripts", mode: "040000", type: "tree" },
+      { path: "scripts/big.sh" },
+    ]);
+    const capped: HarnessFetch = (input, init) => {
+      const url = String(input);
+      return url.endsWith("/scripts/big.sh")
+        ? Promise.resolve(
+          new Response("x".repeat(SKILLS_SH_MAX_SKILL_BYTES + 1)),
+        )
+        : fetch(input, init);
+    };
+
+    const refusal = await refusalOf(
+      acquireSkillsShPinnedSkill(BUILDGREAT_PIN, { fetch: capped }),
+    );
+
+    expect(refusal.code).toBe("skill_too_large");
+    expect(refusal.message).toContain("scripts/big.sh");
   });
 
   it("refuses a truncated recursive tree as an unread listing", async () => {
