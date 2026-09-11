@@ -136,15 +136,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   /** Helper which implements most of a top-level visit. */
   #mainVisit(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
-      // deno-coverage-ignore-start
-
       // This is a defense-in-depth protection against bugs in this file, and
       // also serves as documentation for the intended use of this class.
       throw new Error(
         "Shouldn't happen: Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
       );
     }
-    // deno-coverage-ignore-stop
 
     return this.#visitValue(value);
   }
