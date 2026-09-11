@@ -40,6 +40,8 @@
 export const REPLAYABLE_BUILTIN_REFS: ReadonlySet<string> = new Set([
   "aggregate",
   "aggregateNode",
+  "collectionIndex",
+  "collectionIndexMember",
   "map",
   "filter",
   "flatMap",

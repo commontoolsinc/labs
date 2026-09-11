@@ -8,6 +8,8 @@ import { raw } from "../module.ts";
 import type { Runtime } from "../runtime.ts";
 import { aggregate, aggregateNode } from "./aggregate.ts";
 import { cellFromUrl } from "./cell-from-url.ts";
+import { collectionIndex } from "./collection-index.ts";
+import { collectionIndexMember } from "./collection-index-member.ts";
 import { compileAndRun } from "./compile-and-run.ts";
 import { fetchProgram } from "./fetch-program.ts";
 import {
@@ -51,7 +53,12 @@ export function registerBuiltins(runtime: Runtime) {
 
   moduleRegistry.addModuleByRef("cellFromUrl", raw(cellFromUrl));
   moduleRegistry.addModuleByRef("aggregate", raw(aggregate));
+  moduleRegistry.addModuleByRef("collectionIndex", raw(collectionIndex));
   moduleRegistry.addModuleByRef("aggregateNode", raw(aggregateNode));
+  moduleRegistry.addModuleByRef(
+    "collectionIndexMember",
+    raw(collectionIndexMember),
+  );
   moduleRegistry.addModuleByRef("map", raw(map));
   moduleRegistry.addModuleByRef("filter", raw(filter));
   moduleRegistry.addModuleByRef("flatMap", raw(flatMap));

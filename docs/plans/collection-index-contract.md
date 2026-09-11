@@ -1,10 +1,10 @@
 # Collection indexes and keyed lookup
 
-Status: proposed B1/B2 contract for the
+Status: B1/B2 implementation and acceptance contract for the
 [computation-cost implementation](pattern-computation-cost-implementation.md).
-These operators are pending implementation. The decisions below define the first
-implementation and its acceptance tests; measured complexity belongs in the
-feature documentation when the operators ship.
+The [feature documentation](../features/collection-indexes.md) describes index
+producers and lookup. The remaining acceptance work covers isolation, scale
+measurements, and joins.
 
 ## Key domain and equality
 
@@ -78,7 +78,7 @@ addressed buckets and occupied keys. Compiled lookup delegates to the descriptor
 Cell and returns an ordinary reactive value. Its acceptance tests cover
 primitive/Cell key separation, link retargeting, unrelated-bucket isolation,
 missing-key insertion, linked row contents, and durable lookup resume. Index
-construction, per-element extraction, and bucket ownership remain pending.
+construction uses owned per-occurrence extraction and bucket maintenance.
 
 The first join is a left lookup join against a `keyBy` index: one output per
 left occurrence, with its original left element and an optional right element.
@@ -100,6 +100,22 @@ use ordinary reactive child runs and transaction rollback. Follow
 independent readers, teardown, and reload. Reusing a key after removal should
 address the same deterministic bucket; retired children must not leak merely
 because another key remains populated.
+
+Per-element maintenance must remain demanded when only an unrelated or absent
+bucket is observed. Ordinary child ownership establishes lifetime, not demand:
+a selector currently assigned to B must still run when its key changes to A and
+only A has a reader. Use the scheduler's existing materializer write envelopes
+for owned maintenance children, with selector outputs as their reactive inputs.
+Do not make lookup read every selector or occupied-key enumeration to establish
+that demand.
+
+Materializer envelopes must cover possible destination buckets before a key
+changes, while each transaction writes only affected buckets. Broad envelopes
+may introduce O(N) scheduler ordering edges per lookup; measure that topology
+cost separately from callback and consumer run counts. Teardown releases the
+maintenance registrations. Acceptance includes B-to-A movement with only A
+observed, insertion into an initially absent watched bucket, rejected maintenance,
+and cold resume.
 
 The implementation must distinguish these costs:
 
@@ -124,9 +140,9 @@ groups.
 
 - [x] Prototype the typed index handle and its transformer/schema boundary. Keep
       key lookup separate from ordinary object-property `Cell.key`.
-- [ ] Implement shared key resolution and per-element extraction, reusing
+- [x] Implement shared key resolution and per-element extraction, reusing
       runtime identity and ownership machinery.
-- [ ] Implement `groupBy`, unique-key selection, and per-key lookup.
+- [x] Implement `groupBy`, unique-key selection, and per-key lookup.
 - [ ] Test primitive domains, missing/invalid keys, duplicate occurrences,
       source reorder, key edits, link-only retargeting, and cross-space keys.
 - [ ] Test absent lookup before insertion, last-member removal, reinsertion,

@@ -10,8 +10,8 @@ repair landed in #7265; removal/restoration acceptance landed in #7285 and
 first-browser-materialization acceptance landed in #7302. Reconnect repair
 landed in #7308; rendered acceptance is validated in #7312, pending merge gates.
 Remaining row-invalidation acceptance stays open. B1/B2's contract landed in
-#7294 and its typed lookup foundation landed in #7304. Producer lowering,
-bucket maintenance, and joins remain pending.
+#7294 and its typed lookup foundation landed in #7304. Producer lowering and bucket maintenance are implemented; scale acceptance
+and joins remain pending.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -272,24 +272,24 @@ passed before merge, with clean Cubic and antagonistic reviews.
 ## 6–9. Complete the collection algebra: B1–B4
 
 - [ ] **B1 contract — Specify `groupBy` and `keyBy` separately.** The
-      [proposed index contract](collection-index-contract.md) records semantic
-      decisions and acceptance tests. The typed index handle and lowering
-      prototype remain prerequisites to completing this contract.
-  - [ ] Key domain and equality, including resolved link identity and
+      [index contract](collection-index-contract.md) records semantic decisions
+      and acceptance tests. Producers and typed lookup are implemented;
+      measured initialization and maintenance bounds remain open.
+  - [x] Key domain and equality, including resolved link identity and
         retargeting a key link without editing its containing element.
-  - [ ] Duplicate-key handling that remains deterministic for unordered input;
+  - [x] Duplicate-key handling that remains deterministic for unordered input;
         missing extracted keys and absent lookups.
-  - [ ] Group membership order, group enumeration order, output types, lookup
+  - [x] Group membership order, group enumeration order, output types, lookup
         surface, and identity across removal/reinsertion.
   - [ ] Bound invalidation to affected keys; state initialization, update,
         lookup, and storage complexity.
-- [ ] **B2 contract — Specify lookup and join.** Decide join cardinality,
-      unmatched rows, duplicate matches, output ordering/identity, link
-      retargeting, and cleanup before building the join.
+- [x] **B2 contract — Specify lookup and join.** The index contract defines
+      a left lookup join, unmatched rows, deterministic duplicate matches,
+      left occurrence ordering, link retargeting, and owned cleanup.
 - [ ] **B1 implementation — Build grouping and unique-key indexing.**
   - [ ] Reuse collection element-identity/reconciliation rules from existing
         builtins; cover primitives, linked elements, and inline values.
-  - [ ] Wire builtin registration, replayability, `Cell` methods and reactive
+  - [x] Wire builtin registration, replayability, `Cell` methods and reactive
         operation list, author-facing types, and transformer lowering.
   - [ ] Test inserts, edits, moves between keys, removals, reorder, duplicate
         keys, link retargeting, replay, and teardown. Assert unaffected-key
@@ -312,7 +312,9 @@ passed before merge, with clean Cubic and antagonistic reviews.
       public doc comments, pattern-author documentation, and executable examples
       in the same slice that ships the API. The aggregate portion is documented
       in [collection aggregates](../features/collection-aggregates.md); index
-      and join documentation remains pending.
+      semantics and current costs are documented in
+      [collection indexes](../features/collection-indexes.md). Measured scale
+      acceptance and join documentation remain pending.
 
 **Deferred B3a:** Reconsider restricted append folds only after B1–B3 ship and a
 remaining use case justifies them. Requires a separate contract excluding

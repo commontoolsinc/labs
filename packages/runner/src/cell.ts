@@ -2,6 +2,8 @@ import type {
   AnyBrandedCell,
   CollectionIndexData,
   CollectionIndexKey,
+  GroupIndex,
+  KeyIndex,
   ReadonlyCell,
 } from "@commonfabric/api";
 import {
@@ -252,7 +254,15 @@ function createAggregate<T>(
  * use the `*WithPattern` variant explicitly.
  */
 function throwOpFunctionFormMessage(
-  method: "map" | "filter" | "flatMap" | "count" | "minBy" | "maxBy",
+  method:
+    | "map"
+    | "filter"
+    | "flatMap"
+    | "count"
+    | "minBy"
+    | "maxBy"
+    | "groupBy"
+    | "keyBy",
 ): string {
   return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
@@ -679,7 +689,11 @@ export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
 export type { MemorySpace } from "@commonfabric/memory/interface";
 
-const aggregateMethodNames = [
+const arrayOnlyMethodNames = [
+  "groupBy",
+  "groupByWithPattern",
+  "keyBy",
+  "keyByWithPattern",
   "count",
   "countWithPattern",
   "sum",
@@ -690,7 +704,7 @@ const aggregateMethodNames = [
   "maxBy",
   "maxByWithPattern",
 ] as const;
-const aggregateMethods: ReadonlySet<string> = new Set(aggregateMethodNames);
+const arrayOnlyMethods: ReadonlySet<string> = new Set(arrayOnlyMethodNames);
 
 // The names a `Reactive` forwards as METHODS of the cell it proxies. Every
 // other string reads as data navigation, so a name here shadows a data key
@@ -722,7 +736,7 @@ const cellMethods = new Set<
   "key",
   "map",
   "mapWithPattern",
-  ...aggregateMethodNames,
+  ...arrayOnlyMethodNames,
   "reduce",
   "findIndex",
   "filter",
@@ -3476,20 +3490,20 @@ export class CellImpl<T extends FabricValue>
           // Check if this is a method on the cell. `query`/`exec` are gated to
           // SqliteDb cells so they don't shadow same-named data fields.
           const isSqliteOnlyMethod = prop === "query" || prop === "exec";
-          // Aggregate names remain ordinary data fields on non-array refs,
+          // Array-only method names remain ordinary data fields on non-array refs,
           // including schemaless builder objects. Callable projections cannot
           // be persisted as data because their method/value meaning is ambiguous.
-          const aggregateSchema = typeof prop === "string" &&
-              aggregateMethods.has(prop)
+          const arrayMethodSchema = typeof prop === "string" &&
+              arrayOnlyMethods.has(prop)
             ? resolveSchema(self.schema)
             : undefined;
-          const isAggregateReceiver = aggregateSchema &&
-            typeof aggregateSchema === "object" &&
-            aggregateSchema.type === "array";
+          const isArrayMethodReceiver = arrayMethodSchema &&
+            typeof arrayMethodSchema === "object" &&
+            arrayMethodSchema.type === "array";
           if (
             cellMethods.has(prop as keyof ICell<T>) &&
             (!isSqliteOnlyMethod || cellKind === "sqlite") &&
-            (!aggregateMethods.has(String(prop)) || isAggregateReceiver)
+            (!arrayOnlyMethods.has(String(prop)) || isArrayMethodReceiver)
           ) {
             return nestedCell.getAsReactiveProxy(
               (self as unknown as Record<
@@ -3601,6 +3615,66 @@ export class CellImpl<T extends FabricValue>
     });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
+  }
+
+  /** @inheritDoc */
+  groupBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    _selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T> {
+    throw new Error(throwOpFunctionFormMessage("groupBy"));
+  }
+
+  /** @inheritDoc */
+  groupByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T> {
+    const keys = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createNodeFactory({
+      type: "ref",
+      implementation: "collectionIndex",
+    })({
+      list: keys,
+      elements: this,
+      mode: "group",
+    }) as GroupIndex<K, T extends Array<infer U> ? U : T>;
+  }
+
+  /** @inheritDoc */
+  keyBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    _selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T> {
+    throw new Error(throwOpFunctionFormMessage("keyBy"));
+  }
+
+  /** @inheritDoc */
+  keyByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T> {
+    const keys = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createNodeFactory({
+      type: "ref",
+      implementation: "collectionIndex",
+    })({
+      list: keys,
+      elements: this,
+      mode: "key",
+    }) as KeyIndex<K, T extends Array<infer U> ? U : T>;
   }
 
   /** Reads one index bucket while retaining dependencies on key resolution. */

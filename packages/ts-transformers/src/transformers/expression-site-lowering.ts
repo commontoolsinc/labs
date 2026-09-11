@@ -500,6 +500,13 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
+    if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      context.isSyntheticComputeCallback(node)
+    ) {
+      return node;
+    }
+
     if (ts.isVariableDeclaration(node)) {
       if (
         node.initializer && isFunctionLikeExpression(node.initializer)

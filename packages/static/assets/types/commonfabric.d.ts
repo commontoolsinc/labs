@@ -1435,6 +1435,11 @@ export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
   CollectionIndexData<K, T | undefined>
 >;
 
+/** @internal Preserves an index selector's key kind before result serialization. */
+export declare function tagCollectionKey<T>(
+  value: T,
+): { isCell: boolean; value: T };
+
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
  * direct helpers mirror supported Array methods and return Reactive results.
@@ -1442,6 +1447,42 @@ export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
  * operations.
  */
 export interface IDerivable<T> {
+  /** Builds a reactive index while retaining original source occurrences. */
+  groupBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** @internal Receives the compiler's tagged per-element selector pattern. */
+  groupByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** Builds a reactive index while retaining original source occurrences. */
+  keyBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** @internal Receives the compiler's tagged per-element selector pattern. */
+  keyByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T>;
+
   map<S>(
     this: IsThisObject,
     fn: (

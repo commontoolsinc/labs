@@ -1,0 +1,236 @@
+import { Identity } from "@commonfabric/identity";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { createNodeFactory } from "../../src/builder/module.ts";
+import { collectionKeyBucket } from "../../src/builtins/collection-index-key.ts";
+import type { MaintainedCollectionIndex } from "../../src/builtins/collection-index-membership.ts";
+import { Runtime } from "../../src/runtime.ts";
+import { StorageManager } from "../../src/storage/cache.deno.ts";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+} from "../../src/storage/v2-emulate.ts";
+import { createTrustedBuilder } from "../support/trusted-builder.ts";
+
+describe("collection-index", () => {
+  it("reconciles original linked occurrences while only one bucket is observed", async () => {
+    const signer = await Identity.fromPassphrase("index-coordinator");
+    const storage = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    let cancel: (() => void) | undefined;
+    try {
+      const { pattern } = createTrustedBuilder(runtime).commonfabric;
+      const build = createNodeFactory({
+        type: "ref",
+        implementation: "collectionIndex",
+      });
+      const producer = pattern<{ list: unknown[]; elements: unknown[] }>(
+        ({ list, elements }) => ({
+          index: build({ list, elements, mode: "group" }),
+        }),
+      );
+      let tx = runtime.edit();
+      const first = runtime.getCell<{ title: string }>(
+        signer.did(),
+        "first",
+        undefined,
+        tx,
+      );
+      first.set({ title: "First" });
+      const second = runtime.getCell<{ title: string }>(
+        signer.did(),
+        "second",
+        undefined,
+        tx,
+      );
+      second.set({ title: "Second" });
+      const firstKey = runtime.getCell<{ isCell: boolean; value: string }>(
+        signer.did(),
+        "first-key",
+        undefined,
+        tx,
+      );
+      firstKey.set({ isCell: false, value: "B" });
+      const secondKey = runtime.getCell<{ isCell: boolean; value: string }>(
+        signer.did(),
+        "second-key",
+        undefined,
+        tx,
+      );
+      secondKey.set({ isCell: false, value: "A" });
+      const list = runtime.getCell<unknown[]>(
+        signer.did(),
+        "keys",
+        undefined,
+        tx,
+      );
+      list.set([firstKey, secondKey]);
+      const elements = runtime.getCell<unknown[]>(
+        signer.did(),
+        "elements",
+        undefined,
+        tx,
+      );
+      elements.set([first, second]);
+      const result = runtime.run(
+        tx,
+        producer,
+        { list, elements },
+        runtime.getCell<{ index: MaintainedCollectionIndex }>(
+          signer.did(),
+          "result",
+          undefined,
+          tx,
+        ),
+      );
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+      const bucket = collectionKeyBucket({ kind: "string", value: "A" });
+      const observed: unknown[] = [];
+      cancel = result.key("index").key("buckets").key(bucket).sink((value) => {
+        observed.push(value);
+      });
+      await runtime.idle();
+      expect(observed.at(-1)).toEqual([{ title: "Second" }]);
+      tx = runtime.edit();
+      elements.withTx(tx).set([second, first]);
+      list.withTx(tx).set([secondKey, firstKey]);
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      expect(observed.at(-1)).toEqual([{ title: "Second" }]);
+      tx = runtime.edit();
+      firstKey.withTx(tx).key("value").set("A");
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      expect(observed.at(-1)).toEqual(
+        expect.arrayContaining([{ title: "First" }, { title: "Second" }]),
+      );
+      expect(observed.at(-1)).toHaveLength(2);
+      tx = runtime.edit();
+      elements.withTx(tx).set([first]);
+      list.withTx(tx).set([firstKey]);
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      expect(observed.at(-1)).toEqual([{ title: "First" }]);
+      tx = runtime.edit();
+      first.withTx(tx).key("title").set("Changed");
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      expect(observed.at(-1)).toEqual([{ title: "Changed" }]);
+      tx = runtime.edit();
+      elements.withTx(tx).set([]);
+      list.withTx(tx).set([]);
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      expect(observed.at(-1)).toBeUndefined();
+      expect(result.key("index").key("keys").get()).toEqual([]);
+      tx = runtime.edit();
+      elements.withTx(tx).set([first]);
+      list.withTx(tx).set([firstKey]);
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      expect(observed.at(-1)).toEqual([{ title: "Changed" }]);
+    } finally {
+      cancel?.();
+      await storage.synced();
+      await runtime.dispose({ closeStorage: false });
+      await storage.close();
+    }
+  });
+  it("resumes compiled membership in a fresh runtime and removes a durable member", async () => {
+    const signer = await Identity.fromPassphrase("index-coordinator-resume");
+    const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+    const storages = [0, 1].map(() =>
+      EmulatedStorageManager.connectTo(server, { as: signer })
+    );
+    const runtimes = storages.map((storageManager) =>
+      new Runtime({ apiUrl: new URL(import.meta.url), storageManager })
+    );
+    const [first, second] = runtimes;
+    const program = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+        import {pattern, Writable} from "commonfabric";
+        interface Row { title: string; category: string }
+        export default pattern<{rows: Writable<Row[]>}>(({rows}) => {
+          return { rows, index: rows.groupBy(row => row.category) };
+        });
+      `,
+      }],
+    };
+    const cancellations: (() => void)[] = [];
+    try {
+      const compiled = await first.patternManager.compilePattern(program);
+      const tx = first.edit();
+      const result = first.run(
+        tx,
+        compiled,
+        {
+          rows: [{ title: "First", category: "A" }, {
+            title: "Second",
+            category: "A",
+          }],
+        },
+        first.getCell<
+          {
+            index: MaintainedCollectionIndex;
+            rows: { title: string; category: string }[];
+          }
+        >(signer.did(), "compiled-result", compiled.resultSchema, tx),
+      );
+      first.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+      const bucket = collectionKeyBucket({ kind: "string", value: "A" });
+      const cancel = result.key("index").key("buckets").key(bucket).sink(
+        () => {},
+      );
+      cancellations.push(cancel);
+      await first.idle();
+      expect(await result.key("index").key("buckets").key(bucket).pull())
+        .toHaveLength(2);
+      await storages[0].synced();
+      cancel();
+      first.runner.stop(result);
+      await first.dispose({ closeStorage: false });
+      await storages[0].close();
+      await second.patternManager.compilePattern(program, {
+        space: signer.did(),
+      });
+      const restored = second.getCellFromLink<
+        {
+          index: MaintainedCollectionIndex;
+          rows: { title: string; category: string }[];
+        }
+      >(result.getAsNormalizedFullLink());
+      cancellations.push(
+        restored.key("index").key("buckets").key(bucket).sink(() => {}),
+      );
+      expect(await second.start(restored)).toBe(true);
+      await second.idle();
+      expect(await restored.key("index").key("buckets").key(bucket).pull())
+        .toHaveLength(2);
+      const edit = second.edit();
+      restored.withTx(edit).key("rows").set([{
+        title: "Second",
+        category: "A",
+      }]);
+      expect((await edit.commit()).error).toBeUndefined();
+      await second.idle();
+      expect(await restored.key("index").key("buckets").key(bucket).pull())
+        .toEqual([{ title: "Second", category: "A" }]);
+    } finally {
+      for (const cancel of cancellations) cancel();
+      for (const runtime of runtimes) {
+        await runtime.dispose({ closeStorage: false });
+      }
+      for (const storage of storages) await storage.close();
+      await server.close();
+    }
+  });
+});

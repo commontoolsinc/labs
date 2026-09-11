@@ -1117,6 +1117,14 @@ Key rewrite rules:
 - compute contexts:
   - no computed wrappers; only child rewrites and logical conversions
 
+Collection index selectors (`groupBy` / `keyBy` on explicit array-valued cells)
+use the array callback pipeline and its `WithPattern` form. Each selector return
+is evaluated inside a computation that tags whether its result is a Cell before
+serialization. Primitive fields are read as values; Cell fields retain their
+identity without reading their contents. A nullish selected value omits that
+source occurrence. The pattern-owned expression pass skips synthetic computation
+callbacks, preserving ordinary JavaScript conditionals inside the key tagger.
+
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves
 plain-array semantics inside fully compute-wrapped branches while still letting
