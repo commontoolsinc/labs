@@ -408,6 +408,15 @@ type PendingVersion =
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
 
+  /** Partial local promotion of a wave whose contributions share one seq.
+   * An authoritative frame replaces this record, so same-seq delivery is
+   * never replayed. Entries remain only while an earlier pending contribution
+   * could require reconstructing their local order. */
+  localWavePromotion?: {
+    base: EntityDocument | undefined;
+    entries: PendingVersion[];
+  };
+
   /**
    * The class of the covering commit — the commit whose write produced
    * `seq` (speculation.md §4's arrival-witness predicate, RULED
@@ -7991,7 +8000,37 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      if (record.confirmed.seq < applied.seq) {
+      const previousWave = record.confirmed.seq === applied.seq
+        ? previousConfirmed.localWavePromotion
+        : undefined;
+      if (
+        coverClass === "derived" &&
+        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+      ) {
+        // One wave can accept several local contributions to this document.
+        // Their shared seq covers all of them only after each has promoted.
+        const base = previousWave ? previousWave.base : previousConfirmed.value;
+        const entries = [
+          ...(previousWave?.entries ?? []),
+          ...pendingIndexes.map((index) => record.pending[index]),
+        ].sort((left, right) => left.localSeq - right.localSeq);
+        let value = base;
+        for (const entry of entries) {
+          value = applyPendingVersion(value, entry, {
+            space: this.#space,
+            id,
+            scope,
+          });
+        }
+        promoted = confirmedVersion(applied.seq, value, coverClass);
+        const lastApplied = entries.at(-1)!.localSeq;
+        const earlierPending = record.pending.some((entry) =>
+          entry.localSeq !== localSeq && entry.localSeq < lastApplied
+        );
+        promoted.localWavePromotion = earlierPending
+          ? { base, entries }
+          : { base: value, entries: [] };
+      } else if (record.confirmed.seq < applied.seq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -8099,6 +8138,17 @@ export class SpaceReplica
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      const promotion = record.confirmed.localWavePromotion;
+      const lastApplied = promotion?.entries.at(-1)?.localSeq;
+      if (
+        promotion && lastApplied !== undefined &&
+        !record.pending.some((entry) => entry.localSeq < lastApplied)
+      ) {
+        record.confirmed.localWavePromotion = {
+          base: record.confirmed.value,
+          entries: [],
+        };
+      }
       if (
         record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
       ) {

@@ -1264,7 +1264,14 @@ the durable rows of §5 carry APPENDS, never effect state).
   commit's catch-up marker can never arrive, so parking one wedges
   retirement permanently — the completion-visibility wedge; the
   retirement barrier stays as the belt over that structural
-  guarantee). And completion writebacks commit AUTHORITATIVELY:
+  guarantee). When several accepted contributions to one document share a
+  wave sequence, their settled local value includes every contribution in
+  local sealing order. An authoritative frame at the same sequence already
+  contains the wave's value and prevents replay; a newer frame also takes
+  precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
+  space, user, and session instances, including reordered verdict delivery,
+  withdrawal, and noncommutative appends.
+  And completion writebacks commit AUTHORITATIVELY:
   their memo-state writes go through even where the replica's
   optimistic view — possibly a doomed sealed overlay a later wave
   supersede-drops (§3d) — calls them no-ops, so a drop can never

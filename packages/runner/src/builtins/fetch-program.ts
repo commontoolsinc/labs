@@ -1,8 +1,13 @@
 import { internSchema } from "@commonfabric/data-model-schema";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 
 import type { CellScope } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
@@ -10,18 +15,18 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
+import {
+  requireWaveAcceptance,
+  waveRunContextOf,
+  waveSettlementOf,
+} from "../executor/wave.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
-import {
-  enrollRuntimeOwnedStore,
-  ownedCell,
-  recordRuntimeOwnedStore,
-} from "./runtime-owned-store.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { ownedCell } from "./runtime-owned-store.ts";
 
 /**
  * How long a `fetching` cache entry left by another replica is believed before
@@ -64,6 +69,35 @@ type FetchState =
 interface FetchCacheEntry {
   inputHash: string;
   state: FetchState;
+}
+
+/** The node's symbolic state cells, shared by instances of one scope. */
+interface ProgramCells {
+  pending: Cell<boolean>;
+  result: Cell<ProgramResult | undefined>;
+  error: Cell<unknown>;
+  cache: Cell<Record<string, FetchCacheEntry>>;
+}
+
+/** One accepted resolution, including work waiting for outbox dispatch. */
+interface ProgramResolution {
+  cache: Cell<Record<string, FetchCacheEntry>>;
+  inputHash: string;
+  requestId: string;
+  identity?: ScopeKeyIdentity;
+  controller?: AbortController;
+}
+
+/** A pending announcement for one physical output binding. */
+interface ProgramPublication {
+  bindingKey: string;
+  target: string;
+  sequence: number;
+  current: boolean;
+  accepted?: boolean;
+  finished?: boolean;
+  effectKey?: string;
+  resolution?: ProgramResolution;
 }
 
 const fetchProgramInputSchema = internSchema(
@@ -159,160 +193,197 @@ export function fetchProgram(
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: Runtime,
+  _outputBinding?: NormalizedFullLink,
+  _awaitSync?: boolean,
+  publicationBinding?: NormalizedFullLink,
 ): Action {
-  let cellsInitialized = false;
-  let pending: Cell<boolean>;
-  let result: Cell<ProgramResult | undefined>;
-  let error: Cell<any | undefined>;
-  let cache: Cell<Record<string, FetchCacheEntry>>;
-  let cellScope: CellScope | undefined;
-  let abortController: AbortController | undefined = undefined;
-  // Input hash to the claim id this replica wrote for it, for every resolution
-  // running here right now. The claim id carries `runtime.id`, which is unique
-  // per storage manager and so per replica; the entry's `requestId` used to be
-  // the input hash, which every replica resolving the same URL writes
-  // identically, so no replica could tell its own claim from anyone else's.
-  const inFlight = new Map<string, string>();
+  const bindings = new Map<CellScope, ProgramCells>();
+  const inFlight = new Map<string, ProgramResolution>();
+  const publications = new Set<ProgramPublication>();
+  let publicationSequence = 0;
+  let stopped = false;
 
-  // This is called when the pattern containing this node is being stopped.
-  addCancel(() => {
-    // Abort the request if it's still pending.
-    abortController?.abort("Pattern stopped");
-
-    // Only try to update state if cells were initialized
-    if (!cellsInitialized || inFlight.size === 0) return;
-
-    const tx = runtime.edit();
-
+  /** Releases only the claim owned by this resolution's replica. */
+  function releaseClaim(
+    { cache, inputHash, requestId, identity }: ProgramResolution,
+  ): void {
+    let tx: IExtendedStorageTransaction | undefined;
     try {
-      // Teardown tx on piece stop — no scheduler run stamps it;
-      // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
-      // serving runtime releases this replica's claims instead of
-      // refusing the unstamped seal. No-op off the serving posture.
-      // INSIDE the try (review thread r3756175831): a throwing stamper
-      // must route through the abort path below like any other failure
-      // here, not leak the manually-opened tx and skip claim release.
+      tx = runtime.edit();
       runtime.stampServerRun(tx, {
         actionId: `fetchProgram/teardown/${parentCell.sourceURI}`,
         kind: "bookkeeping",
+        ...(identity !== undefined ? { scopeKeyIdentity: identity } : {}),
       });
-
-      // If we were fetching, transition back to idle
-      const currentCache = cache.withTx(tx).get();
-      const updates: Record<string, FetchCacheEntry> = {};
-
-      // Release only the entries this replica still holds. An entry another
-      // replica took over carries its claim id, not ours, and resetting it
-      // would strand the resolution that replica is running.
-      for (const [hash, entry] of Object.entries(currentCache)) {
-        if (
-          entry.state.type === "fetching" &&
-          entry.state.requestId === inFlight.get(hash)
-        ) {
-          updates[hash] = {
-            inputHash: hash,
-            state: { type: "idle" },
-          };
-        }
+      if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+      const entry = cache.withTx(tx).get()?.[inputHash];
+      if (
+        entry?.state.type === "fetching" &&
+        entry.state.requestId === requestId
+      ) {
+        cache.withTx(tx).update({
+          [inputHash]: { inputHash, state: { type: "idle" } },
+        });
       }
-
-      if (Object.keys(updates).length > 0) {
-        cache.withTx(tx).update(updates);
-      }
-
       runtime.prepareTxForCommit(tx);
       tx.commit();
-    } catch (_) {
-      // Ignore errors during cleanup - the runtime might be shutting down
-      tx.abort();
+    } catch {
+      tx?.abort();
     }
+  }
+
+  addCancel(() => {
+    stopped = true;
+    const resolutions = [...inFlight.values()];
+    inFlight.clear();
+    bindings.clear();
+    publications.clear();
+    for (const resolution of resolutions) {
+      resolution.controller?.abort("Pattern stopped");
+    }
+    for (const resolution of resolutions) releaseClaim(resolution);
   });
 
+  /** Retires deduplicated staging records with the work they share. */
+  function finish(publication: ProgramPublication): void {
+    publication.finished = true;
+    inFlight.delete(publication.effectKey!);
+    for (const other of publications) {
+      if (other.effectKey !== publication.effectKey) continue;
+      other.finished = true;
+      if (other.accepted || other === publication) publications.delete(other);
+    }
+  }
+
+  /** A durable announcement owns its binding even when the link is unchanged. */
+  function observePublication(
+    tx: IExtendedStorageTransaction,
+    publication: ProgramPublication,
+  ): void {
+    requireWaveAcceptance(tx);
+    const accept = () => {
+      publication.accepted = true;
+      for (const other of publications) {
+        if (
+          other.bindingKey === publication.bindingKey &&
+          other.sequence < publication.sequence &&
+          other.target !== publication.target
+        ) {
+          other.current = false;
+          publications.delete(other);
+        }
+      }
+      const resolution = publication.resolution;
+      const effectKey = publication.effectKey;
+      if (resolution === undefined || effectKey === undefined) return;
+      if (stopped) {
+        releaseClaim(resolution);
+        return;
+      }
+      if (publication.finished) {
+        publications.delete(publication);
+        return;
+      }
+      // A deduplicated contribution can be accepted after its shared work
+      // completed. Its durable cache entry retires that late attachment.
+      const read = runtime.readTx();
+      if (resolution.identity) read.tx.scopeKeyIdentity = resolution.identity;
+      const state = resolution.cache.withTx(read).get()?.[
+        resolution.inputHash
+      ]?.state;
+      if (state?.type !== "fetching") {
+        publications.delete(publication);
+        return;
+      }
+      if (!inFlight.has(effectKey)) inFlight.set(effectKey, resolution);
+    };
+    tx.addCommitCallback((committedTx, outcome) => {
+      if (outcome.error) return;
+      const settlement = waveSettlementOf(committedTx) ?? waveSettlementOf(tx);
+      if (settlement) {
+        settlement.then((verdict) => {
+          if (!verdict.error) accept();
+        });
+      } else accept();
+    });
+  }
+
+  /** Reuses symbolic cells while request records retain their issuing identity. */
+  function cellsFor(
+    tx: IExtendedStorageTransaction,
+    scope: CellScope,
+  ): ProgramCells {
+    let cells = bindings.get(scope);
+    if (cells !== undefined) return cells;
+    const pending = ownedCell<boolean>(
+      runtime,
+      tx,
+      parentCell,
+      { fetchProgram: { pending: cause } },
+      undefined,
+      scope,
+    );
+    const result = ownedCell<ProgramResult | undefined>(
+      runtime,
+      tx,
+      parentCell,
+      { fetchProgram: { result: cause } },
+      undefined,
+      scope,
+    );
+    const error = ownedCell<unknown>(
+      runtime,
+      tx,
+      parentCell,
+      { fetchProgram: { error: cause } },
+      undefined,
+      scope,
+    );
+    const cache = ownedCell<Record<string, FetchCacheEntry>>(
+      runtime,
+      tx,
+      parentCell,
+      { fetchProgram: { cache: cause } },
+      cacheSchema,
+      scope,
+    );
+    for (const cell of [pending, result, error, cache]) {
+      setResultCell(cell, parentCell);
+      setPatternCell(cell, parentCell.key("pattern"));
+      cell.sync();
+    }
+    cells = { pending, result, error, cache };
+    bindings.set(scope, cells);
+    return cells;
+  }
+
   return (tx: IExtendedStorageTransaction) => {
+    if (stopped) return;
     tx.resetNarrowestReadScope();
     const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
     const outputScope = tx.getNarrowestReadScope();
-
-    if (!cellsInitialized || cellScope !== outputScope) {
-      pending = ownedCell<boolean>(
-        runtime,
-        tx,
-        parentCell,
-        { fetchProgram: { pending: cause } },
-        undefined,
-        outputScope,
-      );
-
-      result = ownedCell<ProgramResult | undefined>(
-        runtime,
-        tx,
-        parentCell,
-        {
-          fetchProgram: { result: cause },
-        },
-        undefined,
-        outputScope,
-      );
-
-      error = ownedCell<any | undefined>(
-        runtime,
-        tx,
-        parentCell,
-        {
-          fetchProgram: { error: cause },
-        },
-        undefined,
-        outputScope,
-      );
-
-      const baseCache = runtime.getCell(
-        parentCell.space,
-        { fetchProgram: { cache: cause } },
-        cacheSchema,
-        tx,
-      ) as Cell<Record<string, FetchCacheEntry>>;
-      cache = scopedCell(
-        runtime,
-        tx,
-        baseCache,
-        outputScope,
-      ) as Cell<Record<string, FetchCacheEntry>>;
-      recordRuntimeOwnedStore(tx, parentCell, cache);
-      enrollRuntimeOwnedStore(tx, parentCell, cache);
-
-      // Link the new result cells to the parent result cell
-      setResultCell(pending, parentCell);
-      setResultCell(result, parentCell);
-      setResultCell(error, parentCell);
-      setResultCell(cache, parentCell);
-      // Link the new result cells to the pattern cell too
-      const patternCellPtr = parentCell.key("pattern");
-      setPatternCell(pending, patternCellPtr);
-      setPatternCell(result, patternCellPtr);
-      setPatternCell(error, patternCellPtr);
-      setPatternCell(cache, patternCellPtr);
-
-      // Kick off sync in the background
-      pending.sync();
-      result.sync();
-      error.sync();
-      cache.sync();
-
-      // The cells above are re-minted when the scope changes, so a resolution
-      // started under the old scope writes into the old scope's cache and says
-      // nothing about the new one. Forget those claims; their `finally` sees a
-      // claim id that is no longer recorded and leaves the map alone.
-      inFlight.clear();
-
-      cellsInitialized = true;
-      cellScope = outputScope;
-    }
-
+    const runIdentity = waveRunContextOf(tx)?.scopeKeyIdentity;
+    const identity = runIdentity === undefined ? undefined : { ...runIdentity };
+    const cells = cellsFor(tx, outputScope);
+    const { pending, result, error, cache } = cells;
     const { url } = requestSnapshot;
     const inputHash = computeInputHashFromValue(requestSnapshot);
+    const effectKey = effectTargetKey(
+      `fetchProgram:${inputHash}`,
+      cache,
+      identity,
+    );
+    const publication: ProgramPublication = {
+      bindingKey: identity === undefined || publicationBinding === undefined
+        ? "local"
+        : resolveScopeKey(publicationBinding.scope ?? "space", identity),
+      target: effectTargetKey("publication", result),
+      sequence: ++publicationSequence,
+      current: true,
+    };
+    observePublication(tx, publication);
 
     if (!url) {
-      // When URL is empty, clear outputs
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
       error.withTx(tx).set(undefined);
@@ -320,38 +391,38 @@ export function fetchProgram(
       return;
     }
 
-    // Get current state for this input hash
-    const allEntries = cache.withTx(tx).get();
-    const cacheEntry = allEntries[inputHash];
-    const state: FetchState = cacheEntry?.state ?? { type: "idle" };
-
-    // State machine transitions. A resolution running in this replica ends
-    // when its promise settles, so an entry in `inFlight` is left alone
-    // whatever the entry says and however long it has been running. An entry
-    // claimed elsewhere and left untouched for longer than the staleness bound
-    // is taken over directly, without passing through `idle`: a round trip
-    // through `idle` would publish `pending: false` with no result for a tick,
-    // which reads to a consumer as "finished, nothing here".
-    const resolvingHere = inFlight.has(inputHash);
+    const state = cache.withTx(tx).get()?.[inputHash]?.state ??
+      { type: "idle" };
+    const resolvingHere = inFlight.has(effectKey);
     const claimAbandoned = state.type === "fetching" && !resolvingHere &&
       Date.now() - state.startTime > PROGRAM_CLAIM_STALE_AFTER;
 
     if (!resolvingHere && (state.type === "idle" || claimAbandoned)) {
-      // Try to transition to fetching. The claim id names this replica; the
-      // outbox/dedupe key is the input hash WIDENED BY THIS NODE's cache-cell
-      // identity (effectTargetKey): the per-node cache doc is the writeback
-      // target, so a DISTINCT node with the same URL must keep its own
-      // effect — a shared bare-hash key dropped the second node's closure
-      // and left its cache entry `fetching` forever (round-2 headline).
       const requestId = `${runtime.id}:${inputHash}`;
-      const effectKey = effectTargetKey(`fetchProgram:${inputHash}`, cache);
+      const stagedResolution: ProgramResolution = {
+        cache,
+        inputHash,
+        requestId,
+        identity,
+      };
+      publication.effectKey = effectKey;
+      publication.resolution = stagedResolution;
+      for (const other of publications) {
+        if (
+          other.bindingKey === publication.bindingKey &&
+          other.target === publication.target
+        ) {
+          other.current = false;
+          publications.delete(other);
+        }
+      }
+      publications.add(publication);
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
           state: { type: "fetching", requestId, startTime: Date.now() },
         },
       });
-
       enqueueSinkRequestPostCommitEffect(
         tx,
         "fetchProgram",
@@ -359,64 +430,82 @@ export function fetchProgram(
         requestSnapshot,
         "fetchProgram-start",
         () => {
-          // Start fetch asynchronously only after the transaction commits.
-          // Tracked as async builtin work owned by this run, so
-          // `runtime.settled()` and `runtime.settledFor(parentCell)` both wait
-          // for the program resolve + writeback; `idle()` does not.
-          // Recorded in `inFlight` here rather than above, because a
-          // transaction that never commits never reaches this callback.
-          inFlight.set(inputHash, requestId);
-          abortController = new AbortController();
+          if (stopped) {
+            releaseClaim(stagedResolution);
+            return;
+          }
+          const resolution = inFlight.get(effectKey) ?? stagedResolution;
+          if (resolution.controller !== undefined) return;
+          resolution.controller = new AbortController();
+          inFlight.set(effectKey, resolution);
           runtime.trackAsyncWork(
             startFetch(
               runtime,
               cache,
               inputHash,
               url,
-              abortController.signal,
+              resolution.controller.signal,
               effectKey,
-            ).finally(() => {
-              if (inFlight.get(inputHash) === requestId) {
-                inFlight.delete(inputHash);
-              }
-            }),
+              identity,
+            ).finally(() => finish(publication)),
             parentCell,
           );
         },
         {
           idempotencyKey: effectKey,
+          onReleaseRejected: () => {
+            // A rejected attachment cannot retire another callback's running
+            // resolution. A claim with no dispatched owner can be released.
+            if (inFlight.get(effectKey)?.controller === undefined) {
+              releaseClaim(stagedResolution);
+              finish(publication);
+            } else {
+              publication.finished = true;
+              publications.delete(publication);
+            }
+          },
           onRejected: (rejection) => {
+            if (stopped) return;
             runtime.trackAsyncWork(
               settleAbandonedRequest(
                 runtime,
                 "fetchProgram",
                 effectKey,
                 (settleTx) => {
-                  // The claim this run staged rode the abandoned transaction,
-                  // so the entry reads `idle` and a reader waits on a fetch
-                  // nobody is running. Record the refusal in its place — but
-                  // read the entry at write time first: a later request for
-                  // the same inputs claims it or answers it, and that state is
-                  // the newer request's, not this one's to overwrite.
-                  const entry = cache.withTx(settleTx).get()?.[inputHash];
-                  if (entry !== undefined && entry.state.type !== "idle") {
-                    return;
+                  if (identity !== undefined) {
+                    settleTx.tx.scopeKeyIdentity = identity;
                   }
-                  cache.withTx(settleTx).update({
-                    [inputHash]: {
-                      inputHash,
-                      state: { type: "error", message: rejection.message },
-                    },
-                  });
-                  // A run derives these from the entry above and announces
-                  // them at its end. No run follows this one, so the ending
-                  // does both itself.
-                  sendResult(settleTx, { pending, result, error });
+                  const entry = cache.withTx(settleTx).get()?.[inputHash];
+                  const ownsFields = entry === undefined ||
+                    entry.state.type === "idle";
+                  if (ownsFields) {
+                    cache.withTx(settleTx).update({
+                      [inputHash]: {
+                        inputHash,
+                        state: { type: "error", message: rejection.message },
+                      },
+                    });
+                  }
+                  // A refusal may publish only while its inputs still select this
+                  // cache. Other requests retain their own result and binding.
+                  settleTx.resetNarrowestReadScope();
+                  const current = snapshotFetchProgramInputs(
+                    inputsCell.withTx(settleTx),
+                  );
+                  if (
+                    settleTx.getNarrowestReadScope() !== outputScope ||
+                    computeInputHashFromValue(current) !== inputHash
+                  ) return;
+                  if (publication.current) {
+                    sendResult(settleTx, { pending, result, error });
+                    observePublication(settleTx, publication);
+                  }
+                  if (!ownsFields) return;
                   pending.withTx(settleTx).set(false);
                   result.withTx(settleTx).set(undefined);
                   error.withTx(settleTx).set(rejection.message);
                 },
-              ),
+              ).finally(() => publications.delete(publication)),
               parentCell,
             );
           },
@@ -424,19 +513,15 @@ export function fetchProgram(
       );
     }
 
-    // Convert state machine state to output cells
-    const currentEntries = cache.withTx(tx).get();
-    const currentState = currentEntries[inputHash]?.state ?? {
-      type: "idle",
-    };
-    pending.withTx(tx).set(currentState.type === "fetching");
+    const current = cache.withTx(tx).get()?.[inputHash]?.state ??
+      { type: "idle" };
+    pending.withTx(tx).set(current.type === "fetching");
     result.withTx(tx).set(
-      currentState.type === "success" ? currentState.data : undefined,
+      current.type === "success" ? current.data : undefined,
     );
     error.withTx(tx).set(
-      currentState.type === "error" ? currentState.message : undefined,
+      current.type === "error" ? current.message : undefined,
     );
-
     sendResult(tx, { pending, result, error });
   };
 }
@@ -461,6 +546,7 @@ async function startFetch(
   url: string,
   abortSignal: AbortSignal,
   effectKey: string,
+  identity?: ScopeKeyIdentity,
 ) {
   try {
     // Create HTTP program resolver
@@ -483,6 +569,8 @@ async function startFetch(
 
     // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
+      if (abortSignal.aborted) return;
+      if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {
@@ -510,6 +598,8 @@ async function startFetch(
 
     // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
+      if (abortSignal.aborted) return;
+      if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {

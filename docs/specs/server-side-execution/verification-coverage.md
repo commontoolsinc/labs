@@ -25,11 +25,11 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Shared fetch user/session isolation and served `llm`, `generateText`, and direct `generateObject` supersession and isolation are covered. Other effect callers, provider reads, and later-user session initialization remain open. |
+| OW28-supersession-family / OW28-instance-family | Shared fetch, `fetchProgram`, and direct LLM user/session isolation are covered. Other effect callers, provider/tool reads, and later-user session initialization remain open. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
-| OW56 finding 2 | Closed: source following has one owner, the opener. Server-owned materialization/compilation remains future work. |
+| OW56 finding 2 | Closed: source following has one owner, the opener. ON upload and instantiate run on the serving runtime; source updates, other client creation paths, and compiled-byte trust remain separate OW56 work. |
 | OW58 | Closed: resolved-error notice commits release the drain guard. |
 | OW60 | Open: unresolved flag-ON client echoes are still skipped. |
 
@@ -2669,15 +2669,32 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   concurrent responses landing in distinct user and session instances, with
   no service-instance result.
 
-  Remaining investigation obligations: `fetchProgram`, tool-loop LLM requests,
-  `llmDialog`, non-clearance SQLite instance keys, and the provider READ
-  partition. `fetchProgram` can retire an effect with its requesting instance's
-  cache still pending; its user/session completion path remains open. The
-  direct LLM response controls do not discharge the provider/tool READ
-  partition. OW53's SQLite acting-identity, owner, and clearance fixes remain
-  closed. Owed: one- and two-demander request/completion regressions for the
-  remaining callers, without reopening fixed SQLite cases or counting compile
-  coverage twice.
+  `fetchProgram` captures the requesting identity for its cache-instance key
+  and asynchronous claim, completion, refusal, and teardown reads and writes.
+  It retains accepted requests before dispatch and one controller per dispatched
+  resolution. `executor-fetch-program-instances.test.ts` covers space, user,
+  and session completion, two users, two sessions, reverse completion order,
+  isolated errors, A→B→A with both URLs retained in the cache, and teardown
+  despite one cleanup failure. `fetch-program-served-lifecycle.test.ts` covers
+  stop before dispatch, rejected release checks, late publication acceptance,
+  shared physical bindings across actors, independent bindings sharing a pending
+  result, and withdrawn publication. These controls exercise local program
+  responses; cancellation of resolver network requests remains separate.
+
+  `memory-v2-wave-promotion.test.ts` covers the storage boundary those completion
+  guards depend on: all accepted contributions to one document at the same wave
+  sequence remain visible after settlement, across space, user, and session
+  instances. Noncommutative appends retain sealing order; authoritative frames
+  prevent replay, and withdrawing an earlier pending layer preserves already
+  accepted sibling operations.
+
+  Remaining investigation obligations: tool-loop LLM requests, `llmDialog`,
+  non-clearance SQLite instance keys, and the provider READ partition.
+  Direct response controls do not discharge the provider/tool READ partition.
+  OW53's SQLite acting-identity, owner, and clearance fixes remain closed.
+  Owed: one- and two-demander request/completion regressions for the remaining
+  callers, without reopening fixed SQLite cases or counting compile coverage
+  twice.
 
   Child-input default creation is covered separately from builtin instance
   identity. `executor-compile-and-run.test.ts` passes uninitialized
@@ -9125,15 +9142,12 @@ supply; OW29/OW32/OW34 closed):
     (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
     and by this close; no ON surface pins it yet); NOTE-6 below
     (delegated read sessions' demand under the process DID —
-    label-inert, unchanged); the remaining effect kinds' UNSTAMPED
-    writebacks — `fetchProgram`, the `generate*` family, `llm`, and llm-dialog (which
-    additionally marks completions at 4 sites with bare
-    `llmDialog:`-prefixed keys never widened by `effectTargetKey` —
-    a separate pre-existing quirk) — whose hash-guard reads still
-    resolve the service's instances (the OW17 stage-A flag's
-    remaining scope after the SQLite and shared fetch fixes; the
-    space-server.ts `#commitEffectCompletion` comment names the
-    split); the acting≠demanded split: every context the stamper
+    label-inert, unchanged); llm-dialog's unstamped lifecycle reads and
+    completion keys, plus shared provider/tool reads. Shared fetch,
+    `fetchProgram`, `llm`, and the direct `generate*` completion paths bind
+    their hash-guard reads to the issuing identity; OW28-instance-family
+    records their coverage and the remaining caller boundaries.
+    The acting≠demanded split: every context the stamper
     produces derives `acting` FROM the demanded pair where both
     exist, so a run whose two halves disagree is an identity-model
     question no ruling has decided — `sqliteRunActingPrincipal`
@@ -9282,31 +9296,26 @@ supply; OW29/OW32/OW34 closed):
     identity. The coverage audit does not claim a new cross-origin experiment.
     Trigger: the serving pattern-source trust pass; close when the chosen
     posture and its regression coverage land.
-  - **OW56 — FUTURE (optimize-phase-future) — the server owns program
-    materialization AND compilation; clients wait (minted 2026-08-21
-    with the S-C ruling).** The owner's stated ideal, verbatim:
+  - **OW56 — PARTIALLY CLOSED — server-owned program materialization
+    and compilation.** Under ON, the upload and instantiate lifecycle
+    verbs compile and materialize on the serving runtime. `cf piece new`
+    requests this path. The request settles after the verb's wave commits
+    and durable confirmation succeeds; the receipt does not promise that
+    the piece's first derivation has completed. The contract is
+    [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).
+    `executor-lifecycle-verbs.test.ts` covers the host's queue and durable
+    settlement; `packages/piece/test/served-lifecycle.test.ts` covers the
+    operations through a real memory server and serving host.
 
-    > ideally compilation happens on the server and clients just wait
-    > for it, but if that isn't the case yet, then let's mark this for
-    > a later improvement and do (b)
-
-    — owner, 2026-08-21 (option (b), the client-side heal, was
-    subsequently SKIPPED the same day by the follow-on ruling on the
-    lift-path evidence — the OW45 row carries it; the ideal STANDS as
-    the direction that dissolves the whole class: no client-written
-    program docs means no lost program commits, no die-before-flush
-    orphan window, and no client heal to design). Pairs with OW44's
-    ruled coupling (lazy client instantiation — the client not
-    running the pattern immediately — is the client half of the same
-    family; server-side compilation is the server half). It also
-    addresses the owner's newly-raised concerns beyond durability:
-    client-written TRANSPILED CODE INTEGRITY (who attests the bytes a
-    client compiled — adjacent to OW55's pattern-fetch trust surface)
-    and VERSION-UPDATE FRESHNESS (a client compiling on an old
-    runtime version writes stale-toolchain closures; an explorer is
-    mapping this now and its findings may extend this row). Trigger:
-    optimize-phase-future; closing it also retires the OW45 row's
-    named die-before-flush residual.
+    Source update/check and browser/background creation still use their
+    client paths. Serving source updates requires registering module-update
+    authority at wave settlement; migrating each remaining client is
+    separate work. Clients also resolve local program files and may run
+    the opened graph speculatively. The served creation path therefore
+    does not discharge Finding 1's compiled-byte trust obligation or
+    OW45's die-before-flush residual for the remaining client-written
+    program paths. These boundaries remain open alongside OW44's lazy
+    client-instantiation work.
 
     The write-topology explorer's two findings extend this row (explorer
     map 2026-08-21, verified against main), ruled FOLLOW-UP not
