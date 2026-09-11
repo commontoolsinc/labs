@@ -94,6 +94,8 @@
  * | fetch                      | real everywhere; patternTest delta (mock)        |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
+ * | clientClass                | pinned to `"web"` by browserWorker; unset       |
+ * |                            | elsewhere                                        |
  * | navigateCallback           | delta (patternTest, remoteClient, browserWorker) |
  * | pieceCreatedCallback       | delta (browserWorker only)                       |
  * | telemetry                  | delta (productionServer, browserWorker)          |

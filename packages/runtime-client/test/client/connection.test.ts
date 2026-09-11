@@ -466,6 +466,53 @@ describe("connection", () => {
       session.detach();
     });
 
+    it("cancels a mount whose response times out before forgetting its id", async () => {
+      using time = new FakeTime();
+      const transport = new FakeTransport([RequestType.VDomMount]);
+      const connection = await initializedConnection(transport);
+      const session = connection.attachVDom(() => {});
+      try {
+        const mounting = session.mount(37, {
+          id: "of:mount-timeout",
+          space: "did:key:test",
+          scope: "space",
+          path: [],
+        });
+        const rejected = expect(mounting).rejects.toThrow(
+          "RuntimeClient request timed out: vdom:mount",
+        );
+        await time.tickAsync(60_000);
+        await rejected;
+        const requests = transport.sent.filter(
+          (message): message is IPCClientMessage => "msgId" in message,
+        );
+        const cancellations = requests.filter((message) =>
+          message.data.type === RequestType.VDomUnmount
+        );
+        expect(cancellations).toHaveLength(1);
+        expect(cancellations[0].data).toMatchObject({ mountId: 37 });
+        expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+
+        const mounted = requests.find((message) =>
+          message.data.type === RequestType.VDomMount
+        )!;
+        using _warning = stub(console, "warn");
+        transport.emit("message", {
+          msgId: mounted.msgId,
+          data: { rootId: 5 },
+        });
+        expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+        expect(
+          transport.sent.filter((message) =>
+            "msgId" in message && message.data.type === RequestType.VDomUnmount
+          ),
+        ).toHaveLength(1);
+      } finally {
+        session.detach();
+        await connection.dispose();
+      }
+    });
+
     it("mounts, unmounts, and routes batch notifications via the session", async () => {
       const transport = new FakeTransport();
       const connection = await initializedConnection(transport);

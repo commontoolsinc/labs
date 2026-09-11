@@ -5,6 +5,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   booleanSchema,
   numberSchema,
+  pieceListSchema,
   stringArraySchema,
   stringSchema,
 } from "./schemas.ts";
@@ -303,7 +304,7 @@ export const componentReadContracts: Readonly<
   "cf-switch": { checked: booleanSchema },
   "cf-tabs": { value: stringSchema },
   "cf-tab-bar": { value: stringSchema },
-  "cf-picker": { selectedIndex: numberSchema, items: true },
+  "cf-picker": { selectedIndex: numberSchema, items: pieceListSchema },
   "cf-autocomplete": {
     value: { anyOf: [stringSchema, stringArraySchema] },
     items: AutocompleteItemArraySchema,
@@ -353,6 +354,7 @@ export function componentReadSchema(
   const declared = componentReadContracts[component]?.[property];
   if (declared === undefined) return undefined;
   if (
+    (component === "cf-picker" && property === "items") ||
     component === "cf-profile-badge" || component === "cf-fab" ||
     (component === "cf-code-editor" && property !== "value")
   ) return declared;

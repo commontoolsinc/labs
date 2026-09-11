@@ -1,10 +1,12 @@
 /** Traverses visible view nodes under the same read schemas as their components. */
 
+import type { JSONSchema } from "@commonfabric/api";
 import type { ScopeKeyIdentity, ViewInterest } from "@commonfabric/memory/v2";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
-import { type Cell, isCell } from "./cell.ts";
+import { type Cell, deepTraverse, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import {
   componentReadContracts,
   componentReadSchema,
@@ -38,6 +40,16 @@ export function collectViewRenderReads(
   const visited = new PathKeyMap<boolean>();
   const seenObjects = new WeakSet<object>();
 
+  function readProperty(
+    cell: Cell<unknown>,
+    schema: JSONSchema | undefined,
+  ): void {
+    const value = cell.asSchema(schema).get({ traverseCells: true });
+    if (schema === undefined || ContextualFlowControl.isTrueSchema(schema)) {
+      deepTraverse(value);
+    }
+  }
+
   function visit(value: unknown): void {
     if (isCell(value)) {
       const link = value.getAsNormalizedFullLink();
@@ -60,7 +72,7 @@ export function collectViewRenderReads(
     if (isObjectNotArray(props)) {
       for (const [name, prop] of Object.entries(props)) {
         const binding = name.startsWith("$");
-        const event = name.startsWith("on") || name.startsWith("@");
+        const event = name.startsWith("on");
         const property = binding ? name.slice(1) : name;
         const schema = componentReadContracts[value.name]?.[property];
         if (binding || event) {
@@ -71,17 +83,18 @@ export function collectViewRenderReads(
           streams.push(link);
           if (binding) bindings.push(toMemorySpaceAddress(link));
           if (schema !== undefined) {
-            source.asSchema(
+            readProperty(
+              source,
               componentReadSchema(value.name, property, link.schema, props),
-            ).get({ traverseCells: true });
+            );
           }
         } else if (isCell(prop)) {
-          prop.withTx(tx).asSchema(schema ?? true).get({ traverseCells: true });
+          readProperty(prop.withTx(tx), schema ?? true);
         } else if (
           name !== "style" && prop !== null && typeof prop === "object"
         ) {
           // The worker renderer deep-resolves ordinary object/array props.
-          propsCell?.key(name).asSchema(true).get({ traverseCells: true });
+          if (propsCell !== undefined) readProperty(propsCell.key(name), true);
         }
       }
     }

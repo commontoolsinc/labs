@@ -465,6 +465,10 @@ const findNthClickTarget = (
 ): readonly HTMLElement[] | undefined => {
   const target = probe.collect(selector)[index] as HTMLElement | undefined;
   if (!target || probe.isDisabled(target)) return undefined;
+  const root = target.getRootNode();
+  if (root instanceof ShadowRoot && probe.isDisabled(root.host)) {
+    return undefined;
+  }
   const inner = target.shadowRoot?.querySelector("[data-cf-button]");
   if (inner && probe.isDisabled(inner)) return undefined;
   return [target];

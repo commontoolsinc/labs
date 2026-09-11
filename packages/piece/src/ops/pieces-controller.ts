@@ -817,6 +817,8 @@ export class PiecesController<T = unknown> {
 
   /**
    * Resolve a piece to its canonical result cell, optionally starting it.
+   * In view-scoped mode, the narrow root watch demands server execution;
+   * mounted renderers own local graph registration and deeper replication.
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
@@ -837,8 +839,6 @@ export class PiecesController<T = unknown> {
     scope?: CellScope,
   ): Promise<Cell<T>> {
     const { reconcile, start } = normalizePieceOpen(open);
-    const viewScoped = this.runtime.viewScopedReplicationRequested &&
-      await this.runtime.viewReplication.enable(this.#space);
     // Get the piece cell
     const addressed: Cell<unknown> = isCell(id)
       ? id
@@ -850,6 +850,8 @@ export class PiecesController<T = unknown> {
         undefined,
         scope,
       );
+    const viewScoped = this.runtime.viewScopedReplicationRequested &&
+      await this.runtime.viewReplication.enable(addressed.space);
 
     // Load the addressed cell. Syncing a value-link "slot" address also loads
     // its link target — the piece's canonical result cell — together with that
@@ -883,9 +885,7 @@ export class PiecesController<T = unknown> {
         // may have handed us a cell bound to a read transaction older than it.
         // Detach and resync, or a start below loads the identity the origin
         // just replaced — and reads through the returned cell describe it.
-        piece = await (viewScoped
-          ? piece.withTx().asSchema(viewPieceSchema)
-          : piece.withTx()).sync();
+        piece = await piece.withTx().sync();
       }
     }
     if (start && !viewScoped) {
@@ -1634,6 +1634,9 @@ export class PiecesController<T = unknown> {
    * Start scheduling and running a prepared piece. `scope` completes an id
    * into a document address and defaults to the space, as it does for
    * {@link getPieceCell}; a `Cell` argument already carries one.
+   * In view-scoped mode this synchronizes the name and opaque UI tip; the
+   * retained root watch demands server execution, while mounted renderers
+   * own local graph registration.
    */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,

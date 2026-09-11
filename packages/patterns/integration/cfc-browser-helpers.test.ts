@@ -1081,6 +1081,61 @@ describe("CFC browser helpers", () => {
     ).toEqual(["second"]);
   });
 
+  it("waits for an indexed inner control's shadow host to become enabled", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "indexed-disabled-shadow-host";
+      host.setAttribute("disabled", "");
+      Object.assign(host.style, {
+        position: "fixed",
+        left: "950px",
+        top: "400px",
+        width: "220px",
+      });
+      const root = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent =
+        ":host([disabled]) [data-cf-button] { pointer-events: none; }";
+      const button = document.createElement("button");
+      button.id = "indexed-disabled-shadow-inner";
+      button.setAttribute("data-cf-button", "");
+      button.textContent = "Select this item";
+      Object.assign(button.style, { width: "200px", height: "40px" });
+      root.append(style, button);
+      document.body.append(host);
+      let settles = 0;
+      const clicks: string[] = [];
+      host.addEventListener("click", () => {
+        clicks.push(host.hasAttribute("disabled") ? "disabled" : "enabled");
+      }, { capture: true });
+      const global = globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __indexedShadowClicks: string[];
+      };
+      global.commonfabric = {
+        viewSettled: () => {
+          if (++settles === 2) host.removeAttribute("disabled");
+          return Promise.resolve();
+        },
+      };
+      global.__indexedShadowClicks = clicks;
+    });
+    try {
+      await clickNthCfButton(page, "#indexed-disabled-shadow-inner", 0);
+      expect(
+        await page.evaluate(() =>
+          (globalThis as typeof globalThis & {
+            __indexedShadowClicks: string[];
+          }).__indexedShadowClicks
+        ),
+      ).toEqual(["enabled"]);
+    } finally {
+      await page.evaluate(() =>
+        document.getElementById("indexed-disabled-shadow-host")?.remove()
+      );
+    }
+  });
+
   it("settles the view before clicking a trusted action", async () => {
     await page.evaluate(() => {
       const host = document.createElement("div");

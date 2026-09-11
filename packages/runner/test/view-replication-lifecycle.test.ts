@@ -62,7 +62,7 @@ describe("view replication lifetimes", () => {
   });
 
   afterEach(async () => {
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     for (const undo of restore.reverse()) undo();
     await storage.close();
   });
@@ -370,6 +370,62 @@ describe("view replication lifetimes", () => {
     cancel!();
     expect(interests).toEqual([]);
     cancelOther!();
+  });
+
+  it("continues fallback after a root and its error callback fail", async () => {
+    const failed = runtime.getCell(space, "failed fallback", undefined);
+    const healthy = runtime.getCell(space, "healthy fallback", undefined);
+    const failure = new Error("root unavailable");
+    const reported: Error[] = [];
+    const started: string[] = [];
+    restore.push(
+      stub(runtime, "start", (root) => {
+        if (root.equals(failed)) return Promise.reject(failure);
+        started.push(root.getAsNormalizedFullLink().id);
+        return Promise.resolve(true);
+      }).restore,
+    );
+    await runtime.viewReplication.mount(failed, "failed", (error) => {
+      reported.push(error);
+      throw new Error("error callback failed");
+    });
+    await runtime.viewReplication.mount(healthy, "healthy");
+    capable = false;
+    emit([]);
+    await runtime.idle();
+    expect(reported).toEqual([failure]);
+    expect(started).toEqual([healthy.getAsNormalizedFullLink().id]);
+  });
+
+  it("accepts all plan state when a view error callback throws", async () => {
+    const root = runtime.getCell(space, "throwing callback", undefined);
+    const observed: string[] = [];
+    await runtime.viewReplication.mount(root, "first", () => {
+      observed.push("first");
+      throw new Error("error callback failed");
+    });
+    await runtime.viewReplication.mount(root, "second", () => {
+      observed.push("second");
+    });
+    const plans: ViewPlan[] = interests.map((interest) => ({
+      id: interest.id,
+      revision: interest.revision,
+      generation: 1,
+      eligibleActions: [interest.id],
+      pieces: [],
+      errors: [{
+        nodeId: "failed",
+        pieceId: root.getAsNormalizedFullLink().id,
+        message: "computation failed",
+      }],
+    }));
+    expect(() => emit(plans)).not.toThrow();
+    await runtime.idle();
+    expect(runtime.viewReplication.eligible(space, "first")).toBe(true);
+    expect(runtime.viewReplication.eligible(space, "second")).toBe(true);
+    expect(observed).toEqual(["first", "second"]);
+    emit(plans);
+    expect(observed).toEqual(["first", "second"]);
   });
 
   it("reports current view failures once and fences errors from retired mounts", async () => {

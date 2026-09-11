@@ -6769,6 +6769,46 @@ describe("runtime-processor", () => {
         return { runtime, processor, link };
       }
 
+      it("cancels view registration that completes after its mount was removed", async () => {
+        const { runtime, link } = await mountState();
+        const registered = Promise.withResolvers<() => void>();
+        let cancellations = 0;
+        const processor = buildProcessor({
+          runtime: {
+            getCellFromLink: runtime.getCellFromLink.bind(runtime),
+            viewScopedReplicationRequested: true,
+            viewReplication: { mount: () => registered.promise },
+          },
+        });
+        const { client, posted } = testClient(1);
+        const mounting = processor.handleVDomMount({
+          type: RequestType.VDomMount,
+          mountId: 37,
+          cell: link,
+        }, client);
+        try {
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(1);
+          processor.handleVDomUnmount({
+            type: RequestType.VDomUnmount,
+            mountId: 37,
+          }, client);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(0);
+          registered.resolve(() => cancellations++);
+          await mounting;
+          expect(cancellations).toBe(1);
+          expect(
+            posted.filter((message) =>
+              message.type === NotificationType.VDomBatch
+            ),
+          ).toEqual([]);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(0);
+        } finally {
+          registered.resolve(() => {});
+          await mounting;
+          await runtime.dispose();
+        }
+      });
+
       it("keeps one client's mount when another mounts under the same mount id", async () => {
         const { runtime, processor, link } = await mountState();
         const first = testClient(1);

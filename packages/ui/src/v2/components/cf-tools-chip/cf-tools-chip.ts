@@ -54,8 +54,6 @@ export type ToolsRecord = Record<
 // Union type for tools input
 type ToolsInput = ToolsChipTool[] | ToolsRecord;
 
-// JSON Schema for tools array (used when binding CellHandle)
-
 export class CFToolsChip extends BaseElement {
   /** Cell controller for tools binding */
   private _cellController = createCellController<ToolsInput>(this, {

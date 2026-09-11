@@ -4214,8 +4214,8 @@ function sinkHelper(
 
 /**
  * Deeply traverse a value to access all properties.
- * This is used by pull() to ensure all nested values are read,
- * which registers them as dependencies for pull-based scheduling.
+ * Sinks, pulls, and rendered-property queries share this traversal to register
+ * the dependencies behind schema-free values.
  * Works with query result proxies which trigger reads on property access.
  *
  * TODO(danfuzz): A `FabricInstance` passes the `typeof` gate but has no
@@ -4226,7 +4226,10 @@ function sinkHelper(
  * never re-fires on its change. A `FabricPrimitive` ends the walk too, which
  * is correct — it is a leaf.
  */
-function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+export function deepTraverse(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): void {
   if (value === null || value === undefined) return;
   if (typeof value !== "object") return;
 

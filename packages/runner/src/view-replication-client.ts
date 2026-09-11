@@ -7,6 +7,7 @@ import type {
   ViewPlan,
   ViewValueBasis,
 } from "@commonfabric/memory/v2";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
@@ -31,6 +32,8 @@ import { restrictToLocalReads } from "./storage/local-read-policy.ts";
 import { ViewInputBasisCache } from "./view-input-basis.ts";
 
 type ViewProducer = NonNullable<ViewPlan["producers"]>[number];
+
+const logger = getLogger("view-replication", { enabled: true, level: "warn" });
 
 type SpaceViews = {
   replica: ISpaceReplica;
@@ -460,9 +463,18 @@ export class ViewReplicationClient {
           await state.replica.whenSessionRestored?.();
           for (const [id, root] of state.roots) {
             if (this.#disposed || state.roots.get(id) !== root) continue;
-            await root.sync();
-            if (this.#disposed || state.roots.get(id) !== root) continue;
-            await this.#runtime.start(root);
+            try {
+              await root.sync();
+              if (this.#disposed || state.roots.get(id) !== root) continue;
+              await this.#runtime.start(root);
+            } catch (error) {
+              if (this.#disposed || state.roots.get(id) !== root) continue;
+              this.#reportError(
+                state,
+                id,
+                error instanceof Error ? error : new Error(String(error)),
+              );
+            }
           }
         };
         this.#runtime.scheduler.trackBackgroundTask(
@@ -481,7 +493,9 @@ export class ViewReplicationClient {
           continue;
         }
         const { nodeId: _nodeId, message, ...context } = failure;
-        state.errorHandlers.get(plan.id)?.(
+        this.#reportError(
+          state,
+          plan.id,
           Object.assign(new Error(message), context, { space }),
         );
       }
@@ -523,6 +537,22 @@ export class ViewReplicationClient {
     state.eligible = new Set(current.flatMap((plan) => plan.eligibleActions));
     this.#runtime.scheduler.wakeViewReplication(space);
     this.#install(space, state);
+  }
+
+  #reportError(state: SpaceViews, id: string, error: Error): void {
+    const handler = state.errorHandlers.get(id);
+    if (handler === undefined) {
+      logger.warn("view-error", () => [error]);
+      return;
+    }
+    try {
+      handler(error);
+    } catch (cause) {
+      logger.warn("view-error-handler", () => [
+        "A view error callback failed",
+        cause,
+      ]);
+    }
   }
 
   #install(space: MemorySpace, state: SpaceViews): void {

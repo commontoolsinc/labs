@@ -103,6 +103,7 @@ describe("view replication client", () => {
       experimental: { serverExecution: true, viewScopedReplication: true },
     });
     let second: Runtime | undefined;
+    let firstDisposed = false;
     try {
       const root = first.getCell(space, "retained view", undefined);
       const cancelInitial = await first.viewReplication.mount(root, "screen");
@@ -125,13 +126,14 @@ describe("view replication client", () => {
       expect(server.viewInterestsForSpace(space)[0].view.revision).toBe(2);
       cancelOld!();
       await first.dispose({ closeStorage: false });
+      firstDisposed = true;
       expect(server.viewInterestsForSpace(space)).toHaveLength(1);
       expect(second.viewReplication.active(space)).toBe(true);
       cancelNew!();
       await second.idle();
       expect(server.viewInterestsForSpace(space)).toEqual([]);
     } finally {
-      await first.dispose({ closeStorage: false });
+      if (!firstDisposed) await first.dispose({ closeStorage: false });
       await second?.dispose({ closeStorage: false });
       await manager.close();
       await server.close();

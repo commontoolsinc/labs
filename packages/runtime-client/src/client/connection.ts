@@ -786,12 +786,23 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     mountId: number,
     cellRef: CellRef,
   ): Promise<VDomMountResponse> {
-    const response = await this.request<RequestType.VDomMount>({
-      type: RequestType.VDomMount,
-      mountId,
-      cell: cellRef,
-    });
-    return response!;
+    try {
+      const response = await this.request<RequestType.VDomMount>({
+        type: RequestType.VDomMount,
+        mountId,
+        cell: cellRef,
+      });
+      return response!;
+    } catch (error) {
+      // Registration can remain pending in the worker after this request
+      // fails. Cancel by its original id before the renderer drops that id.
+      void this.#unmountVDom(mountId).catch((cleanupError) => {
+        if (!this.#lifetime.signal.aborted) {
+          console.error("[RuntimeClient] Mount cleanup failed:", cleanupError);
+        }
+      });
+      throw error;
+    }
   }
 
   async #unmountVDom(mountId: number): Promise<void> {

@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 
 import { taggedHashStringOf } from "@commonfabric/data-model";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -32,7 +33,7 @@ describe("piece address forms", () => {
   });
 
   afterEach(async () => {
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -65,6 +66,52 @@ describe("piece address forms", () => {
     await expect(pieces.getPieceCell(`computed:${id}`)).rejects.toThrow(
       `Kinded entity id \`computed:${id}\``,
     );
+  });
+
+  it("enables view replication in the space addressed by a Cell", async () => {
+    const viewer = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      clientClass: "web",
+      experimental: { serverExecution: true, viewScopedReplication: true },
+    });
+    const session = await createSession({
+      identity: signer,
+      spaceName: "view-addressed-controller",
+    });
+    const controller = new PiecesController(session, viewer);
+    const remote = viewer.getCell(
+      pieces.getSpace(),
+      "other-space-piece",
+      undefined,
+    );
+    const local = viewer.getCell(
+      controller.getSpace(),
+      "local-piece",
+      undefined,
+    );
+    const calls: string[] = [];
+    const enabling = stub(viewer.viewReplication, "enable", (space) => {
+      calls.push(space);
+      return Promise.resolve(false);
+    });
+    try {
+      await viewer.editWithRetry((tx) => {
+        remote.withTx(tx).set({ $NAME: "Remote" });
+        local.withTx(tx).set({ $NAME: "Local" });
+      });
+      await controller.getPieceCell(remote, { start: false, reconcile: false });
+      expect(calls).toEqual([remote.space]);
+      calls.length = 0;
+      await controller.getPieceCell(local.getAsNormalizedFullLink().id, {
+        start: false,
+        reconcile: false,
+      });
+      expect(calls).toEqual([controller.getSpace()]);
+    } finally {
+      enabling.restore();
+      await viewer.dispose({ closeStorage: false });
+    }
   });
 
   describe("link()", () => {

@@ -18,9 +18,15 @@ graphs and queues removal of its interests, including when storage remains open.
 A held code load cannot delay local retirement. A replica grants exclusive view
 ownership to its current runtime. Replacement retires the previous runtime's
 graphs; its later cancellations and disposal cannot clear the replacement's
-interests. Revisions remain monotonic across runtimes using that replica.
-Desired mounts update before a watch request enters the send queue, so reconnect
-cannot restore a view canceled behind an older pending request.
+interests. Revisions remain monotonic across runtimes using that replica. Watch
+responses integrate in mutation order, including responses to a retired view
+owner. Ordinary document and operation deliveries remain shared; retired view
+plans are withheld. A replacement computes its holdings after those earlier
+deliveries have integrated. Desired mounts update before a watch request enters
+the send queue, so reconnect cannot restore a view canceled behind an older
+pending request. A failed or expired mount request cancels its original mount
+ID; registration that completes after cancellation cannot start rendering and
+releases its view interest.
 
 View interests and ordinary watches have separate ownership. Replacing ordinary
 watches preserves views unless the request explicitly replaces them. Replacing
@@ -36,7 +42,10 @@ generation, and READ authority. The protocol supports the default branch; a
 nondefault branch is rejected. A downgrade retires local preview registrations
 and, after session authentication and watch restoration, starts ordinary graphs
 for the remaining mounted roots. This fallback lasts for the runtime's lifetime;
-a later capable connection requires a new runtime to enter view mode again.
+a later capable connection requires a new runtime to enter view mode again. Each
+root reports its own fallback failure while the remaining roots continue.
+Session restoration remains pending across transient reconnect failures and
+rejects on session closure.
 
 Delivery selects complete documents. Selecting a field limits traversal into
 other documents; it does not hide unrelated fields within a delivered document.
@@ -44,12 +53,14 @@ Path projection and navigation prefetch are separate work.
 
 ## Observed reads and component contracts
 
-After a successful serving settlement, including a quiet settlement, the planner
-checks whether the view selection needs updating. It traverses a new or changed
-visible view using renderer semantics and shared component schemas. Ordinary
-rendered attributes and object props contribute their reads. Declared bindings
-contribute their effective component projection; stream targets identify visible
-handlers, and writable bindings identify direct edits.
+After a successful serving settlement, including a quiet settlement or a partial
+wave that reaches its flush deadline, the planner checks whether the view
+selection needs updating. Unsettled producers carry no currency basis. It
+traverses a new or changed visible view using renderer semantics and shared
+component schemas. Ordinary rendered attributes and object props contribute
+their reads. Declared bindings contribute their effective component projection;
+stream targets identify visible handlers, and writable bindings identify direct
+edits.
 
 The planner uses actual scheduler read logs, including shallow reads and
 identity-specific execution instances. It selects JavaScript computations
@@ -65,6 +76,9 @@ maps, locations, transcription, tools, editor mention lists/reference maps,
 profile fields, Markdown content, FAB preview text, and theme values. Components
 continue to own dynamic reads:
 
+- `cf-picker` reads bound item lists as opaque cell handles and mounts the
+  selected item's rendering; its list subscription does not follow off-screen
+  items' UI.
 - `cf-render` follows its current target and mounts nested rendering.
 - `cf-code-editor` follows mention destinations and their current names/titles.
 - `cf-piece-menu` reads the selected piece's arguments and result when opened.
@@ -74,7 +88,10 @@ continue to own dynamic reads:
 Past read sets describe observed branches. An unseen handler or newly taken
 branch may need a server response before it can preview locally. Handler
 observations are scoped to live viewing sessions and are pruned when those
-sessions stop contributing view demand.
+sessions stop contributing view demand. The first successful observation is
+retained even when its view is registered in the same serving cycle. Guarded
+handler registrations select the implementation for the viewing identity before
+looking up its observations.
 
 The publisher caches the visible tree walk under its session and view lifetime.
 Storage notifications invalidate it using the scheduler's scoped, path-sensitive
@@ -135,7 +152,9 @@ They are selected using the viewing identity and observed path dependencies;
 unrelated outputs do not contribute errors. The mounted client reports a new
 failure once, preserving its piece context and mapped stack. Retired view
 revisions cannot report errors into a replacement mount. Error delivery does not
-authorize the failed computation to run locally.
+authorize the failed computation to run locally. An exception in a mount's error
+callback is reported without interrupting plan acceptance or error delivery to
+other mounts.
 
 The client installs resident JavaScript bindings from the exact stored pattern
 identity. It does not run setup or raw factories to reconstruct missing output.
