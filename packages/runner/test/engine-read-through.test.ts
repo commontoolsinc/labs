@@ -480,4 +480,37 @@ describe("engine-read-through", () => {
       await manager.close();
     }
   });
+
+  it("does not read the store for a pull whose scope the identity cannot resolve", async () => {
+    // Such a scope keys by its name, which names no store row: the store
+    // would read the name as the space scope and answer with the wrong
+    // document. A replica whose identity carries no principal is the
+    // shape that makes a `user` scope unresolvable.
+    const reads: string[] = [];
+    const replica = new SpaceReplica({
+      as: serviceSigner,
+      space,
+      settings: {},
+      subscription: { next: () => {} },
+      scopeKeyIdentity: () => ({}),
+      routeState: { generation: 0 },
+      routeGeneration: 0,
+      createSession: () =>
+        Promise.reject(new Error("no session is opened for this pull")),
+      syncReplayDependencies: () => Promise.resolve(undefined),
+      storeReadThrough: () => ({ id }) => {
+        reads.push(id);
+        return undefined;
+      },
+    });
+    try {
+      expect((await replica.sync("of:by-name" as URI, undefined, "user")).ok)
+        .toBeDefined();
+      expect(reads).toEqual([]);
+      expect((await replica.sync("of:by-key" as URI)).ok).toBeDefined();
+      expect(reads).toEqual(["of:by-key"]);
+    } finally {
+      replica.closeNow();
+    }
+  });
 });

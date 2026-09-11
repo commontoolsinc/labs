@@ -8132,14 +8132,15 @@ export class SpaceReplica
     let firstLoad = false;
     for (const [address] of entries) {
       const id = address.id as URI;
-      // A scope the identity cannot resolve keys by its name, which no
-      // store row carries, so such an entry reads as absent under that
-      // name — the same record a session pull leaves for it.
+      // A scope the identity cannot resolve keys by its name, which names
+      // no store row: the store would read the name as the space scope and
+      // hand back the wrong document, so such an entry is not read.
       const instance = this.instanceKey(
         address.scope,
         undefined,
         address.scopeKey,
-      ) as ScopeKey;
+      );
+      if (!isScopeKey(instance)) continue;
       if (!this.#docs.has(docKey(id, instance))) firstLoad = true;
       const upsert = read({ id, scopeKey: instance });
       if (upsert !== undefined) upserts.push(upsert);

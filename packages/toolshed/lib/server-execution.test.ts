@@ -385,18 +385,41 @@ describe("startServerExecutionHost with the store read-through on", () => {
       transport: MemoryClient.loopback(server),
     });
     try {
-      await connection.mount(space, {}, (_space, _descriptor, context) => ({
-        invocation: {
-          aud: context.audience,
-          challenge: context.challenge.value,
-        },
-        authorization: { principal: client.did() },
-      }));
+      const session = await connection.mount(
+        space,
+        {},
+        (_space, _descriptor, context) => ({
+          invocation: {
+            aud: context.audience,
+            challenge: context.challenge.value,
+          },
+          authorization: { principal: client.did() },
+        }),
+      );
       await until(
         () => host!.spaceServer(space)?.active === true,
         "the space to activate on the client's session",
       );
       expect(host!.stats().activeSpaces).toBe(1);
+      // The client's watch is demand: the serving loop loads the demanded
+      // root through its replica, and under the posture that read comes
+      // from the engine through the installed read-through, counted as
+      // such — over the session it would count nothing.
+      await session.watchAddSync([{
+        id: "store-read-through-demand",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:store-read-through-demanded",
+            scope: "space",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }]);
+      await until(
+        () => host!.stats().storeReads > 0,
+        "the demanded root to be read through the engine",
+      );
     } finally {
       await connection.close();
       await stopServerExecutionHost();
