@@ -223,6 +223,22 @@ describe("pattern-lifecycle verbs (transport half)", () => {
     expect(broken.code).toBe("compile-failed");
   });
 
+  it("answers 500 with its own code when the verb fails for a reason it does not name", async () => {
+    const failing = {
+      runLifecycleVerb: () => Promise.reject(new Error("the loop fell over")),
+    } as unknown as ExecutorHost;
+    const seen = refused(
+      await processUpload(
+        { ...deps, host: () => failing },
+        alice.did(),
+        { space, program: PROGRAM },
+      ),
+    );
+    expect(seen.status).toBe(500);
+    expect(seen.code).toBe("internal");
+    expect(seen.error).toContain("the loop fell over");
+  });
+
   it("answers 503 when the space is served elsewhere", async () => {
     // Another holder's unexpired lease: this deployment's host cannot
     // acquire, so the verb cannot run here. The host built in beforeEach

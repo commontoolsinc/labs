@@ -39,14 +39,25 @@ const deps = (logger: LifecycleDeps["logger"]): LifecycleDeps => ({
   logger,
 });
 
-export const upload: AppRouteHandler<UploadRoute> = async (c) => {
+/**
+ * The DID the first-party proof verified. The router mounts that middleware
+ * ahead of every handler here, so an absent DID is a mount error rather
+ * than a caller's failure.
+ */
+const verifiedCaller = (
+  c: { get(key: "verifiedUserDid"): unknown },
+): string => {
   const callerDid = c.get("verifiedUserDid");
-  if (!callerDid) {
-    return c.json({ error: "Unauthorized", code: "unauthorized" }, 401);
+  if (typeof callerDid !== "string") {
+    throw new Error("pattern-lifecycle handler reached without a verified DID");
   }
+  return callerDid;
+};
+
+export const upload: AppRouteHandler<UploadRoute> = async (c) => {
   const result = await processUpload(
     deps(c.get("logger")),
-    callerDid,
+    verifiedCaller(c),
     c.req.valid("json"),
   );
   if (result.status === 200) return c.json(result.body, 200);
@@ -54,13 +65,9 @@ export const upload: AppRouteHandler<UploadRoute> = async (c) => {
 };
 
 export const instantiate: AppRouteHandler<InstantiateRoute> = async (c) => {
-  const callerDid = c.get("verifiedUserDid");
-  if (!callerDid) {
-    return c.json({ error: "Unauthorized", code: "unauthorized" }, 401);
-  }
   const result = await processInstantiate(
     deps(c.get("logger")),
-    callerDid,
+    verifiedCaller(c),
     c.req.valid("json"),
   );
   if (result.status === 200) return c.json(result.body, 200);

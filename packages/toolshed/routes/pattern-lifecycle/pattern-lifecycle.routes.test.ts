@@ -77,6 +77,34 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
     });
   });
 
+  it("routes a signed upload to its handler, which answers for the posture too", async () => {
+    const res = await signedRequest("upload", {
+      space: "did:key:z6MkaaaabbbbccccddddeeeeffffgggghhhhAAAA",
+      program: { main: "/main.tsx", files: [] },
+    });
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe("server-execution-off");
+  });
+
+  it("refuses a flood from one address with the rate limiter's own code", async () => {
+    // The limiter runs ahead of authentication, so unsigned posts spend the
+    // budget; the address is this test's own, so no other test's budget is
+    // touched. Capacity is 30: the thirty-first post is the refused one.
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Forwarded-For": "10.2.0.1",
+    };
+    let last: Response | undefined;
+    for (let i = 0; i < 31; i += 1) {
+      last = await post(`${BASE}/instantiate`, { headers });
+    }
+    expect(last!.status).toBe(429);
+    expect(await last!.json()).toEqual({
+      error: "Too many requests",
+      code: "rate-limited",
+    });
+  });
+
   it("rejects a signed request whose body fails schema validation", async () => {
     const res = await signedRequest("upload", { space: "did:key:z6Mk" });
     expect(res.status).toBe(422);
