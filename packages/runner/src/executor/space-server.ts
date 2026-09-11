@@ -5864,7 +5864,17 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#runtime = undefined;
     this.#disposeRuntime = undefined;
-    this.#lease?.release();
+    try {
+      this.#lease?.release();
+    } catch (error) {
+      // The row expires by TTL either way; what the park owes the host
+      // is its completion below, which a throw here must not skip.
+      logger.warn("park-release-failed", () => [
+        `space ${this.#options.space}: releasing the lease during park ` +
+        `(${reason}) failed`,
+        error,
+      ]);
+    }
     this.#lease = undefined;
     logger.info?.("parked", () => [
       `space ${this.#options.space} parked (${reason})`,
