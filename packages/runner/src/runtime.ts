@@ -224,6 +224,7 @@ const MISSING_DOC_MAX_ATTEMPTS = 3;
 type MissingDocLoadEntry = {
   status:
     | "pending"
+    | "retrying"
     | "retry-ready"
     | "waiting-for-connection"
     | "settled"
@@ -2742,9 +2743,18 @@ export class Runtime {
       },
       (cause) => {
         if (this.#missingDocLoads.get(key) !== entry) return;
+        if (entry.status === "error") return;
         const connectionState = this.#storageConnectionStates.get(entry.space);
         if (connectionState?.status === "disconnected") {
           entry.status = "waiting-for-connection";
+          return;
+        }
+        if (connectionState?.status === "closed") {
+          entry.status = "error";
+          entry.error = connectionState.cause;
+          this.#releaseMissingDocPullReservation(entry);
+          this.#wakeMissingDocLoadWaiters(entry);
+          entry.waiters.clear();
           return;
         }
         entry.status = "error";
@@ -2797,7 +2807,8 @@ export class Runtime {
     }
 
     if (
-      state.status === "ready" && previous?.status === "disconnected" &&
+      state.status === "ready" &&
+      (previous?.status === "disconnected" || previous?.status === "closed") &&
       state.epoch > previous.epoch
     ) {
       for (const [key, entry] of this.#missingDocLoads) {
@@ -2859,11 +2870,20 @@ export class Runtime {
       },
       (cause) => {
         if (this.#missingDocLoads.get(key) !== entry) return;
+        if (entry.status === "error") return;
         const connectionState = this.#storageConnectionStates.get(entry.space);
         if (connectionState?.status === "disconnected") {
           entry.status = "waiting-for-connection";
           entry.attempts = Math.max(0, entry.attempts - 1);
           this.#releaseMissingDocPullReservation(entry);
+          return;
+        }
+        if (connectionState?.status === "closed") {
+          entry.status = "error";
+          entry.error = connectionState.cause;
+          this.#releaseMissingDocPullReservation(entry);
+          this.#wakeMissingDocLoadWaiters(entry);
+          entry.waiters.clear();
           return;
         }
         if (entry.attempts >= MISSING_DOC_MAX_ATTEMPTS) {
@@ -2886,6 +2906,7 @@ export class Runtime {
     key: string,
     entry: MissingDocLoadEntry,
   ): void {
+    entry.status = "retrying";
     const retryDelayMs = Math.min(
       MISSING_DOC_RETRY_INITIAL_MS * 2 ** (entry.attempts - 1),
       MISSING_DOC_RETRY_MAX_MS,
@@ -2904,7 +2925,7 @@ export class Runtime {
     const retryWork = retryDelay.then(() => {
       entry.cancelRetryDelay = undefined;
       if (this.#missingDocLoads.get(key) !== entry) return;
-      if (entry.status === "waiting-for-connection") return;
+      if (entry.status !== "retrying") return;
       entry.status = "retry-ready";
       const liveWaiters = this.#wakeMissingDocLoadWaiters(entry);
       if (liveWaiters === 0) {

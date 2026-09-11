@@ -311,6 +311,93 @@ Deno.test("storage manager publishes connection state per space", async () => {
   }
 });
 
+Deno.test("storage manager stops a superseded state notification", async () => {
+  const server = new MemoryV2Server.Server({
+    ...TEST_MEMORY_SERVER_AUTH,
+    store: new URL(
+      `memory://runner-v2-reentrant-connection-state-${crypto.randomUUID()}`,
+    ),
+  });
+  const transport = new SabotagedReconnectTransport(server);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-reentrant-connection-state"),
+  }, new SingleSessionFactory(transport));
+  let closing: Promise<void> | undefined;
+  let storageClosed = false;
+  const cancelCloser = storageManager.subscribeConnectionState(
+    space,
+    (state) => {
+      if (state.status === "ready") closing = storageManager.closeNow();
+    },
+  );
+  const states: string[] = [];
+  const cancelRecorder = storageManager.subscribeConnectionState(
+    space,
+    ({ status, epoch }) => states.push(`${status}:${epoch}`),
+  );
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    await provider.sync(
+      `of:reentrant-connection-state-${crypto.randomUUID()}` as URI,
+    ).catch(() => undefined);
+    assert(closing !== undefined);
+    await closing;
+    storageClosed = true;
+    assertEquals(states, ["idle:0", "closed:1"]);
+  } finally {
+    cancelRecorder();
+    cancelCloser();
+    if (!storageClosed) await storageManager.close();
+    await server.close();
+  }
+});
+
+Deno.test("storage manager teardown rejects reentrant session recovery", async () => {
+  const server = new MemoryV2Server.Server({
+    ...TEST_MEMORY_SERVER_AUTH,
+    store: new URL(
+      `memory://runner-v2-teardown-connection-state-${crypto.randomUUID()}`,
+    ),
+  });
+  const transport = new SabotagedReconnectTransport(server);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-teardown-connection-state"),
+  }, sessionFactory);
+  const cancelRecovery = storageManager.subscribeConnectionState(
+    space,
+    (state) => {
+      if (state.status !== "closed") return;
+      sessionFactory.session?.handleDisconnect(new Error("reentrant drop"));
+      sessionFactory.session?.handleRestored();
+    },
+  );
+  const states: string[] = [];
+  const cancelRecorder = storageManager.subscribeConnectionState(
+    space,
+    ({ status, epoch }) => states.push(`${status}:${epoch}`),
+  );
+  const provider = storageManager.open(space) as TestProvider;
+  let storageClosed = false;
+
+  try {
+    await provider.sync(
+      `of:teardown-connection-state-${crypto.randomUUID()}` as URI,
+    );
+    await storageManager.closeNow();
+    storageClosed = true;
+    assertEquals(states, ["idle:0", "ready:1", "closed:1"]);
+  } finally {
+    cancelRecorder();
+    cancelRecovery();
+    if (!storageClosed) await storageManager.close();
+    await server.close();
+  }
+});
+
 for (const closeKind of ["close", "closeNow"] as const) {
   Deno.test(
     `storage manager ${closeKind} keeps closed terminal when transport disconnects during notification`,

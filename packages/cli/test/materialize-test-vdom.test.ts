@@ -35,6 +35,10 @@ Deno.test("materializeTestVDOM reports reconciliation errors after mounting", as
       return this;
     }
 
+    get(): unknown {
+      return this.value;
+    }
+
     sink(callback: (value: unknown) => void): () => void {
       this.#subscribers.add(callback);
       callback(this.value);

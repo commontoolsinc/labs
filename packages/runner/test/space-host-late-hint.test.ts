@@ -382,6 +382,114 @@ describe("late space host hints", () => {
     }
   });
 
+  it("publishes only the replacement route's connection lifecycle", async () => {
+    const signer = await Identity.fromPassphrase("late-hint-connection-state");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-connection-state-target",
+    )).did();
+    const firstId = "of:late-hint-connection-state-first" as URI;
+    const secondId = "of:late-hint-connection-state-second" as URI;
+    const defaultServer = makeServer("late-hint-connection-state-default");
+    const hintedServer = makeServer("late-hint-connection-state-hinted");
+    let targetSessions = 0;
+    const reader = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory((space) => {
+        if (space !== targetSpace) return defaultServer;
+        targetSessions++;
+        return targetSessions === 1 ? defaultServer : hintedServer;
+      }),
+    );
+    const states: string[] = [];
+    const cancelState = reader.subscribeConnectionState(
+      targetSpace,
+      ({ status, epoch }) => states.push(`${status}:${epoch}`),
+    );
+
+    try {
+      const provider = reader.open(targetSpace);
+      const selector = { path: [], schema: true };
+      expect((await provider.sync(firstId, selector)).error).toBeUndefined();
+
+      expect(
+        reader.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      await reader.crossSpaceSettled();
+
+      expect((await provider.sync(secondId, selector)).error).toBeUndefined();
+      expect(states).toEqual([
+        "idle:0",
+        "ready:1",
+        "disconnected:1",
+        "ready:2",
+      ]);
+    } finally {
+      cancelState();
+      await reader.close();
+      await defaultServer.close();
+      await hintedServer.close();
+    }
+  });
+
+  it("stops route replacement when a connection subscriber closes the manager", async () => {
+    const signer = await Identity.fromPassphrase("late-hint-reentrant-close");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-reentrant-close-target",
+    )).did();
+    const targetId = "of:late-hint-reentrant-close" as URI;
+    const defaultServer = makeServer("late-hint-reentrant-close-default");
+    const hintedServer = makeServer("late-hint-reentrant-close-hinted");
+    let targetSessions = 0;
+    const reader = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory((space) => {
+        if (space !== targetSpace) return defaultServer;
+        targetSessions++;
+        return targetSessions === 1 ? defaultServer : hintedServer;
+      }),
+    );
+    let closing: Promise<void> | undefined;
+    let storageClosed = false;
+    const cancelCloser = reader.subscribeConnectionState(
+      targetSpace,
+      (state) => {
+        if (state.status === "disconnected") closing ??= reader.closeNow();
+      },
+    );
+    const states: string[] = [];
+    const cancelRecorder = reader.subscribeConnectionState(
+      targetSpace,
+      ({ status, epoch }) => states.push(`${status}:${epoch}`),
+    );
+
+    try {
+      const provider = reader.open(targetSpace);
+      expect((await provider.sync(targetId)).error).toBeUndefined();
+      expect(
+        reader.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      await reader.crossSpaceSettled();
+
+      expect(closing).toBeDefined();
+      await closing;
+      storageClosed = true;
+      expect(states).toEqual(["idle:0", "ready:1", "closed:1"]);
+      expect(targetSessions).toBe(1);
+    } finally {
+      cancelRecorder();
+      cancelCloser();
+      if (!storageClosed) await reader.close();
+      await defaultServer.close();
+      await hintedServer.close();
+    }
+  });
+
   it("replays every registered document after a late hint", async () => {
     const signer = await Identity.fromPassphrase("late-hint-many-reads");
     const targetSpace = (await Identity.fromPassphrase(

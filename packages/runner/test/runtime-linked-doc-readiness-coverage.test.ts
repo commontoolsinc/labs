@@ -1,3 +1,5 @@
+/// <reference path="./clock.d.ts" />
+
 import type { Cell } from "../src/cell.ts";
 import type {
   IExtendedStorageTransaction,
@@ -165,7 +167,211 @@ describe("linked-document readiness lifecycle", () => {
     }
   });
 
-  it("invalidates a terminal linked-document error on the next restored epoch", async () => {
+  it("keeps a close terminal when an in-flight attempt later rejects", async () => {
+    const target = runtime.getCell(
+      space,
+      "linked-doc-close-during-attempt",
+    );
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    let connectionListener:
+      | ((state: StorageConnectionState) => void)
+      | undefined;
+    storageManager.subscribeConnectionState = (_space, callback) => {
+      connectionListener = callback;
+      callback({ status: "ready", epoch: 1 });
+      return () => {
+        if (connectionListener === callback) connectionListener = undefined;
+      };
+    };
+
+    let attempts = 0;
+    const attemptStarted = Promise.withResolvers<void>();
+    let rejectAttempt: ((cause: Error) => void) | undefined;
+    storageManager.syncCell = <T>(_cell: Cell<T>): Promise<Cell<T>> => {
+      attempts++;
+      attemptStarted.resolve();
+      return new Promise<Cell<T>>((_resolve, reject) => {
+        rejectAttempt = reject;
+      });
+    };
+
+    let status: ReturnType<Runtime["ensureLinkedDocLoaded"]> | undefined;
+    const consumer = () => {
+      status = runtime.ensureLinkedDocLoaded(
+        target.getAsNormalizedFullLink(),
+      );
+    };
+    const closeCause = new Error("synthetic close during attempt");
+
+    try {
+      runtime.scheduler.subscribe(consumer, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+      });
+      runtime.scheduler.queueExecution();
+      await attemptStarted.promise;
+
+      connectionListener?.({
+        status: "closed",
+        epoch: 1,
+        cause: closeCause,
+      });
+      rejectAttempt?.(new Error("late attempt rejection"));
+      await clock.settle();
+      await clock.tick(25);
+      await storageManager.crossSpaceSettled();
+      await runtime.scheduler.idle();
+
+      expect(attempts).toBe(1);
+      expect(status).toBe("error");
+      expect(runtime.linkedDocLoadError(target.getAsNormalizedFullLink()))
+        .toBe(closeCause);
+    } finally {
+      runtime.scheduler.unsubscribe(consumer);
+      storageManager.syncCell = originalSyncCell;
+    }
+  });
+
+  it("keeps a close terminal when it cancels a scheduled retry", async () => {
+    const target = runtime.getCell(
+      space,
+      "linked-doc-close-during-retry-delay",
+    );
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    let connectionListener:
+      | ((state: StorageConnectionState) => void)
+      | undefined;
+    storageManager.subscribeConnectionState = (_space, callback) => {
+      connectionListener = callback;
+      callback({ status: "ready", epoch: 1 });
+      return () => {
+        if (connectionListener === callback) connectionListener = undefined;
+      };
+    };
+
+    let attempts = 0;
+    const attemptStarted = Promise.withResolvers<void>();
+    let rejectAttempt: ((cause: Error) => void) | undefined;
+    storageManager.syncCell = <T>(_cell: Cell<T>): Promise<Cell<T>> => {
+      attempts++;
+      attemptStarted.resolve();
+      return new Promise<Cell<T>>((_resolve, reject) => {
+        rejectAttempt = reject;
+      });
+    };
+
+    let status: ReturnType<Runtime["ensureLinkedDocLoaded"]> | undefined;
+    const consumer = () => {
+      status = runtime.ensureLinkedDocLoaded(
+        target.getAsNormalizedFullLink(),
+      );
+    };
+    const closeCause = new Error("synthetic close during retry delay");
+
+    try {
+      runtime.scheduler.subscribe(consumer, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+      });
+      runtime.scheduler.queueExecution();
+      await attemptStarted.promise;
+      rejectAttempt?.(new Error("attempt rejection before close"));
+      await clock.settle();
+
+      connectionListener?.({
+        status: "closed",
+        epoch: 1,
+        cause: closeCause,
+      });
+      await clock.settle();
+      await clock.tick(25);
+      await storageManager.crossSpaceSettled();
+      await runtime.scheduler.idle();
+
+      expect(attempts).toBe(1);
+      expect(status).toBe("error");
+      expect(runtime.linkedDocLoadError(target.getAsNormalizedFullLink()))
+        .toBe(closeCause);
+    } finally {
+      runtime.scheduler.unsubscribe(consumer);
+      storageManager.syncCell = originalSyncCell;
+    }
+  });
+
+  it("does not invalidate an in-flight load on initial connection", async () => {
+    const target = runtime.getCell(
+      space,
+      "linked-doc-initial-connection",
+    );
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    let connectionState: StorageConnectionState = {
+      status: "idle",
+      epoch: 0,
+    };
+    let connectionListener:
+      | ((state: StorageConnectionState) => void)
+      | undefined;
+    storageManager.subscribeConnectionState = (_space, callback) => {
+      connectionListener = callback;
+      callback(connectionState);
+      return () => {
+        if (connectionListener === callback) connectionListener = undefined;
+      };
+    };
+
+    let attempts = 0;
+    const firstAttemptStarted = Promise.withResolvers<void>();
+    let resolveFirstAttempt: (() => void) | undefined;
+    storageManager.syncCell = <T>(cell: Cell<T>): Promise<Cell<T>> => {
+      attempts++;
+      firstAttemptStarted.resolve();
+      return new Promise<Cell<T>>((resolve) => {
+        resolveFirstAttempt = () => resolve(cell);
+      });
+    };
+
+    let status: ReturnType<Runtime["ensureLinkedDocLoaded"]> | undefined;
+    const consumer = () => {
+      status = runtime.ensureLinkedDocLoaded(
+        target.getAsNormalizedFullLink(),
+      );
+    };
+
+    try {
+      runtime.scheduler.subscribe(consumer, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+      });
+      runtime.scheduler.queueExecution();
+      await firstAttemptStarted.promise;
+
+      connectionState = { status: "ready", epoch: 1 };
+      connectionListener?.(connectionState);
+      await runtime.scheduler.idle();
+      expect(attempts).toBe(1);
+      expect(status).toBe("pending");
+
+      expect(resolveFirstAttempt).toBeDefined();
+      resolveFirstAttempt?.();
+      await storageManager.crossSpaceSettled();
+      await runtime.scheduler.idle();
+      expect(status).toBe("settled");
+    } finally {
+      runtime.scheduler.unsubscribe(consumer);
+      storageManager.syncCell = originalSyncCell;
+    }
+  });
+
+  it("invalidates a terminal linked-document error on a newer ready generation", async () => {
     const target = runtime.getCell(
       space,
       "linked-doc-terminal-reconnect",
@@ -221,9 +427,9 @@ describe("linked-document readiness lifecycle", () => {
       expect(status).toBe("error");
 
       connectionState = {
-        status: "disconnected",
+        status: "closed",
         epoch: 1,
-        cause: new Error("synthetic disconnect after exhaustion"),
+        cause: new Error("synthetic terminal session"),
       };
       connectionListener?.(connectionState);
       allowSuccess = true;

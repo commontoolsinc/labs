@@ -95,7 +95,9 @@ export type ChangeGroup = unknown;
 /**
  * Per-space remote connection state. A ready epoch advances only after the
  * memory session has reconnected and restored all of its watches and pending
- * commits, so consumers can use a new epoch as a safe retry boundary.
+ * commits, so consumers can use a new epoch as a safe retry boundary. `closed`
+ * is terminal for the current connection generation; a provider remount can
+ * supersede it only with a higher ready epoch.
  */
 export type StorageConnectionState =
   | { readonly status: "idle"; readonly epoch: 0 }
