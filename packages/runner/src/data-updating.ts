@@ -218,10 +218,7 @@ const hasPendingSchemaPolicyInput = (
   source: NormalizedFullLink,
 ): boolean => {
   const sourcePath = canonicalizeLogicalPath(source.path);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
-    input.kind === "schema" &&
-    input.target.space === source.space &&
-    input.target.id === source.id &&
+  return tx.getCfcSchemaPolicyInputs(source.space, source.id).some((input) =>
     pathsOverlap(canonicalizeLogicalPath(input.target.path), sourcePath) &&
     schemaIfcOverlapsPath(
       input.schema,

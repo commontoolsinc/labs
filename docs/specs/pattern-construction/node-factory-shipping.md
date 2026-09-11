@@ -373,7 +373,8 @@ traversal consult that resolver before their generic function branches. The
 JSON registry has a dedicated callable-factory codec slot; it does not classify
 `function` as an ordinary primitive type. Value-kind dispatch returns the
 distinct `FabricFactory` tag for admitted factories and continues to reject
-every other callable.
+every other callable. Generic Fabric-value visitors dispatch that tag to a
+dedicated atomic factory-leaf hook rather than a primitive or container hook.
 
 `FactoryCodec.canEncode()` accepts only values admitted to the internal
 factory-state table. The brand is checked before legacy `toJSON()` conversion

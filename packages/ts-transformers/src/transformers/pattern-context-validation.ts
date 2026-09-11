@@ -41,6 +41,7 @@
 
 import ts from "typescript";
 import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
+import { reportNestedCollectionScans } from "../diagnostics/nested-collection-scan.ts";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -161,6 +162,7 @@ function objectMemberMessage(kind: ObjectMemberKind): string {
 export class PatternContextValidationTransformer
   extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
+    reportNestedCollectionScans(context);
     const checker = context.checker;
     const analyze = context.getDataFlowAnalyzer();
 

@@ -764,6 +764,15 @@ const compactCommitReads = <
   space: MemorySpace,
   reads: Read[],
 ): Read[] => {
+  const dependencyKeys = new Map<number | number[], string>();
+  const dependencyKeyFor = (localSeq: number | number[]): string => {
+    let key = dependencyKeys.get(localSeq);
+    if (key === undefined) {
+      key = localSeqKey(localSeq);
+      dependencyKeys.set(localSeq, key);
+    }
+    return key;
+  };
   const sorted = [...reads].sort((left, right) => {
     const leftScope = normalizeCellScope(left.scope);
     const rightScope = normalizeCellScope(right.scope);
@@ -780,8 +789,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -809,7 +818,7 @@ const compactCommitReads = <
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
-        localSeqKey(candidate.localSeq)
+        dependencyKeyFor(candidate.localSeq)
       }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
@@ -867,8 +876,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -6807,6 +6816,13 @@ export class SpaceReplica
     // nonRecursive read at this parent (emitted after the loop).
     const structuralTarget = getBlindStructuralTarget(source);
 
+    // Pending bases belong to a document instance and the speculative-layer
+    // policy. Every path read in this synchronous build shares that same stack.
+    const pendingLayersByDocument = [
+      new Map<string, number[]>(),
+      new Map<string, number[]>(),
+    ];
+
     // Emit one commit read for `id`, baselined against the most recent in-flight
     // local version of that doc below this commit's localSeq if one exists, else
     // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
@@ -6865,9 +6881,8 @@ export class SpaceReplica
       confirmedSeq?: number,
       excludeSpeculativeLayers = false,
     ) => {
-      const record = this.#docs.get(
-        docKey(id, this.instanceKey(scope, identity)),
-      );
+      const recordKey = docKey(id, this.instanceKey(scope, identity));
+      const record = this.#docs.get(recordKey);
       // The read's materialized view sat on EVERY lower pending layer, not
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
@@ -6879,17 +6894,24 @@ export class SpaceReplica
       // servers base staleness at the highest element only — a lower-layer
       // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
-      const layers = [
-        ...new Set(
-          record?.pending
-            .filter((version) => version.localSeq < localSeq)
-            .filter((version) =>
-              !excludeSpeculativeLayers ||
-              !this.#speculativeLocalSeqs.has(version.localSeq)
-            )
-            .map((version) => version.localSeq) ?? [],
-        ),
-      ].sort((left, right) => left - right);
+      const layersByDocument = pendingLayersByDocument[
+        excludeSpeculativeLayers ? 1 : 0
+      ];
+      let layers = layersByDocument.get(recordKey);
+      if (layers === undefined) {
+        layers = [
+          ...new Set(
+            record?.pending
+              .filter((version) => version.localSeq < localSeq)
+              .filter((version) =>
+                !excludeSpeculativeLayers ||
+                !this.#speculativeLocalSeqs.has(version.localSeq)
+              )
+              .map((version) => version.localSeq) ?? [],
+          ),
+        ].sort((left, right) => left - right);
+        layersByDocument.set(recordKey, layers);
+      }
       const shape = nonRecursive ? { nonRecursive: true } : {};
       if (layers.length > 0) {
         pending.push({
