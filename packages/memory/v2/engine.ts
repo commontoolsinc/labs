@@ -8,10 +8,10 @@ import {
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import {
+  classifySchemaMeta,
   collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
   SCHEMA_META_MEMBER,
+  schemaMetaRefHashes,
 } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
@@ -5307,16 +5307,13 @@ const applyCommitTransaction = (
   // distinguishes a schema document from a blob whose value happens to
   // be schema-shaped — so nothing here treats one differently.
   const collectSchemaMetaRefs = (id: string, document: unknown): void => {
-    let hashes: ReadonlySet<string>;
-    try {
-      hashes = collectSchemaMetaRefHashes(document);
-    } catch (error) {
-      if (!(error instanceof MalformedSchemaMetaError)) throw error;
+    const form = classifySchemaMeta(document);
+    if (form.kind === "malformed") {
       throw new ProtocolError(
-        `memory v2 commit writes document ${id} with malformed schema metadata: ${error.message}`,
+        `memory v2 commit writes document ${id} with malformed schema metadata: ${form.reason}`,
       );
     }
-    for (const hash of hashes) requiredSchemaRefs.add(hash);
+    for (const hash of schemaMetaRefHashes(form)) requiredSchemaRefs.add(hash);
   };
   // The metadata positions a patch sequence can land a reference at —
   // directly (`/cfc`, `/cfc/schemaHash`, `/schema`), through a root-level

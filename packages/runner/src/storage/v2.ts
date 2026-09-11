@@ -71,9 +71,9 @@ import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema"
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import {
+  classifySchemaMeta,
   collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
+  schemaMetaRefHashes,
 } from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
@@ -6795,22 +6795,21 @@ export class SpaceReplica
     // Returns whether the document survives; a malformed member is
     // quarantined here, before any obligation of its own is recorded.
     const embedSchemaMeta = (id: string, doc: unknown): boolean => {
-      try {
-        for (const hash of collectSchemaMetaRefHashes(doc)) embed(hash, id);
-        return true;
-      } catch (error) {
-        if (!(error instanceof MalformedSchemaMetaError)) throw error;
+      const form = classifySchemaMeta(doc);
+      if (form.kind === "malformed") {
         quarantined.add(id);
         overlay.delete(id);
         logger.error("schema-doc-quarantine", () => [
           `Document ${id} was delivered with malformed schema metadata ` +
-          `(${error.message}). The commit boundary refuses this form, so ` +
+          `(${form.reason}). The commit boundary refuses this form, so ` +
           `the stored document predates that enforcement or was written ` +
           `out of band. The document is quarantined; this replica keeps ` +
           `its previous state for it.`,
         ]);
         return false;
       }
+      for (const hash of schemaMetaRefHashes(form)) embed(hash, id);
+      return true;
     };
     for (const upsert of sync.upserts) {
       const id = upsert.id;

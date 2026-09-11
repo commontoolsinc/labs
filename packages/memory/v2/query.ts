@@ -21,9 +21,9 @@ import {
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
+  classifySchemaMeta,
   collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
+  schemaMetaRefHashes,
 } from "../../runner/src/schema-decompose.ts";
 import {
   lookupSchemaDocument,
@@ -1057,17 +1057,16 @@ const scanSnapshotSchemaRefs = (
         return schema;
       });
     }
-    try {
-      for (const hash of collectSchemaMetaRefHashes(doc)) refs.add(hash);
-    } catch (error) {
-      if (!(error instanceof MalformedSchemaMetaError)) throw error;
+    const metaForm = classifySchemaMeta(doc);
+    if (metaForm.kind === "malformed") {
       throw new SchemaClosureError(
         `Query result delivers document ${id} with malformed schema ` +
-          `metadata: ${error.message}. The commit boundary refuses this ` +
+          `metadata (${metaForm.reason}). The commit boundary refuses this ` +
           `form, so the stored document predates that enforcement or was ` +
           `written out of band (docs/specs/content-addressed-schemas.md).`,
       );
     }
+    for (const hash of schemaMetaRefHashes(metaForm)) refs.add(hash);
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
   recordSchemaRefScan(engine, key, snapshot, result, scans);
