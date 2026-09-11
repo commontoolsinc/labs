@@ -69,6 +69,7 @@ import {
   createCell,
   isCell,
   markCellDocumentSynced,
+  syncCellForIdentity,
 } from "./cell.ts";
 import {
   ContextualFlowControl,
@@ -5517,11 +5518,7 @@ export class Runner {
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
-    if (identity === undefined) return cell.sync();
-    markCellDocumentSynced(cell);
-    return this.#runtime.storageManager.syncCell(cell, {
-      scopeKeyIdentity: identity,
-    });
+    return syncCellForIdentity(cell, identity);
   }
 
   /**
