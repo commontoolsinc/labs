@@ -35,6 +35,7 @@ import {
   tagFromFabricValue,
   tagFromFabricValueElseNull,
   VALUE_TAGS,
+  ValueTag,
 } from "./value-tags.ts";
 import { toCompactDebugString } from "./value-debug.ts";
 
@@ -709,6 +710,9 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * Iteratively calls `visitValue()`, `visitCycle()`, and the subtype-specific
    * visitor methods, until the visitor returns something other than a `replace`
    * or `visitSubtype` result.
+   *
+   * **Note:** We always transform `recurse` to `recurseOf` for returning from
+   * this method. See comment on the definition of `RecurseOfForm` for details.
    */
   #visitResolvingSubtype(
     value: DomainFor<DomainExtra>,
@@ -719,15 +723,16 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       ReplaceForm<DomainExtra>
     > {
     const vis = this.#visitor;
-    const origValue = value;
 
     for (;;) {
       const resolvedResult = this.#visitResolvingCyclesAndReplacement(value);
 
       switch (resolvedResult?.type) {
         case "recurse": {
-          // No dispatch required, but we do need to adjust the result form.
-          return this.#adjustResultForm(origValue, value, resolvedResult);
+          // No dispatch required, but we do need to validate and adjust the
+          // result form.
+          const tag = this.#tagFromValueElseNull(value);
+          return this.#adjustRecurseForm(resolvedResult, tag, value);
         }
 
         case "visitSubtype": {
@@ -799,7 +804,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       switch (result?.type) {
         case "recurse": {
-          return this.#adjustResultForm(origValue, value, result);
+          return this.#adjustRecurseForm(result, tag, value);
         }
 
         case "replace": {
@@ -837,7 +842,7 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       switch (result?.type) {
         case "visitSubtype": {
-          return this.#adjustResultForm(origValue, value, result);
+          return this.#visitSubtypeFormFor(origValue, value);
         }
 
         case "replace": {
@@ -996,67 +1001,51 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   //
 
   /**
-   * Adjusts a `recurse` or `visitSubtype` form if necessary, if it is meant to
-   * represent action on a replacement value.
+   * Validates and rewrites a `recurse` form as a `recurseOf` form.
    */
-  #adjustResultForm(
-    origValue: DomainFor<DomainExtra>,
-    finalValue: DomainFor<DomainExtra>,
+  #adjustRecurseForm(
     result: RecurseForm,
-  ): RecurseOfForm;
-  #adjustResultForm(
-    origValue: DomainFor<DomainExtra>,
+    finalTag: ValueTag | null,
     finalValue: DomainFor<DomainExtra>,
-    result: VisitSubtypeForm,
-  ):
-    | VisitSubtypeForm
-    | VisitSubtypeOfForm<DomainExtra>;
-  #adjustResultForm(
-    origValue: DomainFor<DomainExtra>,
-    finalValue: DomainFor<DomainExtra>,
-    result: RecurseForm | VisitSubtypeForm,
-  ):
-    | RecurseOfForm
-    | VisitSubtypeForm
-    | VisitSubtypeOfForm<DomainExtra> {
-    switch (result.type) {
-      case "recurse": {
-        // We always transform `recurse` to `recurseOf`. See comment on the
-        // definition of `RecurseOfForm` for details.
-
-        switch (this.#tagFromValueElseNull(finalValue)) {
-          case VALUE_TAGS.Array:
-          case VALUE_TAGS.FabricInstance:
-          case VALUE_TAGS.Object: {
-            return {
-              type: "recurseOf",
-              container: finalValue as FabricContainerValue,
-              doKeys: result.doKeys,
-              doValues: result.doValues,
-            };
-          }
-        }
-
-        const desc = toCompactDebugString(finalValue, { backtickQuote: true });
-        throw new Error(
-          `Cannot use \`recurse\` result with non-container: ${desc}`,
-        );
-      }
-
-      case "visitSubtype": {
-        // On the use of `Object.is()`: The visitor engine does not merge `-0`
-        // into `+0`, and it treats `NaN` is being equal to itself, making this
-        // the correct comparison function.
-        if (Object.is(origValue, finalValue)) {
-          return result;
-        } else {
-          return {
-            type: "visitSubtypeOf",
-            value: finalValue,
-          };
-        }
+  ): RecurseOfForm {
+    switch (finalTag) {
+      case VALUE_TAGS.Array:
+      case VALUE_TAGS.FabricInstance:
+      case VALUE_TAGS.Object: {
+        return {
+          type: "recurseOf",
+          container: finalValue as FabricContainerValue,
+          doKeys: result.doKeys,
+          doValues: result.doValues,
+        };
       }
     }
+
+    const desc = toCompactDebugString(finalValue, { backtickQuote: true });
+    throw new Error(
+      `Cannot use \`recurse\` result with non-container: ${desc}`,
+    );
+  }
+
+  /**
+   * Returns either a `visitSubtype` or `visitSubtypeOf` form as necessary,
+   * based on whether the visited value is a replacement.
+   */
+  #visitSubtypeFormFor(
+    origValue: DomainFor<DomainExtra>,
+    finalValue: DomainFor<DomainExtra>,
+  ):
+    | VisitSubtypeForm
+    | VisitSubtypeOfForm<DomainExtra>
+  {
+    if (Object.is(origValue, finalValue)) {
+      return DO_VISIT_SUBTYPE;
+    }
+
+    return {
+      type: "visitSubtypeOf",
+      value: finalValue,
+    };
   }
 
   /**
