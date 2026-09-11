@@ -341,10 +341,9 @@ const checkoutOptionsOf = lift((
 /** The prompt a session for this topic starts from: the topic's number and
  * title, and the head of its living document. */
 const defaultPromptOf = lift((
-  { shortName, title, body }: {
+  { shortName, title }: {
     shortName: string;
     title: string;
-    body: string;
   },
 ): string => {
   // One sentence. The kickoff's context block carries the document excerpt,
@@ -453,13 +452,6 @@ const useDefaultPrompt = handler<void, {
   spawnPrompt.set(current ? `${current}\n\n${defaultPrompt}` : defaultPrompt);
 });
 
-const pickRoot = handler<void, {
-  spawnRoot: Writable<string>;
-  root: string;
-}>((_, { spawnRoot, root }) => {
-  spawnRoot.set(root);
-});
-
 /** A version 4 UUID, which is the shape a Claude session id must have. */
 const mintSessionId = (): string =>
   "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -538,7 +530,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const checkoutOptions = checkoutOptionsOf({ index: sessions });
     const sourceOptions = sourceOptionsOf({ index: sessions });
     const ownerDid = sessions?.ownerDid ?? "";
-    const defaultPrompt = defaultPromptOf({ shortName, title, body });
+    const defaultPrompt = defaultPromptOf({ shortName, title });
     const kickoff = kickoffOf({
       prompt: spawnPrompt,
       defaultPrompt,
