@@ -3398,6 +3398,7 @@ export async function deriveSelectedValue(
         runtime.runner.syncStoredPieceCells(
           resultCell.withTx(),
           installedPattern ?? mainPattern,
+          { allowMissingArgument: true },
         ),
     );
   } catch (error) {

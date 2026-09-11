@@ -1197,7 +1197,10 @@ argument, the caller performs the normal stored-piece pre-sync again so list
 coordinators can name and load their per-row children. A byte-identical replay
 therefore emits no shared mutable writes; a genuinely absent computed cell is
 initialized normally. A pre-sync failure aborts projection startup and is
-reported through the projection's normal transform-failure boundary.
+reported through the projection's normal transform-failure boundary. Because
+the argument metadata is expected to be absent before first setup, this pass
+skips argument-bound nodes without emitting the missing-argument diagnostic;
+ordinary stored-piece resume retains that diagnostic.
 
 Reactive array lowering does not support the optional JavaScript `thisArg`.
 Pattern callbacks have no ambient JavaScript receiver, and the canonical list

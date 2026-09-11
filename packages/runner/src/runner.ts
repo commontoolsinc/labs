@@ -7366,13 +7366,23 @@ export class Runner {
    * pattern owns. The store delivers none of these with the result document,
    * and a write to a document this replica has not loaded replaces the
    * document the store holds, so a caller staging a setup over a stored piece
-   * names its family first. Resolves once the documents have arrived.
+   * names its family first. Before a piece's first setup, callers may allow the
+   * missing argument metadata so deterministic owned cells still load while
+   * argument-bound nodes are skipped without a resume diagnostic. Resolves
+   * once the documents have arrived.
    */
   syncStoredPieceCells(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
+    options: { allowMissingArgument?: boolean } = {},
   ): Promise<void> {
-    return this.#syncCellsForRunningPattern(resultCell, pattern).then(
+    return this.#syncCellsForRunningPattern(
+      resultCell,
+      pattern,
+      undefined,
+      undefined,
+      options.allowMissingArgument === true,
+    ).then(
       () => {},
     );
   }
@@ -7388,6 +7398,7 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
     identity = resultCell.tx?.tx.scopeKeyIdentity,
+    allowMissingArgument = false,
   ): Promise<boolean> {
     const capturedIdentity = identity === undefined
       ? undefined
@@ -7400,6 +7411,7 @@ export class Runner {
           pattern,
           inputs,
           capturedIdentity,
+          allowMissingArgument,
         );
       } finally {
         // Resume-boot decomposition: this is the dependency pre-sync a fresh
@@ -7422,6 +7434,7 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
     identity?: ScopeKeyIdentity,
+    allowMissingArgument = false,
   ): Promise<boolean> {
     const mentionedInputsStart = performance.now();
     const seen = new Set<Cell<any>>();
@@ -7484,7 +7497,7 @@ export class Runner {
     // collectResumeOwnedCells instead passes the possibly-missing link through
     // and skips per-node, since sub-pattern outputs rarely alias it.
     const argumentMetaLink = getMetaLink(resultCell, "argument");
-    if (argumentMetaLink === undefined) {
+    if (argumentMetaLink === undefined && !allowMissingArgument) {
       // Instrumentation for how often the meta link is missing here (fresh
       // first runs are expected to hit this; resumes should not).
       logger.warn("resume-pre-sync", () => [
@@ -7494,7 +7507,7 @@ export class Runner {
           nodes: pattern.nodes.length,
         },
       ]);
-    } else {
+    } else if (argumentMetaLink !== undefined) {
       for (const node of pattern.nodes) {
         let inputs: NormalizedFullLink[];
         let outputs: NormalizedFullLink[];
