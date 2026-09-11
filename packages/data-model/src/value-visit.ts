@@ -896,12 +896,9 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * result.
    */
   #iterateArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
-    const vis = this.#visitor;
-    const { container, doValues }: {
-      container: FabricContainerValue;
-      doValues: boolean;
-    } = result;
+    const { container, doValues } = result;
     const array = container as FabricArray;
+    const vis = this.#visitor;
 
     if (!doValues) {
       // `result` represents a no-op `recurse`. Though pointless, nothing
@@ -975,12 +972,8 @@ class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * `recurse` result.
    */
   #iterateMap(result: RecurseOfForm): BaselineVisitResult<ResultType> {
+    const { container, doKeys, doValues } = result;
     const vis = this.#visitor;
-    const { container, doKeys, doValues }: {
-      container: FabricContainerValue;
-      doKeys: boolean;
-      doValues: boolean;
-    } = result;
 
     if (!(doKeys || doValues)) {
       // `result` represents a no-op `recurse`. Though pointless, nothing
