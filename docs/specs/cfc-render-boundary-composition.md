@@ -64,8 +64,8 @@ inside it, which the walk stops short of.
 
 The labels a sub-pattern's result document carries are the ones its own fields
 earned. A field aliasing an argument cell carries that cell's label through the
-link machinery. A field fed by a lift or a handler carries the join that
-module makes onto its own result (`applyArgumentIfcToResult`, called from
+link machinery. A field fed by a lift or a sub-pattern carries the join
+that module makes onto its own result (`applyArgumentIfcToResult`, called from
 `packages/runner/src/builder/module.ts`), and every module's output cells carry
 the join of its input cells' labels (`connectInputAndOutputs`, defined in
 `packages/runner/src/builder/node-utils.ts` and called from `module.ts` and
@@ -88,9 +88,52 @@ all its components, so the `derived` component above adds to it and never
 narrows it. A label narrower than the join is therefore available only through
 §8.9.1's trust gate, and nothing in the runtime evaluates that concept.
 
-The join reaches output cells, so a handler is covered by the result join above
-instead: a handler node is built with no outputs, and what its writes carry is
-the join its module makes onto its own result.
+The two build-time mechanisms differ in what each ranges over.
+`applyArgumentIfcToResult` runs once per module factory, joining the schema
+that module declares for its argument onto the result schema it declares — or
+onto `true`, for a module that declares none; every node minted from that
+factory is given what it returns. `applyInputIfcToOutput` runs once per node,
+over that node's own edges. Neither takes a join over a pattern's argument as a
+whole, so a field a lift or a sub-pattern produces carries what its own edge
+carries: a confidential argument field's label reaches the fields that read it,
+and a public field beside it stays public.
+`packages/runner/test/cfc-argument-ifc-propagation.test.ts` measures both
+halves of that over one result.
+
+A handler's write targets take no build-time label, and that is the division
+rather than a gap in it. A handler node is built with `outputs: {}` and the
+cells it is handed sit in `inputs.$ctx`, so the per-node join has nothing to
+write onto, and the event stream the factory returns is one of those inputs
+rather than an output. What a handler writes is decided when it runs, and CFC
+§8.12.8 puts the label for it — §8.9.2's conservative join over the attempt's
+journal, plus §8.9.3's output labels — in the `derived` component, under
+replace-on-overwrite. The `cfcFlowLabels` dial is what persists that component,
+and §18.6.3's conformance matrix marks `enforce-explicit` with propagation
+`off` a conforming state, because that ladder rung consumes declared policy
+alone. Reaching for a build-time stand-in here would put a measurement in the
+component §8.12.8 reserves for declarations, which is the join
+`factoryFromPattern` stopped taking.
+
+A built-in that writes its own schema over its output's link composes that
+label back in rather than replacing it. Four do: `mapWithPattern`,
+`filterWithPattern` and `flatMapWithPattern` stamp a result-container schema
+onto the cell their node factory has just labeled, and a named aggregate stamps
+a scalar one. `schemaCarryingLinkIfc` in `packages/runner/src/cell.ts` carries
+the label onto what they write. CFC §8.5.4.3 requires it: a decomposed
+collection operation's coordinator taints its own structural writes —
+container, membership, order, length — with what its journal consumed. §8.9.2's
+propagation takes the output container's confidentiality from the source
+container's, through `lengthPreserved` for a map and
+`propagateCollectionConstraint` for the two that change length. The label lands
+at the container root, which is the conservative shape rather than the
+pointwise one: `joinSchema` flattens a source's member-level atoms in with its
+container-level ones, so what §8.5.6.1 keeps apart as member and structural
+confidentiality arrives together.
+`packages/runner/test/list-result-schema.test.ts` measures a labeled source and
+an unlabeled one. An aggregate reduces without per-value attribution, so
+§8.17.1 gives its scalar the join of its contributors — a count and a sum are
+that section's own examples — and
+`packages/runner/test/cfc-argument-ifc-propagation.test.ts` measures one.
 
 The declared result schema adds none of its own: `factoryFromPattern` stores
 the schema the author declared, so a pattern that accepts a confidential
