@@ -215,6 +215,10 @@ export function raw<T, R>(
     // builtins (map/filter/flatMap) read it to defer their per-element
     // sub-pattern runs until sync completes too.
     awaitSync?: boolean,
+    // The resolved coordinate where sendResult publishes, including its actual
+    // storage scope. Publication ownership uses this scope; outputBinding's
+    // declared scope controls where a builtin mints its result container.
+    publicationBinding?: NormalizedFullLink,
   ) => RawBuiltinReturnType,
   options?: RawModuleOptions,
 ): ModuleFactory<T, R> {

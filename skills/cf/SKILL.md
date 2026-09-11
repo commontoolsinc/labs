@@ -365,16 +365,18 @@ compose as filter-then-project. Both run through runtime filter/map/lift nodes,
 which construct projected values from source-schema-selected reads. A declared
 root shape and structurally selectable properties make the initial read the
 union of predicate and projection paths, so omitted linked subgraphs are not
-hydrated; ambiguous compositions can retain a wider selector, and schema-less or
-root-union sources need a value-shape read first. CFC behavior is the same as a
-computed pattern expression. Source schema metadata is authoritative; projection
-schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A projection marks
-a position to get that position's address — one string in the canonical
-reference syntax `/[@did/]<id>[@scope][/path]`, where the space rides in front
-only when it differs from the space the command targeted and the scope follows
-the id only when it is not the default, no schema inlined — instead of what is
-behind it, or beside a projection to get both. A JSON `--schema` marks with
-`"$link": true`; a field list marks with a trailing `@`, so
+hydrated; ambiguous compositions can retain a wider selector. A schemaless
+source probes its stored root without following children; a stored object or
+array establishes the shape directly. Root links, instances, and root-union
+schemas need materialization to establish that shape. CFC behavior is the same
+as a computed pattern expression. Source schema metadata is authoritative;
+projection schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A
+projection marks a position to get that position's address — one string in the
+canonical reference syntax `/[@did/]<id>[@scope][/path]`, where the space rides
+in front only when it differs from the space the command targeted and the scope
+follows the id only when it is not the default, no schema inlined — instead of
+what is behind it, or beside a projection to get both. A JSON `--schema` marks
+with `"$link": true`; a field list marks with a trailing `@`, so
 `--select 'topic@,topic.title'` returns one `topic` carrying its address and its
 title. A path that is only `@` marks the position the read is already at, so
 `--select '@'` returns the source's own address and `--select '@,title'` returns
@@ -422,15 +424,15 @@ handler's `result` inside the Invocation JSON, or a tool's JSON on stdout:
 deno task cf piece call --cell ID addTopic '{"title":"Ship it"}' -- --select topic.title
 ```
 
-A selection shapes a result that already exists; it does not narrow what the
-call fetches — the readback materializes the whole receipt before the selection
-runs (a plain result's receipt carries a descriptive schema of what it holds; a
-reactive one carries none). A value-less verb therefore still reports no
-`result` at all rather than `{}` — but a selection that keeps nothing from a
-result that does exist is refused, so the two stay distinguishable. A shaped
-call also waits on the CLI runtime's global idle, not just its own handling's
-commit, so on a piece with heavy derived state prefer calling plain (or
-`--no-wait`) and shaping the collect:
+A selection can narrow a handler receipt's linked fetches: a schemaless receipt
+holding a stored object or array is selected before its children are loaded.
+Root links, instances, scalars, explicitly schema-constrained receipts, and tool
+results are materialized before selection. A value-less verb therefore still
+reports no `result` at all rather than `{}` — but a selection that keeps nothing
+from a result that does exist is refused, so the two stay distinguishable. A
+shaped call also waits on the CLI runtime's global idle, not just its own
+handling's commit, so on a piece with heavy derived state prefer calling plain
+(or `--no-wait`) and shaping the collect:
 `cf cell get --cell <receipt id> --select …`. `--no-wait` refuses all three
 flags, since it skips the receipt readback they are answered from.
 `--show-links` composes with a projection — links are collected after the
