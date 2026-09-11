@@ -232,7 +232,10 @@ import {
   readVerifiedSourceClosure,
 } from "./compilation-cache/cell-cache.ts";
 import { createRef } from "./create-ref.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import {
+  diffAndUpdate,
+  initializeScopedArgumentSlots,
+} from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
@@ -2806,6 +2809,12 @@ export class Runner {
       argumentLink,
       storable,
       argumentLink,
+    );
+    initializeScopedArgumentSlots(
+      this.#runtime,
+      tx,
+      argumentLink,
+      argumentSchema,
     );
   }
 

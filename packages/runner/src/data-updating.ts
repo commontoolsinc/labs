@@ -469,6 +469,97 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
+/** Materialize absent scoped input slots behind a pattern's argument reference. */
+export function initializeScopedArgumentSlots(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  argumentLink: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void {
+  const resolvedSchema = resolveSchema(schema);
+  if (
+    !isObjectOrArray(resolvedSchema) ||
+    !isObjectOrArray(resolvedSchema.properties)
+  ) return;
+  let blocked = false;
+  const container = resolveLink(runtime, tx, argumentLink, "value", {
+    onScopeBlocked: () => blocked = true,
+  });
+  if (blocked || container.pendingHopDoc || isFabricDataUri(container.id)) {
+    return;
+  }
+  const options = {
+    nonRecursive: true,
+    meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+  };
+  const value = tx.readValueOrThrow(container, options);
+  if (!isKeyableObjectNotArray(value) || isPrimitiveCellLink(value)) return;
+  const changes: ChangeSet = [];
+  for (const key of Object.keys(resolvedSchema.properties)) {
+    const childSchema = ContextualFlowControl.getSchemaAtPath(schema, [key]);
+    const scope = declaredCellScope(childSchema);
+    if (scope === undefined || scopeRank(scope) <= scopeRank(container.scope)) {
+      continue;
+    }
+    if (Object.hasOwn(value, key)) continue;
+    const childLink: NormalizedFullLink = {
+      ...container,
+      path: [...container.path, key],
+      schema: childSchema,
+    };
+    changes.push(...scopedRedirectChanges(
+      runtime,
+      tx,
+      childLink,
+      scope,
+      argumentLink,
+      options,
+      { seen: new Map() },
+      undefined,
+    ));
+  }
+  applyChangeSet(tx, changes);
+}
+
+/** Build the redirect chain for a declared narrower slot without writing its content. */
+function scopedRedirectChanges(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  scope: CellScope,
+  context: unknown,
+  options: DiffAndUpdateOptions | undefined,
+  state: DiffWalkState,
+  currentValue: unknown,
+): ChangeSet {
+  const scopedLink: NormalizedFullLink = { ...link, scope };
+  const viaUser = getServerExecutionConfig() && scope === "session" &&
+    scopeRank(link.scope) < scopeRank("user");
+  const target = viaUser ? { ...link, scope: "user" as const } : scopedLink;
+  const changes = viaUser
+    ? normalizeAndDiff(
+      runtime,
+      tx,
+      target,
+      createSigilLinkFromParsedLink(scopedLink, { base: target }),
+      context,
+      options,
+      state,
+    )
+    : [];
+  changes.push(...normalizeAndDiff(
+    runtime,
+    tx,
+    link,
+    createSigilLinkFromParsedLink(target, { base: link }),
+    context,
+    options,
+    state,
+    currentValue,
+  ));
+  return changes;
+}
+
 export type ChangeSet = {
   location: NormalizedFullLink;
   value: FabricValue;
@@ -1727,64 +1818,16 @@ export function normalizeAndDiff(
           path: [...link.path, key],
           schema: childSchema,
         };
-        const scopedLink: NormalizedFullLink = {
-          ...childLink,
-          scope: childScope,
-        };
-        // The eager via-user hop (scopes.md §2's MUST, flag-gated): an
-        // eager space→session redirect chains via user like every other
-        // narrowing write, so the chain shape stays uniform.
-        if (
-          getServerExecutionConfig() &&
-          childScope === "session" &&
-          scopeRank(link.scope) < scopeRank("user")
-        ) {
-          const userLink: NormalizedFullLink = {
-            ...childLink,
-            scope: "user",
-          };
-          changes.push(
-            ...normalizeAndDiff(
-              runtime,
-              tx,
-              userLink,
-              createSigilLinkFromParsedLink(scopedLink, {
-                base: userLink,
-              }) as unknown,
-              context,
-              options,
-              state,
-            ),
-            ...normalizeAndDiff(
-              runtime,
-              tx,
-              childLink,
-              createSigilLinkFromParsedLink(userLink, {
-                base: childLink,
-              }) as unknown,
-              context,
-              options,
-              state,
-              currentRecord[key],
-            ),
-          );
-          eagerScopedKeys.add(key);
-          continue;
-        }
-        changes.push(
-          ...normalizeAndDiff(
-            runtime,
-            tx,
-            childLink,
-            createSigilLinkFromParsedLink(scopedLink, {
-              base: childLink,
-            }) as unknown,
-            context,
-            options,
-            state,
-            currentRecord[key],
-          ),
-        );
+        changes.push(...scopedRedirectChanges(
+          runtime,
+          tx,
+          childLink,
+          childScope,
+          context,
+          options,
+          state,
+          currentRecord[key],
+        ));
         eagerScopedKeys.add(key);
       }
     }

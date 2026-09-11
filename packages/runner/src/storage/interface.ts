@@ -21,6 +21,7 @@ import type {
   ReleaseOpFieldOperation,
   ScopeKey,
   ScopeKeyIdentity,
+  SessionSyncUpsert,
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
@@ -202,6 +203,22 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
+/**
+ * A synchronous read of one document instance straight from the space's
+ * durable store, in the shape a session frame would deliver it: the
+ * document at its current head, or a `deleted` entry at seq 0 when the
+ * store holds nothing at that address. A replica with one installed
+ * serves a miss from it instead of pulling over its session, and
+ * `IStorageManager.integrateStoreWrites` re-reads held documents through
+ * it when the store admits a commit touching them. Only a caller
+ * co-hosted with the store can supply one; the store's own admission
+ * rules are not consulted, so the read runs with whatever authority the
+ * caller holds.
+ */
+export type StoreReadThrough = (
+  address: { id: URI; scopeKey: ScopeKey },
+) => SessionSyncUpsert | undefined;
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -239,6 +256,28 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * direction.
    */
   isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
+
+  /**
+   * Install a store read-through for SPACE's replica: from then on a
+   * document the replica does not hold is read synchronously from the
+   * store on first access, and a `sync()` against the space resolves
+   * from the store without registering a watch. Optional: only a manager
+   * co-hosted with the store can serve one.
+   */
+  installStoreReadThrough?(space: MemorySpace, read: StoreReadThrough): void;
+
+  /**
+   * Re-read every listed document instance that SPACE's replica holds
+   * through its installed read-through and integrate the result as an
+   * inbound frame, so a store commit the replica has no watch for still
+   * reaches its subscribers. Returns how many documents were refreshed;
+   * zero when no read-through is installed or the replica holds none of
+   * them.
+   */
+  integrateStoreWrites?(
+    space: MemorySpace,
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
