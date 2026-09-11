@@ -1,7 +1,7 @@
 import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import Poll from "./main.tsx";
 
-/** Enables interval read accounting for the controlled workload. */
+/** Collects interval diagnostics; render steps declare the enforced limits. */
 export const readBudgets = {};
 
 export default pattern(() => {
