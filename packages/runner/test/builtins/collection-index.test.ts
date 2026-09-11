@@ -4,8 +4,13 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { createNodeFactory } from "../../src/builder/module.ts";
+import {
+  collectionIndex,
+  type CollectionIndexInput,
+} from "../../src/builtins/collection-index.ts";
 import { collectionKeyBucket } from "../../src/builtins/collection-index-key.ts";
 import type { MaintainedCollectionIndex } from "../../src/builtins/collection-index-membership.ts";
+import { useCancelGroup } from "../../src/cancel.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { RuntimeTelemetryEvent } from "../../src/telemetry.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
@@ -16,6 +21,63 @@ import {
 import { createTrustedBuilder } from "../support/trusted-builder.ts";
 
 describe("collection-index", () => {
+  it("rejects malformed source slots and an absent output binding before publication", async () => {
+    await using cleanup = new AsyncDisposableStack();
+    const signer = await Identity.fromPassphrase("index-invalid-coordinator");
+    const storage = EmulatedStorageManager.emulate({ as: signer });
+    cleanup.defer(() => storage.close());
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    cleanup.defer(() => runtime.dispose({ closeStorage: false }));
+    for (const invalid of ["list", "elements", "binding"] as const) {
+      const tx = runtime.edit();
+      const [cancel, addCancel] = useCancelGroup();
+      try {
+        const inputs = runtime.getCell<CollectionIndexInput>(
+          signer.did(),
+          `invalid-${invalid}`,
+          undefined,
+          tx,
+        );
+        inputs.set({ list: [], elements: [], mode: "group" });
+        if (invalid !== "binding") inputs.key(invalid).asSchema(true).set(42);
+        const output = runtime.getCell(
+          signer.did(),
+          `output-${invalid}`,
+          undefined,
+          tx,
+        );
+        let publications = 0;
+        const coordinator = collectionIndex(
+          inputs,
+          () => {
+            publications++;
+          },
+          addCancel,
+          {},
+          runtime.getCell(signer.did(), "parent"),
+          runtime,
+          invalid === "binding" ? undefined : output.getAsNormalizedFullLink(),
+        );
+        if (typeof coordinator === "function") {
+          throw new Error("Expected coordinator wrapper");
+        }
+        expect(() => coordinator.action(tx)).toThrow(
+          invalid === "binding"
+            ? "Collection indexing requires an output binding"
+            : "Collection indexing requires arrays",
+        );
+        expect(publications).toBe(0);
+        expect(output.getRaw()).toBeUndefined();
+      } finally {
+        tx.abort();
+        cancel();
+      }
+    }
+  });
+
   it("reconciles original linked occurrences while only one bucket is observed", async () => {
     const signer = await Identity.fromPassphrase("index-coordinator");
     const storage = StorageManager.emulate({ as: signer });
