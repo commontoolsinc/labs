@@ -2263,11 +2263,24 @@ export function mergeMasks(
   return objectProjectionMask(properties);
 }
 
-/** @internal Exported for focused source-schema selection tests. */
+/**
+ * `source` narrowed to the positions `mask` selects.
+ *
+ * `root` is the document `source` sits in, which is `source` itself when a
+ * caller hands in a whole document. A reference resolves against that root,
+ * and the root moves only where resolution enters another document: an
+ * embedded or external target, or a resolved view flattened with its ref-site
+ * siblings. A `$defs` an arm or a property declares of its own is inert, so
+ * the recursion below carries `root` through unchanged rather than treating
+ * each subschema as a document of its own.
+ *
+ * @internal Exported for focused source-schema selection tests.
+ */
 export function selectSourceSchema(
   source: JSONSchema | undefined,
   mask: ProjectionMask,
   purpose: "source-read" | "projected-output" = "source-read",
+  root: JSONSchema = source ?? true,
 ): JSONSchema {
   // A rejecting mask is the whole answer wherever it appears: nothing is read
   // at this position, whatever the source declares there.
@@ -2280,14 +2293,16 @@ export function selectSourceSchema(
     return source;
   }
   if (source.$ref !== undefined) {
-    if (source.$ref.startsWith("#/") && source.$defs === undefined) {
-      return source;
-    }
     try {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        source,
+        root,
+      );
       return selectSourceSchema(
-        ContextualFlowControl.resolveSchemaRefsOrThrow(source, source),
+        resolved,
         mask,
         purpose,
+        cfcSchemaResolvedRoot(resolved, resolveCfcSchemaRefRoot(source, root)),
       );
     } catch {
       // A malformed or unsupported source reference is not projection's job
@@ -2314,7 +2329,7 @@ export function selectSourceSchema(
       return source;
     }
     const projectOptions = (options: readonly JSONSchema[] | undefined) =>
-      options?.map((option) => selectSourceSchema(option, mask, purpose));
+      options?.map((option) => selectSourceSchema(option, mask, purpose, root));
     const projectedAnyOf = projectOptions(anyOf);
     const projectedOneOf = projectOptions(oneOf);
     const projectedAllOf = projectOptions(allOf);
@@ -2335,7 +2350,7 @@ export function selectSourceSchema(
     const { items: _items, prefixItems: _prefixItems, ...metadata } = source;
     return {
       ...metadata,
-      items: selectSourceSchema(sourceItem, mask.items, purpose),
+      items: selectSourceSchema(sourceItem, mask.items, purpose, root),
     };
   }
 
@@ -2359,6 +2374,7 @@ export function selectSourceSchema(
       child === false ? undefined : child,
       childMask,
       purpose,
+      root,
     );
   }
   // A rejected position holds nothing to require. Keeping it required makes
