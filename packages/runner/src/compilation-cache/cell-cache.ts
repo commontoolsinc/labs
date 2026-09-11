@@ -1,7 +1,7 @@
 import { normalize } from "@std/path/posix";
 
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
-import { taggedHashStringOf } from "@commonfabric/data-model";
+import { type FabricValue, taggedHashStringOf } from "@commonfabric/data-model";
 import type {
   BuilderSourceSitesV1,
   PatternCoverageSpan,
@@ -838,42 +838,6 @@ function withCompileCacheBuiltin<T>(
 }
 
 /**
- * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
- * source/compiled doc's `imports` array holds LIVE links to per-edge element
- * docs (the cell layer hoists each `{specifier, link}` element into its own
- * derived doc); the element doc's own `link` field is a *quoted* link — data,
- * not a traversal edge — so this schema pulls exactly the doc plus its edge
- * element docs and stops. A schema-less `sync()` normalizes to the rejecting
- * selector and delivers only the root, leaving the element docs unknown to
- * the replica — then the re-write touches them blind and needs a rejected
- * commit plus conflict repair. With the element docs client-known up front,
- * the re-write diffs against true state and commits on the first attempt.
- * Recursion is deliberately omitted: the write-target
- * pre-sync enumerates every module doc itself, so each doc only needs its
- * own edges — nothing beyond the write set loads (the lazy-by-default
- * posture for code docs is untouched).
- */
-export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
-  type: "object",
-  properties: {
-    delegatedModuleIdentities: {
-      type: "array",
-      items: { type: "string" },
-    },
-    imports: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          specifier: { type: "string" },
-          link: true,
-        },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
-
-/**
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
  * import a sigil link to its dependency cell (the entry additionally linking any
  * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
@@ -929,30 +893,54 @@ export function writeSourceDocs(
       const cell = delegatedModuleIdentities.length > 0
         ? baseCell.asSchema(sourceDocWriteSchema())
         : baseCell;
-      cell.set({
-        kind: "source",
-        identity,
-        code: codeLink(space, doc.code, tx),
-        filename: doc.filename,
-        imports: doc.imports.map((imp) => ({
-          specifier: imp.specifier,
-          link: runtime.getCell(
-            space,
-            sourceDocKey(imp.identity),
-            undefined,
-            tx,
-          ).getAsLink(),
-        })),
-        ...(delegatedModuleIdentities.length > 0
-          ? { delegatedModuleIdentities }
-          : {}),
-        ...(isObjectOrArray(existingAnnotations)
-          ? { annotations: existingAnnotations }
-          : {}),
-      } as StoredSourceDoc);
+      writeCacheRecord(
+        cell,
+        {
+          kind: "source",
+          identity,
+          code: codeLink(space, doc.code, tx),
+          filename: doc.filename,
+          imports: doc.imports.map((imp) => ({
+            specifier: imp.specifier,
+            link: runtime.getCell(
+              space,
+              sourceDocKey(imp.identity),
+              undefined,
+              tx,
+            ).getAsLink(),
+          })),
+          ...(delegatedModuleIdentities.length > 0
+            ? { delegatedModuleIdentities }
+            : {}),
+          ...(isObjectOrArray(existingAnnotations)
+            ? { annotations: existingAnnotations }
+            : {}),
+        } satisfies StoredSourceDoc,
+      );
     }
   });
   return effectiveModuleDelegations;
+}
+
+/**
+ * Writes a cache record whole, and only when the stored record differs.
+ *
+ * The write is raw: each `imports` element is stored inline in the record,
+ * and the write touches no document but the record's own, so a write of the
+ * same record from any session lands on that one document, and an unchanged
+ * record is not written at all. The diff walk is not usable here, because it
+ * anchors every plain object in an array into a document of its own, named
+ * by the ambient frame's counter and cause; a second session writing the
+ * same record names the documents the first session minted, without having
+ * read them, and its commit is refused as stale. A stored record whose
+ * elements sit in documents of their own differs from the one written and is
+ * rewritten whole; those element documents are left untouched.
+ */
+function writeCacheRecord(
+  cell: Cell<unknown>,
+  record: StoredSourceDoc | StoredCompiledDoc,
+): void {
+  cell.setRawUntyped(record as unknown as FabricValue, true);
 }
 
 /**
@@ -1571,7 +1559,7 @@ export function writeCompiledDocs(
       if (policyManifests !== undefined) {
         runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
-      cell.set({
+      writeCacheRecord(cell, {
         kind: module.isData ? "data" : "compiled",
         identity: module.identity,
         code: codeLink(space, module.js, tx),

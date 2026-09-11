@@ -12,7 +12,12 @@ import {
   codecOf,
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
-import { createSession, isDID, Session } from "@commonfabric/identity";
+import {
+  createSession,
+  type Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { collectDataFileNames } from "@commonfabric/js-compiler";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -109,6 +114,7 @@ import {
   type CallableExecutionDeps,
   type CallableResolution,
   type CallableResultRef,
+  canonicalAddress,
   CF_RUNTIME_ERROR_LOG,
   type CliRuntimeErrorRecord,
   cloneWithoutBoundToolKeys,
@@ -133,6 +139,7 @@ import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
+import { instantiatePieceOnServer } from "./pattern-lifecycle.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
 import {
   deriveDiskHandleId,
@@ -464,6 +471,7 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   loadIdentity?: typeof loadIdentity;
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
+  instantiatePieceOnServer?: typeof instantiatePieceOnServer;
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -1595,12 +1603,71 @@ export async function resolveLinkEndpointAddress(
 }
 
 /**
+ * Whether the deployment this connection speaks to runs the serving loop,
+ * in which case creating a piece is its to execute: the connection carries
+ * the deployment's own flag posture
+ * (docs/features/server-pattern-lifecycle.md).
+ */
+function servesLifecycleVerbs(pieces: PiecesController): boolean {
+  return (pieces.runtime as Runtime | undefined)?.experimental
+    .serverExecution === true;
+}
+
+async function lifecycleClient(
+  config: SpaceConfig,
+  deps: PieceOperationDependencies,
+): Promise<{ apiUrl: URL; identity: Identity }> {
+  return {
+    apiUrl: new URL(config.apiUrl),
+    identity: await (deps.loadIdentity ?? loadIdentity)(config.identity),
+  };
+}
+
+/**
+ * The served half of `newPiece`: the serving runtime compiles the program
+ * and materializes the piece — the creation act, with its registry entry
+ * and its name in the same transaction — and this connection then starts
+ * it the way it starts any piece it opens, running the graph as
+ * speculation while the server derives on demand. The request is awaited
+ * without a wall-clock bound: a creation the server is still committing
+ * is not one to walk away from, since it lands whether or not this
+ * process waits. `boundStart` is the bound the local start runs under.
+ */
+async function createOnServer(
+  config: SpaceConfig,
+  pieces: PiecesController,
+  program: RuntimeProgram,
+  entry: EntryConfig,
+  options: { start?: boolean; slug?: string; force?: boolean } | undefined,
+  deps: PieceOperationDependencies,
+  boundStart: <T>(start: Promise<T>) => Promise<T>,
+): Promise<{ id: string; getCell: () => Cell<unknown> }> {
+  const receipt = await (deps.instantiatePieceOnServer ??
+    instantiatePieceOnServer)(await lifecycleClient(config, deps), {
+      space: pieces.getSpace(),
+      program,
+      ...(entry.repository === undefined
+        ? {}
+        : { repository: entry.repository }),
+      ...(options?.slug === undefined ? {} : { slug: options.slug }),
+      ...(options?.force === undefined ? {} : { force: options.force }),
+      register: true,
+      ...(options?.start === false ? { start: false } : {}),
+    });
+  const cell = await pieces.getPieceCell(receipt.pieceId, false);
+  if (options?.start !== false) await boundStart(pieces.startPiece(cell));
+  return { id: receipt.pieceId, getCell: () => cell };
+}
+
+/**
  * Creates a new piece from source code and optional input.
  *
  * A `slug` that already points somewhere is refused the way `set-slug`
- * refuses one, and `force` takes it. The refusal arrives after the piece
- * exists, so it names the piece as well as the flag: an operator who meant to
- * repoint has an id to name, and one who did not has a piece to find.
+ * refuses one, and `force` takes it. Against a serving deployment the name
+ * rides the creation transaction, so the refusal leaves nothing behind.
+ * Otherwise the refusal arrives after the piece exists, so it names the
+ * piece as well as the flag: an operator who meant to repoint has an id to
+ * name, and one who did not has a piece to find.
  */
 export async function newPiece(
   config: SpaceConfig,
@@ -1613,15 +1680,21 @@ export async function newPiece(
     () => (deps.loadPieces ?? loadPieces)(config),
   );
 
-  // Registration through `pieces.add()` requires an existing default pattern
-  // and fails before sending if none exists. Ensuring it creates an absent
-  // root and reconciles and repairs an existing one; fail here with the cause
-  // if initialization fails.
+  // Against a serving deployment the space root is the serving loop's to
+  // ensure — it does so on activation, ahead of the verb this command sends
+  // — and a served creation that finds no root refuses with `no-space-root`.
+  // Otherwise registration through `pieces.add()` requires an existing
+  // default pattern and fails before sending if none exists. Ensuring it
+  // creates an absent root and reconciles and repairs an existing one; fail
+  // here with the cause if initialization fails.
+  const served = servesLifecycleVerbs(pieces);
   try {
-    await timeCliPhase(
-      "newPiece.ensureDefaultPattern",
-      () => pieces.ensureDefaultPattern(),
-    );
+    if (!served) {
+      await timeCliPhase(
+        "newPiece.ensureDefaultPattern",
+        () => pieces.ensureDefaultPattern(),
+      );
+    }
   } catch (error) {
     throw new Error(
       `Could not initialize the space's default pattern: ${
@@ -1653,11 +1726,7 @@ export async function newPiece(
   const PIECE_START_TIMEOUT_MS = 60_000;
   const runtimeErrors = runtimeErrorLog(pieces.runtime);
   const errorCountBefore = runtimeErrors.length;
-  const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, {
-      repository: entry.repository,
-      start: options?.start,
-    });
+  const boundStart = <T>(starting: Promise<T>): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -1674,14 +1743,33 @@ export async function newPiece(
         );
       }, PIECE_START_TIMEOUT_MS);
     });
-    return Promise.race([createPromise, timeout]).finally(() =>
-      clearTimeout(timer)
-    );
-  });
+    return Promise.race([starting, timeout]).finally(() => clearTimeout(timer));
+  };
+  const piece = await timeCliPhase(
+    "newPiece.create",
+    () =>
+      served
+        ? createOnServer(
+          config,
+          pieces,
+          program,
+          entry,
+          options,
+          deps,
+          boundStart,
+        )
+        : boundStart(pieces.create(program, {
+          repository: entry.repository,
+          start: options?.start,
+        })),
+  );
   // Here rather than after the registry add below: the piece now exists in
   // the space, and a slug or registry step that throws afterwards leaves a
   // partial write that the operator is owed the location of.
   noteWroteTo(config.space);
+  // A served creation named and registered the piece in its own
+  // transaction; what follows is the client-side creation's second half.
+  if (served) return piece.id;
 
   if (options?.slug) {
     try {
@@ -1844,24 +1932,20 @@ export async function setPiecePattern(
     pieces,
     deps,
   );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  const receipt = await piece.setPattern(
-    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      pieces,
-      entry,
-    ),
-    {
-      repository: entry.repository,
-      ...(options.dangerouslyAllowIncompatibleSchema
-        ? { dangerouslyAllowIncompatibleSchema: true }
-        : {}),
-    },
-  );
+  const receipt = await piece.setPattern(program, {
+    repository: entry.repository,
+    ...(options.dangerouslyAllowIncompatibleSchema
+      ? { dangerouslyAllowIncompatibleSchema: true }
+      : {}),
+  });
   noteWroteTo(config.space);
   return receipt;
 }
@@ -1884,18 +1968,15 @@ export async function checkPiecePattern(
     pieces,
     deps,
   );
+  const program = await (deps.getPinnedProgramFromFile ??
+    getPinnedProgramFromFile)(pieces, entry);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  return await piece.checkPattern(
-    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      pieces,
-      entry,
-    ),
-  );
+  return await piece.checkPattern(program);
 }
 
 export async function savePiecePattern(
@@ -2026,19 +2107,13 @@ async function tryResolvePieceCallableAt(
   };
 }
 
-/** The forced-stream cast: assert `name` on `cell` is a stream, then ask the
- * runtime whether it answers as one. The third and last resolution path of
- * `cf piece call` (tryResolvePieceHandler), where a handler whose stored
- * schema lost the stream marker still answers.
- *
- * It proves nothing, and belongs ONLY here. The cast's stream schema survives
- * link resolution for an inline value, so `Cell.isStream`'s schema branch
- * answers from the assertion the caller just made and every name passes.
- * That is acceptable as a dispatcher's last resort — the caller named this
- * verb, and a wrong cast fails harmlessly against a value with no handler
- * behind it. It is not acceptable anywhere that describes what a piece has:
- * the listing and the read-path guard both classify on definite stored
- * signals instead. Returns the cast cell, or null. */
+/**
+ * Helper for `tryResolvePieceHandler()`, which casts `name` to a stream when
+ * its stored schema has lost the stream marker. Returns the cast cell, or
+ * `null` when the cell cannot be cast. The cast establishes no evidence of a
+ * handler: `resolvePieceCallable()` checks the pattern's vocabulary first
+ * when that metadata is available.
+ */
 function probeForcedStreamCell(cell: any, name: string): any | null {
   if (
     typeof cell !== "object" || cell === null ||
@@ -2046,6 +2121,8 @@ function probeForcedStreamCell(cell: any, name: string): any | null {
   ) {
     return null;
   }
+  // For inline values, the cast's stream schema survives link resolution,
+  // so isStream() can answer true solely from the caller's assertion.
   const streamRoot = cell.asSchema({
     type: "object",
     properties: {
@@ -2204,6 +2281,52 @@ async function loadPieceForCallables(
   return { pieces, piece, space, resolvedConfig };
 }
 
+/**
+ * A requested verb absent from the piece's available pattern catalog and
+ * stored callable surface. Carries the public vocabulary and read commands
+ * so callers can recover without treating a verb listing as a data listing.
+ */
+export class UnknownPieceVerbError extends Error {
+  /** Constructs an instance with discovery commands for the resolved target. */
+  constructor(
+    callableName: string,
+    config: PieceConfig,
+    verbs: readonly PieceCallableListing[],
+  ) {
+    const address = canonicalAddress({
+      id: config.piece,
+      space: config.space,
+      scope: config.pieceScope ?? "space",
+    });
+    const names = verbs.map((verb) => {
+      const marks = [
+        ...(verb.tier === "wrapper" ? ["wrapper"] : []),
+        ...(verb.deprecated ? ["deprecated"] : []),
+      ];
+      return `\`${verb.name}\`${marks.length ? ` (${marks.join(", ")})` : ""}`;
+    }).join(", ");
+    super(
+      `Unknown verb \`${callableName}\` on piece \`${config.piece}\`.\n` +
+        `Available verbs (including wrappers and deprecated verbs): ${
+          names || "none"
+        }.\n` +
+        "Verbs are callable operations; readable data is discovered separately.\n" +
+        `Discover fields: ${
+          cliCommand(["piece", "describe", "--cell", address])
+        }\n` +
+        `Read a field: ${
+          cliCommand(["cell", "get", "--cell", address, "<field>"])
+        }`,
+    );
+  }
+
+  /** Error category used by CLI failure reports. */
+  override get name(): string {
+    return "UnknownPieceVerbError";
+  }
+}
+
+/** Resolves a stored callable, consulting the catalog before a stream cast. */
 async function resolvePieceCallable(
   config: PieceConfig,
   callableName: string,
@@ -2233,6 +2356,22 @@ async function resolvePieceCallable(
     callableName,
     "input",
   );
+  let discovery:
+    | Awaited<ReturnType<typeof listCallablesForLoadedPiece>>
+    | undefined;
+  if (!onResultCell && !onInputCell) {
+    discovery = await listCallablesForLoadedPiece(piece);
+    if (
+      !discovery.listing.incomplete &&
+      !discovery.listing.verbs.some((verb) => verb.name === callableName)
+    ) {
+      throw new UnknownPieceVerbError(
+        callableName,
+        { ...resolvedConfig, space },
+        discovery.listing.verbs,
+      );
+    }
+  }
   const resolved = onResultCell ?? onInputCell ??
     (await tryResolvePieceHandler(piece, pieces, space, callableName));
   if (!resolved) {
@@ -2251,11 +2390,12 @@ async function resolvePieceCallable(
     // which is the honest statement — the absence says this resolution cannot
     // describe a result, rather than promising an answer that is always none.
     //
-    // Both thunks read ONE load. They answer from the same compiled pattern
-    // and a help page pulls both, so a loader per thunk would double what a
-    // page costs — and the reason the result is a thunk at all is that the
-    // load is the expensive part.
-    let patternOnce: Promise<any> | undefined;
+    // The thunks share the catalog's compiled pattern when fallback resolution
+    // read it. A stored callable defers that load until documentation or
+    // reference validation needs it.
+    let patternOnce: Promise<any> | undefined = discovery === undefined
+      ? undefined
+      : Promise.resolve(discovery.compiled);
     const loadPattern = () => (patternOnce ??= piece.getPattern());
     return {
       ...resolved,
@@ -2296,11 +2436,13 @@ export interface PieceCallablesListing {
    * none (e.g. harness doubles). */
   pattern: PiecePatternRef | null;
 
-  /** Present when the compiled pattern could not be consulted, which
+  /**
+   * Present when the compiled pattern could not be consulted, which
    * leaves the listing with no source of names at all: `verbs` is then
    * empty, and that emptiness says nothing about what the piece can be asked
-   * to do. Every verb the piece stores still dispatches by name, because
-   * resolution never consults the pattern. */
+   * to do. Stored callables and the stream fallback remain reachable when
+   * the catalog is unavailable.
+   */
   incomplete?: "pattern-unavailable";
 
   verbs: PieceCallableListing[];
@@ -3565,8 +3707,8 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   // above, it is not advisory, and the listing says so when it is missing.
   // `getPattern` throws on a piece carrying no pattern identity and on one
   // whose pattern source will not load in this space — both states in which
-  // every stored verb still DISPATCHES, because resolution never consults the
-  // pattern. So the listing must not fail: it would refuse to describe a
+  // stored callables and the stream fallback remain reachable. So the listing
+  // must not fail: it would refuse to describe a
   // piece it can still drive, to tab-completion and to an agent that could
   // have acted on the answer. What it must not do either is present an empty
   // list as the surface, which is what `incomplete` prevents.
@@ -3700,13 +3842,10 @@ export async function executePieceCallable(
     deps,
     sectionPrefix: commandPrefix,
     renderHelp: async (commandSpec, parsed) => {
-      // The pattern is consulted HERE and nowhere earlier: the parse has
-      // established that a page is being rendered, so the load it costs is
-      // spent on a caller who asked what the verb hands back and what it is
-      // for. Both spellings of the page take it — `--help --json` serves the
-      // declared result as `outputSchema` and the prose as `description`, the
-      // text page enumerates the result's fields and prints the prose as its
-      // summary line.
+      // Help pulls the declared documentation through the resolver's shared
+      // pattern load. `--help --json` serves the declared result as
+      // `outputSchema` and the prose as `description`; the text page lists
+      // the result's fields and prints the prose as its summary line.
       const spec = await withDeclaredPatternDocs(commandSpec, resolved);
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)
