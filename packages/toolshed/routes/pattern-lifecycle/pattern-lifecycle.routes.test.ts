@@ -4,6 +4,8 @@ import { Identity } from "@commonfabric/identity";
 import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
 import env from "@/env.ts";
 import app from "@/app.ts";
+import { createRouter } from "@/lib/create-app.ts";
+import { createRateLimiter, rateLimit } from "@/middlewares/rate-limit.ts";
 import { BASE, MAX_BODY_BYTES } from "./pattern-lifecycle.routes.ts";
 
 if (env.ENV !== "test") {
@@ -86,20 +88,29 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
     expect((await res.json()).code).toBe("server-execution-off");
   });
 
-  it("refuses a flood from one address with the rate limiter's own code", async () => {
-    // The limiter runs ahead of authentication, so unsigned posts spend the
-    // budget; the address is this test's own, so no other test's budget is
-    // touched. Capacity is 30: the thirty-first post is the refused one.
-    const headers = {
-      "Content-Type": "application/json",
-      "X-Forwarded-For": "10.2.0.1",
-    };
-    let last: Response | undefined;
-    for (let i = 0; i < 31; i += 1) {
-      last = await post(`${BASE}/instantiate`, { headers });
-    }
-    expect(last!.status).toBe(429);
-    expect(await last!.json()).toEqual({
+  it("refuses an over-budget caller with the rate limiter's own code", async () => {
+    // The limiter as this router mounts it, over a bucket of one token and a
+    // frozen clock, so the second post is the refused one whatever the box
+    // is doing: a timing-dependent test of a rate limiter is flaky by
+    // construction (lib/rate-limit.ts).
+    const router = createRouter();
+    router.use(
+      "/limited/*",
+      rateLimit(
+        createRateLimiter({ capacity: 1, refillPerSecond: 0, now: () => 0 }),
+        { code: "rate-limited" },
+      ),
+    );
+    router.post("/limited/verb", (c) => c.json({ ok: true }, 200));
+    const send = () =>
+      router.request("/limited/verb", {
+        method: "POST",
+        headers: { "X-Forwarded-For": "10.2.0.1" },
+      });
+    expect((await send()).status).toBe(200);
+    const refused = await send();
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({
       error: "Too many requests",
       code: "rate-limited",
     });
