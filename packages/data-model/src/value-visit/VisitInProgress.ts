@@ -173,15 +173,15 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       case "recurseOf": {
         switch (result.containerTag) {
           case VALUE_TAGS.Array: {
-            return this.#iterateArray(result);
+            return this.#recurseFabricArray(result);
           }
 
           case VALUE_TAGS.FabricInstance: {
-            return this.#iterateFabricInstance(result);
+            return this.#recurseFabricInstance(result);
           }
 
           case VALUE_TAGS.Object: {
-            return this.#iterateFabricPlainObject(result);
+            return this.#recurseFabricPlainObject(result);
           }
 
           default: {
@@ -366,7 +366,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * Recurses into a `FabricArray`, iterating over all its elements, in response
    * to a `recurse` result.
    */
-  #iterateArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
+  #recurseFabricArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
     const array = container as FabricArray;
     const vis = this.#visitor;
@@ -443,7 +443,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * recursion consists of a single sub-value visit, of the instance's state,
    * per its normal codec.
    */
-  #iterateFabricInstance(
+  #recurseFabricInstance(
     result: RecurseOfForm,
   ): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
@@ -484,7 +484,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * Recurses into a `FabricPlainObject`, iterating over all its entries, in
    * response to a `recurse` result.
    */
-  #iterateFabricPlainObject(
+  #recurseFabricPlainObject(
     result: RecurseOfForm,
   ): BaselineVisitResult<ResultType> {
     const { container, doKeys, doValues } = result;
