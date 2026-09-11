@@ -1938,11 +1938,20 @@ describe("piece schema compatibility", () => {
     );
     const widened = argumentWithRootValue({ type: ["number", "string"] });
     const replaced = argumentWithRootValue({ type: "string" });
+    // The candidate's nested map is inert too: its root widens the number,
+    // and the string the nested map declares beside it does not narrow.
+    const widenedBesideInert = argumentWithNestedValue(
+      { type: "string" },
+      { Value: { type: ["number", "string"] } },
+    );
 
     expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
       .not.toThrow();
     expect(() => assertPatternSchemasBackwardCompatible(previous, replaced))
       .toThrow(/argument\.nested\.value/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previous, widenedBesideInert)
+    ).not.toThrow();
   });
 
   it("reads a referenced definition body's refs against the document's map, default included", () => {

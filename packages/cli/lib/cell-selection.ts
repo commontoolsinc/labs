@@ -2738,6 +2738,7 @@ function resolveProjection(
         dereferencedElementSchema(source),
         mask,
         "projected-output",
+        sourceSchema ?? true,
       ),
       KeepAsCell.OnlyStream,
     );
@@ -3292,6 +3293,8 @@ export async function deriveSelectedValue(
     const elementSchema = selectSourceSchema(
       sourceItemSchema,
       predicateItemMask!,
+      "source-read",
+      sourceSchema ?? true,
     );
     const argumentSchema = wrapProperties({
       element: sanitizeSchemaForLinks(
@@ -3322,6 +3325,8 @@ export async function deriveSelectedValue(
     const elementSchema = selectSourceSchema(
       sourceItemSchema,
       projectionItemMask!,
+      "source-read",
+      sourceSchema ?? true,
     );
     const argumentSchema = wrapUnder(
       "element",
