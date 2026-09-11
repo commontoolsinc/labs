@@ -64,6 +64,10 @@ describe("piece-controller", () => {
       );
     }
 
+    /** The argument document as stored, links unresolved. */
+    const rawArgument = (piece: PieceController) =>
+      pieces.getArgument(piece.getCell()).getRaw() as Record<string, unknown>;
+
     it("writes a sibling of a per-user slot this principal has not written", async () => {
       const piece = await create({
         myName: userRedirect(["myName"]),
@@ -84,9 +88,37 @@ describe("piece-controller", () => {
       await piece.input.set("me", ["myName"]);
 
       expect(await piece.input.get(["myName"])).toBe("me");
+      // The redirect is what the shared document keeps; the name went to
+      // this principal's instance behind it.
+      expect(rawArgument(piece).myName).toEqual(userRedirect(["myName"]));
     });
 
-    it("still refuses a sibling write when a linked slot holds a readable wrong-typed value", async () => {
+    it("writes a root value that re-supplies the stored redirect unchanged", async () => {
+      const piece = await create({
+        myName: userRedirect(["myName"]),
+        title: "before",
+      });
+
+      await piece.input.edit((stored) => ({
+        value: { ...(stored as Record<string, unknown>), title: "after" },
+      }));
+
+      expect(await piece.input.get(["title"])).toBe("after");
+      expect(rawArgument(piece).myName).toEqual(userRedirect(["myName"]));
+    });
+
+    it("writes a supplied redirect at the slot it points from", async () => {
+      const piece = await create({
+        myName: userRedirect(["myName"]),
+        title: "before",
+      });
+
+      await piece.input.set(userRedirect(["myName"]), ["myName"]);
+
+      expect(rawArgument(piece).myName).toEqual(userRedirect(["myName"]));
+    });
+
+    it("throws on `myName` when a linked slot holds a readable wrong-typed value", async () => {
       const tx = runtime.edit();
       const other = runtime.getCell(
         session.space,
@@ -106,14 +138,14 @@ describe("piece-controller", () => {
       );
     });
 
-    it("still refuses an explicit `undefined` written at a required slot", async () => {
+    it("throws on `myName` when `undefined` is written at the linked slot", async () => {
       const piece = await create({
         myName: userRedirect(["myName"]),
         title: "before",
       });
 
-      await expect(piece.input.set(undefined, ["title"])).rejects.toThrow(
-        /title/,
+      await expect(piece.input.set(undefined, ["myName"])).rejects.toThrow(
+        /myName/,
       );
     });
   });

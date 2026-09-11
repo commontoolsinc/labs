@@ -193,9 +193,10 @@ export function readStoredLinkChainRaw(
  * local to its descent. Shared acyclic subgraphs avoid repeated expansion,
  * while cyclic graphs retain their path-dependent cutoff behavior.
  *
- * The caller supplies an already-materialized snapshot. Exported from this
- * module for direct cycle tests: eager materialization can reject a cyclic
- * graph before this walk gets to exercise its own termination guards.
+ * The caller supplies an already-materialized snapshot. Exported for the
+ * piece layer's input writes, which stage a document the same way, and for
+ * direct cycle tests: eager materialization can reject a cyclic graph before
+ * this walk gets to exercise its own termination guards.
  */
 export function overlayUnreadableLinkPlaceholders(
   tx: IExtendedStorageTransaction,

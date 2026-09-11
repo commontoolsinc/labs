@@ -476,15 +476,16 @@ An input-cell write is currently sharper:
 <path>` resolves that path through the piece's
 input contract and revalidates the complete input document. It can therefore be
 refused over an unrelated allocated field whose value is readable and violates
-the schema. A field the write leaves untouched whose stored value is a link this
-replica cannot read — a per-user instance another principal owns, a document not
-replicated here — is not judged: its value is owned elsewhere and is checked
-when a reactive read materializes it. Addressing the raw argument cell by id
-avoids that whole-document check, but it is an unsafe recovery tool: it can
-erase link-bearing data that a later `cf cell set` will refuse to restore
-because the serialized link has no durable source contract. The superseded
-`cf set` spelling mounts this same command and has identical validation
-behavior.
+the schema. A field whose stored or supplied value is a link this replica cannot
+read — a per-user instance another principal owns, a document not replicated
+here — is not judged by that check: its value is owned elsewhere and is checked
+when a reactive read materializes it. A write that itself resolves through a
+link is also checked against its destination's contract, which still refuses a
+required field it cannot reach. Addressing the raw argument cell by id avoids
+that whole-document check, but it is an unsafe recovery tool: it can erase
+link-bearing data that a later `cf cell set` will refuse to restore because the
+serialized link has no durable source contract. The superseded `cf set` spelling
+mounts this same command and has identical validation behavior.
 
 ## Linking piece inputs
 
