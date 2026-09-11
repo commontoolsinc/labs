@@ -118,7 +118,7 @@ async function readMember(
     // the browser unit is one unit rather than one per file. The same
     // paths the task names, read without its ignores, so the difference
     // is what an ignore took out rather than what the task never looked
-    // at. No member in the tree has that shape yet.
+    // at.
     const everything = new Set(
       (await memberTestFiles(memberDir, { ...tasks.denoTest, ignores: [] }))
         .map(relative),

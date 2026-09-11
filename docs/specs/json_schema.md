@@ -260,9 +260,18 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   `packages/api/index.ts`.
 
-Generated schemas also hoist named types into `$defs` and reference them via
-`#/$defs/...`. The full TypeScript→schema mapping is specified in the
-schema-generator mapping spec (`docs/specs/schema-generator/`).
+A generated schema places each named type in its root `$defs` and refers to
+it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in
+the schema-generator mapping spec (`docs/specs/schema-generator/`).
+
+A `#/$defs/<name>` ref names a definition of the document root, as JSON
+Schema resolves it. The runtime supports no keyword that starts another
+resource below the root (`$id`, `$anchor`, and the dynamic-ref keywords are
+refused), so a `$defs` on a subschema is inert. Only an embedded or `cid:`
+external ref enters another document, whose own map governs everything below
+it; `docs/specs/content-addressed-schemas.md` gives the `cid:` form. A
+fragment evaluated apart from its document carries a copy of the document's
+map, which opens no scope of its own.
 
 ### Handling of `never`
 

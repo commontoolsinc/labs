@@ -2002,6 +2002,40 @@ describe("setup/start", () => {
     )).rejects.toThrow("requires a fresh source transition");
   });
 
+  it("runSynced refuses a run without a pattern", async () => {
+    const resultCell = runtime.getCell(space, "runSynced without a pattern");
+
+    await expect(runtime.runSynced(
+      resultCell,
+      // JavaScript callers can omit the required TypeScript argument; the
+      // runtime boundary must still refuse by name rather than failing on
+      // the first read of the missing pattern.
+      undefined as never,
+      {},
+    )).rejects.toThrow("requires a pattern");
+  });
+
+  it("runSyncedWithCommit refuses a run without a pattern", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit without a pattern",
+    );
+    const transition = unreachableReceiptSourceTransition();
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      // JavaScript callers can omit the required TypeScript argument; the
+      // runtime boundary must still refuse by name rather than failing on
+      // the first read of the missing pattern.
+      undefined as never,
+      {},
+      {
+        expectedPatternIdentity: transition.expected.pattern,
+        pieceSourceTransition: transition,
+      },
+    )).rejects.toThrow("requires a pattern");
+  });
+
   it("runSyncedWithCommit refuses a source revision ID already in history", async () => {
     const resultCell = runtime.getCell(
       space,
@@ -3186,7 +3220,7 @@ describe("runner utils", () => {
       }
     });
 
-    it("uses nested child-local definitions for defaults", () => {
+    it("reads a nested ref's default from the document's map, not the subtree's own `$defs`", () => {
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -3204,7 +3238,7 @@ describe("runner utils", () => {
       };
 
       expect(extractDefaultValues(schema)).toEqual({
-        nested: { value: "local" },
+        nested: { value: 1 },
       });
     });
 
@@ -3784,27 +3818,32 @@ describe("runner utils", () => {
       });
     });
 
-    it("validates nested defaults against child-local definitions", () => {
-      const value = mergeSchemaDefaults<Record<string, unknown>>(
+    it("validates a nested default against the document's definition, not the subtree's own `$defs`", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+            $defs: { Value: { type: "string" } },
+          },
+        },
+        $defs: { Value: { type: "number" } },
+      };
+
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
         { nested: {} },
         { nested: { value: "local" } },
-        {
-          type: "object",
-          properties: {
-            nested: {
-              type: "object",
-              properties: { value: { $ref: "#/$defs/Value" } },
-              $defs: { Value: { type: "string" } },
-            },
-          },
-          $defs: { Value: { type: "number" } },
-        },
-      );
-
-      expect(value).toEqual({ nested: { value: "local" } });
+        schema,
+      )).toEqual({ nested: {} });
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        { nested: {} },
+        { nested: { value: 2 } },
+        schema,
+      )).toEqual({ nested: { value: 2 } });
     });
 
-    it("keeps definition-body defaults in their child-local scope", () => {
+    it("reads a definition body's default from the document's map, not the body's own `$defs`", () => {
       const schema: JSONSchema = {
         type: "object",
         properties: { item: { $ref: "#/$defs/Entry" } },
@@ -3822,7 +3861,7 @@ describe("runner utils", () => {
       };
 
       expect(extractDefaultValues(schema)).toEqual({
-        item: { value: "local" },
+        item: { value: 1 },
       });
     });
 

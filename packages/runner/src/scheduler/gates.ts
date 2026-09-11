@@ -400,6 +400,28 @@ export class SchedulerGates {
     this.#state.queueExecution();
   }
 
+  /**
+   * Release the freshness gates on `action` for a retry the scheduler owes
+   * (`MarkInvalidOptions.retry`): an armed debounce readiness and throttle
+   * readiness are cleared and the wake recomputed, so the retry is eligible
+   * in the pass queued for it. The convergence backoff (§7.7) stays — it
+   * bounds a non-settling graph, and a retry inside one waits its turn like
+   * every other run. The debounce and throttle POLICIES stay too: the next
+   * genuine invalidation arms them as before.
+   */
+  releaseForRetry(action: Action): void {
+    const gate = this.#gate(action);
+    if (!gate) return;
+    if (
+      gate.debounceReadyAt === undefined && gate.throttleReadyAt === undefined
+    ) {
+      return;
+    }
+    delete gate.debounceReadyAt;
+    delete gate.throttleReadyAt;
+    this.recomputeWakeAfterClear();
+  }
+
   clearBackoff(node: SchedulerNode): boolean {
     const clearedDeadline = node.gate.backoffUntil !== undefined;
     delete node.gate.backoffUntil;
