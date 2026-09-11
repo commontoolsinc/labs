@@ -49,20 +49,26 @@ export function schemaWithRetainedReferenceScope(
   });
 }
 
+/** Whether a durable link schema enforces every acquired follow cap. */
+export function referenceScopeIsSerializable(
+  schema: JSONSchema | undefined,
+  scopeCaps: readonly ScopeCapAtDepth[] | undefined,
+): boolean {
+  const schemaCap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(schema),
+    ContextualFlowControl.getAsCellFollowScopeCap(schema),
+  );
+  return !scopeCaps?.some(({ scope }) =>
+    narrowerScopeCap(scope, schemaCap) !== schemaCap
+  );
+}
+
 /** Refuses a durable link whose schema cannot retain its acquired scope caps. */
 export function assertSerializableReferenceScope(
   schema: JSONSchema | undefined,
   scopeCaps: readonly ScopeCapAtDepth[] | undefined,
 ): void {
-  const schemaCap = narrowerScopeCap(
-    ContextualFlowControl.getSchemaScopeCap(schema),
-    ContextualFlowControl.getAsCellFollowScopeCap(schema),
-  );
-  if (
-    scopeCaps?.some(({ scope }) =>
-      narrowerScopeCap(scope, schemaCap) !== schemaCap
-    )
-  ) {
+  if (!referenceScopeIsSerializable(schema, scopeCaps)) {
     throw new Error(
       "Reference acquisition scope cap cannot be widened for storage",
     );

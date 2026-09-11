@@ -94,6 +94,7 @@ import {
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
+  createSigilLinkFromParsedLink,
   inlineExternalSchemaRefsInValue,
   isCellLink,
   isNormalizedFullLink,
@@ -102,7 +103,10 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { resolveLinkTracingDereferences } from "./link-resolution.ts";
+import {
+  resolveLinkTracingDereferences,
+  schemaScopeForLinkAtDepth,
+} from "./link-resolution.ts";
 import { addressKey, toMemorySpaceAddress } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
@@ -133,6 +137,7 @@ import {
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import {
+  carryCfcReferenceProvenance,
   cfcReferenceBinding,
   cfcReferenceBindingMatches,
   cfcReferenceConfidentialityForView,
@@ -949,8 +954,28 @@ function isMemorySpaceDID(value: string): boolean {
  * reached anywhere inside a value bound for the data model has to become its
  * link first.
  */
-function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
-  return isCell(value) ? value.toSigilLinkOrNull() : value;
+function cellAsLink(
+  value: object | ((...args: never[]) => unknown),
+  retainScope: boolean,
+): unknown {
+  if (!isCell(value)) return value;
+  const serialized = value.toSigilLinkOrNull();
+  if (!retainScope || serialized === null) return serialized;
+  const link = value.getAsNormalizedFullLink();
+  const cap = schemaScopeForLinkAtDepth(
+    { ...link, scopeCaps: undefined },
+    link.path.length,
+  );
+  if (cap === undefined) return serialized;
+  // Immutable inputs carry reference restrictions, not the Cell's value
+  // projection. Keep uncapped identities independent of reader schemas.
+  const scoped = value.asSchema({ scope: cap });
+  return carryCfcReferenceProvenance(
+    scoped,
+    createSigilLinkFromParsedLink(scoped.getAsNormalizedFullLink(), {
+      includeSchema: true,
+    }),
+  );
 }
 
 /**
@@ -1798,15 +1823,11 @@ export class Runtime {
   asyncWorkObserver: ((work: Promise<unknown>) => void) | undefined;
 
   /**
-   * Serving-loop observer of effect-memo hits (server-execution v2
-   * stage G, serving-loop.md §4's hit rule / §7's `memo.hits`): the
-   * effectful builtins report an evaluation that resolved from the
-   * stored request hash — no effect fired. Installed by the
-   * SpaceServer on the serving runtime; undefined everywhere else (the
-   * OFF arm pays one optional call).
+   * Observer of memo hits and completions whose request has been superseded.
+   * The serving loop uses these events for its memo and outbox counters.
    */
   effectMemoObserver:
-    | ((event: { kind: "hit"; id: string }) => void)
+    | ((event: { kind: "hit" | "superseded"; id: string }) => void)
     | undefined;
 
   /**
@@ -3569,11 +3590,11 @@ export class Runtime {
       reference: CfcImmutableReference["reference"];
     }> = [];
     const nestedViews: Array<CfcLabelView | undefined> = [];
-    const flattened = flattenBuilderArtifacts(data, {
-      replaceOther: cellAsLink,
-    });
     const precise =
       (tx?.getCfcState().flowLabelsMode ?? this.cfcFlowLabels) === "persist";
+    const flattened = flattenBuilderArtifacts(data, {
+      replaceOther: (value) => cellAsLink(value, precise),
+    });
     const value = precise
       ? convertCellsToLinks(flattened, {
         allowLinkFreeFabricInstances: true,

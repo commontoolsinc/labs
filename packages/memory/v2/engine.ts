@@ -5259,8 +5259,10 @@ const applyCommitTransaction = (
   // advance the head and fan the unchanged document out to every watcher —
   // the cost that makes blind closure re-installs expensive. The commit
   // still records (the space log advances; a client basis at its seq is
-  // legal and truthful), only the per-document machinery goes quiet.
-  const elidedCidSetOpIndexes = new Set<number>();
+  // legal and truthful), only the per-document machinery goes quiet. The
+  // set holds the content-addressed elisions this pass proves and, below
+  // it, every operation of an identity commit.
+  const elidedOpIndexes = new Set<number>();
   const elidableCidIds = new Set<string>();
   const requiredSchemaRefs = new Set<string>();
   // `$alias` records are NOT scanned: they are Pattern-binding vocabulary
@@ -5453,7 +5455,7 @@ const applyCommitTransaction = (
       // A duplicate of a stored-identical set elides with it; a duplicate
       // within a first install keeps today's write-both behavior.
       if (elidableCidIds.has(operation.id)) {
-        elidedCidSetOpIndexes.add(opIndex);
+        elidedOpIndexes.add(opIndex);
       }
       continue;
     }
@@ -5470,7 +5472,7 @@ const applyCommitTransaction = (
           `memory v2 commit cannot change content-addressed document ${operation.id}`,
         );
       }
-      elidedCidSetOpIndexes.add(opIndex);
+      elidedOpIndexes.add(opIndex);
       elidableCidIds.add(operation.id);
     }
     (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
@@ -5542,15 +5544,225 @@ const applyCommitTransaction = (
     }
   }
 
-  validateConfirmedReads(engine, branch, commit, { principal, sessionId });
-  const resolvedPendingReads = resolvePendingReads(
-    engine,
-    sessionKey,
-    sessionId,
-    principal,
-    branch,
-    commit,
-  );
+  // An identity commit leaves every document it writes unchanged, permitting
+  // staleness to be waived for explicitly elidable reads (03-commit-model.md
+  // §3.6.1). Required reads protect outcomes beyond those document operations
+  // and remain validated. Only the staleness scan is waived: a pending read
+  // naming an unresolved
+  // or rejected layer still refuses the commit, which is what keeps the
+  // client's cascade and the server's verdict in agreement (09-invariants.md,
+  // INV-4 and INV-6). Every comparison reads the stored document under the
+  // same identity the write would apply under, so a scoped instance
+  // compares against its own partition.
+  //
+  // The proof is per document, over the commit's `set` and `patch`
+  // operations on it in order: replayed on the document as the commit's
+  // read of it saw it, the sequence yields the stored document, and
+  // replayed on the stored document it leaves that unchanged. The second
+  // condition is for the writer's own replica, which re-folds the
+  // operations over whatever confirmed base it holds when the accept
+  // arrives: a sequence idempotent on the durable value lands on that value
+  // from any base between the read and the head, where a positional splice
+  // replayed over a base already carrying its elements would duplicate
+  // them.
+  type DocumentOps = Array<
+    Extract<typeof commit.operations[number], { op: "set" | "patch" }>
+  >;
+  const replay = (
+    base: EntityDocument | undefined,
+    operations: DocumentOps,
+  ): EntityDocument | undefined => {
+    let document = base;
+    for (const operation of operations) {
+      document = operation.op === "set"
+        ? operation.value as EntityDocument
+        : applyPatchToDocument(document, operation.patches);
+    }
+    return document;
+  };
+  // The document as the commit's read of it saw it, on the commit's branch
+  // under the write's scope. A pending read is the view the value came
+  // through: the document at the read's declared confirmed basis with
+  // exactly the own layers the read names replayed on it in local order.
+  // The layers' resolution seqs would not do: the durable document at the
+  // highest one carries every foreign write on other paths that landed
+  // before it, which the reader had not integrated, so a patch judged from
+  // there could pass as an identity while the reader's own view would not
+  // have produced the stored document. A pending read that declares no
+  // basis (a legacy client) leaves the view unreconstructable, and such a
+  // commit gets no exemption. Where a commit also carries a confirmed read
+  // of the same document (a shape-only read that names the non-speculative
+  // stack), the pending read decides. A confirmed read's view is the
+  // document at its seq. A read names its branch only when that differs
+  // from the commit's, exactly as the staleness check reads it; a read
+  // that names another branch says nothing about this one and is passed
+  // over. A basis below the branch's creation seq is not a state of this
+  // branch (06-branching.md §6.10.1), so such a read leaves the view
+  // unreconstructable as well. With no read of the document at all the
+  // sequence is an identity only where it is idempotent, so the stored
+  // document is the basis.
+  type Basis =
+    | { known: true; document: EntityDocument | undefined }
+    | { known: false };
+  const REPLAYABLE_LAYER_OPS = new Set(["set", "patch", "delete"]);
+  const branchCreatedSeq = branch === DEFAULT_BRANCH
+    ? 0
+    : getBranch(engine, branch)?.createdSeq ?? Number.POSITIVE_INFINITY;
+  const basisOf = (
+    first: DocumentOps[number],
+    stored: EntityDocument,
+    at: (seq: number) => EntityDocument | null,
+  ): Basis => {
+    const sameDocument = (candidate: { id: string; scope?: unknown }) =>
+      candidate.id === first.id &&
+      normalizeScope(
+          candidate.scope as Parameters<typeof normalizeScope>[0],
+        ) ===
+        normalizeScope(first.scope);
+    const documentAt = (seq: number): EntityDocument | undefined =>
+      seq === 0 ? undefined : at(seq) ?? undefined;
+    const pending = commit.reads.pending.find(sameDocument);
+    if (pending !== undefined) {
+      if (
+        pending.basisSeq === undefined || pending.basisSeq < branchCreatedSeq
+      ) {
+        return { known: false };
+      }
+      let document = documentAt(pending.basisSeq);
+      const layers = [...pendingReadLayers(pending)].sort((a, b) => a - b);
+      for (const localSeq of layers) {
+        const row = engine.statements.selectExistingCommit.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as CommitRow | undefined;
+        if (row === undefined || (row.branch || DEFAULT_BRANCH) !== branch) {
+          return { known: false };
+        }
+        const layer = decodeMemoryBoundary(row.original) as ClientCommit;
+        for (const operation of layer.operations) {
+          if (operation.op === "sqlite" || !sameDocument(operation)) continue;
+          // An op-field operation on the document is not replayable here.
+          if (!REPLAYABLE_LAYER_OPS.has(operation.op)) return { known: false };
+          document = operation.op === "delete"
+            ? undefined
+            : replay(document, [operation as DocumentOps[number]]);
+        }
+      }
+      return { known: true, document };
+    }
+    const confirmed = commit.reads.confirmed.find((candidate) =>
+      sameDocument(candidate) && (candidate.branch ?? branch) === branch
+    );
+    if (confirmed === undefined) return { known: true, document: stored };
+    if (confirmed.seq < branchCreatedSeq) return { known: false };
+    return { known: true, document: documentAt(confirmed.seq) };
+  };
+  // Proving the identity reads the stored document and, for a patch, the
+  // document at the reader's basis, so it runs only once a staleness check
+  // has refused the commit: the cost lands on the refusal path alone, and
+  // a commit that validates never materializes a revision it did not need.
+  // The proof is per document, over every operation the commit applies to
+  // it in order: a commit that creates a document with a `set` and then
+  // patches it is one write of the final value, and only the replay of the
+  // whole sequence can compare with what is stored.
+  const isIdentityCommit = (): boolean => {
+    if (commit.operations.length === 0) return false;
+    type DocOps = { opIndex: number; operations: DocumentOps };
+    const byDocument = new Map<string, DocOps>();
+    for (const [opIndex, operation] of commit.operations.entries()) {
+      if (operation.op !== "set" && operation.op !== "patch") return false;
+      // A space's ACL document, the one entity named by a DID, has its own
+      // admission (09-invariants.md, INV-12 and INV-13): a genesis that
+      // loses its race is refused so that one commit is the genesis, and an
+      // identical re-seal recorded as a no-op would be a second.
+      if (operation.id.startsWith("of:did:")) return false;
+      if (operation.id.startsWith("cid:")) {
+        if (!elidedOpIndexes.has(opIndex)) return false;
+        continue;
+      }
+      const key = opDocKey(opIndex, operation);
+      const group = byDocument.get(key);
+      if (group === undefined) {
+        byDocument.set(key, { opIndex, operations: [operation] });
+      } else {
+        group.operations.push(operation);
+      }
+    }
+    for (const { opIndex, operations } of byDocument.values()) {
+      const first = operations[0];
+      const at = (seq?: number) =>
+        read(engine, {
+          id: first.id,
+          branch,
+          seq,
+          scope: first.scope,
+          principal: scanPrincipal,
+          sessionId: scanSession,
+          scopeKey: scopeKeyByOpIndex.get(opIndex),
+        });
+      const stored = at();
+      if (stored === null) return false;
+      // A view that cannot be reconstructed, or a patch that cannot be
+      // applied to one of the two bases, proves no identity, and the
+      // staleness refusal the commit arrived with stands; the ordinary
+      // apply path reports a patch's own failure on the retry.
+      try {
+        const basis = basisOf(first, stored, at);
+        if (!basis.known) return false;
+        const fromBasis = replay(basis.document, operations);
+        const onStored = replay(stored, operations);
+        if (
+          !valueEqual(fromBasis as FabricValue, stored as FabricValue) ||
+          !valueEqual(onStored as FabricValue, stored as FabricValue)
+        ) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+  let resolvedPendingReads: Array<{ localSeq: number; seq: number }>;
+  try {
+    validateConfirmedReads(engine, branch, commit, { principal, sessionId });
+    resolvedPendingReads = resolvePendingReads(
+      engine,
+      sessionKey,
+      sessionId,
+      principal,
+      branch,
+      commit,
+    );
+  } catch (error) {
+    // Only a staleness refusal has an identity escape. A refusal for an
+    // unresolved or rejected dependency carries no conflict seq and stands.
+    if (
+      !(error instanceof ConflictError) || error.conflictSeq === undefined ||
+      !isIdentityCommit()
+    ) {
+      throw error;
+    }
+    validateConfirmedReads(
+      engine,
+      branch,
+      commit,
+      { principal, sessionId },
+      { elideOptionalStaleness: true },
+    );
+    for (const opIndex of commit.operations.keys()) {
+      elidedOpIndexes.add(opIndex);
+    }
+    resolvedPendingReads = resolvePendingReads(
+      engine,
+      sessionKey,
+      sessionId,
+      principal,
+      branch,
+      commit,
+      { elideOptionalStaleness: true },
+    );
+  }
 
   // Event-append admission (Phase 3, events.md §1/§4): the dedupe-horizon
   // CAS, the firedAt validation-or-stamp, and the sidecar write guard.
@@ -5692,7 +5904,7 @@ const applyCommitTransaction = (
         scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
       });
     }
-    if (elidedCidSetOpIndexes.has(opIndex)) continue;
+    if (elidedOpIndexes.has(opIndex)) continue;
     // Event-append stamping (Phase 3): a declared append's entry gets its
     // stream `seq` (this commit's) and admission-resolved `firedAt`
     // written into a CLONE of the op — the caller's operation objects are
@@ -5778,9 +5990,9 @@ const applyCommitTransaction = (
     branch,
     revisions,
     ...(operationResolutions.length > 0 ? { operationResolutions } : {}),
-    ...(elidedCidSetOpIndexes.size > 0
+    ...(elidedOpIndexes.size > 0
       ? {
-        elidedOpIndexes: [...elidedCidSetOpIndexes].toSorted((a, b) => a - b),
+        elidedOpIndexes: [...elidedOpIndexes].toSorted((a, b) => a - b),
       }
       : {}),
   };
@@ -6179,11 +6391,22 @@ const validateCommitPreconditions = (
   }
 };
 
+/** Validates the read's opt-in to identity staleness elision. */
+const validateReadValidation = (read: { validation?: unknown }): void => {
+  if (
+    read.validation !== undefined && read.validation !== "required" &&
+    read.validation !== "elidable"
+  ) {
+    throw new ProtocolError("unsupported commit read validation");
+  }
+};
+
 const validateConfirmedReads = (
   engine: Engine,
   branch: BranchName,
   commit: ClientCommit,
   scopeContext: { principal?: string; sessionId: SessionId },
+  options: { elideOptionalStaleness?: boolean } = {},
 ): void => {
   // A commit is evaluated under one connection principal/session context.
   // Every confirmed read in the commit resolves declared user/session scope
@@ -6192,9 +6415,13 @@ const validateConfirmedReads = (
   const conflicts: ConfirmedReadConflict[] = [];
   const staleInstances = new Map<BranchName, Map<ScopeKey, Set<EntityId>>>();
   for (const read of commit.reads.confirmed) {
+    validateReadValidation(read);
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
+    if (options.elideOptionalStaleness && read.validation === "elidable") {
+      continue;
+    }
     const scope = read.scope ?? DEFAULT_SCOPE;
     let staleScopes = staleInstances.get(readBranch);
     let staleIds = staleScopes?.get(scopeKey);
@@ -6311,10 +6538,13 @@ const resolvePendingReads = (
   principal: string | undefined,
   branch: BranchName,
   commit: ClientCommit,
+  options: { elideOptionalStaleness?: boolean } = {},
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
   for (const read of commit.reads.pending) {
+    validateReadValidation(read);
+    const scopeKey = resolveScopeKey(read.scope, { principal, sessionId });
     // An array localSeq names EVERY pending layer the read's view sat on:
     // each element must have resolved to an accepted commit, and staleness
     // is checked exactly once, from the basis §3.6.3 selects — the declared
@@ -6354,13 +6584,19 @@ const resolvePendingReads = (
     // basisSeq) keeps the max-dependency basis, so the over-advance
     // deviation persists for it alone
     // (docs/specs/memory-v2/09-invariants.md, INV-1).
+    // The declared basis is validated whether or not the scan runs: an
+    // identity commit may waive an elidable read's staleness, never its
+    // protocol requirements.
     const trueBasis = pendingReadBasisSeq(engine, read);
+    if (options.elideOptionalStaleness && read.validation === "elidable") {
+      continue;
+    }
     const conflictSeq = trueBasis !== undefined
       ? findConflictSeq(
         engine,
         branch,
         read.id,
-        resolveScopeKey(read.scope, { principal, sessionId }),
+        scopeKey,
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
@@ -6370,7 +6606,7 @@ const resolvePendingReads = (
         engine,
         branch,
         read.id,
-        resolveScopeKey(read.scope, { principal, sessionId }),
+        scopeKey,
         basis!.seq,
         read.path,
         read.nonRecursive ?? false,
@@ -6380,6 +6616,13 @@ const resolvePendingReads = (
         `stale pending read: ${read.id} via localSeq ${
           basis!.localSeq
         } conflicted with seq ${conflictSeq}`,
+        [{
+          of: read.id,
+          scope: normalizeScope(read.scope),
+          ...(branch === DEFAULT_BRANCH ? {} : { branch }),
+          seq: trueBasis ?? basis!.seq,
+          conflictSeq,
+        }],
       );
     }
   }

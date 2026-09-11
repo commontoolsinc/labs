@@ -327,7 +327,11 @@ export class Client {
     this.#spaces.delete(session);
   }
 
-  async request<Result>(message: FabricPlainObject): Promise<Result> {
+  /** Runs `beforeSend` after connection readiness, before registering or sending. */
+  async request<Result>(
+    message: FabricPlainObject,
+    beforeSend?: () => void,
+  ): Promise<Result> {
     await this.#ensureConnected();
     // `ensureConnected()` is async even when the transport is already live, so
     // close() can run while this request is suspended there. Recheck before
@@ -336,6 +340,7 @@ export class Client {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
+    beforeSend?.();
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     // The rejection handler below only attaches after the transport send
@@ -913,6 +918,7 @@ export class SpaceSession {
     ) {
       throw protocolError("memory server does not support apply-op");
     }
+    this.#assertReadValidationCapability(commit);
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;
@@ -1778,6 +1784,19 @@ export class SpaceSession {
     }
   }
 
+  #assertReadValidationCapability(commit: ClientCommit): void {
+    if (
+      this.#client.serverFlags?.readValidation !== true &&
+      [...commit.reads.confirmed, ...commit.reads.pending].some((read) =>
+        read.validation !== "elidable"
+      )
+    ) {
+      throw protocolError(
+        "memory server does not support required read validation",
+      );
+    }
+  }
+
   #sendOutstandingCommit(
     localSeq: number,
     pendingCommit: {
@@ -1804,6 +1823,11 @@ export class SpaceSession {
           space: this.space,
           sessionId: this.#sessionId,
           commit: pendingCommit.commit,
+        }, () => {
+          if (!this.#readyOnConnection || !this.#client.isConnected()) {
+            throw toConnectionError();
+          }
+          this.#assertReadValidationCapability(pendingCommit.commit);
         });
         this.#noteResult(applied.seq);
         if (this.#outstandingCommits.get(localSeq) === pendingCommit) {

@@ -1794,38 +1794,44 @@ describe("generateObject with tools", () => {
         confidence: 0.91,
         reasoning: "The briefing was not approved.",
       });
-      expect(cfcLabelViewForCell(resolvedResult)).toMatchObject({
-        entries: expect.arrayContaining([
-          {
-            path: ["action"],
-            label: {
-              confidentiality: [promptInfluence],
-              integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM],
-            },
-          },
-          {
-            path: ["approved"],
-            label: {
-              confidentiality: [promptInfluence],
-              integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM],
-            },
-          },
-          {
-            path: ["confidence"],
-            label: {
-              confidentiality: [promptInfluence],
-              integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM],
-            },
-          },
-          {
-            path: ["reasoning"],
-            label: {
-              confidentiality: [promptRisk, promptInfluence],
-              integrity: [LLM_DERIVED_ATOM],
-            },
-          },
-        ]),
+      const entries = cfcLabelViewForCell(resolvedResult)?.entries;
+      expect(entries).toBeDefined();
+      // Declared confidentiality and value-bound runtime evidence are separate
+      // components. An attestation must not become a lasting store policy.
+      for (const field of ["action", "approved", "confidence"]) {
+        expect(entries).toContainEqual({
+          path: [field],
+          label: { confidentiality: [promptInfluence] },
+        });
+        expect(entries).toContainEqual({
+          path: [field],
+          observes: "value",
+          label: { integrity: [INJECTION_SAFE_ATOM, LLM_DERIVED_ATOM] },
+        });
+      }
+      expect(entries).toContainEqual({
+        path: ["reasoning"],
+        label: { confidentiality: [promptRisk, promptInfluence] },
       });
+      expect(entries).toContainEqual({
+        path: ["reasoning"],
+        observes: "value",
+        label: { integrity: [LLM_DERIVED_ATOM] },
+      });
+      // Only these concrete inert fields are certified: neither reasoning nor
+      // a covering root or wildcard may inherit an InjectionSafe attestation.
+      expect(
+        entries?.filter((entry) =>
+          entry.label.integrity?.some((atom) =>
+            typeof atom === "object" && atom !== null &&
+            "type" in atom && atom.type === INJECTION_SAFE_ATOM.type
+          )
+        ).map((entry) => entry.path),
+      ).toEqual([
+        ["action"],
+        ["approved"],
+        ["confidence"],
+      ]);
     } finally {
       await runtime.dispose();
       await storageManager.close();

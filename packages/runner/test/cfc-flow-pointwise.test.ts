@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -8,6 +9,7 @@ import {
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type FactoryInput } from "../src/builder/types.ts";
 
@@ -595,11 +597,31 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await result.pull();
     await runtime.idle();
 
-    const sc = structureConfidentiality(
-      resolvedContainerId(result.key("kept")),
+    const containerId = resolvedContainerId(result.key("kept"));
+    const selectedEntry = entriesOf(containerId).find((entry) =>
+      entry.origin === "link" && entry.observes === "followRef" &&
+      entry.path.join("/") === "0"
     );
+    expect(selectedEntry).toBeDefined();
+    expect(selectedEntry!.label.integrity).toContainEqual(
+      expect.objectContaining({ type: CFC_ATOM_TYPE.LinkReference }),
+    );
+    expect(selectedEntry!.label.confidentiality ?? []).toEqual([]);
+    const sc = structureConfidentiality(containerId);
     expect(sc).not.toContainEqual("alice-secret");
     expect(sc).not.toContainEqual("bob-secret");
+
+    // The selected identity stays public; consuming its payload acquires only
+    // that member's confidentiality.
+    const probe = runtime.edit();
+    const selected = result.key("kept").withTx(probe).key(0).resolveAsCell();
+    expect(selected.getAsNormalizedFullLink().id).toBe(
+      el0.getAsNormalizedFullLink().id,
+    );
+    expect(deriveFlowJoin(probe).confidentiality).toEqual([]);
+    expect(selected.key("n").get()).toBe(1);
+    expect(deriveFlowJoin(probe).confidentiality).toEqual(["alice-secret"]);
+    probe.abort();
   });
 
   it("filter: structure label re-stamps from J when the list grows", async () => {

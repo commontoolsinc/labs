@@ -14,7 +14,13 @@ refinement are.)
 ## Results
 
 Checked with TLC 2.19 (the atomic configs finish in under a minute each, the
-channel configs in one to three minutes, and the deep config in about five):
+channel configs in one to three minutes, and the deep config in about five).
+`IdentityMode` is `none` and `Values` is the single value `{"v"}` in every
+row that does not say otherwise. It is the mode that keeps elision out of
+those rows, not the alphabet: with one value a stale write of `v` onto a
+path already holding `v` satisfies `IsIdentity` just the same, and would be
+elided under `elide`. The single value is what leaves those rows' reachable
+state graphs exactly the ones the earlier runs certified, to the digit.
 
 | Config | DepMode | BasisMode | DeliveryMode | Result |
 | --- | --- | --- | --- | --- |
@@ -24,6 +30,9 @@ channel configs in one to three minutes, and the deep config in about five):
 | `PendingStacks_Filtered5.cfg` | `filtered` | `confirmed` | `atomic` | **All invariants hold** at `MaxTotal = 5` with single-path writes (110.7M distinct states, ~5 min) — deep enough for a foreign write to reject a *middle* pending layer beneath a reader, the case where overlap-filtering actually drops a dependency. |
 | `PendingStacks_Channel.cfg` | `fullstack` | `confirmed` | `channel` (delayed verdict delivery) | **All invariants hold**, including `AcceptedVersusDropped` (INV-6), at 39,966,805 distinct states, `MaxTotal = 4`, ~90s. Certifies the decided-but-unprocessed window: commits built there name decided-dead layers and are refused by the dead-dependency admission rule; commits built after the processed rejection's drop record sparse arrays (§3.5's view-relative completeness). Negative control: deleting `HasDeadDep` from `Process` violates `CascadeTotality` within a second — the rule is load-bearing, not decorative. |
 | `PendingStacks_ChannelFiltered.cfg` | `filtered` | `confirmed` | `channel` | **All invariants hold** (39,967,453 distinct states, ~90s) — the overlap-filtered narrowing composed with delayed delivery, so the two live refinement directions are certified together rather than only separately. |
+| `PendingStacks_Identity.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold** — `ContentCoherence`, `ElidedUnchanged`, `CascadeTotality`, `MonotonicResolution` — at 304,439,185 distinct states, `MaxTotal = 4`, ~14 min. Certifies the identity-commit acceptance of §3.6.1: a commit refused for staleness and proved to change no path's content, judged from the content its reader saw (its confirmed basis plus the values its own named layers wrote), is accepted with its writes elided, and no commit that wrote anything is ever admitted on an observation whose content differs from durable history — including a commit built on top of an elided layer. |
+| `PendingStacks_IdentityWriterForm.cfg` | `fullstack` | `confirmed` | `atomic`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **ReadCoherenceOfWrites violated** at depth 8, within seconds — the same run as the row above held to the writer-set form of INV-1 over the commits that wrote something. The trace: a foreign commit writes `p1 = a`; the reader's own stale `p1 = a` is elided at the next seq; the reader integrates the foreign write, keeps its elided layer on the stack, and its next commit observes `p1` through that layer — contributors `{1, 2}` where durable history holds `{1}`, the same content either way. Kept as the witness that the content form is the statement under elision, not a weakening. |
+| `PendingStacks_ChannelIdentity.cfg` | `fullstack` | `confirmed` | `channel`, `IdentityMode = "elide"`, `Values = {"a", "b"}` | **All invariants hold**, `AcceptedVersusDropped` included, at 169,592,041 distinct states, `MaxTotal = 4` with single-path writes (`WriteChoices <- SingletonWrites`, the Filtered5 bound), ~9 min. The identity acceptance composed with delayed delivery: an elided layer's accept is processed by `Deliver`, stands on the stack through the parking window, and is named by builds there without a durable write behind it. With multi-path writes this config passes 680M distinct states in half an hour without finishing, which is why the bound is narrowed rather than the depth. |
 
 Read the violation together with the catalog: the maxdep counterexample is an
 INV-1 failure through the staleness basis, orthogonal to dependency
@@ -111,10 +120,15 @@ or missed contributor directly.
   a confirmed integration point `csn`, and a localSeq counter.
 - **Actions**: `Build` (client constructs a commit against one snapshot —
   confirmed prefix plus pending stack — recording observations and the
-  dependency set the active `DepMode` prescribes), `Process` (server FIFO
+  dependency set the active `DepMode` prescribes, and carrying one value
+  from `Values` for every path it writes), `Process` (server FIFO
   admission: dead-dependency check, then staleness scan per `BasisMode`,
   then accept-and-append or reject — with the client's mirrored drop fused
-  in under `atomic` delivery, server-side only under `channel`), `Deliver`
+  in under `atomic` delivery, server-side only under `channel`; under
+  `IdentityMode = "elide"` a staleness refusal first proves the commit an
+  identity over content, and an identity is accepted with its writes
+  elided: it takes a seq and resolves its localSeq, and appends nothing to
+  any path's content), `Deliver`
   (channel mode: the client processes the next verdict in submission
   order — for a rejection, the drop and transitive cascade), and
   `Integrate` (client advances its confirmed view one log entry; own
@@ -128,7 +142,15 @@ or missed contributor directly.
   INV-1 of `09-invariants.md`; `CascadeTotality` and `MonotonicResolution`
   cover INV-4 and INV-5, and `AcceptedVersusDropped` covers INV-6 (checked
   meaningfully in channel mode, where a local drop can precede or replace
-  the victim's own server verdict).
+  the victim's own server verdict). Under `IdentityMode = "elide"` the
+  invariant is `ContentCoherence`, the same equality over the VALUES
+  observed and durable rather than the writers: an elided layer stays in
+  its session's stack and is observed there as a contributor while durable
+  history holds the foreign write that carried the same value, so writer
+  sets differ where content does not, and `ReadCoherenceOfWrites` is kept
+  as the checked witness of that. `ElidedUnchanged` pins the premise of
+  INV-1's recorded exemption: every path an elided commit would have
+  written already held its value at its resolution point.
 
 ## Abstractions, and why each is safe to make
 
@@ -142,12 +164,34 @@ or missed contributor directly.
   for admission logic, but it does NOT check the matcher's own
   refinements — that is the differential harness's job
   (`packages/memory/test/v2-differential-consistency.test.ts`).
+- **Explicitly elidable dependencies.** Identity-mode reads represent callers
+  whose observations decide only document operations. Required dependencies and
+  external outcomes are outside this model; the engine must validate their
+  staleness even when document operations elide. The engine/client required-read
+  tests and Runtime effect race test cover that separate contract.
 - **Appends-only values.** The value of a path is the set of accepted writes
   to it. This makes observations mergeable (a reader through a stack observes
   base + every contributing layer, exactly the mergeable-collection-writes
   situation CT-1872 arose from) and makes coherence a set equality instead of
   a value comparison. Last-writer-wins replace semantics would only coarsen
   observations, hiding contributor differences the set form exposes.
+- **Content is a set of values.** Each commit carries one value from
+  `Values` for every path it writes, and a path's content is the set of
+  values its accepted writes carried. Writing a value the path already
+  holds changes nothing, which is what an identity commit
+  (`03-commit-model.md` §3.6.1) is in this abstraction, and the set-union
+  fold is the idempotence the rule requires of it. The identity proof
+  replays a write from the content the reader saw — a confirmed read's
+  basis, or for a pending read the content at its confirmed basis plus the
+  values its own named layers wrote, which is the reconstructed view the
+  engine's `basisOf` builds — and asks that only the commit's own value
+  landed since. Two values are enough to tell an identity from a real
+  write. What the alphabet does not model is a commit's ordered sequence
+  of operations on one document: a commit here is one write of one value
+  per path, which is the engine's per-document rule with the sequence
+  collapsed to its final effect. The replay of an arbitrary sequence, and
+  what a patch can do to a document beyond adding a value, is the engine
+  unit tests' and the differential harness's to check.
 - **Verdict delivery is a mode.** `atomic` fuses the server's verdict with
   the client's mirrored cascade in one action — the original abstraction,
   kept so the historical configs certify the same state graphs (the
@@ -247,9 +291,9 @@ outside both models.
 ## Changing the models
 
 Per the change discipline in `09-invariants.md`: if a change introduces a new
-dependency-recording shape or staleness basis, add it as a `DepMode` /
-`BasisMode` variant plus a config, and record the expected/observed result in
-the table above. The delivery model has the same obligation on its own axes:
+dependency-recording shape, staleness basis, or acceptance rule, add it as a
+`DepMode` / `BasisMode` / `IdentityMode` variant plus a config, and record
+the expected/observed result in the table above. The delivery model has the same obligation on its own axes:
 a change to the reconnect diff base, to what a declaration may claim or how
 the server reads one, or to removal semantics (union shrink, the zero-watch
 reconcile, uncovered-document retraction) is a reason to rerun all three

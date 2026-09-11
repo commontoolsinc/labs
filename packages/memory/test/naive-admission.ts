@@ -29,6 +29,8 @@
 //   - Scope and branch dimensions are not modeled; the generator stays on
 //     the default branch and space scope.
 
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+
 import type { ClientCommit, Operation, PatchOp } from "../v2.ts";
 
 export interface NaiveOp {
@@ -126,6 +128,47 @@ const conflictSeq = (
 };
 
 /**
+ * Whether `commit` leaves every document `store` holds as it is: an identity
+ * commit, which the engine accepts without a staleness check because
+ * applying it changes nothing (03-commit-model.md §3.6.1). Per document,
+ * the commit's `set` and `patch` operations replayed in order on the stored
+ * document must leave it unchanged. The engine's rule also replays the
+ * sequence from the view the reader saw, which this model has no history to
+ * reconstruct, so the engine accepts a subset of what this predicate
+ * admits, the direction INV-2 requires.
+ */
+export const naiveIsIdentityCommit = (
+  store: ReadonlyMap<string, Record<string, unknown>>,
+  commit: ClientCommit,
+): boolean => {
+  if (commit.operations.length === 0) return false;
+  const ids = new Set<string>();
+  for (const op of commit.operations) {
+    if (op.op !== "set" && op.op !== "patch") return false;
+    ids.add(op.id);
+  }
+  // Replay every operation on a document, in order, over the stored
+  // document; the sequence is an identity where it lands back on it.
+  for (const id of ids) {
+    const stored = store.get(id);
+    if (stored === undefined) return false;
+    const replayed = new Map([[id, clone(stored)]]);
+    try {
+      naiveApply(
+        replayed,
+        commit.operations.filter((op) => op.op !== "sqlite" && op.id === id),
+      );
+    } catch {
+      return false;
+    }
+    if (!valueEqual(replayed.get(id) as FabricValue, stored as FabricValue)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * The reference admission decision for `commit` from `sessionId`, given the
  * accepted history so far. Mirrors §3.6 exactly, without shortcuts.
  */
@@ -133,8 +176,13 @@ export const naiveAdmit = (
   history: NaiveHistory,
   sessionId: string,
   commit: ClientCommit,
+  store?: ReadonlyMap<string, Record<string, unknown>>,
 ): NaiveVerdict => {
+  // Identity admission waives only explicitly elidable staleness.
+  const identity = store !== undefined &&
+    naiveIsIdentityCommit(store, commit);
   for (const read of commit.reads.confirmed) {
+    if (identity && read.validation === "elidable") continue;
     const cs = conflictSeq(history, read.id, read.path, read.seq);
     if (cs !== null) {
       return {
@@ -159,6 +207,7 @@ export const naiveAdmit = (
       }
       if (basis === undefined || seq > basis) basis = seq;
     }
+    if (identity && read.validation === "elidable") continue;
     const cs = read.basisSeq !== undefined
       ? conflictSeq(history, read.id, read.path, read.basisSeq, {
         sessionId,
@@ -181,12 +230,17 @@ export const naiveRecord = (
   sessionId: string,
   commit: ClientCommit,
   seq: number,
+  // The operations the engine elided as changing nothing; they wrote no
+  // revision, so a later reader's scan must not find them either.
+  elidedOpIndexes: readonly number[] = [],
 ): void => {
   history.accepted.push({
     seq,
     sessionId,
     localSeq: commit.localSeq,
-    ops: toNaiveOps(commit.operations),
+    ops: toNaiveOps(
+      commit.operations.filter((_, index) => !elidedOpIndexes.includes(index)),
+    ),
   });
   let sessionRes = history.resolution.get(sessionId);
   if (!sessionRes) {

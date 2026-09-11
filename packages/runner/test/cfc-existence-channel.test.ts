@@ -1019,9 +1019,8 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
   });
 
   it("the frozen existence entry re-derives idempotently", async () => {
-    // Idempotence stays per-class (SC-11): repeating the same clean overwrite
-    // must not churn the metadata — the grown existence entry re-derives
-    // identically.
+    // Repeating a clean overwrite preserves frozen existence and its protected
+    // metadata without retaining a value observation from the original write.
 
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ec-idem-source", { n: 1 }, [
@@ -1041,7 +1040,27 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       expect((await tx.commit()).ok).toBeDefined();
     };
     await overwrite({ copied: false });
-    const first = JSON.stringify(entriesOf(outId));
+    const firstEntries = entriesOf(outId);
+    expect(firstEntries.map((entry) => ({
+      path: entry.path,
+      origin: entry.origin,
+      observes: entry.observes,
+      confidentiality: entry.label.confidentiality,
+    }))).toEqual([
+      {
+        path: [],
+        origin: "derived",
+        observes: "shape",
+        confidentiality: ["secret"],
+      },
+      {
+        path: ["cfc", "labels", "value"],
+        origin: "label-metadata",
+        observes: "labelMetadata",
+        confidentiality: ["secret"],
+      },
+    ]);
+    const first = JSON.stringify(firstEntries);
     await overwrite({ copied: 3 });
     expect(JSON.stringify(entriesOf(outId))).toEqual(first);
   });

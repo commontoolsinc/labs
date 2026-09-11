@@ -37,8 +37,7 @@ conforming, and the conforming ones are reachable only along a partial order.
   provenance mints still run (e.g. the external-ingest mark), but no reason ever
   rejects. CFC is descriptive only. This posture exists only by **explicitly
   passing** `cfcEnforcementMode: "disabled"` — no shipped host does today
-  (toolshed constructs its `Runtime` with no CFC options and therefore runs the
-  `enforce-explicit` default; see §3).
+  (toolshed selects `enforce-explicit` with persistent flow labels; see §3).
 - **`observe`** — the boundary pass runs and records reasons as **diagnostics**;
   the commit still succeeds. Used to measure reason volume before enforcing.
 - **`enforce-explicit`** — a recorded reason **rejects** the commit, and that
@@ -564,13 +563,17 @@ The strict-only delta is:
     both call `enqueuePostCommitEffect` themselves — has none, so its stores
     keep their own ceilings until the gate that should own them exists. Most
     builtins are in neither group: a list coordinator, `ifElse`, `when`,
-    `unless`, `compileAndRun`, `cellFromUrl` and `inspectConfLabel` stage
-    nothing at all, so there is no egress to govern and no refusal to move,
+    `unless`, `cellFromUrl` and `inspectConfLabel` stage nothing at all, so
+    there is no egress to govern and no refusal to move,
     and their stores take the route on the node-keyed test alone. That is
     the reading to apply to a new builtin: ask what it stages before asking
     what its stores may declare. `builtin-ownership-route.test.ts` pairs the
     two sets mechanically, so a builtin that stages an effect and takes the
-    route fails rather than passing on a reviewer noticing.
+    route fails rather than passing on a reviewer noticing. Served
+    `compileAndRun` stages its detached program through a `compileAndRun`
+    sink request before releasing the compiler, so its node-owned progress
+    and result stores use the route and the request has its own configurable
+    sink ceiling.
     Two further stores stay off the route for the reasons above rather than
     for this one. A store the runtime keys on something other than a node —
     `wish`'s interval clock, keyed on the interval, and its shared hashtag

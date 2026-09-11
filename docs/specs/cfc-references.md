@@ -19,9 +19,13 @@ transactions, narrowing its path or schema, recovering it from a query result,
 and serializing it through a supported Runtime boundary preserve the acquisition
 history. Immutable containers retain the trusted acquisitions of their reference
 slots before encoding; decoding an address alone cannot restore that history.
-Eager and lazy schema reads that box inline array objects capture references at
-their original slots and rebase inherited scope caps onto the immutable result.
-A later target-label change is resolved on the next content observation.
+Cells supplied to precise immutable construction retain their effective follow
+scope in an inline scope-only schema; their reader value projections do not
+change immutable identity. Raw schema-bearing references retain their supplied
+schemas, with external references inlined for the immutable document. Eager and
+lazy schema reads that box inline array objects capture references at their
+original slots and rebase inherited scope caps onto the immutable result. A
+later target-label change is resolved on the next content observation.
 Collection removals capture surviving references at their original slots before
 compacting indices; neither nested references nor their selection history become
 raw, unauthenticated links during that move.
@@ -83,7 +87,9 @@ does not resolve the target merely to discover a schema or populate reference
 labels. Canonical handle materialization and resolution retain inherited scope
 caps in the handle's schema so ordinary forwarding preserves them durably. An
 explicit later schema projection that widens those caps remains ineligible for
-storage.
+storage. Generated scope redirects retain these caps in a scope-only schema,
+including an intermediate user hop. A same-binding write can remain a no-op only
+when the stored reference already enforces the newly required scope restriction.
 
 A content assertion can itself reveal protected information through success or
 failure. Its evidence, including traversed bindings and protected metadata, must
@@ -103,8 +109,12 @@ Verification reads carry authorization dependencies separately from application
 taint. Storage checks ordinary document revisions, including the confirmed and
 pending revision basis captured with the read. CFC metadata, schema, binding,
 and value changes cannot disappear through internal-read or mergeable-write
-conflict filters. Storage does not interpret CFC policy and verification does
-not write B.
+conflict filters. These dependencies use Memory's generic `required` validation
+class, so an identical output cannot waive stale evidence. When a storage commit
+is submitted, transactions releasing queued effects or processing durable events
+also require their retained read dependencies. This marker does not cause a
+read-only transaction with no document operations to submit a storage commit.
+Storage does not interpret CFC policy and verification does not write B.
 
 Mutable content assertions across spaces are rejected when their evidence cannot
 be bound atomically to A's commit. Reference-only forwarding does not require a

@@ -145,6 +145,7 @@ import {
   markLazyMaterializationTx,
   noteSchemaRefusalTx,
   reactivityLogFromActivities,
+  requireCommitReadValidation,
   takeSchemaRefusalTx,
   unmarkLazyMaterializationTx,
 } from "./reactivity-log.ts";
@@ -405,6 +406,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     ) => void
   >();
   #statusOverride?: StorageTransactionStatus;
+  #dispatchedEventId?: string;
   #commitCallbacksDispatched = false;
 
   /**
@@ -660,6 +662,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     cfcInstrumentation: CfcInstrumentationHooks = {},
   ) {
     this.#cfcInstrumentation = cfcInstrumentation;
+  }
+
+  /** The durable event whose outcome depends on this transaction's reads. */
+  get dispatchedEventId(): string | undefined {
+    return this.#dispatchedEventId;
+  }
+
+  set dispatchedEventId(value: string | undefined) {
+    this.#dispatchedEventId = value;
+    if (value !== undefined) requireCommitReadValidation(this);
   }
 
   /**
@@ -2198,6 +2210,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return;
     }
     this.#outboxIdempotencyKeys.add(key);
+    requireCommitReadValidation(this);
     this.#cfcState.outbox.push(effect);
   }
 

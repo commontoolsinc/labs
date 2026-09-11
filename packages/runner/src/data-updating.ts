@@ -58,7 +58,11 @@ import {
   getCfcReferenceProvenance,
 } from "./cfc/reference-provenance.ts";
 import { createRef } from "./create-ref.ts";
-import { assertSerializableReferenceScope } from "./cfc/reference-scope.ts";
+import {
+  assertSerializableReferenceScope,
+  referenceScopeIsSerializable,
+  schemaWithRetainedReferenceScope,
+} from "./cfc/reference-scope.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
@@ -85,7 +89,7 @@ import {
 } from "./scheduler.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
-import { isCellScope, scopeRank } from "./scope.ts";
+import { isCellScope, narrowerScopeCap, scopeRank } from "./scope.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import type {
   IExtendedStorageTransaction,
@@ -398,6 +402,54 @@ function declaredCellScope(
 ): CellScope | undefined {
   const cap = ContextualFlowControl.getSchemaScopeCap(schema);
   return isCellScope(cap) ? cap : undefined;
+}
+
+/** Serializes a generated scope redirect with its retained follow restriction. */
+function scopedRedirect(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  target: NormalizedFullLink,
+  base: NormalizedFullLink,
+): ReturnType<typeof createSigilLinkFromParsedLink> {
+  if (tx.getCfcState().flowLabelsMode !== "persist") {
+    return carryCfcReferenceProvenance(
+      runtime.getCellFromLink(target, undefined, tx),
+      createSigilLinkFromParsedLink(target, { base }),
+    );
+  }
+  const cap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(target.schema),
+    ContextualFlowControl.getAsCellFollowScopeCap(target.schema),
+  );
+  const schema = schemaWithRetainedReferenceScope(
+    cap === undefined ? undefined : { scope: cap },
+    target.scopeCaps,
+  );
+  return carryCfcReferenceProvenance(
+    runtime.getCellFromLink(target, undefined, tx),
+    createSigilLinkFromParsedLink({ ...target, schema }, {
+      base,
+      includeSchema: true,
+    }),
+  );
+}
+
+/** A reference no-op must retain the new reference's durable restrictions. */
+function storedReferenceRetainsScope(
+  current: NormalizedFullLink,
+  next: NormalizedFullLink,
+  acquisition: CfcReferenceProvenance | undefined,
+): boolean {
+  const cap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(next.schema),
+    ContextualFlowControl.getAsCellFollowScopeCap(next.schema),
+  );
+  return referenceScopeIsSerializable(current.schema, acquisition?.scopeCaps) &&
+    (cap === undefined ||
+      referenceScopeIsSerializable(current.schema, [{
+        depth: next.path.length,
+        scope: cap,
+      }]));
 }
 
 export type DiffAndUpdateOptions = IReadOptions & {
@@ -855,10 +907,7 @@ export function normalizeAndDiff(
           runtime,
           tx,
           userLink,
-          carryCfcReferenceProvenance(
-            runtime.getCellFromLink(scopedLink, undefined, tx),
-            createSigilLinkFromParsedLink(scopedLink, { base: userLink }),
-          ),
+          scopedRedirect(runtime, tx, scopedLink, userLink),
           context,
           options,
           state,
@@ -868,10 +917,7 @@ export function normalizeAndDiff(
           runtime,
           tx,
           link,
-          carryCfcReferenceProvenance(
-            runtime.getCellFromLink(userLink, undefined, tx),
-            createSigilLinkFromParsedLink(userLink, { base: link }),
-          ),
+          scopedRedirect(runtime, tx, userLink, link),
           context,
           options,
           state,
@@ -899,10 +945,7 @@ export function normalizeAndDiff(
         runtime,
         tx,
         link,
-        carryCfcReferenceProvenance(
-          runtime.getCellFromLink(scopedLink, undefined, tx),
-          createSigilLinkFromParsedLink(scopedLink, { base: link }),
-        ),
+        scopedRedirect(runtime, tx, scopedLink, link),
         context,
         options,
         state,
@@ -1148,7 +1191,13 @@ export function normalizeAndDiff(
       areNormalizedLinksSame(
         parseLink(currentValue, link),
         parsedLink,
-      )
+      ) &&
+      (tx.getCfcState().flowLabelsMode !== "persist" ||
+        storedReferenceRetainsScope(
+          parseLink(currentValue, link),
+          parsedLink,
+          getCfcReferenceProvenance(newValue),
+        ))
     ) {
       diffLogger.debug(
         "diff",
@@ -1295,7 +1344,13 @@ export function normalizeAndDiff(
     }
     if (
       isPrimitiveCellLink(currentValue) &&
-      areLinksSame(newValue, currentValue, link)
+      areLinksSame(newValue, currentValue, link) &&
+      (tx.getCfcState().flowLabelsMode !== "persist" ||
+        storedReferenceRetainsScope(
+          parseLink(currentValue, link),
+          parsedLink,
+          getCfcReferenceProvenance(newValue),
+        ))
     ) {
       diffLogger.debug(
         "diff",
@@ -1887,10 +1942,7 @@ export function normalizeAndDiff(
               runtime,
               tx,
               userLink,
-              carryCfcReferenceProvenance(
-                runtime.getCellFromLink(scopedLink, undefined, tx),
-                createSigilLinkFromParsedLink(scopedLink, { base: userLink }),
-              ),
+              scopedRedirect(runtime, tx, scopedLink, userLink),
               context,
               options,
               state,
@@ -1899,10 +1951,7 @@ export function normalizeAndDiff(
               runtime,
               tx,
               childLink,
-              carryCfcReferenceProvenance(
-                runtime.getCellFromLink(userLink, undefined, tx),
-                createSigilLinkFromParsedLink(userLink, { base: childLink }),
-              ),
+              scopedRedirect(runtime, tx, userLink, childLink),
               context,
               options,
               state,
@@ -1917,10 +1966,7 @@ export function normalizeAndDiff(
             runtime,
             tx,
             childLink,
-            carryCfcReferenceProvenance(
-              runtime.getCellFromLink(scopedLink, undefined, tx),
-              createSigilLinkFromParsedLink(scopedLink, { base: childLink }),
-            ),
+            scopedRedirect(runtime, tx, scopedLink, childLink),
             context,
             options,
             state,

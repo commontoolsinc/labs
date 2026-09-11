@@ -162,12 +162,13 @@ export function listSlotResolutions(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   inputsCell: Cell<any>,
+  listKey = "list",
 ): {
   listCell: Cell<any>;
   rawList: unknown;
   slots: NormalizedFullLink[];
 } {
-  const listCell = inputsCell.key("list").withTx(tx).resolveAsCell();
+  const listCell = inputsCell.key(listKey).withTx(tx).resolveAsCell();
   const rawList = listCell.withTx(tx).getRaw() as unknown;
   const listBase = listCell.getAsNormalizedFullLink();
   const slots = Array.isArray(rawList)

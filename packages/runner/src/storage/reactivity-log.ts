@@ -221,6 +221,21 @@ function* blindWriteTxChain(tx: object): Generator<object> {
   }
 }
 
+const requiredCommitReadTxs = new WeakSet<object>();
+
+/** Requires retained read dependencies to validate observable commit outcomes. */
+export function requireCommitReadValidation(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) requiredCommitReadTxs.add(layer);
+}
+
+/** Returns whether a transaction's retained dependencies require validation. */
+export function requiresCommitReadValidation(tx: object): boolean {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (requiredCommitReadTxs.has(layer)) return true;
+  }
+  return false;
+}
+
 /**
  * Transaction-level UI-input "blind leaf overwrite" mode. handleCellSet marks
  * the transaction around a scalar `$value` set (and unmarks before

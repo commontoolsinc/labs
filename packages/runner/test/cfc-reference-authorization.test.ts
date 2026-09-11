@@ -390,6 +390,7 @@ describe("cfc-reference-authorization", () => {
       );
       expect(reads.pending).toHaveLength(1);
       expect(reads.pending[0].localSeq).toBe(layer.localSeq);
+      expect(reads.pending[0].validation).toBe("required");
       tx.abort("inspection complete");
     } finally {
       verdict.resolve({ withdrawn: { message: "test complete" } });

@@ -228,6 +228,13 @@ references does not redeclare the producing profile's field policies or assert
 its verified identities. Consumers that read identity assertions use the full
 integrity-bearing view and verify those assertions at that boundary.
 
+The profile embed wishes for plain `name`, `avatar`, and `bio` values plus the
+profile's exported mutation streams. Its published wish result does not carry
+the producer's field write declarations. `bio` defaults to an empty string and
+`setBio` is optional for supported older profiles; `setName` and `setAvatar`
+remain required. Edits dispatch through those capabilities, and the profile's
+stored owner and authorized-writer policies govern the resulting writes.
+
 The initial name feeds a named writable cell. The compiler preserves the
 constructor's authored owner and authorized-writer policy on the generated
 lift's reference result. Trusted initialization records the constructor's policy

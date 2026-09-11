@@ -1,4 +1,4 @@
-import type { ReadonlyCell } from "@commonfabric/api";
+import type { AnyBrandedCell, ReadonlyCell } from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -89,6 +89,7 @@ import {
   type Stream,
   type StripDefaultBrand,
 } from "./builder/types.ts";
+import type { AggregateOperation } from "./builtins/aggregate.ts";
 import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
@@ -135,6 +136,7 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
 import {
@@ -212,6 +214,7 @@ import {
   internalVerifierRead,
   markReadAsAttemptedWrite,
   mergeableOpRead,
+  requireCommitReadValidation,
 } from "./storage/reactivity-log.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
@@ -245,9 +248,28 @@ export type RawCellReadOptions = IReadOptions & {
 };
 
 // Shared factory instances for all cells
+let aggregateFactory: NodeFactory<any, any> | undefined;
+
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+
+/** Builds one named aggregate node with its scalar result schema. */
+function createAggregate<T>(
+  list: unknown,
+  operation: AggregateOperation,
+  elements?: unknown,
+): Reactive<T> {
+  aggregateFactory ??= createNodeFactory({
+    type: "ref",
+    implementation: "aggregate",
+  });
+  const result = aggregateFactory({ list, operation, elements });
+  if (operation !== "minBy" && operation !== "maxBy") {
+    result.setSchema({ type: "number" });
+  }
+  return result;
+}
 
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
@@ -259,7 +281,7 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
  * use the `*WithPattern` variant explicitly.
  */
 function throwOpFunctionFormMessage(
-  method: "map" | "filter" | "flatMap",
+  method: "map" | "filter" | "flatMap" | "count" | "minBy" | "maxBy",
 ): string {
   return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
@@ -686,6 +708,19 @@ export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
 export type { MemorySpace } from "@commonfabric/memory/interface";
 
+const aggregateMethodNames = [
+  "count",
+  "countWithPattern",
+  "sum",
+  "min",
+  "max",
+  "minBy",
+  "minByWithPattern",
+  "maxBy",
+  "maxByWithPattern",
+] as const;
+const aggregateMethods: ReadonlySet<string> = new Set(aggregateMethodNames);
+
 // The names a `Reactive` forwards as METHODS of the cell it proxies. Every
 // other string reads as data navigation, so a name here shadows a data key
 // spelled the same way -- which is why `query` and `exec` are gated below.
@@ -716,6 +751,7 @@ const cellMethods = new Set<
   "key",
   "map",
   "mapWithPattern",
+  ...aggregateMethodNames,
   "reduce",
   "findIndex",
   "filter",
@@ -775,14 +811,9 @@ export function elementSchemaFor(
       index < prefixItems.length
     ? prefixItems[index]
     : arraySchema.items;
-  if (!isObjectNotArray(covering)) {
-    return covering as JSONSchema | undefined;
-  }
-  const defs = arraySchema.$defs;
-  if (defs && !("$defs" in covering)) {
-    return { ...covering, $defs: defs } as JSONSchema;
-  }
-  return covering as JSONSchema;
+  return covering === undefined
+    ? undefined
+    : cfcSchemaWithInheritedDefs(covering, arraySchema.$defs);
 }
 
 /** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
@@ -1672,6 +1703,7 @@ export class CellImpl<T extends FabricValue>
 
     // Check if we're dealing with a stream
     if (this.isStream(resolvedToValueLink)) {
+      if (this.tx !== undefined) requireCommitReadValidation(this.tx);
       // Stream behavior
 
       // A lift (reactive computation) must be pure: emitting an event from a
@@ -3188,10 +3220,9 @@ export class CellImpl<T extends FabricValue>
       readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
       this.#cfcLabelView,
     );
-    const nonReactiveTx = createNonReactiveTransaction(readTx);
     const snapshot = maybeConvertArrayPathToDataURILink(
       this.runtime,
-      nonReactiveTx,
+      readTx,
       link,
       mergeCfcLabelViews([this.#cfcLabelView, dereferenceView]),
     );
@@ -3654,9 +3685,20 @@ export class CellImpl<T extends FabricValue>
           // Check if this is a method on the cell. `query`/`exec` are gated to
           // SqliteDb cells so they don't shadow same-named data fields.
           const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          // Aggregate names remain ordinary data fields on non-array refs,
+          // including schemaless builder objects. Callable projections cannot
+          // be persisted as data because their method/value meaning is ambiguous.
+          const aggregateSchema = typeof prop === "string" &&
+              aggregateMethods.has(prop)
+            ? resolveSchema(self.schema)
+            : undefined;
+          const isAggregateReceiver = aggregateSchema &&
+            typeof aggregateSchema === "object" &&
+            aggregateSchema.type === "array";
           if (
             cellMethods.has(prop as keyof ICell<T>) &&
-            (!isSqliteOnlyMethod || cellKind === "sqlite")
+            (!isSqliteOnlyMethod || cellKind === "sqlite") &&
+            (!aggregateMethods.has(String(prop)) || isAggregateReceiver)
           ) {
             return nestedCell.getAsReactiveProxy(
               (self as unknown as Record<
@@ -3768,6 +3810,90 @@ export class CellImpl<T extends FabricValue>
     });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
+  }
+
+  /** @inheritDoc */
+  count(
+    this: AnyBrandedCell<unknown[]>,
+    predicate?: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<boolean>,
+  ): Reactive<number> {
+    if (predicate !== undefined) {
+      throw new Error(throwOpFunctionFormMessage("count"));
+    }
+    return createAggregate(this, "count");
+  }
+
+  /** @inheritDoc */
+  sum(this: AnyBrandedCell<number[]>): Reactive<number> {
+    return createAggregate(this, "sum");
+  }
+
+  /** @inheritDoc */
+  min(this: AnyBrandedCell<number[]>): Reactive<number> {
+    return createAggregate(this, "min");
+  }
+
+  /** @inheritDoc */
+  max(this: AnyBrandedCell<number[]>): Reactive<number> {
+    return createAggregate(this, "max");
+  }
+
+  /** @inheritDoc */
+  countWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
+    params: Record<string, any>,
+  ): Reactive<number> {
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createAggregate(scores, "countTruthy", this);
+  }
+
+  /** @inheritDoc */
+  minBy(
+    this: AnyBrandedCell<unknown[]>,
+    _score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    throw new Error(throwOpFunctionFormMessage("minBy"));
+  }
+
+  /** @inheritDoc */
+  minByWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createAggregate(scores, "minBy", this);
+  }
+
+  /** @inheritDoc */
+  maxBy(
+    this: AnyBrandedCell<unknown[]>,
+    _score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    throw new Error(throwOpFunctionFormMessage("maxBy"));
+  }
+
+  /** @inheritDoc */
+  maxByWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createAggregate(scores, "maxBy", this);
   }
 
   /**
@@ -4291,9 +4417,13 @@ function maybeConvertArrayPathToDataURILink(
     path: candidate.path,
   };
 
+  // The snapshot identity depends on this inline element's content. A reader
+  // must resolve it again when the mutable source changes.
+  tx.readValueOrThrow(baseLink);
+
   const snapshot = snapshotValueAtAddress(
     runtime,
-    tx,
+    createNonReactiveTransaction(tx),
     baseLink,
     candidate.value,
     cfcLabelView,
