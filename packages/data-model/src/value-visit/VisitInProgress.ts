@@ -77,6 +77,9 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   /** Container stack of the visit currently in progress. */
   #stack = new IndexTrackingStack<DomainFor<DomainExtra>>();
 
+  /** Indicates if a visit is now actually in-progress. */
+  #inProgress = false;
+
   /**
    * Indicates if the value being visited is assumed to be a valid
    * `FabricValue`.
@@ -108,9 +111,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * of an explicit check or by fiat).
    */
   visitFabricValue(value: FabricValue): BaselineVisitResult<ResultType> {
-    this.#assumeValid = true;
-    this.#deepTypeCheck = false;
-    return this.#mainVisit(value);
+    return this.#mainVisit(value, true, false);
   }
 
   /**
@@ -122,9 +123,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     value: DomainFor<DomainExtra>,
     deepTypeCheck: boolean,
   ): BaselineVisitResult<ResultType> {
-    this.#assumeValid = false;
-    this.#deepTypeCheck = deepTypeCheck;
-    return this.#mainVisit(value);
+    return this.#mainVisit(value, false, deepTypeCheck);
   }
 
   //
@@ -134,8 +133,8 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   //
 
   /** Helper which implements most of a top-level visit. */
-  #mainVisit(value: DomainFor<DomainExtra>): BaselineVisitResult<ResultType> {
-    if (this.#stack.depth !== 0) {
+  #mainVisit(value: DomainFor<DomainExtra>, assumeValid: boolean, deepTypeCheck: boolean): BaselineVisitResult<ResultType> {
+    if (this.#inProgress) {
       // This is a defense-in-depth protection against bugs in this file, and
       // also serves as documentation for the intended use of this class.
       throw new Error(
@@ -143,7 +142,14 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       );
     }
 
-    return this.#visitValue(value);
+    this.#inProgress = true;
+    try {
+      this.#assumeValid = assumeValid;
+      this.#deepTypeCheck = deepTypeCheck;
+      return this.#visitValue(value);
+    } finally {
+      this.#inProgress = false;
+    }
   }
 
   /**
