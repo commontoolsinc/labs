@@ -50,9 +50,15 @@ leaves membership intact; a later input change can start confirmation again.
 
 ## Work and limitations
 
-Membership reconciliation scans source occurrence identities. `groupBy` rebuilds
-and sorts each affected bucket; a bucket with M members can require O(M log M)
-work. `keyBy` writes one member entry and compares an inserted occurrence with
+Membership reconciliation scans source occurrence identities. `groupBy` writes
+one member entry and uses a cached occurrence order to locate its published
+slot. Unchanged slots retain their original source links. Copying the order and
+result arrays still requires O(M) work for a bucket with M members. A missing
+order cache or published group is rebuilt from durable membership with
+O(M log M) sorting work. Cache and group updates share the membership
+transaction, including rollback and empty-bucket cleanup.
+
+`keyBy` writes one member entry and compares an inserted occurrence with
 the cached winner. Non-winning updates avoid enumerating the bucket. Removing
 the winner scans the remaining members in O(M) work to choose its replacement.
 A missing winner cache is reconstructed from durable membership, and a missing

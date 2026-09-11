@@ -129,6 +129,46 @@ describe("collection-index-membership", () => {
     }]);
   });
 
+  it("keeps group order through insertion, replacement, and an aborted move", async () => {
+    await update("\u{10000}", "A", first);
+    await update("\uE000", "A", second);
+    expect(readBucket("A")).toEqual([{ title: "Second" }, { title: "First" }]);
+    await update("\uE000", "A", first);
+    expect(readBucket("A")).toEqual([{ title: "First" }, { title: "First" }]);
+    await update("\uE000", "B", second, "group", true);
+    expect(readBucket("B")).toBeUndefined();
+    expect(readBucket("A")).toEqual([{ title: "First" }, { title: "First" }]);
+    await update("\uE000", undefined);
+    expect(readBucket("A")).toEqual([{ title: "First" }]);
+  });
+
+  it("rebuilds group order from durable members after its cache is absent", async () => {
+    await update("z", "A", first);
+    await update("a", "A", second);
+    const tx = runtime.edit();
+    state.withTx(tx).key("orders").set(undefined);
+    expect((await tx.commit()).error).toBeUndefined();
+    await update("m", "A", first, "group", true);
+    expect(readBucket("A")).toEqual([{ title: "Second" }, { title: "First" }]);
+    expect(state.key("orders").get()).toBeUndefined();
+    await update("m", "A", first);
+    expect(readBucket("A")).toEqual([
+      { title: "Second" },
+      { title: "First" },
+      { title: "First" },
+    ]);
+  });
+
+  it("restores a missing published group from its durable membership", async () => {
+    await update("z", "A", first);
+    await update("a", "A", second);
+    const tx = runtime.edit();
+    index.withTx(tx).key("buckets").set({});
+    expect((await tx.commit()).error).toBeUndefined();
+    await update("z", "A", first);
+    expect(readBucket("A")).toEqual([{ title: "Second" }, { title: "First" }]);
+  });
+
   it("retains duplicate occurrences and exposes the next unique winner on removal", async () => {
     const tx = runtime.edit();
     index.withTx(tx).key("mode").set("key");
@@ -376,7 +416,12 @@ describe("collection-index-membership", () => {
     expect(Object.keys(state.key("occupied").get())).toHaveLength(1);
     expect(Object.keys(index.key("buckets").get())).toHaveLength(1);
     await update("one", undefined);
-    expect(state.get()).toEqual({ assignments: {}, members: {}, occupied: {} });
+    expect(state.get()).toEqual({
+      assignments: {},
+      members: {},
+      occupied: {},
+      orders: {},
+    });
     expect(index.key("buckets").get()).toEqual({});
     expect(readKeys()).toEqual([]);
   });

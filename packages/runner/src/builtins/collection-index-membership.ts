@@ -59,6 +59,9 @@ export interface CollectionIndexMembership {
 
   /** Winning occurrence hashes for unique-key buckets; populated on demand. */
   winners?: Record<string, string | undefined>;
+
+  /** Sorted occurrence identities aligned with each published group. */
+  orders?: Record<string, string[] | undefined>;
 }
 
 /** Public index descriptor whose groups preserve original source links. */
@@ -160,6 +163,73 @@ function updateUniqueBucket(
   return true;
 }
 
+/** Updates one ordered group while retaining its unchanged source links. */
+function updateGroupBucket(
+  tx: IExtendedStorageTransaction,
+  stored: Cell<CollectionIndexMembership>,
+  output: Cell<MaintainedCollectionIndex>,
+  bucket: string,
+  memberId: string,
+  occurrence: string,
+  member: IndexMember | undefined,
+): boolean {
+  const members = stored.key("members").key(bucket);
+  const orders = stored.key("orders");
+  if (orders.get() === undefined) orders.set({});
+  const orderSlot = orders.key(bucket);
+  const published = output.key("buckets").key(bucket);
+  const previousOrder = orderSlot.getRaw();
+  const previousGroup = published.getRaw();
+  if (member) members.key(memberId).set(member);
+  else deleteIndexSlot(tx, members.key(memberId));
+
+  let order: string[];
+  let group: unknown[];
+  if (
+    previousOrder !== undefined && Array.isArray(previousGroup) &&
+    previousOrder.length === previousGroup.length
+  ) {
+    order = previousOrder.slice();
+    group = previousGroup.slice();
+    let low = 0;
+    let high = order.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (utf8Compare(order[middle], occurrence) < 0) low = middle + 1;
+      else high = middle;
+    }
+    const present = order[low] === occurrence;
+    if (member) {
+      order.splice(low, present ? 1 : 0, occurrence);
+      group.splice(
+        low,
+        present ? 1 : 0,
+        output.runtime.getCellFromLink(member.element, undefined, tx),
+      );
+    } else if (present) {
+      order.splice(low, 1);
+      group.splice(low, 1);
+    }
+  } else {
+    // Reconstruct the optional order cache from durable membership.
+    const sorted = Object.values(snapshotQueryResult(members.get() ?? {}))
+      .sort((a, b) => utf8Compare(a.occurrence, b.occurrence));
+    order = sorted.map((entry) => entry.occurrence);
+    group = sorted.map((entry) =>
+      output.runtime.getCellFromLink(entry.element, undefined, tx)
+    );
+  }
+  if (order.length === 0) {
+    deleteIndexSlot(tx, orderSlot);
+    deleteIndexSlot(tx, members);
+    deleteIndexSlot(tx, published);
+    return false;
+  }
+  orderSlot.set(order);
+  published.set(group);
+  return true;
+}
+
 /**
  * Moves or removes one source occurrence and publishes its affected buckets.
  * The owning coordinator supplies runtime-owned cells in the index's scope.
@@ -175,7 +245,6 @@ export function maintainCollectionIndexMembership(
   key: ResolvedCollectionKey | undefined,
   element: Cell<unknown>,
 ): void {
-  const runtime = index.runtime;
   const stored = state.withTx(tx);
   const output = index.withTx(tx);
   const memberId = hashStringOf(occurrence);
@@ -207,26 +276,16 @@ export function maintainCollectionIndexMembership(
             wasOccupied,
           );
         } else {
-          const membersCell = stored.key("members").key(bucket);
-          const members = { ...snapshotQueryResult(membersCell.get() ?? {}) };
-          wasOccupied = Object.keys(members).length > 0;
-          if (member) members[memberId] = member;
-          else delete members[memberId];
-          const ordered = Object.values(members).sort((a, b) =>
-            utf8Compare(a.occurrence, b.occurrence)
+          wasOccupied = stored.key("occupied").key(bucket).get() !== undefined;
+          isOccupied = updateGroupBucket(
+            tx,
+            stored,
+            output,
+            bucket,
+            memberId,
+            occurrence,
+            member,
           );
-          isOccupied = ordered.length > 0;
-          if (isOccupied) {
-            membersCell.set(members);
-            output.key("buckets").key(bucket).set(
-              ordered.map((entry) =>
-                runtime.getCellFromLink(entry.element, undefined, tx)
-              ),
-            );
-          } else {
-            deleteIndexSlot(tx, membersCell);
-            deleteIndexSlot(tx, output.key("buckets").key(bucket));
-          }
         }
         if (wasOccupied !== isOccupied) {
           if (isOccupied) {
