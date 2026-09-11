@@ -2496,10 +2496,12 @@ export class StorageManager implements IStorageManager {
    * Walks `value` for cell links and pushes a pending provider sync of each
    * linked document onto `promises`, under the schema a read at the link's
    * place in `schema` would cross it with: the reader's sub-schema, which the
-   * link's own schema cannot widen (`combineSchemaForLink`). `seen` holds
-   * the objects already walked. A served per-instance run's `identity`
-   * names that principal's instance of each scoped target (server-execution
-   * v2 stage A), as `syncCell` does for a stored document.
+   * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
+   * through `#syncLinkTarget`, which crosses a link into a data-URI document
+   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * `identity` names that principal's instance of each scoped target
+   * (server-execution v2 stage A), as `syncCell` does for a stored
+   * document.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -2519,33 +2521,15 @@ export class StorageManager implements IStorageManager {
 
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
-      if (link.id && !hasDataUriScheme(link.id)) {
-        const space = link.space ?? base.space!;
-        const scope = normalizeCellScope(
-          link.scope as CellScope | undefined,
-        );
-        const instance = this.#foreignInstanceKey(scope, identity);
-        promises.push(
-          this.#trackPendingProviderSync(
-            {
-              space,
-              scope,
-              id: link.id,
-              ...(instance !== undefined ? { scopeKey: instance } : {}),
-            },
-            () =>
-              this.open(space).sync(
-                link.id!,
-                {
-                  path: link.path.map((segment) => segment.toString()),
-                  schema: combineOptionalSchema(schema, link.schema) ?? false,
-                },
-                scope,
-                instance,
-              ),
-          ),
-        );
-      }
+      if (link.id === undefined) return;
+      this.#syncLinkTarget(
+        { ...link, id: link.id },
+        base,
+        combineOptionalSchema(schema, link.schema),
+        promises,
+        seen,
+        identity,
+      );
       return;
     }
 
@@ -2593,6 +2577,84 @@ export class StorageManager implements IStorageManager {
         );
       }
     }
+  }
+
+  /**
+   * Syncs the document `link` names under `schema`, the schema a read
+   * crosses the link with. A link into a data-URI document is walked
+   * locally instead: the walk descends the link's path through the
+   * document's value, and a link it meets on the way is followed with the
+   * rest of the path appended, so a stand-in holding a caller's cell at
+   * `def` reaches the store for a binding of `def.next` as the read does.
+   * The reader's schema describes the value at the end of the path, so a
+   * link met earlier on the path contributes no schema of its own.
+   */
+  #syncLinkTarget(
+    link: NormalizedLink & { id: URI },
+    base: NormalizedLink,
+    schema: JSONSchema | undefined,
+    promises: Promise<unknown>[],
+    seen: Set<unknown>,
+    identity: ScopeKeyIdentity | undefined,
+  ): void {
+    const space = link.space ?? base.space!;
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    if (hasDataUriScheme(link.id)) {
+      const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
+      const segments = link.path.map((segment) => segment.toString());
+      let target: unknown = valueFromDataUri(link.id);
+      for (let i = 0; i < segments.length; i++) {
+        if (isPrimitiveCellLink(target)) {
+          const inner = parseLinkPrimitive(target, dataBase);
+          if (inner.id === undefined) return;
+          this.#syncLinkTarget(
+            {
+              ...inner,
+              id: inner.id,
+              path: [...inner.path, ...segments.slice(i)],
+            },
+            dataBase,
+            schema,
+            promises,
+            seen,
+            identity,
+          );
+          return;
+        }
+        if (!isKeyableObjectOrArray(target)) return;
+        target = (target as Record<string, unknown>)[segments[i]];
+      }
+      this.#collectLinkedCellSyncs(
+        target,
+        dataBase,
+        schema,
+        promises,
+        seen,
+        identity,
+      );
+      return;
+    }
+    const instance = this.#foreignInstanceKey(scope, identity);
+    promises.push(
+      this.#trackPendingProviderSync(
+        {
+          space,
+          scope,
+          id: link.id,
+          ...(instance !== undefined ? { scopeKey: instance } : {}),
+        },
+        () =>
+          this.open(space).sync(
+            link.id,
+            {
+              path: link.path.map((segment) => segment.toString()),
+              schema: schema ?? false,
+            },
+            scope,
+            instance,
+          ),
+      ),
+    );
   }
 
   //

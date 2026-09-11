@@ -292,18 +292,44 @@ measurements are recorded in the pull request.
 
 ### Stage 3. Children and fresh starts
 
-- [ ] Recurse the walk into pattern nodes: first wave names child result
-      cells, second wave plans and walks child nodes, each level naming its
-      argument document and derived internal cells. `#collectResumeOwnedCells`
-      folds into this walk rather than running beside it.
-- [ ] Give `runSynced` and `run()` the plan walk against an immutable
-      stand-in for the caller's argument.
-- [ ] Test, red first: a nested pattern whose child lift reads a link the
-      parent never reads. On resume the target is local before the child's
-      first run; today it is not, and the run conflicts.
-- [ ] Test, red first: a fresh `runSynced` of a pattern whose lift reads
-      through a link in the caller's argument commits its first run without
-      conflict.
+- [x] Recurse into pattern nodes. The first wave names each child result
+      cell; a third wave (`#syncResumeInstanceNodes`) plans and syncs the
+      nodes of every nested instance whose argument link has become
+      readable, round by round, naming each instance's argument document
+      root-only as well. `#collectResumeOwnedCells` still derives the
+      instances and their derived internal cells; `#syncResumeListChildren`
+      returns the instances it names so a list child's nodes join the
+      rounds. A pattern node's inputs are no longer synced under the child's
+      authored argument schema.
+- [x] Give `runSynced` and `run()` the plan walk against an immutable
+      stand-in for the caller's argument. The storage manager's data-URI
+      walk crosses a link into a data-URI document locally, following a
+      link it meets mid-path with the rest of the path appended, since the
+      transformer captures paths (`def.next`), not only roots. A module's
+      inputs are synced under its argument schema the same way;
+      `syncAllMentionedCells` is gone.
+- [x] `findAllWriteRedirectCells` probes a redirect chain through a
+      schema-less cell. Built with the binding link's schema, the probe's
+      raw read kicked a sync of the target under the whole authored slice,
+      which is what pulled a child's unread `friend` even after the plan
+      syncs stopped asking for it.
+- [x] The stored argument's direct link targets, and the result document
+      owning each, are named root-only after the first wave
+      (`#syncStoredArgumentLinkTargets`), for both a resume and a setup
+      staged over a stored piece: setup's supplied-link proof reads a
+      linked document's metadata and its owner's, and neither is a node
+      read. `packages/cli`'s `piece-link-input-visibility` case over a
+      legacy link on a fresh replica is the pin.
+- [x] Test, red first: a child pattern whose authored argument type declares
+      a link no child body reads leaves it cold; a grandchild reads through
+      a link the level between holds as `unknown` and finds it local
+      (`resume-node-plan-presync.test.ts`).
+- [x] Test, red first: a fresh `runSynced` finds what its lift reads two
+      documents deep local the moment the pre-sync step resolves, observed
+      through the dependency-syncer seam, and the lift runs once. Measured
+      on the way: the fresh path already committed without conflict and
+      landed the right value before this stage, so what the stand-in buys
+      is naming before the run rather than after its first cold read.
 
 Exit: a resume and a fresh start name the same set for the same pattern and
 argument, the stand-in aside.

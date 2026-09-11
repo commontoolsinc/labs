@@ -6424,7 +6424,16 @@ export class Runner {
     };
   }
 
-  /** Load the stored argument and return a transaction guard for that state. */
+  /**
+   * Loads the stored argument and what a setup staged over it reads of the
+   * documents it links to, and returns a transaction guard for that state.
+   * The argument document is named root-only: the meta link carries the
+   * pattern's authored schema, and what the nodes read through the document
+   * is named by their plans. Setup's proof that a supplied link stays
+   * compatible reads each linked document and the result document of the
+   * piece that owns it, so those are named root-only too, the owner through
+   * the `result` backlink the linked document carries.
+   */
   async syncStoredSetupArgument(
     resultCell: Cell<unknown>,
   ): Promise<(candidate: Cell<unknown>) => boolean> {
@@ -6434,14 +6443,13 @@ export class Runner {
       return (candidate) => getMetaLink(candidate, "argument") === undefined;
     }
 
-    // Root only: the meta link carries the pattern's authored schema, and
-    // what the nodes read through the document is named by their plans.
     const argumentCell = this.#runtime.getCellFromLink({
       ...argumentLink,
       schema: undefined,
     });
     await argumentCell.sync();
     const argumentValue = argumentCell.getRawUntyped();
+    await this.#syncStoredArgumentLinkTargets(argumentCell);
     return (candidate) => {
       const candidateLink = getMetaLink(candidate, "argument");
       if (
@@ -6457,6 +6465,57 @@ export class Runner {
       );
       return valueEqual(candidateArgument.getRawUntyped(), argumentValue);
     };
+  }
+
+  /**
+   * Names, root-only, each document the stored argument at `argumentCell`
+   * links to directly, and the result document of the piece that owns each,
+   * reached through the `result` backlink the linked document carries once
+   * it is local. Setup's proof that a supplied link stays compatible reads
+   * both, and the gate that decides whether a run over a stored piece must
+   * name its family first probes them. `argumentCell` is local already.
+   */
+  async #syncStoredArgumentLinkTargets(
+    argumentCell: Cell<unknown>,
+  ): Promise<void> {
+    const targets: Cell<unknown>[] = [];
+    const seen = new Set<unknown>();
+    const collect = (value: unknown): void => {
+      if (seen.has(value)) return;
+      const link = parseLink(value, argumentCell);
+      if (link !== undefined) {
+        targets.push(
+          this.#runtime.getCellFromLink({ ...link, schema: undefined }),
+        );
+        return;
+      }
+      if (!isKeyableObjectOrArray(value)) return;
+      seen.add(value);
+      for (const key in value) collect(value[key]);
+    };
+    collect(argumentCell.getRawUntyped());
+    const syncNamed = (cells: readonly Cell<unknown>[]): Promise<void> =>
+      Promise.all(
+        cells.map((cell) =>
+          Promise.resolve(cell.sync()).catch((error) => {
+            logger.warn("stored-argument-links", () => [
+              "a document the stored argument links to did not sync",
+              error,
+            ]);
+          })
+        ),
+      ).then(() => {});
+    await syncNamed(targets);
+    const owners: Cell<unknown>[] = [];
+    for (const target of targets) {
+      const owner = getMetaLink(target, "result");
+      if (owner !== undefined) {
+        owners.push(
+          this.#runtime.getCellFromLink({ ...owner, schema: undefined }),
+        );
+      }
+    }
+    await syncNamed(owners);
   }
 
   /**
@@ -6517,100 +6576,71 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
-    const mentionedInputsStart = performance.now();
-    const seen = new Set<Cell<any>>();
-    const promises = new Set<Promise<any>>();
-
-    const syncAllMentionedCells = (value: any) => {
-      if (seen.has(value)) return;
-      seen.add(value);
-
-      const link = parseLink(value, resultCell);
-
-      if (link) {
-        promises.add(this.#runtime.getCellFromLink(link).sync());
-      } else if (isKeyableObjectOrArray(value)) {
-        // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a link
-        // nested in a `FabricInstance`'s codec contents is never synced here
-        // — the cold target this pre-sync exists to warm.
-        for (const key in value) syncAllMentionedCells(value[key]);
-      }
-    };
-
-    syncAllMentionedCells(inputs);
-    await Promise.all(promises);
-    logger.time(
-      mentionedInputsStart,
-      "start",
-      "resumeMentionedInputSyncWave",
-    );
-
     const resultSyncStart = performance.now();
     await resultCell.sync();
     logger.time(resultSyncStart, "start", "resumeResultSync");
 
-    // We could support this by replicating what happens in runner, but since
-    // we're calling this again when returning false, this is good enough for now.
-    if (isModule(pattern)) return false;
+    // A module reads `inputs` under its argument schema and nothing else.
+    // The caller runs this again once the module has run, when it returns
+    // false.
+    if (isModule(pattern)) {
+      if (inputs !== undefined) {
+        const inputsSyncStart = performance.now();
+        await this.#runtime
+          .getImmutableCell(resultCell.space, inputs, undefined)
+          .asSchema(pattern.argumentSchema)
+          .sync();
+        logger.time(inputsSyncStart, "start", "resumeInputsSync");
+      }
+      return false;
+    }
 
     const cells: Cell<any>[] = [];
 
-    // Each node's plan, synced under the schema its run reads through. The
-    // inputs document is a data URI, so syncing it under a schema hands the
-    // server one selector per binding link, and the server's query walk
-    // follows links from there the way a read does: as deep as the
-    // declaration goes, through `asCell` positions, stopping at an opaque
-    // one. What arrives is what the node's first run reads. Without the
-    // argument meta link the bindings cannot be bound, so the node pass is
-    // skipped — the pre-sync is best-effort, and binding against a substitute
-    // document would pre-sync the wrong cells (CT-1897). Planning resolves
-    // each node's output redirect chain, which reads link metadata through a
-    // transaction; the plans only read, so it is discarded afterward.
+    // The nodes bind against the piece's argument document once setup has
+    // written it. Before that, on a fresh run, they bind against an
+    // immutable stand-in holding the caller's argument: a data-URI document,
+    // local by construction, whose links are the caller's, so a plan bound
+    // against it names the same stored documents the run will read through
+    // them. Planning resolves each node's output redirect chain, which reads
+    // link metadata through a transaction; the plans only read, so it is
+    // discarded afterward.
     const planTx = this.#runtime.edit();
     const argumentMetaLink = getMetaLink(resultCell, "argument");
-    if (argumentMetaLink === undefined) {
-      // Instrumentation for how often the meta link is missing here (fresh
-      // first runs are expected to hit this; resumes should not).
+    const argumentLink = argumentMetaLink ??
+      (inputs !== undefined
+        ? this.#runtime
+          .getImmutableCell(resultCell.space, inputs, undefined)
+          .getAsNormalizedFullLink()
+        : undefined);
+    if (argumentLink === undefined) {
+      // A resume finds the meta link on the result document; a fresh run
+      // supplies its argument. Neither here is a start with nothing to bind
+      // against, which is worth a trace.
       logger.warn("resume-pre-sync", () => [
-        "argument meta link missing; skipping node pre-sync",
+        "no argument to bind against; skipping node pre-sync",
         {
           resultCell: resultCell.getAsNormalizedFullLink().id,
           nodes: pattern.nodes.length,
         },
       ]);
     } else {
-      for (const node of pattern.nodes) {
-        let plan: NodePlan | undefined;
-        try {
-          plan = this.#nodePlan(planTx, node, resultCell, pattern);
-        } catch (error) {
-          // A node whose bindings cannot be bound contributes nothing rather
-          // than breaking the pre-sync; log it so a resume that silently
-          // skips a node's pre-sync is diagnosable.
-          logger.warn("resume-pre-sync", () => [
-            "skipping a node whose bindings did not unwrap",
-            error,
-          ]);
-          continue;
-        }
-        if (plan === undefined) continue;
-        cells.push(...this.#cellsNodePlanReads(plan, resultCell));
-        // What the node writes through, under the output binding's schema.
-        for (const link of plan.writes) {
-          cells.push(this.#runtime.getCellFromLink(link));
-        }
-      }
+      cells.push(
+        ...this.#cellsPatternNodes(planTx, pattern, resultCell, argumentLink),
+      );
       // The argument document itself, whole and under no schema: setup
       // reads it raw to write the argument over the slots it holds. The
       // node syncs above carry the narrower schemas the runs read through
       // it with; the meta link's own schema is the pattern's authored one,
       // which would pull everything the authored type reaches.
-      cells.push(
-        this.#runtime.getCellFromLink({
-          ...argumentMetaLink,
-          schema: undefined,
-        }),
-      );
+      if (argumentMetaLink !== undefined) {
+        cells.push(
+          this.#runtime.getCellFromLink({
+            ...argumentMetaLink,
+            schema: undefined,
+          }),
+        );
+      }
     }
 
     // Sync the owned (derived internal) cells of this pattern and every nested
@@ -6663,23 +6693,161 @@ export class Runner {
     }));
     logger.time(cellSyncWaveStart, "start", "resumeCellSyncWave");
 
+    // What setup reads of the stored argument beyond its own bytes: the
+    // documents it links to, and their owners. Readable only now that the
+    // argument document has arrived.
+    if (argumentMetaLink !== undefined) {
+      const argumentLinksStart = performance.now();
+      await this.#syncStoredArgumentLinkTargets(
+        this.#runtime.getCellFromLink({
+          ...argumentMetaLink,
+          schema: undefined,
+        }),
+      );
+      logger.time(argumentLinksStart, "start", "resumeArgumentLinksSync");
+    }
+
     // Second wave: the list coordinators' children. The inputs their
     // identities derive from arrived with the first wave, so this cannot run
     // any earlier, and it must finish before instantiation runs those
     // children.
     const followupSyncStart = performance.now();
-    await this.#syncResumeListChildren(instances);
+    const listInstances = await this.#syncResumeListChildren(instances);
     logger.time(followupSyncStart, "start", "resumeFollowupSync");
+
+    // Third wave: the nested instances' own nodes, whose plans need each
+    // instance's argument link, data on the result document the earlier
+    // waves named. The root's nodes were planned above.
+    const instanceNodesStart = performance.now();
+    await this.#syncResumeInstanceNodes([
+      ...instances.slice(1),
+      ...listInstances,
+    ]);
+    logger.time(instanceNodesStart, "start", "resumeInstanceNodesSync");
 
     return true;
   }
 
   /**
+   * The cells to sync for what `pattern`'s nodes on `resultCell` read and
+   * write, each node planned against `argumentLink`. A node whose bindings
+   * cannot be bound contributes nothing rather than breaking the pre-sync;
+   * it is logged, so a resume that silently skips a node's pre-sync is
+   * diagnosable.
+   */
+  #cellsPatternNodes(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<any>,
+    argumentLink: NormalizedFullLink,
+  ): Cell<any>[] {
+    const cells: Cell<any>[] = [];
+    for (const node of pattern.nodes) {
+      let plan: NodePlan | undefined;
+      try {
+        plan = this.#nodePlan(
+          tx,
+          node,
+          resultCell,
+          pattern,
+          undefined,
+          argumentLink,
+        );
+      } catch (error) {
+        logger.warn("resume-pre-sync", () => [
+          "skipping a node whose bindings did not unwrap",
+          error,
+        ]);
+        continue;
+      }
+      if (plan === undefined) continue;
+      // Each node's plan, synced under the schema its run reads through. The
+      // inputs document is a data URI, so syncing it under a schema hands the
+      // server one selector per binding link, and the server's query walk
+      // follows links from there the way a read does: as deep as the
+      // declaration goes, through `asCell` positions, stopping at an opaque
+      // one. What arrives is what the node's first run reads.
+      cells.push(...this.#cellsNodePlanReads(plan, resultCell));
+      // What the node writes through, under the output binding's schema.
+      for (const link of plan.writes) {
+        cells.push(this.#runtime.getCellFromLink(link));
+      }
+    }
+    return cells;
+  }
+
+  /**
+   * Names what the nested instances' nodes read, level by level. An
+   * instance's plans need its argument document's link, which is data on
+   * its result document, delivered by the wave that named that document.
+   * Each round plans every instance whose argument link is readable and
+   * not yet planned, and syncs together what those plans name, the child
+   * result cells of the instance's pattern nodes among them, which is what
+   * lets the next round plan the level below. A round that plans nothing
+   * ends the walk: an instance whose result document never arrived is left
+   * unplanned rather than holding the resume, and its own start names what
+   * it needs.
+   */
+  async #syncResumeInstanceNodes(
+    instances: readonly ResumePatternInstance[],
+  ): Promise<void> {
+    const pending = new Map<string, ResumePatternInstance>();
+    for (const instance of instances) {
+      const link = instance.resultCell.getAsNormalizedFullLink();
+      pending.set(
+        `${link.space}\0${link.id}\0${link.scope ?? "space"}`,
+        instance,
+      );
+    }
+    while (pending.size > 0) {
+      const cells: Cell<any>[] = [];
+      const planTx = this.#runtime.edit();
+      try {
+        for (const [key, { pattern, resultCell }] of pending) {
+          const argumentLink = getMetaLink(resultCell, "argument");
+          if (argumentLink === undefined) continue;
+          pending.delete(key);
+          cells.push(
+            ...this.#cellsPatternNodes(
+              planTx,
+              pattern,
+              resultCell,
+              argumentLink,
+            ),
+          );
+          cells.push(
+            this.#runtime.getCellFromLink({
+              ...argumentLink,
+              schema: undefined,
+            }),
+          );
+        }
+      } finally {
+        planTx.abort("resume instance nodes: read-only planning");
+      }
+      if (cells.length === 0) return;
+      const waveStart = performance.now();
+      await Promise.all(
+        cells.map((cell) =>
+          Promise.resolve(cell.sync()).catch((error) => {
+            logger.warn("resume-pre-sync", () => [
+              "instance node sync failed; resuming without it",
+              error,
+            ]);
+          })
+        ),
+      );
+      logger.time(waveStart, "start", "resumeInstanceNodeSyncWave");
+    }
+  }
+
+  /**
    * The cells to sync for what a node's first run reads: its inputs document
    * under the node's read schema, and for a handler node the stream document
-   * its `$event` slot names. A pattern node's inputs are synced under the
-   * child's argument schema, and its child result cell under the child's
-   * result schema.
+   * its `$event` slot names. A pattern node names its child result cell
+   * under the child's result schema and nothing of its inputs: the child's
+   * own nodes read through them, and are planned once that document is
+   * local (`#syncResumeInstanceNodes`).
    */
   #cellsNodePlanReads(plan: NodePlan, resultCell: Cell<any>): Cell<any>[] {
     switch (plan.kind) {
@@ -6710,10 +6878,7 @@ export class Runner {
       case "passthrough":
         return [plan.inputsCell];
       case "pattern":
-        return [
-          plan.inputsCell.asSchema(plan.child.argumentSchema),
-          ...(plan.childResultCell === undefined ? [] : [plan.childResultCell]),
-        ];
+        return plan.childResultCell === undefined ? [] : [plan.childResultCell];
     }
   }
 
@@ -6862,11 +7027,14 @@ export class Runner {
    * once its family has landed, so the reach is the tree's depth. A node
    * whose plan cannot be derived — inputs not yet readable, an unresolvable
    * op — contributes nothing rather than failing the resume; the
-   * coordinator's own reconcile holds for such inputs.
+   * coordinator's own reconcile holds for such inputs. Returns the child
+   * instances it named, and the instances nested in them, for the caller's
+   * pass over their nodes.
    */
   async #syncResumeListChildren(
     instances: readonly ResumePatternInstance[],
-  ): Promise<void> {
+  ): Promise<ResumePatternInstance[]> {
+    const namedInstances: ResumePatternInstance[] = [];
     const named = new Set<string>();
     // The owned-cell walk's own dedup: an instance the root walk already
     // visited is not collected again here.
@@ -6995,6 +7163,7 @@ export class Runner {
                 );
               }
               next.push(...nested);
+              namedInstances.push(...nested);
             }
           }
         }
@@ -7006,6 +7175,7 @@ export class Runner {
       logger.time(syncWaveStart, "start", "resumeListChildSyncWave");
       frontier = next;
     }
+    return namedInstances;
   }
 
   /**
@@ -7414,11 +7584,15 @@ export class Runner {
    * The plan for `node` on `resultCell`: its module resolved through the
    * registry, its bindings bound to the piece's argument and result
    * documents, and the links those bindings read and write through.
-   * `undefined` for a dynamic node, which nothing instantiates. Binding
-   * resolution is op-wiring machinery: the write-redirect walk reads alias
-   * shells and plumbing containers' child paths, and those reads must not
-   * consume `*`-path membership templates (machineryRead;
-   * template-population §6, the SC-8 machinery-read boundary).
+   * `undefined` for a dynamic node, which nothing instantiates. The
+   * bindings bind against the piece's argument document, or against
+   * `argumentLink` where a caller supplies one: the pre-sync of a fresh run
+   * binds against a stand-in holding the caller's argument, since setup has
+   * not written the document yet. Binding resolution is op-wiring
+   * machinery: the write-redirect walk reads alias shells and plumbing
+   * containers' child paths, and those reads must not consume `*`-path
+   * membership templates (machineryRead; template-population §6, the SC-8
+   * machinery-read boundary).
    */
   #nodePlan(
     tx: IExtendedStorageTransaction,
@@ -7426,6 +7600,7 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     moduleRefName?: string,
+    argumentLink?: NormalizedFullLink,
   ): NodePlan | undefined {
     const module = node.module;
     if (isModule(module)) {
@@ -7448,6 +7623,7 @@ export class Runner {
             resultCell,
             pattern,
             refName,
+            argumentLink,
           );
         }
         case "javascript":
@@ -7461,6 +7637,7 @@ export class Runner {
               node.outputs,
               resultCell,
               pattern,
+              argumentLink,
             ),
           }));
         case "raw":
@@ -7476,6 +7653,7 @@ export class Runner {
               resultCell,
               pattern,
               moduleRefName,
+              argumentLink,
             ),
           }));
         case "pattern":
@@ -7489,6 +7667,7 @@ export class Runner {
               node.outputs,
               resultCell,
               pattern,
+              argumentLink,
             ),
           }));
         default:
@@ -7508,8 +7687,11 @@ export class Runner {
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
+    argumentCellLink: NormalizedFullLink = getMetaLink(
+      resultCell,
+      "argument",
+    )!,
   ): BoundNodeIO {
-    const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const inputs = unwrapOneLevelAndBindToDoc(
       inputBindings,
       argumentCellLink,
@@ -9758,8 +9940,11 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     moduleRefName: string | undefined,
+    argumentCellLink: NormalizedFullLink = getMetaLink(
+      resultCell,
+      "argument",
+    )!,
   ): RawNodeInputs {
-    const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const mappedInputBindings = unwrapOneLevelAndBindToDoc(
       inputBindings,
       argumentCellLink,
@@ -10143,14 +10328,18 @@ export class Runner {
     outputBindings: FabricExecValue,
     resultCell: Cell<any>,
     pattern: Pattern,
+    argumentLink?: NormalizedFullLink,
   ): PatternNodeBinding {
-    // May be undefined: the pre-sync plans before setup writes the meta on a
-    // fresh first run, and a child result cell is not synced yet on a
-    // cold-cache resume. Binding needs the link only when an alias actually
-    // names the argument document, and throws otherwise. Substituting a
-    // different document instead would derive the wrong `resultFor`
-    // identity and pre-sync the wrong owned-cell subtree (CT-1897).
-    const argumentCellLink = getMetaLink(resultCell, "argument");
+    // May be undefined: the owned-cell walk plans before setup writes the
+    // meta on a fresh first run, and a child result cell is not synced yet
+    // on a cold-cache resume. Binding needs the link only when an alias
+    // actually names the argument document, and throws otherwise.
+    // Substituting a different document instead would derive the wrong
+    // `resultFor` identity and pre-sync the wrong owned-cell subtree
+    // (CT-1897); a stand-in a caller supplies deliberately is what the
+    // fresh run's pre-sync binds against.
+    const argumentCellLink = argumentLink ??
+      getMetaLink(resultCell, "argument");
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     // The child's nodes are bound as the child's own start sees them: this
     // bind crosses one `defer` boundary of every alias inside the

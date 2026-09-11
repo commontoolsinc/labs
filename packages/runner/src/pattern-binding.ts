@@ -864,8 +864,13 @@ export function findAllWriteRedirectCells<T>(
       const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
+      // Schema-less: the probe reads the target's raw value to see whether
+      // it is itself a redirect, and a cell built with the link's schema
+      // would sync the target under that schema when the raw read finds it
+      // cold, pulling everything the schema reaches for a read that wants
+      // one document.
       const linkCell = baseCell.runtime.getCellFromLink(
-        link,
+        { ...link, schema: undefined },
         undefined,
         baseCell.tx,
       );

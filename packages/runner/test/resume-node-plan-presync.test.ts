@@ -80,6 +80,66 @@ const HANDLE_PROGRAM: RuntimeProgram = {
   }],
 };
 
+// A child pattern whose authored argument type declares `friend`, a link no
+// child body reads; the child's lift reads `def.name` only. The parent
+// passes `def` through and reads nothing itself.
+const NESTED_UNREAD_LINK_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern } from 'commonfabric';",
+      "type Friend = { name?: string };",
+      "type Profile = { name?: string; friend?: Friend };",
+      "export const badge = pattern<{ def: Profile }, { label: string }>(",
+      "  ({ def }) => {",
+      "    const label = computed(() => `n:${def.name ?? 'none'}`);",
+      "    return { label };",
+      "  },",
+      ");",
+      "export default pattern<{ def: Profile }, {",
+      "  child: { label: string };",
+      "}>(({ def }) => {",
+      "  const child = badge({ def });",
+      "  return { child };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
+// A grandchild two levels down reads through a link its own argument type
+// declares; the level between holds the value as `unknown`, so nothing the
+// child declares reaches the document behind that link.
+const GRANDCHILD_READ_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern } from 'commonfabric';",
+      "type Leaf = { name?: string };",
+      "type Top = { next?: Leaf };",
+      "export const leaf = pattern<{ def: Top }, { label: string }>(",
+      "  ({ def }) => {",
+      "    const label = computed(() => `n:${def.next?.name ?? 'none'}`);",
+      "    return { label };",
+      "  },",
+      ");",
+      "export const mid = pattern<{ def: unknown }, {",
+      "  grandchild: { label: string };",
+      "}>(({ def }) => {",
+      "  const grandchild = leaf({ def: def as Top });",
+      "  return { grandchild };",
+      "});",
+      "export default pattern<{ def: Top }, {",
+      "  child: { grandchild: { label: string } };",
+      "}>(({ def }) => {",
+      "  const child = mid({ def });",
+      "  return { child };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
 function commitConflictCount(): number {
   const counts = getLoggerCountsBreakdown()["storage.v2"] ?? {};
   return (counts as Record<string, { total?: number }>)["commit-conflict"]
@@ -223,6 +283,158 @@ describe("resume node plan pre-sync", () => {
     );
     await counter1.pull();
     expect(counter1.get().n).toBe(2);
+  });
+
+  it("leaves a link a child's authored type declares but no child body reads cold", async () => {
+    const tx1 = rt1.edit();
+    const friend = rt1.getCell<{ name?: string }>(
+      space,
+      "nested unread friend",
+      undefined,
+      tx1,
+    );
+    friend.withTx(tx1).set({ name: "Grace" });
+    const profile = rt1.getCell<{ name?: string; friend?: unknown }>(
+      space,
+      "nested unread profile",
+      undefined,
+      tx1,
+    );
+    profile.withTx(tx1).set({ name: "Ada", friend });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    const before = commitConflictCount();
+    const resumed = await createAndResume(
+      NESTED_UNREAD_LINK_PROGRAM,
+      { def: profile },
+      "nested unread parent",
+    );
+    expect(localOnB(profile)).toBe(true);
+    expect(localOnB(friend)).toBe(false);
+    await rt2.idle();
+    expect(resumed.key("child").key("label").get()).toBe("n:Ada");
+    expect(commitConflictCount()).toBe(before);
+  });
+
+  it("names a document a grandchild reads through a link the level between holds opaquely", async () => {
+    const tx1 = rt1.edit();
+    const leafDoc = rt1.getCell<{ name?: string }>(
+      space,
+      "grandchild read leaf",
+      undefined,
+      tx1,
+    );
+    leafDoc.withTx(tx1).set({ name: "Ada" });
+    const top = rt1.getCell<{ next?: unknown }>(
+      space,
+      "grandchild read top",
+      undefined,
+      tx1,
+    );
+    top.withTx(tx1).set({ next: leafDoc });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    const before = commitConflictCount();
+    const resumed = await createAndResume(
+      GRANDCHILD_READ_PROGRAM,
+      { def: top },
+      "grandchild read parent",
+    );
+    expect(localOnB(leafDoc)).toBe(true);
+    await rt2.idle();
+    expect(
+      resumed.key("child").key("grandchild").key("label").get(),
+    ).toBe("n:Ada");
+    expect(commitConflictCount()).toBe(before);
+  });
+
+  it("names what a fresh run's lift reads through the caller's argument before its first run", async () => {
+    const tx1 = rt1.edit();
+    const leafDoc = rt1.getCell<{ name?: string }>(
+      space,
+      "fresh run leaf",
+      undefined,
+      tx1,
+    );
+    leafDoc.withTx(tx1).set({ name: "Ada" });
+    const midDoc = rt1.getCell<{ next?: unknown }>(
+      space,
+      "fresh run mid",
+      undefined,
+      tx1,
+    );
+    midDoc.withTx(tx1).set({ next: leafDoc });
+    const top = rt1.getCell<{ next?: unknown }>(
+      space,
+      "fresh run top",
+      undefined,
+      tx1,
+    );
+    top.withTx(tx1).set({ next: midDoc });
+    rt1.prepareTxForCommit(tx1);
+    expect((await tx1.commit()).error).toBeUndefined();
+    await rt1.storageManager.synced();
+
+    // Runtime 2 has never seen any of these documents: the run is fresh on a
+    // cold replica, and its argument names `top` by link.
+    const compiled = await rt2.patternManager.compilePattern(
+      DEEP_READ_PROGRAM,
+      { space },
+    );
+    await rt2.patternManager.flushCompileCacheWrites();
+    await rt2.storageManager.synced();
+    const before = commitConflictCount();
+    const top2 = rt2.getCellFromLink<{ next?: unknown }>(
+      top.getAsNormalizedFullLink(),
+    );
+    const resultCell2 = rt2.getCell<Record<string, unknown>>(
+      space,
+      "fresh run result",
+      undefined,
+    );
+    // What the replica holds the moment the first pre-sync step resolves,
+    // before setup and the first run: the seam wraps the runner's own step,
+    // and a later step on the same piece is not the one under test.
+    let leafLocalAfterPresync: boolean | undefined;
+    rt2.runner.accessForTestingOnly.dependencySyncer = async (
+      target,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      const walked = await sync(target, pattern, inputs);
+      leafLocalAfterPresync ??= localOnB(leafDoc);
+      return walked;
+    };
+    let cell: Cell<Record<string, unknown>>;
+    try {
+      cell = await rt2.runSynced(
+        resultCell2,
+        compiled as never,
+        { def: top2 },
+      );
+    } finally {
+      rt2.runner.accessForTestingOnly.dependencySyncer = undefined;
+    }
+    expect(leafLocalAfterPresync).toBe(true);
+    await rt2.idle();
+    await rt2.storageManager.synced();
+    await rt2.idle();
+    await cell.pull();
+    await rt2.idle();
+    expect(cell.key("label").get()).toBe("n:Ada");
+    expect(commitConflictCount()).toBe(before);
+    // One run: the lift found the documents local. A lift that ran cold
+    // runs again when the loads its reads kicked land.
+    const computations = rt2.scheduler.getGraphSnapshot().nodes.filter(
+      (node) => node.type === "computation" && node.stats !== undefined,
+    );
+    expect(computations.length).toBeGreaterThan(0);
+    expect(computations.map((node) => node.stats?.runCount)).toEqual(
+      computations.map(() => 1),
+    );
   });
 
   it("names a document a body reads three links deep", async () => {
