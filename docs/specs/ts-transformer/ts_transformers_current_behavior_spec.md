@@ -1403,6 +1403,9 @@ builder call it rebuilds carries the replaced call's source-map range (§11.5).
 - `_param` convention implies `never` schema for that parameter
 - failed inference falls back to `unknown`
 - `typeRegistry` is consulted first for synthetic nodes/types
+- Common Fabric generic aliases retain their authored type arguments when
+  qualified through `__cfHelpers`; argument pairing uses the alias arguments,
+  which can differ from the arguments of its underlying reference type.
 
 ### 10.2 `pattern(...)`
 

@@ -2,16 +2,16 @@
 
 Status: A1/A2 instrumentation shipped in #7246; worker control shipped in #7256.
 The controlled A0 fixture, accounting regressions, and dashboard shipped in
-#7241, with browser and remote-row demonstrations added in #7264. A3 budget
-repairs are under review in #7257. Full compiler, runner, CLI, generated-pattern,
-and vintage validation pass; current-head CI and Cubic review remain. A4's
-browser benchmark shipped in #7261; count limits remain in #7282. C1's remote-row
+#7241, with browser and remote-row demonstrations added in #7264. A3 budgets
+landed in #7257 after full validation, all 69 CI gates, and clean Cubic and
+antagonistic reviews. A4's browser benchmark shipped in #7261; count limits are
+implemented and validated in #7282, pending its own CI and review. C1's remote-row
 reproductions and C3's inline-element dependency repair landed in #7265;
 removal/restoration acceptance landed in #7285 and first-browser-materialization
 acceptance landed in #7302, both with local demonstrations. Reconnect and
 remaining row-invalidation acceptance stay open. B1/B2's contract landed in
-#7294; typed handles and key resolution are being prototyped, with operator
-lowering and runtime integration pending.
+#7294; the typed lookup foundation is under review in #7304. Producer lowering,
+bucket maintenance, and joins remain pending.
 
 B3's named aggregates are implemented and validated in
 [PR #7259](https://github.com/commontoolsinc/labs/pull/7259), with
@@ -151,7 +151,7 @@ durations are used as performance evidence.
 
 ## 3–4. Defend and calibrate measurements: A3–A5
 
-- [ ] **A3 — Add opt-in pattern-test budgets.** The
+- [x] **A3 — Add opt-in pattern-test budgets.** The
       [budget contract](read-cost-budgets.md) defines the surface, execution
       coverage, and pass/fail demo.
   - [x] Define the test declaration and diagnostics for per-action-run and
@@ -162,14 +162,16 @@ durations are used as performance evidence.
   - [x] Test exact-boundary pass, one-over failure, one expensive run, and many
         individually cheap runs exceeding the step budget. Verify unbudgeted
         tests preserve their behavior.
-- [ ] **A4 — Add the read-side benchmark.**
+- [x] **A4 — Add the read-side benchmark.**
   - [x] Follow [BENCHMARKS.md](../development/BENCHMARKS.md); measure one vote
         settling with its tally on screen across declared collection sizes.
   - [x] Preserve the existing write-burst benchmark as a separate workload.
         Record reads, runs, commits, and timing in
         [PR #7261](https://github.com/commontoolsinc/labs/pull/7261).
-  - [ ] Add read-count regression limits after A3 lands; benchmark timing is
-        reported as a trend.
+  - [x] Add read-count regression limits in
+        [PR #7282](https://github.com/commontoolsinc/labs/pull/7282): all six
+        functional assertions and render limits pass at 74, 296, and 1,184 votes.
+        Benchmark timing remains a reported trend.
 - [ ] **A5 — Explain probe/product differences.**
   - [ ] Compare matched inputs in the headless probe and browser, varying worker
         boundary and single-space/cross-space voter links separately.
@@ -196,8 +198,8 @@ expensive run.
 Compiler acceptance also covers stored fields named after Cell methods,
 optional Cell handles, and whole-value reads passed to helpers. The generated
 call-center integration and pinned default-app vintage replay pass with complete
-stored shapes preserved. Full affected-package validation, CI, and clean latest
-reviews remain landing gates.
+stored shapes preserved. Full affected-package validation and all 69 CI gates
+passed before merge, with clean Cubic and antagonistic reviews.
 
 ## 5, 10. Repair incremental correctness: C1–C4
 
@@ -371,17 +373,18 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## Next task
 
-Complete A3's coverage gate and merge review. Verify C1's rendered rows after
+Complete A4's merge review in #7282. Verify C1's rendered rows after
 reconnect, and complete C1/C3's remaining acceptance checks while retaining the
 production workaround. The first-materialization cases in
 [PR #7302](https://github.com/commontoolsinc/labs/pull/7302) pass all four
 nested/mapped and same/cross-space browser combinations.
-A4's browser benchmark is available; count regression limits remain. A5 still
+A4's browser benchmark is available; validated count limits await review. A5 still
 needs cross-space and deployed measurements before product performance claims.
 Live poll access requires coordination with Mike.
 
-For the pending collection operators, prototype B1's typed handles against the
-[agreed index contract](collection-index-contract.md), implement `groupBy`/`keyBy`,
-then build B2's keyed lookup and join. Their
+For the pending collection operators, review the typed lookup foundation in
+[PR #7304](https://github.com/commontoolsinc/labs/pull/7304), implement
+`groupBy`/`keyBy` and bucket maintenance against the
+[agreed index contract](collection-index-contract.md), then build the left join. Their
 measurements use the shipped counters and the aggregate comparison method; A4/A5
 gate deployed-product claims rather than operator implementation.
