@@ -76,18 +76,19 @@ deno task --cwd packages/cf-harness console:launch \
 
 That task reads the identity, the space and the toolshed URL off a loom
 instance's `pieces.json` when `--instance` names one, the store off
-`loom toolshed-store-dir`, and the two `runsc-cfc` sidecar directories off the
-runtime registration `docker info` reports — so a sidecar path is fixed where
-Docker registers the runtime, not in loom. Without an instance the identity and
-the space are named — by the flags above, or by `CF_HARNESS_FABRIC_IDENTITY` and
-`CF_HARNESS_FABRIC_SPACE`, or by the `cf` CLI's own `CF_IDENTITY` and `CF_SPACE`
-— and their absence is an error naming them. The pattern index and skills
-registry are this deployment's constants rather than any fabric's. It prints
-every value with the record that decided it, and serves on the port Weaver pairs
-with. Arguments after `--` reach this server untouched, so every flag in the
-tables below is reachable through it. [`../docs/WEAVER.md`](../docs/WEAVER.md)
-is the operator procedure it belongs to, including the tailnet topology and the
-pre-demo preflight.
+`loom toolshed-store-dir`, the connector handles that instance has injected off
+its `sqlite-injection/handles.json` receipt, and the two `runsc-cfc` sidecar
+directories off the runtime registration `docker info` reports — so a sidecar
+path is fixed where Docker registers the runtime, not in loom. Without an
+instance the identity and the space are named — by the flags above, or by
+`CF_HARNESS_FABRIC_IDENTITY` and `CF_HARNESS_FABRIC_SPACE`, or by the `cf` CLI's
+own `CF_IDENTITY` and `CF_SPACE` — and their absence is an error naming them.
+The pattern index and skills registry are this deployment's constants rather
+than any fabric's. It prints every value with the record that decided it, and
+serves on the port Weaver pairs with. Arguments after `--` reach this server
+untouched, so every flag in the tables below is reachable through it.
+[`../docs/WEAVER.md`](../docs/WEAVER.md) is the operator procedure it belongs
+to, including the tailnet topology and the pre-demo preflight.
 
 Against a toolshed of your own, the environment below is what `console:launch`
 would otherwise have resolved:
@@ -746,3 +747,43 @@ Each turn is its own run, so what that run holds is established per turn and
 announced in the messages it opens with: the skills registry scanned from the
 skills root, the well-known grants of the session's space — which is what lets a
 task explore what the space holds — and the input cells the request attached.
+
+## Connector grants
+
+A console launched against a loom instance grants every session it runs the
+connector databases that instance has injected, beside the piece registry. That
+is what lets a bare task reach the fabric's own mail and bank data without the
+caller attaching anything: a request that names no `inputCells` at all still
+opens holding them.
+
+A grant is named by the CFC class loom's own table contract declares for the
+handle's columns, so a session is told `email` for a mail database and `finance`
+for a bank one. Two of the instance's records decide that, and the launcher
+reads both. `sqlite-injection/handles.json` — the receipt loom's daemon writes,
+and what `loom connector handles` prints — says which handles exist and what
+each one's reference is, and records no class. `pieces.json` declares each
+connector piece's `sqlite_sources`, whose table contract carries the per-column
+`ifc` the daemon seeded, and that is where the class is written down. They join
+on the piece and connection loom names in both.
+
+What a grant does not do is decide anything a reference does not already decide.
+It discloses a token and a harness-authored sentence; the address stays
+trusted-side, `describe_handle` answers shape from the cell, and reading
+anything behind the token means running a pattern over it, where CFC rules as it
+does for every other flow.
+
+Three cases the launch printout states rather than resolving silently:
+
+- A handle whose declared contract carries no CFC class, or more than one, is
+  printed as `grant <connection>  (none: <reason>)` and is not granted. A name
+  guessed at is a name a session would be told means something it does not.
+- A second handle declaring a class the first already took is printed the same
+  way, naming the connection that holds the name.
+- A receipt that does not parse refuses the launch. A console that came up
+  holding no grants while its report claimed two is the silent misconfiguration
+  this launch path exists to rule out; an absent receipt, by contrast, is simply
+  an instance that has injected nothing yet.
+
+`/api/task` answers 400 when a request's `inputCells` name something the console
+already grants, naming both the word and the connection behind the grant: the
+caller cannot see the grants, so a collision is the console's to explain.

@@ -358,6 +358,86 @@ describe("snapshot memo", () => {
     });
   });
 
+  it("keeps scoped label views at their read epoch after metadata changes", () => {
+    const cell = runtime.getCell(space, "scoped-label-epochs", undefined, tx);
+    const address = cell.getAsNormalizedFullLink();
+    const writeLabel = (name: string) =>
+      tx.writeOrThrow({
+        space,
+        id: address.id,
+        type: "application/json",
+        path: [],
+      }, {
+        value: "unchanged",
+        cfc: {
+          version: 1,
+          schemaHash: "test-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { confidentiality: [name] },
+            }],
+          },
+        },
+      });
+    const readLabel = () =>
+      cfcLabelViewForDereference(tx, address, address)
+        ?.entries[0].label.confidentiality;
+    const scopedLabel = () =>
+      tx.runWithAmbientReadMeta(machineryRead, readLabel);
+    writeLabel("first");
+    const epoch = tx.issueReadEpoch()!;
+    expect(scopedLabel()).toEqual(["first"]);
+    const afterFirst = cfcMetadataReadCount();
+    expect(scopedLabel()).toEqual(["first"]);
+    expect(cfcMetadataReadCount()).toBe(afterFirst);
+
+    writeLabel("second");
+    expect(scopedLabel()).toEqual(["second"]);
+    const afterCurrent = cfcMetadataReadCount();
+    const previous = tx.enterReadEpoch(epoch);
+    try {
+      expect(scopedLabel()).toEqual(["first"]);
+      expect(cfcMetadataReadCount()).toBe(afterCurrent);
+      expect(readLabel()).toEqual(["first"]);
+      expect(cfcMetadataReadCount()).toBeGreaterThan(afterCurrent);
+    } finally {
+      tx.exitReadEpoch(previous);
+    }
+    expect(readLabel()).toEqual(["second"]);
+  });
+
+  it("journals label metadata separately for distinct ambient metadata objects", () => {
+    const { holder } = linkingCell(
+      "metadata-identity-holder",
+      "metadata-identity-target",
+    );
+    const { traces } = resolveLinkTracingDereferences(
+      runtime,
+      tx,
+      holder.key("target").getAsNormalizedFullLink(),
+    );
+    const firstMeta = { ...machineryRead };
+    const secondMeta = { ...machineryRead };
+    const readLabels = () => cfcLabelViewForDereferenceTraces(tx, traces);
+    const before = cfcMetadataReadCount();
+    tx.runWithAmbientReadMeta(firstMeta, readLabels);
+    const afterFirst = cfcMetadataReadCount();
+    expect(afterFirst).toBeGreaterThan(before);
+    tx.runWithAmbientReadMeta(firstMeta, readLabels);
+    expect(cfcMetadataReadCount()).toBe(afterFirst);
+    tx.runWithAmbientReadMeta(secondMeta, readLabels);
+    const afterSecond = cfcMetadataReadCount();
+    expect(afterSecond).toBeGreaterThan(afterFirst);
+    tx.runWithAmbientReadMeta(firstMeta, readLabels);
+    expect(cfcMetadataReadCount()).toBe(afterSecond);
+    tx.runWithAmbientReadMeta(secondMeta, readLabels);
+    expect(cfcMetadataReadCount()).toBe(afterSecond);
+    readLabels();
+    expect(cfcMetadataReadCount()).toBeGreaterThan(afterSecond);
+  });
+
   it("keeps resolutions of two paths in one document apart", () => {
     const first = runtime.getCell<{ value: string }>(
       space,
