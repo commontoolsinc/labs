@@ -49,6 +49,11 @@ coordinator reference retains broader selection history from its creation or
 reconciliation. Dereferencing through that coordinator still consumes its
 history.
 
+Setup discovers dependency chains through redirect probes. Terminal values and
+their nested references are consumed only when the action reads them, so merely
+installing sibling nodes does not add their stored contents to an input's
+acquisition history.
+
 Setup compares stored result bytes only to elide an unchanged projection write;
 that comparison retains its conflict dependency without consuming content
 labels. Preserving a stored name is a separate content copy whose read

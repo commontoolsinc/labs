@@ -11,7 +11,10 @@ import { createSigilLinkFromParsedLink } from "../src/link-utils.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { sendValueToBinding } from "../src/pattern-binding.ts";
+import {
+  findAllWriteRedirectCells,
+  sendValueToBinding,
+} from "../src/pattern-binding.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -73,6 +76,48 @@ describe("CFC reference confidentiality", () => {
     tx.abort();
     return value as CfcMetadata;
   };
+
+  it("collects redirect dependencies without consuming terminal contents", async () => {
+    const nested = await seed("wiring-nested", "nested target");
+    const terminal = await seed("wiring-terminal", {
+      text: "private contents",
+      nested: nested.getAsLink(),
+    }, [{
+      path: [],
+      label: { confidentiality: [targetSecret] },
+    }, {
+      path: ["nested"],
+      origin: "link",
+      observes: "followRef",
+      label: { confidentiality: ["nested-selection"] },
+    }]);
+    const redirect = await seed(
+      "wiring-redirect",
+      terminal.getAsWriteRedirectLink(),
+      [{
+        path: [],
+        origin: "link",
+        observes: "followRef",
+        label: { confidentiality: [secret] },
+      }],
+    );
+    const tx = runtime.edit();
+    try {
+      const dependencies = findAllWriteRedirectCells(
+        { input: redirect.getAsWriteRedirectLink() },
+        redirect.withTx(tx),
+      );
+      expect(dependencies.map(({ id }) => id)).toEqual([
+        redirect.getAsNormalizedFullLink().id,
+        terminal.getAsNormalizedFullLink().id,
+      ]);
+      expect(deriveFlowJoin(tx).confidentiality).toEqual([secret]);
+      expect(terminal.withTx(tx).key("text").get()).toBe("private contents");
+      expect(deriveFlowJoin(tx).confidentiality).toContainEqual(targetSecret);
+    } finally {
+      tx.abort();
+    }
+  });
 
   it("retains selection confidentiality when dereferencing a public constant", async () => {
     const target = await seed("public-target", "public constant");

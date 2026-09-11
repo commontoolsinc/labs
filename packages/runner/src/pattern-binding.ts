@@ -23,7 +23,7 @@ import {
   getCfcReferenceProvenance,
   withCfcReferenceConfidentiality,
 } from "./cfc/reference-provenance.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { joinCfcObservedConfidentiality } from "./cfc/observation.ts";
 import { diffAndUpdate, recordTrustedLinkValueWrite } from "./data-updating.ts";
 import {
@@ -45,6 +45,7 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
   internalVerifierRead,
+  linkResolutionProbe,
   machineryRead,
 } from "./storage/reactivity-log.ts";
 import {
@@ -915,10 +916,8 @@ export function findAllWriteRedirectCells<T>(
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
-  // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
-  // does not depend on the cell's value type, so accept any cell. This lets the
-  // redirect-chain recursion re-base onto the resolved `linkCell` (a
-  // `Cell<unknown>`) rather than the original typed base.
+  // Binding traversal needs the base cell's address and transaction, regardless
+  // of its value type. Each redirect hop resolves against its own target.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isAliasBinding(binding)) {
       // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
@@ -927,30 +926,24 @@ export function findAllWriteRedirectCells<T>(
       // and is not part of this level's read/write surface.
       return;
     } else if (isWriteRedirectLink(binding)) {
-      // Follow a *chain* of write redirects: record this redirect, then if its
-      // target value is ITSELF a write redirect, follow that too (one string of
-      // redirects). We stop as soon as the target is a non-redirect value — we
-      // do NOT recurse into it looking for further nested redirects.
-      //
-      // (Previously this recursed via `find(linkCell.getRaw(...))`, which walked
-      // the whole target value structurally — the transitive closure across
-      // documents — and was the dominant reload instantiation cost: resolving a
-      // cell + walking its entire value per link. Following only direct redirect
-      // chains keeps the cases that matter without the deep dive.)
-      const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
-      if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
-      seen.push(link);
-      const linkCell = baseCell.runtime.getCellFromLink(
-        link,
-        undefined,
-        baseCell.tx,
-      );
-      if (!linkCell) throw new Error("Link cell not found");
-      const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
-      // Resolve the next redirect relative to `linkCell` (the cell the chained
-      // redirect lives in), not the original `baseCell`: a relative redirect in
-      // a cross-document target must resolve against its own document.
-      if (isWriteRedirectLink(target)) find(target, linkCell);
+      let link = parseLink(binding, baseCell.getAsNormalizedFullLink());
+      const tx = baseCell.runtime.readTx(baseCell.tx);
+      while (
+        !seen.some((candidate) => areNormalizedLinksSame(candidate, link))
+      ) {
+        seen.push(link);
+        // Dependency discovery observes redirect topology. A terminal value's
+        // contents and nested references belong to the action's later reads.
+        const target = resolveLink(baseCell.runtime, tx, link, "top", {
+          markIfcCrossings: true,
+        });
+        const next = tx.runWithAmbientReadMeta(
+          { ...ignoreReadForScheduling, ...linkResolutionProbe },
+          () => readMaybeLink(tx, target, true),
+        );
+        if (next === undefined) break;
+        link = next;
+      }
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;

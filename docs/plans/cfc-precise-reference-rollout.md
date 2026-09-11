@@ -197,6 +197,10 @@ keep them out of public logs and never retain owner credentials in the record.
 - [ ] Verify local dispatch, served replay, same-space cascades, and cross-space
       outbox propagation of stream-selection confidentiality, including events
       with no references in their payload.
+- [ ] Run the CFC gallery after trusted handler actions and cold resume with the
+      render ceiling enabled. The admitted prompt-influence card must remain
+      visible while the source-provenance and fact-check cards stay blocked;
+      installing their dependency graphs must not taint unrelated UI references.
 - [ ] Run the large lunch-poll fixture with the intended posture and normal CI
       budget; measure a controlled main/candidate comparison if it regresses.
       Increasing the timeout does not prove readiness. Obtain authoritative
