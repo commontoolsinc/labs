@@ -275,9 +275,10 @@ function writePathCrossesLink(
   path: readonly (string | number)[],
 ): boolean {
   let current = raw;
-  for (let index = 0; index + 1 < path.length; index++) {
-    if (current === null || typeof current !== "object") return false;
-    current = (current as Record<PropertyKey, unknown>)[path[index]];
+  for (const segment of path.slice(0, -1)) {
+    current = current !== null && typeof current === "object"
+      ? (current as Record<PropertyKey, unknown>)[segment]
+      : undefined;
     if (isLink(current)) return true;
   }
   return false;

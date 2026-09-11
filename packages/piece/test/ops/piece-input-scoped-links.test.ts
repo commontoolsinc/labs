@@ -50,10 +50,13 @@ describe("piece-controller", () => {
       await storage.close();
     });
 
-    /** Installs the schema fixture through the normal persistent-piece setup. */
-    async function create(input: unknown): Promise<PieceController> {
+    /** Installs a schema fixture through the normal persistent-piece setup. */
+    async function createWith(
+      argumentSchema: JSONSchema,
+      input: unknown,
+    ): Promise<PieceController> {
       const pattern = runtime.unsafeTrustPattern({
-        argumentSchema: schema,
+        argumentSchema,
         resultSchema: { type: "object", properties: {} },
         result: {},
         nodes: [],
@@ -63,6 +66,9 @@ describe("piece-controller", () => {
         await pieces.runPersistent(pattern, input, undefined, { start: true }),
       );
     }
+
+    /** Installs the `myName`/`title` fixture. */
+    const create = (input: unknown) => createWith(schema, input);
 
     /** The argument document as stored, links unresolved. */
     const rawArgument = (piece: PieceController) =>
@@ -116,6 +122,27 @@ describe("piece-controller", () => {
       await piece.input.set(userRedirect(["myName"]), ["myName"]);
 
       expect(rawArgument(piece).myName).toEqual(userRedirect(["myName"]));
+    });
+
+    it("writes below a readable link into the slot it points at", async () => {
+      const pair: JSONSchema = {
+        type: "object",
+        properties: { b: { type: "string" }, c: { type: "string" } },
+        required: ["b", "c"],
+      };
+      // `obj` aliases `inner` within the same document, so a write below
+      // `obj` lands in `inner`.
+      const alias = { "/": { "link@1": { path: ["inner"] } } };
+      const piece = await createWith({
+        type: "object",
+        properties: { obj: pair, inner: pair },
+        required: ["obj", "inner"],
+      }, { obj: alias, inner: { b: "before", c: "x" } });
+
+      await piece.input.set("after", ["obj", "b"]);
+
+      expect(await piece.input.get(["inner"])).toEqual({ b: "after", c: "x" });
+      expect(rawArgument(piece).obj).toEqual(alias);
     });
 
     it("throws on `myName` when a linked slot holds a readable wrong-typed value", async () => {
