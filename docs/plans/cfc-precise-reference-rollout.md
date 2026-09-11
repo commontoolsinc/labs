@@ -120,6 +120,15 @@ results; use the policy configuration intended for the release. Runs with
 `enforce-explicit` plus `persist`, or with any other dial below this table, are
 diagnostic comparisons and cannot satisfy the readiness gate.
 
+- [ ] Provision a separate strict rehearsal Runtime for each participating
+      migration, client, serving, and background execution role before acceptance
+      begins. `productionServer()` currently pins `enforce-explicit`; stock
+      toolshed and background-piece-service hosts therefore do not satisfy this
+      gate. Use isolated rehearsal hosts whose Runtime factories explicitly set
+      all five values above, including every per-space/worker Runtime. Reusing
+      the production host entry points first requires strict-mode configuration
+      plumbing in the preset and hosts, with resolved-posture tests. A strict
+      client alone cannot prove acceptance of the served topology.
 - [ ] Follow the [space clone procedure](../development/space-clone-rehearsal.md)
       to copy representative real Homes and participating profile/consumer spaces.
       Record source revisions; keep inventory read-only until the clone exists.
