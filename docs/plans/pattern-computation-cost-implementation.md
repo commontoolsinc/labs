@@ -211,6 +211,8 @@ passed before merge, with clean Cubic and antagonistic reviews.
   - [x] Establish failure before repair, or demonstrate that the current system
         already passes the faithful reproduction. Record the cause or evidence
         before deciding what C2/C3 need to change.
+  - [x] Exercise two reader transport outages with nested and mapped rows;
+        verify catch-up and subsequent updates through headless result reads.
   - [ ] Verify rendered rows after reconnect.
 
   The
@@ -226,6 +228,11 @@ passed before merge, with clean Cubic and antagonistic reviews.
   profiles are created in a separate transaction and edited directly in their
   own space. Headless result reads explicitly pull data, so browser rendering
   owns the passive-update check. C1 remains open for reconnect verification.
+  The [reconnect probe](../../packages/patterns/integration/reactive-vote-rows-reconnect.test.ts)
+  closes the reader's storage sockets while the writer changes membership and
+  profiles. Ordinary memory queries wait for session restoration before
+  constructing their requests. This guards the handshake-to-session interval;
+  a subsequent disconnect during request issue remains a separate boundary.
   These synthetic probes do not authorize removing the lunch-poll workaround or
   accessing the live poll.
 
