@@ -1203,6 +1203,34 @@ describe("describe_handle", () => {
         expect(output.database?.tables).toBeDefined();
       });
 
+      it("reports a table whose count query refused with no error object as unread", async () => {
+        // What a provider throws is its own, and not every refusal arrives as
+        // an `Error`. The reason still has to reach the caller as text.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(() =>
+          Promise.reject("the store is closed")
+        );
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill).toEqual([{
+          table: "messages",
+          unread: "the store is closed",
+        }]);
+      });
+
       it("reports a table whose count query returned no count as unread", async () => {
         // The provider answered, so nothing threw, and what came back holds no
         // row count. Zero is the one thing that must not be reported for it.
