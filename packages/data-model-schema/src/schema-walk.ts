@@ -419,7 +419,7 @@ export function mapSubschemas(
     const entries = Object.entries(children);
     let mapped: [string, unknown][] | undefined;
     for (let index = 0; index < entries.length; index++) {
-      const [name, child] = entries[index];
+      const [name, child] = entries[index]!;
       if (!holdsSubschema(child, keyword, name, schema)) continue;
       const next = map(child);
       if (next !== child) {

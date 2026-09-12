@@ -8,13 +8,6 @@ import {
   taggedHashStringOf,
 } from "@commonfabric/data-model";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
-import {
-  classifySchemaMeta,
-  collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
-  SCHEMA_META_MEMBER,
-} from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
 import type { URI } from "../sigil-types.ts";
@@ -56,6 +49,13 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
+  SCHEMA_META_MEMBER,
+} from "@commonfabric/data-model-schema/schema-refs";
 
 import type { CellScope } from "../builder/types.ts";
 import {

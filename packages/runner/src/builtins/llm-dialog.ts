@@ -19,6 +19,15 @@ import {
   toDeepFrozenSchema,
 } from "@commonfabric/data-model-schema";
 import {
+  ARRAY_SUBSCHEMA_KEYS,
+  mapSubschemas,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+} from "@commonfabric/data-model-schema/schema-walk";
+import {
+  isExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   DEFAULT_MODEL_NAME,
   LLMClient,
   LLMRequest,
@@ -54,7 +63,6 @@ import {
   cfcSchemaToObject,
   resolveCfcSchemaRefs,
 } from "../cfc/schema-refs.ts";
-import { isExternalSchemaRef } from "../schema-decompose.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
@@ -100,12 +108,6 @@ import {
 import { Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { schemaToTypeString } from "../schema-format.ts";
-import {
-  ARRAY_SUBSCHEMA_KEYS,
-  mapSubschemas,
-  RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
-} from "../schema-walk.ts";
 import { resolveLinkScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";

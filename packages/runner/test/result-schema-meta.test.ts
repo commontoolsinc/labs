@@ -6,6 +6,13 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { resetSyncSchemaTableConfig } from "@commonfabric/memory/v2";
 import {
+  classifySchemaMetaValue,
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   EmulatedStorageManager,
   newLoopbackServer,
 } from "../src/storage/cache.deno.ts";
@@ -19,14 +26,7 @@ import {
   writeResultSchemaMeta,
 } from "../src/result-schema-meta.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
-import {
-  classifySchemaMetaValue,
-  collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
-  parseExternalSchemaRef,
-  recomposeSchemaRefs,
-} from "../src/schema-decompose.ts";
+import { recomposeSchemaRefs } from "../src/schema-decompose.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { resetContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";

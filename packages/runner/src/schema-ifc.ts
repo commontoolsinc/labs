@@ -18,18 +18,18 @@ import {
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { URI } from "./sigil-types.ts";
+import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
   collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
-} from "./schema-decompose.ts";
+} from "@commonfabric/data-model-schema/schema-refs";
+import type { URI } from "./sigil-types.ts";
 import {
   externalResolutionMissCount,
   lookupSchemaDocument,
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
-import { forEachSubschema } from "./schema-walk.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 const logger = getLogger("schema-ifc");

@@ -6,6 +6,12 @@ import {
   internSchemaAsTaggedHashString,
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model-schema";
+import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  schemaMetaRefHashes,
+} from "@commonfabric/data-model-schema/schema-refs";
 import {
   createGraphQueryWalkStats,
   createSchemaMemo,
@@ -22,15 +28,9 @@ import {
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
-  classifySchemaMeta,
-  collectExternalSchemaRefHashes,
-  schemaMetaRefHashes,
-} from "../../runner/src/schema-decompose.ts";
-import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../../runner/src/schema-registry.ts";
-import { isSubschema } from "../../runner/src/schema-walk.ts";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {

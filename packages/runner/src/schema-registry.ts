@@ -25,7 +25,9 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { collectExternalSchemaRefHashes } from "./schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+} from "@commonfabric/data-model-schema/schema-refs";
 
 /** Thrown when a document's content does not hash to its claimed id. */
 export class SchemaDocumentHashMismatchError extends Error {

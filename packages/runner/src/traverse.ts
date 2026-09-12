@@ -28,6 +28,10 @@ import {
   schemaTypeOfFabricPrimitive,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import {
+  collectExternalSchemaRefHashes,
+  containsExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,
@@ -51,10 +55,6 @@ import {
   isPrimitive,
   isString,
 } from "../../utils/src/types.ts";
-import {
-  collectExternalSchemaRefHashes,
-  containsExternalSchemaRef,
-} from "./schema-decompose.ts";
 import {
   externalResolutionMissCount,
   lookupSchemaDocument,

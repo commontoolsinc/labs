@@ -19,7 +19,7 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
   walkSchema,
-} from "../src/schema-walk.ts";
+} from "@commonfabric/data-model-schema/schema-walk";
 
 interface Edge {
   schema: JSONSchema;
@@ -482,9 +482,9 @@ describe("values that are not schemas", () => {
       edgesOf({ properties: [{ type: "string" }] } as unknown as JSONSchema)
     );
     expect(result.length).toBe(1);
-    expect(result[0].keyword).toBe("properties");
-    expect(result[0].key).toBe("0");
-    expect(result[0].schema).toEqual({ type: "string" });
+    expect(result[0]!.keyword).toBe("properties");
+    expect(result[0]!.key).toBe("0");
+    expect(result[0]!.schema).toEqual({ type: "string" });
     expect(warnings).toEqual([]);
   });
 

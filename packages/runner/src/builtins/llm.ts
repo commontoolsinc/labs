@@ -10,6 +10,7 @@ import {
   internSchema,
   toDeepFrozenSchema,
 } from "@commonfabric/data-model-schema";
+import { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
 import { hashOf } from "@commonfabric/data-model";
 import {
   DEFAULT_GENERATE_OBJECT_MODEL,
@@ -53,7 +54,6 @@ import {
 } from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
-import { mapSubschemas } from "../schema-walk.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import {

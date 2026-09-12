@@ -13,6 +13,12 @@ import {
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
 import {
+  containsExternalSchemaRef,
+  formatExternalSchemaRef,
+  parseExternalSchemaRef,
+  SCHEMA_META_MEMBER,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   cloneForMutation,
   type CloneForMutationResult,
   fabricAwareEqual,
@@ -35,13 +41,9 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
 import {
-  containsExternalSchemaRef,
   decomposeSchema,
-  formatExternalSchemaRef,
-  parseExternalSchemaRef,
   recomposeSchema,
   recomposeSchemaRefs,
-  SCHEMA_META_MEMBER,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
 import {

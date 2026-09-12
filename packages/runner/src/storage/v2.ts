@@ -70,19 +70,19 @@ import {
 } from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
-import type { Cancel } from "../cancel.ts";
-import type { Cell } from "../cell.ts";
+import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
   classifySchemaMeta,
   collectExternalSchemaRefHashes,
   schemaMetaRefHashes,
-} from "../schema-decompose.ts";
+} from "@commonfabric/data-model-schema/schema-refs";
+import type { Cancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
-import { isSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
   isPrimitiveCellLink,

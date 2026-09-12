@@ -114,6 +114,7 @@ import {
   type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
+import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import {
   navigateEventContextFromRunInfo,
@@ -147,7 +148,6 @@ import {
 } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import { isSchemaMismatchError } from "./schema-view.ts";
-import { forEachSubschema } from "./schema-walk.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";

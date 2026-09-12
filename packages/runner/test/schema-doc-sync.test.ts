@@ -10,6 +10,9 @@ import {
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   EmulatedStorageManager,
   newLoopbackServer,
 } from "../src/storage/cache.deno.ts";
@@ -18,7 +21,6 @@ import type { SpaceReplica } from "../src/storage/v2.ts";
 import {
   type DecomposedSchema,
   decomposeSchema,
-  parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
 import {
   isSchemaDocumentClosureComplete,

@@ -1,19 +1,18 @@
 import { Database } from "@db/sqlite";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import {
   hashStringOf,
   taggedHashStringOf,
   valueEqual,
 } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
-import type { JSONSchema } from "../../runner/src/builder/types.ts";
+import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
   classifySchemaMeta,
   collectExternalSchemaRefHashes,
   SCHEMA_META_MEMBER,
   schemaMetaRefHashes,
-} from "../../runner/src/schema-decompose.ts";
-import { isSubschema } from "../../runner/src/schema-walk.ts";
+} from "@commonfabric/data-model-schema/schema-refs";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   applySqliteCommitWrite,

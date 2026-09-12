@@ -10,10 +10,12 @@ import {
   internSchema,
   isNontrivialSchema,
 } from "@commonfabric/data-model-schema";
+import {
+  isExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   decomposeSchema,
-  isExternalSchemaRef,
   recomposeSchema,
   SchemaNotDecomposableError,
 } from "./schema-decompose.ts";

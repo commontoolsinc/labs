@@ -10,6 +10,7 @@ import {
   deepFrozenCloneAndInternSchema,
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
+import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
   cloneIfNecessary,
   fabricAwareEqual,
@@ -24,7 +25,6 @@ import {
   type ReadonlyRecord,
 } from "@commonfabric/utils/types";
 
-import { isSubschema } from "../schema-walk.ts";
 import {
   hasOwnEnumerableDataProperty,
   isCellKind,
