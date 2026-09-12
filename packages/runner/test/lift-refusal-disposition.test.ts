@@ -26,9 +26,19 @@ describe("lift refusal disposition", () => {
     env = undefined;
   });
 
-  it("writes an undefined result when the body's synchronous read refuses", async () => {
+  /**
+   * Runs the pattern in the given posture over two valid rows, then replaces
+   * the second row with one that lacks its required label, and returns what
+   * the demanded `second` read before and after, and what reached the error
+   * channel.
+   */
+  async function breakSecondRow(
+    lazyMaterialization: boolean,
+  ): Promise<
+    { before: string | undefined; after: string | undefined; errors: Error[] }
+  > {
     env = createSchedulerTestRuntime(import.meta.url, {
-      experimental: { lazyMaterialization: true },
+      experimental: { lazyMaterialization },
     });
     const { runtime, tx } = env;
     const compiled = await runtime.patternManager.compilePattern({
@@ -53,7 +63,8 @@ describe("lift refusal disposition", () => {
     runtime.run(tx, compiled, argument, result);
     await tx.commit();
     env.tx = runtime.edit();
-    expect((await result.pull()).second).toBe("bb");
+    const second = result.key("second");
+    const before = await second.pull();
 
     const errors: Error[] = [];
     runtime.scheduler.onError((error) => {
@@ -62,11 +73,23 @@ describe("lift refusal disposition", () => {
     const write = runtime.edit();
     items.key(1).withTx(write).set({ note: 2 } as unknown as Item);
     expect((await write.commit()).error).toBeUndefined();
-    const after = await result.pull();
+    const after = await second.pull();
     await runtime.idle();
     await runtime.scheduler.idleWithPendingCommits();
+    return { before, after, errors };
+  }
 
-    expect(errors).toEqual([]);
-    expect(after.second).toBeUndefined();
+  it("writes an undefined result when the body's synchronous read refuses under the view", async () => {
+    const outcome = await breakSecondRow(true);
+    expect(outcome.before).toBe("bb");
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.after).toBeUndefined();
+  });
+
+  it("writes an undefined result for the same data when the argument is read eagerly", async () => {
+    const outcome = await breakSecondRow(false);
+    expect(outcome.before).toBe("bb");
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.after).toBeUndefined();
   });
 });

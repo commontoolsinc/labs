@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { EventHandler } from "../src/scheduler.ts";
 import type { IStorageNotification } from "../src/storage/interface.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import {
@@ -80,6 +81,16 @@ const PATTERN = [
   "  firstAsResult: firstAsResult({ items, out }),",
   "}));",
 ].join("\n");
+
+/** The item list's schema, which makes an unmarked read of it eager. */
+const ITEMS_SCHEMA = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: { label: { type: "string" }, note: { type: "number" } },
+    required: ["label"],
+  },
+} as const;
 
 type Sender = {
   send(
@@ -358,6 +369,116 @@ describe("handler lazy context", () => {
       await eager.settle();
       expect(eager.out.get()).toBe(4);
       expect(statuses).toEqual(["done"]);
+    });
+  });
+
+  describe("commit preconditions", () => {
+    // A handler's read log is what its commit's preconditions are built from,
+    // so the read set is also the concurrency contract: a concurrent write to
+    // a path the log covers makes the commit retry. An eager read of a list
+    // covers every row; a view covers the rows the body touched. The handler
+    // here is registered on the scheduler directly, reads under the mark the
+    // runner would set, and holds its transaction open across a barrier while
+    // a second runtime on the same store writes a row it never touched.
+
+    /**
+     * Dispatches one event to a handler that reads the first row under the
+     * given posture, then waits at `gate`; returns how many times the handler
+     * ran once everything settled, and the callback statuses.
+     */
+    async function runAgainstConcurrentWrite(
+      lazy: boolean,
+    ): Promise<{ runs: number; statuses: string[] }> {
+      env = createSchedulerTestRuntime(import.meta.url);
+      const { runtime, tx, storageManager } = env;
+      const sibling = createSchedulerTestRuntime(import.meta.url, {
+        storageManager,
+      });
+      try {
+        const items = runtime.getCell<Item[]>(
+          space,
+          "shared-items",
+          undefined,
+          tx,
+        );
+        items.set(rows());
+        const out = runtime.getCell<number>(space, "shared-out", undefined, tx);
+        const eventCell = runtime.getCell<number>(
+          space,
+          "shared-events",
+          undefined,
+          tx,
+        );
+        await tx.commit();
+        env.tx = runtime.edit();
+        await sibling.tx.commit();
+        sibling.tx = sibling.runtime.edit();
+        await runtime.idle();
+        await sibling.runtime.idle();
+
+        let runs = 0;
+        const entered = Promise.withResolvers<void>();
+        const gate = Promise.withResolvers<void>();
+        const handler: EventHandler = async (actionTx) => {
+          runs++;
+          if (lazy) actionTx.markLazyMaterialize(true);
+          const length = items
+            .asSchema(ITEMS_SCHEMA)
+            .withTx(actionTx)
+            .get()[0].label.length;
+          actionTx.markLazyMaterialize(false);
+          entered.resolve();
+          await gate.promise;
+          out.withTx(actionTx).send(length);
+        };
+        runtime.scheduler.addEventHandler(
+          handler,
+          eventCell.getAsNormalizedFullLink(),
+        );
+        const statuses: string[] = [];
+        runtime.scheduler.queueEvent(
+          eventCell.getAsNormalizedFullLink(),
+          1,
+          true,
+          (commitTx) => {
+            statuses.push(commitTx.status().status);
+          },
+        );
+        await entered.promise;
+
+        // The write the handler's commit may or may not conflict with: row 1,
+        // which the body never touched.
+        const siblingItems = sibling.runtime.getCell<Item[]>(
+          space,
+          "shared-items",
+          undefined,
+        );
+        const write = sibling.runtime.edit();
+        siblingItems.key(1).key("label").withTx(write).set("changed");
+        expect((await write.commit()).error).toBeUndefined();
+        await sibling.runtime.idle();
+        await sibling.runtime.scheduler.idleWithPendingCommits();
+
+        gate.resolve();
+        await runtime.idle();
+        await runtime.scheduler.idleWithPendingCommits();
+        expect(out.get()).toBe(4);
+        return { runs, statuses };
+      } finally {
+        await sibling.runtime.dispose({ closeStorage: false });
+      }
+    }
+
+    it("retries an eager handler's commit when an untouched row changed underneath it", async () => {
+      const outcome = await runAgainstConcurrentWrite(false);
+      expect(outcome.statuses).toEqual(["done"]);
+      expect(outcome.runs).toBeGreaterThan(1);
+    });
+
+    it("commits a lazy handler's run once, since the untouched row is outside its read set", async () => {
+      const outcome = await runAgainstConcurrentWrite(true);
+      expect(outcome.statuses).toEqual(["done"]);
+      expect(outcome.runs).toBe(1);
     });
   });
 });
