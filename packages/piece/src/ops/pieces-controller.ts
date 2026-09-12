@@ -2523,9 +2523,9 @@ export class PiecesController<T = unknown> {
     // diagnosed. `editWithRetry` reruns this callback against fresh state on
     // conflict, so without the guard a concurrent heal (another boot, the
     // pattern updater) that already repointed the root would be blindly
-    // clobbered by our stale `officialRef`. Returning `false` aborts the write
-    // without committing; `result.ok === false` (no error) then means
-    // "superseded".
+    // clobbered by our stale `officialRef`. Returning `false` before anything
+    // is staged commits a transaction with no writes; `result.ok === false`
+    // (no error) then means "superseded".
     if (alreadyOfficial) {
       // Nothing to swap: the root already names the entry the official source
       // compiles to, and that source has just been compiled into this space.

@@ -65,9 +65,8 @@ export const AUTO_DEBOUNCE_MIN_RUNS = 3;
 export const AUTO_DEBOUNCE_DELAY_MS = 100;
 
 // How long a resumed action's initial run may be held while waiting for its
-// space to finish syncing (see runner.ts awaitSyncBeforeInitialRun). This hold
-// covers the flag-off path and the flag-on fallback for a missing, stale, or
-// ineligible observation. A successfully rehydrated action needs no hold.
+// space to finish syncing. Every action resumed with
+// `awaitSyncBeforeInitialRun` (see runner.ts) takes the hold.
 // The sync completing releases the hold early; the timeout only bounds a slow
 // or never-quiescing sync. The hold is an anti-churn OPTIMIZATION (avoid
 // re-deriving against half-synced inputs), not a correctness gate — reads see
