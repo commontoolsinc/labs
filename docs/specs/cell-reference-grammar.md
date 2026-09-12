@@ -904,7 +904,7 @@ the same cells. The relative rows at the end need a context, and theirs is
 | `title`                                                                       | the context's          | the context's | the context's | `title` against the position                | `//bakery/glaze-tracker@user/items/0/title`                                                                                          |
 | `./title`                                                                     | the context's          | the context's | the context's | `title` against the position                | the same as `title`; `./` forces the reading where a bare word is a slug                                                             |
 | `.`                                                                           | the context's          | the context's | the context's | the position                                | the context's own cell                                                                                                               |
-| `./items@user`                                                                | the context's          | the context's | the context's | `items@user` against the position           | a key named `items@user`: `@` is data everywhere but on the `.` head                                                                 |
+| `./items@user`                                                                | the context's          | the context's | the context's | `items@user` against the position           | a key named `items@user`: `@` is data everywhere but on the head                                                                     |
 | `../1/title`                                                                  | the context's          | the context's | the context's | the parent, then `1/title`                  | `//bakery/glaze-tracker@user/items/1/title`                                                                                          |
 | `.@session/title`                                                             | the context's          | the context's | `session`     | `title` against the position                | `//bakery/glaze-tracker@session/items/0/title`: the scope moves, the position holds                                                  |
 | `.@space`                                                                     | the context's          | the context's | `space`       | the position                                | `//bakery/glaze-tracker@space/items/0`                                                                                               |
@@ -1098,6 +1098,11 @@ exit (R12):
   The alternative puts a leading `@` back into the head with a second meaning,
   the shape #6775 is about, so it is closed unless a reader can show it cannot
   manage without it.
+- **A write through a trailing slash.** Reading `/glaze-tracker/` is a loud
+  not-found unless the key `""` exists; writing to it silently creates that key.
+  That is the one cost of admitting the empty key that does not announce itself,
+  and the grammar cannot refuse it, since the string is well-formed. Whether a
+  write refuses an empty leaf — or asks — is the writing commands' decision.
 - **`#` at a shell.** The measured hazard on a leading `#` is real and predates
   this document. Whether the wish syntax moves, and to what, is a decision for
   the wish surface; the member's mid-word `#` is not affected.
@@ -1140,11 +1145,11 @@ D10's two rules — the first location part written cuts the context off below i
 the scope is the string's when written and the context's when not — produce this
 table:
 
-| Level          | From the string                                                   | From the context                                                                                                                                  |
-| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| complete       | space, piece, member, path                                        | scope, when the string omits it                                                                                                                   |
-| space-relative | piece, member, path                                               | space; scope, when omitted                                                                                                                        |
-| piece-relative | a path against the position, and a member or qualifier on its `.` | space, piece; the document unless `.#argument` or `.#result` switches it; the scope unless `.@scope` writes it; the position's path as the anchor |
+| Level          | From the string                                                    | From the context                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| complete       | space, piece, member, path                                         | scope, when the string omits it                                                                                                                                                                      |
+| space-relative | piece, member, path                                                | space; scope, when omitted                                                                                                                                                                           |
+| piece-relative | a path against the position, and a member or qualifier on its head | space, piece; the document unless `.#argument` or `.#result` switches it; the scope unless `.@scope` writes it; the position's path as the anchor, or above it by as many climbs as the head carries |
 
 The string's parts are never overridden by the context, and the context's parts
 are never read for a slot the string fills. That is what "defaulting is
