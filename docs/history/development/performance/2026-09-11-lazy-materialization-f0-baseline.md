@@ -212,8 +212,9 @@ From the repository root:
 deno bench -A --v8-flags=--expose-gc packages/runner/test/handler-dispatch-cost.bench.ts
 ```
 
-Each variant requested seven samples after one warmup. Per-sample values
-below are the median of the eight recorded samples after the first. The storage
+Each variant requested seven samples after one warmup; nine invocations were
+recorded per variant, and the values below are the median of the eight after
+the first. The storage
 manager is the in-memory emulation, so commit cost is local and no network is
 represented. No linked rows and no cross-space context are represented; the
 representative-copy limitations recorded in the
@@ -222,56 +223,55 @@ carry forward unchanged, and the live poll was not touched.
 
 ### Timing, in milliseconds per dispatch
 
-`Preflight` is the last of the two preflight passes a dispatch runs, so the
-dispatch pays about twice the figure shown. `Handler` is the scheduler's
-timer around the whole handler action, which contains `ArgRead`, `Body`, and
-`PostRun`. `Commit` sums the transaction's three commit timers. `Rest` is
-what no timer attributes: the elapsed time less the presync, two preflight
-passes, the handler action, and the commit.
+`Populate` is the dependency-population step of the last of the two preflight
+passes a dispatch runs, and `Steps` the sum of that pass's four other timed
+steps (converting the transaction to a log, the dependency commit, collecting
+invalid upstream nodes, scheduling them), so the dispatch pays about twice
+the two figures shown. `Handler` is the scheduler's timer around the handler
+action, which spans `ArgRead`, `Body`, and `PostRun`, then the trusted-write
+collection after the body and the commit's preparation and synchronous steps;
+`Commit` sums the transaction's three commit timers, which run inside that
+span. `Rest` is what no timer attributes: the elapsed time less the presync,
+two preflight passes, and the handler action.
 
-| Rows  | Workload      | Elapsed | Presync | Preflight | ArgRead | Body  | PostRun | Handler | Commit | Rest  |
-| ----- | ------------- | ------- | ------- | --------- | ------- | ----- | ------- | ------- | ------ | ----- |
-| 74 | `scalarKey` | 17.2 | 0.44 | 3.61 | 0.10 | 0.12 | 0.15 | 0.82 | 0.13 | 8.6 |
-| 74 | `scalarGet` | 19.1 | 0.32 | 3.51 | 0.09 | 0.69 | 0.16 | 2.09 | 0.59 | 9.1 |
-| 74 | `walk` | 22.7 | 0.28 | 2.55 | 0.07 | 1.23 | 0.17 | 3.28 | 0.90 | 13.2 |
-| 74 | `mutate` | 15.3 | 0.26 | 1.82 | 0.07 | 0.53 | 0.11 | 1.23 | 0.22 | 10.0 |
-| 74 | `plainScalar` | 12.5 | 0.69 | 1.35 | 0.49 | 0.04 | 0.12 | 1.37 | 0.40 | 7.3 |
-| 74 | `plainWalk` | 31.8 | 1.69 | 2.97 | 1.08 | 0.05 | 0.16 | 2.98 | 0.96 | 20.2 |
-| 296 | `scalarKey` | 33.5 | 0.57 | 10.57 | 0.10 | 0.13 | 0.15 | 0.87 | 0.19 | 10.7 |
-| 296 | `scalarGet` | 39.3 | 0.39 | 7.33 | 0.08 | 2.53 | 0.20 | 6.32 | 1.90 | 16.0 |
-| 296 | `walk` | 72.6 | 0.35 | 7.40 | 0.07 | 4.88 | 0.24 | 12.60 | 4.88 | 40.0 |
-| 296 | `mutate` | 30.8 | 0.41 | 6.52 | 0.07 | 0.84 | 0.12 | 1.59 | 0.25 | 15.6 |
-| 296 | `plainScalar` | 29.7 | 2.16 | 4.29 | 1.65 | 0.04 | 0.13 | 4.66 | 1.20 | 13.1 |
-| 296 | `plainWalk` | 54.8 | 5.06 | 4.79 | 4.30 | 0.05 | 0.16 | 9.35 | 3.19 | 27.6 |
-| 1,184 | `scalarKey` | 55.6 | 0.41 | 18.32 | 0.07 | 0.10 | 0.11 | 0.56 | 0.10 | 17.9 |
-| 1,184 | `scalarGet` | 99.9 | 0.43 | 20.50 | 0.07 | 8.97 | 0.21 | 17.44 | 5.70 | 35.3 |
-| 1,184 | `walk` | 208.6 | 0.45 | 21.57 | 0.07 | 19.71 | 0.23 | 38.15 | 11.93 | 115.0 |
-| 1,184 | `mutate` | 78.3 | 0.42 | 19.61 | 0.07 | 1.97 | 0.10 | 2.80 | 0.36 | 35.5 |
-| 1,184 | `plainScalar` | 125.4 | 9.87 | 21.06 | 7.99 | 0.05 | 0.19 | 16.81 | 5.65 | 50.9 |
-| 1,184 | `plainWalk` | 227.9 | 19.33 | 19.06 | 19.41 | 0.07 | 0.21 | 38.62 | 11.94 | 119.8 |
+| Rows  | Workload      | Elapsed | Presync | Populate | Steps | ArgRead | Body  | PostRun | Handler | Commit | Rest  |
+| ----- | ------------- | ------- | ------- | -------- | ----- | ------- | ----- | ------- | ------- | ------ | ----- |
+| 74 | `scalarKey` | 13.1 | 0.43 | 2.57 | 0.43 | 0.09 | 0.12 | 0.15 | 0.75 | 0.14 | 5.9 |
+| 74 | `scalarGet` | 15.3 | 0.30 | 2.30 | 0.32 | 0.08 | 0.64 | 0.16 | 1.97 | 0.61 | 7.7 |
+| 74 | `walk` | 19.1 | 0.28 | 1.61 | 0.31 | 0.07 | 1.19 | 0.17 | 3.18 | 0.93 | 11.8 |
+| 74 | `mutate` | 15.2 | 0.28 | 2.03 | 0.31 | 0.07 | 0.58 | 0.11 | 1.33 | 0.24 | 8.9 |
+| 74 | `plainScalar` | 14.1 | 0.76 | 1.50 | 0.26 | 0.49 | 0.04 | 0.14 | 1.52 | 0.46 | 8.3 |
+| 74 | `plainWalk` | 19.4 | 1.27 | 1.46 | 0.25 | 1.04 | 0.04 | 0.14 | 2.67 | 0.81 | 12.0 |
+| 296 | `scalarKey` | 27.0 | 0.44 | 7.36 | 0.93 | 0.08 | 0.14 | 0.17 | 0.99 | 0.17 | 9.0 |
+| 296 | `scalarGet` | 29.1 | 0.27 | 4.99 | 0.69 | 0.06 | 2.14 | 0.16 | 4.64 | 1.57 | 12.8 |
+| 296 | `walk` | 44.6 | 0.22 | 4.70 | 0.62 | 0.06 | 4.08 | 0.14 | 8.79 | 2.79 | 25.0 |
+| 296 | `mutate` | 23.7 | 0.32 | 4.43 | 1.58 | 0.06 | 0.70 | 0.09 | 1.31 | 0.23 | 10.0 |
+| 296 | `plainScalar` | 42.5 | 2.38 | 5.41 | 0.78 | 2.21 | 0.07 | 0.21 | 7.82 | 1.56 | 19.9 |
+| 296 | `plainWalk` | 66.5 | 6.46 | 5.70 | 0.91 | 5.56 | 0.07 | 0.26 | 12.07 | 3.36 | 34.8 |
+| 1,184 | `scalarKey` | 61.5 | 0.50 | 20.14 | 3.62 | 0.08 | 0.12 | 0.14 | 0.66 | 0.12 | 12.8 |
+| 1,184 | `scalarGet` | 102.4 | 0.48 | 21.67 | 3.67 | 0.08 | 9.60 | 0.25 | 17.35 | 5.82 | 33.9 |
+| 1,184 | `walk` | 183.1 | 0.47 | 19.86 | 3.70 | 0.07 | 18.71 | 0.23 | 36.03 | 11.04 | 99.5 |
+| 1,184 | `mutate` | 95.5 | 0.51 | 23.47 | 3.37 | 0.08 | 2.70 | 0.12 | 3.58 | 0.42 | 37.8 |
+| 1,184 | `plainScalar` | 139.6 | 10.83 | 23.33 | 3.20 | 9.89 | 0.07 | 0.27 | 19.94 | 7.17 | 55.8 |
+| 1,184 | `plainWalk` | 309.8 | 29.04 | 23.93 | 4.30 | 24.50 | 0.09 | 0.30 | 49.72 | 14.90 | 174.6 |
 
-Four earlier runs of this benchmark on the same revision, before its timed
-interval was narrowed to the commit callback, put `scalarKey` at 1,184 rows
-between 59 and 97 ms elapsed with an 18 to 30 ms preflight pass, and `walk`
+Five earlier runs of this benchmark on the same revision, some with a wider
+timed interval and some on a busier machine, put `scalarKey` at 1,184 rows
+between 56 and 97 ms elapsed with an 18 to 32 ms populate step, and `walk`
 between 161 and 305 ms with a 16 to 35 ms body. The runs agree on the ordering
 of the workloads and on which phases carry the time; the absolute figures move
 by up to a half between runs on this machine and are observations, not
 thresholds.
 
-The preflight telemetry splits each pass into populating the dependencies,
-converting the transaction to a reactivity log, and collecting invalid
-upstream nodes. At 1,184 rows the populate step is 85 to 95 percent of a pass
-in every workload and the other two steps are 2 to 7 ms each; the dependency
-commit and scheduling steps are under 0.1 ms. That split is taken from the
-count pass, with accounting on, and is attribution rather than a timing claim.
-
-`Rest` grows with the list on the whole-list workloads: 115 to 120 ms at
-1,184 rows for `walk` and `plainWalk` against 18 ms for `scalarKey`. No
-existing timer covers the work between the handler action and the commit —
-converting the dispatch transaction to a reactivity log, collecting trusted
-write candidates, and preparing the policy digest — nor the preflight's steps
-past populate, so this record cannot attribute it further. Doing so needs
-timers at those seams and is a lead for F5's remeasurement.
+`Rest` grows with the list on the whole-list workloads: at 1,184 rows it is
+13 ms for `scalarKey`, 34 for `scalarGet`, 100 for `walk`, and 175 for
+`plainWalk`. It is the time outside every timer this record reads: the
+scheduler's ticks between the phases, the presync transaction's setup, the
+commit's asynchronous remainder after its synchronous steps, and the
+callback's delivery. That it grows with the read set the commit carries makes
+the commit's asynchronous part the likely holder, but this record does not
+attribute it; a timer around the commit promise is what would, and that is a
+lead for F5's remeasurement.
 
 ### Counts, from one dispatch with accounting on
 
@@ -302,10 +302,12 @@ attempt: nothing on the handler path reads through a proxy today.
 
 The scheduler held one node before and after every dispatch: a handler with a
 plain result adds nothing to the graph. The retained-heap probe, a full
-collection before and after each dispatch on a shared runtime, gave deltas of
-both signs between 1.5 MB below and 1.3 MB above zero with no relation to the
-workload, so this record makes no retention claim; a retention measurement
-needs a dedicated runtime per dispatch and more samples than this pass takes.
+collection before and after the one dispatch on each variant's fresh runtime,
+gave deltas from 1.8 MB below zero to 0.1 MB above it with no relation to the
+workload: a heap that shrinks across a dispatch is collecting the runtime's
+own setup garbage, not measuring what the dispatch retained. This record makes
+no retention claim; a retention measurement needs a runtime warmed past its
+setup and more samples than this pass takes.
 
 ## Findings
 
@@ -319,16 +321,21 @@ needs a dedicated runtime per dispatch and more samples than this pass takes.
    second runs; both walk the full list. Which condition skips the first pass
    was not established here and is a lead for the scheduler's owner.
 2. **The argument read is negligible for a handle context and linear for a
-   plain one.** With `Writable<Vote[]>` the read mints a handle in 0.1 to 0.2
-   ms at every size. With `Vote[]` it materializes every row, costing 10 to 20
-   ms at 1,184 rows, and the presync pays the same again. The lunch poll's
-   handlers all bind handles.
-3. **Whole-list reads inside the body cost what a plain context costs, per
-   read.** `votes.get()` inside the handler is 19 to 21 ms at 1,184 rows
-   whether the body then takes one element or sums them all, and the commit
-   that follows a whole-list read is 7 to 14 ms against 0.1 to 0.4 ms for a
-   keyed read. The write is the same in both, so the difference is the read
-   set the commit carries.
+   plain one.** With `Writable<Vote[]>` the read mints a handle in under 0.1
+   ms at every size. With `Vote[]` it materializes every row: 2 to 6 ms at
+   296 rows and 10 to 25 ms at 1,184, where the two plain workloads read the
+   same list and the spread between them is run noise. The presync pays
+   about the same again. The lunch poll's handlers bind their collections as
+   handles; the plain values they bind are scalars such as a name or a clock
+   tick.
+3. **A whole-list read inside the body costs what a plain context's argument
+   read costs, and the commit after it grows with the read set.** The body
+   timer spans the whole body, so it cannot isolate the read: at 1,184 rows
+   `scalarGet`'s body, a whole-list read and one element, is 9.6 ms, and
+   `walk`'s, the same read and a sum over every row, is 18.7 ms. The commit
+   after either is 5.8 and 11.0 ms against 0.1 to 0.4 ms after a keyed read;
+   the write is the same in all of them, so the difference is the read set
+   the commit carries.
 4. **A handler's read log is its commit precondition set.** The lunch poll's
    `addOption` and `removeOption` read the whole vote list on purpose so a
    concurrent cast conflicts with their commit. A view registers the paths
@@ -345,9 +352,10 @@ needs a dedicated runtime per dispatch and more samples than this pass takes.
 
 The measured lever on the handler path is not the argument read. Making the
 argument read lazy would save under a millisecond for a handle context and 10
-to 20 ms at 1,184 rows for a plain one, while the two preflight passes spend
-two to three times that on every dispatch regardless. A lazy body read of a handle could save the
-19 to 21 ms a whole-list `get()` costs when the body touches little of it, at
-the price of finding 4 above. Those are the two consequences F1's contract and
-prototype have to weigh, with the same benchmark extended by a posture
-dimension so the comparison holds inputs fixed.
+to 25 ms at 1,184 rows for a plain one, while the two preflight passes spend
+40 to 50 ms on every dispatch regardless. A lazy body read of a handle could
+save most of the 9.6 ms a whole-list `get()` and one element cost, and the
+commit that follows, when the body touches little of the list, at the price of
+finding 4 above. Those are the two consequences F1's contract and prototype
+have to weigh, with the same benchmark extended by a posture dimension so the
+comparison holds inputs fixed.

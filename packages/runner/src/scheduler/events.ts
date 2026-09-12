@@ -1508,7 +1508,10 @@ export async function dispatchQueuedEvent(state: {
       // Materialization and synchronization use the same event actor. Timed
       // on its own key, beside the dispatch's other phases, because the
       // presync materializes the whole argument eagerly and is the one phase
-      // of a dispatch the handler's own timers do not cover.
+      // of a dispatch the handler's own timers do not cover. The key is kept
+      // per process with one active start, like every dispatch timer on this
+      // logger, so two runtimes presyncing at once lose a sample and nothing
+      // else: no caller reads what `timeEnd()` returns.
       logger.timeStart("scheduler", "execute", "event", "presyncInputs");
       try {
         await presyncedImplementation.presyncInputs(

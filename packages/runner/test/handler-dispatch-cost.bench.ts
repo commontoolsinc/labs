@@ -108,10 +108,19 @@ const WORKLOADS: readonly Workload[] = [
 
 const SIZES = [74, 296, 1184] as const;
 
-/** Phase timers a dispatch leaves behind, by logger and key path. */
+/**
+ * Phase timers a dispatch leaves behind, by logger and key path. The
+ * preflight's five steps are read separately; the handler action's timer
+ * spans the argument read, the body, the post-run, the trusted-write
+ * collection after the body, and the commit's preparation.
+ */
 const PHASES = [
   ["scheduler", "scheduler/execute/event/presyncInputs"],
   ["scheduler", "scheduler/execute/event/pullPopulateDependencies"],
+  ["scheduler", "scheduler/execute/event/pullTxToReactivityLog"],
+  ["scheduler", "scheduler/execute/event/pullDepCommitStart"],
+  ["scheduler", "scheduler/execute/event/pullCollectInvalidUpstream"],
+  ["scheduler", "scheduler/execute/event/pullScheduleInvalidUpstream"],
   ["runner", "stream/readInputs"],
   ["runner", "stream/invokeJavaScriptImplementation"],
   ["runner", "stream/postRun"],

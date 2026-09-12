@@ -23,12 +23,6 @@ rollout switch: either can expose a correctness issue the other does not
 address. The flag's owner and removal condition remain recorded in
 [Experimental options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization).
 
-The alternative was to expand the computation-cost arc into handler behavior
-and rollout changes. Keeping a separate plan lets its measured collection
-improvements close with their own evidence and gives the broader behavioral
-changes an explicit review boundary. Deferring the work without an execution sequence would leave the
-default-on flag and handler exception without a completion path.
-
 ## Execution tracker
 
 Mark a step complete only with its linked evidence. Capture decisions and
