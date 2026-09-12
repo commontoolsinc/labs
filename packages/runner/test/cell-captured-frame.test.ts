@@ -45,21 +45,39 @@ describe("cell-captured-frame", () => {
       expect(getTopFrame()).toBe(before);
     });
 
-    it("throws when a disposed runtime is asked for a cell", async () => {
+    // Each case below builds its own runtime, so that disposing that runtime
+    // leaves the stack empty and the cell derived next has no frame.
+    async function cellDerivedAfterDisposal(cause: string) {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
       });
-      const tx = runtime.edit();
+      const parent = runtime.getCell<{ inner: number }>(space, cause);
 
       await runtime.dispose();
       await storageManager.close();
       expect(getTopFrame()).toBeUndefined();
 
-      expect(() =>
-        runtime.getCell<number>(space, "after-dispose", undefined, tx)
-      ).toThrow("no frame is on the stack");
+      return { parent, child: parent.key("inner") };
+    }
+
+    it("is absent for a cell derived after the runtime is disposed, which keeps the link it was derived from", async () => {
+      const { parent, child } = await cellDerivedAfterDisposal("derived-link");
+
+      const parentLink = parent.getAsNormalizedFullLink();
+      const childLink = child.getAsNormalizedFullLink();
+      expect(childLink.id).toBe(parentLink.id);
+      expect(childLink.space).toBe(parentLink.space);
+      expect(childLink.path).toEqual(["inner"]);
+    });
+
+    it("throws from `export()` for a cell derived after the runtime is disposed", async () => {
+      const { child } = await cellDerivedAfterDisposal("derived-export");
+
+      expect(() => child.export()).toThrow(
+        "Cannot export a cell with no frame",
+      );
     });
   });
 

@@ -1040,10 +1040,12 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * The frame on top of the stack when this cell was constructed. A runtime
-   * keeps a frame on the stack from its construction until its disposal, so
-   * every cell it hands out has one.
+   * keeps a frame on the stack from its construction until its disposal, so a
+   * cell has no frame only when it is built after the runtime it came from was
+   * disposed, as deriving one with `key()` from a cell that already has a full
+   * link does.
    */
-  #frame: Frame;
+  #frame: Frame | undefined;
 
   #kind: CellKind;
 
@@ -1070,16 +1072,7 @@ export class CellImpl<T extends FabricValue>
   ) {
     this.#synced = synced;
     this.#cfcLabelView = _cfcLabelView;
-    const frame = getTopFrame();
-    if (frame === undefined) {
-      throw new Error(
-        "Cannot create a cell: no frame is on the stack\n" +
-          "help: a runtime pushes a frame when it is constructed and removes " +
-          "it when it is disposed, so the runtime this cell belongs to has " +
-          "been disposed",
-      );
-    }
-    this.#frame = frame;
+    this.#frame = getTopFrame();
 
     // Store this cell's own link
     this.#_link = {
@@ -1244,7 +1237,7 @@ export class CellImpl<T extends FabricValue>
     // Otherwise, let's attempt to derive the id:
 
     const space = this.#_link.space ?? this.#causeContainer.space ??
-      this.#frame.space;
+      this.#frame?.space;
 
     // We need a space to create a link
     if (!space) {
@@ -1257,7 +1250,7 @@ export class CellImpl<T extends FabricValue>
     // Used passed in cause (via .for()), for events fall back to per-frame
     // counter.
     const cause = this.#causeContainer.cause ??
-      (this.#frame.inHandler
+      (this.#frame?.inHandler
         ? { count: this.#frame.generatedIdCounter++ }
         : undefined);
 
@@ -1269,7 +1262,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, this.#frame.cause));
+    const id = toURI(createRef({ frame: cause }, this.#frame?.cause));
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
@@ -1282,7 +1275,7 @@ export class CellImpl<T extends FabricValue>
 
   get space(): MemorySpace {
     return this.#_link.space ?? this.#causeContainer.space ??
-      this.#frame.space!;
+      this.#frame?.space!;
   }
 
   get path(): readonly PropertyKey[] {
@@ -2262,7 +2255,7 @@ export class CellImpl<T extends FabricValue>
         this.tx,
         writeLink,
         newValue,
-        this.#frame.cause,
+        this.#frame?.cause,
         undefined,
         frameAnchorIds(this.#frame),
       );
@@ -2459,7 +2452,7 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const cause = this.#frame.cause;
+    const cause = this.#frame?.cause;
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -2560,7 +2553,7 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const cause = this.#frame.cause;
+    const cause = this.#frame?.cause;
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -2694,7 +2687,7 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as number",
       );
     }
-    const cause = this.#frame.cause;
+    const cause = this.#frame?.cause;
     const next = (typeof currentValue === "number" ? currentValue : 0) + by;
     diffAndUpdate(this.runtime, this.tx, resolvedLink, next, cause);
 
@@ -2777,7 +2770,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       resolvedLink,
       filtered,
-      this.#frame.cause,
+      this.#frame?.cause,
     );
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
@@ -3488,6 +3481,15 @@ export class CellImpl<T extends FabricValue>
     name?: unknown;
     external?: unknown;
   } {
+    // Exporting a cell is a step in building a pattern, and the builder checks
+    // the exported frame against the one it is building under.
+    if (!this.#frame) {
+      throw new Error(
+        "Cannot export a cell with no frame\n" +
+          "help: this cell was built after the runtime it came from was " +
+          "disposed, so it cannot take part in building a pattern",
+      );
+    }
     return {
       cell: this.#causeContainer.cell,
       path: this.path,
