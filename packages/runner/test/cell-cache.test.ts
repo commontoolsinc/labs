@@ -2396,16 +2396,11 @@ describe("cell-cache", () => {
       ).toBe(true);
     });
 
-    it("second user's writeback of the same content commits cleanly (per-user DID collision regression)", async () => {
-      // Regression: before bd98e01a4, compiled docs were stamped with a
-      // per-user `cf-compiled-by:<did>` atom. A second user's cold-compile
-      // writeback of the SAME content into the same space was rejected by the
-      // CFC label merge ("addIntegrity cannot be weakened at /") because the
-      // deployer's per-DID atom was already present and could not be merged
-      // with a different user's atom. The constant system-compiler atom
-      // (COMPILED_INTEGRITY_ATOM) makes the cache shared: a re-write of the
-      // same content by any user merges cleanly because both sides carry the
-      // identical atom.
+    it("second user's writeback of the same content commits cleanly", async () => {
+      // Compiled docs carry the constant system-compiler atom
+      // (`COMPILED_INTEGRITY_ATOM`), which is what makes the cache shared: a
+      // re-write of the same content by any user merges cleanly with the
+      // deployer's, both sides carrying the identical atom.
 
       const { modules, entryIdentity } = toModules(PROGRAM);
 
