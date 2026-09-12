@@ -589,7 +589,8 @@ packer distributes items by that cost. A package with 675 test files is
 packages' own runners read all go, and `packages/runner` becomes the
 `runner-unit` suite like any other. `tasks/weighted-shards.ts` is the one
 piece that stays, because it is the packing algorithm rather than a table
-of guesses, and the lane packer is its caller.
+of guesses, and `packages/patterns` shards its own integration task with
+it.
 
 The same thing happens one level up. The shard matrices in `deno.yml` —
 eight for the workspace tests, ten for the pattern integration tests,
@@ -3953,7 +3954,7 @@ exercised on the branch on its own.
       set. `tasks/write-coverage-lcov.ts` carries the conversion as a
       function `tasks/ci-lane.ts` calls as well as a command. No test
       changes how it runs.
-- [ ] Delete the hand-maintained sharding: `tasks/test-timing-weights.ts`,
+- [x] Delete the hand-maintained sharding: `tasks/test-timing-weights.ts`,
       `tasks/select-runner-test-files.ts`,
       `tasks/run-sharded-test-files.ts`, `INTERNALLY_SHARDED_PACKAGES` and
       the shard environment variables the packages' own runners read, and
@@ -3961,6 +3962,9 @@ exercised on the branch on its own.
       matrix. `tasks/weighted-shards.ts` stays and the lane packer calls
       it. Nothing may be balanced by a transcribed number afterwards, and
       `check-test-topology` is what proves the items are all still there.
+      `tasks/weighted-shards.ts` stays because `packages/patterns` shards
+      its own integration task with it; the lane packer has its own
+      filling, which charges a suite's setup to the lane that opens it.
 - [x] `packages/ui` and `packages/iframe-sandbox` split their one-string
       test tasks the way `packages/static` already writes the same split,
       so each keeps a measured set over its Deno-only half. The topology
