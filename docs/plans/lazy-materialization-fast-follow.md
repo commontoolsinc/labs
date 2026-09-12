@@ -6,9 +6,9 @@ This plan is the separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
 record](../history/plans/pattern-computation-cost-implementation.md) transferred
-its D1/D2 measurements here. It owns the remaining handler investigation,
-default-on rollout evidence, flag retirement, and those measurements. It does
-not authorize a live lunch-poll update.
+its D1/D2 measurements here. It owns the handler investigation, default-on
+rollout evidence, flag retirement, and those measurements. It does not authorize
+a live lunch-poll update.
 
 The [lazy materialization design](lazy-cell-materialization.md) defines the
 schema-observing view and snapshot contracts. Lift arguments use that view under

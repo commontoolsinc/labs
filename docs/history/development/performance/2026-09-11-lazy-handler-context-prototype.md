@@ -267,12 +267,14 @@ Four things the table shows:
    per half-schema, which is one of the two; what the context shape adds is an
    observation this record does not explain.
 4. **The preflight and the presync are unchanged by construction**, since the
-   prototype does not touch them, and remain the largest fixed cost of every
-   dispatch, as the F0 record found. Their columns are also the measure of run
-   variance: `scalarKey`'s preflight reads 27.0 ms eager and 20.0 ms lazy at
-   1,184 rows with nothing between the postures to explain it, about a quarter
-   of the value, so a difference elsewhere in the table counts as posture only
-   where it is larger than that or repeats in the same direction at every size.
+   prototype does not touch them. The preflight remains the largest fixed cost
+   of every dispatch, as the F0 record found; the presync tracks the context
+   shape, from 0.3 ms for a handle to 25 ms for a plain one at 1,184 rows. Their
+   columns are also the measure of run variance: `scalarKey`'s preflight reads
+   27.0 ms eager and 20.0 ms lazy at 1,184 rows with nothing between the
+   postures to explain it, about a quarter of the value, so a difference
+   elsewhere in the table counts as posture only where it is larger than that or
+   repeats in the same direction at every size.
 
 ## Decision
 

@@ -1,8 +1,8 @@
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
-remains is removing the flag and the eager path for lift arguments, plus the
-handler materialization listed under Stage 5.
+remains is removing the flag and the eager path for lift arguments; handler
+materialization is settled under Stage 5.
 
 The remaining execution sequence and acceptance gates are owned by the separate
 [lazy materialization fast-follow](lazy-materialization-fast-follow.md). This
