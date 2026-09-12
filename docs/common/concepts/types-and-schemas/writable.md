@@ -92,31 +92,18 @@ list: removing it with `removeByValue` drops it from the list but does not clear
 the element's stored value, so a handler that decides anything by reading the
 element back must clear it when removing.
 
-Because keyed elements are stored as links to separate documents, **read the
-collection through a top-level `computed()` / derived value, not by
-`.filter()`/`.map()`-ing the array inline inside a nested reactive `map`**. A
-function or `computed()` that takes the collection resolves the links; an inline
-filter inside another `map`'s body can see only the links a replica has already
-materialized locally — so an element written on another replica (another user's
-keyed entry) is dropped and renders nothing, even though a top-level count over
-the same collection is correct. Compute the per-element data once at the top
-level, and render it from a single `computed()` rather than a reactive
-`map(...)` of sub-elements: a reactive map caches per-item instances whose
-inputs update flakily when a remote write changes one item, whereas one
-`computed` re-runs as a whole when the resolved data changes — the same
-reliability as the count.
+Keyed elements are stored as links to separate documents. Derive values from
+those links in an explicit reactive computation or through a maintained index
+lookup. A reactive `map` can keep a computation per member; it does not refresh a
+plain snapshot captured when that member's callback was constructed. Preserve
+original linked members when binding editing handlers, and make reads of other
+collections reactive rather than relying on what is already materialized on one
+replica.
 
-```typescript
-// Shown for illustration only.
-// In the pattern body — resolves the vote links:
-const tallies = tally(options, votes);
-// In JSX — one computed over the resolved tally, plain JS maps inside:
-computed(() =>
-  tallies.map((t) => (
-    <div>{t.voters.map((v) => <span>{v.name}</span>)}</div>
-  ))
-);
-```
+See [reactive collections](../reactive-collections.md) for filtered views,
+reactive row computations, shared lookups, and their cost boundaries. Verify
+remote edits and cold loading as well as local updates when testing a derived
+view of keyed members.
 
 For the full model and trade-offs (including the add-wins-after-delete
 ordering), see
