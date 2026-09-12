@@ -534,15 +534,15 @@ server](#clients-that-are-not-built-alongside-their-server).
 **Status against the test suites.** The runner unit and integration suite lanes
 have run at the default posture on every merge, and no failure in them has been
 attributed to the flag. The runner unit suite's runtimes read no environment, so
-the variable does not put that suite in the off posture. The pattern integration
-harness and four of the runner integration files read it; the rest of the runner
-integration lane keeps the built-in default whatever the variable says. With the
-built-in default flipped at its source, the runner unit suite passes except for
-five tests: three stating contracts only the view holds (a proxy access count, a
-lookup that does not re-run on a non-key edit, and the unresolved-input
-refusal), one a crash the eager path keeps, and one asserting the default
-itself. The integration suites have not been run at the off posture; the
-[rollout
+the variable does not put that suite in the off posture. The generated-patterns
+integration harness and four of the runner integration files read it; the rest
+of the runner integration lane keeps the built-in default whatever the variable
+says. With the built-in default flipped at its source, the runner unit suite
+passes except for five tests: three stating contracts only the view holds (a
+proxy access count, a lookup that does not re-run on a non-key edit, and the
+unresolved-input refusal), one a crash the eager path keeps, and one asserting
+the default itself. The integration suites have not been run at the off posture;
+the [rollout
 evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
 holds the detail.
 

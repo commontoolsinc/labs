@@ -82,10 +82,12 @@ which a view would narrow.
 - [ ] Define touched required-field refusal, optional mismatch, missing linked
       data, and caught refusal. Distinguish cold input withdrawal from permanent
       invalidity; do not consume an event that never ran or commit partial
-      handler writes as a successful handling. Defined and pinned for client and
-      served dispatches; a client dispatch under server execution with no served
-      carriage seals its skip rather than withdrawing it, and a refusal after a
-      write on that arm is left open.
+      handler writes as a successful handling. Defined for all four; the touched
+      required-field, optional-mismatch, and caught-refusal arms are pinned for
+      client and served dispatches, and a cold linked document parked on its
+      load is defined but not pinned; a client dispatch under server execution
+      with no served carriage seals its skip rather than withdrawing it, and a
+      refusal after a write on that arm is left open.
 - [ ] Pin receipt identity, duplicate delivery, retry, and effect behavior in
       both client and server execution. Test that a refusal after a write does
       not publish that write or an external effect. Retry, the receipt on the

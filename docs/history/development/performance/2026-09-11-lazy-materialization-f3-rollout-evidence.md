@@ -102,7 +102,7 @@ the posture explicitly keeps the posture it names.
 
 | Posture                                      | Result                                                                                                                                                                                      |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| On (the built-in default; every CI run)      | The runner unit and integration suite lanes are green in CI on `main` at `a44d9389c3` (whose one failed lane is the benchmark run) and every lane is green on the F0 change at `b0324aff36` |
+| On (the built-in default; every CI run)      | The runner unit and integration suite lanes are green in CI on `main` at `a44d9389c3` (whose one failed lane is the benchmark run) and no lane failed on the F0 change at `b0324aff36` |
 | Off (built-in default flipped at the source) | `FAILED`: 1,378 tests passed, 5 failed (9 steps), 1 step ignored, in 13 minutes 22 seconds, locally                                                                                         |
 
 The five failing tests, with the assertion each fails on:
@@ -160,11 +160,12 @@ Every commit that touched the view's two files, `schema-view.ts` and
 `query-result-proxy.ts`, between the default flipping on and the revision of
 this evidence, oldest first. The kind is the subject's prefix with its scope
 dropped and its `!` kept, and the subject is quoted without its pull request
-number; two subjects carry no prefix. The transaction mark and the sites that
-read it, in `extended-storage-transaction.ts`, `schema.ts`, and `runner.ts`, are
-outside this table; two commits in the period edited that machinery,
-`129215d4c6` on 2026-08-18, which the table also lists, and `4e345c893e` on
-2026-08-28, which it does not, and both predate the last row.
+number; two subjects carry no prefix. The transaction mark, declared in
+`storage/interface.ts`, and the sites that read it, in
+`extended-storage-transaction.ts`, `schema.ts`, and `runner.ts`, are outside
+this table; two commits in the period edited that machinery, `129215d4c6` on
+2026-08-18, which the table also lists, and `4e345c893e` on 2026-08-28, which it
+does not, and both predate the last row.
 
 | Date       | Commit        | Kind      | Subject                                                                                              |
 | ---------- | ------------- | --------- | ---------------------------------------------------------------------------------------------------- |
