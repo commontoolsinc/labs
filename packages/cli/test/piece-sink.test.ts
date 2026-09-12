@@ -75,7 +75,12 @@ function driving(): { pieces: PiecesController; driven: Driven } {
       return cell;
     },
     get: () => held,
+    pull: () => {
+      calls.push("pull");
+      return Promise.resolve(held);
+    },
     sink: (callback: (value: unknown) => void) => {
+      calls.push("sink");
       subscribed++;
       fire = () => callback(held);
       return () => {
@@ -89,14 +94,14 @@ function driving(): { pieces: PiecesController; driven: Driven } {
       calls.push(`get ${id} ${runIt} ${scope ?? "-"}`);
       return Promise.resolve({
         result: {
-          getCell: () => {
-            calls.push("result");
+          getCell: (path?: (string | number)[]) => {
+            calls.push(`result ${(path ?? []).join("/")}`);
             return Promise.resolve(cell);
           },
         },
         input: {
-          getCell: () => {
-            calls.push("input");
+          getCell: (path?: (string | number)[]) => {
+            calls.push(`input ${(path ?? []).join("/")}`);
             return Promise.resolve(cell);
           },
         },
@@ -249,9 +254,56 @@ describe("sinkCellValue()", () => {
     });
     expect(driven.calls).toEqual([
       `get ${config.piece} false -`,
-      "result",
-      "key topics/3",
+      "result topics/3",
+      "pull",
+      "sink",
     ]);
+  });
+
+  it("asks the controller for the cell at the path, not the root to key into", async () => {
+    // `getCell(path)` is not `getCell()` followed by `key(...path)`. For a
+    // piece's arguments cell the path form asserts the path is admitted by the
+    // input projection, reads the schema selection for it, and resolves a
+    // conditional branch through the root (`PiecePropIo.getCell`,
+    // `packages/piece`); keying into the root reaches none of that. A
+    // subscription taken on the keyed cell would then watch something a read
+    // of the same path does not return, which is the one thing a watch and a
+    // read may not disagree about.
+    //
+    // Kills: resolving the root and keying into it, which records the path
+    // under `key` and hands the controller an empty one.
+
+    const { pieces, driven } = driving();
+    await sinkCellValue(config, ["topics", 3], () => {}, {}, {
+      loadPieces: () => Promise.resolve(pieces),
+      ...RESOLVES,
+    });
+    expect(driven.calls).toContain("result topics/3");
+    expect(driven.calls).not.toContain("key topics/3");
+  });
+
+  it("pulls the cell before subscribing, so the baseline is what a read sees", async () => {
+    // The first settle is the baseline and writes no line, so whatever the
+    // cell holds when the subscription is taken is what every later change is
+    // measured against. `idle()` says the runtime is quiet, which is not the
+    // same as the document having arrived: a baseline taken first would be
+    // whatever was loaded then, and the arrival would read as a change nobody
+    // made. `PiecePropIo.get` pulls the selected cell before its own read
+    // (`packages/piece`), so pulling here is what makes a watch and a read
+    // agree about what the cell held.
+    //
+    // Kills: subscribing straight off the resolved cell, which records no
+    // `pull` at all.
+
+    const { pieces, driven } = driving();
+    await sinkCellValue(config, ["topics", 3], () => {}, {}, {
+      loadPieces: () => Promise.resolve(pieces),
+      ...RESOLVES,
+    });
+    expect({
+      pulled: driven.calls.indexOf("pull"),
+      subscribed: driven.calls.indexOf("sink"),
+    }).toEqual({ pulled: 2, subscribed: 3 });
   });
 
   it("starts nothing, the start being the caller's own act", async () => {
@@ -289,8 +341,9 @@ describe("sinkCellValue()", () => {
     });
     expect(driven.calls).toEqual([
       `get ${config.piece} false -`,
-      "input",
-      "key ",
+      "input ",
+      "pull",
+      "sink",
     ]);
   });
 

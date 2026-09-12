@@ -286,6 +286,25 @@ describe("ShuttleSession", () => {
           }).toEqual({ left: 0, cancels: [1, 1] });
         });
 
+        it("disarms a watch armed after it, rather than holding one", () => {
+          // The window between a subscription coming back and the session
+          // adopting it. A line interrupted mid-`watch` is abandoned by the
+          // prompt loop while its promise runs on, so the adoption can land
+          // after the run has already torn every watch down — and a watch
+          // held then is a sink over a closing connection that `watches`
+          // cannot list and `unwatch` cannot name.
+          //
+          // Kills: arming unconditionally, which leaves the watch held and
+          // its subscription running.
+
+          const session = new ShuttleSession();
+          const late = armed("late");
+          session.disarmAll();
+          session.arm(late.watch);
+          expect({ left: session.watches.length, cancels: late.cancels() })
+            .toEqual({ left: 0, cancels: 1 });
+        });
+
         it("cancels nothing twice where a watch was already disarmed", () => {
           const session = new ShuttleSession();
           const title = armed("title");

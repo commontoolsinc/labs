@@ -119,7 +119,7 @@ import {
 } from "./place.ts";
 import { renderRecord } from "./record.ts";
 import { ShuttleSession } from "./session.ts";
-import { renderValue } from "./value.ts";
+import { classOf, renderValue } from "./value.ts";
 import { ArmedWatch, watchEntries } from "./watch.ts";
 import {
   aimed,
@@ -2701,21 +2701,6 @@ function unwritableInJson(
     if (found !== undefined) return found;
   }
   return undefined;
-}
-
-/**
- * Helper for {@link unwritableInJson}, which is what a fabric value calls
- * itself, for the refusal to name what the cell holds.
- *
- * Read off the prototype rather than the value, as the fabric's own refusals
- * read it: an own `constructor` property is ordinary data, so a value could
- * otherwise choose the name it is refused under. A class that will not say
- * what it is called — a class expression with no name — is named for what it
- * is instead.
- */
-function classOf(value: object): string {
-  const named = Object.getPrototypeOf(value)?.constructor?.name;
-  return typeof named === "string" && named !== "" ? named : "fabric value";
 }
 
 /**

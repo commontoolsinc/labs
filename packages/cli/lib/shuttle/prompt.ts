@@ -323,13 +323,17 @@ export async function runPrompt(
       }
       if (arrival.kind === "lens") {
         running = undefined;
+        // Taken before anything that can throw, because it arrives already
+        // holding a subscription: a lens this loop is not holding is one the
+        // way out cannot close, and its sink would run for the rest of the
+        // process with no frame on screen to say it is there.
+        const opened = arrival.lens;
+        lens = opened;
         // What the line produced is written before the frame takes the screen,
         // which is the order it happened in: the verb armed the watch and said
         // what is armed, and the lens opened onto it. Written after, it would
         // reach the transcript below the changes the frame was up for.
         if (arrival.text !== "") terminal.announce(arrival.text);
-        const opened = arrival.lens;
-        lens = opened;
         // The frame is composed at the size the screen has each time it is
         // drawn, so a window resized under an open lens is redrawn to fit it.
         opened.drawnThrough(() =>

@@ -969,6 +969,7 @@ describe("prompt", () => {
     function driving(
       keys: (framed: Promise<void>) => AsyncIterable<Key>,
       sink: () => Promise<() => void> = () => Promise.resolve(() => {}),
+      refuseAnnounce = false,
     ): {
       writes: Promise<Write[]>;
       drawn: Write[];
@@ -990,6 +991,9 @@ describe("prompt", () => {
           writes.push({ kind: "finish" });
         },
         announce: (text) => {
+          if (refuseAnnounce) {
+            throw new Error("The terminal would not take it.");
+          }
           writes.push({ kind: "announce", text });
         },
         frame: (rows) => {
@@ -1158,6 +1162,32 @@ describe("prompt", () => {
       // One of the two subscriptions the line took: the lens's. The watch's is
       // left armed, which is what a watch is for, and the run's own way out is
       // where that one stops (`run.ts`).
+      expect(cancelled).toBe(1);
+    });
+
+    it("cancels the lens's subscription where announcing the line threw", async () => {
+      // The lens arrives already holding a subscription, so the loop must be
+      // holding the lens before anything that can throw. Announcing what the
+      // line produced is such a thing — a terminal that will not take the
+      // writing — and a lens the loop has not taken yet is one its way out
+      // cannot close: no frame is ever drawn, so nothing on the screen says it
+      // is there, and its sink runs for the rest of the process.
+      //
+      // Kills: announcing ahead of taking the lens, which leaves `cancelled`
+      // at zero.
+
+      let cancelled = 0;
+      const run = driving(
+        async function* () {
+          yield* typed("watch title");
+          yield ENTER;
+        },
+        () => Promise.resolve(() => cancelled++),
+        true,
+      );
+      await expect(run.writes).rejects.toThrow(
+        "The terminal would not take it.",
+      );
       expect(cancelled).toBe(1);
     });
 

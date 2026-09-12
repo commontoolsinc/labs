@@ -17,7 +17,13 @@
  * a value.
  */
 
-import { deepEqual, encodeJsonPointer } from "@commonfabric/runner";
+import {
+  fabricAwareEqual,
+  FabricSpecialObject,
+  isKeyableObjectNotArray,
+} from "@commonfabric/data-model";
+import { encodeJsonPointer } from "@commonfabric/runner";
+import type { ReadonlyRecord } from "@commonfabric/utils/types";
 import { unicodeWidth } from "@std/cli/unicode-width";
 
 import type { Announce } from "./announce.ts";
@@ -31,6 +37,7 @@ import {
   referenceForPlace,
 } from "./place.ts";
 import type { RecordEntry } from "./record.ts";
+import { classOf } from "./value.ts";
 
 /** How many changes an event line writes out before it counts the rest. */
 const NAMED_CHANGES = 3;
@@ -240,7 +247,7 @@ function walk(
   after: unknown,
   found: Change[],
 ): void {
-  if (deepEqual(before, after)) return;
+  if (fabricAwareEqual(before, after)) return;
   if (Array.isArray(before) && Array.isArray(after)) {
     for (
       let index = 0;
@@ -272,9 +279,17 @@ function walk(
  * would walk one against the other's keys and report every member of it as a
  * change under a name it does not have. An array that became an object is one
  * change, which is what a reader is owed.
+ *
+ * A `FabricSpecialObject` is ruled out too, which is what
+ * {@link isKeyableObjectNotArray} adds over the `typeof` test: one answers
+ * `object` while keeping its state in private fields, so descending it reaches
+ * the zero enumerable keys it has and reports nothing. It is a leaf, and a
+ * change to one belongs at the path holding it. That is the walk-side half of
+ * admitting special objects; {@link fabricAwareEqual} above is the compare
+ * side, and a fix to either alone still reports silence.
  */
-function isKeyed(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isKeyed(value: unknown): value is ReadonlyRecord {
+  return isKeyableObjectNotArray(value);
 }
 
 /**
@@ -426,14 +441,24 @@ function pathOf(at: readonly PathSegment[]): string {
  * line is prose about a change rather than the value itself, and `get` is what
  * reads one out.
  *
- * The two arrive by two paths and the `try` holds only the write, which is
+ * Those two arrive by two paths and the `try` holds only the write, which is
  * what keeps them two: a value raised on leaves through the `catch`, and one
  * declined through the check under it. What that keeps out of the `catch` is a
  * failure in composing the line, which is not a declined value and would read
  * as one.
+ *
+ * A `FabricSpecialObject` is named ahead of the write rather than by either of
+ * them, because the writer neither declines nor raises on one: its state is in
+ * private fields, so `JSON.stringify` succeeds and yields `{}`, which reads as
+ * an object holding nothing — a different value from the one the cell holds.
+ * Naming the class is what the line can honestly carry, and is the vocabulary
+ * a refusal names one under (`unwritableInJson`, `verbs.ts`).
  */
 function shown(value: unknown, detail: Detail): string {
-  if (detail === "kind" || value === undefined) {
+  if (
+    detail === "kind" || value === undefined ||
+    value instanceof FabricSpecialObject
+  ) {
     return marker(describeValue(value));
   }
   let json: string | undefined;
@@ -457,6 +482,7 @@ function shown(value: unknown, detail: Detail): string {
 function describeValue(value: unknown): string {
   if (value === undefined) return "nothing";
   if (value === null) return "null";
+  if (value instanceof FabricSpecialObject) return `a ${classOf(value)}`;
   if (Array.isArray(value)) return `an array of ${value.length}`;
   if (typeof value === "object") return "an object";
   if (typeof value === "string") {

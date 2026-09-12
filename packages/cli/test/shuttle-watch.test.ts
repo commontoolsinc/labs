@@ -15,6 +15,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import type { PiecePlace } from "../lib/shuttle/place.ts";
@@ -315,9 +316,93 @@ describe("watch", () => {
       expect(changesBetween({ a: { b: [1, 2] } }, { a: { b: [1, 3] } }))
         .toEqual([{ at: ["a", "b", 1], from: 2, to: 3 }]);
     });
+
+    it("reports two distinct byte sequences as one change", () => {
+      // A `FabricSpecialObject` keeps its state in private fields and has no
+      // enumerable own properties, so a walk that compares by properties reads
+      // two distinct ones as equal and reports nothing. Silence is the wrong
+      // answer here: a cell whose bytes changed is a cell that changed, and a
+      // watch that says nothing reads as a cell nobody is writing to.
+      //
+      // Kills: comparing with `deepEqual` rather than `fabricAwareEqual`,
+      // which returns `[]` for this pair.
+
+      expect(
+        changesBetween(
+          new FabricBytes(new Uint8Array([1, 2, 3])),
+          new FabricBytes(new Uint8Array([4, 5, 6])),
+        ),
+      ).toEqual([{
+        at: [],
+        from: new FabricBytes(new Uint8Array([1, 2, 3])),
+        to: new FabricBytes(new Uint8Array([4, 5, 6])),
+      }]);
+    });
+
+    it("reports two equal byte sequences as no change at all", () => {
+      // The other direction, and the one that stops the fix over-reporting:
+      // two distinct instances holding the same bytes are the same value, so
+      // a settle that landed on what the cell already held writes no line.
+      //
+      // Kills: comparing special objects by reference, which reports a change
+      // every time the runtime hands back a fresh instance.
+
+      expect(
+        changesBetween(
+          new FabricBytes(new Uint8Array([1, 2, 3])),
+          new FabricBytes(new Uint8Array([1, 2, 3])),
+        ),
+      ).toEqual([]);
+    });
+
+    it("reports a byte sequence under a key at that key, not inside it", () => {
+      // The walk-side half. A special object answers `typeof === "object"`, so
+      // a walk that descends every keyed object walks into one, finds the zero
+      // enumerable keys it has, and reports nothing — the same silence by a
+      // second route. It is a leaf, and the change belongs at the key holding
+      // it.
+      //
+      // Kills: descending with a bare `typeof === "object"` test rather than
+      // `isKeyableObjectNotArray`, which yields `[]` for this pair.
+
+      expect(
+        changesBetween(
+          { blob: new FabricBytes(new Uint8Array([1])), n: 1 },
+          { blob: new FabricBytes(new Uint8Array([2])), n: 1 },
+        ),
+      ).toEqual([{
+        at: ["blob"],
+        from: new FabricBytes(new Uint8Array([1])),
+        to: new FabricBytes(new Uint8Array([2])),
+      }]);
+    });
   });
 
   describe("eventLine()", () => {
+    it("names a byte sequence rather than writing it as an empty object", () => {
+      // A `FabricSpecialObject` keeps its state in private fields, so
+      // `JSON.stringify` succeeds and writes `{}` — a spelling that reads as
+      // an object with no keys, which is a different value from the one the
+      // cell holds. Naming the class is the same answer the `kind` detail
+      // gives for a value too large to write, and the same vocabulary a
+      // refusal names one under: what the line carries is prose about a
+      // change, and `get` is what reads the value out.
+      //
+      // Kills: letting a special object reach the `JSON.stringify` arm, which
+      // writes `blob {} → {}`.
+
+      expect(
+        eventLine(
+          "cell @space",
+          changesBetween(
+            { blob: new FabricBytes(new Uint8Array([1])) },
+            { blob: new FabricBytes(new Uint8Array([2])) },
+          ),
+          WIDE,
+        ),
+      ).toBe("watch cell @space: blob <a FabricBytes> → <a FabricBytes>");
+    });
+
     it("writes a path holding the separator as one segment", () => {
       // Escaped as it is everywhere else shuttle writes a path, so a key
       // holding one is one segment here too.

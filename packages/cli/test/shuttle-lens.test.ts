@@ -83,6 +83,51 @@ describe("lens", () => {
             .toEqual(Array(ROWS).fill(COLUMNS));
         });
 
+        it("returns no more rows than a two-row terminal has", () => {
+          // The frame is drawn onto the whole screen, so a frame taller than
+          // the screen scrolls its own top row away — and the top row is the
+          // one naming the cell. Two rows is the size at which the two edges
+          // are the whole of it, and a transition row is what does not fit.
+          //
+          // Kills: adding the transition row outside the room left for it,
+          // which returns three rows for a screen with two.
+
+          const driven = driving("cell @space", 2, COLUMNS);
+          driven.lens.showing({ replies: 14 });
+          driven.lens.showing({ replies: 15 });
+          expect(last(driven).length).toBeLessThanOrEqual(2);
+        });
+
+        it("returns every row at one width on a five-column terminal", () => {
+          // The narrowest a frame is drawn at. Both edges carry text that is
+          // fitted to the room left after their own framing, and a row that
+          // came back wider than the rest would put the right edge in two
+          // columns at exactly the width where there is no room to spare.
+          //
+          // Kills: fitting either edge's text against the full width rather
+          // than the width less its framing.
+
+          const driven = driving("cell @space", ROWS, 5);
+          driven.lens.showing({ a: 1, b: 2, c: 3 });
+          expect(last(driven).map((row) => unicodeWidth(row)))
+            .toEqual(Array(ROWS).fill(5));
+        });
+
+        it("counts no rows as none rather than as a backwards range", () => {
+          // A screen with no room between the edges shows none of the value,
+          // and a range counted from the first row to the one before it reads
+          // as a span that runs backwards. What a reader is owed there is how
+          // much they cannot see.
+          //
+          // Kills: composing the range from `top` and the row count without
+          // asking whether any row was shown, which writes `1-0 of 3`.
+
+          const driven = driving("cell @space", 2, COLUMNS);
+          driven.lens.showing({ a: 1, b: 2, c: 3 });
+          expect(last(driven)[1]).toContain("0 of ");
+          expect(last(driven)[1]).not.toContain("1-0");
+        });
+
         it("names the cell on the top edge", () => {
           expect(last(driving("first/label @space"))[0])
             .toBe("┌ first/label @space ──────────────────┐");

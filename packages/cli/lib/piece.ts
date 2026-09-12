@@ -5289,13 +5289,24 @@ export async function sinkCellValue(
     undefined,
     resolvedConfig.pieceScope,
   );
-  const rootCell =
-    await (options.input ? piece.input.getCell() : piece.result.getCell());
-  return settledSink(
-    rootCell.key(...path) as Cell<unknown>,
-    () => pieces.runtime.idle(),
-    onSettled,
-  );
+  // The path goes to `getCell`, which is not the same cell as keying into the
+  // root. For a piece's arguments cell the path form asserts the path is
+  // admitted by the input projection, reads its schema selection, and resolves
+  // a conditional branch through the root (`PiecePropIo.getCell`,
+  // `packages/piece`); the root keyed into reaches none of that. So a watch
+  // and a read of one path would otherwise be about two different cells.
+  const io = options.input ? piece.input : piece.result;
+  const cell = await io.getCell(path) as Cell<unknown>;
+  // Before the subscription, so the baseline is the value a read of this path
+  // would serve. The first settle writes no line and is what every later
+  // change is measured against, and `runtime.idle()` says the runtime is quiet
+  // rather than that the document has arrived — so a baseline taken ahead of
+  // the pull would be measured against whatever had loaded by then, and the
+  // arrival would report as a change nobody made. `PiecePropIo.get` pulls the
+  // selected cell before its own read (`packages/piece`), which is what makes
+  // the two agree.
+  await cell.pull();
+  return settledSink(cell, () => pieces.runtime.idle(), onSettled);
 }
 
 /**

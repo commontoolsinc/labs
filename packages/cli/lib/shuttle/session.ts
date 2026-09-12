@@ -19,8 +19,8 @@
  * exactly what decision 24 says: `more` continues the listing, and a new
  * listing is what resets the numbering. The warm set is reset by nothing: a
  * piece started stays started for the life of the process. The watches are
- * reset by `unwatch` alone, which is what makes a watch outlive the view that
- * armed it.
+ * reset by `unwatch` and by the run's own way out, which is what makes a watch
+ * outlive the view that armed it and nothing further.
  *
  * Nothing here reads the fabric, moves a place or draws anything. The one
  * thing it reaches outside itself is a watch's own cancel, which is what
@@ -51,6 +51,7 @@ export class ShuttleSession {
   #continuation: Continuation | undefined;
   #warm = new Set<string>();
   #watches: ArmedWatch[] = [];
+  #torndown = false;
 
   /**
    * What the last listing numbered, and nothing where no listing has run.
@@ -117,8 +118,24 @@ export class ShuttleSession {
     return this.#watches;
   }
 
-  /** Records `watch` as armed. */
+  /**
+   * Records `watch` as armed, or disarms it where this session has already
+   * torn its watches down.
+   *
+   * The second arm is what closes the window between a subscription coming
+   * back and the session adopting it. A line the person interrupted is
+   * abandoned by the prompt loop while its own promise runs on, so an
+   * adoption can arrive after {@link disarmAll} has run — and a watch held
+   * then is exactly what that method exists to prevent: a sink over a closing
+   * connection, which `watches` does not list and `unwatch` cannot name.
+   * Disarming here rather than holding it makes the teardown final, so no
+   * caller has to know whether it is racing one.
+   */
   arm(watch: ArmedWatch): void {
+    if (this.#torndown) {
+      watch.disarm();
+      return;
+    }
     this.#watches.push(watch);
   }
 
@@ -155,6 +172,7 @@ export class ShuttleSession {
    * sink firing into a torn-down runtime.
    */
   disarmAll(): void {
+    this.#torndown = true;
     const watches = this.#watches;
     this.#watches = [];
     for (const watch of watches) watch.disarm();

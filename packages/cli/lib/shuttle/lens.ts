@@ -203,14 +203,19 @@ export class ValueLens {
   frame(rows: number, columns: number): readonly string[] {
     const width = Math.max(columns, NARROWEST);
     const inner = width - 4;
+    // What the two edges leave, which the transition row and the value share.
+    const inside = Math.max(rows - 2, 0);
+    // The transition is dropped where the edges leave no room rather than
+    // added beyond it: a frame drawn taller than the screen scrolls its own
+    // top row away, and that row is the one naming the cell being watched.
     // The two columns the marker's own brackets take come off the width the
     // transition is fitted to, so what stands in for a value too large to
     // write is decided against the room the row actually has.
-    const moved = this.#changes === undefined
+    const moved = this.#changes === undefined || inside === 0
       ? []
       : [marker(transitionFor(this.#changes, Math.max(inner - 2, 1)))];
     const body = wrapped(this.#shown, inner);
-    const room = Math.max(rows - 2 - moved.length, 0);
+    const room = inside - moved.length;
     const top = this.#clamped(body.length, room);
     const page = body.slice(top, top + room);
     const filled = [...moved, ...page, ...Array(room - page.length).fill("")];
@@ -326,5 +331,10 @@ function padded(line: string, inner: number): string {
  * is read off a screen by a person rather than indexed by a program.
  */
 function counted(top: number, shown: number, lines: number): string {
-  return shown >= lines ? "" : `${top + 1}-${top + shown} of ${lines}`;
+  if (shown >= lines) return "";
+  // A screen with no room between the edges shows no row at all, and a range
+  // from the first to the one before it reads as a span running backwards.
+  // What is left to say there is how much of the value is out of sight.
+  if (shown === 0) return `0 of ${lines}`;
+  return `${top + 1}-${top + shown} of ${lines}`;
 }

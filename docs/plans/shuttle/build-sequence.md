@@ -622,10 +622,11 @@ Still to land:
   can see. What closes it is a resolved cell for an arguments path —
   `PiecePropIo.get` builds one for the read and `getCell()` hands back the
   unresolved root, so the seam is `packages/piece`'s to offer rather than
-  shuttle's to assemble. Until then `watch <ref>#argument` is refused naming
-  `get`, which reads one, and the result cell, which a watch serves; the two
-  cells are already named and keyed apart everywhere a watch is shown, so what
-  the seam costs is the refusal and nothing under it.
+  shuttle's to assemble. Until then `watch <ref>#argument` is refused, and the
+  refusal names what does work: `get <ref>#argument`, which reads that cell,
+  and `watch <ref>`, which watches the result the pattern computes from it.
+  The two cells are already named and keyed apart everywhere a watch is shown,
+  so what the seam costs is the refusal and nothing under it.
 - **The rest of a view's keys.** The value view answers to the motions and the
   two ways out — `q` and `ctrl-c`, `j`/`k` and the arrows, `g` and `G`. What
   the table in [`views.md`](views.md) has beyond them is this slice: `enter`

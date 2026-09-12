@@ -805,7 +805,7 @@ describe("terminal", () => {
         await Promise.resolve();
       });
       const written = watched.written();
-      const gave = written.indexOf("\x1b[?1049l");
+      const gave = written.indexOf(LEAVE_ALT);
       expect(gave).toBeGreaterThan(-1);
       expect(written.indexOf("one")).toBeGreaterThan(gave);
       expect(written.indexOf("two")).toBeGreaterThan(written.indexOf("one"));
