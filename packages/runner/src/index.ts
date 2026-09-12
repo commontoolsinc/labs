@@ -396,4 +396,8 @@ export {
 } from "./slug-resolution.ts";
 
 export { schemaPathSelection } from "./schema-path.ts";
-export { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
+export {
+  acceptsOpaqueCellOrUnresolvedLink,
+  overlayUnreadableLinkPlaceholders,
+  storedArgumentValidationIssue,
+} from "./stored-argument-validation.ts";

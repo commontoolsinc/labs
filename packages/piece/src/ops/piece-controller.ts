@@ -3,6 +3,7 @@ import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
+  acceptsOpaqueCellOrUnresolvedLink,
   applyPieceSourceTransition,
   Cell,
   type CellPath,
@@ -29,6 +30,7 @@ import {
   mergeSchemaDefaults,
   NAME,
   type NormalizedLink,
+  overlayUnreadableLinkPlaceholders,
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
@@ -263,6 +265,24 @@ function replaceMaterializedValueAtPath(
     writable: true,
   });
   return clone;
+}
+
+/**
+ * Whether a proper prefix of `path` holds a link in `raw`, so that a write at
+ * `path` resolves through that link into another document.
+ */
+function writePathCrossesLink(
+  raw: unknown,
+  path: readonly (string | number)[],
+): boolean {
+  let current = raw;
+  for (const segment of path.slice(0, -1)) {
+    current = current !== null && typeof current === "object"
+      ? (current as Record<PropertyKey, unknown>)[segment]
+      : undefined;
+    if (isLink(current)) return true;
+  }
+  return false;
 }
 
 /** Replace a schema-aware snapshot path, reading through Cell ancestors. */
@@ -3382,6 +3402,45 @@ class PiecePropIo implements PieceCellIo {
           writePath,
           materializedValue,
         );
+        // A slot whose stored value routes through a link this replica cannot
+        // read — another principal's per-user instance, a document not
+        // replicated here — materializes as absent, and judged as it stands
+        // would refuse the write for a value owned elsewhere. Such a slot is
+        // staged as the unresolved-link placeholder and accepted opaquely;
+        // its schema check happens when a reactive read materializes it, the
+        // rule stored-argument validation applies. A link the caller supplies
+        // defers on the same terms — the caller vouches for the link, not for
+        // its target being replicated here — so the raw tree the overlay
+        // walks holds the caller's value, links and all, at the write path,
+        // and a scalar or `undefined` written there is judged as written.
+        // Where the write path crosses a stored link the raw tree stays as
+        // stored, so the overlay can follow that link to the fields around
+        // the written one. The overlay only ever turns an absence into an
+        // accepted opaque, so a candidate is judged against the staged root
+        // first and the overlay is consulted only when that fails.
+        const rawRoot = targetCell.withTx(tx).getRaw();
+        const rawForOverlay = writePathCrossesLink(rawRoot, writePath)
+          ? rawRoot
+          : replaceMaterializedValueAtPath(rawRoot, writePath, value);
+        const argumentLink = targetCell.getAsNormalizedFullLink();
+        const inputIssue = (candidate: unknown): string | undefined => {
+          const options = {
+            acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+          };
+          const issue = validateSchemaValue(schema, candidate, schema, options);
+          if (issue === undefined) return undefined;
+          return validateSchemaValue(
+            schema,
+            overlayUnreadableLinkPlaceholders(
+              tx,
+              argumentLink,
+              rawForOverlay,
+              candidate,
+            ),
+            schema,
+            options,
+          );
+        };
         const mergedRoot = mergeSchemaDefaults(
           stagedRoot,
           extractDefaultValues(schema),
@@ -3405,15 +3464,12 @@ class PiecePropIo implements PieceCellIo {
               mergeMaterializedLinks: true,
               acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
               acceptUnionCandidate: (candidate) =>
-                validateSchemaValue(
-                  schema,
+                inputIssue(
                   replaceMaterializedValueAtPath(
                     stagedRoot,
                     writePath,
                     candidate,
                   ),
-                  schema,
-                  { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
                 ) === undefined,
             },
           );
@@ -3425,12 +3481,7 @@ class PiecePropIo implements PieceCellIo {
             writePath,
             nextValue,
           );
-        const issue = validateSchemaValue(
-          schema,
-          validationRoot,
-          schema,
-          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
-        );
+        const issue = inputIssue(validationRoot);
         if (issue !== undefined) {
           throw new Error(`updated input does not match its schema: ${issue}`);
         }

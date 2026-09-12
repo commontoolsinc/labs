@@ -29,7 +29,14 @@ const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
   "unresolved cell link": true,
 });
 
-const acceptsOpaqueCellOrUnresolvedLink = (
+/**
+ * Whether `value` needs no schema check where it stands: an opaque Cell whose
+ * wrapper the schema declares, or the placeholder
+ * {@link overlayUnreadableLinkPlaceholders} leaves for a stored link this
+ * replica cannot read. The two together are what let a document be judged
+ * here without judging values that are owned elsewhere.
+ */
+export const acceptsOpaqueCellOrUnresolvedLink = (
   value: unknown,
   schema: JSONSchema,
 ): boolean =>
@@ -186,9 +193,10 @@ export function readStoredLinkChainRaw(
  * local to its descent. Shared acyclic subgraphs avoid repeated expansion,
  * while cyclic graphs retain their path-dependent cutoff behavior.
  *
- * The caller supplies an already-materialized snapshot. Exported from this
- * module for direct cycle tests: eager materialization can reject a cyclic
- * graph before this walk gets to exercise its own termination guards.
+ * The caller supplies an already-materialized snapshot. Exported for the
+ * piece layer's input writes, which stage a document the same way, and for
+ * direct cycle tests: eager materialization can reject a cyclic graph before
+ * this walk gets to exercise its own termination guards.
  */
 export function overlayUnreadableLinkPlaceholders(
   tx: IExtendedStorageTransaction,
