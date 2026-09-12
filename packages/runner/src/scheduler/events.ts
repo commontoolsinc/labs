@@ -1505,15 +1505,16 @@ export async function dispatchQueuedEvent(state: {
       presyncTx.setReadOnly?.("scheduler.presyncInputs()");
       const identity = eventScopeIdentity(queuedEvent);
       if (identity !== undefined) presyncTx.tx.scopeKeyIdentity = identity;
-      // Materialization and synchronization use the same event actor. Timed
-      // on its own key, beside the dispatch's other phases, because the
+      // Timed on its own key, beside the dispatch's other phases, because the
       // presync materializes the whole argument eagerly and is the one phase
       // of a dispatch the handler's own timers do not cover. The key is kept
       // per process with one active start, like every dispatch timer on this
-      // logger, so two runtimes presyncing at once lose a sample and nothing
-      // else: no caller reads what `timeEnd()` returns.
+      // logger, so two runtimes presyncing at once record one understated
+      // sample and lose the other, and nothing else: no caller reads what
+      // `timeEnd()` returns.
       logger.timeStart("scheduler", "execute", "event", "presyncInputs");
       try {
+        // Materialization and synchronization use the same event actor.
         await presyncedImplementation.presyncInputs(
           eventValue,
           identity,

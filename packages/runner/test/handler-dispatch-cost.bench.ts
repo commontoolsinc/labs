@@ -5,10 +5,10 @@
  * interval runs from the send to the commit callback. The dispatch's phases —
  * presync, dependency preflight, argument read, body, post-run, commit — are
  * read back from the phase timers the runtime already keeps — as the time
- * each timer accumulated between a snapshot before the send and one after
- * the drain, so a phase that runs twice in a dispatch counts twice and a
- * phase that did not run in it counts nothing — so the whole dispatch and
- * its parts come from the same run. The runtime's drains after
+ * each timer accumulated between a snapshot before the send and one at the
+ * commit callback, so a phase that runs twice in a dispatch counts twice
+ * and a phase that did not run in it counts nothing — so the whole dispatch
+ * and its parts come from the same interval. The runtime's drains after
  * the callback sit outside the timed interval, and so does the re-seeding
  * of the list after the one workload that writes to it, so every sample
  * dispatches over a list of the size its name states. Those timers are kept
@@ -341,10 +341,18 @@ for (const size of SIZES) {
 // Timed samples, with accounting disabled
 //
 
+// The variant whose runtime is live. A new variant's first sample disposes
+// the previous one's runtime before preparing its own, so one runtime exists
+// at a time and nothing an earlier variant allocated is retained across the
+// next one's samples.
+let live:
+  | { key: string; prepared: Awaited<ReturnType<typeof prepare>> }
+  | undefined;
+
 for (const size of SIZES) {
   for (const workload of WORKLOADS) {
+    const key = `${size}/${workload}`;
     let dispatches = 0;
-    let prepared: Awaited<ReturnType<typeof prepare>> | undefined;
     Deno.bench({
       name: `${workload} (${size} rows)`,
       group: `handler-dispatch-${size}`,
@@ -352,14 +360,21 @@ for (const size of SIZES) {
       n: 7,
       warmup: 1,
       async fn(b) {
-        prepared ??= await prepare(size, false);
+        if (live?.key !== key) {
+          await live?.prepared.dispose();
+          live = { key, prepared: await prepare(size, false) };
+        }
+        const { prepared } = live;
         if (workload === "mutate" && dispatches > 0) await prepared.reseed();
         const before = phaseTotals();
         b.start();
         const elapsed = await prepared.dispatch(workload);
         b.end();
-        await prepared.drain();
+        // Snapshot before the drain, so the phase window is the elapsed one:
+        // the handler action and the commit's synchronous steps end before
+        // the callback fires, and the drain adds nothing these keys time.
         const phases = phaseDeltas(before, phaseTotals());
+        await prepared.drain();
         dispatches += 1;
         const value = prepared.out.get();
         const expected = prepared.expected(workload);

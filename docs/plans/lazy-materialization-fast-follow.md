@@ -18,7 +18,8 @@ integration problem.
 ## Scope and decision
 
 Complete the outstanding work in this plan after the computation-cost arc,
-with independent PRs and acceptance evidence. Keep handler semantics separate from removing the lift-path
+with independent PRs and acceptance evidence. Keep handler semantics separate
+from removing the lift-path
 rollout switch: either can expose a correctness issue the other does not
 address. The flag's owner and removal condition remain recorded in
 [Experimental options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization).
