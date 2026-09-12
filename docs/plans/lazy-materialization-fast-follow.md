@@ -136,10 +136,11 @@ must not accidentally inherit it.
 - [x] Assemble default-on evidence with exact revisions, environments, covered
       workloads, observed failures, and any use of the rollback override. State
       the observation period; elapsed time alone is not acceptance.
-- [x] Run the relevant equivalence, refusal, snapshot and dependency tests in
+- [ ] Run the relevant equivalence, refusal, snapshot and dependency tests in
       both current flag postures. Resolve unexplained differences and check
       production-like client/server behavior on isolated data. The runner
-      suite was run at both postures; the integration suites were not run at
+      suite was run at both postures, the off posture by flipping the
+      built-in default at its source; the integration suites were not run at
       the off posture, and the record says so.
 - [ ] Obtain the flag owner's retirement decision with a concrete rollback
       route. No live data mutation is implied by this plan; coordinate any live
