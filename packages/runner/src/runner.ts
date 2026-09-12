@@ -10326,10 +10326,9 @@ export class Runner {
       };
 
       let popFrameAfterReturn = true;
-      // Assigned inside the try before the body is invoked, and reachable from
-      // the catch: a refusal that escaped the body, synchronously or as a
-      // rejection, is disposed of through the same result path as one the
-      // body swallowed.
+      // Assigned inside the try, and reachable from the catch: a refusal that
+      // escaped the body is disposed of through the same result path as one
+      // the body swallowed.
       let postRun: ((result: any) => any) | undefined;
       try {
         logger.timeStart("action", "readInputs");
@@ -10374,6 +10373,27 @@ export class Runner {
           previouslyInvalidArgument = !isValidArgument;
         }
 
+        let result: any = undefined;
+        if (isValidArgument) {
+          logger.timeStart("action", "invokeJavaScriptImplementation");
+          try {
+            result = this.#invokeJavaScriptImplementation(
+              module,
+              fn,
+              argument,
+            );
+            if (result instanceof Promise) {
+              result = result.finally(() =>
+                logger.timeEnd("action", "invokeJavaScriptImplementation")
+              );
+            } else {
+              logger.timeEnd("action", "invokeJavaScriptImplementation");
+            }
+          } catch (error) {
+            logger.timeEnd("action", "invokeJavaScriptImplementation");
+            throw error;
+          }
+        }
         postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
@@ -10418,28 +10438,6 @@ export class Runner {
             logger.timeEnd("action", "postRun");
           }
         };
-
-        let result: any = undefined;
-        if (isValidArgument) {
-          logger.timeStart("action", "invokeJavaScriptImplementation");
-          try {
-            result = this.#invokeJavaScriptImplementation(
-              module,
-              fn,
-              argument,
-            );
-            if (result instanceof Promise) {
-              result = result.finally(() =>
-                logger.timeEnd("action", "invokeJavaScriptImplementation")
-              );
-            } else {
-              logger.timeEnd("action", "invokeJavaScriptImplementation");
-            }
-          } catch (error) {
-            logger.timeEnd("action", "invokeJavaScriptImplementation");
-            throw error;
-          }
-        }
 
         const postRunResult = result instanceof Promise
           // An async body reaches mismatching data after an `await`, so its

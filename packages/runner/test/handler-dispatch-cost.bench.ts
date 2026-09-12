@@ -184,19 +184,24 @@ async function prepare(size: number, readStats: boolean) {
   if (committed.error) throw new Error("Benchmark seeding failed");
   await runtime.idle();
 
-  /** Sends one event and resolves, with the elapsed time, at its commit. */
+  /**
+   * Sends one event and resolves, with the time from the send to the commit
+   * callback, once that callback has run.
+   */
   const dispatch = async (workload: Workload): Promise<number> => {
-    const settled = Promise.withResolvers<string>();
+    const settled = Promise.withResolvers<{ status: string; end: number }>();
     const start = performance.now();
     (result.key(workload) as unknown as Sender).send({}, (commitTx) => {
-      settled.resolve(commitTx.status().status);
+      settled.resolve({
+        status: commitTx.status().status,
+        end: performance.now(),
+      });
     });
-    const status = await settled.promise;
-    const elapsed = performance.now() - start;
+    const { status, end } = await settled.promise;
     if (status !== "done") {
       throw new Error(`Dispatch of ${workload} settled as ${status}`);
     }
-    return elapsed;
+    return end - start;
   };
 
   /** Waits for whatever the dispatch left running. */

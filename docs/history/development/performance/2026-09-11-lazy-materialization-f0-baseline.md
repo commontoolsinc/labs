@@ -13,10 +13,9 @@ It pins the runtime revision the later stages compare against, lists every
 place the `lazyMaterialization` flag and the transaction mark are consumed,
 names the reads on the handler path that stay eager, and measures what one
 dispatched handler event costs, phase by phase, over lists of 74, 296, and
-1,184 rows. It carries two source changes: a phase timer around the handler
-presync, so that the presync can be read back beside the dispatch's other
-phases, and the lift path's disposition of a synchronous refusal, a defect
-the inventory found and the change fixes rather than records.
+1,184 rows. It changes no runtime behavior. The one source change it carries
+is a phase timer around the handler presync, so that the presync can be read
+back beside the dispatch's other phases.
 
 ## Revision and posture
 
@@ -38,8 +37,8 @@ names the owner and the removal condition.
 
 ## Where the flag and the mark are consumed
 
-Every non-test site that reads the flag or the transaction mark, at the pinned
-revision:
+The non-test sites that read the flag, the transaction mark, or the refusal
+at the pinned revision, found by searching for their names:
 
 - **The flag.** `runtime.ts` declares and defaults it; `runtime-presets.ts`
   maps the environment variable and assigns server authority; `runner.ts`
@@ -62,8 +61,12 @@ revision:
   [`schema-view.ts`](../../../../packages/runner/src/schema-view.ts), by the
   unresolved-input arm in `schema.ts`, and by the collection index key
   builtin in
-  [`builtins/collection-index-key.ts`](../../../../packages/runner/src/builtins/collection-index-key.ts);
-  consumed only by the lift path's post-run in `runner.ts`.
+  [`builtins/collection-index-key.ts`](../../../../packages/runner/src/builtins/collection-index-key.ts).
+  `clearSchemaRefusal`, on the same interface, is how the view withdraws a
+  refusal it catches itself — an optional property's — so that only the
+  refusals a reader saw stay recorded. The lift path's post-run in
+  `runner.ts` is the one site that takes a recorded refusal to dispose of
+  the run.
 
 Tests that name the flag or the mark are listed under
 [What the existing tests prove](#what-the-existing-tests-prove).
@@ -84,11 +87,12 @@ refusal the body throws synchronously reaches the catch while `postRun` is
 still unassigned, and the catch's `postRun?.(undefined)` does nothing: the
 mark stays set, the refusal stays recorded, and no result is written, leaving
 the previous result standing. The asynchronous rejection path assigns
-`postRun` first and does dispose. The change that lands this record assigns
-`postRun` before the body is invoked, and `lift-refusal-disposition.test.ts`
-pins the disposition in both postures; its lazy case fails at the pinned
-revision. Result writing and diffing in `#writeJavaScriptActionResult` run
-unmarked, so they read eagerly.
+`postRun` first and does dispose. A separate change carries the fix, which
+assigns `postRun` before the body is invoked, with a test that fails at the
+pinned revision; the vintage replay gate shows that fix clearing a persisted
+derived value the defect had preserved, so it waits on that gate's owner.
+Result writing and diffing in `#writeJavaScriptActionResult` run unmarked, so
+they read eagerly.
 
 ### The handler path
 
@@ -244,26 +248,26 @@ two preflight columns, and the handler action.
 
 | Rows  | Workload      | Elapsed | Presync | Populate | Steps | ArgRead | Body  | PostRun | Handler | Commit | Rest  |
 | ----- | ------------- | ------- | ------- | -------- | ----- | ------- | ----- | ------- | ------- | ------ | ----- |
-| 74 | `scalarKey` | 15.6 | 0.55 | 6.80 | 1.23 | 0.12 | 0.17 | 0.18 | 1.00 | 0.14 | 6.0 |
-| 74 | `scalarGet` | 21.4 | 0.74 | 6.58 | 0.94 | 0.23 | 1.78 | 0.25 | 4.24 | 1.04 | 8.9 |
-| 74 | `walk` | 21.9 | 0.27 | 4.85 | 0.67 | 0.08 | 1.27 | 0.18 | 3.75 | 1.38 | 12.4 |
-| 74 | `mutate` | 13.7 | 0.25 | 3.58 | 0.58 | 0.07 | 0.52 | 0.10 | 1.18 | 0.22 | 8.1 |
-| 74 | `plainScalar` | 13.9 | 0.85 | 3.37 | 0.53 | 0.57 | 0.04 | 0.15 | 1.55 | 0.42 | 7.6 |
-| 74 | `plainWalk` | 42.5 | 3.11 | 7.45 | 0.83 | 2.42 | 0.08 | 0.30 | 5.53 | 0.86 | 25.5 |
-| 296 | `scalarKey` | 32.4 | 0.69 | 18.61 | 3.67 | 0.15 | 0.15 | 0.19 | 1.02 | 0.17 | 8.4 |
-| 296 | `scalarGet` | 42.1 | 0.39 | 16.61 | 1.56 | 0.08 | 2.72 | 0.21 | 6.04 | 1.90 | 17.5 |
-| 296 | `walk` | 73.1 | 0.66 | 16.22 | 1.94 | 0.12 | 7.70 | 0.31 | 14.22 | 4.77 | 40.1 |
-| 296 | `mutate` | 29.5 | 0.60 | 11.62 | 3.28 | 0.14 | 1.01 | 0.15 | 2.16 | 0.32 | 11.8 |
-| 296 | `plainScalar` | 34.6 | 2.29 | 9.96 | 1.51 | 1.75 | 0.04 | 0.14 | 5.87 | 1.32 | 15.0 |
-| 296 | `plainWalk` | 85.5 | 8.17 | 18.76 | 2.08 | 8.77 | 0.08 | 0.25 | 15.61 | 4.04 | 40.9 |
-| 1,184 | `scalarKey` | 80.9 | 0.54 | 54.31 | 8.20 | 0.12 | 0.14 | 0.16 | 0.77 | 0.13 | 17.0 |
-| 1,184 | `scalarGet` | 144.7 | 0.53 | 62.69 | 9.01 | 0.09 | 13.78 | 0.27 | 25.67 | 8.49 | 46.8 |
-| 1,184 | `walk` | 237.5 | 0.51 | 51.27 | 8.40 | 0.12 | 23.13 | 0.24 | 44.23 | 13.96 | 133.0 |
-| 1,184 | `mutate` | 109.0 | 0.55 | 58.90 | 9.40 | 0.09 | 2.54 | 0.13 | 3.49 | 0.40 | 36.6 |
-| 1,184 | `plainScalar` | 224.1 | 18.99 | 88.54 | 10.48 | 16.03 | 0.10 | 0.30 | 34.33 | 11.41 | 71.7 |
-| 1,184 | `plainWalk` | 299.1 | 30.46 | 57.09 | 8.29 | 29.09 | 0.09 | 0.26 | 53.67 | 16.47 | 149.6 |
+| 74 | `scalarKey` | 13.9 | 0.33 | 5.73 | 0.84 | 0.09 | 0.12 | 0.15 | 0.75 | 0.13 | 6.3 |
+| 74 | `scalarGet` | 18.7 | 0.43 | 6.12 | 0.87 | 0.13 | 0.87 | 0.16 | 2.33 | 0.60 | 8.9 |
+| 74 | `walk` | 23.0 | 0.38 | 4.79 | 0.78 | 0.09 | 1.45 | 0.21 | 3.79 | 1.03 | 13.2 |
+| 74 | `mutate` | 18.3 | 0.37 | 5.82 | 0.85 | 0.08 | 0.73 | 0.17 | 1.79 | 0.30 | 9.5 |
+| 74 | `plainScalar` | 22.4 | 1.25 | 7.15 | 0.87 | 0.93 | 0.06 | 0.26 | 2.58 | 0.70 | 10.5 |
+| 74 | `plainWalk` | 31.6 | 2.39 | 6.07 | 0.84 | 1.52 | 0.07 | 0.23 | 3.81 | 1.13 | 18.5 |
+| 296 | `scalarKey` | 22.0 | 0.43 | 11.73 | 2.25 | 0.07 | 0.11 | 0.14 | 0.62 | 0.12 | 7.0 |
+| 296 | `scalarGet` | 28.8 | 0.29 | 10.77 | 1.34 | 0.06 | 2.09 | 0.16 | 4.55 | 1.57 | 11.8 |
+| 296 | `walk` | 57.7 | 0.39 | 12.87 | 1.74 | 0.08 | 5.00 | 0.24 | 10.68 | 3.31 | 32.0 |
+| 296 | `mutate` | 37.5 | 0.58 | 17.29 | 3.52 | 0.08 | 0.83 | 0.11 | 1.60 | 0.26 | 14.5 |
+| 296 | `plainScalar` | 36.6 | 2.78 | 11.85 | 1.61 | 2.05 | 0.06 | 0.19 | 6.07 | 1.49 | 14.3 |
+| 296 | `plainWalk` | 108.4 | 10.71 | 18.96 | 2.37 | 6.77 | 0.09 | 0.26 | 14.74 | 5.10 | 61.7 |
+| 1,184 | `scalarKey` | 70.6 | 0.45 | 48.09 | 7.23 | 0.07 | 0.11 | 0.14 | 0.62 | 0.11 | 14.3 |
+| 1,184 | `scalarGet` | 108.2 | 0.49 | 43.38 | 7.47 | 0.07 | 10.63 | 0.26 | 19.69 | 5.88 | 37.1 |
+| 1,184 | `walk` | 251.9 | 0.54 | 63.30 | 9.50 | 0.08 | 27.64 | 0.30 | 52.18 | 14.46 | 126.4 |
+| 1,184 | `mutate` | 101.0 | 0.53 | 55.67 | 7.56 | 0.08 | 2.44 | 0.15 | 3.76 | 0.45 | 33.5 |
+| 1,184 | `plainScalar` | 205.2 | 13.50 | 64.39 | 9.49 | 12.11 | 0.08 | 0.28 | 24.36 | 8.68 | 93.4 |
+| 1,184 | `plainWalk` | 339.9 | 26.89 | 72.03 | 8.47 | 27.70 | 0.10 | 0.37 | 55.51 | 18.23 | 177.0 |
 
-Six earlier runs of this benchmark on the same revision, some with a wider
+Seven earlier runs of this benchmark on the same revision, some with a wider
 timed interval, some reading each timer's last sample rather than its
 accumulated time, and some while a review or a test suite shared the machine,
 put `scalarKey` at 1,184 rows between 56 and 99 ms elapsed and `walk` between
@@ -273,7 +277,7 @@ between runs on this machine, most of that in the runs taken under shared
 load, and are observations, not thresholds.
 
 `Rest` grows with the list on the whole-list workloads: at 1,184 rows it is
-17 ms for `scalarKey`, 47 for `scalarGet`, 133 for `walk`, and 150 for
+14 ms for `scalarKey`, 37 for `scalarGet`, 126 for `walk`, and 177 for
 `plainWalk`. It is the time outside every timer this record reads: the
 scheduler's ticks between the phases, the presync transaction's setup, the
 commit's asynchronous remainder after its synchronous steps, and the
@@ -286,7 +290,9 @@ lead for F5's remeasurement.
 
 Link resolutions are the `scheduler.read-attempt` counter per attempt kind.
 The preflight column lists both passes. Proxy accesses were zero in every
-attempt: nothing on the handler path reads through a proxy today.
+attempt of these workloads, whose handlers declare an argument schema and so
+read eagerly; a handler without one reads its argument through the
+schema-less query-result proxy and would count accesses.
 
 | Rows  | Workload      | Preflight links | Presync links | Event links | Preflight reads / shallow | First pass skipped |
 | ----- | ------------- | --------------- | ------------- | ----------- | ------------------------- | ------------------ |
@@ -323,17 +329,18 @@ setup and more samples than this pass takes.
 1. **The dependency preflight is the largest fixed cost of a handler
    dispatch, and it does not depend on what the handler reads.** At 1,184
    rows it resolves one link per row, twice, whatever the workload, and its
-   two populate steps take 51 to 89 ms of every dispatch. For the
+   two populate steps take 43 to 72 ms of every dispatch. For the
    handle-context workloads that read little, that is most of what the
-   timers attribute: 54 of `scalarKey`'s 81 ms. For the whole-list workloads
+   timers attribute: 48 of `scalarKey`'s 71 ms. For the whole-list workloads
    the handler action is comparable, and a share of the elapsed time remains
-   unattributed by any timer (the `Rest` column). The first preflight pass is reported skipped and the
+   unattributed by any timer (the `Rest` column). The first preflight pass is
+   reported skipped and the
    second runs; both walk the full list. Which condition skips the first pass
    was not established here and is a lead for the scheduler's owner.
 2. **The argument read is negligible for a handle context and linear for a
-   plain one.** With `Writable<Vote[]>` the read mints a handle in under 0.1
-   ms at every size. With `Vote[]` it materializes every row: 2 to 9 ms at
-   296 rows and 16 to 29 ms at 1,184. The two plain workloads read the same
+   plain one.** With `Writable<Vote[]>` the read mints a handle in under a
+   quarter of a millisecond at every size. With `Vote[]` it materializes every
+   row: 2 to 7 ms at 296 rows and 12 to 28 ms at 1,184. The two plain workloads read the same
    list, and this measurement does not establish what separates their
    figures; each variant keeps its runtime across its samples and the
    workloads run in a fixed order, so neither position nor retention is
@@ -343,9 +350,9 @@ setup and more samples than this pass takes.
 3. **A whole-list read inside the body costs what a plain context's argument
    read costs, and the commit after it grows with the read set.** The body
    timer spans the whole body, so it cannot isolate the read: at 1,184 rows
-   `scalarGet`'s body, a whole-list read and one element, is 13.8 ms, and
-   `walk`'s, the same read and a sum over every row, is 23.1 ms. The commit
-   after either is 8.5 and 14.0 ms against 0.1 to 0.4 ms after a keyed read;
+   `scalarGet`'s body, a whole-list read and one element, is 10.6 ms, and
+   `walk`'s, the same read and a sum over every row, is 27.6 ms. The commit
+   after either is 5.9 and 14.5 ms against 0.1 to 0.4 ms after a keyed read;
    the write is the same in all of them, so the difference is the read set
    the commit carries.
 4. **A handler's read log is its commit precondition set.** The lunch poll's
@@ -363,11 +370,11 @@ setup and more samples than this pass takes.
 ## What F1 takes from here
 
 The measured lever on the handler path is not the argument read. Making the
-argument read lazy would save under a millisecond for a handle context and 16
-to 29 ms at 1,184 rows for a plain one, while the two preflight passes spend
-51 to 89 ms on every dispatch regardless. A lazy body read of a handle could
-save most of the 13.8 ms a whole-list `get()` and one element cost, and the
-8.5 ms commit that follows, when the body touches little of the list, at the
+argument read lazy would save under a millisecond for a handle context and 12
+to 28 ms at 1,184 rows for a plain one, while the two preflight passes spend
+43 to 72 ms on every dispatch regardless. A lazy body read of a handle could
+save most of the 10.6 ms a whole-list `get()` and one element cost, and the
+5.9 ms commit that follows, when the body touches little of the list, at the
 price of finding 4 above. Those are the two consequences F1's contract and prototype
 have to weigh, with the same benchmark extended by a posture dimension so the
 comparison holds inputs fixed.
