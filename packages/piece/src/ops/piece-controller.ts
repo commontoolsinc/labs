@@ -77,6 +77,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
@@ -84,10 +85,7 @@ import {
   readPieceOrigin,
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
-import {
-  isCfcMigrationRejection,
-  type PiecesController,
-} from "./pieces-controller.ts";
+import type { PiecesController } from "./pieces-controller.ts";
 import { compileProgram } from "./utils.ts";
 
 const pieceUpdateLogger = getLogger("piece.update", {
