@@ -3952,7 +3952,7 @@ exercised on the branch on its own.
 - [x] A measured set whose lane held a non-gating failure is reported
       rather than having a baseline published from it, the same way the
       gate already reports a run with a failing test.
-- [ ] `explain <identity>` gains the runs it is given and whether it is
+- [x] `explain <identity>` gains the runs it is given and whether it is
       withheld, replacing the three-way answer that no longer partitions.
 - [x] Repository-wide coverage measurement moves to the full run and stops
       failing anything.
