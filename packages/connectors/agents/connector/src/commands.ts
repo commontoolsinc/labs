@@ -621,7 +621,8 @@ export class CommandWorker {
     }
     if (
       driver &&
-      (result.status === "succeeded" || command.type === "prompt")
+      (result.status === "succeeded" || command.type === "prompt" ||
+        command.type === "start")
     ) {
       await Promise.allSettled(
         this.#targets.map((target) =>

@@ -24,7 +24,8 @@ export interface DriverCapabilities {
   inventory: boolean;
   read: boolean;
   prompt: boolean;
-  /** Whether the driver can start a new session. Absent means it cannot. */
+  /** Present and true for a driver that can start a new session; absent
+   * otherwise. */
   startSession?: boolean;
   cancel: boolean;
   rename: boolean;

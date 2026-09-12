@@ -209,7 +209,6 @@ export class CodexAppServerDriver implements AgentDriver {
         inventory: true,
         read: true,
         prompt: true,
-        startSession: false,
         cancel: true,
         rename: true,
         setMode: false,

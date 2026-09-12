@@ -407,8 +407,9 @@ function pageFromNewest<T>(values: readonly T[], page: number): T[] {
 }
 
 function isAgentCommandType(value: unknown): value is AgentCommandType {
-  return value === "prompt" || value === "cancel" || value === "rename" ||
-    value === "set-mode" || value === "set-config-option";
+  return value === "prompt" || value === "start" || value === "cancel" ||
+    value === "rename" || value === "set-mode" ||
+    value === "set-config-option";
 }
 
 function isAgentCommand(value: unknown): value is AgentCommand {
@@ -1536,7 +1537,9 @@ const DebugView = pattern<DebugInput, DebugOutput>(
     const commandArgumentLabel = computed(() =>
       commandType.get() === "rename" ? "New title" : "Mode ID"
     );
-    const commandIsPrompt = computed(() => commandType.get() === "prompt");
+    const commandIsPrompt = computed(() =>
+      commandType.get() === "prompt" || commandType.get() === "start"
+    );
     const commandIsCancel = computed(() => commandType.get() === "cancel");
     const commandNeedsArgument = computed(() =>
       commandType.get() === "rename" || commandType.get() === "set-mode"
@@ -2303,6 +2306,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
                                 $value={commandType}
                                 items={[
                                   { label: "Prompt", value: "prompt" },
+                                  { label: "Start session", value: "start" },
                                   { label: "Cancel", value: "cancel" },
                                   { label: "Rename", value: "rename" },
                                   { label: "Set mode", value: "set-mode" },

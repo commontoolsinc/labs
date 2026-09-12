@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { isAbsolute, resolve } from "@std/path";
 import {
   ClaudeAgentSdkDriver,
   type ClaudeSdkAdapter,
@@ -998,7 +999,7 @@ Deno.test("Claude driver lists the source directory's sessions when `cwd` is con
   }]);
 });
 
-Deno.test("Claude driver starts a session under a caller-chosen id, titles it, and remembers its directory", async () => {
+Deno.test("Claude driver starts a session under a caller-chosen id in its source's directory, titled through the query", async () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const events: string[] = [];
   const sdk = {
@@ -1029,9 +1030,11 @@ Deno.test("Claude driver starts a session under a caller-chosen id, titles it, a
     sdk,
   );
 
+  // The source's own directory, spelled with a trailing separator: the same
+  // place once resolved.
   const outcome = await driver.startSession(NEW_SESSION_ID, {
     text: "Work on topic #7",
-    cwd: "/work/labs/packages/patterns",
+    cwd: "/work/labs/",
     title: "topic #7: the workbench",
   }, {
     onSessionActive: () => {
@@ -1042,9 +1045,8 @@ Deno.test("Claude driver starts a session under a caller-chosen id, titles it, a
   assertEquals(outcome.status, "succeeded");
   assertEquals(outcome.result, {
     nativeSessionId: NEW_SESSION_ID,
-    cwd: "/work/labs/packages/patterns",
+    cwd: "/work/labs",
     title: "topic #7: the workbench",
-    titled: true,
   });
   // The session is refreshed only once the SDK has emitted for it.
   assertEquals(events, ["yield:init", "active", "yield:result"]);
@@ -1054,12 +1056,11 @@ Deno.test("Claude driver starts a session under a caller-chosen id, titles it, a
   };
   assertEquals(query.prompt, "Work on topic #7");
   assertEquals(query.options.sessionId, NEW_SESSION_ID);
-  assertEquals(query.options.cwd, "/work/labs/packages/patterns");
+  assertEquals(query.options.cwd, "/work/labs");
+  assertEquals(query.options.title, "topic #7: the workbench");
   assertEquals(query.options.resume, undefined);
-  assertEquals(calls.at(-1), {
-    method: "renameSession",
-    args: [NEW_SESSION_ID, "topic #7: the workbench"],
-  });
+  // The SDK titles the session from its first message; nothing renames it.
+  assertEquals(calls.some((call) => call.method === "renameSession"), false);
 
   // A prompt that follows resumes in the started directory without a lookup.
   calls.length = 0;
@@ -1068,7 +1069,26 @@ Deno.test("Claude driver starts a session under a caller-chosen id, titles it, a
   assertEquals(calls.map((call) => call.method), ["query"]);
   const resumed = calls[0].args[0] as { options: Record<string, unknown> };
   assertEquals(resumed.options.resume, NEW_SESSION_ID);
-  assertEquals(resumed.options.cwd, "/work/labs/packages/patterns");
+  assertEquals(resumed.options.cwd, "/work/labs");
+});
+
+Deno.test("Claude driver starts an unscoped source's session in the directory the start names, made absolute", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const driver = new ClaudeAgentSdkDriver(
+    { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
+    sdkWithoutSessions(calls),
+  );
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    cwd: "relative/checkout",
+  });
+  assertEquals(outcome.status, "succeeded");
+  const query = calls.find((call) => call.method === "query")?.args[0] as {
+    options: Record<string, unknown>;
+  };
+  assertEquals(isAbsolute(String(query.options.cwd)), true);
+  assertEquals(query.options.cwd, resolve("relative/checkout"));
+  assertEquals(outcome.result?.cwd, resolve("relative/checkout"));
 });
 
 Deno.test("Claude driver refuses to start a session that already exists", async () => {
@@ -1115,20 +1135,24 @@ Deno.test("Claude driver refuses a start whose id or directory is unusable", asy
     (await scoped.startSession("not-a-uuid", { text: "Hi" })).error?.code,
     "claude-session-id-invalid",
   );
-  assertEquals(
-    (await scoped.startSession(NEW_SESSION_ID, {
-      text: "Hi",
-      cwd: "/work/other",
-    })).error?.code,
-    "claude-start-cwd-outside-source",
-  );
-  assertEquals(
-    (await scoped.startSession(NEW_SESSION_ID, {
-      text: "Hi",
-      cwd: "/work/labs-sibling",
-    })).error?.code,
-    "claude-start-cwd-outside-source",
-  );
+  // A start runs in the source's directory, so any other directory is
+  // refused: another checkout, a sibling that shares the prefix, a
+  // subdirectory the SDK would list as a project of its own, a relative path.
+  for (
+    const cwd of [
+      "/work/other",
+      "/work/labs-sibling",
+      "/work/labs/packages/patterns",
+      "labs",
+    ]
+  ) {
+    assertEquals(
+      (await scoped.startSession(NEW_SESSION_ID, { text: "Hi", cwd })).error
+        ?.code,
+      "claude-start-cwd-not-source",
+      cwd,
+    );
+  }
   const unscoped = new ClaudeAgentSdkDriver(
     { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
     sdkWithoutSessions(calls),
@@ -1140,31 +1164,7 @@ Deno.test("Claude driver refuses a start whose id or directory is unusable", asy
   assertEquals(calls, []);
 });
 
-Deno.test("Claude driver reports a start whose title could not be applied", async () => {
-  const calls: Array<{ method: string; args: unknown[] }> = [];
-  const sdk = {
-    ...sdkWithoutSessions(calls),
-    renameSession: () => Promise.reject(new Error("rename refused")),
-  };
-  const driver = new ClaudeAgentSdkDriver(
-    {
-      id: "claude-code:labs",
-      driver: "claude-agent-sdk",
-      enabled: true,
-      cwd: "/work/labs",
-    },
-    sdk,
-  );
-  const outcome = await driver.startSession(NEW_SESSION_ID, {
-    text: "Hi",
-    title: "Untitled after all",
-  });
-  assertEquals(outcome.status, "succeeded");
-  assertEquals(outcome.result?.titled, false);
-  assertEquals(outcome.result?.titleError, "Error: rename refused");
-});
-
-Deno.test("Claude driver applies a start's mode to the first turn and refuses one it does not advertise", async () => {
+Deno.test("Claude driver applies a start's mode to the first turn, drops it when the start fails, and refuses one it does not advertise", async () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const driver = new ClaudeAgentSdkDriver(
     {
@@ -1194,4 +1194,44 @@ Deno.test("Claude driver applies a start's mode to the first turn and refuses on
   };
   assertEquals(query.options.permissionMode, "acceptEdits");
   assertEquals(query.options.allowDangerouslySkipPermissions, undefined);
+
+  // A start that fails keeps no mode, so a retry under the same id without
+  // one runs in the driver's default mode.
+  const retries: Array<{ method: string; args: unknown[] }> = [];
+  let queries = 0;
+  const flaky = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    {
+      ...sdkWithoutSessions(retries),
+      query: (
+        params: { prompt: string; options?: Record<string, unknown> },
+      ) => {
+        retries.push({ method: "query", args: [params] });
+        queries++;
+        return queries === 1
+          ? fakeQuery([{ type: "result", subtype: "error_during_execution" }])
+          : fakeQuery([
+            { type: "system", subtype: "init", session_id: NEW_SESSION_ID },
+            { type: "result", subtype: "success" },
+          ]);
+      },
+    },
+  );
+  assertEquals(
+    (await flaky.startSession(NEW_SESSION_ID, { text: "Hi", mode: "plan" }))
+      .status,
+    "failed",
+  );
+  assertEquals(
+    (await flaky.startSession(NEW_SESSION_ID, { text: "Hi" })).status,
+    "succeeded",
+  );
+  const retried = retries.filter((call) => call.method === "query").at(-1)
+    ?.args[0] as { options: Record<string, unknown> };
+  assertEquals(retried.options.permissionMode, undefined);
 });

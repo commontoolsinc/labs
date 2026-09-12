@@ -1,4 +1,4 @@
-import { isAbsolute, relative } from "@std/path";
+import { resolve } from "@std/path";
 import * as defaultSdk from "@anthropic-ai/claude-agent-sdk";
 import type {
   AgentDriver,
@@ -79,13 +79,6 @@ const claudeSourceEnvironment = new AsyncSerialQueue();
 // The SDK accepts a caller-chosen id for a new session only in this form.
 const CLAUDE_SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Whether `path` is `root` or lies below it. */
-function isWithinDirectory(path: string, root: string): boolean {
-  const relation = relative(root, path);
-  return relation === "" ||
-    (!isAbsolute(relation) && !relation.startsWith(".."));
-}
 
 function isoFromMillis(value: unknown): string | null {
   return typeof value === "number" && Number.isFinite(value)
@@ -282,8 +275,10 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
       throw new Error("invalid Claude cursor");
     }
     const activeSessionIds = new Set(this.#activeQueries.keys());
-    // A source with a directory lists that directory's sessions, worktrees
-    // included; without one it lists every project on the machine.
+    // A source with a directory lists that project directory's sessions and,
+    // when it is inside a Git repository, its worktrees' — never its
+    // subdirectories', which the SDK keys as projects of their own. Without
+    // one it lists every project on the machine.
     const sessions = await this.#withSourceEnvironment(() =>
       this.#sdk.listSessions({
         limit: PAGE_SIZE,
@@ -411,7 +406,12 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
     if (input.mode !== undefined && !modes.includes(input.mode)) {
       return unsupported(`unsupported Claude mode: ${input.mode}`);
     }
-    const cwd = input.cwd ?? this.#config.cwd;
+    // A start runs where its source lists: in the source's own directory when
+    // it has one (the SDK lists that project directory, not its
+    // subdirectories), otherwise in the directory the start names.
+    const sourceCwd = this.#config.cwd;
+    const requested = input.cwd === undefined ? undefined : resolve(input.cwd);
+    const cwd = sourceCwd ?? requested;
     if (cwd === undefined) {
       return {
         status: "failed",
@@ -424,15 +424,15 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
       };
     }
     if (
-      input.cwd !== undefined && this.#config.cwd !== undefined &&
-      !isWithinDirectory(input.cwd, this.#config.cwd)
+      sourceCwd !== undefined && requested !== undefined &&
+      requested !== resolve(sourceCwd)
     ) {
       return {
         status: "failed",
         error: {
-          code: "claude-start-cwd-outside-source",
+          code: "claude-start-cwd-not-source",
           message:
-            `${input.cwd} is outside the source directory ${this.#config.cwd}`,
+            `${input.cwd} is not the source directory ${sourceCwd}, which is where a start runs`,
           retryable: false,
         },
       };
@@ -465,6 +465,7 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
           },
         };
       }
+      const priorMode = this.#sessionModes.get(nativeSessionId);
       if (input.mode !== undefined) {
         this.#sessionModes.set(nativeSessionId, input.mode);
       }
@@ -472,32 +473,33 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
         nativeSessionId,
         pending,
         input.text,
-        { sessionId: nativeSessionId, cwd },
+        {
+          sessionId: nativeSessionId,
+          cwd,
+          // The SDK titles a new session from its first message.
+          ...(input.title !== undefined ? { title: input.title } : {}),
+        },
         options,
         // The session is on disk once the SDK has emitted a message for it;
         // a refresh before that finds nothing to read.
         { activateAfterFirstMessage: true },
       );
-      if (outcome.status !== "succeeded") return outcome;
-      this.#sessionCwds.set(nativeSessionId, cwd);
-      const result: Record<string, unknown> = {
-        nativeSessionId,
-        cwd,
-        title: input.title ?? null,
-        titled: false,
-      };
-      if (input.title !== undefined) {
-        const title = input.title;
-        try {
-          await this.#withSourceEnvironment(() =>
-            this.#sdk.renameSession(nativeSessionId, title)
-          );
-          result.titled = true;
-        } catch (error) {
-          result.titleError = String(error);
+      if (outcome.status !== "succeeded") {
+        // A start that did not happen leaves no mode behind for a retry.
+        if (input.mode !== undefined) {
+          if (priorMode === undefined) {
+            this.#sessionModes.delete(nativeSessionId);
+          } else {
+            this.#sessionModes.set(nativeSessionId, priorMode);
+          }
         }
+        return outcome;
       }
-      return { status: "succeeded", result };
+      this.#sessionCwds.set(nativeSessionId, cwd);
+      return {
+        status: "succeeded",
+        result: { nativeSessionId, cwd, title: input.title ?? null },
+      };
     } finally {
       if (this.#pendingPrompts.get(nativeSessionId) === pending) {
         this.#pendingPrompts.delete(nativeSessionId);

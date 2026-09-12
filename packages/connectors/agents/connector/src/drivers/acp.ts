@@ -255,7 +255,6 @@ export class AcpDriver implements AgentDriver {
         inventory: false,
         read: false,
         prompt: true,
-        startSession: false,
         cancel: true,
         rename: false,
         setMode: false,
