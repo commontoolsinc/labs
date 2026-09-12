@@ -37,7 +37,7 @@ export type MainResultForm<ResultType> = {
  * A `recurse` form. This is returned by visitor methods which visit containers.
  * This tells the visitor engine that it should recursively visit the contents
  * of the container, such that each visited item is known by the engine to be
- * contained by the container which is being iterated over. The two `boolean`
+ * contained by the container which is being recursed into. The two `boolean`
  * properties indicate whether the container's keys and/or values are to be
  * recursed over. `doKeys` is ignored in a context where there is no key.
  *
@@ -279,7 +279,7 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * a result of the visitor returning a `recurse` result for a visited array
    * and is called _after_ the element itself was directly visited.
    */
-  visitedArrayElement(
+  visitedFabricArrayElement(
     array: FabricArray,
     index: number,
     value: DomainFor<DomainExtra>,
@@ -290,26 +290,38 @@ export interface ValueVisitor<DomainExtra = never, ResultType = FabricValue> {
    * This method is called as a result of the visitor returning a `recurse`
    * result for a visited array and is called during iteration as gaps are
    * encountered. The sequencing of this call is meant to mirror
-   * `visitedArrayElement()`, but since there is nothing to recurse on (it's a
-   * gap, not any actual values), there is no regular `visitValue()` call which
-   * immediately precedes it (hence the visit was "nominal"). `start` is the
-   * start index of the gap (integer `>= 0`), and `count` is the number of holes
-   * in the gap (integer `>= 1`). This method is called as a result of the
-   * visitor returning a `recurse` result for a visited array.
+   * `visitedFabricArrayElement()`, but since there is nothing to recurse on
+   * (it's a gap, not any actual values), there is no regular `visitValue()`
+   * call which immediately precedes it (hence the visit was "nominal"). `start`
+   * is the start index of the gap (integer `>= 0`), and `count` is the number
+   * of holes in the gap (integer `>= 1`). This method is called as a result of
+   * the visitor returning a `recurse` result for a visited array.
    */
-  visitedArrayGap(
+  visitedFabricArrayGap(
     array: FabricArray,
     start: number,
     count: number,
   ): BaselineVisitResult<ResultType>;
 
   /**
-   * Indicates that a container mapping was just visited. This method is called
-   * as a result of the visitor returning a `recurse` result for a visited
-   * container and is called _after_ the mapping itself was directly visited.
+   * Indicates that the instance state of a `FabricInstance` was just visited.
+   * This method is called as a result of the visitor returning a `recurse`
+   * result for a visited `FabricInstance` and is called _after_ the instance's
+   * state was directly visited.
    */
-  visitedMapping(
-    container: FabricPlainObject | FabricInstance,
+  visitedFabricInstance(
+    instance: FabricInstance,
+    state: FabricValue,
+  ): BaselineVisitResult<ResultType>;
+
+  /**
+   * Indicates that `FabricPlainObject` entry was just visited. This method is
+   * called as a result of the visitor returning a `recurse` result for a
+   * visited `FabricPlainObject` and is called _after_ the entry's key and/or
+   * value were directly visited.
+   */
+  visitedFabricPlainObjectEntry(
+    container: FabricPlainObject,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
