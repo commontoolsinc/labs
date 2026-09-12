@@ -13,7 +13,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { getTopFrame } from "../src/builder/pattern.ts";
-import { CellImpl } from "../src/cell.ts";
+import { type Cell, CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -36,27 +36,34 @@ describe("cell-captured-frame", () => {
         storageManager,
       });
 
-      const frame = getTopFrame();
-      expect(frame).not.toBe(before);
-      expect(frame?.runtime).toBe(runtime);
-
-      await runtime.dispose();
-      await storageManager.close();
+      try {
+        const frame = getTopFrame();
+        expect(frame).not.toBe(before);
+        expect(frame?.runtime).toBe(runtime);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
       expect(getTopFrame()).toBe(before);
     });
 
     // Each case below builds its own runtime, so that disposing that runtime
-    // leaves the stack empty and the cell derived next has no frame.
+    // leaves the stack empty and the cell derived next has no frame. The
+    // disposal runs from a `finally`, so a failure on the way to it still takes
+    // the frame off the stack that the cases after it read.
     async function cellDerivedAfterDisposal(cause: string) {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
       });
-      const parent = runtime.getCell<{ inner: number }>(space, cause);
-
-      await runtime.dispose();
-      await storageManager.close();
+      let parent: Cell<{ inner: number }>;
+      try {
+        parent = runtime.getCell<{ inner: number }>(space, cause);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
       expect(getTopFrame()).toBeUndefined();
 
       return { parent, child: parent.key("inner") };
