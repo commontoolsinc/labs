@@ -76,7 +76,7 @@ export function isRunData(value: unknown): value is RunData {
  * that the response can be matched to it.
  */
 export type WorkerIPCRequest =
-  /** Set the worker up, with what it needs to serve its space. */
+  /** Request to set the worker up, with what it needs to serve its space. */
   | {
     /** Kind of the request. */
     type: WorkerIPCMessageType.Initialize;
@@ -87,7 +87,7 @@ export type WorkerIPCRequest =
     /** The request's payload. */
     data: InitializationData;
   }
-  /** Run one piece's background updater. */
+  /** Request to run one piece's background updater. */
   | {
     /** Kind of the request. */
     type: WorkerIPCMessageType.Run;
@@ -98,7 +98,7 @@ export type WorkerIPCRequest =
     /** The request's payload. */
     data: RunData;
   }
-  /** Tear the worker's runtime down ahead of termination. */
+  /** Request to tear the worker's runtime down ahead of termination. */
   | {
     /** Kind of the request. */
     type: WorkerIPCMessageType.Cleanup;
