@@ -2764,6 +2764,7 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     const focusKeys = [
       ...requiredSchedulerKeys,
       ["scheduler", "scheduler/execute/event"],
+      ["scheduler", "scheduler/execute/event/presyncInputs"],
       ["scheduler", "scheduler/execute/event/pullPopulateDependencies"],
       ["scheduler", "scheduler/execute/event/pullTxToReactivityLog"],
       ["scheduler", "scheduler/execute/event/pullDepCommitStart"],

@@ -60,7 +60,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   optional CI adoption and further fixture hardening.
 - [Lazy materialization fast-follow](lazy-materialization-fast-follow.md)
   owns handler integration, rollout evidence, flag retirement, and renewed
-  measurements after #7155, with independently checkable stages F0–F5.
+  measurements after the pattern computation cost work, with independently
+  checkable stages F0–F5.
 - [Lazy cell materialization](lazy-cell-materialization.md) sequences a
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
