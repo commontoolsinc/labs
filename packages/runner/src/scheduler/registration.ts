@@ -59,6 +59,9 @@ export type SchedulerSubscriptionState =
   & SchedulerParentChildState;
 
 export interface SchedulerSubscribeOptions {
+  /** Skips provisional parent demand for a computation with declared outputs. */
+  deferUntilDemand?: boolean;
+
   isEffect?: boolean;
   debounce?: number;
   noDebounce?: boolean;
@@ -158,6 +161,7 @@ export function subscribePullSchedulerAction(
   const parentRecord = state.subscriptionState.nodes.parentOf(action);
   if (
     !actionIsEffect &&
+    !options.deferUntilDemand &&
     record &&
     parentRecord &&
     isLive(state.subscriptionState.dependencyGraphState, parentRecord)

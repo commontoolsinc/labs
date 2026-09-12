@@ -5,6 +5,7 @@ import {
   SKIP_LIST_VARIABLE,
 } from "@commonfabric/test-support/records";
 import {
+  coverageMemberDirectory,
   fileSuite,
   unavailableFrom,
   unavailableLeaves,
@@ -300,5 +301,25 @@ describe("two parts of one suite under one scope", () => {
         file: "packages/oven/b.test.ts",
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("naming a member's coverage directory", () => {
+  it("stands a slash up as a separator a directory name can hold", () => {
+    expect(coverageMemberDirectory("packages/connectors/github"))
+      .toBe("packages__connectors__github");
+  });
+
+  it("names the same directory whether or not the member leads with ./", () => {
+    expect(coverageMemberDirectory("./packages/memory"))
+      .toBe(coverageMemberDirectory("packages/memory"));
+  });
+
+  it("refuses a member whose own name holds the separator", () => {
+    // Two members would otherwise share one directory, and their
+    // coverage would be added together with nothing saying so.
+    expect(() => coverageMemberDirectory("packages/one__two")).toThrow(
+      "cannot be measured",
+    );
   });
 });

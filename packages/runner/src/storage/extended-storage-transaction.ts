@@ -120,6 +120,8 @@ import {
 } from "../cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
@@ -536,6 +538,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * needs no more than this.
    */
   #markedOwnedStores = new Set<string>();
+
+  /**
+   * The stores no schema declares a policy on that a marker named on this
+   * transaction, keyed the same way {@link runtimeOwnedStoreKey} keys a
+   * document. No enrollment stands beside it: the measurement that reads it
+   * runs over documents the asking transaction wrote.
+   */
+  #markedUndeclarableStores = new Set<string>();
 
   /**
    * The stores the runtime owns that outlive the transaction that minted them,
@@ -1782,6 +1792,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           runtimeOwnedStoreKey(frozen.target.space, frozen.target.id),
         );
       }
+      // The same whole-document test, for the same reason: whether a schema
+      // could have declared a policy is a question about the document. There
+      // is no owner to compare a space against — the claim says what the
+      // document is, not which piece it was minted for.
+      if (
+        frozen.kind === "structural-provenance" &&
+        frozen.claim === CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE &&
+        canonicalizeLogicalPath(frozen.target.path).length === 0
+      ) {
+        this.#markedUndeclarableStores.add(
+          runtimeOwnedStoreKey(frozen.target.space, frozen.target.id),
+        );
+      }
     }
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
@@ -1856,6 +1879,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const key = runtimeOwnedStoreKey(space, id);
     return this.#markedOwnedStores.has(key) ||
       (this.#runtimeOwnedStores?.has(key) ?? false);
+  }
+
+  isUndeclarablePolicyStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean {
+    // Acted on rather than measured, so it takes the runtime's mark like the
+    // recorders do.
+    if (!runtimeWritePolicyAuthorized(authorization)) return false;
+    return this.#markedUndeclarableStores.has(
+      runtimeOwnedStoreKey(space, id),
+    );
   }
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
@@ -2830,6 +2866,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.tx.committedSeq?.(space);
+  }
+
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
@@ -3412,7 +3452,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           }
           for (const effect of this.#cfcState.outbox) {
             try {
-              await effect.flush(this);
+              const flushed = effect.flush(this);
+              if (flushed === POST_COMMIT_RELEASE_REJECTED) continue;
+              await flushed;
               this.#cfcInstrumentation.onOutboxFlush?.(effect);
             } catch (error) {
               logger.error(
@@ -3802,6 +3844,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.#wrapped.isRuntimeOwnedStore(space, id, authorization);
   }
 
+  isUndeclarablePolicyStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean {
+    return this.#wrapped.isUndeclarablePolicyStore(space, id, authorization);
+  }
+
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
     this.#wrapped.recordCfcConsultedGrant(consulted);
   }
@@ -3955,6 +4005,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   status(): StorageTransactionStatus {
     return this.#wrapped.status();
+  }
+
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.#wrapped.committedSeq?.(space);
   }
 
   #transformReadOptions(options?: IReadOptions): IReadOptions {

@@ -231,17 +231,6 @@ export const groupedQueries = (
   return grouped;
 };
 
-export const mergeWatchesById = (
-  current: readonly WatchSpec[],
-  added: readonly WatchSpec[],
-): WatchSpec[] => {
-  const merged = new Map(current.map((watch) => [watch.id, watch] as const));
-  for (const watch of added) {
-    merged.set(watch.id, watch);
-  }
-  return [...merged.values()];
-};
-
 const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
   JSON.stringify([
     root.id,

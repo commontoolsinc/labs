@@ -1119,6 +1119,15 @@ type SetupResult<R> = {
 export interface PatternSetupCommitReceipt {
   /** Content-addressed pattern pointer written by the transaction. */
   pattern: { identity: string; symbol: string };
+  /** The space whose commit log accepted the transaction. */
+  space: MemorySpace;
+  /**
+   * Position in `space`'s commit log at which storage accepted the
+   * transaction. With `space` it is the coordinate `cf inspect value-at --seq`
+   * and `diff --from/--to` read, and it orders this receipt against every
+   * other commit to the space.
+   */
+  seq: number;
 }
 
 /** Result of running a pattern through an owned setup transaction. */
@@ -6882,6 +6891,14 @@ export class Runner {
     cell: Cell<any>;
     commit?: PatternSetupCommitReceipt;
   }> {
+    if (pattern === undefined) {
+      // TypeScript callers cannot omit this, but the runtime boundary is also
+      // used from JavaScript. A missing pattern is first read deep in the
+      // pre-sync, where it surfaces as a `TypeError` naming a property rather
+      // than the argument, so fail closed here, at the one point both public
+      // entry points pass through, before any work is done.
+      throw new Error("a synced run requires a pattern");
+    }
     await resultCell.sync();
 
     const synced = await this.#syncCellsForRunningPattern(
@@ -6913,6 +6930,7 @@ export class Runner {
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: SetupResult<any> | undefined;
     let commit: PatternSetupCommitReceipt | undefined;
+    let committedTx: IExtendedStorageTransaction | undefined;
     const assertExpectedPatternIdentity = (
       cell: Cell<any>,
     ): void => {
@@ -6956,6 +6974,9 @@ export class Runner {
     } else {
       const outcome = await this.#runtime.editWithRetry(
         (tx) => {
+          // The attempt that commits is the last one this callback sees, so
+          // the receipt below names the commit it produced.
+          committedTx = tx;
           // Receipts and source-update authority require this transaction's
           // durable acceptance. Check each attempt because a seal destination
           // can be installed during synchronization or between retries.
@@ -7040,7 +7061,17 @@ export class Runner {
             );
           }
           // deno-coverage-ignore-stop
-          commit = { pattern: patternRef };
+          // Recorded on the transaction at its verdict, before the commit
+          // promise resolved, so a resolved commit carries it; like the
+          // pointer above, a missing seq is the type's edge and fails loudly
+          // rather than minting a receipt that names no commit.
+          const seq = committedTx?.committedSeq?.(resultCell.space);
+          if (seq === undefined) {
+            throw new Error(
+              "the pattern setup committed without recording its store seq",
+            );
+          }
+          commit = { pattern: patternRef, space: resultCell.space, seq };
         }
       }
     }
@@ -8748,7 +8779,7 @@ export class Runner {
 
     const eventDependencySchema = cfcSchemaWithInheritedDefs(
       { type: "object", properties: { $event: eventSchema as JSONSchema } },
-      argumentSchema.$defs,
+      resolveExternalRootRefForStructure(argumentSchema).$defs,
     );
     const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
@@ -8916,9 +8947,12 @@ export class Runner {
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
-    const rootDefinitions = isObjectOrArray(argumentSchema)
-      ? argumentSchema.$defs
+    // The argument schema at rest can be a `cid:` reference, whose
+    // definitions live on the document it names.
+    const argumentRoot = isObjectNotArray(argumentSchema)
+      ? resolveExternalRootRefForStructure(argumentSchema)
       : undefined;
+    const rootDefinitions = argumentRoot?.$defs;
 
     const visit = (schema: unknown, currentValue: unknown): void => {
       // Sigil-only: the value is post-unwrap, where the only `$alias`
@@ -11171,6 +11205,9 @@ export class Runner {
     const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.useDeclaredReadsAsDependencies
       : false;
+    const deferUntilDemand = isRawBuiltinResult(builtinResult)
+      ? builtinResult.deferUntilDemand
+      : undefined;
     const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
       ? builtinResult.onActionRegistered
       : undefined;
@@ -11263,6 +11300,7 @@ export class Runner {
         : undefined);
     const schedulerOptions = {
       isEffect,
+      deferUntilDemand,
       debounce,
       noDebounce,
       throttle,

@@ -56,6 +56,7 @@ describe("collection index resume", () => {
         kind: "collection-index",
         mode: "group",
         keys: [],
+        keyEntries: [],
         buckets: {},
       });
       const result = first.run(
@@ -98,6 +99,7 @@ describe("collection index resume", () => {
         collectionKeyBucket({ kind: "string", value: "a" }),
       ).set([7]);
       restoredIndex.key("keys").set(["a"]);
+      restoredIndex.key("keyEntries").set([{ kind: "value", value: "a" }]);
       await edit.commit();
       await second.idle();
       expect(await restored.key("values").pull()).toEqual([7]);

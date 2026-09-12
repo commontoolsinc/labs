@@ -41,7 +41,10 @@ import {
 import type { PendingOutboxRow } from "@commonfabric/memory/v2/execution-outbox";
 import { ProtocolError } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { PostCommitSideEffect } from "../cfc/types.ts";
+import {
+  POST_COMMIT_RELEASE_REJECTED,
+  type PostCommitSideEffect,
+} from "../cfc/types.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { WaveRunContext } from "./wave.ts";
 import type { ServingLoopStats } from "./stats.ts";
@@ -57,6 +60,20 @@ export interface SealedEffectBatch {
   tx: IExtendedStorageTransaction;
   effects: readonly PostCommitSideEffect[];
   context: WaveRunContext | undefined;
+}
+
+/** An accepted attachment whose release check has not run. */
+interface EffectCandidate {
+  effect: PostCommitSideEffect;
+  tx: IExtendedStorageTransaction;
+  context: WaveRunContext | undefined;
+}
+
+/** One effect key, retaining alternatives only until dispatch is decided. */
+interface InflightEffect {
+  retirement: Promise<void>;
+  candidates: EffectCandidate[] | undefined;
+  countsAsRequest: boolean;
 }
 
 /** Per-space egress budgets (Phase 6 — serving-loop.md §5's
@@ -103,14 +120,14 @@ export class SpaceOutbox {
    * scoped per (memo key, result target): a second admit of a live key
    * is the SAME node's request re-issued (a wave re-run, a
    * stale-snapshot re-admit, a crash re-miss) and is served by the
-   * first entry's completion writing that node's cells. Distinct nodes
+   * selected attachment's completion writing that node's cells. Distinct nodes
    * never share a key (effectTargetKey widens the memo key by the
    * result-cell identity — the round-2 headline: their closures write
    * different cells, so cross-node dedupe dropped real work). The
-   * stored promise is the entry's RETIREMENT (work settled AND every
+   * entry's promise tracks RETIREMENT (work settled AND every
    * completion commit readable — see #retireBarriers), which is what
    * `settle()` awaits. */
-  readonly #inflight = new Map<string, Promise<void>>();
+  readonly #inflight = new Map<string, InflightEffect>();
 
   /** Run-context carriage per in-flight effect id (§4's miss rule),
    * consumed by the completion committer; retired with the entry
@@ -304,7 +321,7 @@ export class SpaceOutbox {
   }
 
   /** The §4 identity carriage for an in-flight effect, captured at the
-   * original run's seal. */
+   * selected dispatch attachment's seal. */
   carriageFor(effectKey: string): WaveRunContext | undefined {
     return this.#carriage.get(effectKey);
   }
@@ -352,15 +369,12 @@ export class SpaceOutbox {
     for (const batch of batches) {
       for (const effect of batch.effects) {
         const key = effect.idempotencyKey ?? effect.id;
-        if (this.#inflight.has(key)) {
-          // §4's in-flight dedupe, per (memo key, result target): a
-          // live key means THIS NODE's identical request is already
-          // running, and its completion writes this node's cells —
-          // the re-admit attaches. Keys carry the result-cell identity
-          // (effectTargetKey), so this branch can never drop a
-          // DIFFERENT node's closure (the round-2 headline bug: with
-          // bare `kind:inputHash` keys, "one completion serves both
-          // result cells" was false — the cells are per-node).
+        const candidate = { effect, tx: batch.tx, context: batch.context };
+        const existing = this.#inflight.get(key);
+        if (existing !== undefined) {
+          // Held requests keep each attachment's release check. Once one
+          // dispatches, its completion serves every same-key attachment.
+          existing.candidates?.push(candidate);
           continue;
         }
         const countsAsRequest = effect.kind !== RUNNER_ACCEPTANCE_EFFECT_KIND;
@@ -368,31 +382,37 @@ export class SpaceOutbox {
           this.#stats.outbox.queued += 1;
           this.#stats.memo.misses += 1;
         }
+        const retired = Promise.withResolvers<void>();
+        const entry: InflightEffect = {
+          retirement: retired.promise,
+          candidates: [candidate],
+          countsAsRequest,
+        };
+        this.#inflight.set(key, entry);
+        if (countsAsRequest) this.#stats.memo.inflight += 1;
         if (batch.context !== undefined) {
           this.#carriage.set(key, batch.context);
         }
-        // The in-flight entry (dedupe/carriage/retirement) exists from
-        // ADMISSION; only the DISPATCH defers behind the Phase-6 budget
-        // gate — a re-admit during the hold attaches to this entry
-        // instead of double-firing (the eager-registration contract).
+        // Registration precedes the synchronous prefix too: a re-admission
+        // during a release check attaches to this entry instead of firing twice.
         const work = this.#budgeted(effect)
           ? this.#acquireDispatchSlot().then((acquired) =>
             acquired
-              ? this.#runEffect(key, effect, batch.tx)
+              ? this.#runEffect(key, entry)
                 .finally(() => this.#releaseDispatchSlot())
               : undefined
           )
-          : this.#runEffect(key, effect, batch.tx);
-        const retirement = work.catch(() => undefined)
-          .then(() => this.#awaitRetireBarriers(key))
+          : this.#runEffect(key, entry);
+        work.catch(() => undefined)
+          .then(() => {
+            if (this.#inflight.get(key) === entry) {
+              return this.#awaitRetireBarriers(key);
+            }
+          })
           .finally(() => {
-            this.#retireBarriers.delete(key);
-            this.#inflight.delete(key);
-            this.#carriage.delete(key);
-            if (countsAsRequest) this.#stats.memo.inflight -= 1;
+            this.#retireEntry(key, entry);
+            retired.resolve();
           });
-        this.#inflight.set(key, retirement);
-        if (countsAsRequest) this.#stats.memo.inflight += 1;
       }
     }
   }
@@ -416,32 +436,53 @@ export class SpaceOutbox {
     }
   }
 
-  async #runEffect(
-    key: string,
-    effect: PostCommitSideEffect,
-    tx: IExtendedStorageTransaction,
-  ): Promise<void> {
-    const countsAsRequest = effect.kind !== RUNNER_ACCEPTANCE_EFFECT_KIND;
-    // Capture the builtin's tracked work during the SYNCHRONOUS prefix
-    // of the flush only: fetch/llm callbacks start their network work
-    // and register it via trackAsyncWork before returning; sqlite's
-    // async flush IS its work. Restricting capture to the synchronous
-    // prefix keeps concurrent scheduler runs' tracked work out.
+  /** Frees only this generation's key, carriage, and consistency barriers. */
+  #retireEntry(key: string, entry: InflightEffect): void {
+    if (this.#inflight.get(key) !== entry) return;
+    entry.candidates = undefined;
+    this.#retireBarriers.delete(key);
+    this.#inflight.delete(key);
+    this.#carriage.delete(key);
+    if (entry.countsAsRequest) this.#stats.memo.inflight -= 1;
+  }
+
+  async #runEffect(key: string, entry: InflightEffect): Promise<void> {
+    const countsAsRequest = entry.countsAsRequest;
+    // Capture only each flush's synchronous prefix. A release refusal can
+    // select another accepted attachment; any other outcome ends selection.
     const captured: Array<Promise<unknown>> = [];
-    this.#capturing = captured;
-    let flushResult: Promise<void> | void;
-    try {
-      flushResult = effect.flush(tx) as Promise<void> | void;
-    } catch (error) {
+    let flushResult: ReturnType<PostCommitSideEffect["flush"]> = undefined;
+    let dispatched = false;
+    while (entry.candidates?.length) {
+      const candidate = entry.candidates.shift()!;
+      if (candidate.context === undefined) this.#carriage.delete(key);
+      else this.#carriage.set(key, candidate.context);
+      this.#capturing = captured;
+      try {
+        flushResult = candidate.effect.flush(candidate.tx);
+      } catch (error) {
+        this.#capturing = undefined;
+        entry.candidates = undefined;
+        if (countsAsRequest) this.#stats.outbox.failed += 1;
+        logger.warn("effect-flush-failed", () => [
+          `effect ${key} flush threw`,
+          error,
+        ]);
+        return;
+      }
       this.#capturing = undefined;
-      if (countsAsRequest) this.#stats.outbox.failed += 1;
-      logger.warn("effect-flush-failed", () => [
-        `effect ${key} flush threw`,
-        error,
-      ]);
+      if (flushResult === POST_COMMIT_RELEASE_REJECTED) continue;
+      dispatched = true;
+      break;
+    }
+    entry.candidates = undefined;
+    if (!dispatched) {
+      // No request started. Free the key synchronously so an attachment
+      // arriving before this call's promise retires gets its own release check.
+      this.#retireEntry(key, entry);
+      if (countsAsRequest) this.#stats.outbox.completed += 1;
       return;
     }
-    this.#capturing = undefined;
     try {
       await flushResult;
       const settled = await Promise.allSettled(captured);
@@ -473,7 +514,9 @@ export class SpaceOutbox {
    * loop never awaits it (the loop never awaits the network). */
   async settle(): Promise<void> {
     while (this.#inflight.size > 0) {
-      await Promise.allSettled([...this.#inflight.values()]);
+      await Promise.allSettled(
+        [...this.#inflight.values()].map((entry) => entry.retirement),
+      );
     }
   }
 

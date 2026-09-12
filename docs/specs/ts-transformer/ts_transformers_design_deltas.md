@@ -15,6 +15,15 @@ behavior and open follow-up work.
 
 ## Delta Backlog
 
+### Collection index selectors
+
+Explicit array-valued cells expose `groupBy` and `keyBy`, returning typed index
+handles with per-key lookup. Their one-element callbacks preserve Cell identity
+by tagging the evaluated key before serialization. Index and whole-array
+callback parameters remain outside this API. Ordinary array-typed inputs do not
+expose these methods through the public types. See the
+[index documentation](../../features/collection-indexes.md).
+
 ### Named collection aggregates
 
 Explicit array-valued cells expose `count`, `sum`, `min`, `max`, `minBy`, and
