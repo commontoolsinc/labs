@@ -254,19 +254,34 @@ None of this is specific to the inbox. Any action whose returned artifact
 changes pays a child re-instantiation and a double walk of the entire result,
 so the cost scales with the result's size rather than with the change's.
 
-**Three places it could be fixed, smallest blast radius first:**
+**Candidate 2 landed.** The schema is computed three lines below the pull site,
+so `#pullCellOnceAfterSuccessfulCommit` now takes it and hands it to
+`getCellFromLink`. Eight alternating arms, run in both orders, paced click
+medians on a 37-thread list: plain 351, 351, 424, 343 ms (best 290) against
+schema 298, 191, 261, 270 ms (best 179) — complete separation, about a quarter
+off the median. Full runner suite, the piece suite and four pattern integration
+tests are green.
 
-1. **Do not traverse twice.** The convergence loop re-runs the pull's action;
-   re-walking an unchanged value on the second pass buys nothing. Halves this
-   on its own, and is the most contained.
-2. **Give the start pull a schema.** `#pullCellOnceInPullMode` builds its cell
-   with `getCellFromLink(resultCell.getAsNormalizedFullLink())`; a start pull
-   carrying the pattern's result schema registers the same dependencies without
-   the walk. A runtime decision about what a start pull should demand.
-3. **Narrow what counts as a pattern change.** A one-character change to an
-   emitted stylesheet should not re-instantiate a child. This is the root, and
-   the largest question: `resultPatternKey` is a content hash by design, so the
-   fix is about what the child's identity should depend on, not about hashing.
+It carries a caveat worth keeping in view: it NARROWS what the pull demands, so
+a result schema narrower than what genuinely needs demanding would under-demand,
+and no test here would necessarily say so. It passes `resultSchema` alone
+rather than the `effectiveResultSchema` fallback chain below it; the wider
+variant covers more pulls and narrows more demand, and is unmeasured.
+
+**What is left, and the correction that goes with it.**
+
+An earlier draft of this plan called "stop the second traversal" the most
+contained fix. That was wrong: the second run is the scheduler re-firing the
+pull's effect, not a redundant convergence pass, so removing it would drop the
+dependency registration the traversal exists for. It is not a candidate.
+
+What remains is the root: **a click should not re-instantiate a child piece at
+all.** `resultPatternKey` is a content hash by design, so a one-character change
+to an emitted stylesheet is a different artifact and takes the
+`!patternUnchanged` arm. The question is what a child's identity should depend
+on, which is a runtime design decision rather than a local edit — and it is
+worth more than the pull fix, because it would remove the instantiation, both
+pulls and both walks together.
 
 **One lead ruled out.** The render root looked like the same fault:
 `cf-render` renders the `full` kind with a bare cast rather than
@@ -285,10 +300,9 @@ nothing. The traversal is in the pull, not the sink and not the render.
 4. ~~**Stage 3's local half**~~ — landed; the pass is down to 7.1% of wall.
 5. ~~**Stage 6**~~ — landed: a benchmark that guards the curve's shape, and the
    authoring rule in `pattern-dev` and `pattern-critic`.
-6. **Stage 7** — the largest remaining item at ~65% of a click, measured end to
-   end, with three candidate fixes and a prize of roughly halving what a click
-   costs. It is not an inbox problem: every action whose returned artifact
-   changes pays it.
+6. ~~**Stage 7's pull half**~~ — landed; about a quarter off a paced click.
+7. **Stage 7's root** — a click should not re-instantiate a child piece. Worth
+   more than the pull fix and a runtime design decision, not a local edit.
 7. **Stage 4a** — small, and it is a correctness bug. The root cause is known;
    what is missing is a harness that reproduces it.
 8. **Stage 3's structural half** — a CFC design decision, not a measurement.
