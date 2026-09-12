@@ -1535,7 +1535,7 @@ they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
-LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
+LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
 mapping.
 
@@ -1655,7 +1655,7 @@ shutdown able to reach it. An aborted signal is the one failure that does not
 resolve to the environment: it throws the abort reason, because the caller has
 stopped wanting a posture at all.
 
-Presets that run against local emulated storage — `cf test`, `cf dev`, the
+Presets that run against local emulated storage — `cf test`, `cf check`, the
 pattern harnesses — have no server to ask and keep reading the environment
 alone. The background piece service's own main and worker processes have one
 but do not ask it: they are deployed with the same environment as the toolshed

@@ -33,7 +33,7 @@ The [F0 baseline](2026-09-11-lazy-materialization-f0-baseline.md) records how
 each process resolves the flag. The parts that matter to a retirement
 decision:
 
-- **Toolshed, the background piece service, and `cf dev`** read the
+- **Toolshed, the background piece service, and `cf check`** read the
   variable from their own environment through `experimentalOptionsFromEnv`
   and resolve an unset one to on. An explicit `false` there is the rollback
   route the registry names; no tracked file supplies one. The flag is

@@ -3576,7 +3576,7 @@ discharge OW28. The flip's changes and validation record follow:
   (`experimentalOptionsForDeployedClient`, authority "server") from
   the default binary's /api/meta; the job gains the server-side ON
   posture probe so the exercise is verified, not assumed. (`cf test`
-  / `cf dev` stay deliberately ambient-OFF — patternTest/localDev
+  / `cf check` stay deliberately ambient-OFF — patternTest/localDev
   presets.)
   (4) `PiecesController` hosts — the default package/pattern lanes
   are the ON exercise (sx2-scale's N controllers, the
