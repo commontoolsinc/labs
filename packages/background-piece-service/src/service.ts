@@ -1,3 +1,8 @@
+/**
+ * The service's top level: watches the registry of background pieces and
+ * keeps one `SpaceManager` running per space that has an enabled piece in it.
+ */
+
 import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
@@ -14,20 +19,50 @@ import {
 import { SpaceManager } from "./space-manager.ts";
 import { getBGPieces } from "./utils.ts";
 
+/**
+ * The part of a `SpaceManager` the service drives, so that a test can stand
+ * one in.
+ */
 type SpaceManagerLike = Pick<SpaceManager, "start" | "stop" | "watch">;
 
+/** Options for constructing a `BackgroundPieceService`. */
 export interface BackgroundPieceServiceOptions {
+  /** Identity the service runs as, and hands each space's worker. */
   identity: Identity;
+
+  /** URL of the toolshed the workers talk to. */
   toolshedUrl: string;
+
+  /** Runtime the service reads the registry through. */
   runtime: Runtime;
+
+  /** Space holding the registry; the system space by default. */
   bgSpace?: MemorySpace;
+
+  /** Cause of the registry cell; `BG_CELL_CAUSE` by default. */
   bgCause?: string;
+
+  /**
+   * How long a worker request may run before it fails, in milliseconds; each
+   * space's manager passes it on to its worker controller.
+   */
   workerTimeoutMs?: number;
+
+  /**
+   * Factory for a space's manager, which constructs a `SpaceManager` by
+   * default; a test hands in one that builds a stand-in.
+   */
   createSpaceManager?: (
     options: ConstructorParameters<typeof SpaceManager>[0],
   ) => SpaceManagerLike;
 }
 
+/**
+ * Orchestrator of background piece execution. Once initialized it watches the
+ * registry cell, starts a `SpaceManager` for each space with an enabled entry,
+ * hands each manager the entries for its space, and stops the manager of a
+ * space that no longer has one.
+ */
 export class BackgroundPieceService {
   #piecesCell: Cell<Cell<BGPieceEntry>[]> | null = null;
   #isRunning = false;
@@ -42,6 +77,10 @@ export class BackgroundPieceService {
     options: ConstructorParameters<typeof SpaceManager>[0],
   ) => SpaceManagerLike;
 
+  /**
+   * Constructs an instance from `options`, which runs nothing until
+   * `initialize()`.
+   */
   constructor(options: BackgroundPieceServiceOptions) {
     this.#identity = options.identity;
     this.#toolshedUrl = options.toolshedUrl;
@@ -53,6 +92,11 @@ export class BackgroundPieceService {
       ((managerOptions) => new SpaceManager(managerOptions));
   }
 
+  /**
+   * Syncs the registry cell and starts watching it; from then on every change
+   * to the registry reconciles the set of space managers. A second call while
+   * running does nothing.
+   */
   async initialize() {
     if (this.#isRunning) {
       console.log("Service is already running");
@@ -72,6 +116,10 @@ export class BackgroundPieceService {
     this.#piecesCell.sink((cs) => this.#ensurePieces(cs));
   }
 
+  /**
+   * Stops every space manager, and returns how each stop settled. Stops
+   * nothing when the service is not running.
+   */
   stop(): Promise<PromiseSettledResult<void>[]> {
     // FIXME(ja): stop listening to the pieces cell ?
     if (!this.#isRunning) {
@@ -86,10 +134,17 @@ export class BackgroundPieceService {
     return Promise.allSettled(promises);
   }
 
-  // FIXME(ja): space managers should watch their own pieces!
-  // Note(ja): this assumes that sync won't return an empty
-  // array / partial results!
+  /**
+   * Helper for `initialize()`, which reconciles the space managers against
+   * the registry's entries: starts a manager for each space with an enabled
+   * entry, hands every manager the entries for its space, and stops the
+   * manager of a space with no enabled entry left. Returns the `Cancel` that
+   * undoes the watches it registered.
+   */
   #ensurePieces(pieces: readonly Cell<BGPieceEntry>[]) {
+    // FIXME(ja): space managers should watch their own pieces!
+    // Note(ja): this assumes that sync won't return an empty
+    // array / partial results!
     if (!this.#isRunning) {
       console.log("ignoring pieces update because service asked to stop");
       return;

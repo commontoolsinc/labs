@@ -1,5 +1,11 @@
+/**
+ * The environment this service reads: each variable it recognizes, with the
+ * default that stands in for an unset one, parsed once at load into `env`.
+ */
+
 import { z } from "zod";
 
+/** Schema of the recognized variables, defaults included. */
 const envSchema = z.object({
   // Job queue settings
   //MAX_CONCURRENT_JOBS: z.coerce.number().positive().default(5),
@@ -32,11 +38,11 @@ const envSchema = z.object({
   ),
   OTEL_SERVICE_NAME: z.string().default("bg-piece-service"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
-  // EXPERIMENTAL_* feature flags are no longer declared here: the runtime
+  // The EXPERIMENTAL_* feature flags are not declared here: the runtime
   // construction site reads them through the canonical mapping
   // (`experimentalOptionsFromEnv` / EXPERIMENTAL_ENV_VARS in
   // @commonfabric/runner runtime-presets), shared with toolshed and the CLI
-  // so the wirings cannot drift (CT-1814).
+  // so the wirings cannot drift.
 
   // Background Piece Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
@@ -44,8 +50,15 @@ const envSchema = z.object({
   //),
 });
 
+/** The parsed environment, as `loadEnv()` returns it. */
 export type EnvVars = z.infer<typeof envSchema>;
 
+/**
+ * Reads every recognized variable through `source` and returns the parsed
+ * result, defaults filled in.
+ *
+ * @throws If a variable's value fails its schema.
+ */
 export function loadEnv(
   source: (key: string) => string | undefined = (key) => Deno.env.get(key),
 ): EnvVars {
@@ -58,4 +71,5 @@ export function loadEnv(
   return envSchema.parse(rawEnv);
 }
 
+/** The process environment, parsed at module load. */
 export const env = loadEnv();

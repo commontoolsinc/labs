@@ -1,3 +1,9 @@
+/**
+ * Scheduling of one space's background pieces: which are enabled, when each
+ * next runs, how a failure backs off and eventually disables a piece, and the
+ * worker controller the runs go through.
+ */
+
 import { type Cancel, Cell, useCancelGroup } from "@commonfabric/runner";
 import { sleep } from "@commonfabric/utils/sleep";
 
@@ -8,18 +14,50 @@ import {
   type WorkerOptions,
 } from "./worker-controller.ts";
 
+/**
+ * Options for constructing a `SpaceManager`: the worker controller's, plus
+ * the scheduler's own intervals.
+ */
 export interface PieceSchedulerOptions extends WorkerOptions {
+  /**
+   * How often the loop looks for a runnable task, in milliseconds; 100 by
+   * default.
+   */
   pollingIntervalMs?: number;
+
+  /**
+   * How long `stop()` waits for a piece in flight, in milliseconds; ten
+   * seconds by default.
+   */
   deactivationTimeoutMs?: number;
+
+  /**
+   * How long after a run its piece runs again, in milliseconds; a minute by
+   * default.
+   */
   rerunIntervalMs?: number;
 }
 
+/** A scheduled run of one piece. */
 type Task = {
+  /** Entity id of the piece. */
   pieceId: string;
+
+  /** When the run is due, as a `Date.now()` value. */
   timestamp: number;
+
+  /** The piece's registry entry. */
   entry: Cell<BGPieceEntry>;
 };
 
+/**
+ * Scheduler of one space's background pieces. It keeps the enabled entries it
+ * is watching, a queue of runs ordered by due time, and one
+ * `WorkerController` for the space, and it records each run's outcome on the
+ * piece's registry entry. A piece that fails three runs in a row is disabled,
+ * and a terminal worker error disables every piece in the space and replaces
+ * the worker.
+ */
 export class SpaceManager {
   #did: string;
   #pollingIntervalMs: number;
@@ -33,6 +71,10 @@ export class SpaceManager {
   #workerOptions: WorkerOptions;
   #isRunning = false;
 
+  /**
+   * Constructs an instance for the space `options` names, and starts its
+   * worker controller. Runs nothing until `start()`.
+   */
   constructor(options: PieceSchedulerOptions) {
     this.#did = options.did;
     this.#pollingIntervalMs = options.pollingIntervalMs ?? 100;
@@ -131,6 +173,7 @@ export class SpaceManager {
     return cancel;
   }
 
+  /** Starts the scheduling loop; does nothing if it is already running. */
   start(): void {
     if (this.#isRunning) {
       return;
@@ -140,6 +183,11 @@ export class SpaceManager {
     this.#execLoop();
   }
 
+  /**
+   * Stops the scheduling loop, waits for a piece in flight to finish or for
+   * the deactivation timeout to pass, whichever is first, and shuts the
+   * worker controller down.
+   */
   async stop(): Promise<void> {
     console.log(`${this.#did} Stopping piece scheduler...`);
     this.#isRunning = false;
@@ -162,6 +210,11 @@ export class SpaceManager {
     await this.#workerController.shutdown();
   }
 
+  /**
+   * The scheduling loop: while running, hands the head of the queue to
+   * `#processPiece()` once it is due, the worker is ready, and no piece is in
+   * flight, polling between checks.
+   */
   async #execLoop(): Promise<void> {
     while (this.#isRunning) {
       if (!this.#workerController.isReady()) {
@@ -188,6 +241,10 @@ export class SpaceManager {
     }
   }
 
+  /**
+   * Runs one piece through the worker controller and records the outcome,
+   * skipping a piece whose entry has been disabled.
+   */
   async #processPiece(pieceId: string, entry: Cell<BGPieceEntry>) {
     const raw = entry.get();
 
@@ -213,6 +270,10 @@ export class SpaceManager {
     this.#activePiece = null;
   }
 
+  /**
+   * Queues a run of `pieceId` due `whenInMs` from now, the rerun interval by
+   * default, keeping the queue ordered by due time.
+   */
   #pushTask(
     pieceId: string,
     entry: Cell<BGPieceEntry>,
@@ -229,17 +290,21 @@ export class SpaceManager {
     this.#pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
   }
 
-  #updatePieceStatus(b: BGPieceEntry, c: Cell<BGPieceEntry>) {
-    const pieceId = b.pieceId;
-    const enabled = !b.disabledAt;
+  /**
+   * Handler for a change to a watched entry, which schedules a piece that has
+   * become enabled and drops one that has become disabled.
+   */
+  #updatePieceStatus(raw: BGPieceEntry, entry: Cell<BGPieceEntry>) {
+    const pieceId = raw.pieceId;
+    const enabled = !raw.disabledAt;
     const currentlyScheduled = this.#enabledPieces.has(pieceId) ||
       this.#activePiece?.get().pieceId === pieceId;
 
     if (enabled) {
       // if we aren't already scheduling this piece, add it to the list
       if (!currentlyScheduled) {
-        this.#enabledPieces.set(pieceId, c);
-        this.#pushTask(pieceId, c, 0);
+        this.#enabledPieces.set(pieceId, entry);
+        this.#pushTask(pieceId, entry, 0);
       }
     } else {
       // if we are disabling a piece, remove it from the list
@@ -252,6 +317,10 @@ export class SpaceManager {
     }
   }
 
+  /**
+   * Records a successful run on the entry, clears the piece's failure count,
+   * and queues its next run if it is still enabled.
+   */
   #onProcessSuccess(pieceId: string, entry: Cell<BGPieceEntry>) {
     // If previous runs have failed, clear out the counter
     if (this.#failureTracking.has(pieceId)) {
@@ -270,6 +339,10 @@ export class SpaceManager {
     }
   }
 
+  /**
+   * Records a failed run on the entry and queues a retry with a linearly
+   * growing delay; the third failure in a row disables the piece instead.
+   */
   #onProcessFail(
     pieceId: string,
     entry: Cell<BGPieceEntry>,
@@ -302,6 +375,10 @@ export class SpaceManager {
     }
   }
 
+  /**
+   * Disables `pieceId`, recording `error` as the reason on its entry, and
+   * drops its queued runs.
+   */
   #disablePiece(
     pieceId: string,
     entry: Cell<BGPieceEntry>,
@@ -321,6 +398,7 @@ export class SpaceManager {
     );
   }
 
+  /** Disables every enabled piece in the space, recording `reason` on each. */
   #disableSpace(reason: string) {
     console.log(`${this.#did} Disabling space: ${reason}`);
     for (const [pieceId, entry] of this.#enabledPieces.entries()) {
@@ -360,6 +438,11 @@ export class SpaceManager {
     this.#setupWorkerController();
   };
 
+  /**
+   * Replaces the worker controller with a fresh one, listening for its
+   * terminal errors, and shuts the previous one down. A controller that fails
+   * to initialize disables the space and is replaced in turn.
+   */
   async #setupWorkerController() {
     const previousWorker = this.#workerController;
     const newWorker = new WorkerController(this.#workerOptions);
@@ -380,7 +463,7 @@ export class SpaceManager {
     }
 
     try {
-      await newWorker.initializeResolve;
+      await newWorker.ready;
       console.log(`${this.#did} Worker controller ready for work`);
     } catch (e) {
       // Initialization error. This "should not" occur, but is seen on invalid IPC requests

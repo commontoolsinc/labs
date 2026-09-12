@@ -1,10 +1,17 @@
+/**
+ * Helpers shared by the service, its workers, and the admin tooling: identity
+ * derivation, id validation, and reads and writes of the registry of
+ * background pieces.
+ */
+
+import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
   type JSONSchema,
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
-import { Identity } from "@commonfabric/identity";
+
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -12,10 +19,12 @@ import {
   BGPieceEntrySchema,
 } from "./schema.ts";
 
+/** Returns whether `did` has the shape of a `did:key` DID. */
 export function isValidDID(did: string): boolean {
   return did?.startsWith("did:key:") && did.length > 10;
 }
 
+/** Returns whether `id` has the length of a piece's entity id. */
 export function isValidPieceId(id: string): boolean {
   return !!id && id.length === 59;
 }
@@ -57,6 +66,13 @@ export async function getIdentity(
   throw new Error("No IDENTITY or OPERATOR_PASS environment set.");
 }
 
+/**
+ * Registers the piece `pieceId` in `space` for background updates on behalf
+ * of `integration`, or re-enables its entry when one already exists. Returns
+ * whether an entry was added.
+ *
+ * @throws If the registry write fails.
+ */
 export async function setBGPiece({
   space,
   pieceId,
@@ -133,6 +149,11 @@ export async function setBGPiece({
   return added;
 }
 
+/**
+ * Returns the registry cell, synced, with its entries read as cells. The
+ * registry lives in `bgSpace` under `bgCause`, the system space and
+ * `BG_CELL_CAUSE` by default.
+ */
 export async function getBGPieces(
   { bgSpace, bgCause, runtime }: {
     bgSpace?: MemorySpace;

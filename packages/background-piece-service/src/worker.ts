@@ -1,3 +1,11 @@
+/**
+ * The worker side of a space: a dedicated thread holding a session and a
+ * runtime for one space, which loads the pieces it is asked to run and fires
+ * each one's `bgUpdater` stream. It answers the requests in `worker-ipc.ts`
+ * over `postMessage`, and announces itself ready once its listener is
+ * installed.
+ */
+
 import {
   createSession,
   type DID,
@@ -49,6 +57,10 @@ let detachOtelBridge: (() => void) | null = null;
 const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 let streamValidator = isStream;
 
+/**
+ * Error handler of the worker's runtime, which keeps the latest error so that
+ * `runPiece()` can report it once the run settles.
+ */
 export function recordLatestError(e: ErrorWithContext): void {
   latestError = e;
 }
@@ -56,6 +68,8 @@ export function recordLatestError(e: ErrorWithContext): void {
 const errorHandler: ErrorHandler = recordLatestError;
 
 const trueConsole = globalThis.console;
+
+/** Returns the prefix the worker's own log lines carry, naming its space. */
 export function workerConsoleContext(currentSpaceId = spaceId): string {
   return `Worker(${currentSpaceId ?? "NO_SPACE"})`;
 }
@@ -73,6 +87,13 @@ const console = {
   },
 };
 
+/**
+ * Console handler of the worker's runtime, which prefixes a piece's console
+ * output with the piece's id and renders each argument through
+ * `safeFormat()`.
+ *
+ * @throws If the worker has no space, or the message names a different one.
+ */
 export function formatConsoleMessage(
   {
     metadata,
@@ -103,6 +124,7 @@ export function formatConsoleMessage(
 const consoleHandler: ConsoleHandler = (message) =>
   formatConsoleMessage(message);
 
+/** Sets whichever parts of the worker's module state `state` names. */
 export function setWorkerStateForTesting(
   state: {
     initialized?: boolean;
@@ -134,6 +156,7 @@ export function setWorkerStateForTesting(
   }
 }
 
+/** Resets the worker's module state to its initial values. */
 export function resetWorkerStateForTesting(): void {
   initialized = false;
   spaceId = undefined;
@@ -146,6 +169,11 @@ export function resetWorkerStateForTesting(): void {
   streamValidator = isStream;
 }
 
+/**
+ * Sets the worker up for its space: derives its identity from the encoded
+ * key pair, opens a session, builds the runtime with telemetry bridged in,
+ * and readies the pieces controller. A second call does nothing.
+ */
 export async function initialize(
   data: InitializationData,
 ): Promise<void> {
@@ -170,11 +198,10 @@ export async function initialize(
     spaceDid: spaceId,
   });
 
-  // Initialize runtime and the pieces controller. Shared first-party posture
-  // (CT-1814); `experimental` arrives as data from the main process so the
-  // service has one flag decision point (see main.ts createRuntime). The
-  // preset pins patternEnvironment to `apiUrl`, matching the explicit pin
-  // this site previously carried.
+  // Initialize runtime and the pieces controller. Shared first-party posture:
+  // `experimental` arrives as data from the main process so the service has
+  // one flag decision point (see main.ts createRuntime). The preset pins
+  // patternEnvironment to `apiUrl`.
   runtime = new Runtime(runtimePresets.productionServer({
     apiUrl,
     storageManager: StorageManager.open({
@@ -221,8 +248,13 @@ export async function initialize(
   initialized = true;
 }
 
-// FIXME(ja) should we make sure we kill the worker?
+/**
+ * Tears the worker down: forgets its loaded pieces and session, syncs and
+ * disposes the runtime, detaches the telemetry bridge, and flushes
+ * telemetry. Does nothing when the worker was never initialized.
+ */
 export async function cleanup(): Promise<void> {
+  // FIXME(ja) should we make sure we kill the worker?
   if (!initialized) {
     console.log(`Not initialized, skipping cleanup`);
     return;
@@ -259,6 +291,15 @@ export async function cleanup(): Promise<void> {
   initialized = false;
 }
 
+/**
+ * Runs the piece `data` names: loads it on first use, sends `{}` to its
+ * `bgUpdater` stream, and waits for the runtime to go idle.
+ *
+ * @throws If the worker is not initialized; if the piece is not registered,
+ *   not found, or has no updater stream; or if the run raised an error. A
+ *   piece whose run failed is dropped from the loaded set, so its next run
+ *   reloads it.
+ */
 export async function runPiece(data: RunData): Promise<void> {
   if (!pieces) {
     throw new Error("Worker session not initialized");
@@ -355,16 +396,18 @@ export async function runPiece(data: RunData): Promise<void> {
   }
 }
 
-// Logs here are often viewed through observability dashboards
-// that don't render objects well. Attempt to stringify any objects
-// here.
-//
-// TODO(danfuzz): this is an unsafe use of `stringify()` for piece console
-// arguments, which arrive live and in-process (the runtime's console capture
-// dispatches them without serialization): a logged `FabricSpecialObject`
-// renders as `{}`, silently. Wants a `FabricSpecialObject` test rendering
-// via `toCompactDebugString()` from `@commonfabric/data-model`.
+/**
+ * Renders `value` for a log line: an object is stringified, with
+ * `encodedIdentity` redacted, because the observability dashboards these
+ * logs reach render objects poorly. Anything else, and an object that will
+ * not stringify, is returned as is.
+ */
 export function safeFormat(value: unknown): unknown {
+  // TODO(danfuzz): this is an unsafe use of `stringify()` for piece console
+  // arguments, which arrive live and in-process (the runtime's console capture
+  // dispatches them without serialization): a logged `FabricSpecialObject`
+  // renders as `{}`, silently. Wants a `FabricSpecialObject` test rendering
+  // via `toCompactDebugString()` from `@commonfabric/data-model`.
   if (value && typeof value === "object") {
     try {
       // While we use this formatter for runtime code, we also use
@@ -382,6 +425,10 @@ export function safeFormat(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Handler for the worker's `unhandledrejection` event, which rethrows the
+ * reason so that the rejection surfaces as a worker error.
+ */
 export function throwUnhandledRejectionReason(
   e: PromiseRejectionEvent,
 ): never {
@@ -390,14 +437,25 @@ export function throwUnhandledRejectionReason(
 
 self.addEventListener("unhandledrejection", throwUnhandledRejectionReason);
 
+/** What `handleWorkerMessage()` dispatches to, each part replaceable. */
 type WorkerMessageHandlers = {
+  /** Handles an `Initialize` request. */
   initialize: typeof initialize;
+
+  /** Handles a `Run` request. */
   runPiece: typeof runPiece;
+
+  /** Handles a `Cleanup` request. */
   cleanup: typeof cleanup;
+
+  /** Posts a response to the controller. */
   postMessage: (message: unknown) => void;
+
+  /** Logs a failed request. */
   error: typeof console.error;
 };
 
+/** Returns the handlers wired to this module's own functions and to `self`. */
 function defaultWorkerMessageHandlers(): WorkerMessageHandlers {
   return {
     initialize,
@@ -408,6 +466,11 @@ function defaultWorkerMessageHandlers(): WorkerMessageHandlers {
   };
 }
 
+/**
+ * Dispatches `message` to the handler for its kind.
+ *
+ * @throws If the kind is unknown, or whatever the handler throws.
+ */
 export async function executeWorkerRequest(
   message: WorkerIPCRequest,
   handlers: WorkerMessageHandlers = defaultWorkerMessageHandlers(),
@@ -430,6 +493,10 @@ export async function executeWorkerRequest(
   }
 }
 
+/**
+ * Handles one message posted to the worker: validates it, executes it, and
+ * posts the response, which reports the error when anything failed.
+ */
 export async function handleWorkerMessage(
   message: unknown,
   handlers: WorkerMessageHandlers = defaultWorkerMessageHandlers(),
