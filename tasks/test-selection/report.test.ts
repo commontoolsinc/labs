@@ -958,6 +958,29 @@ describe("report", () => {
       expect(body).not.toMatch(/\b(should have|failed to|forgot)\b/i);
     });
 
+    it("says the branch stayed green for a test it holds back as flaky", () => {
+      // A test too noisy to judge a change by is held back from a pull
+      // request and run several times on the default branch, whose run
+      // does not fail for it. A reader of a failure list assumes the
+      // branch went red, so the line says it did not.
+
+      const body = renderReport(
+        buildReport(input({
+          previous: run([["proves", "pass"]]),
+          current: run([["proves", "fail"]]),
+          pullRequest: knows(["proves"], {
+            withheld: new Map([[key("proves"), "flaky" as const]]),
+          }),
+        })),
+        context,
+      )!;
+      expect(body).toContain("too flaky to judge a change by");
+      expect(body).toContain("stayed green");
+      // And what makes it worth a line rather than noise: it failed
+      // every run here and passed every run at the parent.
+      expect(body).toContain("passed every one at the parent");
+    });
+
     it("labels a test the store knows disagrees with itself", () => {
       // It is accurate about flakes.
 

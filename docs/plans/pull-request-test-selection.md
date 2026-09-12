@@ -4072,7 +4072,7 @@ exercised on the branch on its own.
       over the same member that a selected run only samples. The full run
       publishes those figures, so the note is silent until it does and
       needs nothing further then.
-- [ ] The reporter's note for a test too flaky for pull requests that
+- [x] The reporter's note for a test too flaky for pull requests that
       failed every one of its runs at this commit and passed every one at
       the parent. It needs the full run's extra runs to exist before it can
       say anything, and it says the test is a known flaky one and that the
