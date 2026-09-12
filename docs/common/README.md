@@ -40,6 +40,7 @@ on the Common Fabric runtime.
 
 - [concepts/pattern.md](concepts/pattern.md) — what a pattern is; inputs, outputs, `[UI]`, `[NAME]`
 - [concepts/reactivity.md](concepts/reactivity.md) — the cell system, read/write access, reactive mental model
+- [concepts/reactive-collections.md](concepts/reactive-collections.md) — `map`, `filter`, `reduce`, shared indexes, named aggregates, and reactive collection recipes
 - [concepts/computed/computed.md](concepts/computed/computed.md) — `computed()`, `lift()`, derived values, and measured collection-loop cost
 - [../features/collection-aggregates.md](../features/collection-aggregates.md) — named aggregates, numeric contracts, and collection computation costs
 - [concepts/action.md](concepts/action.md) — handling events with `action()`
