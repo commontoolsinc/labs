@@ -37,7 +37,7 @@ import {
   measuredSetDirectory,
   measuredSets,
 } from "./test-selection/coverage.ts";
-import { COVERAGE_FAILURE_MARKER } from "./ci-lane.ts";
+import { COVERAGE_FAILURE_MARKER, COVERAGE_REPORT_DIR } from "./ci-lane.ts";
 
 /** What the command line asked for. */
 export interface ReportOptions {
@@ -167,11 +167,13 @@ export async function measuredSetFigures(
     path.join(options.root, "deno.jsonc"),
   )).map((member) => member.replace(/^\.\//, ""));
   const reports = await collectSetReports(options.reports);
+  const marked = await markedSets(options.reports);
   const figures: Figure[] = [];
   for (const ref of measuredSets(suites)) {
-    const found = reports.get(measuredSetDirectory(ref));
+    const directory = measuredSetDirectory(ref);
+    if (marked.has(directory)) continue;
+    const found = reports.get(directory);
     if (found === undefined || found.length === 0) continue;
-    if (await measuredThroughAFailure(found)) continue;
     const lcov = (await Promise.all(found.map((at) => Deno.readTextFile(at))))
       .join("\n");
     const debt = await collectMeasuredSetDebt({
@@ -193,23 +195,35 @@ export async function measuredSetFigures(
 }
 
 /**
- * Whether any lane marked this set as measured through a failing test.
- * The marker sits beside the report in the set's own directory, which is
- * why a lane gives each set a directory rather than a file.
+ * The measured sets some lane marked as measured through a failing test,
+ * by the directory a lane writes a set's report under.
+ *
+ * Walked for rather than looked for beside a report, because a lane
+ * writes the marker whether or not it also wrote a report there: a lane
+ * that ran a set's unit and saw it fail may have collected no profile
+ * for it, and the set's baseline still must not be published from
+ * another lane's report.
  */
-async function measuredThroughAFailure(
-  reports: readonly string[],
-): Promise<boolean> {
-  for (const report of reports) {
-    const at = path.join(path.dirname(report), COVERAGE_FAILURE_MARKER);
-    try {
-      await Deno.stat(at);
-      return true;
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
+export async function markedSets(reportsDir: string): Promise<Set<string>> {
+  const marked = new Set<string>();
+  const layout = COVERAGE_REPORT_DIR.split("/");
+  try {
+    for await (const entry of walk(reportsDir, { includeDirs: false })) {
+      if (path.basename(entry.path) !== COVERAGE_FAILURE_MARKER) continue;
+      const parts = entry.path.replaceAll("\\", "/").split("/");
+      const at = parts.findIndex((_, index) =>
+        parts.slice(index, index + layout.length).join("/") ===
+          COVERAGE_REPORT_DIR
+      );
+      if (at === -1) continue;
+      const rest = parts.slice(at + layout.length);
+      if (rest.length !== 3) continue;
+      marked.add(`${rest[0]}/${rest[1]}`);
     }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
-  return false;
+  return marked;
 }
 
 /** Says what this run measured, in the job summary. */

@@ -33,6 +33,32 @@ export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
  */
 export const MEASURED_BATCH_SUFFIX = " with coverage";
 
+/** What a lane's measurement of one batch is called. */
+export function batchMeasurementName(
+  suite: string,
+  measured: boolean,
+): string {
+  return `${LANE_MEASUREMENT_PREFIX}batch ${suite}` +
+    (measured ? MEASURED_BATCH_SUFFIX : "");
+}
+
+/**
+ * The suite one batch measurement names, and whether coverage was on for
+ * it. Nothing else for the name: a reader that took it apart itself
+ * would be a second answer to how it is composed, and the two would
+ * part company the first time either moved.
+ */
+export function batchMeasurement(
+  name: string,
+): { suite: string; measured: boolean } | undefined {
+  const prefix = `${LANE_MEASUREMENT_PREFIX}batch `;
+  if (!name.startsWith(prefix)) return undefined;
+  const rest = name.slice(prefix.length);
+  const measured = rest.endsWith(MEASURED_BATCH_SUFFIX);
+  const suite = measured ? rest.slice(0, -MEASURED_BATCH_SUFFIX.length) : rest;
+  return suite.length === 0 ? undefined : { suite, measured };
+}
+
 /** Whether an identity is the lane measuring itself rather than a test. */
 export function isLaneMeasurement(test: TestIdentity): boolean {
   return test.k === LANE_MEASUREMENT_SURFACE.kind &&

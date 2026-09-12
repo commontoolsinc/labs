@@ -37,7 +37,11 @@ import {
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
-import { type CapabilityId, openCapabilities } from "./ci-capabilities.ts";
+import {
+  type CapabilityId,
+  openCapabilities,
+  takeGithubToken,
+} from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import {
   type Invocation,
@@ -66,9 +70,9 @@ import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
 import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
+  batchMeasurementName,
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
-  MEASURED_BATCH_SUFFIX,
 } from "./lane-measurement.ts";
 
 /** What the lane was asked to do. */
@@ -646,8 +650,7 @@ export async function runBatch(
     spoolRecords(spool, [
       ...records,
       timingRecord(
-        `${LANE_MEASUREMENT_PREFIX}batch ${batch.suite.id}` +
-          (coverage === undefined ? "" : MEASURED_BATCH_SUFFIX),
+        batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
         ok,
       ),
@@ -1151,6 +1154,11 @@ export async function runLane(
     ...(runnerTemp() === undefined ? {} : { dir: runnerTemp() }),
   });
   const spool = (deps.spool ?? recordsDir)();
+  // Before any capability opens and before any batch runs. A child
+  // inherits what this process holds, so a token left here would reach
+  // every test in the lane whatever its suite declared — and a lane that
+  // opens `github-api` is not the one where that matters.
+  const githubToken = takeGithubToken();
   // The directory belongs to the lane from the moment it exists, and a
   // capability that refuses to open is one of the ways the lane ends.
   let opened;
@@ -1159,6 +1167,7 @@ export async function runLane(
       root: options.root,
       dryRun: false,
       workDir,
+      ...(githubToken === undefined ? {} : { githubToken }),
     });
   } catch (error) {
     await Deno.remove(workDir, { recursive: true }).catch(() => {});

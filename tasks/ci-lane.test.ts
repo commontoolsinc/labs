@@ -32,7 +32,11 @@ import {
   spoolRecords,
   unitsForRun,
 } from "./ci-lane.ts";
-import { MEASURED_BATCH_SUFFIX } from "./lane-measurement.ts";
+import {
+  batchMeasurement,
+  batchMeasurementName,
+  MEASURED_BATCH_SUFFIX,
+} from "./lane-measurement.ts";
 import { census } from "./test-selection/census.ts";
 import type { CommandContext, Suite } from "./test-topology/suite.ts";
 import {
@@ -1577,6 +1581,18 @@ describe("what a lane records about itself", () => {
     expect(written).toContain('"s":"ci"');
     await Deno.remove(workDir, { recursive: true });
     await Deno.remove(spool, { recursive: true });
+  });
+
+  it("reads back the suite and the coverage a batch measurement names", () => {
+    // One place composes the name and one place takes it apart, so a
+    // reader that took it apart itself could not part company with the
+    // writer.
+    expect(batchMeasurement(batchMeasurementName("workspace-unit", false)))
+      .toEqual({ suite: "workspace-unit", measured: false });
+    expect(batchMeasurement(batchMeasurementName("workspace-unit", true)))
+      .toEqual({ suite: "workspace-unit", measured: true });
+    expect(batchMeasurement("ci-lane setup deno")).toBeUndefined();
+    expect(batchMeasurement("ci-lane batch ")).toBeUndefined();
   });
 
   it("names what a measured batch cost apart from what an unmeasured one did", async () => {

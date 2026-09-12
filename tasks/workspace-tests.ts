@@ -19,15 +19,9 @@ import {
 } from "@commonfabric/test-support/records";
 import { writeUnlaunchedMembers } from "./unlaunched-members.ts";
 
-export const ALL_DISABLED: string[] = [];
-
 export function getPackageName(memberPath: string): string {
   const relativePath = memberPath.replace(/^\.\//, "");
   return relativePath.replace(/^packages\//, "");
-}
-
-export function parseDisabledPackageList(raw: string | undefined): string[] {
-  return (raw ?? "").split(/[,\s]+/).filter((name) => name.length > 0);
 }
 
 export async function initializeDb(cwd: string = Deno.cwd()): Promise<boolean> {
@@ -644,5 +638,5 @@ export async function main(): Promise<boolean> {
   // A failure here returns rather than exits: the entry point's recording
   // teardown runs in a finally that an exit would skip.
   if (!await initializeDb()) return false;
-  return await runTests(ALL_DISABLED);
+  return await runTests([]);
 }

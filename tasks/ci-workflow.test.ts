@@ -3,6 +3,17 @@ import { parse as parseYaml } from "@std/yaml";
 import { getBinary } from "@astral/astral";
 import { commandWords, withoutComments } from "./ci-workflow.ts";
 import { phaseOf } from "./ci-step-phases.ts";
+import {
+  FULL_LANE_BOUND_SECONDS,
+  FULL_RUN_LABEL,
+  LANE_BOUND_SECONDS,
+  LANES,
+} from "./test-selection/policy.ts";
+
+/** The lane numbers a run of `count` lanes has, as the matrix lists them. */
+function range(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index + 1);
+}
 
 function jobBlock(workflow: string, jobId: string): string {
   const jobsStart = workflow.indexOf("jobs:\n");
@@ -476,6 +487,45 @@ Deno.test("every lane uploads its coverage, and the joiners read it", async () =
       `${jobId} must download the lanes' coverage`,
     );
   }
+});
+
+Deno.test("the workflow spells the dials the packer reads", async () => {
+  // Three numbers and one string decide which of the two paths a pull
+  // request takes and how it divides. They live in
+  // `tasks/test-selection/policy.ts`, and the workflow writes them out
+  // because a GitHub expression cannot read a TypeScript constant. That
+  // is the whole reason this test exists: without it a dial moves and
+  // the workflow goes on spelling the old value.
+  const contents = await workflow("deno.yml");
+  const pr = jobBlock(contents, "pr-tests");
+
+  assertStringIncludes(pr, `lane: [${range(LANES).join(", ")}]`);
+  assertStringIncludes(pr, `--lane \${{ matrix.lane }} --of ${LANES}`);
+  assertStringIncludes(pr, `name: "PR Tests (\${{ matrix.lane }}/${LANES})"`);
+
+  // Exactly one of the two paths runs, and both `if:` conditions name
+  // the label by the same string the selection tooling does.
+  for (const jobId of ["plan-full", "pr-tests"]) {
+    assertStringIncludes(
+      jobBlock(contents, jobId),
+      `contains(github.event.pull_request.labels.*.name, '${FULL_RUN_LABEL}')`,
+    );
+  }
+
+  // A run replays the payload it was created with, so a label reaches
+  // the `if:` above only when a label change starts a run of its own.
+  const triggers = workflowTriggers(contents);
+  assertStringIncludes(triggers, "      - labeled\n");
+  assertStringIncludes(triggers, "      - unlabeled\n");
+
+  // Each lane's work bound is the bound the packer packs against,
+  // written in minutes.
+  const anchors = anchoredMinutes(contents);
+  assertEquals(anchors.get("lane-work-timeout"), LANE_BOUND_SECONDS / 60);
+  assertEquals(
+    anchors.get("full-lane-work-timeout"),
+    FULL_LANE_BOUND_SECONDS / 60,
+  );
 });
 
 Deno.test("a lane's cache is one exact key over one directory", async () => {

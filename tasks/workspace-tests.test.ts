@@ -14,7 +14,6 @@ import {
   leafFlags,
   memberRecordingArguments,
   memberTestTask,
-  parseDisabledPackageList,
   readWorkspaceMembers,
   recordingSpool,
   runTests,
@@ -67,20 +66,6 @@ async function ranPackages(
   }
   return ran;
 }
-
-Deno.test("parseDisabledPackageList parses comma and whitespace separated names", () => {
-  assertEquals(parseDisabledPackageList("runner, ui\nshell\tcli"), [
-    "runner",
-    "ui",
-    "shell",
-    "cli",
-  ]);
-});
-
-Deno.test("parseDisabledPackageList ignores empty entries", () => {
-  assertEquals(parseDisabledPackageList(" runner, ,ui "), ["runner", "ui"]);
-  assertEquals(parseDisabledPackageList(undefined), []);
-});
 
 Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest", async () => {
   const dir = await Deno.makeTempDir({ prefix: "ws-members-" });

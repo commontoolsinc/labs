@@ -18,12 +18,18 @@ GitHub's Team plan allows the organization
 That capacity is shared by every workflow and repository in the organization,
 and the full run is what can fill it. A pull request takes five runners.
 
-Each pull-request lane is packed to finish inside `LANE_BOUND_SECONDS`, and a
-lane of the full run inside `FULL_LANE_BOUND_SECONDS`. Those are the numbers to
-move when a lane runs long, and the workflow's `lane-work-timeout` and
-`full-lane-work-timeout` anchors are the same numbers in minutes. Moving one
-without the other leaves a lane packed against a budget its job will not allow
-it, or a job waiting past the budget it was packed against.
+`LANE_BOUND_SECONDS` is the bound a pull-request lane is killed at, and
+`FULL_LANE_BOUND_SECONDS` the bound a lane of the full run is killed at. What
+the packer fills is a budget derived from each: the bound less
+`LANE_PROLOGUE_SECONDS`, which is what a lane spends before it runs anything,
+and `LANE_SAFETY_SECONDS`, which is what it is left with if every estimate is
+wrong. So a lane filled to its budget finishes seventy seconds short of its
+bound.
+
+The two bounds are the numbers to move when a lane runs long, and the
+workflow's `lane-work-timeout` and `full-lane-work-timeout` anchors are those
+same two numbers in minutes. Moving one without the other leaves a lane packed
+against a budget its job will not allow it.
 
 Rebalancing is not something anybody does here any more. What a test costs is
 measured on every run and published in the manifest, and the packer distributes

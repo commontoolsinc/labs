@@ -11,6 +11,7 @@ import {
   topologyUnits,
 } from "./test-topology.ts";
 import { CAPABILITIES } from "./ci-capabilities.ts";
+import { ALWAYS_GATING_SUITES } from "./test-selection/policy.ts";
 import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -216,6 +217,17 @@ describe("reading the topology as a whole", () => {
       ["other", "c"],
     ]);
     expect(topologyUnits([])).toEqual([]);
+  });
+
+  it("names a suite this tree holds in every always-gating entry", () => {
+    // The set lives beside the other dials and the suite identifiers
+    // live in `tasks/test-topology/`, so a suite renamed on one side and
+    // not the other would quietly turn its failures from gating into
+    // excusable, with nothing failing to say so.
+    const ids = new Set(suites.map((suite) => suite.id));
+    for (const id of ALWAYS_GATING_SUITES) {
+      expect([id, ids.has(id)]).toEqual([id, true]);
+    }
   });
 
   it("keys a set of records the way the store keys them", () => {

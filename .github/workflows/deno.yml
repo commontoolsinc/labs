@@ -7,6 +7,19 @@ on:
   pull_request:
     branches:
       - main
+    # The default three, plus the two that carry a label change. Which of
+    # the two paths a pull request takes is decided by the `ci: full`
+    # label, and a run replays the payload it was created with, so without
+    # these a label reaches continuous integration only on the next push
+    # — which is the one thing somebody reaching for the label does not
+    # want to have to do. The cost is that changing any label starts a
+    # run, and the concurrency group above cancels whatever was going.
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
 
 # Runs of a pull request are grouped by the pull request, and a new push to the
 # branch cancels the run already going. Runs of a push to main are grouped by
@@ -24,9 +37,10 @@ concurrency:
 # The bounds the jobs below are built from. They are YAML anchors, used as
 # aliases at each job and each work step, so the numbers live here and nowhere
 # else. The first pair is what a job that builds or reports takes. The lane
-# pairs are the budgets `tasks/test-selection/policy.ts` packs against, written
-# in minutes: a pull-request lane is packed to finish inside five, and a lane of
-# the full run inside ten. See "Step And Job Timeouts" in
+# pairs are `LANE_BOUND_SECONDS` and `FULL_LANE_BOUND_SECONDS` from
+# `tasks/test-selection/policy.ts`, written in minutes: the bound a lane is
+# killed at, which the budget it is packed against is derived from by taking
+# off a prologue and a safety margin. See "Step And Job Timeouts" in
 # docs/development/CI_PERFORMANCE.md for the sizing rule. The environment
 # variables holding the numbers are how a workflow declares a value an anchor
 # can name; nothing reads them.
@@ -481,12 +495,19 @@ jobs:
       - name: 📊 Publish what the run measured
         timeout-minutes: *work-timeout
         continue-on-error: true
+        env:
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          # Absent on a push that carries no head commit, and quoted for
+          # it: a flag whose value expanded to nothing would take the flag
+          # after it as its value, and the whole command line would then
+          # be refused — silently, since this step reports rather than
+          # failing.
+          CREATED_AT: ${{ github.event.head_commit.timestamp }}
         run: >-
           deno run -A tasks/coverage-report.ts
           --reports coverage-artifacts
-          --run-id ${{ github.run_id }}
-          --sha ${{ github.sha }}
-          --created-at ${{ github.event.head_commit.timestamp }}
+          --run-id "$RUN_ID" --sha "$SHA" --created-at "$CREATED_AT"
 
       # Named perf-metrics for continuity: the run report and the publisher
       # both read recent main runs' artifacts by this name.

@@ -2813,8 +2813,14 @@ pull request.
 Label a pull request `ci: full` and the same `plan-full` and `full-tests`
 jobs run on it, so opting out of selection runs exactly what `main` runs
 rather than an approximation of it. A label rather than a phrase in the
-description, because a label can be added and removed without a push and
-re-runs pick it up.
+description, because a label can be added and removed without a push.
+
+What makes that work is the workflow's `types:` list. A run replays the
+event payload it was created with, so a label added after a run started
+reaches nothing that run evaluates, and re-running it changes nothing.
+`labeled` and `unlabeled` in that list are what start a run of their own,
+which then sees the label. The cost is that changing any label starts a
+run, and the concurrency group cancels whatever was going.
 
 **The five lanes do not run when the label is present.** One or the other,
 never both. Running both would contradict the five-job contract, and it

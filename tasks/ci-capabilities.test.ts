@@ -10,6 +10,7 @@ import {
   openCapabilities,
   pidOfBackgroundLaunch,
   resolveCapabilities,
+  takeGithubToken,
 } from "./ci-capabilities.ts";
 import {
   serverExecutionCiLane,
@@ -87,27 +88,19 @@ describe("ci capabilities", () => {
   });
 
   it("hands the API token to the suites that asked and to no others", async () => {
-    // A child process inherits what the lane holds, so a token left in
-    // the lane's own environment would reach every test in the lane.
-    Deno.env.set("GITHUB_TOKEN", "a-token");
-    try {
-      const opened = await openCapabilities(["github-api", "jq"], {
-        root: Deno.cwd(),
-        dryRun: false,
-        workDir: "/nonexistent",
-        exec: () => Promise.resolve(""),
-      });
-      expect(opened.envFor(["github-api"]).GITHUB_TOKEN).toBe("a-token");
-      expect(opened.envFor(["jq"]).GITHUB_TOKEN).toBeUndefined();
-      expect(Deno.env.get("GITHUB_TOKEN")).toBeUndefined();
-      await opened.close();
-    } finally {
-      Deno.env.delete("GITHUB_TOKEN");
-    }
+    const opened = await openCapabilities(["github-api", "jq"], {
+      root: Deno.cwd(),
+      dryRun: false,
+      workDir: "/nonexistent",
+      exec: () => Promise.resolve(""),
+      githubToken: "a-token",
+    });
+    expect(opened.envFor(["github-api"]).GITHUB_TOKEN).toBe("a-token");
+    expect(opened.envFor(["jq"]).GITHUB_TOKEN).toBeUndefined();
+    await opened.close();
   });
 
   it("exports nothing where the lane was handed no token", async () => {
-    Deno.env.delete("GITHUB_TOKEN");
     const opened = await openCapabilities(["github-api"], {
       root: Deno.cwd(),
       dryRun: false,
@@ -116,6 +109,31 @@ describe("ci capabilities", () => {
     });
     expect(opened.envFor(["github-api"])).toEqual({});
     await opened.close();
+  });
+
+  it("takes the token out of this process whatever any suite declared", () => {
+    // A lane that opens `github-api` is not the one where a token left
+    // behind matters: a child inherits what the lane holds, so a lane
+    // holding no gate batch at all is where it would reach the most.
+    Deno.env.set("GITHUB_TOKEN", "a-token");
+    try {
+      expect(takeGithubToken()).toBe("a-token");
+      expect(Deno.env.get("GITHUB_TOKEN")).toBeUndefined();
+      expect(takeGithubToken()).toBeUndefined();
+    } finally {
+      Deno.env.delete("GITHUB_TOKEN");
+    }
+  });
+
+  it("reads an empty token as no token", () => {
+    // An unset Actions variable interpolates as an empty string.
+    Deno.env.set("GITHUB_TOKEN", "");
+    try {
+      expect(takeGithubToken()).toBeUndefined();
+      expect(Deno.env.get("GITHUB_TOKEN")).toBeUndefined();
+    } finally {
+      Deno.env.delete("GITHUB_TOKEN");
+    }
   });
 
   it("exports the environment a dry run's batches would see", async () => {

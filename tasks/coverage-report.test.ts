@@ -5,6 +5,7 @@ import {
   describe as summarize,
   type Figure,
   joinReports,
+  markedSets,
   measuredSetFigures,
   parseReportArgs,
 } from "./coverage-report.ts";
@@ -65,6 +66,36 @@ describe("what the full run publishes about coverage", () => {
     // A run whose lanes reported nothing scores an empty report rather
     // than raising, which charges every tracked line as uncovered.
     expect(await joinReports("/nonexistent-coverage-artifacts")).toBe("");
+  });
+
+  it("skips a marked set whose lane wrote no report of its own", async () => {
+    // A lane that ran a set's unit and saw it fail may have collected no
+    // profile for it. Another lane's report for the same set must still
+    // not become the baseline, so the marker is looked for by the set's
+    // directory rather than beside a report that may not be there.
+    const root = await reportsIn({
+      "lane-1/lcov/sets/workspace-unit/packages_memory/coverage.lcov":
+        "SF:/a.ts\nend_of_record\n",
+      [`lane-2/lcov/sets/workspace-unit/packages_memory/${COVERAGE_FAILURE_MARKER}`]:
+        "packages/memory/test/one.test.ts\n",
+      [`lane-2/lcov/sets/runner-unit/packages_runner/${COVERAGE_FAILURE_MARKER}`]:
+        "packages/runner/test/two.test.ts\n",
+      "lane-2/notes.txt": "not under the layout at all",
+    });
+    try {
+      expect([...await markedSets(root)].sort()).toEqual([
+        "runner-unit/packages_runner",
+        "workspace-unit/packages_memory",
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("marks nothing where nothing was downloaded", async () => {
+    expect([...await markedSets("/nonexistent-coverage-artifacts")]).toEqual(
+      [],
+    );
   });
 
   it("publishes no baseline for a set measured through a failure", async () => {

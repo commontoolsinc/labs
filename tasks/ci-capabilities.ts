@@ -78,6 +78,13 @@ export interface CapabilityContext {
   exec?: Exec;
 
   /**
+   * The GitHub API token the lane took out of its own environment, for
+   * the suites that declared they need one. Absent where the lane was
+   * handed none.
+   */
+  githubToken?: string;
+
+  /**
    * How a capability asks a server it started what it is serving. A
    * caller that supplies one is saying what the server would have
    * answered, the way `exec` says what the machine would have answered.
@@ -320,6 +327,25 @@ const gitHistory: Capability = {
 export const GITHUB_TOKEN_VARIABLE = "GITHUB_TOKEN";
 
 /**
+ * Takes the GitHub API token out of this process and answers with it.
+ *
+ * A child process inherits what its parent holds, so a token left in the
+ * lane's own environment reaches every test in the lane whether or not
+ * its suite asked for one. Taking it out is what makes the declaration
+ * mean something, and it has to happen whether or not any batch in the
+ * lane opens `github-api` — a lane that opens nothing is the one where a
+ * token left behind reaches the most.
+ *
+ * Answers with nothing where the lane was handed no token, which is the
+ * state on a workstation and in a job whose workflow passes none.
+ */
+export function takeGithubToken(): string | undefined {
+  const token = Deno.env.get(GITHUB_TOKEN_VARIABLE);
+  Deno.env.delete(GITHUB_TOKEN_VARIABLE);
+  return token === undefined || token.length === 0 ? undefined : token;
+}
+
+/**
  * A token for the GitHub API, handed to the suites that ask the service a
  * question and to no others.
  *
@@ -329,22 +355,20 @@ export const GITHUB_TOKEN_VARIABLE = "GITHUB_TOKEN";
  * token, shared across everything else reaching it from that address, so
  * the gate needs one.
  *
- * The workflow puts the token in the lane's own environment, and this
- * takes it out of there before any batch runs. A child process inherits
- * what the lane holds, so a token left in place would reach every test in
- * the lane whether or not its suite asked for one; removing it is what
- * makes the declaration mean something.
+ * What it exports is the token the lane took out of its own environment
+ * before it opened anything, handed back here.
  */
 const githubApi: Capability = {
   id: "github-api",
   description: "a token for the GitHub API",
   open(context) {
-    const token = Deno.env.get(GITHUB_TOKEN_VARIABLE);
-    if (token === undefined || token.length === 0) {
-      return Promise.resolve(exported({}));
-    }
-    if (!context.dryRun) Deno.env.delete(GITHUB_TOKEN_VARIABLE);
-    return Promise.resolve(exported({ [GITHUB_TOKEN_VARIABLE]: token }));
+    return Promise.resolve(
+      exported(
+        context.githubToken === undefined
+          ? {}
+          : { [GITHUB_TOKEN_VARIABLE]: context.githubToken },
+      ),
+    );
   },
 };
 
