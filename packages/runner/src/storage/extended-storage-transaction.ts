@@ -390,7 +390,7 @@ type ValueWriteAuthor = Readonly<
 type ValueWriteAuthorNode = {
   at?: ValueWriteAuthor;
   latest?: ValueWriteAuthor;
-  children: Map<string, ValueWriteAuthorNode>;
+  children?: Map<string, ValueWriteAuthorNode>;
   untrustedChildren: number;
   untrusted: boolean;
   revision: number;
@@ -423,7 +423,6 @@ const valueWriteAuthor = (
 };
 
 const valueWriteAuthorNode = (): ValueWriteAuthorNode => ({
-  children: new Map(),
   untrustedChildren: 0,
   untrusted: false,
   revision: 0,
@@ -1495,8 +1494,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const spine = [root];
     let node = root;
     for (const segment of canonicalizeLogicalPath(address.path)) {
-      const child = node.children.get(segment) ?? valueWriteAuthorNode();
-      node.children.set(segment, child);
+      const children = node.children ??= new Map();
+      const child = children.get(segment) ?? valueWriteAuthorNode();
+      children.set(segment, child);
       spine.push(child);
       node = child;
     }
@@ -1504,7 +1504,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     let previousUntrusted = node.untrusted;
     // A replacement shadows prior writes inside its subtree. Sibling writes
     // remain represented, so one later builtin cannot certify a user's bytes.
-    node.children.clear();
+    node.children = undefined;
     node.untrustedChildren = 0;
     node.at = stamp;
     node.latest = stamp;
@@ -1530,7 +1530,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     let node = this.#valueWriteIdentities.get(key);
     let covering = node?.at;
     for (const segment of target.path) {
-      node = node?.children.get(segment);
+      node = node?.children?.get(segment);
       if (node?.at !== undefined) covering = node.at;
       if (node === undefined) return covering;
     }

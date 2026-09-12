@@ -3423,10 +3423,21 @@ export class CellImpl<T extends FabricValue>
       overwrite: "this",
     });
     const provenance = getCfcReferenceProvenance(this)!;
-    registerCfcReferenceCarrier(result, () => ({
-      ...provenance,
-      binding: cfcReferenceBinding({ ...this.#link, overwrite: undefined }),
-    }), () => this.#cfcLabelView);
+    const reference = provenance.binding.overwrite === undefined
+      ? provenance
+      : deepFreeze({
+        ...provenance,
+        binding: cfcReferenceBinding({
+          ...provenance.binding,
+          overwrite: undefined,
+        }),
+      });
+    const view = this.#cfcLabelView;
+    registerCfcReferenceCarrier(
+      result,
+      () => reference,
+      view === undefined ? undefined : () => view,
+    );
     return result;
   }
 
@@ -3444,10 +3455,18 @@ export class CellImpl<T extends FabricValue>
       overwrite: "redirect",
     }) as SigilWriteRedirectLink;
     const provenance = getCfcReferenceProvenance(this)!;
-    registerCfcReferenceCarrier(result, () => ({
-      ...provenance,
-      binding: { ...provenance.binding, overwrite: "redirect" },
-    }), () => this.#cfcLabelView);
+    const reference = provenance.binding.overwrite === "redirect"
+      ? provenance
+      : deepFreeze({
+        ...provenance,
+        binding: { ...provenance.binding, overwrite: "redirect" as const },
+      });
+    const view = this.#cfcLabelView;
+    registerCfcReferenceCarrier(
+      result,
+      () => reference,
+      view === undefined ? undefined : () => view,
+    );
     return result;
   }
 
