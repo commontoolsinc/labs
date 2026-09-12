@@ -38,7 +38,7 @@ in the same PR as behavior changes.
 | F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                 |
 | F1   | F0                          | Handler materialization contract and measured prototype               | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)        |
 | F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md) |
-| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Pending                                                                                                                                                                |
+| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag owner                 |
 | F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                                                                                |
 | F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
 
@@ -133,12 +133,14 @@ must not accidentally inherit it.
 
 ### F3/F4 — Retire the lift rollout switch
 
-- [ ] Assemble default-on evidence with exact revisions, environments, covered
+- [x] Assemble default-on evidence with exact revisions, environments, covered
       workloads, observed failures, and any use of the rollback override. State
       the observation period; elapsed time alone is not acceptance.
-- [ ] Run the relevant equivalence, refusal, snapshot and dependency tests in
+- [x] Run the relevant equivalence, refusal, snapshot and dependency tests in
       both current flag postures. Resolve unexplained differences and check
-      production-like client/server behavior on isolated data.
+      production-like client/server behavior on isolated data. The runner
+      suite was run at both postures; the integration suites were not run at
+      the off posture, and the record says so.
 - [ ] Obtain the flag owner's retirement decision with a concrete rollback
       route. No live data mutation is implied by this plan; coordinate any live
       deployment separately.

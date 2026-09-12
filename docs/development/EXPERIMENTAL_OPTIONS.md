@@ -516,7 +516,9 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 - **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
   `new Runtime({ experimental: { lazyMaterialization: false } })` as a temporary
-  rollback override.
+  rollback override. The browser shell has no build-time define for this
+  flag, so a shell build runs the runtime default and the override does not
+  reach it.
 - **Purpose.** Materialize a lift's argument lazily. The runner marks the
   action's transaction (`markLazyMaterialize`), and `Cell.get()` on a marked
   transaction hands back a schema-observing view instead of building everything
