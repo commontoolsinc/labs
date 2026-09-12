@@ -3,8 +3,10 @@
  * narrow view, sessions come off the connector index newest first with
  * deleted rows dropped, a session naming the topic is offered as related,
  * attach is idempotent and joins the live row, detach removes it, the
- * spawn command composes from the picked checkout and prompt, and a start
- * sends the connector a `start` command and attaches the session it named.
+ * spawn command composes from the picked checkout and prompt, a start
+ * sends the connector a `start` command and attaches the session it named,
+ * the rail's own buttons attach and detach a row and add the topic's words
+ * to the prompt, and a verb call without both ids is refused.
  */
 import {
   action,
@@ -16,12 +18,60 @@ import {
   UI,
   Writable,
 } from "commonfabric";
+import {
+  childNodes,
+  findNode,
+  hasExactText,
+  hasText,
+  propsOf,
+} from "../test/vnode-helpers.ts";
 import Workbench, {
   type Attachment,
   type CommandValue,
   type SessionIndexView,
   type TopicView,
 } from "./main.tsx";
+
+type ClickStream = { send: (event: Record<string, never>) => void };
+
+const isButton = (label: string) => (candidate: unknown): boolean =>
+  propsOf(candidate)?.onClick !== undefined &&
+  hasExactText(candidate, label);
+
+/** The innermost node the predicate accepts: the row itself rather than
+ * every container that also carries the row's text. */
+const innermost = (
+  node: unknown,
+  accept: (node: unknown) => boolean,
+): unknown => {
+  for (const child of childNodes(node)) {
+    const hit = innermost(child, accept);
+    if (hit !== undefined) return hit;
+  }
+  return accept(node) ? node : undefined;
+};
+
+const send = (node: unknown): void => {
+  const onClick = propsOf(node)?.onClick;
+  if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+    (onClick as ClickStream).send({});
+  }
+};
+
+/** Click the button labelled `label` in the row whose text carries `rowText`. */
+const clickInRow = (root: unknown, rowText: string, label: string): void => {
+  const row = innermost(
+    root,
+    (candidate) =>
+      hasText(candidate, rowText) &&
+      findNode(candidate, isButton(label)) !== undefined,
+  );
+  send(findNode(row, isButton(label)));
+};
+
+/** Click the one button labelled `label`. */
+const click = (root: unknown, label: string): void =>
+  send(findNode(root, isButton(label)));
 
 /** The first queued command, decoded; `null` when the queue is empty. */
 // deno-lint-ignore no-explicit-any
@@ -202,9 +252,48 @@ export default pattern(() => {
     wb.attachedSessions[1]?.sourceId === "claude"
   );
 
+  // The rail's buttons write the same record the verbs do: Attach on a recent
+  // row attaches it and takes it out of the rail, Detach puts it back.
+  const action_click_attach = action(() => {
+    clickInRow(wb[UI], "something unrelated", "Attach");
+  });
+  const assert_clicked_attached = assert(() =>
+    wb.attachedSessions.length === 3 &&
+    wb.attachedSessions[2]?.nativeSessionId === "bbb" &&
+    wb.attachedSessions[2]?.title === "something unrelated" &&
+    wb.recentSessions.every((row) => row.nativeSessionId !== "bbb")
+  );
+  const action_click_detach = action(() => {
+    clickInRow(wb[UI], "something unrelated", "Detach");
+  });
+  const assert_clicked_detached = assert(() =>
+    wb.attachedSessions.length === 2 &&
+    wb.recentSessions.some((row) => row.nativeSessionId === "bbb")
+  );
+
+  // "Add the topic's words" appends the default sentence to what the person
+  // typed rather than replacing it.
+  const action_click_topic_words = action(() => {
+    click(wb[UI], "Add the topic's words");
+  });
+  const assert_topic_words_appended = assert(() =>
+    wb.kickoff.startsWith(
+      'Work on topic #7, it\'s time.\n\nWork on topic #7, "Workbench topic".\n\nContext:',
+    )
+  );
+
+  // A verb call without both ids is refused and changes nothing.
+  const action_attach_without_ids = action(() => {
+    wb.attach.send({ sourceId: "", nativeSessionId: "" });
+  });
+  const assert_attach_refused = assert(() => wb.attachedSessions.length === 2);
+
   return {
     [NAME]: "Topic workbench test",
     [UI]: wb[UI],
+    // The refused attach above throws inside the verb, which the runner
+    // reports as a runtime error; exactly one is expected.
+    expectRuntimeErrors: 1,
     [TESTS]: [
       { assertion: assert_header },
       { render: wb[UI] },
@@ -222,6 +311,14 @@ export default pattern(() => {
       { action: action_start },
       { assertion: assert_start_command },
       { assertion: assert_start_attached },
+      { action: action_click_attach },
+      { assertion: assert_clicked_attached },
+      { action: action_click_detach },
+      { assertion: assert_clicked_detached },
+      { action: action_click_topic_words },
+      { assertion: assert_topic_words_appended },
+      { action: action_attach_without_ids },
+      { assertion: assert_attach_refused },
     ],
   };
 });
