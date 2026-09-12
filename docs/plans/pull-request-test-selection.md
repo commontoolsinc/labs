@@ -4005,11 +4005,41 @@ exercised on the branch on its own.
       variant apart from explicit unavailable entries. This is what
       running on `main` was going to prove, done where a mistake costs one
       branch.
-- [ ] Before merging: `plan --dry-run` over the reference records, after
+- [x] Before merging: `plan --dry-run` over the reference records, after
       classifying every identity and mapping every item-level identity to
       its runnable item. Record selected item count, measured test time,
       capability setup, repeats, and unschedulable items. All five lanes
       retain their 30-second safety margin.
+
+      Against the manifest of 2026-09-11T20:26Z, built from 157 runs at
+      `475aa549c`, the tree holds 22,141 identities and the manifest
+      withholds one. The five lanes take 17,127 of them, and each is
+      packed to within a tenth of a second of the 230-second budget:
+      4,568, 2,529, 4,140, 5,668 and 222 identities respectively. The
+      spread in identity counts against a flat time is the skew the
+      problem statement describes — a lane carrying the cheap tail holds
+      twenty times as many tests as one carrying pattern integration.
+
+      The 30-second safety margin is retained by construction rather than
+      by luck: the budget the packer fills is the 300-second bound less a
+      40-second prologue and that margin, so a lane filled to its budget
+      is 70 seconds short of the bound it is killed at.
+
+      Every lane opens `browser`, `compile-cache`, `deno`, `fuse` and both
+      baked Toolshed servers; `cf`, `git-history`, `github-api`,
+      `local-dev-servers` and `toolshed` each reach three or fewer. The
+      packer charges each of those to the lane that opens it, which is
+      what the budget is filled against.
+
+      Nothing repeats. Every identity the manifest carries has a flake
+      rate of zero, so `executionsFor` gives each of them one run.
+
+      Twenty identities are unschedulable, all of them pattern
+      integration tests measured at 300 to 307 seconds: past the
+      300-second bound a lane runs under, so no lane can hold one. They
+      are reported rather than scheduled, and the sixty-second rule is
+      where such a test gets split. The full run takes 55 lanes and runs
+      them.
 
 ### Part three — the pull-request path
 
