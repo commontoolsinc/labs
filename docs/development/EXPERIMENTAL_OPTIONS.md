@@ -526,11 +526,8 @@ server](#clients-that-are-not-built-alongside-their-server).
   transaction hands back a schema-observing view instead of building everything
   the schema selects in one pass. The body reads the paths it touches and
   nothing else; a reader that touches data the schema no longer describes
-  refuses, and the run is disposed of as an argument that did not resolve,
-  except that a refusal a synchronous lift body throws leaves the previous
-  result standing until the fix the [design plan's Stage
-  5](../plans/lazy-cell-materialization.md) names lands. Unmarked transactions
-  read exactly as they did before.
+  refuses, and the run is disposed of as an argument that did not resolve.
+  Unmarked transactions read exactly as they did before.
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 

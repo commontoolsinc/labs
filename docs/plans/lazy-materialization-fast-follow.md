@@ -3,8 +3,7 @@
 Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
 deferral needed, with three bullets carried forward; F3's evidence assembled,
 with the integration-suite gap recorded; F3's decision, F4, and F5 pending, the
-decision with the flag's owner and the rest behind it; the lift's synchronous
-refusal fix held, as the design plan's Stage 5 records. This plan is the
+decision with the flag's owner and the rest behind it. This plan is the
 separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
@@ -169,19 +168,6 @@ must not accidentally inherit it.
 - [ ] Run affected package suites, authoritative pattern checks when patterns
       change, repository type/format/lint checks, and applicable independent
       gates. Require clean antagonistic and Cubic reviews before merging.
-
-Held beside F3/F4: the lift path drops a refusal its body throws synchronously,
-and the previous result stands (measured at the F0 record's pinned revision,
-[The lift
-path](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md#the-lift-path)).
-The fix, on the branch the design plan's [Stage 5](lazy-cell-materialization.md)
-names, writes the undefined result the design specifies for a refusal the body
-raises (one raised during the argument read keeps the current disposition on
-that branch too), and with it the Pattern Update State and Baseline Integrity
-gate fails, because the fix clears a persisted derived value the defect had
-preserved, as that record's lift-path section says. It waits on a ruling from
-that gate's owner on how the vintage expectation moves. Until it lands, the
-design plan's Stage 5 records which arms hold.
 
 ### F5 — Measure and close
 

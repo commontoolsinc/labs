@@ -85,9 +85,7 @@ Schemas influence runtime behavior:
   mismatch under a `required` property throws a `SchemaMismatchError` at that
   access. The runner disposes of one as an argument that did not resolve — an
   undefined result, not a fault — which is what an eager read's `undefined`
-  produces anyway. A refusal a synchronous lift body throws is not disposed of
-  this way today: the previous result stands until the fix the [design plan's
-  Stage 5](../../plans/lazy-cell-materialization.md) names lands.
+  produces anyway. 
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 
