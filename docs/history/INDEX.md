@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Computation-cost adoption brief](development/performance/2026-09-12-computation-cost-adoption.md) — mechanisms, implementation lessons, announcement prerequisites, and proposed lunch-poll and Topics migrations after the #7155 arc.
+
 - [Representative lunch-poll copy rehearsal](development/performance/2026-09-12-representative-lunch-poll-rehearsal.md) — two isolated migration passes, authored-data preservation, matched browser/headless read counts, graph and timing tradeoffs, bounded clock churn, and the Q9 fast-follow decision.
 
 - [Index maintenance phase counts](development/performance/2026-09-11-index-maintenance-phases.md) — completed action-body counts for both index types across membership edits, key edits and lookup retargeting at three sizes.
