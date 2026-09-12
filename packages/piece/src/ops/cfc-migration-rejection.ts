@@ -1,18 +1,28 @@
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 
 /**
- * The migration token in its FRAMED reason position — `: <token>: ` — the
- * exact shape the CFC prepare catch emits (`${token}: ${message}` recorded as
- * a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
- * `includes(token)` would also match the token appearing incidentally inside
- * an UNRELATED, user-influenced error — e.g. an ordinary incompatible-type
- * merge failure at a property path literally named
+ * The commit rejection's prefix up to its reason position, the shape the
+ * runner surfaces a refused prepare with (`extended-storage-transaction.ts`):
+ * `…not prepared: ${reason}`, `reason` being the first that refused.
+ */
+const UNPREPARED_REJECTION_PREFIX =
+  "CFC enforcement rejected commit: relevant transaction was not prepared";
+
+/**
+ * The migration token in its FRAMED reason position — `not prepared:
+ * <token>: ` — the exact shape the CFC prepare catch emits (`${token}:
+ * ${message}` recorded as a reason, surfaced by the commit as `…not prepared:
+ * ${reason}`). A bare `includes(token)` would also match the token appearing
+ * incidentally inside an UNRELATED, user-influenced error — e.g. an ordinary
+ * incompatible-type merge failure at a property path literally named
  * `/cfc-schema-migration-incompatible` — and wrongly authorize a root
- * replacement for a non-additive incompatibility. The `: … : ` framing cannot
- * be produced by a path or value that merely contains the token string.
+ * replacement for a non-additive incompatibility; so would `: <token>: `
+ * alone, for a property named to reproduce that framing inside another
+ * reason's message. Anchoring at the reason position leaves no
+ * user-influenced text ahead of the token.
  */
 const FRAMED_MIGRATION_REASON =
-  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
+  `${UNPREPARED_REJECTION_PREFIX}: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
 
 /**
  * Reports whether a cold-start setup repair failed specifically because the
@@ -38,5 +48,4 @@ const FRAMED_MIGRATION_REASON =
  */
 export const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
-  error.message.startsWith("CFC enforcement rejected commit") &&
-  error.message.includes(FRAMED_MIGRATION_REASON);
+  error.message.startsWith(FRAMED_MIGRATION_REASON);
