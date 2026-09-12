@@ -650,6 +650,14 @@ For point-in-time reads at a specific seq:
 2. Collect patches in `(snapshot.seq, targetSeq]`.
 3. Replay from snapshot through patches.
 
+The engine can reuse an immutable decoded revision from its bounded document
+cache as a replay prefix. The cached revision must match the resolved branch and
+scope instance and lie within the selected sequence and operation-index range.
+Only the remaining patches are applied, retaining frozen subtrees outside their
+write paths. An evicted prefix is reconstructed from stored facts. Commit-local
+decoded revisions remain staged until the transaction commits and are discarded
+on rollback. Cache hits include direct reads and replay-prefix reuse.
+
 See §02 Storage for the SQL queries that implement this.
 
 ### 7.3 Snapshot Invariants

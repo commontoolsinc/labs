@@ -10,9 +10,7 @@ import { BaseValueVisitor } from "./BaseValueVisitor.ts";
 import {
   type BaselineVisitResult,
   type DispatchingVisitorResult,
-  DO_RECURSE_KEYS_VALUES,
   DO_RECURSE_VALUES,
-  DO_VISIT_SUBTYPE,
   type DomainFor,
   type LeafVisitorResult,
 } from "./interface.ts";
@@ -21,13 +19,17 @@ import {
  * Visitor which handles all containers by requesting that the engine iterate
  * over their contents. Recursion is as follows:
  *
- * * `FabricArray` -- all elements.
- * * `FabricInstance` -- keys and values.
+ * * `FabricArray` -- all elements (values).
+ * * `FabricInstance` -- _the_ state value (it only has the one).
  * * `FabricPlainObject`s -- values only.
  *
- * The implementation includes a definition for all container-specific `visit()`
- * methods per the above description, and also implements no-op (empty)
- * `visited*()` methods. Every other method of the interface remains `abstract`.
+ * The implementation includes a definition for all container-specific
+ * `visit*()` methods, which all return `DO_RECURSE_VALUES` (per the above
+ * description), and also implements no-op (empty) `visited*()` methods. Every
+ * other method of the interface remains `abstract`. The `visit*()` method
+ * implementations are intended to make it easy to override implementations
+ * selectively, by overriding `visitFabricContainer()` to return
+ * `DO_VISIT_SUBTYPE` and then whatever specific subtypes need to be altered.
  */
 export abstract class ContainerIteratingValueVisitor<
   DomainExtra = never,
@@ -48,7 +50,7 @@ export abstract class ContainerIteratingValueVisitor<
   visitFabricInstance(
     _value: FabricInstance,
   ): LeafVisitorResult<DomainExtra, ResultType> {
-    return DO_RECURSE_KEYS_VALUES;
+    return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
@@ -62,11 +64,11 @@ export abstract class ContainerIteratingValueVisitor<
   visitFabricContainer(
     _value: FabricContainerValue,
   ): DispatchingVisitorResult<DomainExtra, ResultType> {
-    return DO_VISIT_SUBTYPE;
+    return DO_RECURSE_VALUES;
   }
 
   /** @inheritDoc */
-  visitedArrayElement(
+  visitedFabricArrayElement(
     _array: FabricArray,
     _index: number,
     _value: DomainFor<DomainExtra>,
@@ -75,7 +77,7 @@ export abstract class ContainerIteratingValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedArrayGap(
+  visitedFabricArrayGap(
     _array: FabricArray,
     _start: number,
     _count: number,
@@ -84,8 +86,16 @@ export abstract class ContainerIteratingValueVisitor<
   }
 
   /** @inheritDoc */
-  visitedMapping(
-    _container: FabricPlainObject | FabricInstance,
+  visitedFabricInstance(
+    _instance: FabricInstance,
+    _state: FabricValue,
+  ): BaselineVisitResult<ResultType> {
+    return undefined;
+  }
+
+  /** @inheritDoc */
+  visitedFabricPlainObjectEntry(
+    _container: FabricPlainObject,
     _key: DomainFor<DomainExtra>,
     _value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType> {
