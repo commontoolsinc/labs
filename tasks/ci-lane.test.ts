@@ -370,6 +370,9 @@ describe("the order a runner is handed its work in", () => {
   });
 
   it("puts the batches themselves in one order whatever chose them", () => {
+    // Which batch a lane takes next is decided by the plan and never by
+    // which pass put a selection in it, so the two runs the design has
+    // to keep together cannot order their work differently.
     const seen = census(bakery, undefined, new Set());
     const selections = seen.manifest.entries.map((entry) => ({
       entry,
@@ -378,7 +381,10 @@ describe("the order a runner is handed its work in", () => {
     }));
     const suiteIds = (chosen: readonly Selection[]) =>
       batchesOf(bakery, seen.manifest, chosen).map((batch) => batch.suite.id);
-    expect(suiteIds(selections)).toEqual(["repo-gates", "workspace-unit"]);
+    expect(suiteIds(selections).toSorted()).toEqual([
+      "repo-gates",
+      "workspace-unit",
+    ]);
     expect(suiteIds([...selections].reverse())).toEqual(suiteIds(selections));
   });
 });
@@ -1854,10 +1860,23 @@ describe("writing the lane's records into its spool", () => {
 
 describe("the order a lane runs its batches in", () => {
   /** A manifest whose entries name these suites, fitting only some. */
-  function withFit(fitted: readonly string[]) {
+  function withFit(
+    fitted: readonly string[],
+    cost: Record<string, number> = {},
+  ) {
     const made = manifestOf([
-      { test: { k: "unit", s: "a", n: "one" }, suite: "zebra", unit: "z.ts" },
-      { test: { k: "unit", s: "b", n: "two" }, suite: "alpha", unit: "a.ts" },
+      {
+        test: { k: "unit", s: "a", n: "one" },
+        suite: "zebra",
+        unit: "z.ts",
+        cost: cost.zebra ?? 1,
+      },
+      {
+        test: { k: "unit", s: "b", n: "two" },
+        suite: "alpha",
+        unit: "a.ts",
+        cost: cost.alpha ?? 1,
+      },
     ]);
     for (const suite of fitted) {
       made.calibration.suites[suite] = { overhead: 5, correction: 1 };
@@ -1866,8 +1885,11 @@ describe("the order a lane runs its batches in", () => {
   }
 
   /** The suites a lane would run, in the order it would run them. */
-  function order(fitted: readonly string[]): string[] {
-    const made = withFit(fitted);
+  function order(
+    fitted: readonly string[],
+    cost: Record<string, number> = {},
+  ): string[] {
+    const made = withFit(fitted, cost);
     const topology = made.entries.map((entry) =>
       suite({
         id: entry.suite,
@@ -1894,11 +1916,23 @@ describe("the order a lane runs its batches in", () => {
     expect(order(["alpha"])).toEqual(["zebra", "alpha"]);
   });
 
-  it("falls back to the identifier once everything is measured", () => {
-    // Which is what makes the order the same on the default branch and
-    // on a change.
-    expect(order(["alpha", "zebra"])).toEqual(["alpha", "zebra"]);
-    expect(order([])).toEqual(["alpha", "zebra"]);
+  it("runs the largest share of the lane first within a group", () => {
+    // A lane that runs out of time should have spent it on the batch
+    // most worth knowing about and dropped the cheap ones. With nothing
+    // measured the two suites are equally unknown, so this is what
+    // decides — and ordering by the identifier instead put the largest
+    // suites last by the alphabet.
+    expect(order([], { alpha: 1, zebra: 90 })).toEqual(["zebra", "alpha"]);
+    expect(order([], { alpha: 90, zebra: 1 })).toEqual(["alpha", "zebra"]);
+  });
+
+  it("orders the same way whatever built the plan", () => {
+    // Both keys are a function of the plan, which is what the
+    // identifier was there for.
+    expect(order(["alpha", "zebra"], { alpha: 90, zebra: 1 }))
+      .toEqual(["alpha", "zebra"]);
+    expect(order(["alpha", "zebra"], { alpha: 1, zebra: 90 }))
+      .toEqual(["zebra", "alpha"]);
   });
 });
 

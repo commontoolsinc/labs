@@ -3900,14 +3900,20 @@ inside them, so nothing measures what one more file costs a batch that
 already runs others; a suite's intercept carries it, which charges a
 batch of one file what a batch of many was seen to cost.
 
-A suite nothing has measured runs first. A lane that runs out of time is
-killed with its later batches unrun, so they record nothing, so the cost
-model never learns them — and a suite the model cannot price is one that
-makes lanes run out of time. Ordering by the identifier alone put the
-three largest suites last by the alphabet, and three runs of the lanes
-left `workspace-unit`, `runner-unit` and `typecheck` with no fitted cost
-for exactly that reason. The order settles by itself, because once every
-suite is fitted it orders nothing and the identifier decides again.
+The order a lane takes its batches in decides which suites the model can
+ever learn. A lane that runs out of time is killed with its later batches
+unrun, so they record nothing — and a suite the model cannot price is one
+that makes lanes run out of time. Two keys answer that. A suite nothing
+has measured goes ahead of one something has, because it is the one worth
+measuring; and within each group the largest share of the lane goes
+first, because a lane that runs out of time should have spent it on the
+batch most worth knowing about and dropped the cheap ones.
+
+Ordering by the suite identifier put the three largest suites last by the
+alphabet, and four runs of the lanes left `workspace-unit`, `runner-unit`
+and `typecheck` with no fitted cost for exactly that reason. Both keys are
+a function of the plan, which is what the identifier was there for: the
+order is the same on the default branch as on a change.
 
 The first run of the lanes measured this and nothing read it. Five lanes
 of run 34666650680 spent 20.5 seconds opening `toolshed-baked`, 20.2 on
