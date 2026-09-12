@@ -138,6 +138,22 @@ export const FILL_EXPLORATION_SHARE = 0.15;
 export const FLAKE_EXCLUSION_RATE = 0.005;
 
 /**
+ * The suites whose failures always fail the run, whatever their flake
+ * rate.
+ *
+ * A repository gate reads the working tree and answers yes or no. A gate
+ * that disagrees with itself is a bug in the gate rather than a test too
+ * noisy to judge a change by, and excusing it would let every real
+ * failure of that gate through with it. So a gate above
+ * `FLAKE_EXCLUSION_RATE` is neither held back from a pull request nor
+ * excused on the default branch: it runs, and it gates.
+ */
+export const ALWAYS_GATING_SUITES: ReadonlySet<string> = new Set([
+  "repo-gates",
+  "repo-history-gates",
+]);
+
+/**
  * What an item that has ever disagreed with itself runs, however rarely
  * it does. One execution cannot tell a pass from a lucky pass, so an
  * item with any flake rate at all is run at least twice.
@@ -353,10 +369,10 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why:
       "Up when more should fit in a lane; down when five minutes is longer " +
-      "than anybody will wait for a first answer. The lane jobs that this " +
-      "bounds do not exist yet; when they do, their work-step and job " +
-      "timeouts in `deno.yml` have to move with it, and nothing checks " +
-      "that until they are written.",
+      "than anybody will wait for a first answer. The `lane-work-timeout` " +
+      "anchor in `deno.yml` is the same number in minutes, and " +
+      "`lane-job-timeout` is ten above it; both move with this one, and " +
+      "nothing checks that.",
   },
   {
     name: "LANE_PROLOGUE_SECONDS",
@@ -391,7 +407,9 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "chosen",
     why: "Up when the run on `main` uses more jobs than it needs; down when " +
-      "`main` takes too long to say something broke.",
+      "`main` takes too long to say something broke. The " +
+      "`full-lane-work-timeout` anchor in `deno.yml` is the same number in " +
+      "minutes, and `full-lane-job-timeout` is ten above it.",
   },
   {
     name: "FULL_LANE_BUDGET_SECONDS",
@@ -604,6 +622,15 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when the unselected corpus is going stale; down when lanes spend " +
       "the share on tests that never find anything.",
+  },
+  {
+    name: "ALWAYS_GATING_SUITES",
+    value: ALWAYS_GATING_SUITES.size,
+    unit: "suites",
+    setBy: "chosen",
+    why: "Add a suite whose failures are never noise, so that a flake rate " +
+      "cannot excuse one; remove one whose failures a change's author " +
+      "cannot act on.",
   },
   {
     name: "FLAKE_EXCLUSION_RATE",

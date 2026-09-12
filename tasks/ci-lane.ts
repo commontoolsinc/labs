@@ -54,7 +54,7 @@ import {
   type Selection,
   type SelectionReason,
 } from "./test-selection/plan.ts";
-import { type Census, census } from "./test-selection/census.ts";
+import { type Census, census, isStandIn } from "./test-selection/census.ts";
 import {
   type CoverageGateSelection,
   measuredMembersOf,
@@ -610,6 +610,114 @@ export async function runBatch(
   return { ok, records, conflicts, seconds };
 }
 
+/** What reading a batch's records against what it was asked to run found. */
+export interface Accounting {
+  /** Failing identities whose failure fails the lane. */
+  gating: string[];
+
+  /** Failing identities a flake rate excuses, where they are excused. */
+  excused: string[];
+
+  /**
+   * Units the batch was asked to run that recorded nothing at all. A
+   * unit runs its tests or it does not, so a unit with no record is a
+   * runner that ran none of it — a skip list that swallowed the whole
+   * unit, or a command that reported success having done nothing.
+   */
+  silent: string[];
+
+  /**
+   * Identities the batch was asked to run and no record accounts for.
+   * An excused failure beside one of these is not excused: an invocation
+   * that recorded a failure and then stopped has run almost nothing
+   * while satisfying any weaker test.
+   */
+  unaccounted: string[];
+}
+
+/**
+ * Reads one batch's records against what it was asked to run.
+ *
+ * An identity is accounted for by a record naming it. A stand-in is
+ * accounted for by its unit recording anything at all: a stand-in is what
+ * the packer places for a unit no manifest has seen, and no record will
+ * ever carry its name, because a real record is named for a test rather
+ * than for a file.
+ *
+ * A unit that recorded nothing recorded nothing under any name, and that
+ * is the state no run should pass in. An identity that went unaccounted
+ * for while its unit recorded is ordinary churn — a manifest is hours old
+ * by construction, and a test renamed since records under the new name —
+ * so it costs an excusal rather than the run.
+ */
+export function accountFor(
+  batch: Batch,
+  asked: readonly Selection[],
+  records: readonly TestRecord[],
+  nonGating: ReadonlySet<string>,
+): Accounting {
+  const gating: string[] = [];
+  const excused: string[] = [];
+  const heard = new Set<string>();
+  const heardUnits = new Set<string>();
+  for (const record of records) {
+    const location = batch.suite.locate(record);
+    if (location?.level === "unit") heardUnits.add(location.unit);
+    const key = testIdentityKey(record.test);
+    heard.add(key);
+    if (record.outcome !== "fail") continue;
+    (nonGating.has(key) ? excused : gating).push(key);
+  }
+  const unaccounted = asked
+    .filter((selection) => selection.entry.suite === batch.suite.id)
+    .filter((selection) =>
+      isStandIn(selection.entry)
+        ? !heardUnits.has(selection.entry.unit)
+        : !heard.has(testIdentityKey(selection.entry.test))
+    )
+    .map((selection) => testIdentityKey(selection.entry.test));
+  const silent = batch.units
+    .map((request) => request.unit)
+    .filter((unit) => !heardUnits.has(unit));
+  return {
+    gating: [...new Set(gating)].sort(),
+    excused: [...new Set(excused)].sort(),
+    silent: silent.sort(),
+    unaccounted: [...new Set(unaccounted)].sort(),
+  };
+}
+
+/** Says what a batch's records came to, where they came to anything. */
+export function describeAccounting(
+  suite: string,
+  accounting: Accounting,
+  excusing: boolean,
+): void {
+  const lines: string[] = [];
+  if (accounting.excused.length > 0) {
+    lines.push(
+      excusing
+        ? `${suite}: ${accounting.excused.length} failures too flaky to ` +
+          `judge a change by, which do not fail this run:`
+        : `${suite}: ${accounting.excused.length} failures a flake rate ` +
+          `would excuse, which fail this run because the batch did not ` +
+          `account for everything it was asked to run:`,
+      "",
+    );
+    for (const key of accounting.excused) lines.push(`- ${key}`);
+  }
+  if (accounting.silent.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(
+      `${suite}: ${accounting.silent.length} units recorded nothing, so ` +
+        `nothing ran them:`,
+      "",
+    );
+    for (const unit of accounting.silent) lines.push(`- ${unit}`);
+  }
+  if (lines.length > 0) say(lines);
+}
+
 /** Says something both on the lane's output and in the job summary. */
 function say(lines: readonly string[]): void {
   const text = `${lines.join("\n")}\n`;
@@ -1014,6 +1122,12 @@ export async function runLane(
   }
   let ok = true;
   const conflicts: TestRecord[] = [];
+  // What a failure here is allowed not to fail the run for. A pull
+  // request holds these back rather than running them, so the set is
+  // empty there and the whole of this is the full run's.
+  const nonGating = new Set(
+    laid.nonGating.map((entry) => testIdentityKey(entry.test)),
+  );
   try {
     for (const batch of batches) {
       // A failure never stops the lane: one failing batch would otherwise
@@ -1030,8 +1144,36 @@ export async function runLane(
         opened.envFor(batch.suite.needs),
         batchCoverage(options, batch.suite.id, seen.coverage),
       );
-      if (!result.ok) ok = false;
       conflicts.push(...result.conflicts);
+      // The records decide, rather than the command's exit status: a
+      // runner that failed only on identities a flake rate excuses
+      // exits non-zero and has told this run nothing it should stop
+      // for, and a runner that exited zero having run none of its unit
+      // has.
+      const accounting = accountFor(
+        batch,
+        mine.selections,
+        result.records,
+        nonGating,
+      );
+      // An invocation is excused only when it accounted for every
+      // identity it was asked to run: one that recorded a failure and
+      // then stopped has run almost nothing while satisfying any weaker
+      // test.
+      const excusing = accounting.unaccounted.length === 0;
+      describeAccounting(batch.suite.id, accounting, excusing);
+      if (accounting.silent.length > 0) ok = false;
+      if (accounting.gating.length > 0) ok = false;
+      if (!excusing && accounting.excused.length > 0) ok = false;
+      // A batch that failed with no failing record of its own failed
+      // somewhere the records cannot see — a runner that could not
+      // start, a command that died before reporting.
+      if (
+        !result.ok && accounting.gating.length === 0 &&
+        accounting.excused.length === 0
+      ) {
+        ok = false;
+      }
     }
   } finally {
     await opened.close();

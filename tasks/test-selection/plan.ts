@@ -11,6 +11,7 @@
 
 import { testIdentityKey } from "@commonfabric/test-support/records";
 import {
+  ALWAYS_GATING_SUITES,
   FILL_DENSITY_SHARE,
   FILL_EXPLORATION_SHARE,
   FILL_VALUE_SHARE,
@@ -94,6 +95,22 @@ export interface Plan {
    * for a full run, which declines nothing.
    */
   withheld: Manifest["withheld"];
+
+  /**
+   * Identities this plan is running whose failures do not fail the run.
+   *
+   * A test too noisy to judge a change by is held back from a pull
+   * request, and the default branch runs it anyway: what it knows about
+   * that test is the whole of what says whether the exclusion should
+   * reverse, and a run that stopped running it would never find out. But
+   * a run that stopped for it would make the branch red for something no
+   * change caused, so the failure is reported and the run stays green.
+   *
+   * Empty for a pull request, where such a test is held back rather than
+   * run. A suite in `ALWAYS_GATING_SUITES` is in neither list: it runs
+   * on a pull request and it fails the run wherever it fails.
+   */
+  nonGating: Manifest["withheld"];
 
   /**
    * Seconds by which the mandatory pass alone put the longest lane past a
@@ -418,10 +435,12 @@ export function plan(input: PlanInput): Plan {
     unschedulable.map((entry) => testIdentityKey(entry.test)),
   );
   for (const held of manifest.withheld) {
+    if (ALWAYS_GATING_SUITES.has(held.suite)) continue;
     const key = testIdentityKey(held.test);
     if (!requiredOf.has(key)) excluded.add(key);
   }
   for (const entry of manifest.entries) {
+    if (ALWAYS_GATING_SUITES.has(entry.suite)) continue;
     const key = testIdentityKey(entry.test);
     if (entry.flakeRate > FLAKE_EXCLUSION_RATE && !requiredOf.has(key)) {
       excluded.add(key);
@@ -600,11 +619,28 @@ export function plan(input: PlanInput): Plan {
     // A full run withholds nothing: every identity is required, so the
     // reasons the manifest gives for holding one back never applied.
     // Reporting the manifest's list here would have a run that ran a
-    // test say in its own summary that no lane chose it.
-    withheld: everything ? [] : manifest.withheld,
+    // test say in its own summary that no lane chose it. What it ran
+    // anyway and will not fail for is the other list.
+    withheld: everything ? [] : excused(manifest),
+    nonGating: everything ? excused(manifest) : [],
     overBudgetSeconds: overBudget,
     unschedulable,
   };
+}
+
+/**
+ * The identities a flake rate excuses: too noisy to judge a change by,
+ * and outside a suite whose failures always fail the run. A pull request
+ * holds these back; the default branch runs them and does not fail for
+ * them.
+ *
+ * The reason is read rather than the membership, so a reason added later
+ * does not become non-gating without anybody deciding that it should.
+ */
+function excused(manifest: Manifest): Manifest["withheld"] {
+  return manifest.withheld.filter((held) =>
+    held.reason === "flaky" && !ALWAYS_GATING_SUITES.has(held.suite)
+  );
 }
 
 /**
@@ -639,9 +675,12 @@ export function fullLaneCount(
   // The tests' own corrected time, with no lane overhead in it. Every
   // overhead a lane pays only raises the answer, so this is a floor and
   // starting below it would measure packings that cannot fit.
+  // Every execution, not one each: an identity the packer repeats costs
+  // the lane that holds it once per repeat, and a floor that counted one
+  // would start the search below a packing that can fit.
   const work = manifest.entries.reduce(
     (total, entry) =>
-      total + entry.cost *
+      total + entry.cost * Math.max(1, entry.repeats) *
         (manifest.calibration.suites[entry.suite]?.correction ?? 1),
     0,
   );

@@ -3921,7 +3921,7 @@ exercised on the branch on its own.
       and repeats.
 - [x] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
-- [ ] The full run's treatment of a test too flaky for pull requests.
+- [x] The full run's treatment of a test too flaky for pull requests.
       The count is placed already: `tasks/test-selection/plan.ts` gives
       every mandatory identity the count `executionsFor` returns for its
       share, and gives up runs until what is left fits rather than
@@ -3930,9 +3930,17 @@ exercised on the branch on its own.
       failures do not fail the run, and that a withheld repository gate
       is in neither list.
       `tasks/ci-lane.ts` reads each batch's gathered records, exits
-      non-zero only where a failing identity is outside `nonGating`, fails
-      the lane whenever a batch did not account for every identity it was
-      asked to run, and names every non-gating failure in the job summary.
+      non-zero only where a failing identity is outside `nonGating`, and
+      names every non-gating failure in the job summary. Two rules about
+      what a batch accounted for, rather than the one this said. An
+      excusal takes the specification's rule: an invocation is excused
+      only when it accounted for every identity it was asked to run. The
+      run itself takes the weaker one: a unit that recorded nothing
+      recorded nothing under any name, and that fails the lane whether or
+      not anything was there to excuse. Failing the run on an unaccounted
+      identity outright would fail it for every rename, since a manifest
+      is hours old by construction and a test renamed since records under
+      its new name.
       The manifest gains no field and `executionsFor` needs no change: its
       line already runs past the exclusion rate. `fullLaneCount`'s work
       sum counts the extra runs, which it does not today, so the floor its
