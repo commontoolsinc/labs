@@ -2207,15 +2207,22 @@ const forEachFlowObservation = (
     const space = read.space;
     const id = read.id as URI;
     const scope = normalizeCellScope(read.scope);
-    const coveredByTrace = probeBelongsToDereference(
-      space,
-      id,
-      scope,
-      logicalPath,
-    );
+    // Computed on demand rather than for every read: `flowLabelWorkExists`
+    // consumes observations without ever reading `coveredByTrace`, and it is
+    // the caller that runs on every reactive action commit. Only a
+    // link-resolution probe needs the answer here, and only `deriveFlowJoin`
+    // asks for it afterwards. Memoized so the two cannot disagree.
+    let coveredByTraceMemo: boolean | undefined;
+    const coveredByTrace = (): boolean =>
+      coveredByTraceMemo ??= probeBelongsToDereference(
+        space,
+        id,
+        scope,
+        logicalPath,
+      );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (coveredByTrace) {
+      if (coveredByTrace()) {
         continue;
       }
       shape = "followRef";
@@ -2241,7 +2248,9 @@ const forEachFlowObservation = (
         {
           shape,
           nonRecursive: read.nonRecursive,
-          coveredByTrace,
+          get coveredByTrace() {
+            return coveredByTrace();
+          },
           machinery: isMachineryRead(read.meta),
         },
       )
