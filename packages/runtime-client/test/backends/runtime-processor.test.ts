@@ -2742,7 +2742,7 @@ describe("runtime-processor", () => {
       });
     });
 
-    it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    it("redacts `Caveat.source` from the introspection response", async () => {
       const ref: CellRef = {
         id: "of:cfc-caveat-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3291,7 +3291,9 @@ describe("runtime-processor", () => {
       expect(sourceSynced).toBe(false);
     });
 
-    it("reads the cell's own stored label without syncing (caller owns liveness)", () => {
+    it("reads the cell's own stored label without syncing", () => {
+      // Keeping the cell live is the caller's job, so the read syncs nothing.
+
       const ref: CellRef = {
         id: "of:cfc-label-pure-read" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -5082,7 +5084,7 @@ describe("runtime-processor", () => {
       expect(params.experimental).toEqual({ serverExecution: true });
     });
 
-    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default (OFF-arm-neutral)", () => {
+    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default", () => {
       assertServerExecutionPostureAgreement(
         { serverExecution: true },
         { experimental: { serverExecution: true } },
