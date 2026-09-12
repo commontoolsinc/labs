@@ -88,6 +88,12 @@ export interface SourceEntry {
   driver: string;
 }
 
+/** A harness shown in the picker that no configured source backs. */
+export interface ShownHarness {
+  id: string;
+  driver: string;
+}
+
 /** A JSON-encoded connector command, as the connector's queues hold them. */
 export type CommandValue = string;
 
@@ -113,6 +119,8 @@ export interface Attachment {
   nativeSessionId: string;
   title: string;
   attachedAt: number;
+  /** The workstream the session was attached under, where one applies. */
+  workstreamId?: string;
 }
 
 /** A session as the workbench shows it: the index row joined with whether it
@@ -169,6 +177,17 @@ export interface WorkbenchInput {
    * the host has linked it; a start sent before then reaches nothing.
    */
   commands?: Writable<CommandValue[] | Default<[]>>;
+  /**
+   * The permission mode a started session's first turn runs under, one the
+   * driver advertises. Empty leaves the driver's default, which cannot pass a
+   * tool or network approval headlessly.
+   */
+  startMode?: string | Default<"">;
+  /**
+   * Harnesses to list in the picker beside the connector's sources, for a
+   * machine that shows a harness it does not run. Picking one starts nothing.
+   */
+  harnessesShown?: ShownHarness[] | Default<[]>;
 }
 
 export interface WorkbenchOutput {
@@ -207,12 +226,12 @@ export interface WorkbenchOutput {
 //
 // Module-scope lifts, because the declared parameter is what bounds the read.
 
-const sessionKey = (sourceId: string, nativeSessionId: string): string =>
+export const sessionKey = (sourceId: string, nativeSessionId: string): string =>
   `${sourceId}/${nativeSessionId}`;
 
 /** Every session the index holds, newest first, with the fields the rows
  * render. Reads the shallow row and nothing under the manifest. */
-const sessionRowsOf = lift((
+export const sessionRowsOf = lift((
   { index, attached }: {
     index?: SessionIndexView;
     attached: Attachment[] | Default<[]>;
@@ -244,7 +263,7 @@ const sessionRowsOf = lift((
 /** The attached sessions, in attach order, each joined with its live row when
  * the index still carries it. A session the index no longer holds still shows,
  * from the attachment's own record, so an attachment never silently vanishes. */
-const attachedRowsOf = lift((
+export const attachedRowsOf = lift((
   { attached, rows }: {
     attached: Attachment[] | Default<[]>;
     rows: SessionRow[];
@@ -295,7 +314,7 @@ const relatedRowsOf = lift((
 });
 
 /** The newest unattached sessions, bounded. */
-const recentRowsOf = lift((
+export const recentRowsOf = lift((
   { rows, limit }: { rows: SessionRow[]; limit: number },
 ): SessionRow[] => rows.filter((r) => !r.attached).slice(0, limit));
 
@@ -308,11 +327,15 @@ const presentLinksOf = lift((
   )
 );
 
-/** The connector's sources, as picker options; Claude sources first. */
-const sourceOptionsOf = lift((
-  { index }: { index?: SessionIndexView },
-): CheckoutOption[] =>
-  (index?.sources ?? [])
+/** The connector's sources, as picker options; Claude sources first, then
+ * the harnesses the piece is told to show without a source behind them. */
+export const sourceOptionsOf = lift((
+  { index, shown }: {
+    index?: SessionIndexView;
+    shown?: ShownHarness[] | Default<[]>;
+  },
+): CheckoutOption[] => {
+  const configured = (index?.sources ?? [])
     .flatMap((source) =>
       source?.id
         ? [{ label: `${source.id}  (${source.driver})`, value: source.id }]
@@ -321,11 +344,27 @@ const sourceOptionsOf = lift((
     .toSorted((a, b) =>
       (a.label.includes("claude-agent-sdk") ? 0 : 1) -
       (b.label.includes("claude-agent-sdk") ? 0 : 1)
-    )
-);
+    );
+  const known = new Set(configured.map((option) => option.value));
+  const extra = (shown ?? [])
+    .filter((harness) => harness.id && !known.has(harness.id))
+    .map((harness) => ({
+      label: `${harness.id}  (${harness.driver}, not on this Mac)`,
+      value: harness.id,
+    }));
+  return [...configured, ...extra];
+});
+
+/** Whether a picked source is one the connector runs. */
+export const sourceIsConfigured = (
+  index: SessionIndexView | undefined,
+  sourceId: string,
+): boolean =>
+  (index?.sessions !== undefined) &&
+  (index.sources ?? []).some((source) => source?.id === sourceId);
 
 /** Checkouts the connector discovered, as picker options. */
-const checkoutOptionsOf = lift((
+export const checkoutOptionsOf = lift((
   { index }: { index?: SessionIndexView },
 ): CheckoutOption[] =>
   (index?.checkouts ?? []).flatMap((c) =>
@@ -382,7 +421,8 @@ const kickoffOf = lift((
   ].join("\n\n");
 });
 
-const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+export const shellQuote = (s: string): string =>
+  `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** The command to paste until the connector can start a session itself. */
 const spawnCommandOf = lift((
@@ -393,7 +433,7 @@ const spawnCommandOf = lift((
     : `claude ${shellQuote(prompt)}`
 );
 
-const whenIso = (iso: string): string =>
+export const whenIso = (iso: string): string =>
   iso ? iso.replace("T", " ").slice(0, 16) : "";
 
 const tail = (path: string, parts = 2): string =>
@@ -401,7 +441,7 @@ const tail = (path: string, parts = 2): string =>
 
 /** The one-line caption under a session's title. Module scope, because a
  * callable used inside a reactive `.map()` must be self-contained. */
-const captionOf = (row: SessionRow): string =>
+export const captionOf = (row: SessionRow): string =>
   [
     row.sourceId,
     row.gitBranch,
@@ -453,7 +493,7 @@ const useDefaultPrompt = handler<void, {
 });
 
 /** A version 4 UUID, which is the shape a Claude session id must have. */
-const mintSessionId = (): string =>
+export const mintSessionId = (): string =>
   "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = Math.floor(Math.random() * 16);
     return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
@@ -470,14 +510,19 @@ export const startSessionCommand = handler<void, {
   spawnRoot: Writable<string>;
   spawnSource: Writable<string>;
   sourceOptions: CheckoutOption[];
+  configuredSources: string[];
   kickoff: string;
   ownerDid: string;
   shortName: string;
   title: string;
+  startMode: string;
 }>((_, state) => {
   const sourceId = (state.spawnSource.get() || state.sourceOptions[0]?.value ||
     "").trim();
   if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
+  // A harness shown for display has no source to run it; starting is a no-op.
+  if (!state.configuredSources.includes(sourceId)) return;
+  const mode = state.startMode.trim();
   const nativeSessionId = mintSessionId();
   const createdAt = new Date().toISOString();
   const sessionTitle = state.shortName
@@ -496,6 +541,7 @@ export const startSessionCommand = handler<void, {
       text: state.kickoff,
       ...(cwd ? { cwd } : {}),
       ...(sessionTitle ? { title: sessionTitle } : {}),
+      ...(mode ? { mode } : {}),
     },
   }));
   // Attached now, so the session shows as starting before the index carries
@@ -508,8 +554,15 @@ export const startSessionCommand = handler<void, {
 
 // ===== The pattern =====
 
+/** The ids of the sources the connector runs, for the start's own check. */
+const configuredSourcesOf = lift((
+  { index }: { index?: SessionIndexView },
+): string[] =>
+  (index?.sources ?? []).flatMap((source) => source?.id ? [source.id] : [])
+);
+
 export default pattern<WorkbenchInput, WorkbenchOutput>(
-  ({ topic, sessions, attached, commands }) => {
+  ({ topic, sessions, attached, commands, startMode, harnessesShown }) => {
     const spawnPrompt = new Writable.perSession("");
     const spawnRoot = new Writable.perSession("");
     const spawnSource = new Writable.perSession("");
@@ -528,8 +581,13 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const recentSessions = recentRowsOf({ rows, limit: 8 });
     const links = presentLinksOf({ links: topic?.links });
     const checkoutOptions = checkoutOptionsOf({ index: sessions });
-    const sourceOptions = sourceOptionsOf({ index: sessions });
+    const sourceOptions = sourceOptionsOf({
+      index: sessions,
+      shown: harnessesShown,
+    });
+    const configuredSources = configuredSourcesOf({ index: sessions });
     const ownerDid = sessions?.ownerDid ?? "";
+    const mode = startMode ?? "";
     const defaultPrompt = defaultPromptOf({ shortName, title });
     const kickoff = kickoffOf({
       prompt: spawnPrompt,
@@ -546,10 +604,12 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       spawnRoot,
       spawnSource,
       sourceOptions,
+      configuredSources,
       kickoff,
       ownerDid,
       shortName,
       title,
+      startMode: mode,
     });
 
     const hasAttached = attachedSessions.length > 0;
