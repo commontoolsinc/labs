@@ -1189,6 +1189,43 @@ describe("data-updating", () => {
       expect(ids).not.toContain(testCell.getAsNormalizedFullLink().id);
     });
 
+    it("leaves an element that arrives as a link alone", () => {
+      // An element already carrying a link is stored as that link and draws
+      // no id: nothing re-homes a value the writer addressed by reference.
+
+      const target = runtime.getCell<unknown>(
+        space,
+        "link element target",
+        undefined,
+        tx,
+      );
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "link element container",
+        undefined,
+        tx,
+      );
+      const link = createSigilLinkFromParsedLink(
+        target.getAsNormalizedFullLink(),
+      );
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [link],
+        "link element container",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+
+      expect(draws).toBe(0);
+      const raw = testCell.getRaw() as unknown[];
+      expect(parseLink(raw[0], testCell)?.id).toBe(
+        target.getAsNormalizedFullLink().id,
+      );
+    });
+
     it("draws anchor ids pre-order: containing element before nested children", () => {
       // The id source is consumed for an anchored element BEFORE the
       // recursion into its content, so an element containing its own
