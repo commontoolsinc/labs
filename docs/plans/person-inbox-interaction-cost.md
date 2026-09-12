@@ -293,20 +293,39 @@ and no test here would necessarily say so. It passes `resultSchema` alone
 rather than the `effectiveResultSchema` fallback chain below it; the wider
 variant covers more pulls and narrows more demand, and is unmeasured.
 
-**What is left, and the correction that goes with it.**
+**What is left, and two corrections that go with it.**
 
-An earlier draft of this plan called "stop the second traversal" the most
+*First correction.* An earlier draft called "stop the second traversal" the most
 contained fix. That was wrong: the second run is the scheduler re-firing the
 pull's effect, not a redundant convergence pass, so removing it would drop the
 dependency registration the traversal exists for. It is not a candidate.
 
-What remains is the root: **a click should not re-instantiate a child piece at
-all.** `resultPatternKey` is a content hash by design, so a one-character change
-to an emitted stylesheet is a different artifact and takes the
-`!patternUnchanged` arm. The question is what a child's identity should depend
-on, which is a runtime design decision rather than a local edit — and it is
-worth more than the pull fix, because it would remove the instantiation, both
-pulls and both walks together.
+*Second correction, and the larger one.* An earlier draft said the root — a
+click re-instantiating a child piece — was "worth more than the pull fix", and
+that the cost generalised to any action whose returned artifact changes. Both
+claims are now disproved, by two measurements taken on one build:
+
+- A minimal pattern with the same click shape (a session write, a stylesheet
+  computed, twenty rows) instantiates **no** child at all and clicks in 19-50 ms,
+  even though its returned artifact changes on every click exactly as the
+  inbox's does. So the re-instantiation is not what any changed artifact costs;
+  something about this pattern's result provokes it.
+- Timing the instantiation itself on the inbox: **8-11 ms of a 300-450 ms
+  click**, about 3%.
+
+So the re-instantiation mattered only because it dragged a schemaless pull
+behind it. With the pull carrying its schema, the root is no longer a
+performance item. It may still be worth understanding — a click should probably
+not re-instantiate anything — but that is a correctness and cleanliness
+question, not this plan's.
+
+**There is no next lever on this path.** Profiled at HEAD over four paced
+clicks, no frame exceeds 5.6% of busy worker CPU and the largest is the garbage
+collector; `traverseWithSchema`, the schema-guided walk that replaced the blind
+one, is 5.4%. What remains is spread across schema traversal, freezing,
+encoding and equality — the ordinary cost of committing a change against a
+large result. A further win would come from making the result smaller, which is
+the authoring rule stage 6 wrote down, rather than from another leaf.
 
 **One lead ruled out.** The render root looked like the same fault:
 `cf-render` renders the `full` kind with a bare cast rather than
@@ -326,8 +345,9 @@ nothing. The traversal is in the pull, not the sink and not the render.
 5. ~~**Stage 6**~~ — landed: a benchmark that guards the curve's shape, and the
    authoring rule in `pattern-dev` and `pattern-critic`.
 6. ~~**Stage 7's pull half**~~ — landed; about a quarter off a paced click.
-7. **Stage 7's root** — a click should not re-instantiate a child piece. Worth
-   more than the pull fix and a runtime design decision, not a local edit.
+7. ~~**Stage 7's root**~~ — measured at 8-11 ms of a 300-450 ms click once the
+   pull carried its schema, and absent entirely from a minimal pattern with the
+   same click shape. Not a performance item; left as a correctness question.
 7. **Stage 4a** — small, and it is a correctness bug. The root cause is known;
    what is missing is a harness that reproduces it.
 8. **Stage 3's structural half** — a CFC design decision, not a measurement.
