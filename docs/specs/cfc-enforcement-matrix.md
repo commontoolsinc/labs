@@ -660,12 +660,17 @@ The strict-only delta is:
     disposed, so a cell made while a runtime is alive always carries one. Two
     things the walk leaves alone: an element the write carries through by
     reference from the stored array, which diffs to nothing, and one that is
-    already a link. Which writes split is what an author needs in order to
-    read a refusal: the split decides which document a writer-fit reason
-    names, and an anchored child's id appears in no source file. §8.2 treats
-    either representation of a pass-through as valid so long as the label is
-    preserved, which is the nearest thing the spec says to "the choice must
-    not decide a verdict"; the reading here goes one step past that text.
+    already a link. Splitting is the shape §8.5.4.3 prefers rather than one
+    the spec tolerates: a coordinator reading a container of references
+    consumes membership and reference identities and no element contents, so
+    a per-element transaction's pointwise label is a fact about its journal
+    rather than a claim needing `flow-taint-precision` trust. Which writes
+    split is what an author needs in order to read a refusal: the split
+    decides which document a writer-fit reason names, and an anchored child's
+    id appears in no source file. §8.2 treats either representation of a
+    pass-through as valid so long as the label is preserved, which is the
+    nearest thing the spec says to "the choice must not decide a verdict";
+    the reading here goes one step past that text.
     A child the runtime split out of a store it owns is therefore that
     store's, and it takes the marker alone: the transaction that anchors it
     writes it, and a later write reaching the same position walks through the
