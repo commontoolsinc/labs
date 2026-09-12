@@ -572,14 +572,26 @@ jobs:
         timeout-minutes: *work-timeout
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-          TESTS_FAILED: ${{ needs.pr-tests.result == 'failure' || needs.full-tests.result == 'failure' }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
           TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
           TEST_RECORDS_PREFIX: ${{ vars.TEST_RECORDS_PREFIX }}
           TEST_SELECTION_PREFIX: ${{ vars.TEST_SELECTION_PREFIX }}
         run: |
           args=(--base "origin/${{ github.base_ref }}")
           args+=(--reports coverage-artifacts --body "$PR_BODY")
-          if [[ "$TESTS_FAILED" == "true" ]]; then
+
+          # Anything but success or skipped, which is a lane that failed
+          # and a lane GitHub cancelled at its bound alike. Both leave a
+          # measured set short of its own units, and coverage scored
+          # through either says nothing about whether the change was
+          # tested.
+          unhealthy=$(jq -r '
+            [to_entries[]
+             | select(.value.result != "success" and .value.result != "skipped")]
+            | length
+          ' <<< "$JOB_RESULTS")
+
+          if [[ "$unhealthy" -ne 0 ]]; then
             args+=(--tests-failed)
           fi
           deno run -A tasks/coverage-gate.ts "${args[@]}"
