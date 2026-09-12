@@ -297,9 +297,9 @@ class ScriptedServerModel {
       // (the doc's top-of-stack below the reader). Scanning lower layers
       // would false-conflict with the session's own later stacked writes —
       // the exact hazard the max-basis rule exists to avoid. (This double
-      // keeps the LEGACY basis; the CT-1910 true-basis path — `basisSeq`
-      // with own-session exclusion — is exercised against the real engine
-      // in packages/memory/test/v2-pending-read-basis-overadvance.test.ts.)
+      // keeps the LEGACY basis; the true-basis path — `basisSeq` with
+      // own-session exclusion — is exercised against the real engine in
+      // packages/memory/test/v2-pending-read-basis-overadvance.test.ts.)
       const layers = Array.isArray(read.localSeq)
         ? read.localSeq
         : [read.localSeq];
@@ -1913,8 +1913,8 @@ describe("memory-v2-stacked-commit", () => {
         expect(reads.confirmed).toEqual([]);
         // One read per path, carrying the FULL dependency array (ascending; the
         // last element is the doc's top-of-stack, the staleness basis) so a
-        // dropped lower layer still dooms the commit (CT-1872 1c). Two source
-        // reads over the same stack compact to a single entry.
+        // dropped lower layer still dooms the commit. Two source reads over
+        // the same stack compact to a single entry.
         expect(reads.pending.map((read) => ({
           id: read.id,
           localSeq: read.localSeq,
@@ -2007,9 +2007,9 @@ describe("memory-v2-stacked-commit", () => {
         await expectResultOk(c3.promise);
 
         // The wire read names its dependency layer AND the confirmed basis the
-        // view sat on — the seq c1's acceptance advanced the doc to. Before
-        // CT-1910 that basis was discarded whenever layers existed, leaving the
-        // server's staleness scan anchored at the dependency's resolution.
+        // view sat on — the seq c1's acceptance advanced the doc to. The basis
+        // travels even with layers present, so the server's staleness scan is
+        // anchored there rather than at the dependency's resolution.
         const sent = harness.model.applied.get(c3.localSeq);
         expect(sent).toBeDefined();
         const confirmedBasis =
@@ -3470,7 +3470,7 @@ describe("memory-v2-stacked-commit", () => {
         await expectConflict(t1.promise);
         // The patch carried no pending reads, so it never entered the cascade
         // scan set: still in flight after T1's drop, its optimistic write
-        // re-derived on top of confirmed state (intended CT-1872 1a semantics).
+        // re-derived on top of confirmed state.
         expect(patchSettled).toBe(false);
         expectVisible(harness, { A: { count: 5 }, B: undefined });
 
@@ -3920,13 +3920,7 @@ describe("memory-v2-stacked-commit", () => {
           readyToRetry?: () => Promise<void>;
         }).readyToRetry;
         expect(readyToRetry).toBeDefined();
-        const raced = await Promise.race([
-          readyToRetry!().then(() => "ready" as const),
-          new Promise<"timeout">((resolve) =>
-            setTimeout(() => resolve("timeout"), 500)
-          ),
-        ]);
-        expect(raced).toBe("ready");
+        await readyToRetry!();
       } finally {
         await harness.close();
       }
@@ -4735,11 +4729,10 @@ describe("memory-v2-stacked-commit", () => {
           },
         );
 
-        // Ops-replay (CT-1872 1a): the patch descends through a base that
-        // cannot hold it, so the layer renders SKIPPED — the base shows
-        // through — rather than branch-replacing the pending snapshot in (the
-        // old value-combining, which fabricated states the server would never
-        // produce and could resurrect dropped sibling data).
+        // Ops-replay: the patch descends through a base that cannot hold it,
+        // so the layer renders SKIPPED and the base shows through. A combined
+        // value here would fabricate a state the server never produces, and
+        // could resurrect dropped sibling data.
         expectVisible(harness, {
           A: null,
         });
@@ -4779,11 +4772,10 @@ describe("memory-v2-stacked-commit", () => {
           },
         );
 
-        // Ops-replay (CT-1872 1a): the patch descends through a base that
-        // cannot hold it, so the layer renders SKIPPED — the base shows
-        // through — rather than branch-replacing the pending snapshot in (the
-        // old value-combining, which fabricated states the server would never
-        // produce and could resurrect dropped sibling data).
+        // Ops-replay: the patch descends through a base that cannot hold it,
+        // so the layer renders SKIPPED and the base shows through. A combined
+        // value here would fabricate a state the server never produces, and
+        // could resurrect dropped sibling data.
         expectVisible(harness, {
           A: {
             choice: 1,
@@ -4825,11 +4817,10 @@ describe("memory-v2-stacked-commit", () => {
           },
         );
 
-        // Ops-replay (CT-1872 1a): the patch descends through a base that
-        // cannot hold it, so the layer renders SKIPPED — the base shows
-        // through — rather than branch-replacing the pending snapshot in (the
-        // old value-combining, which fabricated states the server would never
-        // produce and could resurrect dropped sibling data).
+        // Ops-replay: the patch descends through a base that cannot hold it,
+        // so the layer renders SKIPPED and the base shows through. A combined
+        // value here would fabricate a state the server never produces, and
+        // could resurrect dropped sibling data.
         expectVisible(harness, {
           A: [],
         });
@@ -4888,18 +4879,6 @@ describe("memory-v2-stacked-commit", () => {
         await harness.close();
       }
     });
-
-    for (
-      const [name, testFn] of [
-        [
-          "memory v2 stacked commits: duplicate localSeq returns the same promise/result",
-          () => Promise.resolve(),
-        ],
-      ] as const
-    ) {
-      void name;
-      void testFn;
-    }
 
     for (
       const seed of [
