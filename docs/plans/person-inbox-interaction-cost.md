@@ -127,18 +127,29 @@ than a performance one. Raise it as such rather than optimizing around it.
 Both block a host from setting `people` at all. Both are small, and neither is
 a performance problem; they are here because they cost a day to route around.
 
-**4a. An input refused by an unrelated input.** Any
-`cf cell set --cell <piece>#argument <field>` on this piece fails with
-`updated input does not match its schema: view: value does not match type
-object`. The emitted schema for `view` is correct — `type: "object"`,
-`default: {}`, `asCell: [{kind:"cell",scope:"session"}]` — and reading it
-returns `{}`. The update validator
-(`packages/piece/src/ops/piece-controller.ts:3435`) validates the whole staged
-root, and the stored session **link** does not validate against the referent's
-type. A write at the arguments **root** carrying `view` explicitly succeeds and
-preserves both scopes. Fix: resolve `asCell` inputs before validating the
-staged root, or exclude them from it. Test: set one input on a piece that has a
-`PerSession` input, from a process whose session differs.
+**4a. An input refused by an unrelated input — root cause found, not yet
+fixed.** Any `cf cell set --cell <piece>#argument <field>` on this piece fails
+with `updated input does not match its schema: view: value does not match type
+object`. The staged root is read as
+`targetCell.asSchema(undefined).withTx(tx).get()`, so a scoped input arrives as
+its stored **sigil link** rather than as a `Cell`; `schemaAcceptsOpaqueCellValue`
+opens with `if (!isCell(value)) return false`, so the link is not admitted as an
+opaque cell value and is validated against the referent's type instead. A write
+to any input is then refused by whichever `asCell` input the piece happens to
+have, naming that one.
+
+The fix is to accept a sigil link at a position whose schema declares `asCell` —
+the link is the stored form of exactly that — either by widening the shared
+predicate or by passing a local `acceptOpaqueValue` at this call site.
+
+What is missing is a test that fails without it.
+`packages/piece/test/scoped-input-write.test.ts` guards the same-session case,
+which passes today; the refusal needs a client whose session is not the one
+that minted the link, and an attempt to build that in-process did not
+reproduce — a second `PiecesController` over the same space did not fail the
+way `cf` does. Land the fix behind a harness that can mint a second session
+properly, or behind a CLI-level test, rather than behind a test that would pass
+either way.
 
 **4b. A conflict that is neither retried nor reported.** `cf cell set` against
 the inbox's own backing document fails with `ConflictError: stale confirmed
