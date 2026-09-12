@@ -166,13 +166,14 @@ reads skip the machinery outright on that check.
 
 ## Where a view is not used
 
-- **Handlers.** They stay eager, for a consequence the lift path does not share: a handler's read log is what its commit's read set is built from, so the set of
-  paths it reads is also the set of concurrent writes its commit refuses. A view
-  would narrow that set to the paths the body touched: an append to a list the
-  body read, or a change to a field it read, would still conflict, but a change
-  to a field of a row it never touched would not, and a handler relying on that
-  conflict would lose the guard without any change to its code. A handler's
-  reads through a handle are ordinary eager reads for the same reason.
+- **Handlers.** They stay eager. A handler's read log is what its commit's read
+  set is built from, so the set of paths it reads is also the set of concurrent
+  writes its commit refuses. A view would narrow that set to the paths the body
+  touched: an append to a list the body read, or a change to a field it read,
+  would still conflict, but a change to a field of a row it never touched would
+  not, and a handler relying on that conflict would lose the guard without any
+  change to its code. A handler's reads through a handle are ordinary eager
+  reads for the same reason.
 - **An absent or `true` schema.** That is the schema-less query-result proxy's
   job, and `validateAndTransform` dispatches to it before a view is considered.
 

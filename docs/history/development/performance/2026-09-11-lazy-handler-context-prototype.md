@@ -300,9 +300,9 @@ addressing exists to replace: `elementById` in a handler ([keyed collection
 writes](../../../features/keyed-collection-writes.md)), which is what the lunch
 poll's handlers use, and `lookup` in a pattern body ([reactive
 collections](../../../common/concepts/reactive-collections.md)). The shapes that
-remain — keyed reads, which pay a little more, and full walks taken for their
-conflict set, which pay the body penalty finding 2 measures — so the change
-would ship its contract cost to every handler for a win few would collect.
+remain are keyed reads, which pay a little more, and full walks taken for their
+conflict set, which pay the body penalty finding 2 measures, so the change would
+ship its contract cost to every handler for a win few would collect.
 
 What the deferral does not touch: for a handle-bound context, the shape the
 exemplar's handlers take, the argument read was never the cost. For a plain
