@@ -60,7 +60,16 @@ const EMPTY_VIEWER: ViewerState = {};
 type RosterCell = Writable<Roster | Default<typeof DEFAULT_ROSTER>>;
 type ViewerCell = Writable<ViewerState | Default<typeof EMPTY_VIEWER>>;
 
-export type JoinEvent = Record<PropertyKey, never>;
+// `void`, not the empty closed object it was: the runner's closed-world gate
+// refuses any payload with an undeclared field against `additionalProperties:
+// false`, and a rendered click arrives as the serialized DOM event (`type`,
+// `provenance`, target scalars) — so `Record<PropertyKey, never>` made every
+// Join from the button fail before the handler ran (seen on the
+// fabric-profiles bench, 2026-09-12). The handler reads nothing from the
+// event. `void` is the lobby's shape (`addSelfToLobby`); it changes the
+// `join` stream's recorded contract, accepted in
+// tasks/pattern-compat-accepted-breaks.ts.
+export type JoinEvent = void;
 
 const join = handler<JoinEvent, {
   roster: RosterCell;
