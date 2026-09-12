@@ -30,6 +30,7 @@ import type {
   SourceDescriptor,
 } from "../types.ts";
 import { normalizeSourceId } from "../session-contract.ts";
+import { terminateChildProcess } from "../child-process.ts";
 
 export interface AcpTransport {
   setSessionUpdateSink(sink: (notification: SessionNotification) => void): void;
@@ -219,11 +220,7 @@ class ProcessAcpTransport implements AcpTransport {
     this.#connection = undefined;
     this.#child = undefined;
     if (!child) return;
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // The adapter already exited.
-    }
+    terminateChildProcess(child);
     await child.status.catch(() => undefined);
   }
 }

@@ -730,6 +730,13 @@ export interface IStorageProvider {
   /** Establish the authenticated space session without reading entity values. */
   ensureSession?(): Promise<void>;
 
+  /**
+   * Wait for an ordered response after this space's published input frames.
+   * Frame application completes before the response; pending local writes may
+   * still shadow those inputs. This does not wait for commit durability.
+   */
+  pullToServerHead?(): Promise<void>;
+
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
 
@@ -1424,6 +1431,16 @@ export interface IStorageTransaction {
   status(): StorageTransactionStatus;
 
   /**
+   * The store seq `space` accepted this transaction's commit at: the position
+   * in that space's commit log the writes landed at, which
+   * `cf inspect value-at --seq` and `diff --from/--to` read. Known once the
+   * commit's verdict arrives; undefined before it, for a commit the space
+   * rejected, and for a space this transaction wrote nothing to. Optional the
+   * same way as the read hooks above; absent means unknown.
+   */
+  committedSeq?(space: MemorySpace): number | undefined;
+
+  /**
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the transaction invariants. If value was written in read memory
    * address in this transaction read will return value that was written as
@@ -2099,6 +2116,29 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * pattern-authored code whether a given piece is running here.
    */
   isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean;
+
+  /**
+   * Whether the store at `id` in `space` is one no schema declares a policy
+   * on — named by an authorized whole-document
+   * `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE` marker on this transaction.
+   *
+   * The §8.12.4 writer-fit measurement quantifies over the paths a schema
+   * could have declared a policy at, and skips the ones it cannot ask about.
+   * Two of those it reads off the id alone; this is the answer for a document
+   * whose id says nothing, which the runtime names as it writes it.
+   *
+   * This transaction alone, with no enrollment beside it: the measurement runs
+   * over documents the asking transaction wrote, so a marker recorded beside
+   * the write always covers the question.
+   *
+   * Takes the runtime's mark for the same reason {@link isRuntimeOwnedStore}
+   * does: the gate acts on the claim rather than measuring it.
+   */
+  isUndeclarablePolicyStore(
     space: string,
     id: string,
     authorization?: RuntimeWritePolicyAuthorization,

@@ -20,12 +20,17 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { Runtime } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
+
 import type { RuntimeProcessor } from "@/backends/runtime-processor.ts";
 import { createCellRef } from "@/backends/utils.ts";
 import { $conn, CellHandle, type RuntimeClient } from "@/mod.ts";
@@ -42,10 +47,6 @@ import {
   type IPCRemoteMessage,
   RequestType,
 } from "@/protocol/mod.ts";
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
 import { buildProcessor } from "./build-processor.ts";
 
 const signer = await Identity.fromPassphrase("cell-set-echo-race");

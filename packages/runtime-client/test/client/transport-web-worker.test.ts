@@ -1,15 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+
 import {
   ClientTransportNotificationType,
   type ErrorNotification,
   NotificationType,
   TransportNotificationType,
 } from "@/protocol/mod.ts";
-import { expect } from "@std/expect";
 import { WebWorkerRuntimeTransport } from "@/client/transports/web-worker/transport-web-worker.ts";
 
 // Exercises the transport's handling of forwarded worker console output

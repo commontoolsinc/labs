@@ -119,21 +119,14 @@ function attachCfcToOutputs(
         ? { ...outputSchema.ifc }
         : {};
     ifc.confidentiality = ContextualFlowControl.lub(joined);
-    const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
-      ? {}
-      : outputSchema === false
-      ? { not: true }
-      : outputSchema;
     const cfcSchema: JSONSchema = {
-      ...outpuSchemaObj,
+      ...ContextualFlowControl.toSchemaObj(outputSchema),
       ifc,
     };
-    try {
-      outputs.setSchema(cfcSchema);
-    } catch {
-      // Cell already has a cause (computed/derived output) — its schema was
-      // set during construction, so we cannot override it here.
-    }
+    // The label reaches the cell through its link schema, which `setSchema`
+    // takes only while the cell carries neither a cause nor a link. A cell
+    // carrying either throws here, stopping the build.
+    outputs.setSchema(cfcSchema);
     return;
   } else if (isObjectOrArray(outputs)) {
     // Descend into objects and arrays.

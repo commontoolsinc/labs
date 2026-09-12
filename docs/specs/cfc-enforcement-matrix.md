@@ -312,9 +312,10 @@ The strict-only delta is:
   entries document refuses every mark a served run writes to record that it
   handled an event, and every entry a same-space served emission carries into
   the document on its own transaction. Both are ordinary operation rather
-  than edge cases. One predicate covers those two classes and the meta seam
-  above (`isDeclarablePolicyPath` in `prepare.ts`), because all three answer
-  one question: could a schema have declared a policy here.
+  than edge cases. One predicate covers those two classes, the marked class
+  below, and the meta seam above (`isDeclarablePolicyPath` in `prepare.ts`),
+  because all of them answer one question: could a schema have declared a
+  policy here.
 
   Two id classes is what this is, rather than a rule about documents the
   runtime mints. The runtime mints many more and route 2 below is what most
@@ -341,6 +342,91 @@ The strict-only delta is:
   express one, so pattern-authored traffic arrives `authored` whatever id it
   names.
 
+  A third class is outside the check for the same reason and reaches it by a
+  different route, because its ids say nothing at all. It is also the one the
+  spec already names: §18.6.2's read exclusions list "program/source text
+  loaded to execute the handler" beside the `cid:` schema documents and the
+  `/cfc/...` label metadata this runtime already excludes, and calls all three
+  public infrastructure. A compilation-cache record holds one module for the
+  compiler — the `cid:` document its bytes live in, the identities of its
+  imports, and the predecessor identities its writer authority descends from
+  ([`module-loading.md`](./module-loading.md), and the write side in
+  [`cell-cache.ts`](../../packages/runner/src/compilation-cache/cell-cache.ts)).
+  The cache addresses it by the cause `pattern:<identity>`, or
+  `compileCache:<runtimeVersion>/<identity>` for the compiled set, whose
+  `<identity>` is the module's content-derived Merkle identity. The entity id
+  that cause mints is an ordinary `of:fid1:<hash>`, indistinguishable from a
+  piece's argument document, so there is nothing for a predicate over id
+  strings to recognize, and giving the class an id of its own would re-address
+  every cached module in every space that holds one. The write side names the
+  document instead: the cache records an authorized whole-document
+  `runtime.undeclarable-store` marker beside each of its writes, and the
+  measurement asks the transaction. No pattern names one of these documents.
+  The schemas that describe their fields are the cache's own write schemas,
+  which declare integrity and no confidentiality, so the ceiling that resolves
+  there is the empty one, and a measured cache write carrying any clause
+  misfits. A piece's source transition stages the
+  successor module's delegation union on the same transaction that moves the
+  piece's source pointer, so that the authority and the pointer land together,
+  and that transaction also reads the piece's argument — which is why the
+  measurement reaches a cache document during an ordinary pattern update
+  rather than only in an unusual flow.
+
+  Three things bound the marker, and the first is what the other two rest on.
+  The recording method is the same public one route 2's marker uses, so the
+  runtime's authorization is what separates a claim it made from one pattern-
+  authored code wrote; a marker without it counts for nothing. The marker
+  names a whole document, because whether a schema could have declared a
+  policy is a question about the document rather than about a path inside one;
+  `anchorValueAsEntity` carries the claim down to a document anchored out of a
+  marked value, which holds part of that value at an id derived from it, the
+  same way it carries a runtime-owned store's. A cache record is written raw,
+  with its import edges inline, so the cache itself anchors nothing. And it
+  lasts for the transaction that recorded it, with no enrollment beside it:
+  the measurement runs over documents the asking transaction wrote, so a
+  marker recorded beside the write always covers the question. That is the one
+  respect in which it is narrower than route 2's marker, which answers for
+  stores a later transaction writes.
+
+  One thing this class does NOT take from §18.6.2 is its write-side mirror.
+  That section states its read exclusion as mirroring "the write-side rule
+  that the same addresses are not value-write targets", which would leave the
+  record unstamped as well as unmeasured, the way a `cid:` document is. This
+  runtime keeps it a stamp target and skips the ceiling alone, as it does for
+  the two id classes above, and safety invariant 9 is what decides that rather
+  than a preference. The delegation metadata holds module identities, and
+  §17.7 says holding one grants no access to the artifact it names, so the
+  content written there is public. Which identity appears is the other
+  question: a transaction that read a labeled value and chose a successor by
+  it writes that choice into the record, and §8.11.3 puts a decision's label
+  on every downstream output whatever the output's own content is — the router
+  attack at one bit per update. Unstamping the record would drop exactly that.
+  The module's bytes are unaffected either way, living in a `cid:` document of
+  their own, so the divergence covers the compiler's bookkeeping and nothing
+  else. Its cost is that a later reader of the delegation field consumes the
+  clause. For a join the target's own space produced the two shapes differ
+  only in what is labeled: neither refuses. They part on a join that drew a
+  clause from elsewhere, which the skip is scoped away from, so the
+  implemented shape measures the cache write and can refuse it at strict where
+  §18.6.2's shape, having no write target there at all, would not. That is the
+  direction the residency half of the ceiling was written for, so the
+  divergence keeps a refusal rather than giving one up. §18.6.4's checklist
+  obligation to document "the excluded address patterns" is discharged by this
+  section.
+
+  A cache document is off route 2 on the same keying ground an entries
+  document is. Route 2 declares one piece's flow join as the store's policy,
+  so it wants a store keyed on that piece's own nodes; a cache document is
+  keyed on module content, every piece in the space running that module
+  addresses it, and it outlives all of them. What route 2 leaves behind is
+  also permanent, and that is the second reason. It writes a `declared` entry
+  per measured path, which §8.12.1 does not let back, on a document nothing
+  collects; the flow stamp the skip keeps instead is a per-value component
+  §8.12.8 replaces on overwrite. The two routes agree on what a later reader
+  carries — reading a cache document is how a pattern's code is loaded, and
+  under either route the clause reaches whoever loads that module next — so
+  that consequence is not what separates them.
+
   An entries document takes this route rather than §8.12.5's route 2 below,
   and the ownership route 2 asks for is the reason. Route 2 declares a policy
   out of one piece's flow join, so it reaches stores keyed on that piece's
@@ -362,18 +448,21 @@ The strict-only delta is:
   label map would grow by one entry per event the stream ever carried, on a
   durable log that outlives the pieces that wrote to it.
 
-  The skip is scoped to a join the target's own space produced. Every clause
-  the join carries comes from a document some read resolved, and the join
-  records which space each of those lived in; where any of them lived
-  elsewhere, the target is measured like any other document. So the residency
-  half of the ceiling still holds for the direction it was written for — a
-  derivation cannot carry another space's labeled value into a local document
-  by materializing it, and an emission cannot carry one into a local stream's
-  entries document — while work over the space's own data proceeds. A
-  computed cell shares a replica set with the source it derives from, and an
-  entries document shares one with the document holding the stream it belongs
-  to, so in both cases the value reaches no reader it had not reached
-  already, and what follows it is the stamp.
+  The skip is scoped to a join the target's own space produced, for the marked
+  class as much as for the two id classes. Every clause the join carries comes
+  from a document some read resolved, and the join records which space each of
+  those lived in; where any of them lived elsewhere, the target is measured
+  like any other document. So the residency half of the ceiling still holds
+  for the direction it was written for — a derivation cannot carry another
+  space's labeled value into a local document by materializing it, an emission
+  cannot carry one into a local stream's entries document, and a source
+  transition cannot carry one into a local cache document — while work over
+  the space's own data proceeds. A computed cell shares a replica set with the
+  source it derives from, an entries document shares one with the document
+  holding the stream it belongs to, and a cache document shares one with every
+  piece in that space running the module it holds, so in each case the value
+  reaches no reader it had not reached already, and what follows it is the
+  stamp.
 
   A declared entry can still reach one of these documents, from a
   schema-carrying write to it, and the skip is unconditional over that route
@@ -597,6 +686,21 @@ The strict-only delta is:
     the parent link a write traverses — which is tracked separately.
     `cfc-runtime-owned-store-wiring.test.ts` pins both spellings, so the
     refused half flips visibly the day that lands.
+
+    The claim reaches a child only from a parent that carries one, and the
+    case where none does is worth stating because the refusal it produces
+    names a document no author wrote down. A child anchored out of an
+    ordinary authored store is measured against its own ceiling: the
+    residency clause, plus what the schema describing the parent's value at
+    the anchored position declares, which the child carries. Only a
+    declaration at that position covers it. The anchoring write lands at the
+    child's root, so an `ifc` on a field of the element leaves the write
+    uncovered, and the misfit reads `at /` rather than naming the field the
+    clause was written for. Where the parent declares nothing there, a write
+    carrying a label into the child is refused at the child's id, and that id
+    is a hash of the parent and the path, so nothing recovers the parent from
+    it: what the message establishes is that some document holds a piece of
+    another document's value. The same test file pins the four outcomes.
   - **How far it reaches inside that document.** Every path the
     transaction writes there, not only the paths setup wrote: the marker
     names the store, and the declaration is a statement about the store.
@@ -644,9 +748,9 @@ The strict-only delta is:
   ordinary document measures against its own ceiling whichever transaction
   makes it: a bystander written by a later transaction of the same piece is
   refused exactly as one written by the setup transaction is. A `computed:`
-  document and a stream's entries document are outside the route for a
-  different reason — the measurement skips them altogether, per the
-  exemption above.
+  document, a stream's entries document and a compilation-cache document are
+  outside the route for a different reason — the measurement skips them
+  altogether, per the exemption above.
 
   It DOES reach further than the setup-time route in two ways worth stating,
   because neither follows from "the same rule, later". The piece's result

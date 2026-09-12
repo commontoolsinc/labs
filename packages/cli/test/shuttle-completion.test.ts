@@ -295,6 +295,16 @@ describe("completion", () => {
       ).toBe("get title");
     });
 
+    it("writes the key for `ls`, whose operand names the place to list", async () => {
+      // The arm `ls` declares is the one that carries a slot to fill, so a
+      // target is offered where a target may be written — the same candidates
+      // `cd` and `get` are offered, from the one listing under the place.
+
+      expect(
+        await completeLine(atPiece(), "ls ti", holding({ title: "a" })),
+      ).toBe("ls title");
+    });
+
     it("writes every key where the token being completed is empty", async () => {
       expect(await completeLine(atPiece(), "cd ", holding({ title: "a" })))
         .toBe("cd title");
@@ -374,7 +384,7 @@ describe("completion", () => {
 
   describe("completeLine() over where a token may stand", () => {
     it("writes nothing for a verb that takes no operand", async () => {
-      expect(await completeLine(shuttleIn(), "ls sl", READS_NOTHING))
+      expect(await completeLine(shuttleIn(), "pwd sl", READS_NOTHING))
         .toBeUndefined();
     });
 

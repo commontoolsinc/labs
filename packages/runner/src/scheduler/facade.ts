@@ -142,6 +142,7 @@ import {
   type StorageNotificationState,
 } from "./invalidation.ts";
 import {
+  resolveRegistrationSurface,
   resubscribePullSchedulerAction,
   type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
@@ -187,6 +188,9 @@ type FilterStatsState = { filtered: number; executed: number };
 
 type SchedulerRegistrationInput = ReactivityLog;
 type SchedulerRegisterOptions = {
+  /** Skips provisional parent demand; requires declared outputs and a computation. */
+  deferUntilDemand?: boolean;
+
   isEffect?: boolean;
   debounce?: number;
   noDebounce?: boolean;
@@ -691,9 +695,10 @@ export class Scheduler {
   /**
    * Subscribes an action to run when its dependencies change.
    *
-   * The action will be scheduled to run immediately. After running, the
-   * scheduler automatically re-subscribes using the reactivity log from the
-   * run.
+   * Computations run when demanded. A live parent provisionally demands a new
+   * child unless `deferUntilDemand` is set with a declared write surface.
+   * Effects and idempotency diagnostics retain their execution policy. After
+   * running, the scheduler re-subscribes using the recorded reactivity log.
    *
    * @param action The action to subscribe
    * @param dependencies Optional callback or immediate ReactivityLog for
@@ -712,6 +717,14 @@ export class Scheduler {
       dependenciesOrOptions,
       maybeOptions,
     );
+    if (options.deferUntilDemand) {
+      if (options.isEffect || this.#nodes.isKnownEffect(action)) {
+        throw new Error("`deferUntilDemand` requires a computation");
+      }
+      if (resolveRegistrationSurface(action, dependencies).length === 0) {
+        throw new Error("`deferUntilDemand` requires a declared write surface");
+      }
+    }
     // Tag the action with its owning pattern instance so pattern readers
     // always carry a pieceId (used to group shaped cell-flip wakes by
     // instance and to distinguish pattern readers from internal machinery —
@@ -720,6 +733,7 @@ export class Scheduler {
       this.#setActionObservationIdentity(action, options.observationIdentity);
     }
     const subscribeOptions = {
+      deferUntilDemand: options.deferUntilDemand,
       isEffect: options.isEffect,
       debounce: options.debounce,
       noDebounce: options.noDebounce,
@@ -1656,6 +1670,11 @@ export class Scheduler {
 
   onError(fn: ErrorHandler): void {
     this.#errorHandlers.add(fn);
+  }
+
+  /** Reports an action's asynchronous failure through the ordinary error handlers. */
+  reportError(error: Error, action: Action): void {
+    this.#handleError(error, action);
   }
 
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
@@ -2937,10 +2956,17 @@ export class Scheduler {
     const record = this.#nodes.get(action);
     if (!record) return;
     markInvalidRecord(this.#nodes, action, cause, options);
-    // Trailing computation debounce re-arms on every invalidation (§8.1:
-    // debounceReadyAt resets while gated). Arming here — in the one
-    // invalid-setter — covers every path (channel, registration, retry), so
-    // gate QUERIES stay side-effect-free.
+    // A scheduler-owed retry (`options.retry`: a refused run re-queued after
+    // its catch-up) is not an input change — it runs past the node's
+    // freshness gates, and any armed readiness is released (§8.3).
+    if (options?.retry) {
+      this.#gates.releaseForRetry(action);
+      return;
+    }
+    // Trailing computation debounce re-arms on every other invalidation
+    // (§8.1: debounceReadyAt resets while gated). Arming here — in the one
+    // invalid-setter — covers every path (channel, registration), so gate
+    // QUERIES stay side-effect-free.
     if (record.kind === "computation") {
       this.#gates.onInvalidated(
         record,

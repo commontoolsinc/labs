@@ -106,11 +106,22 @@ export interface CommandContext {
   outputDir: string;
 
   /**
-   * Where coverage profiles go, one directory per workspace member.
+   * Where coverage profiles go. A suite writes one directory under it
+   * per workspace member, named by {@link coverageMemberDirectory}, so
+   * that what one member's tests reached is converted on its own.
    * Absent where this batch is not being measured, which is every batch
-   * outside the per-package coverage gate and the full run.
+   * outside the coverage gate and the full run.
    */
   coverageDir?: string;
+
+  /**
+   * The workspace members to measure, where only some of them are. A
+   * member outside the set runs unmeasured, because coverage costs time
+   * and nothing reads a profile no measured set is scored from. Absent
+   * means every member this batch runs, which is what the full run asks
+   * for.
+   */
+  measuredMembers?: ReadonlySet<string>;
 
   /**
    * Where a producer that writes a coverage report of its own puts it.
@@ -184,6 +195,14 @@ export interface Suite {
    */
   unitsForChange?(changed: ReadonlySet<string>): readonly Unit[];
 
+  /**
+   * What this suite's coverage is gated on: one entry per workspace
+   * member whose lines a subset of these units is scored over. Absent
+   * where nothing here is measured, which is every suite whose runner
+   * writes no coverage profile.
+   */
+  measured?: readonly MeasuredSet[];
+
   /** Whether a record belongs to one of this suite's units, or to it. */
   locate(record: LocatableRecord): Location | undefined;
 
@@ -216,6 +235,77 @@ export interface Suite {
  * budget forever.
  */
 export type ReachedBy = readonly string[];
+
+/**
+ * One suite's units over one workspace member's lines, measured together
+ * and gated together.
+ *
+ * The pair is the unit of the coverage gate because it is the one
+ * measurement selection cannot skew: run every unit here and what those
+ * tests reached in that member is complete, whatever was chosen anywhere
+ * else in the run. Two sets over one member are two numbers and are never
+ * added together, since a line one suite covers says nothing about
+ * whether the other does.
+ */
+export interface MeasuredSet {
+  /** The workspace member whose lines are counted, repository-relative. */
+  member: string;
+
+  /**
+   * The paths a change reaches this set by. Reaching it makes every unit
+   * below mandatory, which is the same declaration vocabulary that
+   * reaches a unit no diff can name, so one mechanism answers "what did
+   * this change touch" wherever the question comes up.
+   */
+  reachedBy: ReachedBy;
+
+  /** Every unit that measures it. */
+  units: readonly Unit[];
+}
+
+/**
+ * The directory one member's coverage profiles go in, under whatever
+ * directory a batch was given. Derived rather than declared, so that the
+ * suite writing the profiles and the conversion reading them cannot
+ * disagree about where they are.
+ *
+ * A member already holding the separator is refused rather than encoded,
+ * because two members would then share one directory and their coverage
+ * would be added together silently. No member in the tree has such a
+ * name, and the refusal is what keeps that from becoming a measurement
+ * nobody can explain.
+ */
+export function coverageMemberDirectory(member: string): string {
+  const path = member.replace(/^\.\//, "");
+  if (path.includes("__")) {
+    throw new Error(
+      `the workspace member ${path} cannot be measured: its name holds ` +
+        `the separator that stands for a slash in a coverage directory, ` +
+        `so it would share a directory with another member`,
+    );
+  }
+  return path.replaceAll("/", "__");
+}
+
+/**
+ * Where an invocation over `member` writes its coverage profiles, or
+ * nothing where it writes none. A batch with no coverage directory
+ * measures nothing, and one measuring only some members measures none of
+ * the others.
+ *
+ * The directory rather than a yes or no, so that a caller cannot ask
+ * whether it is measuring and then build the path from a directory the
+ * answer said nothing about.
+ */
+export function measuringInto(
+  context: Pick<CommandContext, "coverageDir" | "measuredMembers">,
+  member: string,
+): string | undefined {
+  if (context.coverageDir === undefined) return undefined;
+  const normalized = member.replace(/^\.\//, "");
+  if (context.measuredMembers?.has(normalized) === false) return undefined;
+  return path.join(context.coverageDir, coverageMemberDirectory(normalized));
+}
 
 /**
  * Whether one entry names a path. `**\/` stands for any run of
@@ -422,6 +512,9 @@ export interface FileSuiteOptions {
    * batch is measured.
    */
   patternCoverage?: boolean;
+
+  /** What this suite's coverage is gated on, where anything is. */
+  measured?: readonly MeasuredSet[];
 }
 
 /**
@@ -453,6 +546,7 @@ export function fileSuite(options: FileSuiteOptions): Suite {
     needs: options.needs,
     units,
     unavailable,
+    ...(options.measured === undefined ? {} : { measured: options.measured }),
 
     locate(record) {
       if (!claimsIdentity(surfaces, record.test)) return undefined;
@@ -500,9 +594,8 @@ export function fileSuite(options: FileSuiteOptions): Suite {
           await writeSkipList(skipListPath, skips);
           env[SKIP_LIST_VARIABLE] = skipListPath;
         }
-        if (context.coverageDir !== undefined) {
-          env.DENO_COVERAGE_DIR = path.join(context.coverageDir, slug);
-        }
+        const measuring = measuringInto(context, part.packageDir);
+        if (measuring !== undefined) env.DENO_COVERAGE_DIR = measuring;
         if (
           options.patternCoverage === true &&
           context.patternCoverageDir !== undefined

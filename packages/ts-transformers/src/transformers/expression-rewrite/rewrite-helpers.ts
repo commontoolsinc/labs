@@ -109,6 +109,8 @@ export function createReactiveWrapperForExpression(
     allowDirectExpressionWrap?: boolean;
     preferInputBoundWrapper?: boolean;
     filterNestedFunctionLocalCaptures?: boolean;
+    /** Known output type of a synthetic expression. */
+    resultTypeNode?: ts.TypeNode;
   } = {},
 ): ts.Expression | undefined {
   const shouldFilterNestedLocals = options.filterNestedFunctionLocalCaptures ??
@@ -161,6 +163,7 @@ export function createReactiveWrapperForExpression(
       tsContext: context.tsContext,
       cfHelpers: context.cfHelpers,
       context,
+      resultTypeNode: options.resultTypeNode,
     });
   }
 
@@ -204,7 +207,7 @@ export function createReactiveWrapperForExpression(
       undefined,
       undefined,
       [],
-      resultTypeNode,
+      options.resultTypeNode ?? resultTypeNode,
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       expression,
     ),

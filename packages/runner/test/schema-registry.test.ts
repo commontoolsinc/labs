@@ -212,7 +212,7 @@ describe("schema-registry", () => {
       });
     });
 
-    it("resolves a fragment ref to the member with the group's `$defs` attached", () => {
+    it("resolves a fragment ref to a member view whose refs into the group are external", () => {
       const schema: JSONSchemaObj = {
         $ref: "#/$defs/FragFolder",
         $defs: {
@@ -232,27 +232,26 @@ describe("schema-registry", () => {
       };
       const decomposed = decomposeSchema(schema);
       registerAll(decomposed);
+      const groupHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+      const memberRef = (name: string) => `cid:${groupHash}#/$defs/${name}`;
       const resolved = resolveSchema({
         $ref: decomposed.rootRef,
       }) as JSONSchemaObj;
       expect(resolved.type).toBe("object");
-      // The group's definitions ride along so the member's internal refs
-      // keep a scope...
-      expect(Object.keys(resolved.$defs!).toSorted()).toEqual([
-        "FragEntry",
-        "FragFolder",
-      ]);
-      // ...and a local ref inside the view resolves against it.
+      // The view carries no `$defs`: its refs into the group name the group
+      // document, so they resolve wherever the view is later embedded...
+      expect(resolved.$defs).toBeUndefined();
       const items = (resolved.properties!.children as JSONSchemaObj)
         .items as JSONSchemaObj;
-      expect(items).toEqual({ $ref: "#/$defs/FragEntry" });
+      expect(items).toEqual({ $ref: memberRef("FragEntry") });
+      // ...and a ref inside the view resolves through the registry.
       const entry = ContextualFlowControl.resolveSchemaRefs(
         items,
         resolved,
       ) as JSONSchemaObj;
       expect(entry.anyOf).toEqual([
         { type: "string" },
-        { $ref: "#/$defs/FragFolder" },
+        { $ref: memberRef("FragFolder") },
       ]);
     });
 
