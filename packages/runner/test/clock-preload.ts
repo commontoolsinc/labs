@@ -49,6 +49,7 @@ installFakeClock({
     "executor-compile-and-run",
     // Scoped fetch requests use the same live serving host and lease cadence.
     "executor-fetch-instances",
+    "executor-fetch-program-instances",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.

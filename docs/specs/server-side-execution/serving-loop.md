@@ -391,13 +391,17 @@ on drain-settle (TRUE quiescence: a settled non-exhausted cycle, no
 contributions, no pending events, the drain empty — S1, RULED
 2026-08-19; protocol.md §4's quiescence-advance amendment):
   additionally advance W over the space's own committed derived tail
-  (the wave commits contiguously above the input coverage point),
+  (own waves and standalone effect completions contiguously above the
+  input coverage point),
   sealed as an advance-only wave and pushed through the ordinary
   watermark-doc channel — client retirement floors that include a
   pushed derived commit's seq become reachable on a quiet space (the
   swatch-stall class fix). At most once per quiescence transition
-  (latched by content-carrying wave commits, consumed on seal); the
-  advance's own bookkeeping commit is never chased; any non-own seq
+  (latched by content-carrying own derived commits, consumed on seal); a
+  completion arriving after an advance chose its target keeps a later advance
+  owed. Each successful advance-only commit is counted even when that newer
+  completion keeps the latch armed. The advance's own bookkeeping commit
+  is never chased; any non-own seq
   above the coverage point stops the advance below it (fail-closed —
   its coverage arrives input-driven). Counted: settleAdvances.
 
@@ -1215,6 +1219,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **In-flight dedupe**: one outstanding effect per (key, result
   target) per space; the target includes its resolved user/session instance.
   A second miss on the same (key, target) attaches to the in-flight effect.
+  Before dispatch, each accepted attachment retains its own release check.
+  A synchronous release refusal selects the next attachment under that
+  attachment's captured run context. Once an attachment dispatches, the key
+  deduplicates until its work and readable completion retire; a thrown error
+  or rejected work promise does not select another attachment.
   Completion acceptance follows the currently selected request in that
   instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
@@ -1299,6 +1308,21 @@ the durable rows of §5 carry APPENDS, never effect state).
   write-free writebacks, and identical re-asserts are idempotent at
   the store. For appends, idempotence is the `eventId` dedupe
   horizon.
+- When several accepted contributions to one document share a
+  wave sequence, their settled local value includes every contribution in
+  local sealing order. Local promotion also preserves that order between
+  verdicts, including in the view that excludes speculative pending layers.
+  An authoritative frame at the same sequence already
+  contains the wave's value and prevents replay of accepted contributions;
+  a newer frame also takes
+  precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
+  space, user, and session instances, including reordered verdict delivery,
+  withdrawal, and noncommutative appends. Foreign provisioning groups
+  contributions by actor and grant, so one wave can commit several batches
+  to a foreign space in a different order from local sealing. Accepted verdicts
+  for each space follow that space's server sequence, retaining sealing order
+  within each batch. The settled replica therefore matches the engine when
+  nonadjacent contributions share a foreign batch.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.
