@@ -1,9 +1,11 @@
 # Lazy materialization fast-follow
 
-Status: planned as the separate follow-up to the pattern computation cost work
-in #7155. This plan owns the remaining handler investigation, default-on rollout
-evidence, flag retirement, and measurements that the computation-cost tracker
-called D1/D2. It does not authorize a live lunch-poll update.
+Status: F0 complete; F1 in progress. This plan is the separate follow-up to the
+[pattern computation cost](../history/plans/pattern-computation-cost.md) work,
+whose [implementation record](../history/plans/pattern-computation-cost-implementation.md)
+transferred its D1/D2 measurements here. It owns the remaining handler
+investigation, default-on rollout evidence, flag retirement, and those
+measurements. It does not authorize a live lunch-poll update.
 
 The [lazy materialization design](lazy-cell-materialization.md) defines the
 schema-observing view and snapshot contracts. Lift arguments use that view under
@@ -15,16 +17,16 @@ integration problem.
 
 ## Scope and decision
 
-Complete the outstanding work in this plan after #7155, with independent PRs and
-acceptance evidence. Keep handler semantics separate from removing the lift-path
+Complete the outstanding work in this plan after the computation-cost arc,
+with independent PRs and acceptance evidence. Keep handler semantics separate from removing the lift-path
 rollout switch: either can expose a correctness issue the other does not
 address. The flag's owner and removal condition remain recorded in
 [Experimental options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization).
 
-The alternative is to expand #7155 into handler behavior and rollout changes.
-Keeping a separate plan lets its measured collection improvements close with
-their own evidence and gives the broader behavioral changes an explicit review
-boundary. Deferring the work without an execution sequence would leave the
+The alternative was to expand the computation-cost arc into handler behavior
+and rollout changes. Keeping a separate plan lets its measured collection
+improvements close with their own evidence and gives the broader behavioral
+changes an explicit review boundary. Deferring the work without an execution sequence would leave the
 default-on flag and handler exception without a completion path.
 
 ## Execution tracker
@@ -35,8 +37,8 @@ in the same PR as behavior changes.
 
 | Step | Depends on       | Deliverable                                                           | State   |
 | ---- | ---------------- | --------------------------------------------------------------------- | ------- |
-| F0   | #7155 acceptance | Fixed baseline and remaining-call-site inventory                      | Pending |
-| F1   | F0               | Handler materialization contract and measured prototype               | Pending |
+| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md) |
+| F1   | F0               | Handler materialization contract and measured prototype               | In progress |
 | F2   | F1               | Reviewed handler integration, or an explicit evidence-backed deferral | Pending |
 | F3   | F0               | Default-on rollout evidence and flag-retirement decision              | Pending |
 | F4   | F3               | Remove the lift rollout switch and redundant fallback dispatch        | Pending |
@@ -48,14 +50,23 @@ Do not delete eager materialization that unmarked transactions still require.
 
 ### F0 — Establish the baseline
 
-- [ ] Inventory flag consumers, lift and handler argument entry points, and
+- [x] Inventory flag consumers, lift and handler argument entry points, and
       eager reads required for result writing, diffing, or unmarked callers.
-- [ ] Pin a runtime revision and record flag posture for each process. Preserve
-      the #7155 controlled 74-, 296-, and 1,184-vote fixtures and the
-      representative copy's current-day filter and linked-profile limitations.
-- [ ] Record completed-attempt reads, reactive-body reads, handler and commit
+- [x] Pin a runtime revision and record flag posture for each process. Preserve
+      the controlled 74-, 296-, and 1,184-vote fixtures and the representative
+      copy's current-day filter and linked-profile limitations.
+- [x] Record completed-attempt reads, reactive-body reads, handler and commit
       work, graph size, allocation/retention, and disabled-accounting durations
       in separate windows. Preserve their different accounting boundaries.
+
+The [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)
+holds the inventory, the posture table, and the per-phase handler dispatch
+measurement from `packages/runner/test/handler-dispatch-cost.bench.ts`. Its
+retention probe was inconclusive and is recorded as such; the representative
+copy was not re-run and its limitations carry forward. Two of its findings
+shape F1: the dependency preflight, not the argument read, dominates a
+handler dispatch, and a handler's read log is its commit precondition set,
+which a view would narrow.
 
 ### F1/F2 — Decide and integrate handler materialization
 
