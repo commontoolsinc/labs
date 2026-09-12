@@ -94,7 +94,9 @@ interface ProgramPublication {
   bindingKey: string;
   target: string;
   sequence: number;
-  current: boolean;
+  selection: {
+    acceptedSequence: number;
+  };
   accepted?: boolean;
   finished?: boolean;
   effectKey?: string;
@@ -272,13 +274,19 @@ export function fetchProgram(
     const accept = () => {
       // Replacing an output binding does not relinquish its accepted request.
       publication.accepted = true;
+      publication.selection.acceptedSequence = Math.max(
+        publication.selection.acceptedSequence,
+        publication.sequence,
+      );
       for (const other of publications) {
         if (
           other.bindingKey === publication.bindingKey &&
-          other.sequence < publication.sequence &&
-          other.target !== publication.target
+          other.sequence < publication.sequence
         ) {
-          other.current = false;
+          other.selection.acceptedSequence = Math.max(
+            other.selection.acceptedSequence,
+            publication.sequence,
+          );
           publications.delete(other);
         }
       }
@@ -391,8 +399,14 @@ export function fetchProgram(
         : resolveScopeKey(publicationBinding.scope ?? "space", identity),
       target: effectTargetKey("publication", result),
       sequence: ++publicationSequence,
-      current: true,
+      selection: { acceptedSequence: 0 },
     };
+    for (const other of publications) {
+      if (other.bindingKey === publication.bindingKey) {
+        publication.selection = other.selection;
+        break;
+      }
+    }
     observePublication(tx, publication);
 
     if (!url) {
@@ -425,7 +439,9 @@ export function fetchProgram(
           other.bindingKey === publication.bindingKey &&
           other.target === publication.target
         ) {
-          other.current = false;
+          // Only accepted publication supersedes an earlier refusal. Retain
+          // one staging record per binding/target; old callbacks share the
+          // acceptance sequence without retaining a chain of retry attempts.
           publications.delete(other);
         }
       }
@@ -514,7 +530,10 @@ export function fetchProgram(
                     settleTx.getNarrowestReadScope() !== outputScope ||
                     computeInputHashFromValue(current) !== inputHash
                   ) return;
-                  if (publication.current) {
+                  if (
+                    publication.sequence >=
+                      publication.selection.acceptedSequence
+                  ) {
                     sendResult(settleTx, { pending, result, error });
                     observePublication(settleTx, publication, "binding");
                   }
@@ -523,7 +542,14 @@ export function fetchProgram(
                   result.withTx(settleTx).set(undefined);
                   error.withTx(settleTx).set(rejection.message);
                 },
-              ).finally(() => publications.delete(publication)),
+              ).finally(() => {
+                // A failed refusal leaves one record through which an older
+                // callback can observe the next accepted binding publication.
+                if (
+                  publication.selection.acceptedSequence >=
+                    publication.sequence
+                ) publications.delete(publication);
+              }),
               parentCell,
             );
           },

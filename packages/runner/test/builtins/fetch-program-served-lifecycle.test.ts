@@ -763,6 +763,104 @@ describe("fetch-program-served-lifecycle", () => {
     }
   });
 
+  for (const withdraw of [false, true]) {
+    it(`preserves the ${withdraw ? "refused request" : "accepted retry"}'s announcement after a same-binding retry ${withdraw ? "withdraws" : "commits"}`, async () => {
+      const f = fixture();
+      await f.seed(aliceOne, "user");
+      const original = f.stage(aliceOne);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const write = runtime.editWithRetry.bind(runtime);
+      using _write = stub(
+        runtime,
+        "editWithRetry",
+        <T>(
+          fn: (tx: IExtendedStorageTransaction) => T,
+          maxRetries?: number,
+          options?: Parameters<Runtime["editWithRetry"]>[2],
+        ) => {
+          entered.resolve();
+          return release.promise.then(() => write(fn, maxRetries, options));
+        },
+      );
+      try {
+        expect(original.getCfcState().outbox).toHaveLength(1);
+        original.getCfcState().outbox[0].abandon?.(
+          new Error("original request refused"),
+        );
+        await entered.promise;
+        const retry = f.stage(aliceOne);
+        expect(retry.getCfcState().outbox).toHaveLength(1);
+        await commitBatch([retry], withdraw, () => {
+          expect(f.read(f.binding, aliceOne)?.selected).toBe(
+            withdraw ? undefined : "user",
+          );
+          release.resolve();
+        });
+      } finally {
+        release.resolve();
+      }
+      await runtime.settled();
+      expect(f.cacheState(aliceOne, "user")).toBe(
+        withdraw ? "error" : "fetching",
+      );
+      expect(f.read(f.binding, aliceOne)?.selected).toBe("user");
+      expect(f.publications).toHaveLength(withdraw ? 3 : 2);
+      expect(f.read(f.resultCells.pending, aliceOne)).toBe(!withdraw);
+      f.cancels[0]();
+      await runtime.settled();
+    });
+  }
+
+  it("honors an accepted different target between same-target retry attempts", async () => {
+    const f = fixture();
+    await f.seed(aliceOne, "user");
+    await f.seed(bobOne, "session");
+    const original = f.stage(aliceOne);
+    await commit(f.stage(bobOne, true, true));
+    const retry = f.stage(aliceOne);
+    for (const callback of f.accepted) callback();
+    await runtime.settled();
+    await commitBatch([retry], true);
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+    original.getCfcState().outbox[0].abandon?.(new Error("original refused"));
+    await runtime.settled();
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+    expect(f.publications).toHaveLength(3);
+    f.cancels[0]();
+    await runtime.settled();
+  });
+
+  it("retains accepted replacement visibility after a retry refusal cannot commit", async () => {
+    const f = fixture();
+    await f.seed(aliceOne, "user");
+    await f.seed(bobOne, "session");
+    const original = f.stage(aliceOne);
+    const retry = f.stage(aliceOne);
+    {
+      using failure = stub(runtime, "editWithRetry", () =>
+        Promise.resolve({
+          error: {
+            name: "StorageTransactionAborted" as const,
+            message: "refusal write unavailable",
+            reason: new Error("refusal write unavailable"),
+          },
+        }));
+      retry.getCfcState().outbox[0].abandon?.(new Error("retry refused"));
+      await runtime.settled();
+      expect(failure.calls).toHaveLength(1);
+    }
+    expect(f.read(f.binding, aliceOne)).toBeUndefined();
+    await commit(f.stage(bobOne));
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+    original.getCfcState().outbox[0].abandon?.(new Error("original refused"));
+    await runtime.settled();
+    expect(f.read(f.binding, bobOne)?.selected).toBe("session");
+    expect(f.publications).toHaveLength(3);
+    f.cancels[0]();
+    await runtime.settled();
+  });
+
   it("preserves earlier refusal ownership when a newer scope publication is withdrawn", async () => {
     const f = fixture();
     await f.seed(aliceOne, "user");

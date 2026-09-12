@@ -190,6 +190,7 @@ function loneCost(
   manifest: Manifest,
   input: PlanInput,
   entry: ManifestEntry,
+  repeats = 1,
 ): number {
   return marginalCost(
     manifest,
@@ -203,7 +204,7 @@ function loneCost(
       load: 0,
     },
     entry,
-    1,
+    repeats,
   );
 }
 
@@ -438,6 +439,7 @@ export function plan(input: PlanInput): Plan {
     key: string;
     reason: SelectionReason;
     entry: ManifestEntry;
+    runs: number;
     cost: number;
   }[] = [];
   for (const [key, reason] of requiredOf) {
@@ -463,7 +465,18 @@ export function plan(input: PlanInput): Plan {
       key,
       reason,
       entry,
-      cost: loneCost(manifest, input, entry),
+      // How many times an item runs is what its share asks for, and
+      // nothing else decides it. A repeat catches a test disagreeing
+      // with itself, which is worth the same whether the item was
+      // chosen, edited, pulled in by the coverage gate, or required
+      // because the run is the whole corpus.
+      runs: entry.repeats,
+      // What an empty lane would pay for every one of those runs. The
+      // setup and overheads a lane opens are paid once however many
+      // times the item runs, so multiplying one run's whole figure
+      // would charge them again per repeat and order the pass by a cost
+      // no lane pays.
+      cost: loneCost(manifest, input, entry, entry.repeats),
     });
   }
 
@@ -478,17 +491,27 @@ export function plan(input: PlanInput): Plan {
     b.cost - a.cost || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   );
 
-  for (const { key, reason, entry } of required) {
-    // Mandatory work runs once. A repeat covers nothing a measured run
-    // did not, and this pass is the one allowed to put a lane past its
-    // budget: it takes a lane that can hold the work where there is one,
-    // and the lane it leaves shortest where there is not.
-    const spots = spotsFor(input, lanes, entry, 1, laneBudget, bound);
-    // Every lane is a candidate for work that fits in none of them, and
-    // there is at least one lane, so there is always a shortest.
-    const spot = spots.fitting ?? spots.shortest!;
+  for (const { key, reason, entry, runs } of required) {
+    // An identity that would be repeated but fits nowhere runs fewer
+    // times first, down to once, the way the discretionary passes do.
+    // All of one identity's runs go in one lane, so a lane cannot be
+    // added to make room for them.
+    let taking: { spot: Spot; runs: number } | undefined;
+    for (let count = runs; count >= 1 && taking === undefined; count--) {
+      const spot = spotsFor(input, lanes, entry, count, laneBudget, bound)
+        .fitting;
+      if (spot !== undefined) taking = { spot, runs: count };
+    }
+    // This pass is the one allowed to put a lane past its budget: where
+    // one run of it fits in no lane, it goes in the lane it leaves
+    // shortest. Every lane is a candidate for such work, and there is at
+    // least one lane, so there is always a shortest.
+    const chosen = taking ?? {
+      spot: spotsFor(input, lanes, entry, 1, laneBudget, bound).shortest!,
+      runs: 1,
+    };
     taken.add(key);
-    place(input, spot, entry, reason, 1);
+    place(input, chosen.spot, entry, reason, chosen.runs);
   }
   const mandatoryLoad = laneLoad(lanes);
   // A mandatory set larger than the whole run's budget leaves some lane

@@ -14,6 +14,7 @@ import {
   PERF_METRICS_ARTIFACT_NAME,
   type PRInfo,
   type WorkflowRun,
+  workflowRunsPathForBaseline,
 } from "./ci-check-lib.ts";
 import {
   baselineLcovForRun,
@@ -57,7 +58,6 @@ import {
   unscoredGroupsReport,
   validateBaselineRunsForMainHead,
   walkBaselineRuns,
-  workflowRunsPathForBaseline,
   writeCoverageComment,
   writeCoverageDebtSuggestion,
   writeCoverageResolved,
@@ -413,9 +413,10 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   const overrides = parseMergedBaselineOverrides(
     {
       number: 123,
-      // A directory below the group level names no source group, so accepting
-      // it throws.
-      body: "ACCEPT_COVERAGE_DEBT: packages/runner/src +7 lines",
+      // Only `packages` splits below its top level, so a directory under
+      // any other one names neither a source group nor a workspace
+      // member, and accepting it throws.
+      body: "ACCEPT_COVERAGE_DEBT: tasks/runner +7 lines",
     },
     (message) => warnings.push(message),
   );
@@ -424,6 +425,17 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   assertEquals(warnings.length, 1);
   assertStringIncludes(warnings[0], "merged PR #123");
   assertStringIncludes(warnings[0], "name a coverage source group");
+});
+
+Deno.test("a merged PR's acceptance of a workspace member is not this ratchet's", () => {
+  // It names a member deeper than any source group, which the coverage
+  // gate reads and this ratchet measures nothing for.
+  const overrides = parseMergedBaselineOverrides({
+    number: 125,
+    body: "ACCEPT_COVERAGE_DEBT: packages/connectors/github +7 lines",
+  });
+
+  assertEquals(overrides?.metrics.size, 0);
 });
 
 Deno.test("valid merged PR baseline override metadata is parsed", () => {

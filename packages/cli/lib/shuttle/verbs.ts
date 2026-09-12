@@ -389,10 +389,7 @@ async function get(
     if (!(thrown instanceof CellSelectionError)) throw thrown;
     return refuse(messageOf(thrown));
   }
-  const operand = line.operands[0];
-  const at = operand === undefined
-    ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, "get", deps);
+  const at = await aimed(shuttle, line.operands[0], "get", deps);
   if (at.kind === "refused") return at;
   // Before the read and not after it, which is the whole point of warming: the
   // value a read serves is what a running pattern holds, so the pattern runs
@@ -450,8 +447,26 @@ function help(_shuttle: Shuttle, line: VerbLine): Outcome {
 }
 
 /**
- * Lists what stands where shuttle stands, numbering the rows and writing one
- * page of them.
+ * Lists what stands at the place `line` names, which is where shuttle stands
+ * where it names none, numbering the rows and writing one page of them.
+ *
+ * The operand is read through the door every reading verb aims one through
+ * ({@link aimed}), so a target `get` reads is a target this lists and neither
+ * is refused a spelling the other takes. Nothing moves: listing a child is a
+ * read like any other, and shuttle stands where it stood.
+ *
+ * A listing numbers its rows against the place it was *read* at rather than
+ * against the place shuttle stands at, which is what makes `cd %3` reach the
+ * row `ls <target>` printed. That renumbers, as any listing does (decision
+ * 17): `%n` is a reference until the next listing, so the numbers a target's
+ * rows carry are the ones the next line takes. Numbers that did not bind
+ * would be rows shown that the next command will not take, which is the one
+ * thing a numbered listing may not be.
+ *
+ * The `#argument` suffix is refused. It selects one of a piece's two cells
+ * and a place holds no such selection, so a listing of an arguments cell
+ * would number rows whose handles walk the result — the numbers not binding
+ * again, by a route the operand rather than the listing opened.
  *
  * Every row is numbered and every row's handle is recorded, page or no page:
  * what a page decides is how many of them are on the screen at once, and
@@ -474,7 +489,16 @@ async function ls(
         `given ${limit}.`,
     );
   }
-  const place = shuttle.place.place;
+  const at = await aimed(shuttle, line.operands[0], "ls", deps);
+  if (at.kind === "refused") return at;
+  if (at.input) {
+    return refuse(
+      `\`${ARGUMENT_SUFFIX}\` selects one of a piece's two cells, and a ` +
+        `listing's rows are reached from the place they were listed at, ` +
+        `which carries no such selection. \`get\` reads that cell.`,
+    );
+  }
+  const place = at.place;
   const warmed = await warmAt(shuttle, place, deps);
   if (warmed !== undefined) return warmed;
   const listed = await guarded(
@@ -1238,18 +1262,26 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
   }],
   ["ls", {
     run: ls,
-    arity: { operands: "none" },
+    arity: { operands: "optional", completes: ["children"] },
     options: LIST_OPTIONS,
-    usage: "ls",
-    summary: "Lists what stands where shuttle stands.",
-    detail: "A space root lists its facets, `slugs/` the names the space's " +
-      "index\nrecords, `pieces/` the space's pieces, and a cell the keys " +
-      "directly\nunder it. A row that failed on its own account is still a " +
-      "row and\ncarries what went wrong, where a read that failed outright " +
-      "is no\nlisting at all and is reported as the failure it is.\n\nEvery " +
-      "row is numbered from `%1`, and a row that is one of the piece's\n" +
-      "callables says so. One screenful is written and `more` writes the " +
-      "rest\nunder the numbers it already gave them.",
+    usage: "ls [<ref>]",
+    summary: "Lists what stands at a place, defaulting to where you stand.",
+    detail: "The operand names the place to list, and is `get`'s operand " +
+      "less the\n`#argument` suffix: a place carries no selection between a " +
+      "piece's two\ncells, and a row is reached from the place it was " +
+      "listed at. A space\nroot and a facet are places to list, where `get` " +
+      "turns them down as\nholding no value. Nothing moves: listing a child " +
+      "reads it without\nstanding on it.\n\nA space root lists " +
+      "its facets, `slugs/` the names the space's index\nrecords, " +
+      "`pieces/` the space's pieces, and a cell the keys directly\nunder " +
+      "it. A row that failed on its own account is still a row and\n" +
+      "carries what went wrong, where a read that failed outright is no\n" +
+      "listing at all and is reported as the failure it is.\n\nEvery row " +
+      "is numbered from `%1`, and a row that is one of the piece's\n" +
+      "callables says so. The numbers are the listed place's, so `cd %3`\n" +
+      "reaches the row a listed target showed, and the next listing " +
+      "replaces\nthem wherever it was read. One screenful is written and " +
+      "`more` writes\nthe rest under the numbers it already gave them.",
   }],
   ["more", {
     run: more,
@@ -2495,9 +2527,7 @@ async function receiver(
   verb: string,
   deps: VerbDeps,
 ): Promise<Receiving> {
-  const at = operand === undefined
-    ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, verb, deps);
+  const at = await aimed(shuttle, operand, verb, deps);
   if (at.kind === "refused") return at;
   if (at.input) {
     return refuse(
