@@ -429,4 +429,146 @@ describe("runtime-owned-store enrollment wiring", () => {
       expect(refused.error?.message).toContain('"anchor-field-2"');
     });
   });
+
+  describe("an element anchored inside a store no piece owns", () => {
+    // The other half of the same split. A child inherits the runtime-owned
+    // claim only from a parent that carries one, so a child of an ordinary
+    // authored document is measured against what the schema describing the
+    // parent's value at the anchored position declares. The refusal names the
+    // child, at an id no author wrote down, and lands at the child's root
+    // whatever the declaration sits on inside the element.
+
+    /** The holder these cases write their list into, under `schema`. */
+    const holder = (name: string, schema: JSONSchema) =>
+      runtime.getCell<{ items: { note: string }[] }>(space, name, schema);
+
+    /** A list schema whose ELEMENT declares `clauses`, where any are given. */
+    const listSchema = (...clauses: string[]): JSONSchema => ({
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { note: { type: "string" } },
+            ...(clauses.length > 0
+              ? { ifc: { confidentiality: clauses } }
+              : {}),
+          },
+        },
+      },
+    } as JSONSchema);
+
+    /** Put what `sourceName` carries into `target`'s list, anchoring it. */
+    const writeElement = async (
+      target: ReturnType<typeof holder>,
+      sourceName: string,
+    ) => {
+      // Create the public container before reading the secret so the write
+      // under test lands at the declared element slot and its anchored child.
+      const setup = runtime.edit();
+      target.withTx(setup).set({ items: [] });
+      expect((await setup.commit()).error).toBeUndefined();
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(space, sourceName, undefined, tx);
+      const raw = source.getRaw() as { secret?: string };
+      target.withTx(tx).key("items").key(0).set({
+        note: `${raw.secret}/anchored`,
+      });
+      tx.prepareCfc();
+      return await tx.commit();
+    };
+
+    it("refuses one whose parent declares nothing", async () => {
+      await seedSecret("unowned-bare", "unowned-bare-clause");
+      const refused = await writeElement(
+        holder("wiring-unowned-bare", listSchema()),
+        "unowned-bare",
+      );
+      expect(refused.error?.message).toContain(
+        "writer-fit confidentiality misfit",
+      );
+      expect(refused.error?.message).toContain('"unowned-bare-clause"');
+    });
+
+    it("admits one the element's own declaration covers", async () => {
+      await seedSecret("unowned-covered", "unowned-covered-clause");
+      const committed = await writeElement(
+        holder(
+          "wiring-unowned-covered",
+          listSchema("unowned-covered-clause"),
+        ),
+        "unowned-covered",
+      );
+      expect(committed.error).toBeUndefined();
+    });
+
+    it("refuses replacing an undeclared parent with privately selected elements", async () => {
+      await seedSecret("unowned-parent", "unowned-parent-clause");
+      const target = holder(
+        "wiring-unowned-parent",
+        listSchema("unowned-parent-clause"),
+      );
+      const tx = runtime.edit();
+      const source = runtime.getCell(space, "unowned-parent", undefined, tx);
+      const raw = source.getRaw() as { secret: string };
+      target.withTx(tx).set({ items: [{ note: `${raw.secret}/anchored` }] });
+      tx.prepareCfc();
+      const refused = await tx.commit();
+      expect(refused.error?.message).toContain(
+        `writer-fit confidentiality misfit for ${target.getAsNormalizedFullLink().id} at /`,
+      );
+      expect(refused.error?.message).toContain('"unowned-parent-clause"');
+    });
+
+    it("refuses one the element declares a different clause for", async () => {
+      await seedSecret("unowned-other", "unowned-other-clause");
+      const refused = await writeElement(
+        holder(
+          "wiring-unowned-other",
+          listSchema("some-other-clause"),
+        ),
+        "unowned-other",
+      );
+      expect(refused.error?.message).toContain(
+        "writer-fit confidentiality misfit",
+      );
+      expect(refused.error?.message).toContain('"unowned-other-clause"');
+    });
+
+    it("refuses one declared on a field rather than on the element", async () => {
+      // The anchoring write lands at the child's ROOT, so a declaration one
+      // level in does not cover it, and the misfit says `at /` rather than
+      // naming the field the clause was written for.
+      await seedSecret("unowned-field", "unowned-field-clause");
+      const fieldDeclared: JSONSchema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                note: {
+                  type: "string",
+                  ifc: { confidentiality: ["unowned-field-clause"] },
+                },
+              },
+            },
+          },
+        },
+      } as JSONSchema;
+      const refused = await writeElement(
+        holder("wiring-unowned-field", fieldDeclared),
+        "unowned-field",
+      );
+      expect(refused.error?.message).toContain(
+        "writer-fit confidentiality misfit",
+      );
+      expect(refused.error?.message).toContain("at /");
+      expect(refused.error?.message).not.toContain("at /note");
+      expect(refused.error?.message).toContain('"unowned-field-clause"');
+    });
+  });
 });

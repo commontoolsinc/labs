@@ -709,6 +709,25 @@ The strict-only delta is:
     the parent link a write traverses — which is tracked separately.
     `cfc-runtime-owned-store-wiring.test.ts` pins both spellings, so the
     refused half flips visibly the day that lands.
+
+    The claim reaches a child only from a parent that carries one, and the
+    case where none does is worth stating because the refusal it produces
+    names a document no author wrote down. A child anchored out of an
+    ordinary authored store is measured against its own ceiling: the
+    residency clause, plus what the schema describing the parent's value at
+    the anchored position declares, which the child carries. Only a
+    declaration at that position covers it. The anchoring write lands at the
+    child's root, so an `ifc` on a field of the element leaves the write
+    uncovered, and the misfit reads `at /` rather than naming the field the
+    clause was written for. Where the parent declares nothing there, a write
+    carrying a label into the child is refused at the child's id, and that id
+    is a hash of the parent and the path, so nothing recovers the parent from
+    it: what the message establishes is that some document holds a piece of
+    another document's value. The containing document is measured at its own
+    written path as well: a declaration on the element does not cover replacing
+    the whole parent under a confidential flow. Writing the declared element
+    slot of an existing public container measures that slot and the anchored
+    child. The same test file pins both write shapes and the child outcomes.
   - **How far it reaches inside that document.** Every path the
     transaction writes there, not only the paths setup wrote: the marker
     names the store, and the declaration is a statement about the store.

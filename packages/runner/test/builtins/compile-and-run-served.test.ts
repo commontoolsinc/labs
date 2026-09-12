@@ -7,8 +7,13 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 import type { BuiltInCompileAndRunParams } from "commonfabric";
 
 import { compileAndRun } from "../../src/builtins/compile-and-run.ts";
+import {
+  enrollRuntimeOwnedStore,
+  recordRuntimeOwnedStore,
+} from "../../src/builtins/runtime-owned-store.ts";
 import type { Cell } from "../../src/cell.ts";
 import { readStoredCfcMetadata } from "../../src/cfc/metadata.ts";
+import type { CfcEnforcementMode } from "../../src/cfc/types.ts";
 import { RUNNER_ACCEPTANCE_EFFECT_KIND } from "../../src/executor/runner-acceptance.ts";
 import {
   stampWaveRunContext,
@@ -44,6 +49,7 @@ type Outputs = {
 async function fixture(
   servingPosture: boolean,
   cfcFlowLabels: "off" | "persist" = "off",
+  cfcEnforcementMode: CfcEnforcementMode = "enforce-explicit",
 ) {
   const identity = await Identity.fromPassphrase("served compile unit");
   const storage = StorageManager.emulate({ as: identity });
@@ -53,6 +59,7 @@ async function fixture(
     experimental: { serverExecution: true },
     servingPosture,
     cfcFlowLabels,
+    cfcEnforcementMode,
   });
   const space = identity.did();
   const inputs = runtime.getCell<BuiltInCompileAndRunParams<any>>(
@@ -60,6 +67,28 @@ async function fixture(
     "inputs",
   );
   const parent = runtime.getCell(space, "parent");
+  // A program's bytes live in a cell of the piece that names them — its
+  // argument document, or one of the internal documents its result projects —
+  // and the runner enrolls each of those as a store the runtime owns. This
+  // cell stands in for that document, so it carries the same claim.
+  //
+  // The claim decides a verdict once the source carries a label. `run()` puts
+  // the program in through `Cell.set`, which gives a plain object sitting in
+  // an array a document of its own, so `files[0]` is split out into a child
+  // whose id derives from this one's; §8.12.5 route 2 reaches that child
+  // through this document's claim, and without it the child is a store no
+  // piece owns and no schema declares. That write shape has no production
+  // counterpart: a builtin's inputs arrive in an immutable `data:` document
+  // that nothing writes to, and a node's output reaches its binding without
+  // anchoring anything.
+  //
+  // The enrollment is deliberately not transactional, so this transaction
+  // carries it and nothing else.
+  {
+    const enrollment = runtime.edit();
+    enrollRuntimeOwnedStore(enrollment, parent, inputs);
+    enrollment.abort("Enrollment recorded");
+  }
   const publication = runtime.getCellFromLink<unknown>({
     ...runtime.getCell(space, "compile-publication").getAsNormalizedFullLink(),
     scope: "user",
@@ -71,6 +100,9 @@ async function fixture(
     inputs,
     (tx, result) => {
       outputs = result;
+      // This publication stands in for the node's runtime-owned output
+      // binding, declared in the transaction's acting-user scope.
+      recordRuntimeOwnedStore(tx, parent, publication.withTx(tx));
       publication.withTx(tx).set(result);
     },
     (cancel) => cancels.push(cancel),
@@ -116,6 +148,22 @@ async function fixture(
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [{ name: "/main.tsx", contents: "export default 1;" }],
+};
+
+/**
+ * A compilation the case settles by hand.
+ *
+ * The rejection carries a handler from the moment the compilation exists. A
+ * case that throws before settling its own compilation still runs the
+ * `finally` that rejects it, and that rejection is then the promise's first
+ * settlement with nobody awaiting it. The unhandled rejection aborts the
+ * module: the cases after it never run, and the failure that caused it can go
+ * unreported with them.
+ */
+const deferredCompilation = <T>(): PromiseWithResolvers<T> => {
+  const deferred = Promise.withResolvers<T>();
+  deferred.promise.catch(() => {});
+  return deferred;
 };
 
 describe("compile-and-run-served", () => {
@@ -184,7 +232,7 @@ describe("compile-and-run-served", () => {
 
   it("launches at commit and keeps one unresolved request through repeated runs", async () => {
     const f = await fixture(true);
-    const compilation = Promise.withResolvers<never>();
+    const compilation = deferredCompilation<never>();
     let launches = 0;
     f.runtime.patternManager.compileOrGetPattern = () => {
       launches++;
@@ -293,9 +341,94 @@ describe("compile-and-run-served", () => {
     }
   });
 
+  it("compiles a program whose source carries a confidentiality label", async () => {
+    // The companion to the ceiling case above: the same labeled program,
+    // released rather than refused, so the path past the sink gate is covered
+    // too. Setup reads the labeled source, so its flow join carries that
+    // caveat and every store the setup transaction fills is measured against
+    // it; each is a store the runtime owns, so §8.12.5 route 2 declares the
+    // join on it and the compiler is handed the program.
+    const signer = await Identity.fromPassphrase("compile labeled source");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      ...MAX_ENFORCEMENT_CFC_OPTIONS,
+      cfcEnforcementMode: "enforce-strict",
+      // The sink releases ungated here; the ceiling case covers the gate.
+      cfcSinkMaxConfidentiality: {},
+      experimental: { serverExecution: true },
+      servingPosture: true,
+    });
+    let launches = 0;
+    runtime.patternManager.compileOrGetPattern = () => {
+      launches++;
+      return Promise.reject(new Error("labeled source compiler failure"));
+    };
+    const refusals: unknown[] = [];
+    const refused = Promise.withResolvers<void>();
+    refused.promise.catch(() => {});
+    runtime.scheduler.onError((error) => {
+      refusals.push(error);
+      refused.resolve();
+    });
+    const { pattern, Cell: BuilderCell, compileAndRun: compile } =
+      createTrustedBuilder(runtime).commonfabric;
+    const parent = pattern<Record<string, never>>(() => {
+      const contents = BuilderCell.of("export default 1;", {
+        type: "string",
+        ifc: {
+          confidentiality: [{
+            type: "https://commonfabric.org/cfc/atom/Caveat",
+            kind: "https://commonfabric.org/cfc/concepts/prompt-influence",
+            source: "of:compile-labeled-source",
+          }],
+        },
+      });
+      return compile({
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents }],
+      });
+    });
+    try {
+      const tx = runtime.edit();
+      const result = runtime.getCell(
+        signer.did(),
+        "compile-labeled-result",
+        parent.resultSchema,
+        tx,
+      );
+      runtime.run(tx, parent, {}, result);
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+      // Either outcome ends the wait. A refused write never reaches the
+      // result cell, so waiting on that cell alone would hang on exactly the
+      // regression these assertions are written to name; the scheduler
+      // reports the refusal, and a run that reaches the compiler reports
+      // nothing.
+      await Promise.race([
+        waitForCellValue<{ pending: boolean; error?: string }>(
+          runtime,
+          result,
+          (value) => value?.error !== undefined,
+        ),
+        refused.promise,
+      ]);
+      await runtime.settled();
+      expect(refusals.map(String).join("\n")).not.toContain("writer-fit");
+      expect(launches).toBe(1);
+      const value = result.get() as { pending: boolean; error?: string };
+      expect(value.pending).toBe(false);
+      expect(value.error).toContain("labeled source compiler failure");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("reissues a recovered compilation before consulting the process cache", async () => {
     const f = await fixture(true);
-    const compilation = Promise.withResolvers<never>();
+    const compilation = deferredCompilation<never>();
     const spaces: unknown[] = [];
     f.runtime.patternManager.compileOrGetPattern = (_input, space) => {
       spaces.push(space);
@@ -324,7 +457,7 @@ describe("compile-and-run-served", () => {
 
   it("reissues a recovered pending request after its sealed wave is withdrawn", async () => {
     const f = await fixture(true);
-    const compilation = Promise.withResolvers<never>();
+    const compilation = deferredCompilation<never>();
     let launches = 0;
     f.runtime.patternManager.compileOrGetPattern = () => {
       launches++;
@@ -433,7 +566,7 @@ describe("compile-and-run-served", () => {
     const child = createTrustedBuilder(f.runtime).commonfabric.pattern(
       () => ({ answer: 1 }),
     );
-    const compilation = Promise.withResolvers<typeof child>();
+    const compilation = deferredCompilation<typeof child>();
     f.runtime.patternManager.compileOrGetPattern = () => compilation.promise;
     try {
       expect(await f.run(PROGRAM)).toBe(true);
@@ -475,7 +608,7 @@ describe("compile-and-run-served", () => {
       const child = createTrustedBuilder(f.runtime).commonfabric.pattern(
         () => ({ answer: 1 }),
       );
-      const compilation = Promise.withResolvers<typeof child>();
+      const compilation = deferredCompilation<typeof child>();
       f.runtime.patternManager.compileOrGetPattern = () => compilation.promise;
       f.runtime.patternManager.getCompiledPatternForProgramSync = () => child;
       try {
@@ -530,7 +663,7 @@ describe("compile-and-run-served", () => {
 
   it("ignores a superseded completion and reports its retirement", async () => {
     const f = await fixture(true);
-    const compilation = Promise.withResolvers<never>();
+    const compilation = deferredCompilation<never>();
     const events: string[] = [];
     f.runtime.effectMemoObserver = (event) => events.push(event.kind);
     f.runtime.patternManager.compileOrGetPattern = () => compilation.promise;
@@ -552,7 +685,7 @@ describe("compile-and-run-served", () => {
 
   it("settles an accepted request after a newer sealed request is withdrawn", async () => {
     const f = await fixture(true);
-    const compilation = Promise.withResolvers<never>();
+    const compilation = deferredCompilation<never>();
     let completion: Promise<unknown> | undefined;
     let launches = 0;
     f.runtime.asyncWorkObserver = (work) => completion = work;
@@ -619,8 +752,8 @@ describe("compile-and-run-served", () => {
   });
 
   it("inherits source labels added while an accepted compile is pending", async () => {
-    const f = await fixture(true, "persist");
-    const compilation = Promise.withResolvers<never>();
+    const f = await fixture(true, "persist", "enforce-strict");
+    const compilation = deferredCompilation<never>();
     f.runtime.patternManager.compileOrGetPattern = () => compilation.promise;
 
     /** Replaces the source's metadata while preserving the program bytes. */
@@ -658,6 +791,7 @@ describe("compile-and-run-served", () => {
         const metadata = readStoredCfcMetadata(tx, {
           space: link.space,
           id: link.id,
+          scope: link.scope,
         });
         return (metadata?.labelMap.entries ?? []).flatMap((entry) =>
           entry.label.confidentiality ?? []
@@ -671,6 +805,7 @@ describe("compile-and-run-served", () => {
       await writeSourceLabels(["initial-source-label"]);
       expect(await f.run(PROGRAM)).toBe(true);
       expect(confidentiality(f.memo)).toContain("initial-source-label");
+      expect(confidentiality(f.publication)).toContain("initial-source-label");
       await writeSourceLabels(["initial-source-label", "late-source-label"]);
       compilation.reject(new Error("labeled compiler failure"));
       await f.runtime.settled();

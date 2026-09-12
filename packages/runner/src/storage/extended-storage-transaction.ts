@@ -403,6 +403,24 @@ const valueWriteDocumentKey = (
 const unattributedValueWrite: ValueWriteAuthor = Object.freeze({
   identity: undefined,
 });
+const valueWriteAuthors = new WeakMap<
+  ImplementationIdentity,
+  ValueWriteAuthor
+>();
+
+/** Reuses immutable author evidence across writes by the same implementation. */
+const valueWriteAuthor = (
+  identity: ImplementationIdentity | undefined,
+): ValueWriteAuthor => {
+  if (identity === undefined) return unattributedValueWrite;
+  let author = valueWriteAuthors.get(identity);
+  if (author === undefined) {
+    author = deepFreeze({ identity });
+    valueWriteAuthors.set(identity, author);
+  }
+  return author;
+};
+
 const valueWriteAuthorNode = (): ValueWriteAuthorNode => ({
   children: new Map(),
   untrustedChildren: 0,
@@ -1481,7 +1499,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       spine.push(child);
       node = child;
     }
-    const stamp = deepFreeze({ identity });
+    const stamp = valueWriteAuthor(identity);
     let previousUntrusted = node.untrusted;
     // A replacement shadows prior writes inside its subtree. Sibling writes
     // remain represented, so one later builtin cannot certify a user's bytes.
@@ -3382,10 +3400,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           ) {
             interleavedDocuments.add(key);
           }
-          captured.push(deepFreeze({
+          captured.push({
             address: { ...address, path: [...address.path] },
-            identity: this.#cfcState.implementationIdentity,
-          }));
+            identity: deepFreeze(this.#cfcState.implementationIdentity),
+          });
           this.#recordValueWriteIdentity(address, undefined);
           batchRevisions.set(
             key,
