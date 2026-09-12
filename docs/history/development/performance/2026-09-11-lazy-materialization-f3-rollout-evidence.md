@@ -47,7 +47,8 @@ decision:
 - **A deployed `cf`** resolves the flag through
   `experimentalOptionsForDeployedClient`: an explicit value in its own
   environment wins, otherwise the posture its server publishes, otherwise the
-  built-in default.
+  built-in default; with `CF_ADOPT_SERVER_FLAGS=false` it reads its
+  environment alone and a server's rollback does not reach it.
 - **The browser shell has no rollback route.** Its build-time defines cover
   five other experimental flags and not this one, so every shell build since
   2026-08-12 has run the view on with no way to turn it off short of a code
@@ -68,7 +69,8 @@ outside the tree is not visible from the tree either.
   is `EXPERIMENTAL_SERVER_EXECUTION`, for that flag's lanes and its benchmark
   run.
 - **The pattern computation-cost arc**, in the records dated 2026-09-10 to
-  2026-09-12: the
+  2026-09-12 (the last a UTC date on a run taken inside this record's
+  period): the
   [controlled lunch-poll baseline](2026-09-10-lunch-poll-read-baseline.md)
   and the
   [representative-copy rehearsal](2026-09-12-representative-lunch-poll-rehearsal.md)
@@ -101,7 +103,7 @@ the posture explicitly keeps the posture it names.
 
 | Posture                                | Result                       |
 | -------------------------------------- | ---------------------------- |
-| On (the built-in default; every CI run) | Green in CI on `main` at `a44d9389c3` and on the F0 change at `b0324aff36` |
+| On (the built-in default; every CI run) | The runner unit and integration suite lanes are green in CI on `main` at `a44d9389c3` (whose one failed lane is the benchmark run) and every lane is green on the F0 change at `b0324aff36` |
 | Off (built-in default flipped at the source) | `FAILED`: 1,378 tests passed, 5 failed (9 steps), 1 step ignored, in 13 minutes 22 seconds, locally |
 
 The five failing tests, with the assertion each fails on:
@@ -125,10 +127,13 @@ The five failing tests, with the assertion each fails on:
   promised a value for and threw `TypeError: Cannot read properties of
   undefined (reading 'split')`. That is the crash the unresolved-input
   refusal exists to prevent, and the eager arm still carries it.
-- `experimental-options.test.ts`, two steps, "respects explicitly-set flags"
-  and "merges provided flags with defaults": both assert the built-in default
-  is `true`, which the method of this run changed. An artifact of the method,
-  not of the posture.
+- `experimental-options.test.ts`, two steps, "respects explicitly-set flags
+  (all true)" and "merges provided flags with defaults": both assert the
+  built-in default is `true`, which the method of this run changed. An
+  artifact of the method, not of the posture.
+
+The test names above are abbreviated; each is a unique prefix or fragment of
+the name in its file.
 
 The counts above include the parents those steps fail. Three of the five are
 contracts the view holds and the eager path does not; one is a crash the
@@ -141,9 +146,10 @@ above it exercised the off posture only in the cases that set the option
 themselves, and it is not counted here.
 
 Files that construct runtimes at both postures within one run:
-`lazy-materialization-runner.test.ts`, `lift-refusal-disposition.test.ts`,
-and, on `codex/lazy-handler-context-prototype` at `45dd2b301a`,
-`handler-lazy-context.test.ts`. `patterns-lift.test.ts` is posture-adaptive
+`lazy-materialization-runner.test.ts`; `lift-refusal-disposition.test.ts`, on
+`codex/lift-refusal-disposition` at `f3872d5737`; and
+`handler-lazy-context.test.ts`, on `codex/lazy-handler-context-prototype` at
+`b8da502953`. `patterns-lift.test.ts` is posture-adaptive
 instead: its forwarding-lift case expects one run under the view and two
 eager, whichever posture the ambient runtime resolved.
 
@@ -200,6 +206,11 @@ as observable.
   sets the override for any other process. The off arm's evidence is the
   runner suite run with the default flipped and the both-posture test files
   above.
+- The off-posture run's tree carries the lift-path fix, which changes only
+  how a lift disposes of a synchronous refusal. Of the five failures, the two
+  refusal cases wait on an unresolved-input refusal the eager posture never
+  raises, so they do not reach that path; the run was not repeated at the
+  base.
 - The integration suites were not run at the off posture for this record.
   They launch browsers, which this record's author could not do from the
   session it ran in; a retirement decision that wants them run at the off

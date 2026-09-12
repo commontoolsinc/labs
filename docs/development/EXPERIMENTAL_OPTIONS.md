@@ -86,7 +86,8 @@ and read by
 `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
 background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines
-through the same canonical parser.
+through the same canonical parser, for the flags it defines — each flag's
+section says whether it has one.
 `EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
 env-reachable — a flag that deliberately is not, `commitPreconditions` today,
 is mapped to `null` there, which records the decision rather than leaving an
@@ -531,8 +532,8 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Status against the test suites.** The runner unit suite and the integration
-suites are green at the default posture on every merge. The suites' runtimes
+**Status against the test suites.** The runner unit and integration suite
+lanes are green at the default posture on every merge. The suites' runtimes
 read no environment, so the variable does not put them in the off posture;
 with the built-in default flipped at its source, the runner suite passes
 except for four cases that state contracts only the view holds — a proxy

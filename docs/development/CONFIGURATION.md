@@ -270,7 +270,8 @@ default, its planned end state, and its removal path, plus the propagation paths
   turns adoption off wholesale.
 - Everywhere else — the shell included — the same env var must be set
   wherever the flag is read; shell-side that means a build-time define, so
-  toggling requires a rebuild.
+  toggling requires a rebuild, and only the flags the shell defines can be
+  toggled there at all (the registry says which).
 
 The environment-backed flags (the only ones settable without editing code) are
 declared once in `EXPERIMENTAL_ENV_VARS`
