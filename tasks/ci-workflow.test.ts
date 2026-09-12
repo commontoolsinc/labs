@@ -501,7 +501,11 @@ Deno.test("a lane's cache is one exact key over one directory", async () => {
   assertStringIncludes(contents, "        with: &lane-cache\n");
   assertStringIncludes(contents, "        with: *lane-cache\n");
   assertStringIncludes(contents, "          path: .ci-cache\n");
-  assertStringIncludes(contents, "lane-${{ matrix.lane }}-${{ hashFiles(");
+  assertStringIncludes(contents, "ci-lane-${{ hashFiles(");
+  assert(
+    !contents.includes("${{ matrix.lane }}-${{ hashFiles("),
+    "one cache entry per lane per commit outgrows the repository's cache",
+  );
   assertStringIncludes(contents, "'tasks/build-binaries.ts'");
 });
 

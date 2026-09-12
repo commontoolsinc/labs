@@ -1246,7 +1246,14 @@ hash of the sources the binaries are built from. Everything a lane wants
 to keep between runs sits under that one directory — the built binaries,
 and the pattern compile byte cache — because one step covering one
 directory is what keeps the workflow independent of what the lane turns
-out to need. That step is in the workflow rather than in the runner
+out to need.
+
+Every lane of every run shares that one key. A lane caches what it
+opened, so the entry holds whichever lane's capabilities were saved
+first, and a lane wanting something else builds it, which is the path a
+miss takes anyway. One key per lane would be sixty entries per commit
+against a repository-wide cache with a bound, and evicting everything
+else to hold them costs more than the builds do. That step is in the workflow rather than in the runner
 because the cache service is only reachable through the action, and it is
 written once and never touched again.
 

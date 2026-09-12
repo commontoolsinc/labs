@@ -141,13 +141,18 @@ jobs:
         with: &lane-cache
           path: .ci-cache
           # An exact key over the sources a binary is built from, with no
-          # restore-key prefix: a capability that finds a binary uses it, so
-          # a prefix would hand it one built from other sources. The lane
-          # number is part of the key because the packing is stable, so lane
-          # N tends to want the same binaries run after run, and five lanes
-          # saving one key would keep only whichever finished first.
+          # restore-key prefix: a capability that finds a binary uses it
+          # without asking what it was built from, so a prefix would hand it
+          # one built from other sources.
+          #
+          # One key for every lane rather than one each. A lane caches what
+          # it opened, so the entry holds whichever lane's capabilities were
+          # saved first and a lane wanting something else builds it — the
+          # path a miss takes anyway. One key each would be sixty entries
+          # per commit against a repository-wide cache with a bound, and
+          # evicting everything to hold them costs more than the builds do.
           key: >-
-            lane-${{ matrix.lane }}-${{ hashFiles('deno.lock', 'deno.jsonc',
+            ci-lane-${{ hashFiles('deno.lock', 'deno.jsonc',
             'tasks/build-binaries.ts', 'packages/**/*.ts',
             'packages/**/*.tsx', 'packages/**/*.json',
             'packages/**/*.jsonc', 'packages/**/*.css',
