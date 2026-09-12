@@ -1,10 +1,26 @@
+---
+status: historical
+created: 2026-09-09
+archived: 2026-09-12
+reason: "Executed #7155 scope; B3a deferred and D1/D2 transferred to a separate fast-follow."
+---
+
+Execution closed with the
+[implementation record](pattern-computation-cost-implementation.md) and
+[representative-copy report](../development/performance/2026-09-12-representative-lunch-poll-rehearsal.md).
+B3a remains explicitly deferred. Q9 transfers remaining D1/D2 execution to the
+[lazy-materialization fast-follow](../../plans/lazy-materialization-fast-follow.md).
+The proposal below records the original design, not a claim that deferred stages
+shipped or historical deployment timings were reproduced.
+
 # Making pattern computation cost declarable and visible
 
 A pattern author can write a derivation that reads a thousand documents. The
 single-runtime pattern test runner exposes that work through per-action read
-counts. Named aggregates maintain linked single-row updates incrementally;
-keyed collection operations and opt-in test budgets remain the next steps. This plan gives expensive collection operations an incremental form and
-makes their cost visible before they ship.
+counts. Named aggregates maintain linked single-row updates incrementally; keyed
+collection operations and opt-in test budgets remain the next steps. This plan
+gives expensive collection operations an incremental form and makes their cost
+visible before they ship.
 
 It is deliberately not a proposal to hand execution planning to the compiler.
 The reasoning for that boundary is under
@@ -21,8 +37,8 @@ Mark a parent checkbox complete only after all of its child checks pass.
 
 A1 and A2 provide read accounting and generic `reduce` baselines. B3 provides
 named aggregates on explicit Cell/Writable array inputs, with contracts in
-[collection aggregates](../features/collection-aggregates.md). The
-[aggregate comparison](../history/development/performance/2026-09-incremental-aggregates.md)
+[collection aggregates](../../features/collection-aggregates.md). The
+[aggregate comparison](../development/performance/2026-09-incremental-aggregates.md)
 covers initialization, single-row updates, scheduler runs, and total read work
 at 10, 100, and 1,000 elements. Timings include maintenance and commits and
 record the startup cost and machine-load limitations alongside update savings.
@@ -32,12 +48,14 @@ collection-algebra priority.
 A0's specified headless command is measured, but it does not reproduce the
 reported 74-vote deployed workload. Keep the deployed figures unconfirmed until
 the representative workload and probe/deployed comparison in A4/A5 are ready.
-The [first-batch measurement record](../history/development/performance/2026-09-pattern-read-accounting.md)
+The
+[first-batch measurement record](../development/performance/2026-09-pattern-read-accounting.md)
 contains the observed headless counts and the aggregate baseline matrix.
 
 ## Problem
 
-The vote path in [`packages/patterns/lunch-poll/main.tsx`](../../packages/patterns/lunch-poll/main.tsx)
+The vote path in
+[`packages/patterns/lunch-poll/main.tsx`](../../../packages/patterns/lunch-poll/main.tsx)
 is the worked example. `tallyOptions` is a group-by over votes joined against a
 roster, hand-written as nested scans: for each of the options it filters the
 whole vote list, then filters that result three more times by vote color, then
@@ -45,16 +63,16 @@ resolves each voter through a linear `find` over the roster. Every one of those
 element and property reads goes through a reactive query proxy, so each is a
 link resolution rather than a property load.
 
-Figures reported from the current investigation, reconstructed by hand from a
-V8 profile and a reading of the code, pending reconfirmation under Stage A0:
+Figures reported from the current investigation, reconstructed by hand from a V8
+profile and a reading of the code, pending reconfirmation under Stage A0:
 
-| Quantity | Reported |
-| --- | --- |
-| Wall clock per vote | ~1.15 s |
-| Tally derivation, single run | ~550 ms |
-| Tally proxy accesses, single run at 74 votes | ~2,600 |
-| Per-option card derivation, per run | ~30 ms, over 14 runs |
-| Per-proxy-access cost | ~0.2 to 0.8 ms |
+| Quantity                                     | Reported             |
+| -------------------------------------------- | -------------------- |
+| Wall clock per vote                          | ~1.15 s              |
+| Tally derivation, single run                 | ~550 ms              |
+| Tally proxy accesses, single run at 74 votes | ~2,600               |
+| Per-option card derivation, per run          | ~30 ms, over 14 runs |
+| Per-proxy-access cost                        | ~0.2 to 0.8 ms       |
 
 The tally figure decomposes as 14 options times 74 votes for the per-option
 filter, three more color filters over each option's votes, then up to 8 roster
@@ -70,11 +88,12 @@ proxy accesses and link resolutions separately rather than reporting one number.
 Three properties of the system produce that, and each needs a different repair.
 
 **The algebra has no middle.** `map`, `filter`, and `flatMap` have incremental
-builtins under [`packages/runner/src/builtins/`](../../packages/runner/src/builtins/)
-that key elements by normalized link address and reuse per-element runs across
+builtins under
+[`packages/runner/src/builtins/`](../../../packages/runner/src/builtins) that
+key elements by normalized link address and reuse per-element runs across
 changes. `reduce` has none — its doc comment on
-[`packages/runner/src/cell.ts`](../../packages/runner/src/cell.ts) records that
-it re-runs the whole reduction when any element changes — and there is no
+[`packages/runner/src/cell.ts`](../../../packages/runner/src/cell.ts) records
+that it re-runs the whole reduction when any element changes — and there is no
 `groupBy`, no `keyBy`, no join, and no read-side index. A tally is a group-by
 and a join. Neither has a declarative spelling, so it is written as scans.
 
@@ -103,23 +122,27 @@ than competing with them.
 
 - **Incremental collection builtins.** `map`, `filter`, `flatMap` and their
   `WithPattern` forms, registered in
-  [`packages/runner/src/builtins/index.ts`](../../packages/runner/src/builtins/index.ts).
+  [`packages/runner/src/builtins/index.ts`](../../../packages/runner/src/builtins/index.ts).
   `map.ts` documents the element-identity rules every new operator must follow.
 - **A declarative query surface.** The SQLite builtin ships;
-  [`docs/specs/sqlite-builtin/`](../specs/sqlite-builtin/README.md) is as-built,
-  with its remaining phases and open questions recorded there. Any proposal for
-  a new declarative layer should first say why that one is not the vehicle.
-- **Per-access cost work.** [Lazy cell materialization](lazy-cell-materialization.md)
-  is the plan that owns the constant this plan multiplies against. It is on by
-  default behind `lazyMaterialization`; its remaining stages include the handler
-  path and flag removal. This plan adds no work there and depends on it.
-- **Per-step counters.** `deno task cf test <file> --verbose --stats-threshold 0`
-  prints per-step timing and per-action run deltas from
-  [`packages/cli/lib/test-runner.ts`](../../packages/cli/lib/test-runner.ts).
+  [`docs/specs/sqlite-builtin/`](../../specs/sqlite-builtin/README.md) is
+  as-built, with its remaining phases and open questions recorded there. Any
+  proposal for a new declarative layer should first say why that one is not the
+  vehicle.
+- **Per-access cost work.**
+  [Lazy cell materialization](../../plans/lazy-cell-materialization.md) is the
+  plan that owns the constant this plan multiplies against. It is on by default
+  behind `lazyMaterialization`; its remaining stages include the handler path
+  and flag removal. This plan adds no work there and depends on it.
+- **Per-step counters.**
+  `deno task cf test <file> --verbose --stats-threshold 0` prints per-step
+  timing and per-action run deltas from
+  [`packages/cli/lib/test-runner.ts`](../../../packages/cli/lib/test-runner.ts).
 - **Read-width feedback.** `deno task cf check <file> --show-transformed` shows
   the emitted input schema, whose size is a usable proxy for how much a
   derivation declared it would read.
-- **A write-side benchmark.** [`packages/patterns/integration/lunch-poll-vote-burst.bench.ts`](../../packages/patterns/integration/lunch-poll-vote-burst.bench.ts)
+- **A write-side benchmark.**
+  [`packages/patterns/integration/lunch-poll-vote-burst.bench.ts`](../../../packages/patterns/integration/lunch-poll-vote-burst.bench.ts)
   measures a hundred-vote burst to settle. It exercises the write path; the read
   path this plan targets needs its own.
 
@@ -128,12 +151,12 @@ than competing with them.
 It does not build a cost-based optimizer that chooses an execution strategy for
 arbitrary authored TypeScript.
 
-Planners work where there is a closed algebra and statistics to plan against. Authored pattern bodies are neither. More importantly, an optimizer
-answers the complaint that motivates this work — an author cannot predict what
-their code costs — by removing the author's choice rather than informing it,
-which relocates the surprise into a plan the author can neither see nor
-override. The tracks below keep the choice with the author and make it a choice
-they can see.
+Planners work where there is a closed algebra and statistics to plan against.
+Authored pattern bodies are neither. More importantly, an optimizer answers the
+complaint that motivates this work — an author cannot predict what their code
+costs — by removing the author's choice rather than informing it, which
+relocates the surprise into a plan the author can neither see nor override. The
+tracks below keep the choice with the author and make it a choice they can see.
 
 Track B adds operators whose cost is a documented property of the operator. The
 author says what the result is and the runtime owns how it is maintained, with
@@ -154,9 +177,10 @@ only one that helps patterns nobody rewrites. Do it first.
 
 - [ ] **A0. Reconfirm the baseline.** Reproduce the table above with
       `deno task cf test packages/patterns/lunch-poll/main.test.tsx --verbose
-      --stats-threshold 0 --no-idempotency-check`, disabling verification before quoting
-      any duration, per the instrument notes in
-      [`skills/perf-investigation/SKILL.md`](../../skills/perf-investigation/SKILL.md).
+      --stats-threshold 0 --no-idempotency-check`,
+      disabling verification before quoting any duration, per the instrument
+      notes in
+      [`skills/perf-investigation/SKILL.md`](../../../skills/perf-investigation/SKILL.md).
       Record counts, not milliseconds, as the durable baseline.
 - [x] **A1. Count accesses per action run.** Add read accounting to
       `ActionStats` in `packages/runner/src/telemetry.ts`, accumulated the way
@@ -188,7 +212,7 @@ only one that helps patterns nobody rewrites. Do it first.
       Reports cover assertion, render, and settle steps as well as actions;
       initialization is separate. Totals collect completion events, including
       actions absent from the final graph snapshot. The
-      [CLI reference](../../packages/cli/README.md#pattern-test-read-costs)
+      [CLI reference](../../../packages/cli/README.md#pattern-test-read-costs)
       defines each counter and its boundary.
 - [ ] **A3. Give a pattern test a budget.** Opt-in per pattern, not a
       repository-wide gate, so a pattern can defend its own hot path the way a
@@ -208,8 +232,9 @@ only one that helps patterns nobody rewrites. Do it first.
 - [ ] **A4. Add the read-side benchmark.** A lunch-poll benchmark for the cost
       of one vote settling with the tally on screen, sibling to the existing
       write-side burst benchmark, so Track B and Track C changes have something
-      to move. Follow [`docs/development/BENCHMARKS.md`](../development/BENCHMARKS.md)
-      for the shape rather than copying the burst file.
+      to move. Follow
+      [`docs/development/BENCHMARKS.md`](../../development/BENCHMARKS.md) for
+      the shape rather than copying the burst file.
 - [ ] **A5. Settle the probe-versus-deployed discrepancy.** The headless probe
       `packages/patterns/tools/lunch-poll-diagnose.ts` runs at the same
       `enforce-explicit` posture as the deployed board, and its tally at 70
@@ -241,10 +266,10 @@ reconciliation; follow their keying rules rather than inventing new ones.
 - [ ] **B1. `groupBy` and `keyBy` are two operators, not one.** They differ in
       arity and therefore in every edge case, so settle both contracts before
       either is built. `groupBy` maps a key to a collection of elements and is
-      what the tally needs; `keyBy` maps a key to at most one element and is what
-      the roster lookup needs. Both maintain the index incrementally: an element
-      changing its key moves, and consumers of untouched keys do not re-run.
-      Together they are the read-side counterpart to `elementById`.
+      what the tally needs; `keyBy` maps a key to at most one element and is
+      what the roster lookup needs. Both maintain the index incrementally: an
+      element changing its key moves, and consumers of untouched keys do not
+      re-run. Together they are the read-side counterpart to `elementById`.
 
       Decide and write down, before implementation:
 
@@ -274,8 +299,8 @@ reconciliation; follow their keying rules rather than inventing new ones.
       `find((x) => x.id === k)`, `find((u) => equals(u.profile, p))`, and
       `some((x) => x.id === k)`. The nested form
       `filter((a) => !current.some((b) => b === a))` is a set difference written
-      as a quadratic scan, and appears several times. Keep this stage as the next collection-algebra priority after the initial
-      aggregate comparison.
+      as a quadratic scan, and appears several times. Keep this stage as the
+      next collection-algebra priority after the initial aggregate comparison.
 - [x] **B3. Named aggregates, not a general incremental `reduce`.** A survey of
       the authored patterns finds 33 `reduce` call sites, of which the large
       majority are a sum, and the rest an average (a sum over a count), an
@@ -353,7 +378,7 @@ reconciliation; follow their keying rules rather than inventing new ones.
 - [ ] **B4. State each operator's cost in its documentation.** An operator whose
       complexity is not written down is one an author has to measure. The
       per-change cost belongs in the doc comment and in
-      [`docs/common/concepts/`](../common/README.md).
+      [`docs/common/concepts/`](../../common/README.md).
 - [ ] **B5. Rewrite `tallyOptions` on the new operators** and record the
       before-and-after access counts from Track A in this plan.
 - [ ] **B6. Measure maintenance cost against savings, on the deployed board and
@@ -419,14 +444,14 @@ constant is what every other track multiplies against, and operators layered
 over a sub-millisecond access are still one large collection away from a slow
 interaction.
 
-- [ ] **D1. Track [lazy cell materialization](lazy-cell-materialization.md)
+- [ ] **D1. Track
+      [lazy cell materialization](../../plans/lazy-cell-materialization.md)
       through flag removal**, including the handler path it lists as
       deliberately deferred.
 - [ ] **D2. Re-run the Track A baseline after each stage of it lands**, so the
       per-access improvement is attributed rather than assumed.
-- [ ] **D3. Audit and measure the scoped snapshot memo.**
-      `getSnapshotMemo()` in
-      [`packages/runner/src/storage/extended-storage-transaction.ts`](../../packages/runner/src/storage/extended-storage-transaction.ts)
+- [ ] **D3. Audit and measure the scoped snapshot memo.** `getSnapshotMemo()` in
+      [`packages/runner/src/storage/extended-storage-transaction.ts`](../../../packages/runner/src/storage/extended-storage-transaction.ts)
       maintains separate memos by read epoch and ambient metadata identity.
       Child-view label derivation in `deriveDereferenceLabelView` uses an
       ambient-read-meta scope. Measure reuse within these scopes with Track A's
@@ -438,12 +463,12 @@ interaction.
 
 Independent of every other track, cheap, and worth doing this week.
 
-- [ ] **E1. Give the `computed` and `lift` recommendation a cost dimension,
-      once it is measured.**
-      [`docs/common/concepts/computed/computed.md`](../common/concepts/computed/computed.md)
+- [ ] **E1. Give the `computed` and `lift` recommendation a cost dimension, once
+      it is measured.**
+      [`docs/common/concepts/computed/computed.md`](../../common/concepts/computed/computed.md)
       recommends `computed()` as almost always better and treats `lift()` purely
-      as a reuse mechanism. Cost appears nowhere in that recommendation, which is
-      the defect regardless of which way the answer falls.
+      as a reuse mechanism. Cost appears nowhere in that recommendation, which
+      is the defect regardless of which way the answer falls.
 
       Do not assume the answer is "prefer `lift` for a loop over a collection".
       Lazy materialization defaults on, and `packages/runner/src/runner.ts`
@@ -458,16 +483,16 @@ Independent of every other track, cheap, and worth doing this week.
             defaults, using the Track A counters.
       - [ ] Write the guidance the measurement supports, in terms of declared
             read width, and say what it does not fix.
-- [ ] **E2. Name the trap where authors will hit it.** The scan-over-a-reactive-array
-      cost is currently written down in
-      [`skills/perf-investigation/SKILL.md`](../../skills/perf-investigation/SKILL.md),
+- [ ] **E2. Name the trap where authors will hit it.** The
+      scan-over-a-reactive-array cost is currently written down in
+      [`skills/perf-investigation/SKILL.md`](../../../skills/perf-investigation/SKILL.md),
       which an author reads after something is slow. It belongs in the
       pattern-authoring documentation, which they read before.
 - [ ] **E3. Add a transformer diagnostic for the recognizable shape.** A nested
       scan over a reactive collection inside a `computed` body is detectable
       statically. Emit a diagnostic naming the shape and the cheaper spelling,
       through the `TransformationDiagnostic` collector in
-      [`packages/ts-transformers/src/cf-pipeline.ts`](../../packages/ts-transformers/src/cf-pipeline.ts).
+      [`packages/ts-transformers/src/cf-pipeline.ts`](../../../packages/ts-transformers/src/cf-pipeline.ts).
       Ship it as a warning first; the false-positive rate decides whether it
       ever becomes an error.
 
@@ -487,9 +512,9 @@ that is cheap to discover on paper and expensive to discover in two landed
 operators. Write them down, then build.
 
 After the aggregate comparison prioritized above, rank B2 ahead of further
-aggregate extensions by expected value: the tree holds roughly
-250 linear-scan lookups against a handful of aggregates worth incrementalizing.
-B1 still precedes B2, since keyed lookup and join depend on its index contracts.
+aggregate extensions by expected value: the tree holds roughly 250 linear-scan
+lookups against a handful of aggregates worth incrementalizing. B1 still
+precedes B2, since keyed lookup and join depend on its index contracts.
 
 Suggested split for three parallel efforts: one on Track A plus E, one on Track
 C's reproduction and fixes, one settling the Track B contracts and then building
@@ -498,7 +523,7 @@ B1.
 ## Testing
 
 - Pattern tests for each new operator's semantics, per
-  [`docs/development/unit-test-coding-style.md`](../development/unit-test-coding-style.md).
+  [`docs/development/unit-test-coding-style.md`](../../development/unit-test-coding-style.md).
 - Incrementality is a count property, not a duration property: assert on
   scheduler run counts and the Track A access counts, not on milliseconds.
 - Multi-replica integration tests for Track C, since the failures do not

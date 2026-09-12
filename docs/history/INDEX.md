@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Representative lunch-poll copy rehearsal](development/performance/2026-09-12-representative-lunch-poll-rehearsal.md) — two isolated migration passes, authored-data preservation, matched browser/headless read counts, graph and timing tradeoffs, bounded clock churn, and the Q9 fast-follow decision.
+
 - [Index maintenance phase counts](development/performance/2026-09-11-index-maintenance-phases.md) — completed action-body counts for both index types across membership edits, key edits and lookup retargeting at three sizes.
 
 - [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
@@ -263,3 +265,6 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## The retired tutorial site
 
 - [tutorials/](tutorials/) — the complete MyST source of the retired docs.commontools.dev site: nine chapters, example code and images, and the build scaffolding, entered at [index.md](tutorials/index.md). Its state chapters and LLM tour teach the retired `cell()` API.
+
+- [Pattern computation cost implementation](plans/pattern-computation-cost-implementation.md) — executed #7155 sequence, copy-based acceptance, explicit B3a deferral, and D1/D2 handoff.
+- [Pattern computation cost design](plans/pattern-computation-cost.md) — original #7155 proposal, executed scope and separately tracked remaining lazy-materialization work.

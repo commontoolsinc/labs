@@ -2,7 +2,7 @@
 
 Local execution dashboard for the design in PR #7155. The acceptance checklist
 is
-[the implementation tracker](../../docs/plans/pattern-computation-cost-implementation.md).
+[the implementation tracker](../../docs/history/plans/pattern-computation-cost-implementation.md).
 `status.json` records delivery state, review gates, questions, and demo
 milestones. Update it at each milestone and when a question or review finding
 changes. “Landed” means merged; implemented work awaiting review stays “In
