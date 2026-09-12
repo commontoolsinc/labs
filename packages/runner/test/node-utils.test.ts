@@ -55,7 +55,7 @@ describe("node-utils", () => {
   });
 
   function withinHandler<T>(fn: () => T): T {
-    pushFrame(
+    const pushed = pushFrame(
       {
         runtime,
         space,
@@ -70,7 +70,7 @@ describe("node-utils", () => {
     try {
       return fn();
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
   }
 

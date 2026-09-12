@@ -27,7 +27,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createNodeFactory, lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import type { Frame, JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
@@ -72,6 +72,7 @@ describe("cfc-argument-ifc-propagation", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let tx: IExtendedStorageTransaction;
+    let frame: Frame;
 
     beforeEach(() => {
       storageManager = StorageManager.emulate({ as: signer });
@@ -80,7 +81,7 @@ describe("cfc-argument-ifc-propagation", () => {
         storageManager,
       });
       tx = runtime.edit();
-      pushFrame({
+      frame = pushFrame({
         cause: "cfc-argument-ifc-propagation",
         space,
         runtime,
@@ -90,7 +91,7 @@ describe("cfc-argument-ifc-propagation", () => {
     });
 
     afterEach(async () => {
-      popFrame();
+      popFrame(frame);
       await tx.commit();
       await runtime?.dispose();
       await storageManager?.close();

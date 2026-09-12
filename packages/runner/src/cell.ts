@@ -1038,7 +1038,12 @@ export class CellImpl<T extends FabricValue>
    */
   #causeContainer: CauseContainer;
 
-  #frame: Frame | undefined;
+  /**
+   * The frame on top of the stack when this cell was constructed. A runtime
+   * keeps a frame on the stack from its construction until its disposal, so
+   * every cell it hands out has one.
+   */
+  #frame: Frame;
 
   #kind: CellKind;
 
@@ -1065,7 +1070,16 @@ export class CellImpl<T extends FabricValue>
   ) {
     this.#synced = synced;
     this.#cfcLabelView = _cfcLabelView;
-    this.#frame = getTopFrame();
+    const frame = getTopFrame();
+    if (frame === undefined) {
+      throw new Error(
+        "Cannot create a cell: no frame is on the stack\n" +
+          "help: a runtime pushes a frame when it is constructed and removes " +
+          "it when it is disposed, so the runtime this cell belongs to has " +
+          "been disposed",
+      );
+    }
+    this.#frame = frame;
 
     // Store this cell's own link
     this.#_link = {
@@ -1229,16 +1243,8 @@ export class CellImpl<T extends FabricValue>
 
     // Otherwise, let's attempt to derive the id:
 
-    // We must be in a frame context to derive the id.
-    if (!this.#frame) {
-      throw new Error(
-        "Cannot create cell link - no frame context\n" +
-          "help: create cells inside pattern/handler/lift, or use .for(cause) for explicit identity",
-      );
-    }
-
     const space = this.#_link.space ?? this.#causeContainer.space ??
-      this.#frame?.space;
+      this.#frame.space;
 
     // We need a space to create a link
     if (!space) {
@@ -1276,7 +1282,7 @@ export class CellImpl<T extends FabricValue>
 
   get space(): MemorySpace {
     return this.#_link.space ?? this.#causeContainer.space ??
-      this.#frame?.space!;
+      this.#frame.space!;
   }
 
   get path(): readonly PropertyKey[] {
@@ -2256,7 +2262,7 @@ export class CellImpl<T extends FabricValue>
         this.tx,
         writeLink,
         newValue,
-        this.#frame?.cause,
+        this.#frame.cause,
         undefined,
         frameAnchorIds(this.#frame),
       );
@@ -2453,7 +2459,7 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const cause = this.#frame?.cause;
+    const cause = this.#frame.cause;
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -2554,7 +2560,7 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const cause = this.#frame?.cause;
+    const cause = this.#frame.cause;
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -2592,16 +2598,11 @@ export class CellImpl<T extends FabricValue>
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by content, mirroring the server's keyless dedup. Under a frame, the
-    // content comparison runs against a fabric-normalized COPY of the candidate
-    // (a native `Date` must match its stored `FabricEpochNsec` form); the
-    // original candidate -- not the copy -- is what an accepted add writes, so
-    // no identity the write path relies on is disturbed. A frameless
-    // `addUnique` compares the raw candidate: the write boundary that would
-    // normalize it runs only under a frame, and a raw comparison also tolerates
-    // annotation-carrying values (e.g. `get()` results) that the strict
-    // conversion rejects.
-    const normalizeForComparison = this.#frame !== undefined;
+    // by content, mirroring the server's keyless dedup. The content comparison
+    // runs against a fabric-normalized COPY of the candidate (a native `Date`
+    // must match its stored `FabricEpochNsec` form); the original candidate --
+    // not the copy -- is what an accepted add writes, so no identity the write
+    // path relies on is disturbed.
     const alreadyPresent = (candidate: FabricValue) => {
       if (isCell(candidate)) {
         return existing.some((element) =>
@@ -2627,9 +2628,9 @@ export class CellImpl<T extends FabricValue>
       // compare as themselves -- the write boundary passes them through
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
-      const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(flattenBuilderArtifacts(candidate))
-        : candidate;
+      const comparable = isCellLink(candidate)
+        ? candidate
+        : fabricFromNativeValue(flattenBuilderArtifacts(candidate));
       return existing.some((element) => valueEqual(element, comparable));
     };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
@@ -2693,7 +2694,7 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as number",
       );
     }
-    const cause = this.#frame?.cause;
+    const cause = this.#frame.cause;
     const next = (typeof currentValue === "number" ? currentValue : 0) + by;
     diffAndUpdate(this.runtime, this.tx, resolvedLink, next, cause);
 
@@ -2776,7 +2777,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       resolvedLink,
       filtered,
-      this.#frame?.cause,
+      this.#frame.cause,
     );
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
@@ -3487,9 +3488,6 @@ export class CellImpl<T extends FabricValue>
     name?: unknown;
     external?: unknown;
   } {
-    if (!this.#frame) {
-      throw new Error("Cannot export cell: no frame context.");
-    }
     return {
       cell: this.#causeContainer.cell,
       path: this.path,

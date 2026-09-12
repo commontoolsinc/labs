@@ -222,6 +222,31 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
+  it("leaves the frame stack as it found it when a raw module has no builtin identity", () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    const frameBeforeRun = getTopFrame();
+    const module = raw(() => () => undefined);
+
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell(
+      signer.did(),
+      "cfc-unregistered-raw-frame",
+      undefined,
+      tx,
+    );
+    runtime.runner.run(tx, module, {}, resultCell);
+
+    expect(getTopFrame()).toBe(frameBeforeRun);
+    tx.abort("test-complete");
+  });
+
   it("resolves verified compiled modules through provenance, with binding identity and bundle id", () => {
     // PR E2: the implementationRef × verifiedLoadId registry arm is gone; the
     // function object's provenance (recorded during verified evaluation) is
