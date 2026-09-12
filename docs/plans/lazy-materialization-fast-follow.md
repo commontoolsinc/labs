@@ -43,11 +43,11 @@ in the same PR as behavior changes.
 | F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
 
 F1/F2 and F3 can proceed independently. F4 does not depend on making handlers
-lazy: F1 identified no shared contract that would require that order. Its
-blocker is what a narrower read set does to a handler's commit — it changes
-which concurrent writes the commit refuses — where on the lift path it changes
-only when a node re-runs. Do not delete eager materialization that unmarked
-transactions still require.
+lazy: F1 identified no shared contract that would require that order. The
+deferral's blocker is what a narrower read set does to a handler's commit — it
+changes which concurrent writes the commit refuses — where on the lift path it
+changes only when a node re-runs. Do not delete eager materialization that
+unmarked transactions still require.
 
 ### F0 — Establish the baseline
 

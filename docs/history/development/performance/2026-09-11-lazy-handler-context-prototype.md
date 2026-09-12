@@ -18,13 +18,12 @@ are at the end.
 
 The prototype, its tests, and the posture benchmark are on the branch
 `codex/lazy-handler-context-prototype`, at commit
-`b8da502953b1793719bebf76c02b5539ad1d278d`, built on `9b61f01934`: the
-[F0 baseline](2026-09-11-lazy-materialization-f0-baseline.md)'s revision
-plus the first two of that record's commits, which add the presync timer and
-the benchmark as it then stood. One
-defect the stage found on the lift path has its fix on a branch of its own,
-`codex/lift-refusal-disposition`, and on the prototype branch as well; see
-[What ships](#what-ships).
+`b8da502953b1793719bebf76c02b5539ad1d278d`, built on `9b61f01934`: the [F0
+baseline](2026-09-11-lazy-materialization-f0-baseline.md)'s revision plus the
+first two of that record's commits, which add the presync timer and the
+benchmark as it then stood. One defect the stage found on the lift path has its
+fix on a branch of its own, `codex/lift-refusal-disposition`, and on the
+prototype branch as well; see [What ships](#what-ships).
 
 ## The contract
 
@@ -33,14 +32,14 @@ the schema `generateHandlerSchema` builds: `$ctx` required, `$event` optional,
 the event and state schemas' definitions hoisted to the root. The contract
 divides that read at the same seam the closed-world gate already uses.
 
-**The event payload stays eager.** It arrives inline and small. Where the
-event schema is closed (`additionalProperties: false`), the closed-world gate
-has already judged the payload before the argument is read and rejected it if
+**The event payload stays eager.** It arrives inline and small. Where the event
+schema is closed (`additionalProperties: false`), the closed-world gate has
+already judged a present payload before the argument is read and rejected it if
 it does not satisfy the schema; where the schema is open, the gate does not
-judge it, and the eager read is what decides its delivery: a declared field
-the payload does not satisfy reads as an absent event, never as a refusal
-inside the body. Reading it eagerly keeps both of those the same in both
-postures. Nothing about payload validation moves.
+judge it, and the eager read is what decides its delivery: a declared field the
+payload does not satisfy reads as an absent event, never as a refusal inside the
+body. Reading it eagerly keeps both of those the same in both postures. Nothing
+about payload validation moves.
 
 **The bound context is read through a view.** It is where a handler binds a
 collection, and a view hands the body the paths it touches and nothing else.
