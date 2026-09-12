@@ -71,9 +71,11 @@ export interface ShuttleDeps {
  *
  * The connection is this call's to close, so it is closed on the way out
  * whatever ended the run — a line that ended it, or a throw from anywhere
- * under the prompt. A terminal that will not open is the one way out that
- * closes nothing, and closes nothing because nothing was opened: the terminal
- * is what the connection is opened inside.
+ * under the prompt. Every watch the run armed is disarmed first, for the same
+ * reason and in the order that reason asks for: a subscription is over the
+ * connection, so it stops before the connection does. A terminal that will not
+ * open is the one way out that closes nothing, and closes nothing because
+ * nothing was opened: the terminal is what the connection is opened inside.
  *
  * @throws Whatever opening the terminal or the connection throws, and whatever
  * the prompt throws that it did not report as a line's own failure.
@@ -104,14 +106,22 @@ export async function runShuttle(
     // Both dimensions ride the deps bag because that is what already reaches
     // every verb, and a verb writing a page is where both are wanted: a page
     // is measured in rows, and a line becomes rows at the width.
-    await (deps.prompt ?? runPrompt)(shuttle, terminal, {
-      rows: consoleRows,
-      columns: consoleColumns,
-      // The same sink the connection's own writing goes to, so a call's
-      // dispatch announcement and a pattern's console reach one screen in the
-      // order they happened rather than in two orders.
-      announce: (text) => terminal.announce(text),
-      editText: (text) => terminal.suspend(() => openEditor(text)),
-    });
+    try {
+      await (deps.prompt ?? runPrompt)(shuttle, terminal, {
+        rows: consoleRows,
+        columns: consoleColumns,
+        // The same sink the connection's own writing goes to, so a call's
+        // dispatch announcement and a pattern's console reach one screen in
+        // the order they happened rather than in two orders.
+        announce: (text) => terminal.announce(text),
+        editText: (text) => terminal.suspend(() => openEditor(text)),
+      });
+    } finally {
+      // Before the connection closes, whatever ended the run. A watch outlives
+      // the view that armed it and nothing else, so what it must not outlive
+      // is the runtime it subscribed to: a sink still armed over a disposed
+      // connection is a callback into a torn-down runtime.
+      shuttle.session.disarmAll();
+    }
   });
 }

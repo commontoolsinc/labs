@@ -33,6 +33,10 @@ import { ASSUMED_ROWS } from "../lib/shuttle/page.ts";
 import { consoleRows, withPromptTerminal } from "../lib/shuttle/terminal.ts";
 import type { Key } from "../lib/view/keys.ts";
 
+/** What the terminal sends to take the screen for a frame, and to give it back. */
+const ENTER_ALT = "\x1b[?1049h";
+const LEAVE_ALT = "\x1b[?1049l";
+
 /** The members a case stands in for. */
 interface Stubs {
   /** Whether standard input reports itself a terminal. */
@@ -82,10 +86,13 @@ interface Stubs {
    * `entering` delivers it as raw mode goes on, so the handler restores and
    * the run's own way out finds it already done. `leaving` delivers it during
    * that way out's own restore, so the handler is the one that finds it
-   * already done. Both are orderings the process can really be in, and the
-   * restore has to be right from either side.
+   * already done. `framed` delivers it as a full-screen frame takes the
+   * screen, which is the state a signal costs the most: the process ends
+   * without unwinding, so nothing but the handler is left to give that screen
+   * back. All three are orderings the process can really be in, and the
+   * restore has to be right from each of them.
    */
-  readonly raiseWhen?: "entering" | "leaving";
+  readonly raiseWhen?: "entering" | "leaving" | "framed";
 
   /** The raw-mode call that fails, where one does. */
   readonly rawThrowsOn?: boolean;
@@ -175,7 +182,10 @@ async function watching(
     // orderings differ: on the way in, before anything has restored, or from
     // inside the restore on the way out. Once either way — a signal arrives
     // once, and a second delivery would be the harness inventing a case.
-    if (mode === (stubs.raiseWhen !== "leaving") && deliver !== undefined) {
+    if (
+      stubs.raiseWhen !== "framed" &&
+      mode === (stubs.raiseWhen !== "leaving") && deliver !== undefined
+    ) {
       const arrived = deliver;
       deliver = undefined;
       arrived();
@@ -195,7 +205,23 @@ async function watching(
   if (stubs.consoleSize !== undefined) Deno.consoleSize = stubs.consoleSize;
   Deno.stdout.writeSync = (bytes: Uint8Array) => {
     const taken = stubs.accepts?.(bytes.length) ?? bytes.length;
-    chunks.push(decoder.decode(bytes.subarray(0, Math.max(taken, 0))));
+    const sent = decoder.decode(bytes.subarray(0, Math.max(taken, 0)));
+    chunks.push(sent);
+    // The screen going back is a step of the restore, and the only one that
+    // shows in the bytes rather than in a `Deno` call, so it is recorded
+    // beside the raw-mode calls: what a case about a signal asks is which of
+    // them happened first.
+    if (sent.includes(LEAVE_ALT)) order.push("screen");
+    // Delivered as the frame takes the screen, which is the moment the
+    // handler is the only thing left that would give it back.
+    if (
+      stubs.raiseWhen === "framed" && sent.includes(ENTER_ALT) &&
+      deliver !== undefined
+    ) {
+      const arrived = deliver;
+      deliver = undefined;
+      arrived();
+    }
     return taken;
   };
   const listened: Deno.Signal[] = [];
@@ -377,6 +403,23 @@ describe("terminal", () => {
       expect(watched.order).toEqual(["raw", "cooked", "exit 129"]);
     });
 
+    it("gives the screen back where a signal ended the run, before the mode", async () => {
+      // A signal ends the process without unwinding, so nothing but the
+      // handler is left to put the screen back — and a person left on an
+      // alternate screen with a hidden cursor has their next command's output
+      // thrown away with it. Both restorations happen, in the order the
+      // handler makes them.
+
+      const watched = await watching(
+        { raise: "SIGINT", raiseWhen: "framed" },
+        async (terminal) => {
+          terminal.frame(["a"]);
+          await Promise.resolve();
+        },
+      );
+      expect(watched.order).toEqual(["raw", "screen", "cooked", "exit 130"]);
+    });
+
     it("ends with the status the shell convention gives the signal", async () => {
       for (
         const [signal, status] of [
@@ -435,6 +478,25 @@ describe("terminal", () => {
       );
       expect(message(watched.thrown)).toBe("stdin is gone");
       expect(watched.released).toEqual(watched.listened);
+    });
+
+    it("takes the mode back though the screen will not go back", async () => {
+      // The two halves of the restore are two `try`s because neither needs the
+      // other and the second must run whatever the first did. A terminal that
+      // will not take the give-back is the other way of not holding a screen,
+      // and the mode a person's next command is typed at goes back regardless.
+
+      let accepting = true;
+      const watched = await watching({
+        consoleSize: wide(40),
+        accepts: (offered) => accepting ? offered : 0,
+      }, (terminal) => {
+        terminal.frame(["a"]);
+        accepting = false;
+        return Promise.resolve();
+      });
+      expect(watched.order).toEqual(["raw", "cooked"]);
+      expect(watched.thrown).toBe(undefined);
     });
 
     it("returns though the terminal will not come out of raw mode", async () => {
@@ -677,6 +739,100 @@ describe("terminal", () => {
         for await (const key of terminal.keys) keys.push(key);
       });
       expect(keys).toEqual([{ name: "up" }]);
+    });
+  });
+
+  describe("frame()", () => {
+    it("takes the alternate screen once and draws the rows on it", async () => {
+      // The whole of what a run holding a frame sends, the run's own way out
+      // included: the screen goes back before this returns, whatever the run
+      // did with it.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.frame(["b"]);
+        await Promise.resolve();
+      });
+      expect(watched.written()).toBe(
+        "\x1b[?1049h\x1b[?25l" +
+          "\x1b[?7l\x1b[1;1H\x1b[2Ka\x1b[?7h" +
+          "\x1b[?7l\x1b[1;1H\x1b[2Kb\x1b[?7h" +
+          "\x1b[?25h\x1b[?1049l",
+      );
+    });
+
+    it("draws no line being edited while it has the screen", async () => {
+      // A drawing of a line that is not on screen has nothing to be kept for,
+      // where a line written above the prompt is a record.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.edit("shuttle> ", 9);
+        terminal.finish();
+        await Promise.resolve();
+      });
+      expect(watched.written().includes("shuttle> ")).toBe(false);
+    });
+
+    it("keeps what was announced while it had the screen, and writes it after", async () => {
+      // A watch's event lines and a pattern's console go on arriving while a
+      // frame is up, and a transcript missing them would be missing exactly
+      // the changes a person opened the frame to watch. So neither is drawn
+      // over the frame and neither is lost: both land once the screen is back,
+      // in the order they arrived.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.announce("one");
+        terminal.announce("two");
+        await Promise.resolve();
+      });
+      const written = watched.written();
+      const gave = written.indexOf(LEAVE_ALT);
+      expect(gave).toBeGreaterThan(-1);
+      expect(written.indexOf("one")).toBeGreaterThan(gave);
+      expect(written.indexOf("two")).toBeGreaterThan(written.indexOf("one"));
+    });
+  });
+
+  describe("unframe()", () => {
+    it("gives the screen back and writes what was announced, in order", async () => {
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.announce("one");
+        terminal.announce("two");
+        terminal.unframe();
+        await Promise.resolve();
+      });
+      const written = watched.written();
+      const gave = written.indexOf(LEAVE_ALT);
+      expect(gave).toBeGreaterThan(-1);
+      expect(written.indexOf("one")).toBeGreaterThan(gave);
+      expect(written.indexOf("two")).toBeGreaterThan(written.indexOf("one"));
+    });
+
+    it("does nothing where no frame has the screen", async () => {
+      const watched = await watching({}, async (terminal) => {
+        terminal.unframe();
+        await Promise.resolve();
+      });
+      expect(watched.written()).toBe("");
+    });
+
+    it("forgets what was drawn before the frame took the screen", async () => {
+      // The alternate screen leaves the cursor where the transcript ended
+      // rather than where the last line was drawn, so the next drawing is an
+      // ordinary first one and clears nothing above it.
+
+      const watched = await watching({ consoleSize: wide(20) }, async (t) => {
+        t.edit("a".repeat(25), 25);
+        t.frame(["f"]);
+        t.unframe();
+        t.edit("b", 1);
+        await Promise.resolve();
+      });
+      expect(watched.written().endsWith("\r\x1b7\x1b[0Jb\x1b8\x1b[1C"))
+        .toBe(true);
     });
   });
 

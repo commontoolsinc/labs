@@ -745,8 +745,7 @@ export class CurrentPlace {
    * the scope sits last rather than where a reference carries it.
    */
   label(): string {
-    const place = this.#here.place;
-    return `${labelPosition(place.position)} ${renderScope(place.scope)}`;
+    return labelForPlace(this.#here.place);
   }
 
   /**
@@ -1301,10 +1300,10 @@ function moveIntoPiece(
   const hash = segment.indexOf("#");
   if (hash !== -1) {
     const suffix = segment.slice(hash);
-    return suffix === "#argument" ? refuseArgumentSuffix(verb) : refuse(
+    return suffix === ARGUMENT_SUFFIX ? refuseArgumentSuffix(verb) : refuse(
       `Unknown suffix "${suffix}". The one supported suffix is ` +
-        `"#argument", which selects the piece's arguments cell the way ` +
-        `"--input" does.`,
+        `"${ARGUMENT_SUFFIX}", which selects the piece's arguments cell the ` +
+        `way "--input" does.`,
     );
   }
   if (segment.startsWith("@")) {
@@ -1525,8 +1524,13 @@ export function scopeMoveHint(operand: string): string {
 /**
  * The suffix an operand ends in to select a piece's arguments cell, which is
  * the selection `--input` spells as a flag.
+ *
+ * Exported because it is written as well as read: a verb that says where a
+ * write landed and a watch that names the cell it watches each spell the
+ * selection back, and one string is what keeps the spelling a person types
+ * and the spelling they are shown the same one.
  */
-const ARGUMENT_SUFFIX = "#argument";
+export const ARGUMENT_SUFFIX = "#argument";
 
 /**
  * The verb whose operand this module reads to stand somewhere rather than to
@@ -1998,6 +2002,30 @@ export function messageOf(thrown: unknown): string {
     // The conversion is what failed, which is the case this exists for.
   }
   return "The failure carries nothing that can be written as a message.";
+}
+
+/**
+ * The cell `place` names written short, which is the form the prompt carries
+ * for the place shuttle stands at and a watch carries for the cell it watches.
+ *
+ * It is one rendering rather than two because it makes one promise: the piece
+ * is written by the name the space's index confirmed for it and by its handle
+ * otherwise, nothing is cut down to a prefix, and the scope is written out.
+ * A reader who has learned to read the prompt reads a watch's name with no
+ * second convention, and neither is an address — {@link referenceForPlace} is
+ * what a seam takes and `pwd` is what a person copies.
+ *
+ * `input` selects the piece's arguments cell, which is the one thing a place
+ * cannot carry: a place is result-rooted, so nothing here writes the suffix
+ * for a *place*. What this names is a cell, and a piece has two — so a caller
+ * naming the arguments one says which, in the spelling an operand selects it
+ * by ({@link ARGUMENT_SUFFIX}). Without it two cells of one piece are one
+ * name, and a listing of them says the same thing twice.
+ */
+export function labelForPlace(place: Place, input = false): string {
+  return `${labelPosition(place.position)}${input ? ARGUMENT_SUFFIX : ""} ${
+    renderScope(place.scope)
+  }`;
 }
 
 /**

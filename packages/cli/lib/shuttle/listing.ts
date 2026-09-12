@@ -65,11 +65,13 @@ const SLUG_INDEX_BOUND = "the space's slug index names these, and a slug it " +
 /**
  * What a row turned out to be, recorded where the row is made.
  *
- * Five kinds and no sixth, closed by the projection {@link ANNOTATED} makes of
- * them: what stands at a space root is a facet, which is a `container`; what
- * stands in the two facets is a `slug` or a `piece`; and what stands inside a
+ * Six kinds and no seventh, closed by the projection {@link ANNOTATED} makes
+ * of them: what stands at a space root is a facet, which is a `container`;
+ * what stands in the two facets is a `slug` or a `piece`; what stands inside a
  * piece is a `container` where a walk continues through it, a `callable` where
- * the position is a verb's dispatch surface, and a `value` otherwise.
+ * the position is a verb's dispatch surface, and a `value` otherwise; and a
+ * `watch` is what `watches` numbers, which is a session object rather than
+ * anything standing at a place.
  *
  * A link is not among them, and its absence is a fact about the read rather
  * than a gap in the vocabulary: a cell read resolves a link on the way past,
@@ -83,7 +85,8 @@ export type RowKind =
   | "value"
   | "callable"
   | "piece"
-  | "slug";
+  | "slug"
+  | "watch";
 
 /** One thing a listing found standing where it was read. */
 export interface ListingRow {
@@ -122,6 +125,19 @@ export interface ListingRow {
 
   /** What the read said is wrong with what the name points at. */
   readonly error?: string;
+
+  /**
+   * The watch a `watch` row stands for, by the key that names one
+   * (`watch.ts`), and absent on every other kind of row.
+   *
+   * It is here because a handle is a bound reference rather than a row number
+   * (decision 27), and what binds a watch row is neither of the two things
+   * every other row is bound by: a watch stands at no place, and its name is a
+   * rendering rather than an identifier. The key is the complete reference of
+   * the cell it watches, so a row read back names the watch it was minted for
+   * whatever has been armed or disarmed since.
+   */
+  readonly watch?: string;
 }
 
 /** What `ls` found at a place. */
@@ -457,7 +473,9 @@ function rowFor(
  * promises: a piece's callables surface inline in listings, annotated as
  * callable, rather than behind a reserved name. The rest are not marked
  * because the annotation would be on every row and would say what the next
- * `ls` says anyway — a container lists, and a value does not.
+ * `ls` says anyway — a container lists, and a value does not. A watch is that
+ * case at its plainest: every row of the one listing that mints one is a
+ * watch, so the mark would be on all of them and distinguish none.
  */
 const ANNOTATED = {
   container: undefined,
@@ -465,6 +483,7 @@ const ANNOTATED = {
   callable: "callable",
   piece: undefined,
   slug: undefined,
+  watch: undefined,
 } satisfies Record<RowKind, string | undefined>;
 
 /**

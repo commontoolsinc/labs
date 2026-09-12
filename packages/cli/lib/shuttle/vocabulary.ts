@@ -27,6 +27,7 @@ import type {
   listPieceCallables,
   PieceConfig,
   setCellValue,
+  sinkCellValue,
   SpaceConfig,
   warmPiece,
 } from "../piece.ts";
@@ -35,7 +36,8 @@ import { type Announce } from "./announce.ts";
 import { type HeldConnection } from "./connection.ts";
 import { type Editing } from "./editor.ts";
 import { resolveHandle } from "./handles.ts";
-import { type ListingDeps } from "./listing.ts";
+import type { ValueLens } from "./lens.ts";
+import { type ListingDeps, type RowKind } from "./listing.ts";
 import { type VerbOptions } from "./options.ts";
 import {
   ASSUMED_COLUMNS,
@@ -68,6 +70,20 @@ export type Outcome =
   | { readonly kind: "text"; readonly text: string }
   /** The verb read `value` out of the fabric. */
   | { readonly kind: "value"; readonly value: unknown }
+  /**
+   * The verb armed a watch and opened `lens` onto it, having composed `armed`
+   * — the listing of what is now armed — on the way.
+   *
+   * The two are one outcome and not two because they happened in one line and
+   * in that order, and because only the caller that owns the keyboard can open
+   * a lens: a verb composes what it did and hands the frame over, exactly as
+   * it hands back the text of a line it merely wrote (`prompt.ts`).
+   */
+  | {
+    readonly kind: "watching";
+    readonly lens: ValueLens;
+    readonly armed: string;
+  }
   /** The line is refused, for the reason given. */
   | { readonly kind: "refused"; readonly reason: string }
   | Interruption;
@@ -129,6 +145,17 @@ export interface VerbDeps {
 
   /** Writes a reference at a cell path, which is what `link` does. */
   readonly linkPieces?: typeof linkPieces;
+
+  /**
+   * Subscribes to a cell and reports what it settles at, which is what a
+   * watch and the lens onto it are each built from.
+   *
+   * It is one seam serving both because the two want the same thing and differ
+   * only in how long they want it: the settling discipline is the seam's
+   * (`sinkCellValue`, `lib/piece.ts`), and which of them cancels when is the
+   * caller's.
+   */
+  readonly sinkCellValue?: typeof sinkCellValue;
 
   /**
    * Starts the piece a verb is about to act on, which is reaching in warms
@@ -417,6 +444,27 @@ export type Rowed =
   | Refusal;
 
 /**
+ * What a row of each kind that no place stands at is reached by instead, as
+ * the clause a refusal adds, and nothing for a kind that stands somewhere.
+ *
+ * A projection over every kind rather than a test for the two that carry a
+ * clause, closed by the compiler: a kind added to {@link RowKind} without a
+ * line here does not compile, so whether it names a verb of its own is a
+ * decision somebody made rather than an absence nobody noticed. Three kinds
+ * stand at a place and one that does not is a row a listing gave no operand,
+ * which is what the sentence in front of the clause already says.
+ */
+const REACHED_BY = {
+  container: undefined,
+  value: undefined,
+  callable: ", it being one of the piece's callables. `call` is what " +
+    "invokes one",
+  piece: undefined,
+  slug: undefined,
+  watch: ", it being a watch. `unwatch` is what disarms one",
+} satisfies Record<RowKind, string | undefined>;
+
+/**
  * Helper for {@link landing} and {@link reading}, which is the row `move`
  * names and the operand that reaches it, or the reason it reaches nothing.
  *
@@ -426,21 +474,17 @@ export type Rowed =
  *
  * A row with no operand is a row no place stands at, and the refusal says that
  * rather than that the handle named nothing — the handle named a row, and the
- * row is the part that is not somewhere to go. A callable is the row that is
- * always so, and it is the row `call` reads through a door of its own.
+ * row is the part that is not somewhere to go. Two kinds are always so and
+ * each has a verb of its own, which {@link REACHED_BY} is what names.
  */
 export function rowFor(shuttle: Shuttle, move: HandleMove): Rowed {
   const bound = resolveHandle(shuttle.session.handles, move.handle);
   if (bound.kind === "refused") return bound;
   const toward = bound.row.operand;
+  const instead: string | undefined = REACHED_BY[bound.row.kind];
   return toward === undefined
     ? refuse(
-      `\`${move.handle}\` names a row no place stands at${
-        bound.row.kind === "callable"
-          ? ", it being one of the piece's callables. `call` is what invokes " +
-            "one"
-          : ""
-      }.`,
+      `\`${move.handle}\` names a row no place stands at${instead ?? ""}.`,
     )
     : { kind: "row", at: bound.at, toward };
 }
@@ -636,6 +680,11 @@ export function pieceConfigAt(
  * what clears a continuation the line before it left: `more` after a listing
  * that fit is `more` with nothing waiting, not `more` writing the tail of the
  * listing before it.
+ *
+ * It comes back as the one arm of {@link Outcome} a rendering can be rather
+ * than as the union, so a caller that wants the lines rather than the outcome
+ * — one composing a page into a line of its own — reads them without a test
+ * that could not fail.
  */
 export function paged(
   shuttle: Shuttle,
@@ -643,7 +692,7 @@ export function paged(
   entries: readonly string[],
   bound: PageBound,
   hint?: string,
-): Outcome {
+): { readonly kind: "text"; readonly text: string } {
   const page: Page = pageOf(
     header,
     entries,

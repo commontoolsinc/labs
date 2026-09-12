@@ -5229,6 +5229,155 @@ export interface WarmPieceDeps extends PieceResolutionDeps {
   readonly alreadyRunning?: (piece: string) => boolean;
 }
 
+/** What {@link sinkCellValue} reads at each settled change. */
+export interface CellSinkOptions {
+  /**
+   * Read the piece's arguments cell rather than its result, which is the
+   * selection `getCellValue` makes on the same pair.
+   */
+  readonly input?: boolean;
+}
+
+/**
+ * Subscribes to the cell `addressedPath` resolves to and calls `onSettled`
+ * with its value once per quiet runtime, returning the function that cancels
+ * the subscription.
+ *
+ * One logical change fires the underlying sink several times before the
+ * reactive graph quiets, so what a caller would see without this is a value
+ * part-way through a computation. The discipline is a reentrancy guard plus
+ * `runtime.idle()`, which is `renderVDomToHtml`'s
+ * (`lib/piece-render.ts`): a fire while a settle is outstanding is folded
+ * into that settle, and the value is read after the runtime is quiet rather
+ * than taken from the callback. Nothing here waits on a clock, so a runtime
+ * that is slow is a runtime that is still computing.
+ *
+ * The bound on "once per quiet runtime" is what the guard can promise: two
+ * changes that quiet separately are two calls, and two that arrive inside one
+ * settle are one — so a caller is told what the cell holds at each quiet
+ * point and not how many commits reached it. A settle that fails costs the
+ * one report it was folding rather than every report after it, the guard
+ * being cleared on that path too.
+ *
+ * The piece is not started. Starting it is the caller's decision and its own
+ * act ({@link warmPiece}), because a caller that watches several cells of one
+ * piece starts it once.
+ *
+ * @returns The cancel, which is idempotent and stops delivery at once: a
+ * settle already outstanding when it runs reports nothing.
+ *
+ * @throws Error if the piece cannot be resolved, or if the pattern behind it
+ * will not load in this space.
+ */
+export async function sinkCellValue(
+  config: PieceConfig,
+  addressedPath: (string | number)[],
+  onSettled: (value: unknown) => void,
+  options: CellSinkOptions = {},
+  deps: PieceResolutionDeps = {},
+): Promise<() => void> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
+    config,
+    addressedPath,
+    pieces,
+    deps,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  // The path goes to `getCell`, which is not the same cell as keying into the
+  // root. For a piece's arguments cell the path form asserts the path is
+  // admitted by the input projection, reads its schema selection, and resolves
+  // a conditional branch through the root (`PiecePropIo.getCell`,
+  // `packages/piece`); the root keyed into reaches none of that. So a watch
+  // and a read of one path would otherwise be about two different cells.
+  const io = options.input ? piece.input : piece.result;
+  const cell = await io.getCell(path) as Cell<unknown>;
+  // Before the subscription, so the baseline is the value a read of this path
+  // would serve. The first settle writes no line and is what every later
+  // change is measured against, and `runtime.idle()` says the runtime is quiet
+  // rather than that the document has arrived — so a baseline taken ahead of
+  // the pull would be measured against whatever had loaded by then, and the
+  // arrival would report as a change nobody made. `PiecePropIo.get` pulls the
+  // selected cell before its own read (`packages/piece`), which is what makes
+  // the two agree.
+  await cell.pull();
+  return settledSink(
+    await readThrough(cell),
+    () => pieces.runtime.idle(),
+    onSettled,
+  );
+}
+
+/**
+ * Helper for {@link sinkCellValue}, which is the cell a read of the same path
+ * reads its value through: the one behind an `asCell` handle where the slot
+ * holds one, and the slot's own cell everywhere else.
+ *
+ * A path crossing an `asCell` field selects a cell whose value *is* a handle,
+ * and what a read serves is what stands behind it (`PiecePropIo.get`,
+ * `packages/piece`). A subscription on the outer cell fires when the handle
+ * stored at the slot is replaced and at no other time, so a change to the
+ * value behind it would settle nothing the caller could see — the watch and
+ * the read would be about two different cells, which is the one thing they may
+ * not be.
+ *
+ * The stored slot decides rather than the projection, and in that order: an
+ * `asCell` projection materializes even an absent or explicitly undefined slot
+ * as a `Cell`, so asking the projection first would follow a handle standing
+ * for nothing. That is the order the read takes for the same reason.
+ */
+async function readThrough(cell: Cell<unknown>): Promise<Cell<unknown>> {
+  if (cell.getRaw() === undefined) return cell;
+  const held = cell.get();
+  if (!isCell(held)) return cell;
+  await held.pull();
+  return held as Cell<unknown>;
+}
+
+/**
+ * Helper for {@link sinkCellValue}, which is the settling half of it: the
+ * sink on `cell`, the guard that folds a fire arriving during a settle into
+ * that settle, and the read `idle` gates.
+ *
+ * It is separate from the resolution above it because the two are driven by
+ * different things — the resolution by a connection, this by the reactive
+ * graph — and only this one has an ordering worth exhibiting on its own.
+ *
+ * The guard is cleared in the same synchronous stretch as the read, so no
+ * fire lands unreported between the two.
+ */
+function settledSink(
+  cell: Cell<unknown>,
+  idle: () => Promise<void>,
+  onSettled: (value: unknown) => void,
+): () => void {
+  let settling = false;
+  let cancelled = false;
+  const cancelSink = cell.sink(() => {
+    if (settling || cancelled) return;
+    settling = true;
+    idle().then(() => {
+      settling = false;
+      // Read after the settle rather than taking the value the sink was
+      // handed: a cell passes through states that exist only until the
+      // scheduler drains, and the callback's value can be one of them.
+      if (!cancelled) onSettled(cell.get());
+    }, () => {
+      settling = false;
+    });
+  });
+  return () => {
+    if (cancelled) return;
+    cancelled = true;
+    cancelSink();
+  };
+}
+
 export async function stepPiece(
   config: PieceConfig,
   deps: PieceResolutionDeps = {},

@@ -47,11 +47,35 @@ Usage:
     shuttle-terminal.py <script> <transcript> -- <command> [args...]
 
 `<script>` is one line to type per line, with `#` comments and blank lines
-ignored. `<transcript>` is written as JSON: an array of
-`{"line", "said", "prompt"}` records in the order the shell answered them, after
-a leading record whose line is null carrying anything written before the first
-prompt. The exit status is the shell's own, and a shell that ended before the
-script did is an error here.
+ignored. Two of those lines are directives to this driver rather than lines for
+the shell, and neither makes a record of its own:
+
+* `@frame <keys>` waits until the shell has taken the alternate screen for a
+  full-screen view, then types `<keys>` at it with no return. It belongs
+  directly under the line that opens the view, because that line has not
+  settled — the view is what it settles into — and typing at a view before it
+  is drawn would put the keys on the line being typed next instead.
+* `@said <text>` waits until `<text>` has been drawn, searching from the last
+  line typed. It is for what the shell writes on its own account rather than in
+  answer to a line: a watch's event line arrives when the runtime settles, which
+  may be before or after the prompt that line drew, so waiting for it is the
+  only ordering there is. Waiting is all it does -- which record the write lands
+  in is decided by when it arrived, not by this: one drawn before the prompt
+  that ends a line belongs to that line, one after it to the next line, and one
+  with no next line to the trailing record. So a test asserting on such a line
+  reads the whole transcript rather than a record of it.
+
+Neither is a poll and neither is a clock: each blocks until the terminal has
+more bytes, exactly as the settle wait does, and a condition that never holds
+is left to the one session deadline above.
+
+`<transcript>` is written as JSON: an array of
+`{"line", "said", "prompt"}` records in the order the shell answered them,
+between a leading record whose line is null carrying anything written before the
+first prompt and, where the shell wrote anything after the last line settled, a
+trailing one whose line is null carrying that. Both are the writes no typed line
+accounts for. The exit status is the shell's own, and a shell that ended before
+the script did is an error here.
 """
 
 import fcntl
@@ -79,6 +103,18 @@ ABOVE_END = "\r\n\r" + SAVE
 
 # A prompt with nothing typed at it, which is the settle marker.
 SETTLED = re.compile(r"^shuttle .*> $")
+
+# What the shell sends when a full-screen view takes the screen. A frame is
+# drawn there rather than on the transcript's own screen, and carries none of
+# the three writes above, so what the parser wants from it is this one
+# boundary: everything between it and the drawing that follows the view is
+# invisible to `next_write`, which looks for a clear that a frame never sends.
+ENTER_ALT = "\x1b[?1049h"
+
+# The script lines that are instructions to this driver rather than to the
+# shell. Each is documented in the module docstring above.
+FRAME_KEYS = "@frame "
+AWAIT_SAID = "@said "
 
 # How tall and wide the terminal is. Fixed rather than inherited, so that what
 # a page bounds and what a line wraps at is the same on every machine.
@@ -129,6 +165,11 @@ class Terminal:
         os.close(slave)
         self.drawn = ""
         self.read_from = 0
+        # Where the drawing stood when the last line was typed, which is where
+        # a wait for something the shell wrote in answer to it searches from.
+        # Consuming a write moves `read_from` past it, so a wait that searched
+        # from there would miss what has already been read apart.
+        self.typed_at = 0
         self.deadline = time.time() + DEADLINE_SECONDS
 
     def pump(self):
@@ -165,6 +206,17 @@ class Terminal:
         """Sends `text` to the terminal, as a person typing it would."""
         os.write(self.master, text.encode("utf8"))
 
+    def type_line(self, text):
+        """Types `text` and the return that runs it, marking where that was."""
+        self.typed_at = len(self.drawn)
+        self.type(text + "\r")
+
+    def wait_for(self, needle):
+        """Blocks until `needle` has been drawn since the last line was typed."""
+        while self.drawn.find(needle, self.typed_at) < 0:
+            if not self.pump():
+                raise EOFError("the shell ended before it drew %r" % needle)
+
 
 def settle(terminal, said):
     """Reads until an empty prompt is drawn, collecting what was written above it."""
@@ -185,9 +237,21 @@ def run(script, argv):
     banner = []
     prompt = settle(terminal, banner)
     records = [{"line": None, "said": "\n".join(banner), "prompt": prompt}]
-    for line in script:
+    at = 0
+    while at < len(script):
+        line = script[at]
+        at += 1
+        if line.startswith(AWAIT_SAID):
+            terminal.wait_for(line[len(AWAIT_SAID):])
+            continue
         said = []
-        terminal.type(line + "\r")
+        terminal.type_line(line)
+        # A view opens instead of the line settling, so the keys that close it
+        # are typed before the settle rather than after it.
+        while at < len(script) and script[at].startswith(FRAME_KEYS):
+            terminal.wait_for(ENTER_ALT)
+            terminal.type(script[at][len(FRAME_KEYS):])
+            at += 1
         prompt = settle(terminal, said)
         records.append({"line": line, "said": "\n".join(said), "prompt": prompt})
     # `ctrl-d` on an empty line is how a session ends, and the terminal closes
@@ -195,6 +259,26 @@ def run(script, argv):
     terminal.type("\x04")
     while terminal.pump():
         pass
+    # What the shell drew after the last line settled, which is what it wrote on
+    # its own account: a watch's event line arrives when the runtime goes quiet,
+    # which can be after the prompt that ended the last record. Every earlier
+    # one is taken by the next line's settle; there is no next line for these,
+    # so without this they are drawn and then dropped -- and a `@said` waiting
+    # on one as the last directive of a script would be the case where what was
+    # waited for reaches no record at all. It carries no line of its own, as the
+    # banner record does not, for the same reason: no line was typed for it.
+    trailing = []
+    while True:
+        write = terminal.next_write()
+        if write is None:
+            break
+        kind, text = write
+        if kind == "above":
+            trailing.append(text.replace("\r\n", "\n"))
+    if trailing:
+        records.append(
+            {"line": None, "said": "\n".join(trailing), "prompt": ""},
+        )
     return records, terminal.process.wait()
 
 
