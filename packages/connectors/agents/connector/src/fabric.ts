@@ -249,6 +249,11 @@ function isDriverCapabilities(value: unknown): value is DriverCapabilities {
     return false;
   }
   if (
+    value.startSession !== undefined && typeof value.startSession !== "boolean"
+  ) {
+    return false;
+  }
+  if (
     value.modes !== undefined &&
     (!Array.isArray(value.modes) ||
       !value.modes.every((mode) => typeof mode === "string"))

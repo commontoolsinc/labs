@@ -255,6 +255,7 @@ export class AcpDriver implements AgentDriver {
         inventory: false,
         read: false,
         prompt: true,
+        startSession: false,
         cancel: true,
         rename: false,
         setMode: false,
@@ -482,6 +483,12 @@ export class AcpDriver implements AgentDriver {
     } finally {
       this.#pendingPrompts.delete(nativeSessionId);
     }
+  }
+
+  startSession(): Promise<CommandExecutionResult> {
+    return Promise.resolve(
+      unsupported("ACP has no portable operation that starts a session"),
+    );
   }
 
   async cancel(nativeSessionId: string): Promise<CommandExecutionResult> {

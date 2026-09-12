@@ -24,6 +24,8 @@ export interface DriverCapabilities {
   inventory: boolean;
   read: boolean;
   prompt: boolean;
+  /** Whether the driver can start a new session. Absent means it cannot. */
+  startSession?: boolean;
   cancel: boolean;
   rename: boolean;
   setMode: boolean;
@@ -83,6 +85,20 @@ export interface PromptInput {
   text: string;
 }
 
+export interface StartInput {
+  /** The first prompt of the new session. */
+  text: string;
+  /**
+   * Working directory the session runs in. When absent, the source's
+   * configured `cwd` is used.
+   */
+  cwd?: string;
+  /** Title given to the session once it exists. */
+  title?: string;
+  /** A mode the driver advertises, applied to the session's first turn. */
+  mode?: string;
+}
+
 export interface CommandExecutionOptions {
   force?: boolean;
   onCancellationReady?: () => void;
@@ -110,6 +126,15 @@ export interface AgentDriver {
   prompt(
     nativeSessionId: string,
     input: PromptInput,
+    options?: CommandExecutionOptions,
+  ): Promise<CommandExecutionResult>;
+  /**
+   * Starts a new session whose provider identity is `nativeSessionId`, chosen
+   * by the caller, and runs `input.text` as its first prompt.
+   */
+  startSession(
+    nativeSessionId: string,
+    input: StartInput,
     options?: CommandExecutionOptions,
   ): Promise<CommandExecutionResult>;
   cancel(nativeSessionId: string): Promise<CommandExecutionResult>;
