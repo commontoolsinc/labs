@@ -59,17 +59,23 @@ the shell, and neither makes a record of its own:
   line typed. It is for what the shell writes on its own account rather than in
   answer to a line: a watch's event line arrives when the runtime settles, which
   may be before or after the prompt that line drew, so waiting for it is the
-  only ordering there is.
+  only ordering there is. Waiting is all it does -- which record the write lands
+  in is decided by when it arrived, not by this: one drawn before the prompt
+  that ends a line belongs to that line, one after it to the next line, and one
+  with no next line to the trailing record. So a test asserting on such a line
+  reads the whole transcript rather than a record of it.
 
 Neither is a poll and neither is a clock: each blocks until the terminal has
 more bytes, exactly as the settle wait does, and a condition that never holds
 is left to the one session deadline above.
 
 `<transcript>` is written as JSON: an array of
-`{"line", "said", "prompt"}` records in the order the shell answered them, after
-a leading record whose line is null carrying anything written before the first
-prompt. The exit status is the shell's own, and a shell that ended before the
-script did is an error here.
+`{"line", "said", "prompt"}` records in the order the shell answered them,
+between a leading record whose line is null carrying anything written before the
+first prompt and, where the shell wrote anything after the last line settled, a
+trailing one whose line is null carrying that. Both are the writes no typed line
+accounts for. The exit status is the shell's own, and a shell that ended before
+the script did is an error here.
 """
 
 import fcntl
@@ -253,6 +259,26 @@ def run(script, argv):
     terminal.type("\x04")
     while terminal.pump():
         pass
+    # What the shell drew after the last line settled, which is what it wrote on
+    # its own account: a watch's event line arrives when the runtime goes quiet,
+    # which can be after the prompt that ended the last record. Every earlier
+    # one is taken by the next line's settle; there is no next line for these,
+    # so without this they are drawn and then dropped -- and a `@said` waiting
+    # on one as the last directive of a script would be the case where what was
+    # waited for reaches no record at all. It carries no line of its own, as the
+    # banner record does not, for the same reason: no line was typed for it.
+    trailing = []
+    while True:
+        write = terminal.next_write()
+        if write is None:
+            break
+        kind, text = write
+        if kind == "above":
+            trailing.append(text.replace("\r\n", "\n"))
+    if trailing:
+        records.append(
+            {"line": None, "said": "\n".join(trailing), "prompt": ""},
+        )
     return records, terminal.process.wait()
 
 
