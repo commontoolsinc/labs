@@ -15,12 +15,12 @@ retired (F4). It records no decision itself, and it mutates no live data.
 
 ## Revisions and observation period
 
-| Item                     | Value                                                                                                                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| View landed, flag off    | `cd5510583b`, 2026-08-12                                                                                                                                                                |
-| Flag default flipped on  | `3c36680eba`, 2026-08-12, the same day                                                                                                                                                  |
-| Revision this evidence   | `8551bd82b8`, 2026-09-11, on top of `a44d9389c3`                                                                                                                                        |
-| Observation period       | 2026-08-12 to 2026-09-11, thirty days of `main` at the default-on posture                                                                                                                |
+| Item                               | Value                                                                                                                                                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| View landed, flag off              | `cd5510583b`, 2026-08-12                                                                                                                                                                              |
+| Flag default flipped on            | `3c36680eba`, 2026-08-12, the same day                                                                                                                                                                |
+| Revision this evidence             | `8551bd82b8`, 2026-09-11, on top of `a44d9389c3`                                                                                                                                                      |
+| Observation period                 | 2026-08-12 to 2026-09-11, thirty days of `main` at the default-on posture                                                                                                                             |
 | Rollback override in tracked files | None. No workflow under `.github/`, deployment configuration, or package manifest sets `EXPERIMENTAL_LAZY_MATERIALIZATION`. A process environment supplied outside the tree is not observable from it |
 
 Elapsed time is not acceptance. What the period covers is stated under
@@ -49,11 +49,10 @@ decision:
   environment wins, otherwise the posture its server publishes, otherwise the
   built-in default; with `CF_ADOPT_SERVER_FLAGS=false` it reads its
   environment alone and a server's rollback does not reach it.
-- **The browser shell has no rollback route.** Its build-time defines cover
-  five other experimental flags and not this one, so every shell build since
+- **The browser shell has no rollback route.** Its build-time defines cover five
+  other experimental flags and not this one, so every shell build since
   2026-08-12 has run the view on with no way to turn it off short of a code
-  change. The registry's statement that the shell reads the same variables
-  from its defines does not hold for this flag.
+  change.
 
 So every shell build in the period could run only the on arm, and whatever
 browser use there was in the period was on-arm use; how much there was, this
@@ -101,10 +100,10 @@ change at `8551bd82b8` plus the lift-path fix, the tree
 suite builds without an explicit value then runs off, and a case that names
 the posture explicitly keeps the posture it names.
 
-| Posture                                | Result                       |
-| -------------------------------------- | ---------------------------- |
-| On (the built-in default; every CI run) | The runner unit and integration suite lanes are green in CI on `main` at `a44d9389c3` (whose one failed lane is the benchmark run) and every lane is green on the F0 change at `b0324aff36` |
-| Off (built-in default flipped at the source) | `FAILED`: 1,378 tests passed, 5 failed (9 steps), 1 step ignored, in 13 minutes 22 seconds, locally |
+| Posture                                      | Result                                                                                                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| On (the built-in default; every CI run)      | The runner unit and integration suite lanes are green in CI on `main` at `a44d9389c3` (whose one failed lane is the benchmark run) and every lane is green on the F0 change at `b0324aff36` |
+| Off (built-in default flipped at the source) | `FAILED`: 1,378 tests passed, 5 failed (9 steps), 1 step ignored, in 13 minutes 22 seconds, locally                                                                                         |
 
 The five failing tests, with the assertion each fails on:
 
@@ -122,7 +121,7 @@ The five failing tests, with the assertion each fails on:
   disposed of by a refusal re-fires when the awaited document arrives. The
   unresolved-input refusal is the view's, so the eager posture never
   produces the refusal the case waits on.
-- `unresolved-input-lift.test.ts`, "a hop-target dead-end disposes the run":
+- `unresolved-input-lift.test.ts`, "a hop-target dead-end DISPOSES the run":
   under the eager posture the body ran with `undefined` in a slot its schema
   promised a value for and threw
   `TypeError: Cannot read properties of undefined (reading 'split')`. That is
@@ -161,29 +160,33 @@ Every commit that touched the view's two files, `schema-view.ts` and
 `query-result-proxy.ts`, between the default flipping on and the revision of
 this evidence, oldest first. The kind is the subject's prefix with its scope
 dropped and its `!` kept, and the subject is quoted without its pull request
-number; two subjects carry no prefix.
+number; two subjects carry no prefix. The transaction mark and the sites that
+read it, in `extended-storage-transaction.ts`, `schema.ts`, and `runner.ts`, are
+outside this table; two commits in the period edited that machinery,
+`129215d4c6` on 2026-08-18, which the table also lists, and `4e345c893e` on
+2026-08-28, which it does not, and both predate the last row.
 
-| Date       | Commit        | Kind     | Subject                                                                                              |
-| ---------- | ------------- | -------- | ---------------------------------------------------------------------------------------------------- |
-| 2026-08-13 | `572a477c27` | refactor | name each object-shape predicate for the array case |
-| 2026-08-14 | `401df0d11d` | docs | say "returns" where "answers" was doing the work, in `src` |
-| 2026-08-15 | `720c03243c` | refactor | conform imports in `runner/src` and `runner/integration` |
-| 2026-08-17 | `a3fcd6047a` | (none) | A transaction resolves a link once, not once per element read |
-| 2026-08-17 | `8ca18b71e1` | fix | an `unknown` field keeps the reference it holds |
-| 2026-08-17 | `9c0881506b` | fix | the proxy value cache answers for the writability asked for |
-| 2026-08-17 | `0c9ea8a8a0` | refactor! | remove `{ proxy: true }` and writability in query-result proxies |
-| 2026-08-18 | `129215d4c6` | feat | a materialized read describes the instant it was taken |
-| 2026-08-19 | `4543e4dfcd` | refactor | a validator is named after the type it guards |
-| 2026-08-21 | `90b0996722` | (none) | OW51 unresolved-input semantics: the RULED option-3 build [HOLD — coordinator delta review pending] |
-| 2026-08-26 | `7789adb5ca` | refactor | `data-model-schema`, and `data-model` stops importing `api` |
-| 2026-08-28 | `8acda7a358` | feat | reader schema takes precedence over link schemas on hops |
-| 2026-09-01 | `14bc4ecc9e` | refactor | the `FabricValue` surface is the package's main export |
-| 2026-09-09 | `fda353d69b` | fix | the walks admit fabric special objects |
-| 2026-09-09 | `818af09978` | fix | an empty write batch keeps the transaction's read caches |
-| 2026-09-10 | `89e5524c23` | feat | expose pattern computation read costs |
-| 2026-09-10 | `e70704f206` | fix | preserve read accounting across transaction and test boundaries |
-| 2026-09-10 | `10a780d064` | fix | carry enclosing `$defs` into sub-schemas through one shared helper |
-| 2026-09-11 | `5347f7da45` | fix | resolve `#/$defs/<name>` against the document root |
+| Date       | Commit        | Kind      | Subject                                                                                              |
+| ---------- | ------------- | --------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-13 | `572a477c27`  | refactor  | name each object-shape predicate for the array case                                                  |
+| 2026-08-14 | `401df0d11d`  | docs      | say "returns" where "answers" was doing the work, in `src`                                           |
+| 2026-08-15 | `720c03243c`  | refactor  | conform imports in `runner/src` and `runner/integration`                                             |
+| 2026-08-17 | `a3fcd6047a`  | (none)    | A transaction resolves a link once, not once per element read                                        |
+| 2026-08-17 | `8ca18b71e1`  | fix       | an `unknown` field keeps the reference it holds                                                      |
+| 2026-08-17 | `9c0881506b`  | fix       | the proxy value cache answers for the writability asked for                                          |
+| 2026-08-17 | `0c9ea8a8a0`  | refactor! | remove `{ proxy: true }` and writability in query-result proxies                                     |
+| 2026-08-18 | `129215d4c6`  | feat      | a materialized read describes the instant it was taken                                               |
+| 2026-08-19 | `4543e4dfcd`  | refactor  | a validator is named after the type it guards                                                        |
+| 2026-08-21 | `90b0996722`  | (none)    | OW51 unresolved-input semantics: the RULED option-3 build [HOLD — coordinator delta review pending]  |
+| 2026-08-26 | `7789adb5ca`  | refactor  | `data-model-schema`, and `data-model` stops importing `api`                                          |
+| 2026-08-28 | `8acda7a358`  | feat      | reader schema takes precedence over link schemas on hops                                             |
+| 2026-09-01 | `14bc4ecc9e`  | refactor  | the `FabricValue` surface is the package's main export                                               |
+| 2026-09-09 | `fda353d69b`  | fix       | the walks admit fabric special objects                                                               |
+| 2026-09-09 | `818af09978`  | fix       | an empty write batch keeps the transaction's read caches                                             |
+| 2026-09-10 | `89e5524c23`  | feat      | expose pattern computation read costs                                                                |
+| 2026-09-10 | `e70704f206`  | fix       | preserve read accounting across transaction and test boundaries                                      |
+| 2026-09-10 | `10a780d064`  | fix       | carry enclosing `$defs` into sub-schemas through one shared helper                                   |
+| 2026-09-11 | `5347f7da45`  | fix       | resolve `#/$defs/<name>` against the document root                                                   |
 
 Separately from these two files, the lift path's disposition of a
 synchronous refusal in `runner.ts` has a fix on
