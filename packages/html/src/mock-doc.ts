@@ -71,9 +71,7 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
       } else {
         attrValue = `${value}`;
       }
-      if (!el.attribs[key]) {
-        el.attribs[key] = attrValue;
-      }
+      el.attribs[key] = attrValue;
     },
   };
 }
