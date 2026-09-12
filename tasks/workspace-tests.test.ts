@@ -292,6 +292,27 @@ Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest",
   }
 });
 
+Deno.test("readWorkspaceMembers rejects a manifest declaring no workspace", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-members-" });
+  try {
+    // A workspace member's own manifest, which is the file a caller handed a
+    // package directory or the wrong root reads instead of the root's.
+    const configPath = `${dir}/deno.jsonc`;
+    await Deno.writeTextFile(
+      configPath,
+      JSON.stringify({ tasks: { test: "deno test" } }),
+    );
+    const error = await assertRejects(
+      () => readWorkspaceMembers(configPath),
+      Error,
+      "declares no workspace",
+    );
+    assertStringIncludes(error.message, configPath);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("assertTaskTestsIncluded requires tasks in the root workspace", () => {
   assertTaskTestsIncluded(["./packages/api", "./tasks"]);
   assertThrows(
