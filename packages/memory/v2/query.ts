@@ -6,7 +6,10 @@ import {
   internSchemaAsTaggedHashString,
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model-schema";
-import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
+import {
+  verifySchemaDocument,
+  walkSchemaDocumentClosure,
+} from "@commonfabric/data-model-schema/schema-closure";
 import {
   classifySchemaMeta,
   collectExternalSchemaRefHashes,
@@ -1141,10 +1144,7 @@ const scanSnapshotSchemaRefs = (
     if (id.startsWith("cid:")) {
       const hash = id.slice("cid:".length);
       const inner = (doc as { value?: unknown }).value;
-      if (
-        isSubschema(inner) &&
-        internSchemaAsTaggedHashString(inner as JSONSchema) === hash
-      ) {
+      if (verifySchemaDocument(hash, inner) !== undefined) {
         isSchemaDocument = true;
         refs.add(hash);
       }
@@ -1270,14 +1270,7 @@ const assembleSchemaDocClosures = (
   trackerAdds: QueryDocKey[];
   additions: Map<QueryDocKey, EntitySnapshot>;
 } => {
-  const pending: string[] = [];
-  const seen = new Set<string>();
-  const enqueue = (hash: string) => {
-    if (!seen.has(hash)) {
-      seen.add(hash);
-      pending.push(hash);
-    }
-  };
+  const roots = new Set<string>();
   for (const [key, snapshot] of delivered) {
     for (
       const hash of scanSnapshotSchemaRefs(
@@ -1289,12 +1282,12 @@ const assembleSchemaDocClosures = (
         stats,
       )
     ) {
-      enqueue(hash);
+      roots.add(hash);
     }
   }
   if (revalidateEstablished) {
     for (const hash of counts.keys()) {
-      enqueue(hash);
+      roots.add(hash);
     }
   }
   let verified = verifiedSchemaDocCaches.get(engine);
@@ -1304,55 +1297,78 @@ const assembleSchemaDocClosures = (
   }
   const trackerAdds: QueryDocKey[] = [];
   const additions = new Map<QueryDocKey, EntitySnapshot>();
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    const id = `cid:${hash}`;
-    const key = toDocKey(space, id, DEFAULT_SCOPE, identityOf(manager));
-    manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
-    const snapshot = snapshotForDocKey(space, manager, branch, key);
-    const doc = snapshot?.document;
-    const inner = isObjectNotArray(doc)
-      ? (doc as { value?: unknown }).value
-      : undefined;
-    if (snapshot === null || inner === undefined) {
-      throw new SchemaClosureError(
-        `Query result requires schema document ${id}, which is not stored ` +
-          `in this space. Every embedded schema ref must resolve within ` +
-          `the delivered set (docs/specs/content-addressed-schemas.md).`,
-      );
-    }
-    // This exact version verified here before: skip re-hashing, but keep
-    // the registry entry warm (a registry clear may have dropped it).
-    let registered = verified.get(key) === snapshot.seq
-      ? lookupSchemaDocument(hash)
-      : undefined;
-    if (registered === undefined) {
-      try {
-        registered = registerSchemaDocument(hash, inner as JSONSchema);
-      } catch {
+  // What the loader read for each hash, for the verified callback: the key
+  // and snapshot, and whether this exact version had verified here before.
+  const loaded = new Map<
+    string,
+    { key: QueryDocKey; snapshot: EntitySnapshot; cached: boolean }
+  >();
+  walkSchemaDocumentClosure({
+    roots,
+    load: (hash) => {
+      const id = `cid:${hash}`;
+      const key = toDocKey(space, id, DEFAULT_SCOPE, identityOf(manager));
+      manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
+      const snapshot = snapshotForDocKey(space, manager, branch, key);
+      const doc = snapshot?.document;
+      const inner = isObjectNotArray(doc)
+        ? (doc as { value?: unknown }).value
+        : undefined;
+      if (snapshot === null || inner === undefined) return undefined;
+      // This exact version verified here before: skip re-hashing, but keep
+      // the registry entry warm (a registry clear may have dropped it).
+      const registered = verified.get(key) === snapshot.seq
+        ? lookupSchemaDocument(hash)
+        : undefined;
+      loaded.set(hash, { key, snapshot, cached: registered !== undefined });
+      return registered === undefined
+        ? { kind: "stored", value: inner }
+        : { kind: "verified", schema: registered };
+    },
+    onMissing: (hash, miss) => {
+      const id = `cid:${hash}`;
+      if (miss === "absent") {
         throw new SchemaClosureError(
-          `Schema document ${id} did not verify in this space: its stored ` +
-            `content does not hash to its id.`,
+          `Query result requires schema document ${id}, which is not stored ` +
+            `in this space. Every embedded schema ref must resolve within ` +
+            `the delivered set (docs/specs/content-addressed-schemas.md).`,
         );
       }
-      if (verified.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) verified.clear();
-      verified.set(key, snapshot.seq);
-    }
-    // The document just verified is the schema document its id names,
-    // which is all a scan of it finds: its own hash. Recording that here
-    // keeps the state's record at one entry per delivered version, so a
-    // later refresh answers the closure's documents without scanning them.
-    recordSchemaRefScan(engine, key, snapshot, new Set([hash]), scans, counts);
-    for (const dep of collectExternalSchemaRefHashes(registered)) {
-      enqueue(dep);
-    }
-    if (!tracker.has(key)) {
-      trackerAdds.push(key);
-      if (!delivered.has(key)) {
-        additions.set(key, snapshot);
+      throw new SchemaClosureError(
+        `Schema document ${id} did not verify in this space: its stored ` +
+          `content does not hash to its id.`,
+      );
+    },
+    onVerified: (hash, schema) => {
+      const { key, snapshot, cached } = loaded.get(hash)!;
+      if (!cached) {
+        registerSchemaDocument(hash, schema);
+        if (verified.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) {
+          verified.clear();
+        }
+        verified.set(key, snapshot.seq);
       }
-    }
-  }
+      // The document just verified is the schema document its id names,
+      // which is all a scan of it finds: its own hash. Recording that here
+      // keeps the state's record at one entry per delivered version, so a
+      // later refresh answers the closure's documents without scanning
+      // them.
+      recordSchemaRefScan(
+        engine,
+        key,
+        snapshot,
+        new Set([hash]),
+        scans,
+        counts,
+      );
+      if (!tracker.has(key)) {
+        trackerAdds.push(key);
+        if (!delivered.has(key)) {
+          additions.set(key, snapshot);
+        }
+      }
+    },
+  });
   return { trackerAdds, additions };
 };
 
@@ -1376,48 +1392,47 @@ const validateSelectorSchemaRefs = (
   branch: string,
   roots: GraphQuery["roots"],
 ): void => {
-  const pending: string[] = [];
+  const hashes = new Set<string>();
   for (const root of roots) {
     const schema = root.selector?.schema;
     if (schema === undefined || typeof schema === "boolean") continue;
     for (const hash of collectExternalSchemaRefHashes(schema as JSONSchema)) {
-      pending.push(hash);
+      hashes.add(hash);
     }
   }
-  if (pending.length === 0) return;
-  const seen = new Set<string>();
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    if (seen.has(hash)) continue;
-    seen.add(hash);
-    const id = `cid:${hash}`;
-    const key = toDocKey(space, id, DEFAULT_SCOPE, identityOf(manager));
-    manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
-    const snapshot = snapshotForDocKey(space, manager, branch, key);
-    const doc = snapshot?.document;
-    const inner = isObjectNotArray(doc)
-      ? (doc as { value?: unknown }).value
-      : undefined;
-    if (snapshot === null || inner === undefined) {
-      throw new SchemaClosureError(
-        `Selector references schema document ${id}, which is not stored ` +
-          `in this space. A selector reference must name a persisted ` +
-          `closure (docs/specs/content-addressed-schemas.md).`,
-      );
-    }
-    let interned: JSONSchema;
-    try {
-      interned = registerSchemaDocument(hash, inner as JSONSchema);
-    } catch {
+  if (hashes.size === 0) return;
+  walkSchemaDocumentClosure({
+    roots: hashes,
+    load: (hash) => {
+      const id = `cid:${hash}`;
+      const key = toDocKey(space, id, DEFAULT_SCOPE, identityOf(manager));
+      manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
+      const snapshot = snapshotForDocKey(space, manager, branch, key);
+      const doc = snapshot?.document;
+      const inner = isObjectNotArray(doc)
+        ? (doc as { value?: unknown }).value
+        : undefined;
+      if (snapshot === null || inner === undefined) return undefined;
+      return { kind: "stored", value: inner };
+    },
+    onVerified: (hash, schema) => {
+      registerSchemaDocument(hash, schema);
+    },
+    onMissing: (hash, miss) => {
+      const id = `cid:${hash}`;
+      if (miss === "absent") {
+        throw new SchemaClosureError(
+          `Selector references schema document ${id}, which is not stored ` +
+            `in this space. A selector reference must name a persisted ` +
+            `closure (docs/specs/content-addressed-schemas.md).`,
+        );
+      }
       throw new SchemaClosureError(
         `Selector references schema document ${id} that did not verify ` +
           `in this space: its stored content does not hash to its id.`,
       );
-    }
-    for (const dep of collectExternalSchemaRefHashes(interned)) {
-      pending.push(dep);
-    }
-  }
+    },
+  });
 };
 
 /** The walk-side recorder over a graph state's miss structures: records
