@@ -215,58 +215,65 @@ of whether it is understood. Add it under the lane
 paced band rather than an absolute: what regresses is the gap between a paced
 click and an eager one.
 
-## Stage 7 — Two result pulls per click, each walking the whole result
+## Stage 7 — Every click re-instantiates a child piece, and its result pull walks the whole result twice
 
-The largest item left, and the measurement it was waiting for is taken.
+The largest item left, and the chain is now named end to end.
 
-**What happens.** Every click on a thread runs **exactly two `Cell.pull()`
-calls**, and each deep-traverses the entire result because the cell it pulls
-carries no schema. `pull()` walks its value when the link's schema is absent or
-true, since without one there is nothing to say which nested values to read as
-dependencies. Instrumented over five consecutive paced clicks on a 37-thread
-list, one per line:
+**The measurement.** Instrumented over five consecutive paced clicks on a
+37-thread list, with a counter on each pull site:
 
-| click | event → detail visible | of which traversal | pulls |
-| ---: | ---: | ---: | ---: |
-| 0 | 384 ms | 237 ms | 2 |
-| 1 | 378 ms | 248 ms | 2 |
-| 2 | 379 ms | 268 ms | 2 |
-| 3 | 398 ms | 261 ms | 2 |
-| 4 | 401 ms | 257 ms | 2 |
+| click | event → detail visible | child instantiations | traversals | traversal time |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 404 ms | 1 | 2 | 248 ms |
+| 1 | 355 ms | 1 | 2 | 233 ms |
+| 2 | 390 ms | 1 | 2 | 250 ms |
+| 3 | 444 ms | 1 | 2 | 295 ms |
+| 4 | 411 ms | 1 | 2 | 275 ms |
 
-**About 65% of a click.** Skipping the traversal outright — a diagnostic, not a
-fix, since it is what registers the dependencies — took the same five clicks to
-138, 217, 168, 144 and 180 ms. So this is worth roughly halving what a click
-still costs.
+Exactly one instantiation and exactly two traversals per click, **about 65% of
+the click**. Skipping the traversal outright — a diagnostic, not a fix, since it
+is what registers the dependencies — took the same five clicks to 138, 217,
+168, 144 and 180 ms. The prize is roughly halving what a click still costs.
 
-**Where the pulls come from.** Not the client: an IPC `handleCellPull` was
-marked and never fired, so both are runner-internal. The internal sites are
-`#pullCellOnceInPullMode`, reached from the deferred-start and
-`#startFromServedState` paths and from `#pullCellOnceAfterSuccessfulCommit` —
-all of which read as **once per piece start**, not once per interaction. Two of
-them firing on every click is the part that does not add up, and it is where to
-start.
+**The chain.**
 
-**So there are two candidate fixes, and the first is the better one:**
+1. A click writes one session cell, which changes what a JavaScript action
+   returns.
+2. `#writeJavaScriptActionResult` hashes the returned artifact
+   (`hashStringOf(flattenBuilderArtifacts(resultPattern))`) and compares it
+   against `#resultPatternCache`. Any change at all takes the
+   `!patternUnchanged` arm and **re-instantiates the child piece**.
+3. That instantiation registers a one-shot result pull
+   (`#pullCellOnceAfterSuccessfulCommit`).
+4. `Cell.pull()` deep-traverses its value, because the result cell it is built
+   from carries no schema and there is otherwise nothing to say which nested
+   values to read as dependencies — and its convergence loop runs the action
+   **twice**, so the whole result is walked twice.
 
-1. **Stop the starts.** If a click is starting or re-starting a piece that is
-   already running, both pulls and both traversals go away together, and the
-   start itself is a cost nobody asked for. Establish first whether the piece is
-   genuinely being started twice per click, or whether one of these sites is
-   reached by another route.
-2. **Give the pull a schema.** `#pullCellOnceInPullMode` builds its cell with
-   `getCellFromLink(resultCell.getAsNormalizedFullLink())`, so a result cell
-   that carries no schema produces a schemaless pull. A start pull that carried
-   the pattern's result schema would register the same dependencies without the
-   walk. That is a runtime decision about what a start pull should demand, not a
-   local edit.
+None of this is specific to the inbox. Any action whose returned artifact
+changes pays a child re-instantiation and a double walk of the entire result,
+so the cost scales with the result's size rather than with the change's.
+
+**Three places it could be fixed, smallest blast radius first:**
+
+1. **Do not traverse twice.** The convergence loop re-runs the pull's action;
+   re-walking an unchanged value on the second pass buys nothing. Halves this
+   on its own, and is the most contained.
+2. **Give the start pull a schema.** `#pullCellOnceInPullMode` builds its cell
+   with `getCellFromLink(resultCell.getAsNormalizedFullLink())`; a start pull
+   carrying the pattern's result schema registers the same dependencies without
+   the walk. A runtime decision about what a start pull should demand.
+3. **Narrow what counts as a pattern change.** A one-character change to an
+   emitted stylesheet should not re-instantiate a child. This is the root, and
+   the largest question: `resultPatternKey` is a content hash by design, so the
+   fix is about what the child's identity should depend on, not about hashing.
 
 **One lead ruled out.** The render root looked like the same fault:
 `cf-render` renders the `full` kind with a bare cast rather than
 `rendererVDOMSchema`. Applying the schema there changed neither the counters
 (766 logged operations either way) nor `deepTraverse`'s share (3.3% self
-against 3.1%), and a separate instrument showed **zero** traversing sinks during
-a click. It was reverted: it touches every pattern's render path and bought
+against 3.1%), and a separate instrument found **zero** traversing sinks during
+a click. It was reverted — it touches every pattern's render path and bought
 nothing. The traversal is in the pull, not the sink and not the render.
 
 ## Order, and why
@@ -278,8 +285,10 @@ nothing. The traversal is in the pull, not the sink and not the render.
 4. ~~**Stage 3's local half**~~ — landed; the pass is down to 7.1% of wall.
 5. ~~**Stage 6**~~ — landed: a benchmark that guards the curve's shape, and the
    authoring rule in `pattern-dev` and `pattern-critic`.
-6. **Stage 7** — the largest remaining item at ~65% of a click, measured, with
-   two candidate fixes and a prize of roughly halving what a click costs.
+6. **Stage 7** — the largest remaining item at ~65% of a click, measured end to
+   end, with three candidate fixes and a prize of roughly halving what a click
+   costs. It is not an inbox problem: every action whose returned artifact
+   changes pays it.
 7. **Stage 4a** — small, and it is a correctness bug. The root cause is known;
    what is missing is a harness that reproduces it.
 8. **Stage 3's structural half** — a CFC design decision, not a measurement.
