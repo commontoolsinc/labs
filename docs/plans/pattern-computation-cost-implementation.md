@@ -7,10 +7,11 @@ producers and join acceptance;
 [PR #7362](https://github.com/commontoolsinc/labs/pull/7362) publishes the separate
 maintenance-phase measurements. Both passed CI and review before merge.
 [PR #7372](https://github.com/commontoolsinc/labs/pull/7372) bounds index member
-setup reads. The repository lunch-poll migration and tighter updated-render
-budgets remain in [PR #7336](https://github.com/commontoolsinc/labs/pull/7336):
-the 1,184-vote CI case times out during its first render. The execution dashboard
-tracks the remaining performance investigation and publication gates.
+setup reads, and [PR #7385](https://github.com/commontoolsinc/labs/pull/7385)
+bounds shared downstream traversal in scheduler wake checks. The repository
+lunch poll uses maintained per-option groups and tighter updated-render budgets
+in [PR #7336](https://github.com/commontoolsinc/labs/pull/7336). The execution
+dashboard records validation and publication status.
 
 A5/B6 still require a comparison against an isolated snapshot copy of the
 representative poll. Local-copy evidence does not establish production hosting,
@@ -368,13 +369,13 @@ whole-array access and mutable accumulator aliasing; no active checkbox here.
 
 ## 11. Validate the motivating pattern: B5–B6
 
-- [ ] **B5 — Rewrite `tallyOptions` using the shipped operators.**
+- [x] **B5 — Rewrite `tallyOptions` using the shipped operators.**
       [PR #7336](https://github.com/commontoolsinc/labs/pull/7336) uses maintained
-      per-option vote groups. All 93 poll assertions and a fresh server-executed
-      two-browser vote test pass; ranking, profile identity, and viewer-specific
-      behavior remain covered. Publication is held for the remaining 1,184-vote
-      CI timeout; local passing runs do not establish CI acceptance.
-- [ ] Add measured per-run and steady-state step budgets for the hot path.
+      per-option vote groups. Authored pattern tests and two-browser acceptance
+      cover ranking, profile identity, and viewer-specific behavior with client
+      and server execution. The 1,184-vote coverage case keeps its existing
+      action limit and default heap.
+- [x] Add measured per-run and steady-state step budgets for the hot path.
       PR #7336 limits the 74-vote fixture to 6,000 initial-render accesses,
       1,100 updated-render accesses, and 300 accesses per reactive body. The
       local combined run measured 4,857 / 958 / 224. The scan control passes
@@ -455,10 +456,9 @@ and regression surfaces are documented in
 
 ## Next task
 
-Resolve the large-poll CI failure and complete review and publication of #7336.
-In parallel, obtain the representative poll URL and a consistent snapshot for
-A5/B6, then serve an isolated local copy and inventory its linked-profile dependencies. Keep
-the live poll unchanged. The
+Obtain the representative poll URL and a consistent snapshot for A5/B6, then
+serve an isolated local copy and inventory its linked-profile dependencies.
+Keep the live poll unchanged. The
 [lazy-materialization plan](lazy-cell-materialization.md) owns its remaining
 handler and rollout stages. Track its changes under D1 and rerun the motivating
 baseline under D2 when they land. The execution dashboard

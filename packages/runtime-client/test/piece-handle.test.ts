@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { CellScope } from "@commonfabric/api";
 import type { DID } from "@commonfabric/identity";
+
 import { PieceHandle } from "@/piece-handle.ts";
 import { $conn, type RuntimeClient } from "@/runtime-client.ts";
 import { type CellRef, RequestType } from "@/protocol/mod.ts";

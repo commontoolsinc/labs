@@ -452,24 +452,39 @@ type MaterializedVersion = {
 };
 
 type PendingVersion =
-  | {
-    localSeq: number;
-    op: "set";
-    value: EntityDocument;
+  & {
+    /** A sealed verdict already accepted this operation at the store seq. */
+    acceptedSeq?: number;
   }
-  | {
-    localSeq: number;
-    op: "patch";
-    patches: PatchOp[];
-    value: EntityDocument;
-  }
-  | {
-    localSeq: number;
-    op: "delete";
-  };
+  & (
+    | {
+      localSeq: number;
+      op: "set";
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "patch";
+      patches: PatchOp[];
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "delete";
+    }
+  );
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
+
+  /** Partial local promotion of a wave whose contributions share one seq.
+   * An authoritative frame replaces this record, so same-seq delivery is
+   * never replayed. Entries remain only while an earlier pending contribution
+   * could require reconstructing their local order. */
+  localWavePromotion?: {
+    base: EntityDocument | undefined;
+    entries: PendingVersion[];
+  };
 
   /**
    * The class of the covering commit — the commit whose write produced
@@ -627,6 +642,35 @@ const applyPendingVersion = (
   }
 };
 
+/** Whether the confirmed view covers an accepted operation. */
+const isCoveredPendingVersion = (
+  confirmed: ConfirmedVersion,
+  pending: PendingVersion,
+): boolean =>
+  confirmed.localWavePromotion === undefined &&
+  pending.acceptedSeq !== undefined && pending.acceptedSeq <= confirmed.seq;
+
+/** Folds pending and locally accepted wave contributions in sealing order. */
+const materializePendingVersions = (
+  confirmed: ConfirmedVersion,
+  pending: readonly PendingVersion[],
+  logContext: PendingPatchLogContext,
+): EntityDocument | undefined => {
+  const promotion = confirmed.localWavePromotion;
+  const interleaved = promotion !== undefined && promotion.entries.length > 0;
+  const entries = interleaved
+    ? [...promotion.entries, ...pending].sort((left, right) =>
+      left.localSeq - right.localSeq
+    )
+    : pending;
+  let value = interleaved ? promotion.base : confirmed.value;
+  for (const entry of entries) {
+    if (isCoveredPendingVersion(confirmed, entry)) continue;
+    value = applyPendingVersion(value, entry, logContext);
+  }
+  return value;
+};
+
 const ensurePendingMaterializationCache = (
   record: DocumentRecord,
 ): PendingMaterializationCache => {
@@ -650,6 +694,19 @@ const materializedVersionThroughPending = (
   if (pendingCount <= 0) {
     return record.confirmed;
   }
+  if (record.confirmed.localWavePromotion?.entries.length) {
+    // A later verdict can settle before an earlier pending contribution.
+    // Reconstruct their sealing order until that unresolved prefix retires;
+    // the ordinary prefix cache assumes all confirmed operations precede it.
+    return {
+      value: materializePendingVersions(
+        record.confirmed,
+        record.pending.slice(0, pendingCount),
+        logContext,
+      ),
+      transactionValue: UNCACHED_TRANSACTION_VALUE,
+    };
+  }
 
   const cache = ensurePendingMaterializationCache(record);
   while (cache.prefixes.length < pendingCount) {
@@ -658,10 +715,15 @@ const materializedVersionThroughPending = (
       ? record.confirmed
       : cache.prefixes[nextIndex - 1]!;
     const pending = record.pending[nextIndex]!;
+    const covered = isCoveredPendingVersion(record.confirmed, pending);
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending, logContext),
-      transactionValue: UNCACHED_TRANSACTION_VALUE,
+      value: covered
+        ? base.value
+        : applyPendingVersion(base.value, pending, logContext),
+      transactionValue: covered
+        ? base.transactionValue
+        : UNCACHED_TRANSACTION_VALUE,
     });
   }
   return cache.prefixes[pendingCount - 1]!;
@@ -4450,18 +4512,17 @@ export class SpaceReplica
     // array, not a prefix, so the prefix materialization cache does not
     // apply; a doc carrying speculation is a bounded transient (the
     // overlay destination retires it), so this stays a cold path.
-    let value = record.confirmed.value;
-    for (const entry of record.pending) {
-      if (this.#speculativeLocalSeqs.has(entry.localSeq)) {
-        continue;
-      }
-      value = applyPendingVersion(value, entry, {
+    return materializePendingVersions(
+      record.confirmed,
+      record.pending.filter((entry) =>
+        !this.#speculativeLocalSeqs.has(entry.localSeq)
+      ),
+      {
         space: this.#space,
         id: uri,
         scope,
-      });
-    }
-    return value;
+      },
+    );
   }
 
   /** Whether an optimistic local write for this doc is still pending — not
@@ -5257,6 +5318,58 @@ export class SpaceReplica
     return { localSeq, commit, settled };
   }
 
+  /** Records accepted sealed operations before their promotion continuation. */
+  #noteSealedReceipt(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    seq: number,
+    identity?: ScopeKeyIdentity,
+  ): void {
+    const touched = this.#touchedOf(operations, identity);
+    const changed = touched.filter(({ id, scope, scopeKey }) => {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      return record.confirmed.localWavePromotion === undefined &&
+        record.confirmed.seq >= seq &&
+        record.pending.some((entry) => entry.localSeq === localSeq);
+    });
+    const shouldNotifySubscribers = changed.length > 0 &&
+      this.#hasNotificationSubscribers();
+    const shouldNotifySinks = changed.length > 0 &&
+      this.#hasSinkSubscribers(changed);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        changed.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    // The confirmed view can advance between receipt and settlement, or
+    // already cover the receipt. Covered operations are present in that value;
+    // partial local wave promotions still need their pending contributions.
+    for (const { id, scope, scopeKey } of touched) {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      for (const entry of record.pending) {
+        if (entry.localSeq === localSeq) entry.acceptedSeq = seq;
+      }
+      record.materialized = undefined;
+    }
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        });
+        if (shouldNotifySinks) this.#notifySinks(changes);
+      }
+    } else if (shouldNotifySinks) {
+      this.#notifySinksForIds(changed);
+    }
+  }
+
   async #settleSealedCommit(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -5281,7 +5394,19 @@ export class SpaceReplica
     try {
       const outcome = await Promise.race([
         verdict.then(
-          (v) => ({ verdict: v }),
+          (v) => {
+            if (
+              "committed" in v && inFlight.localRejectionValue === undefined
+            ) {
+              this.#noteSealedReceipt(
+                localSeq,
+                operations,
+                v.committed.seq,
+                identity,
+              );
+            }
+            return { verdict: v };
+          },
           // The accumulator's contract is to resolve every verdict; a
           // rejection is a wave-machinery bug, mapped to a withdrawal so
           // the pending writes still roll back instead of stranding.
@@ -8008,7 +8133,37 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      if (record.confirmed.seq < applied.seq) {
+      const previousWave = record.confirmed.seq === applied.seq
+        ? previousConfirmed.localWavePromotion
+        : undefined;
+      if (
+        coverClass === "derived" &&
+        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+      ) {
+        // One wave can accept several local contributions to this document.
+        // Their shared seq covers all of them only after each has promoted.
+        const base = previousWave ? previousWave.base : previousConfirmed.value;
+        const entries = [
+          ...(previousWave?.entries ?? []),
+          ...pendingIndexes.map((index) => record.pending[index]),
+        ].sort((left, right) => left.localSeq - right.localSeq);
+        let value = base;
+        for (const entry of entries) {
+          value = applyPendingVersion(value, entry, {
+            space: this.#space,
+            id,
+            scope,
+          });
+        }
+        promoted = confirmedVersion(applied.seq, value, coverClass);
+        const lastApplied = entries.at(-1)!.localSeq;
+        const earlierPending = record.pending.some((entry) =>
+          entry.localSeq !== localSeq && entry.localSeq < lastApplied
+        );
+        promoted.localWavePromotion = earlierPending
+          ? { base, entries }
+          : { base: value, entries: [] };
+      } else if (record.confirmed.seq < applied.seq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -8116,6 +8271,17 @@ export class SpaceReplica
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      const promotion = record.confirmed.localWavePromotion;
+      const lastApplied = promotion?.entries.at(-1)?.localSeq;
+      if (
+        promotion && lastApplied !== undefined &&
+        !record.pending.some((entry) => entry.localSeq < lastApplied)
+      ) {
+        record.confirmed.localWavePromotion = {
+          base: record.confirmed.value,
+          entries: [],
+        };
+      }
       if (
         record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
       ) {
@@ -8307,7 +8473,10 @@ export class SpaceReplica
     for (let index = 0; index < frame.length; index++) {
       const upsert = frame[index]!;
       if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
-      const hashes = new Set<string>();
+      const metadata = classifySchemaMeta(upsert.doc);
+      // Leave malformed metadata in the frame for per-document quarantine.
+      if (metadata.kind === "malformed") continue;
+      const hashes = new Set(schemaMetaRefHashes(metadata));
       if (upsert.id.startsWith("cid:")) {
         const value = (upsert.doc as { value?: unknown }).value;
         if (isSubschema(value)) {
@@ -8324,10 +8493,6 @@ export class SpaceReplica
           }
           return schema;
         });
-        const meta = classifySchemaMeta(upsert.doc);
-        if (meta.kind !== "malformed") {
-          for (const hash of schemaMetaRefHashes(meta)) hashes.add(hash);
-        }
       }
       for (const hash of hashes) {
         const id = `cid:${hash}` as URI;
