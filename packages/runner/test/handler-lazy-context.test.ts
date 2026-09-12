@@ -498,6 +498,15 @@ describe("handler lazy context", () => {
       expect(outcome.runs).toBe(1);
     });
 
+    it("retries an eager handler's commit when the row it touched changed underneath it", async () => {
+      const outcome = await runAgainstConcurrentWrite(
+        false,
+        "touched-row-field",
+      );
+      expect(outcome.statuses).toEqual(["done"]);
+      expect(outcome.runs).toBeGreaterThan(1);
+    });
+
     it("retries a lazy handler's commit when the row it touched changed underneath it", async () => {
       const outcome = await runAgainstConcurrentWrite(
         true,
