@@ -41,6 +41,42 @@ and degraded phases, holding the counted work fixed:
 `isPrefix` scales with the whole; the dereference-trace machinery is the part
 that grows out of proportion. Both sit on the same structure.
 
+## Stage 8 — The degradation is delayed, not cured
+
+Stage 2's note that "a paced round after an eager one recovers fully" was taken
+from sequences of three rounds. Over five it does not hold, on either side of
+the schema fix. Paced-round medians, `paced, eager, paced, paced, paced`, six
+clicks each, on a 37-thread list:
+
+| arm | 1 | (eager) | 3 | 4 | 5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| before the schema fix | 341 | 1065 | 320 | 309 | **802** |
+| after it | 255 | 413 | 363 | **876** | 845 |
+
+Both arms climb to the same plateau, around 800-850 ms. So the degradation
+stage 2 appeared to cure is **delayed rather than removed**, and the schema
+fix does not cause it — it reaches it sooner, having less other work in the
+way.
+
+Read against three-round sequences this looked like a regression in the schema
+fix: its round-3 figure (876) against the other arm's (320) is 2.7×, and that
+is a comparison of a degraded state with one that has not degraded yet. The
+honest comparison is condition by condition, and the fix is better or equal in
+each:
+
+| condition | before | after |
+| --- | ---: | ---: |
+| fresh paced click | 341-424 ms | 213-255 ms |
+| during eager clicking | 1065-2080 ms | 413-563 ms |
+| the plateau, after enough clicking | ~800 ms | ~850 ms |
+
+**What this leaves.** The plateau is now the largest thing on this path, and
+nothing above measures it: every A/B in this plan was taken on a fresh or
+nearly-fresh pane. The next pass should start by characterising it — what
+accumulates, whether it is the same structure stage 2 indexed or a different
+one, and whether a data change or a reload clears it, as the pre-stage-2
+version did.
+
 ## Where this has got to
 
 Measured on the same rig throughout — the unmodified pattern, live connector
@@ -49,8 +85,9 @@ stores linked read-only, `serverExecution` off at both ends, a machine at load
 
 | | at the start | now |
 | --- | ---: | ---: |
-| paced click, median | 1482 ms | 230 ms |
-| click after eager clicking | 1711 ms | recovers to the paced band |
+| paced click, median | 1482 ms | 213-255 ms |
+| during eager clicking | 1711 ms | 413-563 ms |
+| after enough clicking | — | ~850 ms, and see stage 8 |
 | 1 person's data (52 messages) | 187-524 ms | 327-358 ms |
 | 5 people's data (150 messages) | 10.7-19.5 s | 309-368 ms |
 
