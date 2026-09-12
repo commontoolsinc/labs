@@ -9,9 +9,16 @@ import type { CapabilityId } from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 
 import {
+  batchCoverage,
   batchesOf,
+  batchRepeats,
   changedFiles,
+  convertCoverage,
+  COVERAGE_PROFILE_DIR,
+  COVERAGE_REPORT_DIR,
+  COVERAGE_REPORT_FILE,
   describeConflicts,
+  describeCoverage,
   describePlan,
   describeWithheld,
   fullLanes,
@@ -22,9 +29,10 @@ import {
   runInvocation,
   runLane,
   spoolRecords,
+  unitsForRun,
 } from "./ci-lane.ts";
 import { census } from "./test-selection/census.ts";
-import type { Suite } from "./test-topology/suite.ts";
+import type { CommandContext, Suite } from "./test-topology/suite.ts";
 import {
   plan,
   type Selection,
@@ -233,7 +241,7 @@ describe("turning a lane's selections into batches", () => {
       reason: "value",
       repeats: 3,
     }]);
-    expect(batches[0]!.repeats).toBe(3);
+    expect(batchRepeats(batches[0]!)).toBe(3);
   });
 
   it("holds the most runs when a later identity asks for fewer", () => {
@@ -247,12 +255,12 @@ describe("turning a lane's selections into batches", () => {
       { entry: manifest.entries[0]!, reason: "value", repeats: 3 },
       { entry: manifest.entries[1]!, reason: "value", repeats: 1 },
     ]);
-    expect(batches[0]!.repeats).toBe(3);
+    expect(batchRepeats(batches[0]!)).toBe(3);
   });
 
-  it("holds the most runs across the units of one batch", () => {
-    // A batch runs its units together under one count, so a unit asking
-    // for fewer cannot cut short the one that asked for more.
+  it("runs each unit of a batch as many times as that unit asked for", () => {
+    // A unit that asked for fewer runs stops when it has had them: one
+    // flaky unit is not a reason to run the rest of the batch again.
     const twoUnits = suite({
       id: "workspace-unit",
       units: ["packages/bakery/glaze.test.ts", "packages/bakery/ice.test.ts"],
@@ -269,7 +277,30 @@ describe("turning a lane's selections into batches", () => {
       { entry: manifest.entries[1]!, reason: "value", repeats: 2 },
     ]);
     expect(batches.length).toBe(1);
-    expect(batches[0]!.repeats).toBe(4);
+    expect(batchRepeats(batches[0]!)).toBe(4);
+    const round = (run: number) =>
+      unitsForRun(batches[0]!, run).map((request) => request.unit);
+    expect(round(1)).toEqual([
+      "packages/bakery/glaze.test.ts",
+      "packages/bakery/ice.test.ts",
+    ]);
+    expect(round(2)).toEqual([
+      "packages/bakery/glaze.test.ts",
+      "packages/bakery/ice.test.ts",
+    ]);
+    expect(round(3)).toEqual(["packages/bakery/glaze.test.ts"]);
+    expect(round(4)).toEqual(["packages/bakery/glaze.test.ts"]);
+  });
+
+  it("runs a unit nothing asked to repeat exactly once", () => {
+    const manifest = manifestOf([{}]);
+    const batches = batchesOf([bakery], manifest, [{
+      entry: manifest.entries[0]!,
+      reason: "coverage-gate",
+      repeats: 1,
+    }]);
+    expect(batchRepeats(batches[0]!)).toBe(1);
+    expect(unitsForRun(batches[0]!, 2)).toEqual([]);
   });
 });
 
@@ -784,6 +815,73 @@ describe("running a lane's work", () => {
     expect(bad.ok).toBe(false);
   });
 
+  it("hands a measured batch the directory and members to measure", async () => {
+    // The suite decides where under that directory each member's
+    // profiles land, so what the lane passes is the directory and which
+    // members are being scored.
+    const workDir = await Deno.makeTempDir({ prefix: "lane-batch-" });
+    let given: CommandContext | undefined;
+    const recording: Suite = {
+      id: "workspace-unit",
+      recordSurfaces: [{ kind: "unit", scope: "bakery" }],
+      needs: [],
+      units: ["packages/bakery/glaze.test.ts"],
+      unavailable: [],
+      locate: () => undefined,
+      command: (_units, context) => {
+        given = context;
+        return Promise.resolve([]);
+      },
+    };
+    await runBatch(
+      {
+        suite: recording,
+        units: [{ unit: "packages/bakery/glaze.test.ts", skip: [] }],
+        runs: new Map([["packages/bakery/glaze.test.ts", 1]]),
+      },
+      lane,
+      workDir,
+      undefined,
+      {},
+      { dir: "/cov/workspace-unit", members: new Set(["packages/bakery"]) },
+    );
+    expect(given?.coverageDir).toBe("/cov/workspace-unit");
+    expect([...(given?.measuredMembers ?? [])]).toEqual(["packages/bakery"]);
+    await Deno.remove(workDir, { recursive: true });
+  });
+
+  it("measures every member a full run's batch holds", async () => {
+    const workDir = await Deno.makeTempDir({ prefix: "lane-batch-" });
+    let given: CommandContext | undefined;
+    const recording: Suite = {
+      id: "workspace-unit",
+      recordSurfaces: [{ kind: "unit", scope: "bakery" }],
+      needs: [],
+      units: ["packages/bakery/glaze.test.ts"],
+      unavailable: [],
+      locate: () => undefined,
+      command: (_units, context) => {
+        given = context;
+        return Promise.resolve([]);
+      },
+    };
+    await runBatch(
+      {
+        suite: recording,
+        units: [{ unit: "packages/bakery/glaze.test.ts", skip: [] }],
+        runs: new Map([["packages/bakery/glaze.test.ts", 1]]),
+      },
+      { ...lane, full: true },
+      workDir,
+      undefined,
+      {},
+      { dir: "/cov/workspace-unit" },
+    );
+    expect(given?.coverageDir).toBe("/cov/workspace-unit");
+    expect(given?.measuredMembers).toBeUndefined();
+    await Deno.remove(workDir, { recursive: true });
+  });
+
   it("runs a batch once per repeat, and every one must pass", async () => {
     // A repeat is not a retry: three runs of a test is strictly stricter
     // than one, so a batch that fails once has failed.
@@ -791,8 +889,8 @@ describe("running a lane's work", () => {
     const passing = await runBatch(
       {
         suite: runnable([Deno.execPath(), "eval", "0"]),
-        units: [],
-        repeats: 3,
+        units: [{ unit: "a-unit", skip: [] }],
+        runs: new Map([["a-unit", 3]]),
       },
       lane,
       workDir,
@@ -804,8 +902,8 @@ describe("running a lane's work", () => {
     const failing = await runBatch(
       {
         suite: runnable([Deno.execPath(), "eval", "Deno.exit(1)"], "red"),
-        units: [],
-        repeats: 2,
+        units: [{ unit: "a-unit", skip: [] }],
+        runs: new Map([["a-unit", 2]]),
       },
       lane,
       workDir,
@@ -836,8 +934,8 @@ describe("running a lane's work", () => {
             ${JSON.stringify(written + "\n")},
           )`,
         ]),
-        units: [],
-        repeats: 1,
+        units: [{ unit: "a-unit", skip: [] }],
+        runs: new Map([["a-unit", 1]]),
       },
       lane,
       workDir,
@@ -857,8 +955,8 @@ describe("running a lane's work", () => {
         lane,
         [{
           suite: runnable(["true"], "workspace-unit"),
-          units: [],
-          repeats: 2,
+          units: [{ unit: "a-unit", skip: [] }],
+          runs: new Map([["a-unit", 2]]),
         }],
         ["deno", "toolshed"],
         { objectName: "manifest-x.json.gz" },
@@ -901,7 +999,7 @@ describe("running a lane's work", () => {
         [{
           suite: runnable(["true"], "workspace-unit"),
           units: [{ unit: "packages/bakery/glaze.test.ts", skip: [] }],
-          repeats: 2,
+          runs: new Map([["packages/bakery/glaze.test.ts", 2]]),
         }],
         ["deno"],
         { objectName: "manifest-x.json.gz" },
@@ -1256,6 +1354,94 @@ describe("the lane's own housekeeping", () => {
     await Deno.remove(summary);
   });
 
+  it("fails a lane whose coverage would not convert", async () => {
+    // A conversion that lost a tracked file leaves a report every line
+    // of which reads as uncovered, so a gate scored from it would fail
+    // somebody for a report that was never complete.
+    const root = await Deno.makeTempDir({ prefix: "lane-convert-" });
+    const temp = await Deno.makeTempDir({ prefix: "lane-tmp-" });
+    const previous = Deno.env.get("TMPDIR");
+    Deno.env.set("TMPDIR", temp);
+    const dir =
+      `${root}/coverage/${COVERAGE_PROFILE_DIR}/workspace-unit/packages__bakery`;
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(`${dir}/broken.json`, "this is not a profile");
+    const bare: Suite = {
+      id: "workspace-unit",
+      recordSurfaces: [{ kind: "unit", scope: "bakery" }],
+      needs: [],
+      units: [],
+      unavailable: [],
+      locate: () => undefined,
+      command: () => Promise.resolve([]),
+    };
+    const log = console.log;
+    console.log = () => {};
+    let ok: boolean;
+    try {
+      ok = await runLane({
+        lane: 1,
+        of: 1,
+        full: true,
+        dryRun: false,
+        laneCount: false,
+        root,
+      }, {
+        topology: () => Promise.resolve([bare]),
+        manifest: (at) =>
+          Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
+      });
+    } finally {
+      console.log = log;
+      if (previous === undefined) Deno.env.delete("TMPDIR");
+      else Deno.env.set("TMPDIR", previous);
+    }
+    expect(ok).toBe(false);
+    await Deno.remove(temp, { recursive: true });
+    await Deno.remove(root, { recursive: true });
+  });
+
+  it("gives its work directory back when a capability will not open", async () => {
+    // The directory belongs to the lane from the moment it exists, so a
+    // capability that refuses is not a reason to leave one behind.
+    const root = await Deno.makeTempDir({ prefix: "lane-caps-" });
+    const temp = await Deno.makeTempDir({ prefix: "lane-tmp-" });
+    const previous = Deno.env.get("TMPDIR");
+    Deno.env.set("TMPDIR", temp);
+    const wanting: Suite = {
+      id: "wanting",
+      recordSurfaces: [{ kind: "unit", scope: "wanting" }],
+      needs: ["nothing-opens-this" as CapabilityId],
+      units: ["packages/bakery/glaze.test.ts"],
+      unavailable: [],
+      locate: () => undefined,
+      command: () => Promise.resolve([]),
+    };
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await expect(runLane({
+        lane: 1,
+        of: 1,
+        full: true,
+        dryRun: false,
+        laneCount: false,
+        root,
+      }, {
+        topology: () => Promise.resolve([wanting]),
+        manifest: (at) =>
+          Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
+      })).rejects.toThrow();
+    } finally {
+      console.log = log;
+      if (previous === undefined) Deno.env.delete("TMPDIR");
+      else Deno.env.set("TMPDIR", previous);
+    }
+    expect([...Deno.readDirSync(temp)]).toEqual([]);
+    await Deno.remove(temp, { recursive: true });
+    await Deno.remove(root, { recursive: true });
+  });
+
   it("runs a lane that was given no share of the work", async () => {
     // The whole path, with nothing in it: no capability is opened, no
     // batch runs, and the directory the lane made for itself goes.
@@ -1367,7 +1553,7 @@ describe("what a lane records about itself", () => {
         }]),
     });
     const result = await runBatch(
-      { suite: suiteUnderTest, units: [], repeats: 1 },
+      { suite: suiteUnderTest, units: [], runs: new Map() },
       lane,
       workDir,
       spool,
@@ -1430,8 +1616,8 @@ describe("what a lane records about itself", () => {
               }]),
             ...declared,
           }),
-          units: [],
-          repeats: 1,
+          units: [{ unit: "a-unit", skip: [] }],
+          runs: new Map([["a-unit", 1]]),
         },
         lane,
         workDir,
@@ -1797,5 +1983,246 @@ describe("what a lane does with the batches it was given", () => {
       await Deno.remove(outside, { recursive: true });
     }
     expect(lines.join("\n")).toContain("cannot read the commit's date");
+  });
+});
+
+describe("what a lane measures", () => {
+  const options = {
+    lane: 1,
+    of: 5,
+    full: false,
+    dryRun: false,
+    laneCount: false,
+    root: "/repo",
+  };
+
+  const gated = (member: string) =>
+    census(
+      [suite({
+        id: "workspace-unit",
+        units: [`${member}/one.test.ts`],
+        measured: [{
+          member,
+          reachedBy: [`${member}/`],
+          units: [`${member}/one.test.ts`],
+        }],
+      })],
+      undefined,
+      new Set([`${member}/src/main.ts`]),
+    ).coverage;
+
+  it("measures the members of the sets the gate is scoring", () => {
+    const coverage = batchCoverage(
+      options,
+      "workspace-unit",
+      gated("packages/bakery"),
+    );
+    expect(coverage?.dir)
+      .toBe(`/repo/coverage/${COVERAGE_PROFILE_DIR}/workspace-unit`);
+    expect([...coverage!.members!]).toEqual(["packages/bakery"]);
+  });
+
+  it("measures nothing in a suite the gate is not scoring", () => {
+    expect(batchCoverage(options, "runner-unit", gated("packages/bakery")))
+      .toBeUndefined();
+  });
+
+  it("measures every member of every suite in a full run", () => {
+    const coverage = batchCoverage(
+      { ...options, full: true },
+      "runner-unit",
+      gated("packages/bakery"),
+    );
+    expect(coverage?.members).toBeUndefined();
+    expect(coverage?.dir)
+      .toBe(`/repo/coverage/${COVERAGE_PROFILE_DIR}/runner-unit`);
+  });
+
+  it("puts coverage where the command line said", () => {
+    const coverage = batchCoverage(
+      { ...options, full: true, coverageDir: "elsewhere" },
+      "runner-unit",
+      gated("packages/bakery"),
+    );
+    expect(coverage?.dir)
+      .toBe(`/repo/elsewhere/${COVERAGE_PROFILE_DIR}/runner-unit`);
+  });
+});
+
+describe("converting what a lane collected", () => {
+  /** A lane's coverage directory holding one profile per named set. */
+  async function collected(sets: readonly string[]): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: "lane-coverage-" });
+    for (const set of sets) {
+      const dir = `${root}/coverage/${COVERAGE_PROFILE_DIR}/${set}`;
+      await Deno.mkdir(dir, { recursive: true });
+      // An empty profile directory converts to an empty report, which is
+      // enough to prove the walk found it and named it.
+      await Deno.writeTextFile(`${dir}/empty.json`, "");
+    }
+    return root;
+  }
+
+  it("writes one report per profile directory, named for the set", async () => {
+    const root = await collected([
+      "workspace-unit/packages__bakery",
+      "runner-unit/packages__runner",
+    ]);
+    const converted = await convertCoverage({ ...options(root) });
+    expect(converted.ok).toBe(true);
+    expect(converted.reports).toEqual([
+      "runner-unit/packages__runner",
+      "workspace-unit/packages__bakery",
+    ]);
+    const at = `${root}/coverage/${COVERAGE_REPORT_DIR}/workspace-unit/` +
+      `packages__bakery/${COVERAGE_REPORT_FILE}`;
+    expect((await Deno.stat(at)).isFile).toBe(true);
+  });
+
+  it("converts a directory no measured set names", async () => {
+    // The repository-wide figure the full run publishes is the merge of
+    // every report, so a directory the gate will not score is still
+    // converted.
+    const root = await collected(["cli-core/packages__cli"]);
+    const converted = await convertCoverage({ ...options(root) });
+    expect(converted.reports).toEqual(["cli-core/packages__cli"]);
+  });
+
+  it("takes the directory its coverage goes under from the command line", () => {
+    const options = parseLaneArgs(["--coverage-dir", "/somewhere/coverage"]);
+    expect(options?.coverageDir).toBe("/somewhere/coverage");
+  });
+
+  it("refuses a profile directory it cannot walk", async () => {
+    // An absent directory is a lane that measured nothing, which is
+    // ordinary. Anything else is a failure worth ending on.
+    const root = await Deno.makeTempDir({ prefix: "lane-coverage-" });
+    const at = `${root}/coverage/${COVERAGE_PROFILE_DIR}`;
+    await Deno.mkdir(`${root}/coverage`, { recursive: true });
+    await Deno.writeTextFile(at, "");
+    await expect(convertCoverage({ ...options(root) })).rejects.toThrow();
+  });
+
+  it("fails the lane when a conversion loses what it was given", async () => {
+    // Every line of a file the report lost reads as uncovered
+    // downstream, so a gate scored from it would fail somebody for a
+    // report that was never complete.
+    const root = await Deno.makeTempDir({ prefix: "lane-coverage-" });
+    const dir =
+      `${root}/coverage/${COVERAGE_PROFILE_DIR}/workspace-unit/packages__bakery`;
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(`${dir}/broken.json`, "this is not a profile");
+    const converted = await convertCoverage({ ...options(root) });
+    expect(converted.ok).toBe(false);
+    expect(converted.reports).toEqual(["workspace-unit/packages__bakery"]);
+  });
+
+  it("writes nothing where the lane measured nothing", async () => {
+    const root = await Deno.makeTempDir({ prefix: "lane-coverage-" });
+    const converted = await convertCoverage({ ...options(root) });
+    expect(converted).toEqual({ ok: true, reports: [] });
+  });
+
+  function options(root: string) {
+    return {
+      lane: 1,
+      of: 5,
+      full: false,
+      dryRun: false,
+      laneCount: false,
+      root,
+    };
+  }
+});
+
+describe("what a lane says about coverage", () => {
+  it("says nothing where the change reaches no set and nothing measured", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeCoverage({ sets: [], reached: [] }, []);
+    } finally {
+      console.log = log;
+    }
+    expect(lines).toEqual([]);
+  });
+
+  it("names the sets it is scoring, and the reports it wrote", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeCoverage({
+        sets: [{
+          suite: "workspace-unit",
+          set: {
+            member: "packages/bakery",
+            reachedBy: ["packages/bakery/"],
+            units: ["packages/bakery/one.test.ts"],
+          },
+        }],
+        reached: [],
+      }, ["workspace-unit/packages__bakery"]);
+    } finally {
+      console.log = log;
+    }
+    const text = lines.join("\n");
+    expect(text).toContain("workspace-unit/packages/bakery");
+    expect(text).toContain("workspace-unit/packages__bakery");
+  });
+
+  it("names a report by its set where the change reached that set", () => {
+    // A report belonging to a set is named as the set, so one summary
+    // does not spell one thing two ways.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    const ref = {
+      suite: "workspace-unit",
+      set: {
+        member: "packages/bakery",
+        reachedBy: ["packages/bakery/"],
+        units: ["packages/bakery/one.test.ts"],
+      },
+    };
+    try {
+      describeCoverage(
+        { sets: [ref], reached: [ref] },
+        ["workspace-unit/packages__bakery", "workspace-unit/packages__cellar"],
+      );
+    } finally {
+      console.log = log;
+    }
+    const text = lines.join("\n");
+    expect(text).toContain("- workspace-unit/packages/bakery");
+    // A directory no set is scored from keeps the name the suite wrote.
+    expect(text).toContain("- workspace-unit/packages__cellar");
+    expect(text).not.toContain("- workspace-unit/packages__bakery");
+  });
+
+  it("says why nothing is forced, and what the change reached", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeCoverage({
+        sets: [],
+        reached: [{
+          suite: "workspace-unit",
+          set: {
+            member: "packages/bakery",
+            reachedBy: ["packages/bakery/"],
+            units: ["packages/bakery/one.test.ts"],
+          },
+        }],
+        off: "the change reaches 3 measured sets",
+      }, []);
+    } finally {
+      console.log = log;
+    }
+    const text = lines.join("\n");
+    expect(text).toContain("No measured set is forced");
+    expect(text).toContain("workspace-unit/packages/bakery");
   });
 });

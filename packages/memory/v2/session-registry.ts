@@ -1,5 +1,6 @@
 import type {
   OpCursor,
+  OperationWatchSpec,
   SessionDescriptor,
   SessionToken,
   ViewInterest,
@@ -40,6 +41,16 @@ export type SessionState = {
   /** Demand provenance, excluding server-selected supporting documents. */
   viewDemandGraphs: Map<string, TrackedGraphState>;
   viewDemandEntities: Map<string, SessionCacheEntry>;
+
+  /** Watch declarations by id, updated with the array at publication. */
+  watchIndex: Map<string, WatchSpec>;
+
+  /** Scoped dirty keys owned by operation watches. Rebuilt on replacement. */
+  operationTrackedIds: Set<string>;
+
+  /** Operation declarations in accepted list order, for incremental refresh. */
+  operationWatches: OperationWatchSpec[];
+
   operationCursors: Map<string, OpCursor>;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
@@ -177,6 +188,9 @@ export class SessionRegistry {
       viewSelections: existing?.viewSelections ?? new Map(),
       viewDemandGraphs: existing?.viewDemandGraphs ?? new Map(),
       viewDemandEntities: existing?.viewDemandEntities ?? new Map(),
+      watchIndex: existing?.watchIndex ?? new Map(),
+      operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
+      operationWatches: existing?.operationWatches ?? [],
       operationCursors: existing?.operationCursors ?? new Map(),
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),

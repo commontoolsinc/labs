@@ -49,7 +49,14 @@ function suiteHolding(units: readonly string[]): Suite {
 }
 
 const TOPOLOGY: Suite[] = [
-  suiteHolding(["packages/memory/test/memory.test.ts"]),
+  {
+    ...suiteHolding(["packages/memory/test/memory.test.ts"]),
+    measured: [{
+      member: "packages/memory",
+      reachedBy: ["packages/memory/"],
+      units: ["packages/memory/test/memory.test.ts"],
+    }],
+  },
 ];
 
 describe("test-selection", () => {
@@ -227,41 +234,105 @@ describe("test-selection", () => {
 });
 
 describe("coverageLines()", () => {
-  it("names the baseline a member is gated against", () => {
+  const workspaceUnit = {
+    suite: "workspace-unit",
+    set: {
+      member: "packages/memory",
+      reachedBy: ["packages/memory/"],
+      units: ["packages/memory/one.test.ts", "packages/memory/two.test.ts"],
+    },
+  };
+
+  it("names the baseline a measured set is compared against", () => {
     const manifest = sampleManifest({
       coverageBaselines: [{
+        suite: "workspace-unit",
         member: "packages/memory",
         commit: "abcdef0",
-        day: "2026-08-20",
+        createdAt: "2026-08-20T00:00:00.000Z",
         uncoveredLines: 41,
       }],
     });
-    expect(coverageLines(manifest, ["packages/memory"])).toEqual([
-      "packages/memory  gated, against 41 uncovered lines at abcdef0",
+    expect(coverageLines(manifest, [workspaceUnit], [])).toEqual([
+      "workspace-unit/packages/memory  2 units, against 41 uncovered lines " +
+      "at abcdef0",
+    ]);
+    expect(
+      coverageLines(manifest, [{
+        suite: "workspace-unit",
+        set: { ...workspaceUnit.set, units: ["packages/memory/one.test.ts"] },
+      }], [])[0],
+    ).toContain("1 unit,");
+  });
+
+  it("keeps two sets over one member apart", () => {
+    const manifest = sampleManifest({
+      coverageBaselines: [
+        {
+          suite: "workspace-unit",
+          member: "packages/memory",
+          commit: "abcdef0",
+          createdAt: "2026-08-20T00:00:00.000Z",
+          uncoveredLines: 41,
+        },
+        {
+          suite: "memory-integration",
+          member: "packages/memory",
+          commit: "abcdef0",
+          createdAt: "2026-08-20T00:00:00.000Z",
+          uncoveredLines: 900,
+        },
+      ],
+    });
+    const lines = coverageLines(manifest, [
+      workspaceUnit,
+      { suite: "memory-integration", set: workspaceUnit.set },
+    ], []);
+    expect(lines[0]).toContain("41 uncovered lines");
+    expect(lines[1]).toContain("900 uncovered lines");
+  });
+
+  it("says so when a set has no baseline yet", () => {
+    const lines = coverageLines(sampleManifest(), [workspaceUnit], []);
+    expect(lines).toEqual([
+      "workspace-unit/packages/memory  2 units, against no baseline yet",
     ]);
   });
 
-  it("says so when a member has no baseline yet", () => {
-    const lines = coverageLines(sampleManifest(), ["packages/memory"]);
-    expect(lines).toEqual(["packages/memory  gated, against no baseline yet"]);
-  });
-
-  it("gives the reason for a member the gate leaves alone", () => {
+  it("gives the reason for a member that carries no set", () => {
     const member = [...EXCLUDED_FROM_COVERAGE_GATE.keys()][0]!;
-    const lines = coverageLines(sampleManifest(), [member]);
-    expect(lines[0]).toContain("not gated: ");
+    const lines = coverageLines(sampleManifest(), [], [member]);
+    expect(lines[0]).toContain("no measured set: ");
     expect(lines[0]).toContain(EXCLUDED_FROM_COVERAGE_GATE.get(member)!);
   });
 
-  it("reads a manifest that is missing the same as one with no baselines", () => {
-    const members = ["packages/memory", "packages/runner"];
-    expect(coverageLines(undefined, members))
-      .toEqual(coverageLines(sampleManifest(), members));
+  it("says a member outside the list has no Deno-only tests", () => {
+    const lines = coverageLines(sampleManifest(), [], ["packages/nowhere"]);
+    expect(lines[0]).toContain("no measured set: it has no Deno-only tests");
   });
 
-  it("pads every member to one width, so the column lines up", () => {
-    const lines = coverageLines(undefined, ["packages/a", "packages/longer"]);
-    const at = lines.map((line) => line.indexOf("gated"));
+  it("leaves a member that carries a set out of the ungated half", () => {
+    const lines = coverageLines(
+      sampleManifest(),
+      [workspaceUnit],
+      ["packages/memory"],
+    );
+    expect(lines).toHaveLength(1);
+  });
+
+  it("reads a manifest that is missing the same as one with no baselines", () => {
+    expect(coverageLines(undefined, [workspaceUnit], ["packages/runner"]))
+      .toEqual(
+        coverageLines(sampleManifest(), [workspaceUnit], ["packages/runner"]),
+      );
+  });
+
+  it("pads every name to one width, so the column lines up", () => {
+    const lines = coverageLines(undefined, [], [
+      "packages/a",
+      "packages/longer",
+    ]);
+    const at = lines.map((line) => line.indexOf("no measured set"));
     expect(at[0]).toBe(at[1]);
   });
 });
@@ -480,13 +551,21 @@ describe("dispatch()", () => {
     expect(result.out).toContain(DIALS[0]!.name);
   });
 
-  it("names the gated members, and carries on with no manifest", async () => {
+  it("names the measured sets, and carries on with no manifest", async () => {
     const result = await ran(["coverage"], {
       manifest: () => Promise.resolve(undefined),
     });
     expect(result.code).toBe(0);
-    expect(result.out).toContain("packages/memory");
+    expect(result.out).toContain("workspace-unit/packages/memory");
     expect(result.out).toContain("no baseline yet");
+  });
+
+  it("names a member that carries no set beside the sets", async () => {
+    const result = await ran(["coverage"], {
+      members: () => Promise.resolve(["packages/memory", "packages/runner"]),
+    });
+    expect(result.out).toContain("workspace-unit/packages/memory");
+    expect(result.out).toContain("no measured set: Its whole set is past");
   });
 
   it("stops when explain is given no identity, or a bad one", async () => {

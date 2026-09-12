@@ -14,9 +14,9 @@ import {
   firstFailures,
   flakyNewTests,
   MAIN_REPORT_MARKER,
+  measuredSetRises,
   nameSimilarity,
   outcomesOf,
-  packageRises,
   partsOf,
   type PullRequestView,
   renames,
@@ -33,7 +33,7 @@ import {
 import {
   COVERAGE_COMMENT_LINES,
   EXCLUDED_FROM_COVERAGE_GATE,
-  LOCAL_COVERAGE_MAX_PACKAGES,
+  LOCAL_COVERAGE_MAX_SETS,
   RENAME_SIMILARITY,
 } from "./policy.ts";
 
@@ -74,10 +74,14 @@ function figures(
 /** An own-tests figure set: a package measured by only its own tests. */
 function ownTests(
   entries: readonly (readonly [string, number])[],
+  suite = "workspace-unit",
 ): CoverageFigures {
   return new Map(
     entries.map(([member, lines]) =>
-      [`coverage-debt: ${member} own-tests uncovered lines`, lines] as const
+      [
+        `coverage-debt: measured set ${suite}/${member} uncovered lines`,
+        lines,
+      ] as const
     ),
   );
 }
@@ -129,6 +133,7 @@ function input(partial: Partial<ReportInput> = {}): ReportInput {
     coverage: new Map(),
     coverageBefore: new Map(),
     touched: new Set(),
+    coverageGate: { reached: [], ran: true },
     day: "2026-09-07",
     ...partial,
   };
@@ -396,31 +401,60 @@ describe("report", () => {
     });
   });
 
-  describe("packageRises()", () => {
+  describe("measuredSetRises()", () => {
     const gated = "packages/memory";
     const excluded = [...EXCLUDED_FROM_COVERAGE_GATE.keys()][0]!;
-    const overTheCap = new Set(
-      Array.from(
-        { length: LOCAL_COVERAGE_MAX_PACKAGES + 1 },
-        (_, index) => `packages/gated-${index}`,
+    /** The gate having run over exactly these sets. */
+    const over = (...members: string[]) => ({
+      reached: members.map((member) => `workspace-unit/${member}`),
+      ran: true,
+    });
+    const overTheCap = {
+      reached: Array.from(
+        { length: LOCAL_COVERAGE_MAX_SETS + 1 },
+        (_, index) => `workspace-unit/packages/gated-${index}`,
       ),
-    );
+      ran: false,
+    };
 
-    it("names the cap when the change touched more packages than it allows", () => {
-      const rises = packageRises(input({
+    it("names the cap when the change reached more sets than it allows", () => {
+      const rises = measuredSetRises(input({
         coverageBefore: ownTests([[gated, 10]]),
         coverage: ownTests([[gated, 14]]),
-        touched: overTheCap,
+        touched: new Set([gated]),
+        coverageGate: overTheCap,
       }));
       expect(rises[0]?.route).toBe("over-the-cap");
-      expect(rises[0]?.touched).toBe(LOCAL_COVERAGE_MAX_PACKAGES + 1);
+      expect(rises[0]?.touched).toBe(LOCAL_COVERAGE_MAX_SETS + 1);
+    });
+
+    // Two sets over one member count twice against the cap, because the
+    // cap is what the gate applies and the gate counts sets. Counting
+    // members here would say the gate ran when it did not.
+    it("counts a set rather than a member against the cap", () => {
+      const rises = measuredSetRises(input({
+        coverageBefore: ownTests([[gated, 10]]),
+        coverage: ownTests([[gated, 14]]),
+        touched: new Set([gated]),
+        coverageGate: {
+          reached: [
+            `workspace-unit/${gated}`,
+            `memory-e2e/${gated}`,
+            `memory-browser/${gated}`,
+          ],
+          ran: false,
+        },
+      }));
+      expect(rises[0]?.route).toBe("over-the-cap");
+      expect(rises[0]?.touched).toBe(3);
     });
 
     it("names the exclusion list, with its reason", () => {
-      const rises = packageRises(input({
+      const rises = measuredSetRises(input({
         coverageBefore: ownTests([[excluded, 10]]),
         coverage: ownTests([[excluded, 14]]),
         touched: new Set([excluded]),
+        coverageGate: over(),
       }));
       expect(rises[0]?.route).toBe("excluded");
       expect(rises[0]?.reason).toBe(EXCLUDED_FROM_COVERAGE_GATE.get(excluded));
@@ -430,19 +464,21 @@ describe("report", () => {
     // list whatever else the change touched, so the cap cannot be the
     // route that let its rise through.
     it("names the exclusion list even when the cap was also passed", () => {
-      const rises = packageRises(input({
+      const rises = measuredSetRises(input({
         coverageBefore: ownTests([[excluded, 10]]),
         coverage: ownTests([[excluded, 14]]),
-        touched: overTheCap,
+        touched: new Set([excluded]),
+        coverageGate: overTheCap,
       }));
       expect(rises[0]?.route).toBe("excluded");
     });
 
-    it("names the change when it did not touch the risen package", () => {
-      const rises = packageRises(input({
+    it("names the change when it did not reach the risen set", () => {
+      const rises = measuredSetRises(input({
         coverageBefore: ownTests([[gated, 10]]),
         coverage: ownTests([[gated, 14]]),
         touched: new Set(["tasks"]),
+        coverageGate: over(),
       }));
       expect(rises[0]?.route).toBe("elsewhere");
     });
@@ -451,10 +487,11 @@ describe("report", () => {
     // landed anyway. That is the two measurements disagreeing, and saying
     // the change did not touch the package would be false.
     it("says the measurements disagree when the gate did run", () => {
-      const rises = packageRises(input({
+      const rises = measuredSetRises(input({
         coverageBefore: ownTests([[gated, 10]]),
         coverage: ownTests([[gated, 14]]),
         touched: new Set([gated]),
+        coverageGate: over(gated),
       }));
       expect(rises[0]?.route).toBe("gated");
     });
@@ -463,14 +500,14 @@ describe("report", () => {
     // compare against, and calling its first figure a rise would report
     // every package the moment it gains a gate.
     it("says nothing about a package the run before did not measure", () => {
-      expect(packageRises(input({
+      expect(measuredSetRises(input({
         coverage: ownTests([[gated, 14]]),
         touched: new Set(["tasks"]),
       }))).toEqual([]);
     });
 
     it("says nothing about a package that did not rise", () => {
-      expect(packageRises(input({
+      expect(measuredSetRises(input({
         coverageBefore: ownTests([[gated, 10]]),
         coverage: both(ownTests([[gated, 10]]), figures([["workspace", 900]])),
       }))).toEqual([]);
@@ -479,17 +516,20 @@ describe("report", () => {
     // Both metrics carry the same package name, and only the own-tests
     // one is the quantity the per-package gate compares.
     it("reads the own-tests figure and not the whole run's figure", () => {
-      expect(packageRises(input({
+      expect(measuredSetRises(input({
         coverageBefore: figures([[gated, 10]]),
         coverage: figures([[gated, 400]]),
       }))).toEqual([]);
     });
 
-    it("counts only covered packages against the cap", () => {
-      const rises = packageRises(input({
+    it("counts only the sets the gate reached", () => {
+      // An excluded member carries no set, so touching every one of them
+      // reaches nothing and the gate ran over an empty selection.
+      const rises = measuredSetRises(input({
         coverageBefore: ownTests([[gated, 10]]),
         coverage: ownTests([[gated, 14]]),
         touched: new Set([...EXCLUDED_FROM_COVERAGE_GATE.keys()]),
+        coverageGate: over(),
       }));
       expect(rises[0]?.route).toBe("elsewhere");
     });
@@ -1070,7 +1110,7 @@ describe("report", () => {
       expect(body).toContain("somewhere else in the repository");
     });
 
-    it("names the exclusion list's reason and the packages counted", () => {
+    it("names the exclusion list's reason and the sets counted", () => {
       const excluded = [...EXCLUDED_FROM_COVERAGE_GATE.keys()][0]!;
       const body = renderReport(
         buildReport(input({
@@ -1080,6 +1120,14 @@ describe("report", () => {
             "packages/html",
             "tasks",
           ]),
+          coverageGate: {
+            reached: [
+              "workspace-unit/packages/memory",
+              "workspace-unit/packages/ui",
+              "workspace-unit/packages/html",
+            ],
+            ran: false,
+          },
           coverageBefore: ownTests([[excluded, 10], ["packages/memory", 4]]),
           coverage: ownTests([[excluded, 14], ["packages/memory", 9]]),
         })),
@@ -1087,7 +1135,7 @@ describe("report", () => {
       )!;
       expect(body).toContain("The list gives the reason:");
       expect(body).toContain(EXCLUDED_FROM_COVERAGE_GATE.get(excluded));
-      expect(body).toContain("The change touched 3 covered packages.");
+      expect(body).toContain("The change reached 3 measured sets.");
     });
 
     it("says the coverage note is not a failure", () => {

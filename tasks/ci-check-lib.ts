@@ -481,6 +481,25 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
 }
 
 /** The GitHub page of a workflow run: the URL the baseline file records. */
+/**
+ * The API path listing the runs a coverage baseline could come from:
+ * successful pushes to the default branch, newest first.
+ *
+ * One path rather than one per reader, because the workflow the runs
+ * belong to has to be the same for everything that compares against a
+ * baseline, and a second copy is a second place to update when the run
+ * moves to another workflow.
+ */
+export function workflowRunsPathForBaseline(perPage: number): string {
+  const params = new URLSearchParams({
+    branch: "main",
+    status: "success",
+    event: "push",
+    per_page: String(perPage),
+  });
+  return `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`;
+}
+
 export function workflowRunUrl(runId: number): string {
   return `${SERVER_URL}/${REPO}/actions/runs/${runId}`;
 }
@@ -814,38 +833,39 @@ export function coverageMetricGroupName(metric: string): string | null {
   if (!metric.startsWith(prefix) || !metric.endsWith(suffix)) return null;
 
   const name = metric.slice(prefix.length, -suffix.length);
-  // A package's own-tests figure carries the package's name and is not a
-  // source group. Whatever iterates the coverage metrics of a run sees
-  // both, and reading one as the other would ratchet the wrong number.
-  return name.endsWith(OWN_TESTS_MARKER) ? null : name;
+  // A measured set's figure carries a member's name and is not a source
+  // group. Whatever iterates the coverage metrics of a run sees both, and
+  // reading one as the other would ratchet the wrong number.
+  return name.startsWith(MEASURED_SET_MARKER) ? null : name;
 }
 
-/** What separates a covered package's own-tests metric from its group. */
-const OWN_TESTS_MARKER = " own-tests";
+/** What separates a measured set's metric from a source group's. */
+const MEASURED_SET_MARKER = "measured set ";
 
 /**
- * The metric one covered package's own tests are counted in.
+ * The metric one measured set's uncovered lines are counted in, named by
+ * the suite and the member the set pairs.
  *
- * A different quantity from the source group of the same name: that one
- * is the package's source measured by every test in the run, and this one
- * is the same source measured by only the package's own tests. The two
+ * A different quantity from the source group over the same member: that
+ * one is the member's source measured by every test in the run, and this
+ * one is the same source measured by one suite's tests alone. The two
  * come apart under test selection, because a run that samples the corpus
  * measures a sample of the first and the whole of the second. That is
- * what makes this the figure a per-package gate can compare and the other
+ * what makes this the figure the coverage gate can compare and the other
  * one a trend.
  */
-export function ownTestsCoverageMetric(member: string): string {
-  return `${COVERAGE_METRIC_PREFIX} ${member}` +
-    `${OWN_TESTS_MARKER} uncovered lines`;
+export function measuredSetCoverageMetric(set: string): string {
+  return `${COVERAGE_METRIC_PREFIX} ${MEASURED_SET_MARKER}${set} ` +
+    `uncovered lines`;
 }
 
-/** The covered package one own-tests metric names, or null for anything else. */
-export function ownTestsCoverageMember(metric: string): string | null {
-  const prefix = `${COVERAGE_METRIC_PREFIX} `;
-  const suffix = `${OWN_TESTS_MARKER} uncovered lines`;
+/** The measured set one metric names, or null for anything else. */
+export function coverageMetricMeasuredSet(metric: string): string | null {
+  const prefix = `${COVERAGE_METRIC_PREFIX} ${MEASURED_SET_MARKER}`;
+  const suffix = " uncovered lines";
   if (!metric.startsWith(prefix) || !metric.endsWith(suffix)) return null;
-  const member = metric.slice(prefix.length, -suffix.length);
-  return member.length === 0 ? null : member;
+  const set = metric.slice(prefix.length, -suffix.length);
+  return set.length === 0 ? null : set;
 }
 
 /** The metric a source group's uncovered lines are counted in. */
@@ -1658,9 +1678,84 @@ const COVERAGE_ACCEPTANCE_TERMS =
  * A coverage source group. Metric collection rolls a file up to its top-level
  * directory, `packages` excepted, where the package directory below it carries
  * the group. So `workspace` and `tasks` are groups and `packages/runner` is
- * one, while `tasks/foo` is not — nothing measures a group at that depth.
+ * one, while `tasks/foo` and `packages/connectors/github` are not — nothing
+ * measures a group at that depth.
  */
 const COVERAGE_GROUP_NAME = /^(?:[A-Za-z0-9._-]+|packages\/[A-Za-z0-9._-]+)$/;
+
+/** Whether an accepted name is one the repository-wide ratchet measures. */
+export function namesCoverageSourceGroup(name: string): boolean {
+  return COVERAGE_GROUP_NAME.test(name);
+}
+
+/**
+ * What an acceptance may name: a coverage source group, or a workspace member
+ * nested deeper than one. The coverage gate scores a measured set over a
+ * member, which sits at whatever depth the workspace puts it, so an acceptance
+ * has to be able to name `packages/connectors/github`.
+ */
+const COVERAGE_ACCEPTANCE_NAME =
+  /^(?:[A-Za-z0-9._-]+|packages(?:\/[A-Za-z0-9._-]+)+)$/;
+
+/**
+ * Each `ACCEPT_COVERAGE_DEBT:` acceptance in a description, as the name it
+ * gives against the lines it allows.
+ *
+ * The name is read as written. Two gates take it differently — the
+ * repository-wide ratchet reads it as a coverage source group, and the
+ * coverage gate reads it as a workspace member — and one parse serving both
+ * is what keeps an author writing one marker rather than two.
+ *
+ * `mergedPullRequestBody` says a merged pull request's description is what is
+ * being read, in which case a marker this cannot read is passed over rather
+ * than rejected: a body that has already merged cannot be rewritten to suit a
+ * later parser.
+ */
+export function acceptedCoverageDebt(
+  body: string,
+  mergedPullRequestBody = false,
+): Map<string, number> {
+  const accepted = new Map<string, number>();
+  for (const marker of body.match(COVERAGE_ACCEPTANCE_MARKER) ?? []) {
+    const terms = COVERAGE_ACCEPTANCE_TERMS.exec(marker);
+    if (terms === null) {
+      if (mergedPullRequestBody) continue;
+      throw new Error(
+        `Invalid ACCEPT_COVERAGE_DEBT acceptance "${marker.trim()}": write it ` +
+          "as `ACCEPT_COVERAGE_DEBT: <source group or workspace member> +N " +
+          "lines`, where N is how many lines above the baseline to allow the " +
+          "rise.",
+      );
+    }
+    const name = terms[1];
+    if (!COVERAGE_ACCEPTANCE_NAME.test(name)) {
+      throw new Error(
+        `Invalid ACCEPT_COVERAGE_DEBT acceptance for "${name}": name a ` +
+          "coverage source group or a workspace member, such as " +
+          "`packages/runner`, `packages/connectors/github`, `tasks`, or " +
+          "`workspace`.",
+      );
+    }
+    const lines = parseInt(terms[2], 10);
+    const already = accepted.get(name);
+    if (already !== undefined) {
+      // Two acceptances of one name is an author who meant one number
+      // and would be given the other. A body that has already merged
+      // cannot be rewritten, so there the larger stands.
+      if (!mergedPullRequestBody) {
+        throw new Error(
+          `Two ACCEPT_COVERAGE_DEBT acceptances name "${name}", for ` +
+            `${already} and ${lines} lines. Write one, for the whole rise ` +
+            `you are accepting.`,
+        );
+      }
+      accepted.set(name, Math.max(already, lines));
+      continue;
+    }
+    accepted.set(name, lines);
+  }
+  return accepted;
+}
 
 /**
  * Parse a PR body for coverage-debt overrides.
@@ -1722,27 +1817,15 @@ export function parseBaselineOverrides(
     }
   }
 
-  for (const marker of body.match(COVERAGE_ACCEPTANCE_MARKER) ?? []) {
-    const terms = COVERAGE_ACCEPTANCE_TERMS.exec(marker);
-    if (terms === null) {
-      if (mergedPullRequestBody) continue;
-      throw new Error(
-        `Invalid ACCEPT_COVERAGE_DEBT acceptance "${marker.trim()}": write it ` +
-          "as `ACCEPT_COVERAGE_DEBT: <source group> +N lines`, where N is how " +
-          "many lines above the baseline to allow the group to rise.",
-      );
-    }
-
-    const group = terms[1];
-    if (!COVERAGE_GROUP_NAME.test(group)) {
-      throw new Error(
-        `Invalid ACCEPT_COVERAGE_DEBT acceptance for "${group}": name a ` +
-          "coverage source group, such as `packages/runner`, `tasks`, or " +
-          "`workspace`.",
-      );
-    }
-
-    result.metrics.set(coverageMetricForGroup(group), parseInt(terms[2], 10));
+  for (
+    const [name, lines] of acceptedCoverageDebt(body, mergedPullRequestBody)
+  ) {
+    // An acceptance naming a workspace member deeper than a source group
+    // is one the coverage gate reads and this ratchet measures nothing
+    // for. Taking it as a group would fail the run for an acceptance
+    // that names no group.
+    if (!namesCoverageSourceGroup(name)) continue;
+    result.metrics.set(coverageMetricForGroup(name), lines);
   }
 
   if (mergedPullRequestBody) {

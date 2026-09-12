@@ -346,13 +346,22 @@ export function groupReadsByEntity(
   return readsByEntity;
 }
 
+/** Returns whether `to` is reachable from `from`, including itself. */
 export function hasDependentPath(
   dependentsByAction: WeakMap<Action, Set<Action>>,
   from: Action,
   to: Action,
 ): boolean {
-  const visited = new Set<Action>([from]);
-  const pending = [from];
+  return reachesDependent(dependentsByAction, [from], to);
+}
+
+/** Traverses the union of the seed nodes' downstream edges once per query. */
+function reachesDependent(
+  dependentsByAction: WeakMap<Action, Set<Action>>,
+  pending: Action[],
+  to: Action,
+): boolean {
+  const visited = new Set(pending);
 
   while (pending.length > 0) {
     const current = pending.pop()!;
@@ -374,8 +383,8 @@ export function hasDependentPath(
  * True when an invalid/never-ran node is transitively upstream of `action`.
  *
  * Seed from the maintained invalid-node set rather than walking `action`'s
- * whole upstream cone. {@link hasDependentPath} supplies the cycle-safe
- * downstream reachability check over the canonical writer-to-reader edges.
+ * whole upstream cone. Shared downstream paths are visited once per query,
+ * including when several invalid nodes feed the same reader.
  * `action` itself is excluded: a resubscribe records a run that just completed,
  * so callers use this to decide whether newly-live upstream work needs a wake.
  */
@@ -383,15 +392,11 @@ export function hasInvalidUpstream(
   state: Pick<DependencyGraphState, "dependents" | "nodes">,
   action: Action,
 ): boolean {
+  const pending: Action[] = [];
   for (const candidate of state.nodes.getInvalidNodes()) {
-    if (
-      candidate !== action &&
-      hasDependentPath(state.dependents, candidate, action)
-    ) {
-      return true;
-    }
+    if (candidate !== action) pending.push(candidate);
   }
-  return false;
+  return reachesDependent(state.dependents, pending, action);
 }
 
 export function collectDirectWritersForLog(state: {

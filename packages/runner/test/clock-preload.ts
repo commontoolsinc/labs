@@ -15,6 +15,10 @@ installFakeClock({
   mode: "auto-advance",
   // Test files kept on the real clock for now. These should be converted to use
   // a fake clock. // TODO: convert these tests to a fake clock
+  // The event-visibility suite uses clock.settle() to hold positive-delay
+  // timers while transport work drains, and ticks only the deferred-rescan
+  // boundary. It intentionally stays on the fake clock: absence of a visibility
+  // response fails a call-count assertion without waiting for a timer.
   realClockFiles: [
     // Holds the resume's per-element documents in the transport so the
     // coordinator reconciles while they are absent. A commit carrying a read of
@@ -45,6 +49,7 @@ installFakeClock({
     "executor-compile-and-run",
     // Scoped fetch requests use the same live serving host and lease cadence.
     "executor-fetch-instances",
+    "executor-fetch-program-instances",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
@@ -52,6 +57,9 @@ installFakeClock({
     // View publication drives a live ExecutorHost with the same flush, renew,
     // and disposal deadlines. The fixture waits on view-plan events.
     "view-replication-client",
+    // The activation lease suite controls Date and renewal intervals itself,
+    // while scheduler and transport dispatch use ordinary zero-delay timers.
+    "activation-lease",
     // The OW45 arm-B stage-1 space-root ensure suite drives a real
     // SpaceServer directly under the same wall-clock policies (renew
     // interval, flush deadline); auto-advance turns the renew cadence

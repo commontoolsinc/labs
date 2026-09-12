@@ -732,6 +732,13 @@ export interface IStorageProvider {
   /** Establish the authenticated space session without reading entity values. */
   ensureSession?(): Promise<void>;
 
+  /**
+   * Wait for an ordered response after this space's published input frames.
+   * Frame application completes before the response; pending local writes may
+   * still shadow those inputs. This does not wait for commit durability.
+   */
+  pullToServerHead?(): Promise<void>;
+
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
 
@@ -1424,6 +1431,16 @@ export interface IStorageTransaction {
    * Each status variant includes a `journal` field with transaction operations.
    */
   status(): StorageTransactionStatus;
+
+  /**
+   * The store seq `space` accepted this transaction's commit at: the position
+   * in that space's commit log the writes landed at, which
+   * `cf inspect value-at --seq` and `diff --from/--to` read. Known once the
+   * commit's verdict arrives; undefined before it, for a commit the space
+   * rejected, and for a space this transaction wrote nothing to. Optional the
+   * same way as the read hooks above; absent means unknown.
+   */
+  committedSeq?(space: MemorySpace): number | undefined;
 
   /**
    * Reads a value from a (local) memory address and captures corresponding

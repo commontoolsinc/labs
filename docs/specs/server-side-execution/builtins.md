@@ -69,7 +69,7 @@ reported rather than written into the conversation.
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
 | `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending }`; the memo hash is committed in the internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts`) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; the memo base is `` `${kind.name}:${inputHash}` ``; the served outbox key also names the target document and its resolved user or session instance |
-| `fetch-program` | program source ref + integrity | compiled program ref | same | feeds `compile-and-run` |
+| `fetch-program` | URL | `{ pending, result?, error? }`; successful `result` contains source `files` and `main` | same | the durable cache is keyed by input hash; served outbox keys also name the cache document and resolved user or session instance |
 | `llm` (`generateText` / `generateObject`) | model, messages/prompt, schema, params | settled result only (protocol.md §6 — no partial commits in v2); `requestHash` on the result cell selects the pending request and accompanies its settled result or error | broker-held provider keys; grant from handle | temperature etc. are inputs, so nondeterminism is memo-stable by construction |
 | `llm-dialog` | dialog state + params | settled turns | same | multi-turn = new key per turn |
 | `sqlite*` | database link, statement, params, reader principal | one cleared result cell per (query, reader) | read served under the reader's clearance | clearance = per-reader materialization (RULED 2026-08-02) — see below |
@@ -92,6 +92,24 @@ requests selecting another target for the same binding. Distinct bindings can
 announce a shared result independently without changing another request's
 result fields. Unstamped client runs use the runtime's own identity and keep
 one local lifecycle.
+
+`fetchProgram` retains accepted requests per resolved cache instance and input
+hash, including requests waiting for dispatch. Cell handles are shared per
+symbolic scope; each request captures its issuing identity for completion,
+refusal, and teardown reads and writes. Different URLs may resolve concurrently
+and remain cached, so returning to an earlier URL can use its original request.
+Only the selected URL is projected into the published result. Stopping the node
+releases its accepted claims and suppresses writeback from every dispatched
+resolution. Cancellation does not reach `HttpProgramResolver` network requests.
+Accepted publication owns the raw node's physical binding independently from
+cache state. A late refusal cannot replace another actor's accepted target, while
+distinct bindings can announce the same pending result. Attempts for one physical
+binding share an accepted-publication sequence; a retry supersedes an earlier
+refusal only when its publication commits. Staging retains one record per binding
+and target, including after a refusal write fails, until an accepted publication
+covers it or the node stops. A rejected release check
+releases a claim with no dispatched owner. Accepted request records retire when
+their work settles.
 
 Served `llm`, `generateText`, and `generateObject` bind lifecycle state and
 outbox identity to the resolved output instance. The pending request writes

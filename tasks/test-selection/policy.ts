@@ -164,13 +164,17 @@ export const SUITE_FLAKE_PRIOR_RATE = 0.02;
 /** Uncovered lines a change must add before the comment mentions it. */
 export const COVERAGE_COMMENT_LINES = 25;
 
-/** Seconds past which a covered package's measured set is reported. */
+/** Seconds past which a measured set's units are reported as expensive. */
 export const LOCAL_COVERAGE_MAX_SECONDS = 30;
 
-/** Covered packages a change may touch and still be gated. */
-export const LOCAL_COVERAGE_MAX_PACKAGES = 2;
+/** Measured sets a change may reach and still be gated. */
+export const LOCAL_COVERAGE_MAX_SETS = 2;
 
-/** Days of per-package coverage baselines a manifest carries. */
+/**
+ * How old a measured set's coverage baseline may be and still be
+ * published. A publisher keeps one measured within this many days of the
+ * moment it publishes, and drops the rest.
+ */
 export const LOCAL_COVERAGE_BASELINE_DAYS = 7;
 
 /** Weeks of rising debt before the coverage tile goes amber. */
@@ -254,11 +258,11 @@ export const RENAME_SUGGESTIONS = 5;
 export const ALIAS_GATE_MIN_CATCHES: number | undefined = undefined;
 
 /**
- * Workspace members the per-package coverage gate does not cover, each
- * with the reason it is here. A list rather than a rule that measures
- * each package and decides, because such a rule can take a package's gate
- * away for a change nobody meant as a change to coverage, and a gate that
- * silently stops gating is worse than no gate.
+ * Workspace members that carry no measured set, each with the reason it
+ * is here. A list rather than a rule that measures each member and
+ * decides, because such a rule can take a member's gate away for a change
+ * nobody meant as a change to coverage, and a gate that silently stops
+ * gating is worse than no gate.
  */
 export const EXCLUDED_FROM_COVERAGE_GATE: ReadonlyMap<string, string> = new Map(
   [
@@ -671,19 +675,19 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "chosen",
     why:
-      "Up when too many packages are reported as expensive for the report to " +
-      "be worth reading; down when one is quietly eating a lane. Nothing is " +
+      "Up when too many sets are reported as expensive for the report to be " +
+      "worth reading; down when one is quietly eating a lane. Nothing is " +
       "excluded either way; it only decides what the summary mentions.",
   },
   {
-    name: "LOCAL_COVERAGE_MAX_PACKAGES",
-    value: LOCAL_COVERAGE_MAX_PACKAGES,
-    unit: "packages",
+    name: "LOCAL_COVERAGE_MAX_SETS",
+    value: LOCAL_COVERAGE_MAX_SETS,
+    unit: "measured sets",
     setBy: "chosen",
     why:
       "Up when broader changes should still be gated and the run can afford " +
-      "their packages' whole test sets; down when sweeping changes are " +
-      "crowding lanes.",
+      "those sets' whole unit lists; down when sweeping changes are crowding " +
+      "lanes.",
   },
   {
     name: "EXCLUDED_FROM_COVERAGE_GATE",
@@ -692,8 +696,8 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why:
       "Not a quantity. A line comes off when a package fits the run's budget " +
-      "or gains a Deno-only half, which turns its gate on. A line goes on " +
-      "when a package's own tests stop being what covers it.",
+      "or gains a Deno-only half, which gives it a measured set. A line goes " +
+      "on when a package's own tests stop being what covers it.",
   },
   {
     name: "LOCAL_COVERAGE_BASELINE_DAYS",
@@ -701,9 +705,9 @@ export const DIALS: readonly Dial[] = [
     unit: "days",
     setBy: "chosen",
     why:
-      "Up when branches based further back are being reported for want of an " +
-      "ancestor baseline; down when the manifest carries more history than " +
-      "anybody reads.",
+      "Up when branches based further back are being reported for want of a " +
+      "baseline they contain; down when the manifest carries more history " +
+      "than anybody reads.",
   },
   {
     name: "COVERAGE_TREND_WEEKS",

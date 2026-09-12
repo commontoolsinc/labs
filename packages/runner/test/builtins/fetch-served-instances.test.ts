@@ -13,6 +13,7 @@ import {
 
 import { fetchText } from "../../src/builtins/fetch.ts";
 import type { Cell } from "../../src/cell.ts";
+import type { PostCommitSideEffect } from "../../src/cfc/types.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,
@@ -303,7 +304,8 @@ describe("fetch-served-instances", () => {
       scope: bindingScope,
     });
     const cancels: Array<() => void> = [];
-    const dispatches: Array<() => void | Promise<void>> = [];
+    const dispatches: Array<() => ReturnType<PostCommitSideEffect["flush"]>> =
+      [];
     const publicationCallbacks: Array<() => void> = [];
     let resultCells: {
       pending: Cell<boolean>;

@@ -13,7 +13,11 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
-import { cfcSchemaResolvedRoot } from "./cfc/schema-refs.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./cfc/schema-refs.ts";
+import { isEmbeddedCfcSchemaRef } from "./embedded-schemas.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
@@ -164,10 +168,15 @@ export function schemaWithScopedLinkRequiredsRelaxed(
     structuralRoot = structural;
   } else {
     // A local reference resolves against the document root, the rule every
-    // CFC schema walker applies; a `$defs` below that root is inert.
+    // CFC schema walker applies; a `$defs` below that root is inert. An
+    // embedded reference (the renderer's vnode schema among them) is a
+    // document of its own, and the root moves into it.
     structuralRoot = root ?? structural;
     const ref = (structural as { $ref?: unknown }).$ref;
-    if (typeof ref === "string" && ref.startsWith("#")) {
+    if (
+      typeof ref === "string" &&
+      (ref.startsWith("#") || isEmbeddedCfcSchemaRef(ref))
+    ) {
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         structural as Parameters<
           typeof ContextualFlowControl.resolveSchemaRefs
@@ -175,8 +184,11 @@ export function schemaWithScopedLinkRequiredsRelaxed(
         structuralRoot,
       );
       if (!isObjectOrArray(resolved)) return schema;
+      structuralRoot = cfcSchemaResolvedRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(structural, structuralRoot),
+      );
       structural = resolved;
-      structuralRoot = cfcSchemaResolvedRoot(structural, structuralRoot);
     }
   }
 
