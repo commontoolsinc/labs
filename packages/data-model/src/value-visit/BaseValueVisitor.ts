@@ -78,22 +78,28 @@ export abstract class BaseValueVisitor<
   ): DispatchingVisitorResult<DomainExtra, ResultType>;
 
   /** @inheritDoc */
-  abstract visitedArrayElement(
+  abstract visitedFabricArrayElement(
     array: FabricArray,
     index: number,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
-  abstract visitedArrayGap(
+  abstract visitedFabricArrayGap(
     array: FabricArray,
     start: number,
     count: number,
   ): BaselineVisitResult<ResultType>;
 
   /** @inheritDoc */
-  abstract visitedMapping(
-    container: FabricPlainObject | FabricInstance,
+  abstract visitedFabricInstance(
+    instance: FabricInstance,
+    state: FabricValue,
+  ): BaselineVisitResult<ResultType>;
+
+  /** @inheritDoc */
+  abstract visitedFabricPlainObjectEntry(
+    container: FabricPlainObject,
     key: DomainFor<DomainExtra>,
     value: DomainFor<DomainExtra>,
   ): BaselineVisitResult<ResultType>;

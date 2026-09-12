@@ -219,7 +219,10 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   read of such an instance that finds the lease row lapsed runs the
   renew arm first (the lost-then-reacquire step the renew timer takes,
   taken at the moment the lapse is found) and is served under the
-  reacquired tenure, or withheld as the tenure parks; space-scoped
+  reacquired tenure, or withheld as the tenure parks. During initialization,
+  lease loss withholds the read and invalidates activation; that partially
+  initialized runtime is disposed rather than reused under a new tenure.
+  Space-scoped
   documents and the service's own instances are delivered to any
   session, so they are read without consulting the row. And an address
   the store holds nothing at leaves no record, as a pull that delivered
@@ -282,7 +285,7 @@ processes* (deploy overlap, partition) it holds via the lease:
   the in-process residue is a local obligation, not wire machinery.
 - Acquire with a conditional write; TTL 15 s; renew every 5 s **by direct
   table update — a lease renewal is NEVER a commit** (v1's renewal-adjacent
-  traffic was part of the storm). The renew has TWO drivers (stage C
+  traffic was part of the storm). Periodic renewal has two drivers (stage C
   tuning T3, 2026-08-18): the interval timer, and a MID-WAVE renew issued
   from the serving scheduler's cooperative macrotask yield (§3) once the
   tenure has gone TTL/3 without a renewal — the timer rides the macrotask
@@ -293,6 +296,26 @@ processes* (deploy overlap, partition) it holds via the lease:
   commit. Impl: `space-server.ts` `#renewIfDue` on
   `Runtime.servingYieldObserver`; pinned in
   `executor-cooperative-yield.test.ts` (ii).
+- Renewal starts immediately after acquisition and covers runtime creation,
+  foreign basis reads, and delegated append recovery. Initialization remains
+  distinct from an active serving loop. Before launch, a direct renewal checks
+  that the lease is still live even if synchronous work delayed timer callbacks.
+  A renewal failure or lease-store exception invalidates initialization: the
+  outstanding initialization await finishes, then its runtime is disposed,
+  its renewal timer is cleared, and its lease is released. Observer cleanup
+  failures cannot skip the factory disposer; observer cleanup and disposer
+  failures cannot skip lease release. Host shutdown waits
+  for this lifecycle before returning. After initialization loses its lease,
+  the host clears that activation's in-flight record and re-evaluates live
+  sessions, undelivered events, and retained warm requests. Matching demand
+  starts a fresh tenure after the failure-park backoff; repeated initialization
+  losses extend that backoff, and a committed wave clears the streak. Warm
+  notices arriving during initialization or its cleanup remain obligations of
+  the successor. Initial acquisition refusal on a rival's lease does not
+  schedule another attempt, and host shutdown cancels a pending backoff. A
+  lifecycle-verb request whose activation fails receives the not-served error;
+  the request alone is not a persistent reactivation criterion. These
+  boundaries are covered by `test/executor/activation-lease.test.ts`.
 - On renewal failure or expiry: the SpaceServer MUST stop committing
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
@@ -330,6 +353,7 @@ defines the ordered publication/response barrier before deferral.
 ```
 on activate(space):
   acquire lease (else park)
+  start lease renewal through initialization
   runtime = new Runtime(serverPosture)   // flag ON, egress allow,
                                          // builtins registered
   load graph structure for demanded values + queued events (§1 —
@@ -338,6 +362,7 @@ on activate(space):
   re-mark the dirty frontier from the basis index (§3b, §6):
     a node is dirty iff a recorded input seq is behind that doc's head
   subscribe(space, from = the head the index scan ran against)
+  verify the initialization tenure remains live (else dispose and park)
 
 on commits [s..n] arriving (the wave's input batch; commits arriving
 mid-wave belong to the NEXT wave — natural double-buffering, no timers):

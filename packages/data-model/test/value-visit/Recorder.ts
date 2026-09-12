@@ -3,8 +3,8 @@
  * call it receives, and builders for the result forms a test hands back.
  *
  * The recorder dispatches every value to its subtype method and recurses into
- * containers the way `ContainerIteratingValueVisitor` does by default, so a test
- * that wants the default walk sets nothing, and one that wants a different
+ * containers the way `ContainerIteratingValueVisitor` does by default, so a
+ * test that wants the default walk sets nothing, and one that wants a different
  * decision at one hook assigns the matching `on*` property.
  */
 
@@ -31,9 +31,9 @@ export type Event = [name: string, ...args: unknown[]];
 
 /**
  * Visitor that dispatches every value to its subtype method, recurses into
- * containers the way `ContainerIteratingValueVisitor` does by default, and records
- * each call it receives. Each hook can be overridden per test by assigning the
- * matching `on*` property.
+ * containers the way `ContainerIteratingValueVisitor` does by default, and
+ * records each call it receives. Each hook can be overridden per test by
+ * assigning the matching `on*` property.
  */
 export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
   readonly events: Event[] = [];
@@ -66,6 +66,10 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
     value: unknown,
   ) => BaselineVisitResult<unknown>;
   onVisitedGap?: (start: number, count: number) => BaselineVisitResult<unknown>;
+  onVisitedInstance?: (
+    instance: FabricInstance,
+    state: unknown,
+  ) => BaselineVisitResult<unknown>;
   onVisitedMapping?: (
     key: unknown,
     value: unknown,
@@ -126,11 +130,10 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
   override visitFabricInstance(
     value: FabricInstance,
   ): LeafVisitorResult<unknown, unknown> {
-    // Unlike the other container hooks, this one does not defer to the
-    // superclass by default: the engine cannot yet iterate an instance, so
-    // the default here is to stop.
     this.events.push(["instance", value]);
-    return this.onInstance ? this.onInstance(value) : undefined;
+    return this.onInstance
+      ? this.onInstance(value)
+      : super.visitFabricInstance(value);
   }
 
   override visitPrimitive(
@@ -148,7 +151,7 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
     return this.onNonFabric ? this.onNonFabric(value) : undefined;
   }
 
-  override visitedArrayElement(
+  override visitedFabricArrayElement(
     array: FabricArray,
     index: number,
     value: unknown,
@@ -159,7 +162,7 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
       : undefined;
   }
 
-  override visitedArrayGap(
+  override visitedFabricArrayGap(
     array: FabricArray,
     start: number,
     count: number,
@@ -168,12 +171,22 @@ export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
     return this.onVisitedGap ? this.onVisitedGap(start, count) : undefined;
   }
 
-  override visitedMapping(
+  override visitedFabricInstance(
+    instance: FabricInstance,
+    state: unknown,
+  ): BaselineVisitResult<unknown> {
+    this.events.push(["visitedInstance", instance, state]);
+    return this.onVisitedInstance
+      ? this.onVisitedInstance(instance, state)
+      : undefined;
+  }
+
+  override visitedFabricPlainObjectEntry(
     container: FabricPlainObject | FabricInstance,
     key: unknown,
     value: unknown,
   ): BaselineVisitResult<unknown> {
-    this.events.push(["visitedMapping", container, key, value]);
+    this.events.push(["visitedFabricPlainObjectEntry", container, key, value]);
     return this.onVisitedMapping
       ? this.onVisitedMapping(key, value)
       : undefined;
