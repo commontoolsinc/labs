@@ -1,0 +1,51 @@
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { commitFailure } from "../src/ops/utils.ts";
+
+describe("commitFailure", () => {
+  it("throws the reason when the commit carried an Error one", () => {
+    const reason = new RangeError("the underlying cause");
+    expect(commitFailure({ name: "Whatever", message: "outer", reason }))
+      .toBe(reason);
+  });
+
+  it("wraps a Result error so it is an Error at all", () => {
+    const result = commitFailure({
+      name: "ConflictError",
+      message: "stale confirmed read: of:fid1:abc at seq 0 conflicted with 12",
+    });
+    expect(result).toBeInstanceOf(Error);
+    expect(result.name).toBe("ConflictError");
+    expect(result.message).toContain("stale confirmed read");
+    // The stack is what a plain Result object cannot carry, and what a
+    // rendered failure needs.
+    expect(typeof result.stack).toBe("string");
+  });
+
+  it("keeps the Result on cause, so the conflict's own fields survive", () => {
+    const conflict = {
+      name: "ConflictError",
+      message: "stale confirmed read",
+      transaction: { localSeq: 6 },
+    };
+    expect(commitFailure(conflict).cause).toBe(conflict);
+  });
+
+  it("renders a Result with no message rather than losing it", () => {
+    const result = commitFailure({ name: "Odd", code: 17 });
+    expect(result).toBeInstanceOf(Error);
+    expect(result.message).toContain("17");
+  });
+
+  it("ignores a non-Error reason and still produces an Error", () => {
+    const result = commitFailure({
+      name: "ConflictError",
+      message: "refused",
+      reason: "a string, not an Error",
+    });
+    expect(result).toBeInstanceOf(Error);
+    expect(result.name).toBe("ConflictError");
+    expect(result.message).toBe("refused");
+  });
+});
