@@ -192,11 +192,11 @@ flag: the pane pays for every row the statement returned, whether or not it
 shows them. Measured on the unified inbox: one person with 38 rows on screen
 opened a thread in 320ms, five people with 6 rows on screen took 1.4-3.5s.
 
-| Violation                                                                          | Fix                                                                                        |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| a render-side cap (`slice`, `take`, a `limit` prop) presented as the bound on cost | Bound the statement — a narrower `LIMIT` or predicate — and keep the render cap for layout |
-| a widened statement `LIMIT` added to "show more" without a paging story            | Page the query rather than raising its ceiling                                             |
-| a control that can fire again before the previous change settles                   | Disable or debounce it while the graph converges                                           |
+| Violation                                                                          | Fix                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a render-side cap (`slice`, `take`, a `limit` prop) presented as the bound on cost | Bound the statement with `LIMIT`, and keep the render cap for layout. A `WHERE` clause is not a bound: it narrows the candidates and says nothing about how many survive — see "A statement therefore bounds its rows" in `docs/common/capabilities/sqlite.md` |
+| a widened statement `LIMIT` added to "show more" without a paging story            | Page the query rather than raising its ceiling                                                                                                                                                                                                                 |
+| a control that can fire again before the previous change settles                   | Disable or debounce it while the graph converges                                                                                                                                                                                                               |
 
 `docs/history/development/performance/2026-09-11-person-inbox-click-cost.md`
 carries the measurements; `skills/perf-investigation/SKILL.md` is the route to

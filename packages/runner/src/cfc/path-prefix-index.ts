@@ -12,7 +12,24 @@
  * single node, so a literal segment follows both its own child and the `"*"`
  * child, and a `"*"` segment follows every child. The two are held together by
  * a test that compares them across a generated corpus.
+ *
+ * A `"*"` in the QUERY follows every child at that depth, which makes the
+ * frontier as wide as the set and costs far more than the scan it replaces —
+ * measured at 730x on a 256-source set whose queries are all wildcard at the
+ * branching segment. So a query carrying one takes the scan instead, and the
+ * trie serves the concrete queries it is good at, where the frontier is at most
+ * two nodes: the literal child and the `"*"` child. Both shapes are benched.
  */
+
+/** `isPrefix` from `prepare.ts`, for the queries that take the scan. */
+const isPrefixOf = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) =>
+    segment === path[index] || segment === "*" || path[index] === "*"
+  );
 
 type PathPrefixNode = {
   children: Map<string, PathPrefixNode>;
@@ -23,8 +40,12 @@ type PathPrefixNode = {
 export class PathPrefixIndex {
   #root: PathPrefixNode = { children: new Map(), terminal: false };
 
+  /** The same paths, for the wildcard queries the trie is bad at. */
+  #paths: (readonly string[])[] = [];
+
   /** Add a path to the set. Adding the same path twice is a no-op. */
   add(path: readonly string[]): void {
+    this.#paths.push(path);
     let node = this.#root;
     for (const segment of path) {
       let next = node.children.get(segment);
@@ -40,20 +61,23 @@ export class PathPrefixIndex {
   /** Whether any added path is a prefix of `path`, by `isPrefix`'s rules. */
   hasPrefixOf(path: readonly string[]): boolean {
     if (this.#root.terminal) return true;
-    let frontier = [this.#root];
+    if (path.includes("*")) {
+      return this.#paths.some((source) => isPrefixOf(source, path));
+    }
+    let frontier: Iterable<PathPrefixNode> = [this.#root];
     for (const segment of path) {
-      const next: PathPrefixNode[] = [];
+      const next = new Set<PathPrefixNode>();
       for (const node of frontier) {
         if (segment === "*") {
-          for (const child of node.children.values()) next.push(child);
+          for (const child of node.children.values()) next.add(child);
           continue;
         }
         const literal = node.children.get(segment);
-        if (literal !== undefined) next.push(literal);
+        if (literal !== undefined) next.add(literal);
         const wildcard = node.children.get("*");
-        if (wildcard !== undefined && segment !== "*") next.push(wildcard);
+        if (wildcard !== undefined) next.add(wildcard);
       }
-      if (next.length === 0) return false;
+      if (next.size === 0) return false;
       for (const node of next) if (node.terminal) return true;
       frontier = next;
     }

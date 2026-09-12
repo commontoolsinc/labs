@@ -9693,23 +9693,19 @@ export class Runner {
   /**
    * Pull the result cell once, after this transaction commits successfully.
    *
-   * `schema` decides whether that pull walks the whole result. `Cell.pull()`
-   * deep-traverses its value when the link carries no schema, because without
-   * one there is nothing to say which nested values to read as dependencies;
-   * given one it registers the same dependencies as it reads. That matters
-   * because a child instantiation is re-run whenever the returned artifact
-   * changes, so the walk is paid per interaction and costs the result's size
-   * rather than the change's.
-   *
-   * Passing it is not yet universal: only the child-instantiation caller in
-   * `#writeJavaScriptActionResult` supplies one, that being the site whose cost
-   * was measured. The other callers here, and the three that reach
-   * `#pullCellOnceInPullMode` directly, still pull schemaless.
+   * The pull is schemaless on purpose, which makes `Cell.pull()` deep-traverse
+   * the whole result. That walk is what demands lazy producers under
+   * properties a declared result schema does not name — an eager node such as
+   * `navigateTo`, `generateText` or a `fetch*` can sit under one and still be
+   * valid by structural typing, and a schema-guided traversal descends only
+   * declared `properties` (`preparePlainSchemaPlan`), so its operation would
+   * never run. Narrowing this is measurable — about a quarter off a thread
+   * open on the unified inbox — and was tried and reverted for exactly that
+   * reason; see stage 7 of docs/plans/person-inbox-interaction-cost.md.
    */
   #pullCellOnceAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
-    schema?: JSONSchema,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -9717,7 +9713,7 @@ export class Runner {
         return;
       }
       this.#pullCellOnceInPullMode(
-        this.#runtime.getCellFromLink<T>(resultLink, schema),
+        this.#runtime.getCellFromLink<T>(resultLink),
       );
     });
   }
@@ -9882,7 +9878,7 @@ export class Runner {
         );
         this.releaseChild(resultCell, undefined);
       });
-      this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell, resultSchema);
+      this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
 
     const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??

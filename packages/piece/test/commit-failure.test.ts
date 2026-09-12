@@ -10,6 +10,17 @@ describe("commitFailure", () => {
       .toBe(reason);
   });
 
+  it("passes an Error through, so its own fields stay reachable", () => {
+    // A precondition failure arrives as an Error carrying `precondition`.
+    // Wrapping it would put that behind `cause`, where a caller checking the
+    // field would no longer find it.
+    const precondition = Object.assign(new Error("stale basis"), {
+      name: "PreconditionFailed",
+      precondition: { seq: 12 },
+    });
+    expect(commitFailure(precondition)).toBe(precondition);
+  });
+
   it("wraps a Result error so it is an Error at all", () => {
     const result = commitFailure({
       name: "ConflictError",

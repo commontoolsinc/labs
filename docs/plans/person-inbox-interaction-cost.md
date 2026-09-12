@@ -152,10 +152,14 @@ now flat across a threefold difference in returned rows. The cross-session
 comparison is loose (the live stores moved from 40 threads to 37 between the
 two), but not by anything like the margin.
 
-What is left is three design questions rather than three edits: what a child
-piece's identity should depend on (stage 7's root), how a flow-relevance memo
-should be keyed (stage 3), and a harness that can reproduce a cross-session
-write refusal (stage 4a).
+What is left is one measurement and three design questions. The measurement is
+stage 8: a session that settles at ~800 ms after roughly twenty clicks, which
+is waiting rather than compute, and which every instrument used here is blind
+to. The design questions are what a child piece's identity should depend on
+(stage 7's root), how a flow-relevance memo should be keyed (stage 3), and a
+harness that can reproduce a cross-session write refusal (stage 4a). Stage 7's
+pull half is a fourth, reopened: it measured well and was reverted on review
+for narrowing what the pull demands.
 
 ## Stage 1 — Stop the dereference-trace set from growing — **not built**
 
@@ -208,11 +212,13 @@ the only thing that makes the substitution safe.
 | paced click, median | 1482 ms | 387 ms | **3.8× faster** |
 | after eager clicking, median | 1711 ms | 392 ms | **4.4× faster** |
 
-And the symptom stage 1 was named for is gone with it: a paced round after an
-eager one used to stay degraded (~920 ms against a ~124 ms first round) and now
-recovers fully — 431 ms, then eager, then 400 ms. `isPrefix` no longer appears
-in the profile's top ten at all; what is left is flat, with no frame above 8%
-of a healthy round.
+It also pushes back the symptom stage 1 was named for: a paced round after an
+eager one used to stay degraded at ~920 ms against a ~124 ms first round, and
+across three rounds now returns to the band — 431 ms, then eager, then 400 ms.
+Across sixty it does not, and stage 8 is where that is measured: the
+degradation is delayed to about click 18-24 rather than removed. `isPrefix` no
+longer appears in the profile's top ten at all; what is left of a healthy round
+is flat, with no frame above 8%.
 
 ## Stage 3 — Do not run the pass at all when there is nothing to find — **part landed**
 
@@ -280,13 +286,15 @@ write against a one-input holder piece in the same space at the same moment
 commits every time, so this is the inbox's argument graph rather than a busy
 space. Two defects, worth splitting:
 
-- The transaction is not retried; repeated attempts against a piece that is
-  still re-deriving fail repeatedly (5/5 observed).
-- The operator sees `Error: [non-error-thrown] [object Object]`. Cliffy
-  replaces the thrown `ConflictError` before `renderCliError` sees it.
-  Recovering the message needed a patch to `Command.prototype.handleError`.
-  Fix this one first and on its own: it is a few lines, and every later
-  investigation of the first defect is blind without it.
+- **Still open:** the transaction is not retried; repeated attempts against a
+  piece that is still re-deriving fail repeatedly (5/5 observed).
+- **Landed.** The operator used to see `Error: [non-error-thrown] [object
+  Object]`, Cliffy having replaced the thrown `ConflictError` before
+  `renderCliError` saw it; recovering the message needed a patch to
+  `Command.prototype.handleError`. A commit failure now throws a real `Error`
+  (`commitFailure`, `packages/piece/src/ops/utils.ts`), so the same refusals
+  print `ConflictError: stale confirmed read: …`. This one went first because
+  every later investigation of the retry defect is blind without it.
 
 Routing the write through a **verb** goes through the event path, carries its
 own retry, and reports `settled`. It is reliable where both direct spellings
@@ -366,23 +374,35 @@ is what registers the dependencies — took the same five clicks to 138, 217,
    values to read as dependencies — and its convergence loop runs the action
    **twice**, so the whole result is walked twice.
 
-None of this is specific to the inbox. Any action whose returned artifact
-changes pays a child re-instantiation and a double walk of the entire result,
-so the cost scales with the result's size rather than with the change's.
+That chain is what this pattern was measured doing. It is **not** what any
+changed artifact costs — a minimal pattern with the same click shape
+instantiates no child at all, which is measured further down and was this
+plan's own premise until it was tested. What provokes the re-instantiation here
+is still unexplained; the cost, once provoked, scales with the result's size
+rather than with the change's.
 
-**Candidate 2 landed.** The schema is computed three lines below the pull site,
-so `#pullCellOnceAfterSuccessfulCommit` now takes it and hands it to
-`getCellFromLink`. Eight alternating arms, run in both orders, paced click
-medians on a 37-thread list: plain 351, 351, 424, 343 ms (best 290) against
+**Candidate 2 was landed and then reverted.** The schema is computed three
+lines below the pull site, so handing it to `getCellFromLink` is a small change,
+and it measured well: eight alternating arms, run in both orders, paced click
+medians on a 37-thread list of plain 351, 351, 424, 343 ms (best 290) against
 schema 298, 191, 261, 270 ms (best 179) — complete separation, about a quarter
-off the median. Full runner suite, the piece suite and four pattern integration
-tests are green.
+off the median, with the runner and piece suites and four pattern integration
+tests green.
 
-It carries a caveat worth keeping in view: it NARROWS what the pull demands, so
-a result schema narrower than what genuinely needs demanding would under-demand,
-and no test here would necessarily say so. It passes `resultSchema` alone
-rather than the `effectiveResultSchema` fallback chain below it; the wider
-variant covers more pulls and narrows more demand, and is unmeasured.
+Review found the mechanism that makes it unsafe, and it is the under-demand
+risk the change shipped with as an unproven caveat. A schema-guided traversal
+descends only declared `properties` (`preparePlainSchemaPlan` in
+`traverse.ts`), while the walk this pull performs is what demands lazy
+producers under properties a result schema does not name. An eager node —
+`navigateTo`, `generateText`, a `fetch*`, the `EAGER_RESULT_BUILTIN_REFS` set —
+can sit under such a property and still be valid by structural typing, and its
+operation would then never run. That is a silent correctness failure in a
+general path, bought for a quarter of one interaction, with no test here that
+would catch it. Reverted, and `#pullCellOnceAfterSuccessfulCommit` now carries
+the reason in a comment so the next attempt starts from it.
+
+A fix that keeps the win has to demand the eager nodes some other way — a
+schema covering the whole artifact is the walk again, so it is not that.
 
 **What is left, and two corrections that go with it.**
 
@@ -430,19 +450,27 @@ nothing. The traversal is in the pull, not the sink and not the render.
 
 1. ~~**4b's error rendering**~~ — landed. A few lines, and it unblinded the rest.
 2. ~~**Stage 1**~~ — measured first, and the measurement said no. Rescoped.
-3. ~~**Stage 2**~~ — landed, and it carried the whole symptom: 3.8× on a paced
-   click, and the persistent degradation gone.
+3. ~~**Stage 2**~~ — landed, and it carried most of the win: 3.8× on a paced
+   click, and the degradation delayed from about 8 clicks to about 24.
 4. ~~**Stage 3's local half**~~ — landed; the pass is down to 7.1% of wall.
 5. ~~**Stage 6**~~ — landed: a benchmark that guards the curve's shape, and the
    authoring rule in `pattern-dev` and `pattern-critic`.
-6. ~~**Stage 7's pull half**~~ — landed; about a quarter off a paced click.
-7. ~~**Stage 7's root**~~ — measured at 8-11 ms of a 300-450 ms click once the
-   pull carried its schema, and absent entirely from a minimal pattern with the
+6. **Stage 7's pull half** — landed, then reverted on review: it narrows what
+   the pull demands, and an eager node under an undeclared property would stop
+   running. Still worth about a quarter of a click to whoever finds a safe
+   shape.
+7. ~~**Stage 7's root**~~ — measured at 8-11 ms of a 300-450 ms click with the
+   pull narrowed, and absent entirely from a minimal pattern with the
    same click shape. Not a performance item; left as a correctness question.
 7. **Stage 4a** — small, and it is a correctness bug. The root cause is known;
    what is missing is a harness that reproduces it.
 8. **Stage 3's structural half** — a CFC design decision, not a measurement.
 9. **Stage 5** — the writing down, in loom's own performance notes.
+10. **Stage 8** — the plateau, and the largest thing left by wall clock. It
+    needs an instrument no other stage here used, so it is the one item that
+    starts with a measurement rather than a design: the memory frame log, the
+    server's queue time against handle time, and the browser summary's IPC
+    rows.
 
 After stage 2 the profile has no hotspot left. The next tier, by share of a
 degraded round, is `sortAndCompactPaths` (13.7%), `#findNode` (9.7%),

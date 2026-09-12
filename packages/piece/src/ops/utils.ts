@@ -29,8 +29,11 @@ export async function compileProgram(
  * with `[non-error-thrown] [object Object]` before `cf` can render it, so a
  * commit conflict reaches an operator with its reason already discarded.
  *
- * An `Error` `reason` is the real cause and is thrown as it stands. Otherwise
- * the Result's `name` and `message` become the error's, and the Result itself
+ * An error that is already an `Error` passes through untouched, whether it
+ * arrives as the Result's `reason` or as the Result itself — an
+ * `IPreconditionFailedError` is one of those, and wrapping it would put its
+ * `precondition` out of a caller's reach behind `cause`. Only a plain Result is
+ * wrapped: its `name` and `message` become the error's, and the Result itself
  * is kept on `cause` so a caller that wants the conflict's own fields — which
  * documents conflicted, at which sequence — still has them.
  *
@@ -40,6 +43,7 @@ export async function compileProgram(
  * one — inside the path that exists to make a failure legible.
  */
 export function commitFailure(error: object): Error {
+  if (error instanceof Error) return error;
   if ("reason" in error && error.reason instanceof Error) return error.reason;
   const named = error as { name?: unknown; message?: unknown };
   const message = typeof named.message === "string"
