@@ -2250,7 +2250,8 @@ export class CellImpl<T extends FabricValue>
 
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       // The anchor id source makes sure each object in an array gets its own
-      // doc; without a frame there is none, and such objects store inline.
+      // doc, its id drawn from the frame this cell was made in
+      // (`frameAnchorIds()`).
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -2504,8 +2505,8 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
-    // The anchor id source makes sure each pushed object gets its own doc;
-    // without a frame there is none, and such objects store inline.
+    // The anchor id source makes sure each pushed object gets its own doc,
+    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -2636,8 +2637,8 @@ export class CellImpl<T extends FabricValue>
     if (toAdd.length === 0) {
       return;
     }
-    // The anchor id source makes sure each added object gets its own doc;
-    // without a frame there is none, and such objects store inline.
+    // The anchor id source makes sure each added object gets its own doc,
+    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -4469,8 +4470,15 @@ function validateStaticData(value: unknown): void {
 
 /**
  * The per-frame id source for anchoring plain array-element objects into
- * entity documents during a write (`DiffWalkState.nextAnchorId`). Without a
- * frame there is no source, and such objects store inline.
+ * entity documents during a write (`DiffWalkState.nextAnchorId`).
+ *
+ * A cell holds whichever frame was on top of the builder frame stack when the
+ * cell was made, and hands that frame here. The `Runtime` constructor pushes a
+ * frame that nothing pops until that runtime is disposed, so a cell made while
+ * a runtime is alive always carries one and this always hands back a source.
+ * Making the cell inside a handler or a lift puts that frame's counter behind
+ * the ids instead. Where the cell was made is what decides, not where the write
+ * happens.
  */
 export function frameAnchorIds(
   frame: Frame | undefined,

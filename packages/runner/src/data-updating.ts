@@ -395,8 +395,10 @@ export interface DiffWalkState {
   /**
    * When present, a plain object sitting in an array that is not already a
    * link gets anchored into an entity document of its own, its id drawn from
-   * this source. Writers running under a builder frame supply the frame's id
-   * counter; frameless writes leave it unset, and such elements store inline.
+   * this source. The `Cell` write paths that can put a plain object into an
+   * array — `set()`, `push()`, `addUnique()` — draw it from the frame their
+   * cell was made in (`frameAnchorIds()`). A walk reached without it stores
+   * such elements inline.
    */
   nextAnchorId?: () => string | number;
 }

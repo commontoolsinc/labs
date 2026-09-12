@@ -652,18 +652,28 @@ The strict-only delta is:
   - **How ownership reaches an anchored document.** Anchoring splits one
     value across two documents, deriving the child's id from the parent's
     rather than from anything an author named, and nothing but that write
-    puts anything in the child. §8.2 treats either representation of a
-    pass-through as valid so long as the label is preserved, which is the
-    nearest thing the spec says to "the choice must not decide a verdict";
-    the reading here goes one step past that text. A child the runtime split
-    out of a store it owns is therefore that store's, and it takes the marker
-    alone: the transaction that
-    anchors it writes it, and a later write reaching the same position walks
-    through the same place again. A transaction addressing the child
-    directly rather than through its parent finds no claim and measures
-    against the child's own ceiling, which is the fail-closed direction. The
-    marker also carries the claim down a nested anchor, whose own parent is
-    the child marked a step earlier.
+    puts anything in the child. A `set`, a `push` or an `addUnique` through
+    a cell splits every plain object it puts at an array position, and being
+    inside a handler or a lift is not what decides. The id the split draws on
+    comes from the builder frame the cell was made in, and the `Runtime`
+    constructor pushes a frame that nothing pops until that runtime is
+    disposed, so a cell made while a runtime is alive always carries one. Two
+    things the walk leaves alone: an element the write carries through by
+    reference from the stored array, which diffs to nothing, and one that is
+    already a link. Which writes split is what an author needs in order to
+    read a refusal: the split decides which document a writer-fit reason
+    names, and an anchored child's id appears in no source file. §8.2 treats
+    either representation of a pass-through as valid so long as the label is
+    preserved, which is the nearest thing the spec says to "the choice must
+    not decide a verdict"; the reading here goes one step past that text.
+    A child the runtime split out of a store it owns is therefore that
+    store's, and it takes the marker alone: the transaction that anchors it
+    writes it, and a later write reaching the same position walks through the
+    same place again. A transaction addressing the child directly rather than
+    through its parent finds no claim and measures against the child's own
+    ceiling, which is the fail-closed direction. The marker also carries the
+    claim down a nested anchor, whose own parent is the child marked a step
+    earlier.
 
     That direction has a shape an author meets rather than predicts, so it is
     stated here concretely. On a piece whose result projects a list of
@@ -685,7 +695,8 @@ The strict-only delta is:
     link-carried provenance (§8.12.8) — deriving the child's ownership from
     the parent link a write traverses — which is tracked separately.
     `cfc-runtime-owned-store-wiring.test.ts` pins both spellings, so the
-    refused half flips visibly the day that lands.
+    refused half flips visibly the day that lands. That file also reads the
+    split itself, from a write with neither a handler nor a lift around it.
 
     The claim reaches a child only from a parent that carries one, and the
     case where none does is worth stating because the refusal it produces
