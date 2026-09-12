@@ -1852,6 +1852,56 @@ describe("writing the lane's records into its spool", () => {
   });
 });
 
+describe("the order a lane runs its batches in", () => {
+  /** A manifest whose entries name these suites, fitting only some. */
+  function withFit(fitted: readonly string[]) {
+    const made = manifestOf([
+      { test: { k: "unit", s: "a", n: "one" }, suite: "zebra", unit: "z.ts" },
+      { test: { k: "unit", s: "b", n: "two" }, suite: "alpha", unit: "a.ts" },
+    ]);
+    for (const suite of fitted) {
+      made.calibration.suites[suite] = { overhead: 5, correction: 1 };
+    }
+    return made;
+  }
+
+  /** The suites a lane would run, in the order it would run them. */
+  function order(fitted: readonly string[]): string[] {
+    const made = withFit(fitted);
+    const topology = made.entries.map((entry) =>
+      suite({
+        id: entry.suite,
+        units: [entry.unit],
+        locate: () => ({ level: "unit" as const, unit: entry.unit }),
+      })
+    );
+    return batchesOf(
+      topology,
+      made,
+      made.entries.map((entry) => ({
+        entry,
+        reason: "value" as const,
+        repeats: 1,
+      })),
+    ).map((batch) => batch.suite.id);
+  }
+
+  it("runs a suite nothing has measured before one it has", () => {
+    // A lane that runs out of time is killed with its later batches
+    // unrun and unmeasured, so a suite that sorts late is one the cost
+    // model can never learn — and one it cannot price is one that makes
+    // lanes run out of time.
+    expect(order(["alpha"])).toEqual(["zebra", "alpha"]);
+  });
+
+  it("falls back to the identifier once everything is measured", () => {
+    // Which is what makes the order the same on the default branch and
+    // on a change.
+    expect(order(["alpha", "zebra"])).toEqual(["alpha", "zebra"]);
+    expect(order([])).toEqual(["alpha", "zebra"]);
+  });
+});
+
 describe("reading a batch's records against what it was asked to run", () => {
   const UNIT = "packages/bakery/glaze.test.ts";
 

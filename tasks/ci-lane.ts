@@ -384,8 +384,22 @@ export function batchesOf(
       (a.unit < b.unit ? -1 : a.unit > b.unit ? 1 : 0)
     );
   }
+  // A suite nothing has measured runs first. What a lane costs beyond
+  // its tests is fitted from what its batches were seen to take, and a
+  // lane that runs out of time is killed with its later batches unrun
+  // and unmeasured — so a suite that sorts late is one the cost model
+  // can never learn, and one the model cannot price is one that makes
+  // lanes run out of time. Measuring it first is what breaks that.
+  //
+  // It settles by itself: once every suite is fitted, this orders
+  // nothing and the identifier decides, which is what makes the order
+  // stable between a run on the default branch and a run on a change.
+  const fitted = manifest?.calibration.suites ?? {};
+  const unfitted = (batch: Batch): number =>
+    fitted[batch.suite.id] === undefined ? 0 : 1;
   return [...batches.values()].sort((a, b) =>
-    a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0
+    unfitted(a) - unfitted(b) ||
+    (a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0)
   );
 }
 
