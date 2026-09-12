@@ -2396,7 +2396,7 @@ describe("cell-cache", () => {
       ).toBe(true);
     });
 
-    it("second user's writeback of the same content commits cleanly", async () => {
+    it("commits a second user's writeback of the same content cleanly", async () => {
       // Compiled docs carry the constant system-compiler atom
       // (`COMPILED_INTEGRITY_ATOM`), which is what makes the cache shared: a
       // re-write of the same content by any user merges cleanly with the
