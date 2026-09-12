@@ -223,7 +223,7 @@ setting to fix.
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `ALWAYS_GATING_SUITES` | 2 | suites | chosen | Add a suite whose failures are never noise, so that a flake rate cannot excuse one; remove one whose failures a change's author cannot act on. |
 | `MAX_SUITE_CORRECTION` | 4 | multiple of a suite's own test time | chosen | Up when a suite really does take several times its tests' own time per second of them; down when a fitted slope is pricing a suite out of every lane. |
-| `MIN_CORRECTION_SAMPLES` | 8 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
+| `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
 | `FLAKE_MIN_EXECUTIONS` | 2 | runs of one item | chosen | What an item that has ever disagreed runs. Down to one when the cheapest evidence of intermittency is not worth a second execution; nowhere useful above two, since the line through the anchor covers everything flakier. |
 | `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |

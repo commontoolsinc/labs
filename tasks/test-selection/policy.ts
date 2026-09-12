@@ -150,12 +150,14 @@ export const MAX_SUITE_CORRECTION = 4;
 /**
  * Observations a suite needs before its slope is fitted at all.
  *
- * Two points fit a line exactly, and a line through two points a second
- * apart says nothing about the second after them. Below this the slope
- * is one and the intercept carries the whole difference, which is the
- * reading that cannot be wrong in the direction that matters.
+ * Two points fit a line exactly, so a line through two of them says
+ * whatever they say and nothing about their noise. Below this the slope
+ * is one and the intercept carries the whole difference. It is low
+ * because both directions a slope can be wrong in are already bounded:
+ * too high by `MAX_SUITE_CORRECTION`, and too low by the intercept being
+ * raised afterwards to cover every observation.
  */
-export const MIN_CORRECTION_SAMPLES = 8;
+export const MIN_CORRECTION_SAMPLES = 3;
 
 /** The flake rate above which an item leaves the selectable set. */
 export const FLAKE_EXCLUSION_RATE = 0.005;

@@ -3888,12 +3888,21 @@ took, not what the packer thought they would.
 Every figure errs high, for the reason every cost estimate here does. A
 `setupCost` is the ninetieth percentile of what that capability was seen
 to take. A suite's slope comes from observations that disagree about how
-long the same planned work took, and is never below one; with fewer than
-two such observations there is nothing to say about how the cost grows,
-and the intercept carries the whole difference. The intercept is then
-raised until no observation is under-predicted, because a least-squares
-line sits in the middle of its observations by construction, and for this
-quantity the middle means half the lanes running past their budget.
+long the same planned work took, and the intercept is then raised until
+no observation is under-predicted — because a least-squares line sits in
+the middle of its observations by construction, and for this quantity the
+middle means half the lanes running past their budget.
+
+The two bounds on that slope are not symmetric, and the reason is worth
+stating. A slope far above one is the fit reading a fixed cost as a
+marginal one, which charges every identity of the suite for it and prices
+the suite out of every lane — quietly, since a suite nothing can afford
+simply stops being chosen. Below one needs no bound at all: a batch runs
+its files in parallel, so its wall time is routinely a fraction of the
+sum of its tests' own durations, and the pattern unit suite takes about a
+third. Holding the slope at one pushes that difference into the
+intercept, which is charged whatever the batch holds. Only a negative
+slope is meaningless.
 
 `unitOverhead` stays empty. A lane times its batches and not the units
 inside them, so nothing measures what one more file costs a batch that

@@ -228,15 +228,32 @@ describe("what a lane costs beyond the tests it runs", () => {
       }
     });
 
-    it("refuses a slope saying a batch runs faster than its tests", () => {
+    it("fits a suite whose batch runs faster than the sum of its tests", () => {
+      // A batch runs its files in parallel, so its wall time is
+      // routinely a fraction of the sum of its tests' own durations —
+      // the pattern unit suite takes about a third. Holding the slope at
+      // one would push that difference into the intercept, which is
+      // charged whatever the batch holds.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          planned: 50 + 10 * i,
+          spent: (50 + 10 * i) / 3,
+        })),
+      );
+      expect(fitted.correction).toBeCloseTo(1 / 3, 6);
+      expect(fitted.overhead).toBeCloseTo(0, 6);
+    });
+
+    it("refuses a slope saying a batch gets cheaper with more tests", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
           planned: 10 + 10 * i,
-          spent: 60 + 0.05 * (10 + 10 * i),
+          spent: 60 - 0.5 * (10 + 10 * i),
         })),
       );
-      expect(fitted.correction).toBe(1);
+      expect(fitted.correction).toBe(0);
     });
 
     it("charges nothing for a suite nothing has measured", () => {

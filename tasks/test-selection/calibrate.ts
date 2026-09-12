@@ -189,13 +189,10 @@ export function percentile(values: readonly number[], share: number): number {
  * What the share of a batch that is not its tests comes to, as an
  * intercept and a slope.
  *
- * A slope is fitted only from `MIN_CORRECTION_SAMPLES` observations that
+ * A slope is fitted from `MIN_CORRECTION_SAMPLES` observations that
  * disagree about how long the same planned work took, and is bounded
- * below by one and above by `MAX_SUITE_CORRECTION`. Anything less gives
- * no slope, and the whole difference goes into the intercept. That is
- * the conservative reading and the honest one: two points fit a line
- * exactly, and a line through two points a second apart says nothing
- * about the second after them.
+ * below by nothing and above by `MAX_SUITE_CORRECTION`. With fewer there
+ * is no slope, and the whole difference goes into the intercept.
  *
  * The intercept is then raised until no observation is under-predicted,
  * whatever the slope came to. A least-squares line sits in the middle of
@@ -220,17 +217,23 @@ export function fitSuite(
       top += (o.planned - meanX) * (o.spent - meanY);
       bottom += (o.planned - meanX) ** 2;
     }
-    // Below one would say a batch runs faster than the tests in it, and
-    // far above one is the fit reading a fixed cost as a marginal one:
-    // both are what a set of observations dominated by its intercept
-    // fits to. The intercept is raised to cover every observation
-    // afterwards, so bounding the slope moves cost between the two terms
-    // rather than losing any of it.
+    // Bounded above and below, and the two bounds are not symmetric.
+    //
+    // A slope far above one is the fit reading a fixed cost as a marginal
+    // one, which charges every identity of the suite for it and prices
+    // the suite out of every lane — quietly, since a suite nothing can
+    // afford simply stops being chosen. `MAX_SUITE_CORRECTION` is what
+    // stops that.
+    //
+    // Below one needs no bound at all. A batch runs its files in
+    // parallel, so the wall time of one is routinely a fraction of the
+    // sum of its tests' own durations: the pattern unit suite takes
+    // about a third. A slope held at one would push that difference into
+    // the intercept, which is charged whatever the batch holds, and a
+    // lane would then be priced out of running the suite at all. Only a
+    // negative slope is meaningless.
     if (bottom > 0) {
-      correction = Math.min(
-        MAX_SUITE_CORRECTION,
-        Math.max(1, top / bottom),
-      );
+      correction = Math.min(MAX_SUITE_CORRECTION, Math.max(0, top / bottom));
     }
   }
   const overhead = observations.reduce(
