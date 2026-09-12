@@ -13,7 +13,15 @@ import {
 } from "@commonfabric/identity";
 import { env, waitFor } from "@commonfabric/integration";
 import { Program } from "@commonfabric/js-compiler";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import {
+  experimentalOptionsFromEnv,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
+import {
+  debugVDOMSchema,
+  rendererVDOMSchema,
+  vnodeSchema,
+} from "@commonfabric/runner/schemas";
 import {
   $conn,
   attachOptionsFrom,
@@ -25,14 +33,11 @@ import {
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
-import {
-  experimentalOptionsFromEnv,
-  withServerExecutionDefault,
-} from "@commonfabric/runner";
-import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 import { MessagePortRuntimeTransport } from "@commonfabric/runtime-client/transports/message-port";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { defer } from "@commonfabric/utils/defer";
+
+import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
 const { API_URL } = env;
 
@@ -45,16 +50,15 @@ const keyConfig: IdentityCreateConfig = {
 
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
-// The server-execution v2 posture this test process runs (testing.md §2):
-// resolved exactly like a deployed entry point — the canonical env
-// mapping, else the first-party default (ON since the flip) — so the
-// worker below runs the arm the lane's toolshed runs: the DEFAULT lane's
-// unset flag resolves ON, the explicit-`false` OFF regression-guard
-// lane the OFF arm. An UNDECLARED worker resolves the ambient baseline
-// instead, which post-flip is the P7 review's finding-7 mixed posture.
-const SERVER_EXECUTION_RESOLVED = withServerExecutionDefault(
+// Workers receive the host process's environment-selected flags. An absent
+// server-execution declaration follows the first-party default.
+const EXPERIMENTAL = withServerExecutionDefault(
   experimentalOptionsFromEnv(Deno.env.get),
-).serverExecution;
+);
+const SERVER_EXECUTION_RESOLVED = EXPERIMENTAL.serverExecution;
+const VIEW_SCOPED_REQUESTED = SERVER_EXECUTION_RESOLVED &&
+  (EXPERIMENTAL.webViewScopedReplication ??
+    EXPERIMENTAL.viewScopedReplication ?? false);
 
 /**
  * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
@@ -275,17 +279,40 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const piece = await rt.createPiece(TEMP_PATTERN, session.space, {
-        run: true,
-      });
+      const piece = await rt.createPiece<{ $UI: VNode }>(
+        TEMP_PATTERN,
+        session.space,
+        {
+          run: true,
+        },
+      );
+      // The default piece handle may expose only the opaque UI tip. This
+      // reader requests the VNode structure it serializes explicitly.
       const cell = piece.cell();
-      const value = await cell.sync() as { $UI?: VNode; $NAME?: string };
-      // With schema-driven serialization (asCell: ["cell"]), children are resolved
-      // inline as VNodes rather than wrapped in CellHandle indirection.
-      const children = value.$UI?.children as VNode[];
-      const firstChild = children?.[0];
-      assertEquals(firstChild?.children, ["Non-positive"]);
-      assertEquals(firstChild?.name, "p");
+      const uiCell = VIEW_SCOPED_REQUESTED
+        ? cell.key("$UI").asSchema<VNode>(debugVDOMSchema)
+        : cell.key("$UI");
+      // A sync reads the current value while the server may still be forming
+      // the conditional child. Observe that child's arrival before checking
+      // the serialization returned by the one-shot read.
+      const childArrived = defer<void>();
+      const cancel = uiCell.subscribe((value) => {
+        if (Array.isArray(value?.children) && value.children[0] != null) {
+          childArrived.resolve();
+        }
+      });
+      try {
+        await childArrived.promise;
+        const value = VIEW_SCOPED_REQUESTED
+          ? await uiCell.sync()
+          : (await cell.sync())?.$UI;
+        const children = value?.children as VNode[];
+        const firstChild = children?.[0];
+        assertEquals(firstChild?.children, ["Non-positive"]);
+        assertEquals(firstChild?.name, "p");
+      } finally {
+        cancel();
+      }
     });
 
     it("resolves cell links with resolveAsCell()", async () => {
@@ -763,7 +790,15 @@ describe("RuntimeClient", () => {
       const retrieved = await rt.getPiece(piece.id(), session.space, true);
       assertExists(retrieved);
 
-      const cell = retrieved.cell();
+      const cell = VIEW_SCOPED_REQUESTED
+        ? retrieved.cell().asSchema({
+          type: "object",
+          properties: {
+            $NAME: { type: "string" },
+            $UI: vnodeSchema,
+          },
+        })
+        : retrieved.cell();
       await cell.sync();
       const value = cell.get() as { $UI?: VNode; $NAME?: string };
 
@@ -1975,14 +2010,9 @@ async function clientOptionsFor(
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
     spaceName: session.spaceName,
-    // The HOST declares the worker's posture (runtime-client's posture
-    // agreement; the worker refuses to initialize on a mismatch). Only the
-    // server-execution flag is declared: the other experimental keys keep
-    // the worker's own defaults. Always declared since the flip — the
-    // resolved value is env-else-first-party-default, never the worker's
-    // ambient baseline (which would be the finding-7 mixed posture under
-    // default ON).
-    experimental: { serverExecution: SERVER_EXECUTION_RESOLVED },
+    // Workers receive the same environment-selected flags as their host,
+    // including explicit false overrides of a client-class default.
+    experimental: EXPERIMENTAL,
     ...extraOptions,
   };
 }

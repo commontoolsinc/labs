@@ -57,8 +57,6 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toCell } from "./back-to-cell.ts";
-import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
-import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import {
   collectionKeyBucket,
   resolveCollectionKey,
@@ -135,6 +133,7 @@ import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
 } from "./data-uri.ts";
+import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -146,13 +145,13 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { type MetaField, type RawMetaWriteAuthorization } from "./meta-seam.ts";
 import {
   type CellResult,
   createQueryResultProxy,
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { type MetaField, type RawMetaWriteAuthorization } from "./meta-seam.ts";
 import type { Runtime } from "./runtime.ts";
 import {
   type Action,
@@ -173,6 +172,7 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   createChildCellTransaction,
@@ -185,6 +185,7 @@ import type {
   IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
+import { usesLocalReads } from "./storage/local-read-policy.ts";
 import {
   allowMutableTransactionRead,
   internalVerifierRead,
@@ -3141,6 +3142,9 @@ export class CellImpl<T extends FabricValue>
    * still race the deferred sync.
    */
   sync(): Promise<Cell<T>> {
+    if (usesLocalReads(this.tx)) {
+      return Promise.resolve(this as unknown as Cell<T>);
+    }
     this.#synced = true;
     logger.info("sync", this.#link);
     // The runner's explicit-instance read (server-execution v2 stage A —
@@ -4210,8 +4214,8 @@ function sinkHelper(
 
 /**
  * Deeply traverse a value to access all properties.
- * This is used by pull() to ensure all nested values are read,
- * which registers them as dependencies for pull-based scheduling.
+ * Sinks, pulls, and rendered-property queries share this traversal to register
+ * the dependencies behind schema-free values.
  * Works with query result proxies which trigger reads on property access.
  *
  * TODO(danfuzz): A `FabricInstance` passes the `typeof` gate but has no
@@ -4222,7 +4226,10 @@ function sinkHelper(
  * never re-fires on its change. A `FabricPrimitive` ends the walk too, which
  * is correct — it is a leaf.
  */
-function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+export function deepTraverse(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): void {
   if (value === null || value === undefined) return;
   if (typeof value !== "object") return;
 

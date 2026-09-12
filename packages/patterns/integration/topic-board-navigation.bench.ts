@@ -39,7 +39,9 @@ import {
   type TopicBoardFixture,
   topicTitle,
 } from "./topic-board-fixture.ts";
+import { describeThrown } from "../../integration/describe-thrown.ts";
 import { BoardSession } from "./topic-board-session.ts";
+import { collectBrowserLoadSummary } from "./cfc-browser-helpers.ts";
 
 const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
 
@@ -157,11 +159,36 @@ function segment<Reached>(
     warmup: WARMUP,
   }, async (b) => {
     const navigation = await BoardSession.open({ fixture, identity });
+    let startedAt = performance.now();
+    let phase = "setup";
     try {
       const reached = await reach(navigation);
+      phase = "measurement";
+      startedAt = performance.now();
       b.start();
       await measure(navigation, reached);
       b.end();
+    } catch (error) {
+      const failure = {
+        name,
+        phase,
+        elapsedMs: performance.now() - startedAt,
+        error: describeThrown(error),
+      };
+      let diagnostics: unknown;
+      try {
+        diagnostics = await collectBrowserLoadSummary(navigation.page, name, {
+          includeWorker: false,
+        });
+      } catch (diagnosticError) {
+        diagnostics = { unavailable: describeThrown(diagnosticError) };
+      }
+      await Deno.stderr.write(new TextEncoder().encode(
+        `[topic-board-navigation] failed attempt ${
+          JSON.stringify({ ...failure, diagnostics })
+        }\n`,
+      ));
+      throw error;
     } finally {
       await navigation.close();
     }

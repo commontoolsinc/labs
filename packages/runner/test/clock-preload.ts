@@ -54,6 +54,9 @@ installFakeClock({
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
     "executor-space-server",
+    // View publication drives a live ExecutorHost with the same flush, renew,
+    // and disposal deadlines. The fixture waits on view-plan events.
+    "view-replication-client",
     // The activation lease suite controls Date and renewal intervals itself,
     // while scheduler and transport dispatch use ordinary zero-delay timers.
     "activation-lease",

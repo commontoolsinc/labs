@@ -1,5 +1,6 @@
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { parseFlagValue } from "@commonfabric/runner/experimental-posture";
+
 import { optionalPresenceUrl } from "./presence-url.ts";
 
 declare global {
@@ -10,6 +11,8 @@ declare global {
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
   var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
+  var $EXPERIMENTAL_VIEW_SCOPED_REPLICATION: string | undefined;
+  var $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
   var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
 }
@@ -76,6 +79,16 @@ function flagValue(flag: string | undefined): boolean | undefined {
 export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
+  viewScopedReplication: flagValue(
+    typeof $EXPERIMENTAL_VIEW_SCOPED_REPLICATION === "string"
+      ? $EXPERIMENTAL_VIEW_SCOPED_REPLICATION
+      : undefined,
+  ),
+  webViewScopedReplication: flagValue(
+    typeof $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION === "string"
+      ? $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION
+      : undefined,
+  ),
   // Server-execution v2 (docs/specs/server-side-execution/): the
   // first-party default (the constant; the registry states its current
   // value), overridable by the build define either way (CI's `opposite`

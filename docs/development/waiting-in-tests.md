@@ -107,11 +107,12 @@ Waits split into two groups with different primitives.
   answers only while neither the host nor that control is disabled;
   `clickCfButtonsConcurrently` does the same for a group. `clickNthCfButton`
   takes the `index`-th match of a selector that already resolves to the buttons
-  themselves. `clickTrustedAction` takes the first enabled match of a
-  `data-ui-action` value. The note-button helpers take the first enabled
-  button matching a text or a title. `submitViaEnter` focuses a field and
-  presses Enter rather than clicking, and settles around resolving that field
-  the same way.
+  themselves and waits for that match and its wrapped control to become enabled,
+  counting disabled matches when locating the index. `clickTrustedAction` takes
+  the first enabled match of a `data-ui-action` value. The note-button helpers
+  take the first enabled button matching a text or a title. `submitViaEnter`
+  focuses a field and presses Enter rather than clicking, and settles around
+  resolving that field the same way.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate

@@ -1,4 +1,4 @@
-import { type JSONSchema, NAME } from "@commonfabric/runner/shared";
+import { NAME } from "@commonfabric/runner/shared";
 
 export interface Mentionable {
   [NAME]: string;
@@ -40,27 +40,7 @@ export interface Mentionable {
 
 export type MentionableArray = readonly Mentionable[];
 
-export const MentionableSchema = {
-  type: "object",
-  properties: {
-    [NAME]: { type: "string" },
-    // The `MentionRef.destination` shape: an opaque cell boundary. The value
-    // at this position never carries a usable handle — an `asCell` position
-    // crosses the client boundary as an empty object — so a reader reaches
-    // the piece by ADDRESS and never reads through it under this schema.
-    piece: { type: "object", properties: {}, asCell: ["cell"] },
-    // One scalar serving both positions this schema is used at: a universe
-    // row's copy, and a destination piece's own. Neither read reaches past
-    // the string.
-    shortName: { type: "string" },
-  },
-  required: [NAME],
-  // While Mentionable may have extra properies on it,
-  // we don't need to sync them when using in UI code
-  // additionalProperties: true,
-} as const satisfies JSONSchema;
-
-export const MentionableArraySchema = {
-  type: "array",
-  items: MentionableSchema,
-} as const satisfies JSONSchema;
+export {
+  MentionableArraySchema,
+  MentionableSchema,
+} from "@commonfabric/runner/component-read-contract";

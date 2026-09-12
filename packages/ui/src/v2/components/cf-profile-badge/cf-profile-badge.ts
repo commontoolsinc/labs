@@ -1,3 +1,4 @@
+import { ProfileBadgeSchema } from "@commonfabric/runner/component-read-contract";
 import { consume } from "@lit/context";
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
@@ -717,22 +718,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
           bio?: string;
           elements?: Array<{ title?: string }>;
         }
-      >({
-        type: "object",
-        properties: {
-          [NAME]: { type: "string" },
-          name: { type: "string" },
-          avatar: { type: "string" },
-          bio: { type: "string" },
-          elements: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { title: { type: "string" } },
-            },
-          },
-        },
-      });
+      >(ProfileBadgeSchema);
       // The runtime-attested label rides each subscription update
       // (`includeCfcLabel`), read on the sink's tracked tx — so verification
       // re-derives whenever the profile's label changes (re-labeling, or the

@@ -4,17 +4,13 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { MessagesSchema } from "@commonfabric/runner/component-read-contract";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
 
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
-
-const MessagesSchema = {
-  type: "array",
-  items: { type: "object" },
-} as const satisfies JSONSchema;
 
 type BeadColor = "blue" | "green" | "amber" | "purple";
 

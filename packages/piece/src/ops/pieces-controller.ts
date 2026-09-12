@@ -13,6 +13,7 @@ import {
 } from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
+import type { CfcPosture } from "@commonfabric/runner";
 import {
   applyPieceSourceTransition,
   type Cell,
@@ -57,7 +58,6 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
-import type { CfcPosture } from "@commonfabric/runner";
 import type {
   CfcConfClause,
   CfcEnforcementMode,
@@ -67,10 +67,12 @@ import type {
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import {
   type NameSchema,
   nameSchema,
   pieceListSchema,
+  viewPieceSchema,
 } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -100,7 +102,6 @@ import {
 } from "./piece-input-path.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
-import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
@@ -816,6 +817,8 @@ export class PiecesController<T = unknown> {
 
   /**
    * Resolve a piece to its canonical result cell, optionally starting it.
+   * In view-scoped mode, the narrow root watch demands server execution;
+   * mounted renderers own local graph registration and deeper replication.
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
@@ -847,13 +850,19 @@ export class PiecesController<T = unknown> {
         undefined,
         scope,
       );
+    const viewScoped = this.runtime.viewScopedReplicationRequested &&
+      await this.runtime.viewReplication.enable(addressed.space);
 
     // Load the addressed cell. Syncing a value-link "slot" address also loads
     // its link target — the piece's canonical result cell — together with that
     // cell's `argument`/`patternIdentity` meta, because the query follows the
     // top-of-doc value link and returns the target's meta docs. So this one sync
     // makes both the slot and the canonical cell (with its metadata) local.
-    await timePiecePhase("get.piece.sync", () => addressed.sync());
+    await timePiecePhase(
+      "get.piece.sync",
+      () =>
+        (viewScoped ? addressed.asSchema(viewPieceSchema) : addressed).sync(),
+    );
 
     // Canonicalize the value-link "slot" to the piece's canonical result cell.
     // A piece created inside a handler and stored into a list/object (e.g. the
@@ -866,7 +875,7 @@ export class PiecesController<T = unknown> {
     // further sync. Idempotent for a normal top-level piece.
     let piece = addressed.resolveAsCell();
 
-    if (reconcile) {
+    if (reconcile && !viewScoped) {
       const outcome = await timePiecePhase(
         "get.reconcileSource",
         () => reconcilePieceSource(this.runtime, piece),
@@ -879,7 +888,7 @@ export class PiecesController<T = unknown> {
         piece = await piece.withTx().sync();
       }
     }
-    if (start) {
+    if (start && !viewScoped) {
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
@@ -892,6 +901,8 @@ export class PiecesController<T = unknown> {
     if (asSchema) {
       return piece.asSchema<T>(asSchema);
     }
+
+    if (viewScoped) return piece.asSchema<T>(viewPieceSchema);
 
     // Otherwise, recover the result schema from the cell's metadata if present.
     return getResultCellWithSourceSchema(piece as Cell<T>);
@@ -1623,6 +1634,9 @@ export class PiecesController<T = unknown> {
    * Start scheduling and running a prepared piece. `scope` completes an id
    * into a document address and defaults to the space, as it does for
    * {@link getPieceCell}; a `Cell` argument already carries one.
+   * In view-scoped mode this synchronizes the name and opaque UI tip; the
+   * retained root watch demands server execution, while mounted renderers
+   * own local graph registration.
    */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
@@ -1635,6 +1649,13 @@ export class PiecesController<T = unknown> {
       )
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
+    if (
+      this.runtime.viewScopedReplicationRequested &&
+      await this.runtime.viewReplication.enable(piece.space)
+    ) {
+      await piece.asSchema(viewPieceSchema).sync();
+      return;
+    }
     await timePiecePhase(
       "startPiece.runtime.start",
       () => this.runtime.start(piece),

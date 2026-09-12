@@ -34,13 +34,7 @@
 // annotated from the outbox carriage captured at the original run's
 // seal; the durable outbound-append rows deliver and retire through
 // the outbox; `memo.*`/`outbox.*` counters are live.
-
 import { toCompactDebugString } from "@commonfabric/data-model";
-import {
-  type AdmittedCommitNotice,
-  type Server as MemoryServer,
-} from "@commonfabric/memory/v2/server";
-import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   type CellScope,
   type DeliveryAttention,
@@ -59,7 +53,14 @@ import {
   type StreamEventsDocValue,
   toDirtyKey,
 } from "@commonfabric/memory/v2";
+import * as Engine from "@commonfabric/memory/v2/engine";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
+import {
+  type AdmittedCommitNotice,
+  type Server as MemoryServer,
+} from "@commonfabric/memory/v2/server";
+
+import { ViewPlanPublisher } from "./view-plan-publisher.ts";
 
 /** The deferral backstop cadence: with NO input arriving at all, a
  * deferred event retries once per tick and hardens into the DROP
@@ -509,6 +510,7 @@ export class SpaceServer implements TransactionSealDestination {
   #lease: ExecutionLeaseCycle | undefined;
   #initializing = false;
   #runtime: Runtime | undefined;
+  #viewPlanPublisher = new ViewPlanPublisher();
   #disposeRuntime: (() => Promise<void>) | undefined;
   #sink: WaveCommitSink | undefined;
   #renewTimer: ReturnType<typeof setInterval> | undefined;
@@ -5438,6 +5440,11 @@ export class SpaceServer implements TransactionSealDestination {
       // The owed re-drain rides quiet cycles too (round-2 thread 9): a
       // transport-failed delivery must retry on the NEXT loop cycle,
       // not wait for a new input wave or a re-activation.
+      await this.#viewPlanPublisher.publish(
+        runtime,
+        this.#options.server,
+        this.#options.space,
+      );
       await this.#drainOutboxAppends(false);
       return;
     }
@@ -5793,6 +5800,14 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
+    if (outcome.aborted === undefined) {
+      await this.#viewPlanPublisher.publish(
+        runtime,
+        this.#options.server,
+        this.#options.space,
+      );
+    }
+
     // Drain the durable append rows (FP1): after a wave that landed
     // appends, and after any earlier drain left rows behind (a
     // transport-failed delivery on a long-lived active space must not
@@ -5839,6 +5854,7 @@ export class SpaceServer implements TransactionSealDestination {
    * failure logged when it lands; the park completes regardless (lease
    * released, `#parked` resolved, recovery unblocked). */
   async #disposeRuntimeTimeboxed(reason: string): Promise<void> {
+    this.#viewPlanPublisher.dispose();
     const dispose = this.#disposeRuntime;
     if (dispose === undefined) return;
     const timeoutMs = this.#options.policy?.parkDisposeTimeoutMs ??

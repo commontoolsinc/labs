@@ -1,6 +1,9 @@
 import type { Schema } from "@commonfabric/api/schema";
-import { stringArraySchema, stringSchema } from "@commonfabric/runner/schemas";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import {
+  AutocompleteItemArraySchema,
+  autocompleteValueSchema,
+} from "@commonfabric/runner/component-read-contract";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
 import { css, html, nothing, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
@@ -17,22 +20,6 @@ import {
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
 // matching the prior phase-1 token migration pattern.
-
-// Schema for AutocompleteItem array
-const AutocompleteItemArraySchema = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      value: { type: "string" },
-      label: { type: "string" },
-      group: { type: "string" },
-      searchAliases: { type: "array", items: { type: "string" } },
-      data: {},
-    },
-    required: ["value"],
-  },
-} as const satisfies JSONSchema;
 
 /**
  * AutocompleteItem - Item format for cf-autocomplete
@@ -500,7 +487,7 @@ export class CFAutocomplete extends BaseElement {
     this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
 
     // Initialize cell controller bindings with appropriate schemas
-    const valueSchema = this.multiple ? stringArraySchema : stringSchema;
+    const valueSchema = autocompleteValueSchema(this.multiple);
     this._cellController.bind(
       this.value as CellHandle<string | string[]> | string | string[],
       valueSchema,
@@ -518,7 +505,7 @@ export class CFAutocomplete extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      const valueSchema = this.multiple ? stringArraySchema : stringSchema;
+      const valueSchema = autocompleteValueSchema(this.multiple);
       this._cellController.bind(
         this.value as CellHandle<string | string[]> | string | string[],
         valueSchema,

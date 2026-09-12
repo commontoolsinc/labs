@@ -1,23 +1,6 @@
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
-import { expect } from "@std/expect";
-import {
-  ADOPT_SERVER_FLAGS_ENV,
-  adoptServerExperimentalOptions,
-  EXPERIMENTAL_ENV_VARS,
-  EXPERIMENTAL_FLAG_AUTHORITY,
-  experimentalOptionsForDeployedClient,
-  experimentalOptionsFromEnv,
-  MAX_ENFORCEMENT_CFC_OPTIONS,
-  MAX_ENFORCEMENT_SINK_CEILINGS,
-  parseServerExperimentalOptions,
-  RUNTIME_OPTION_KEYS,
-  type RuntimeOptionKey,
-  runtimePresets,
-} from "../src/runtime-presets.ts";
-import type { ExperimentalOptions, RuntimeOptions } from "../src/runtime.ts";
-import type { IStorageManager } from "../src/storage/interface.ts";
-import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
 
 /**
  * Conformance guard for CT-1814 (the construction-config axis of CT-1811).
@@ -36,8 +19,25 @@ import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
  *    `RuntimeOptions` key (full-args goldens), so a param cannot be silently
  *    dropped or mis-mapped.
  */
-
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
+import {
+  ADOPT_SERVER_FLAGS_ENV,
+  adoptServerExperimentalOptions,
+  EXPERIMENTAL_ENV_VARS,
+  EXPERIMENTAL_FLAG_AUTHORITY,
+  experimentalOptionsForDeployedClient,
+  experimentalOptionsFromEnv,
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
+  parseServerExperimentalOptions,
+  RUNTIME_OPTION_KEYS,
+  type RuntimeOptionKey,
+  runtimePresets,
+} from "../src/runtime-presets.ts";
+import type { ExperimentalOptions, RuntimeOptions } from "../src/runtime.ts";
+import type { IStorageManager } from "../src/storage/interface.ts";
+import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
 
 /**
  * Runs `body` with `console.warn` captured, returning what it warned and what
@@ -102,6 +102,11 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   apiUrl: { treat: "per-site" },
   storageManager: { treat: "per-site" },
   experimental: { treat: "per-site" },
+  clientClass: {
+    treat: "pinned-in",
+    presets: ["browserWorker"],
+    value: "web",
+  },
   // Same value as the Runtime constructor default today; pinned so a changed
   // constructor default cannot silently relax first-party environments.
   cfcEnforcementMode: { treat: "core-pinned", value: "enforce-explicit" },

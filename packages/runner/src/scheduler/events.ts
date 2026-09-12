@@ -9,7 +9,7 @@ import {
   ensurePieceRunningVerdict,
   type EnsurePieceVerdict,
 } from "../ensure-piece-running.ts";
-import { waveRunContextOf } from "../executor/wave.ts";
+import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
@@ -21,6 +21,11 @@ import type {
   IPreconditionFailedError,
   MemorySpace,
 } from "../storage/interface.ts";
+import {
+  localReadFailure,
+  releaseLocalReadBasis,
+  validateLocalReadBasis,
+} from "../storage/local-read-policy.ts";
 import {
   isConflictRejection,
   isPermanentRejection,
@@ -87,8 +92,17 @@ function isGuardedDispatcher(
   return guardedImplementations in handler;
 }
 
+/** Enumerates the implementations retained by a live stream registration. */
+export function eventHandlerImplementations(
+  handler: EventHandler,
+): readonly EventHandler[] {
+  if (!isGuardedDispatcher(handler)) return [handler];
+  return [...handler[guardedImplementations].implementations.values()]
+    .map(({ handler }) => handler);
+}
+
 /** Resolve exactly one implementation while recording every selector read. */
-function selectEventImplementation(
+export function selectEventImplementation(
   handler: EventHandler,
   tx: IExtendedStorageTransaction,
 ): EventHandler | undefined {
@@ -1059,10 +1073,15 @@ export function preflightQueuedEventDependencies(state: {
     try {
       const implementation = selectEventImplementation(handler, depTx);
       queuedEvent.preflightImplementation = implementation;
-      implementation?.populateDependencies?.(depTx, eventValue);
+      if (implementation !== undefined) {
+        state.runtime.scheduler.prepareViewAction(depTx, implementation);
+        implementation.populateDependencies?.(depTx, eventValue);
+      }
     } catch (error) {
-      reportFailure(error);
-      shouldSkipEvent = true;
+      if (localReadFailure(depTx) === undefined) {
+        reportFailure(error);
+        shouldSkipEvent = true;
+      }
     } finally {
       logger.timeEnd(
         "scheduler",
@@ -1536,6 +1555,7 @@ export async function dispatchQueuedEvent(state: {
   state.eventQueue.shift();
 
   const tx = state.runtime.edit();
+  let viewHandler = presyncedImplementation ?? handler;
   const served = queuedEvent.served;
   let lineageReleased = false;
   const releaseLineage = () => {
@@ -1845,6 +1865,13 @@ export async function dispatchQueuedEvent(state: {
     };
 
     const finalize = (error?: unknown): void => {
+      const unavailable = validateLocalReadBasis(tx);
+      if (unavailable !== undefined) {
+        if (tx.status().status === "ready") tx.abort(unavailable);
+        releaseLocalReadBasis(tx);
+        runFinalCommitCallback();
+        return;
+      }
       // A RetryImmediately signal means the handler referenced an inSpace("name")
       // target that has now been resolved into the runtime cache. Abort this run's
       // transaction and re-queue the event so the handler re-runs and resolves the
@@ -2019,7 +2046,17 @@ export async function dispatchQueuedEvent(state: {
         return;
       }
 
-      state.runtime.prepareTxForCommit(tx);
+      try {
+        state.runtime.prepareTxForCommit(tx);
+      } catch (error) {
+        if (localReadFailure(tx) === undefined) throw error;
+        finalize(error);
+        return;
+      }
+      if (validateLocalReadBasis(tx) !== undefined) {
+        finalize();
+        return;
+      }
       const log = txToReactivityLog(tx);
       const telemetryWrites = log.writes
         .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
@@ -2037,6 +2074,11 @@ export async function dispatchQueuedEvent(state: {
       const handleCommitResult = (
         error: EventCommitError | undefined,
       ): void => {
+        if (validateLocalReadBasis(tx) !== undefined) {
+          releaseLocalReadBasis(tx);
+          runFinalCommitCallback();
+          return;
+        }
         if (
           served !== undefined && error !== undefined &&
           isLt1LateSealRefusal(error)
@@ -2186,9 +2228,31 @@ export async function dispatchQueuedEvent(state: {
         };
 
         switch (disposition.kind) {
-          case "success":
+          case "success": {
+            const viewActor = waveRunContextOf(tx)?.scopeKeyIdentity;
+            if (viewActor !== undefined) {
+              const settlement = waveSettlementOf(tx);
+              if (settlement === undefined) {
+                state.runtime.scheduler.recordViewHandlerLog(
+                  viewHandler,
+                  viewActor,
+                  log,
+                );
+              } else {
+                void settlement.then((result) => {
+                  if (result.error === undefined) {
+                    state.runtime.scheduler.recordViewHandlerLog(
+                      viewHandler,
+                      viewActor,
+                      log,
+                    );
+                  }
+                });
+              }
+            }
             runFinalCommitCallback();
             break;
+          }
           case "give-up":
             deferCommitPreparationFailure();
             routeProvenNoCommitFailure();
@@ -2325,6 +2389,7 @@ export async function dispatchQueuedEvent(state: {
           implementation = selected;
         }
       }
+      viewHandler = implementation;
       if (hasAnnotatedWrites(implementation)) {
         recordTrustedEventPolicyInputs(tx, implementation.writes, eventValue);
       }
@@ -2337,13 +2402,13 @@ export async function dispatchQueuedEvent(state: {
       );
       try {
         const runningPromise = Promise.resolve(
-          state.runtime.harness.invoke(() =>
-            tx.dispatchedHandlerNotRun !== undefined
-              ? undefined
-              : isGuardedDispatcher(handler)
+          state.runtime.harness.invoke(() => {
+            if (tx.dispatchedHandlerNotRun !== undefined) return undefined;
+            state.runtime.scheduler.prepareViewAction(tx, implementation);
+            return isGuardedDispatcher(handler)
               ? implementation(tx, eventValue)
-              : action(tx)
-          ),
+              : action(tx);
+          }),
         ).then(() => {
           const trustedEventCandidates =
             trustedEventWriteCandidatesFromTransaction(tx, implementation, [

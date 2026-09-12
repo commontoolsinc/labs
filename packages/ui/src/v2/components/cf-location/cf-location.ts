@@ -1,5 +1,6 @@
 import type { Schema } from "@commonfabric/api/schema";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { LocationDataSchema } from "@commonfabric/runner/component-read-contract";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
@@ -15,21 +16,6 @@ import {
 } from "../theme-context.ts";
 
 // Schema for LocationData
-const LocationDataSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    latitude: { type: "number" },
-    longitude: { type: "number" },
-    accuracy: { type: "number" },
-    altitude: { type: "number" },
-    altitudeAccuracy: { type: "number" },
-    heading: { type: "number" },
-    speed: { type: "number" },
-    timestamp: { type: "number" },
-  },
-  required: ["id", "latitude", "longitude", "accuracy", "timestamp"],
-} as const satisfies JSONSchema;
 
 /**
  * Location request state machine to prevent race conditions

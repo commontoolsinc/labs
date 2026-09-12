@@ -3,7 +3,7 @@ import type { FanOutNodeState } from "./fan-out.ts";
 import type { Action } from "./types.ts";
 
 export type NodeKind = "computation" | "effect";
-export type NodeStatus = "never-ran" | "clean" | "invalid";
+export type NodeStatus = "never-ran" | "clean" | "invalid" | "unavailable";
 
 export interface SchedulerGateState {
   debounceMs?: number;
@@ -32,6 +32,15 @@ export interface SchedulerNode {
   parentAction?: Action;
   children?: Set<Action>;
   status: NodeStatus;
+
+  /** Identity of the current registration lifetime, including reactivation. */
+  registrationToken: object;
+
+  /** Bound source whose server proof justifies this initial clean state. */
+  adoptedViewIdentity?: string;
+
+  /** Releases the residency wake of a parked local computation. */
+  cancelLocalReadWake?: () => void;
   declaredReads: IMemorySpaceAddress[];
 
   /**
@@ -127,6 +136,7 @@ export class NodeRegistry {
       ordinal: this.#nextOrdinal++,
       kind,
       status: "never-ran",
+      registrationToken: {},
       declaredReads: [],
       invalidCauses: new Map(),
       liveRefs: 0,
@@ -149,6 +159,10 @@ export class NodeRegistry {
   remove(action: Action): SchedulerNode | undefined {
     const record = this.#records.get(action);
     if (!record) return undefined;
+    record.registrationToken = {};
+    record.adoptedViewIdentity = undefined;
+    record.cancelLocalReadWake?.();
+    record.cancelLocalReadWake = undefined;
     this.#all.delete(record);
     this.#activeEffects.delete(action);
     this.#activeComputations.delete(action);
@@ -191,6 +205,7 @@ export class NodeRegistry {
   setStatus(action: Action, status: NodeStatus): void {
     const record = this.#records.get(action);
     if (!record) return;
+    if (status !== "clean") record.adoptedViewIdentity = undefined;
     record.status = status;
     this.#syncInvalidIndex(record);
   }
@@ -326,6 +341,7 @@ export class NodeRegistry {
   }
 
   #activate(record: SchedulerNode): void {
+    if (!this.#all.has(record)) record.registrationToken = {};
     this.#all.add(record);
     if (record.kind === "effect") {
       this.#activeEffects.add(record.action);

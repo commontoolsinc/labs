@@ -6,7 +6,7 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
 
 ## Anchors (verified on main, 2026-08-02 — re-verify before coding)
 
-- The client runtime already runs the full graph; v2 does not add a
+- The ordinary client runtime runs the full graph; v2 does not add a
   speculation engine — it REDIRECTS the existing run's writes into an
   overlay instead of a storage transaction.
 - Overlay substrate: the storage stack's transaction/journal layering in
@@ -44,6 +44,24 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   some run computed, whole.
 
 ## 2. What may speculate
+
+The optional
+[view-scoped replication mode](../../features/view-scoped-client-replication.md)
+restricts this permission to the computations selected from observed server
+reads for mounted UI. Its client installs resident JavaScript bindings from the
+stored graph without executing raw factories. A transaction with an unavailable
+input aborts all writes and staged work, even if the authored body catches the
+read failure. It parks on input and eligibility dependencies until its complete
+local basis is usable. Invalidation never replaces a confirmed output with
+`undefined` merely because an input was not replicated.
+
+This mode consumes effect outputs directly, including their authoritative
+pending/error fields; it does not hash omitted request inputs to synthesize
+pending state. It also defers result-as-pattern materialization and raw
+structural builtins. Producer currency requires a successful local attempt or
+matching authoritative input/output fingerprints from a successful durable
+serving settlement. A generation or store sequence alone does not establish
+currency. The existing overlay and retirement rules below still apply.
 
 - The membership test is the SCHEDULER TELL (RULED, owner 2026-08-07;
   protocol.md §1 carries the primary statement and the owner's

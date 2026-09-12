@@ -1,5 +1,6 @@
 import type { Schema } from "@commonfabric/api/schema";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { TranscriptionDataSchema } from "@commonfabric/runner/component-read-contract";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
@@ -21,33 +22,6 @@ import { convertToWav } from "../../utils/audio-conversion.ts";
 import type { CFAudioVisualizer } from "../cf-audio-visualizer/cf-audio-visualizer.ts";
 
 // Schema for TranscriptionData
-const TranscriptionDataSchema = {
-  type: "object",
-  properties: {
-    id: { type: "string" },
-    text: { type: "string" },
-    chunks: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          timestamp: {
-            type: "array",
-            items: { type: "number" },
-            minItems: 2,
-            maxItems: 2,
-          },
-          text: { type: "string" },
-        },
-        required: ["timestamp", "text"],
-      },
-    },
-    audioData: { type: "string" },
-    duration: { type: "number" },
-    timestamp: { type: "number" },
-  },
-  required: ["id", "text", "duration", "timestamp"],
-} as const satisfies JSONSchema;
 
 /**
  * Recording state machine to prevent race conditions

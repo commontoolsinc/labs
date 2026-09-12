@@ -3,6 +3,9 @@ import type {
   OperationWatchSpec,
   SessionDescriptor,
   SessionToken,
+  ViewInterest,
+  ViewPlan,
+  ViewQuery,
   WatchSpec,
 } from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
@@ -16,6 +19,28 @@ export type SessionState = {
   seenSeq: number;
   lastSyncedSeq: number;
   watches: WatchSpec[];
+  /** Stable across a true resume, replaced when a forgotten session is opened. */
+  viewEpoch: string;
+  /** Renderer interests independent of ordinary subscriptions. */
+  views: ViewInterest[];
+  viewEpochs: Map<string, string>;
+  /** Delivery-only roots selected by the co-hosted planner, keyed by view ID. */
+  viewSelections: Map<
+    string,
+    {
+      revision: number;
+      generation: number;
+      delivery: readonly ViewQuery[];
+      eligibleActions?: readonly string[];
+      pieces?: ViewPlan["pieces"];
+      inputs?: ViewPlan["inputs"];
+      producers?: ViewPlan["producers"];
+      errors?: ViewPlan["errors"];
+    }
+  >;
+  /** Demand provenance, excluding server-selected supporting documents. */
+  viewDemandGraphs: Map<string, TrackedGraphState>;
+  viewDemandEntities: Map<string, SessionCacheEntry>;
 
   /** Watch declarations by id, updated with the array at publication. */
   watchIndex: Map<string, WatchSpec>;
@@ -157,6 +182,12 @@ export class SessionRegistry {
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
+      viewEpoch: existing?.viewEpoch ?? crypto.randomUUID(),
+      views: existing?.views ?? [],
+      viewEpochs: existing?.viewEpochs ?? new Map(),
+      viewSelections: existing?.viewSelections ?? new Map(),
+      viewDemandGraphs: existing?.viewDemandGraphs ?? new Map(),
+      viewDemandEntities: existing?.viewDemandEntities ?? new Map(),
       watchIndex: existing?.watchIndex ?? new Map(),
       operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
       operationWatches: existing?.operationWatches ?? [],

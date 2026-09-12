@@ -53,6 +53,7 @@ import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
   isSqliteDbRef,
+  resolveScopeKey,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
   sqliteRowToWire,
@@ -604,17 +605,20 @@ export function sqliteDatabase(
   runtime: Runtime,
   outputBinding?: NormalizedFullLink,
 ): RawBuiltinResult {
-  let initialized = false;
-  let handle: Cell<SqliteDbRef>;
+  const initialized = new Set<string>();
   const action: Action = (tx: IExtendedStorageTransaction) => {
-    if (!initialized) {
+    const scope = outputBinding?.scope ?? "space";
+    const instance = resolveScopeKey(
+      scope,
+      waveRunContextOf(tx)?.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
+    );
+    if (!initialized.has(instance)) {
       // The db's scope is the scope the author declared on the result cell
       // (`PerUser<SqliteDb>` / `.asScope("user")`), carried on the resolved
       // output binding. The server uses it to derive a per-user / per-session
       // on-disk filename; the handle cell itself must live at that scope so its
       // value is partitioned the same way.
-      const scope = outputBinding?.scope ?? "space";
-      handle = makeResultCell<SqliteDbRef>(
+      const handle = makeResultCell<SqliteDbRef>(
         runtime,
         parentCell,
         cause,
@@ -645,7 +649,7 @@ export function sqliteDatabase(
       // resolves the row rule's dbOwner(); a FIXED property of the db, not
       // the acting reader). Minted ONLY when there is no prior committed
       // handle: this init re-runs in every runtime that opens the piece (the
-      // `initialized` guard is per-runtime-instance), and re-minting would
+      // `initialized` guard is per scoped instance), and re-minting would
       // rotate ownership to the last opener — dbOwner() row rules and
       // {__ctDbOwner} ceiling placeholders would then admit the wrong
       // principal. An ownerless prior handle stays ownerless (dbOwner()
@@ -711,12 +715,12 @@ export function sqliteDatabase(
         }
         const waveSettlement = waveSettlementOf(settledTx);
         if (waveSettlement === undefined) {
-          initialized = true;
+          initialized.add(instance);
           return;
         }
         void waveSettlement.then((waveResult) => {
           if (!waveResult.error) {
-            initialized = true;
+            initialized.add(instance);
           }
         });
       });

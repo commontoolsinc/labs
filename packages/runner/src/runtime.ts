@@ -7,6 +7,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
   type CellScope,
@@ -21,14 +22,6 @@ import {
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
-import {
-  getContentAddressedSchemasConfig,
-  setContentAddressedSchemasConfig,
-} from "./schema-doc-config.ts";
-import {
-  getReaderSchemaPrecedenceConfig,
-  setReaderSchemaPrecedenceConfig,
-} from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
   type AsyncLocalStore,
@@ -36,23 +29,10 @@ import {
 } from "@commonfabric/utils/async-local-store";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
-import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
-import { sameAcl } from "@commonfabric/memory/acl";
-import type {
-  ACL,
-  ChangeGroup,
-  CommitError,
-  DID,
-  IExtendedStorageTransaction,
-  IStorageManager,
-  IStorageProvider,
-  MemorySpace,
-  TransactionSealDestination,
-  UnexaminedAbsence,
-  URI,
-} from "./storage/interface.ts";
 import type {
   AnyCell,
   Frame,
@@ -70,32 +50,6 @@ import {
   isCell,
   schemaCellScope,
 } from "./cell.ts";
-import { createRef, EntityId } from "./create-ref.ts";
-import {
-  type EventIntentOutcome,
-  SpeculationOverlayDestination,
-  stampSpeculationRunContext,
-} from "./speculation/overlay-destination.ts";
-import { EffectsChannel } from "./speculation/effects-channel.ts";
-import { waveRunContextOf } from "./executor/wave.ts";
-import { Action, Scheduler } from "./scheduler.ts";
-import { entityKey, entityNameKey } from "./scheduler/keys.ts";
-import {
-  type CommitBackpressurePolicy,
-  resolveCommitBackpressure,
-} from "./scheduler/backpressure.ts";
-import { Engine } from "./harness/index.ts";
-import {
-  CellLink,
-  inlineExternalSchemaRefsInValue,
-  isCellLink,
-  isNormalizedFullLink,
-  isSigilLink,
-  type NormalizedFullLink,
-  NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
-import { addressKey } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
   buildCfcReadCeiling,
@@ -127,44 +81,6 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import type { ConsoleMethod } from "./harness/console.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
-import type { ConsoleMessage } from "./interface.ts";
-import { ModuleRegistry } from "./module.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import {
-  PatternManager,
-  type PreparedSourceUpdate,
-} from "./pattern-manager.ts";
-import { SourceReconciler } from "./source-reconciler.ts";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
-import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import {
-  type PieceSourceTransition,
-  Runner,
-  type RunSyncedCommitResult,
-  type RunSyncedOptions,
-  type RunSyncedWithCommitOptions,
-} from "./runner.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  markRendererInputTx,
-  markUiInputBlindWriteTx,
-  setBlindStructuralTarget,
-  unmarkUiInputBlindWriteTx,
-} from "./storage/reactivity-log.ts";
-import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
-import { toURI } from "./uri-utils.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import {
-  getWriteStackTrace,
-  setWriteStackTraceMatchers,
-  type WriteStackTraceEntry,
-  type WriteStackTraceMatcher,
-} from "./storage/write-stack-trace.ts";
 import {
   runtimeOwnedStoreOwnerKey,
   RuntimeOwnedStores,
@@ -173,12 +89,98 @@ import {
   type RuntimeWritePolicyAuthorization,
   runtimeWritePolicyAuthorized,
 } from "./cfc/types.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
+import { Engine } from "./harness/index.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type { ConsoleMessage } from "./interface.ts";
+import { addressKey } from "./link-types.ts";
+import {
+  CellLink,
+  inlineExternalSchemaRefsInValue,
+  isCellLink,
+  isNormalizedFullLink,
+  isSigilLink,
+  type NormalizedFullLink,
+  NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { ModuleRegistry } from "./module.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import {
+  PatternManager,
+  type PreparedSourceUpdate,
+} from "./pattern-manager.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
+import {
+  getReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "./reader-schema-precedence-config.ts";
+import {
+  type PieceSourceTransition,
+  Runner,
+  type RunSyncedCommitResult,
+  type RunSyncedOptions,
+  type RunSyncedWithCommitOptions,
+} from "./runner.ts";
+import { Action, Scheduler } from "./scheduler.ts";
+import {
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
+import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
+import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
+import { SourceReconciler } from "./source-reconciler.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { EffectsChannel } from "./speculation/effects-channel.ts";
+import {
+  type EventIntentOutcome,
+  SpeculationOverlayDestination,
+  stampSpeculationRunContext,
+} from "./speculation/overlay-destination.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import type {
+  ACL,
+  ChangeGroup,
+  CommitError,
+  DID,
+  IExtendedStorageTransaction,
+  IStorageManager,
+  IStorageProvider,
+  MemorySpace,
+  TransactionSealDestination,
+  UnexaminedAbsence,
+  URI,
+} from "./storage/interface.ts";
+import {
+  markRendererInputTx,
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "./storage/reactivity-log.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
+import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
+import {
+  getWriteStackTrace,
+  setWriteStackTraceMatchers,
+  type WriteStackTraceEntry,
+  type WriteStackTraceMatcher,
+} from "./storage/write-stack-trace.ts";
 import { type NonIdempotentReport, RuntimeTelemetry } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+import { toURI } from "./uri-utils.ts";
+import { ViewReplicationClient } from "./view-replication-client.ts";
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -333,6 +335,12 @@ export interface ExperimentalOptions {
    * unlike v1's SERVER_PRIMARY_EXECUTION so archived docs never alias it.
    */
   serverExecution?: boolean | undefined;
+
+  /** Global default for server-selected view replication. Defaults to off. */
+  viewScopedReplication?: boolean | undefined;
+
+  /** Web client override; an explicit value takes precedence over the default. */
+  webViewScopedReplication?: boolean | undefined;
 }
 
 /**
@@ -533,6 +541,9 @@ export interface RuntimeOptions {
 
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+
+  /** Client class opting into view replication; only web is supported. */
+  clientClass?: "web";
 
   /**
    * Server-execution v2 (serving-loop.md §3): mark THIS runtime as the
@@ -1091,6 +1102,11 @@ export class Runtime {
    */
   #explicitServerExecution: boolean | undefined;
 
+  /** Client class whose replication override applies to this runtime. */
+  #clientClass: RuntimeOptions["clientClass"];
+
+  #viewReplication?: ViewReplicationClient;
+
   /**
    * The enabler release for an explicitly-_enabled_ runtime. The count itself
    * lives with the flag (`memory/v2.ts`, shared with the `ExecutorHost`):
@@ -1468,6 +1484,7 @@ export class Runtime {
           "would silently bypass the custom provider for acting runs.",
       );
     }
+    this.#clientClass = options.clientClass;
     this.experimental = {
       modernCellRep: undefined,
       commitPreconditions: undefined,
@@ -2053,6 +2070,7 @@ export class Runtime {
   }
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
+    this.#viewReplication?.dispose();
     try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or
@@ -2348,6 +2366,19 @@ export class Runtime {
     if (this.servingPosture) return undefined;
     this.#speculationOverlay ??= new SpeculationOverlayDestination(this);
     return this.#speculationOverlay;
+  }
+
+  /** Renderer demand and local preview eligibility owned by this runtime. */
+  get viewReplication(): ViewReplicationClient {
+    return this.#viewReplication ??= new ViewReplicationClient(this);
+  }
+
+  /** Whether this client requests view replication, subject to session support. */
+  get viewScopedReplicationRequested(): boolean {
+    return this.#clientClass === "web" &&
+      this.experimental.serverExecution === true && !this.servingPosture &&
+      (this.experimental.webViewScopedReplication ??
+        this.experimental.viewScopedReplication ?? false);
   }
 
   /** DIAGNOSTIC (tests): the lazily-created speculation overlay, if this

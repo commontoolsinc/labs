@@ -35,6 +35,8 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
+| [`viewScopedReplication` / `webViewScopedReplication`](#viewscopedreplication--webviewscopedreplication) | `EXPERIMENTAL_VIEW_SCOPED_REPLICATION` / `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION`, or `RuntimeOptions.experimental` | global off; web inherits global | Bernhard Seefeld (2026-09-09) | validate view selection and guarded previews, then graduate per client class | experimental, off by default |
+| [`viewScopedReplicationV1`](#viewscopedreplicationv1) | Memory hello capability | available when server execution is on | Bernhard Seefeld (2026-09-09) | retain as protocol negotiation until older clients and servers retire | optional capability |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack and OW28 scoped compilation have direct coverage; Phase-7 gate dispositions govern a renewed rollout; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -510,6 +512,39 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 ---
 
+### `viewScopedReplication` / `webViewScopedReplication`
+
+- **Added by:** Bernhard Seefeld, 2026-09-09.
+- **Toggle:** `EXPERIMENTAL_VIEW_SCOPED_REPLICATION` sets the global default;
+  `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` sets the web client override. Both
+  are available through `RuntimeOptions.experimental`, deployment metadata, and
+  the shell's build defines. Both have server authority in the experimental flag
+  registry; explicit environment values still take precedence when adopting
+  deployment defaults.
+- **Default:** global `false`; web override absent. A web runtime resolves
+  `webViewScopedReplication ?? viewScopedReplication ?? false`. An explicit web
+  `false` overrides a global `true`.
+- **Scope:** requires `serverExecution: true`, the browser-worker
+  `clientClass: "web"` preset, and a server advertising
+  `viewScopedReplicationV1`. Other client classes retain ordinary replication.
+  Every browser tab owns its own runtime and authenticated view interests.
+- **Behavior:** piece opening reads the name and opaque UI tip; mounted views
+  register renderer demand. The server selects supporting documents from
+  observed execution reads and shared component contracts. Client JavaScript
+  runs only with admitted, resident inputs and current producer/source evidence.
+  Unavailable attempts abort without implicit pulls; server-only nodes retain
+  their confirmed outputs.
+- **End state and removal:** validate selection, reconnect behavior, component
+  coverage, and speculative currency for each supported client class. Graduate
+  classes deliberately, then remove their overrides and the global switch once
+  every supported class uses this protocol.
+- **Status (2026-09-09):** experimental and off by default. See
+  [view-scoped client replication](../features/view-scoped-client-replication.md)
+  for the current bounds and
+  [the implementation plan](../plans/view-scoped-client-replication.md) for
+  follow-up work.
+
+
 ### `lazyMaterialization`
 
 **Last checked:** 2026-08-09. **Status:** implemented, on by default.
@@ -980,6 +1015,22 @@ the per-epic implementation notes).
 ---
 
 ## Category 3: Storage and memory-protocol capability flags
+
+### `viewScopedReplicationV1`
+
+- **Added by:** Bernhard Seefeld, 2026-09-09.
+- **Toggle and default:** a Memory hello capability, advertised when server
+  execution is configured on. An absent field means unsupported. This is
+  negotiation, not permission to enable the feature on a client; the runtime
+  flags above separately select that client's behavior.
+- **Gates:** session-owned renderer interests, delivery-only support selections,
+  and view eligibility manifests applied with their supplying document frames.
+  Ordinary graph watches remain independently owned.
+- **End state and removal:** retain backward-compatible negotiation while
+  deployments may contain clients or servers without the protocol. Remove the
+  capability only as part of a protocol version that requires view support.
+- **Status (2026-09-09):** optional; the runtime feature remains off by default.
+
 
 ### `conflictAdmissionMode`
 
