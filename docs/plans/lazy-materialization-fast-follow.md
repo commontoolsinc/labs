@@ -117,9 +117,9 @@ holds the contract, the prototype, its tests, and the measurements. The outcome
 is a deferral: the prototype preserves the event contract, but its measured
 consequence is a win only for a handler that reads a whole list and touches
 little of it, a shape the collection guidance already steers authors away from,
-and a cost in the body for the full walks the exemplar's handlers rely on; and a
-view narrows the read log a handler's commit is checked against to the paths the
-body touched, so a concurrent write to a field of a row the body never read
+and a cost in the body for the full walks the lunch poll's handlers rely on; and
+a view narrows the read log a handler's commit is checked against to the paths
+the body touched, so a concurrent write to a field of a row the body never read
 stops conflicting with its commit. The record names the conditions under which
 the prototype is worth taking up again. Three bullets above stay open because
 the deferred prototype was not verified against everything they name; the record

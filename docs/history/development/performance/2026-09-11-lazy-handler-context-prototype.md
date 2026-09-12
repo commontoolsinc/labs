@@ -86,8 +86,9 @@ prototype up.
 
 ## The prototype
 
-Three changes to [`runner.ts`](../../../../packages/runner/src/runner.ts)
-implement the contract on the prototype branch:
+Three changes to [`runner.ts`](../../../../packages/runner/src/runner.ts) on the
+prototype branch; two implement the contract, and the third is the lift-path fix
+under [What ships](#what-ships):
 
 - `#readJavaScriptHandlerArgument` reads `{ $event }` eagerly, marks the
   transaction, reads `{ $ctx }` through the view, and hands the body
@@ -127,11 +128,12 @@ the two-runtime block described below. It pins:
   reads back from the receipt as a plain value;
 - with the flag off the same data skips the run eagerly.
 
-`lift-refusal-disposition.test.ts`, on the fix's branch, pins that a refusal a
-lift body throws synchronously writes an undefined result in both postures.
-At the F0 baseline's revision, `a44d9389c3`, its lazy case fails with the
-previous result standing, which is the defect named under
-[What ships](#what-ships); the prototype commit carries the fix and passes it.
+`lift-refusal-disposition.test.ts`, on the fix's branch, pins that a lift body's
+synchronous refusal writes an undefined result under the view, and that the same
+data yields an undefined result under the eager read. At the F0 baseline's
+revision, `a44d9389c3`, its lazy case fails with the previous result standing,
+which is the defect named under [What ships](#what-ships); the prototype commit
+carries the fix and passes it.
 
 A two-runtime block pins the contract difference that decides F2, and it
 isolates the transaction mark rather than the prototype's argument read: the
@@ -268,13 +270,14 @@ Four things the table shows:
    observation this record does not explain.
 4. **The preflight and the presync are unchanged by construction**, since the
    prototype does not touch them. The preflight remains the largest fixed cost
-   of every dispatch, as the F0 record found; the presync tracks the context
-   shape, from 0.3 ms for a handle to 25 ms for a plain one at 1,184 rows. Their
-   columns are also the measure of run variance: `scalarKey`'s preflight reads
-   27.0 ms eager and 20.0 ms lazy at 1,184 rows with nothing between the
-   postures to explain it, about a quarter of the value, so a difference
-   elsewhere in the table counts as posture only where it is larger than that or
-   repeats in the same direction at every size.
+   of every dispatch, as the F0 record found: its two passes together cost about
+   twice the `Preflight` column here, which holds one pass, 34 to 54 ms at 1,184
+   rows. The presync tracks the context shape, from 0.3 ms for a handle to 25 ms
+   for a plain one at 1,184 rows. Their columns are also the measure of run
+   variance: `scalarKey`'s preflight reads 27.0 ms eager and 20.0 ms lazy at
+   1,184 rows with nothing between the postures to explain it, about a quarter
+   of the value, so a difference elsewhere in the table counts as posture only
+   where it is larger than that or repeats in the same direction at every size.
 
 ## Decision
 
@@ -307,11 +310,11 @@ conflict set, which pay the body penalty finding 2 measures, so the change would
 ship its contract cost to every handler for a win few would collect.
 
 What the deferral does not touch: for a handle-bound context, the shape the
-exemplar's handlers take, the argument read was never the cost. For a plain
-context it is — 16 to 21 ms at 1,184 rows, which the prototype removes — but
-the dependency preflight and the presync walk the same list on every
-dispatch, cost more together than the read did, and are not something a
-view can serve. The F0 record's finding stands.
+lunch poll's handlers take, the argument read was never the cost. For a plain
+context it is — 16 to 21 ms at 1,184 rows, which the prototype removes — but the
+dependency preflight and the presync walk the same list on every dispatch, cost
+more together than the read did, and are not something a view can serve. The F0
+record's finding stands.
 
 ### Alternatives considered
 
