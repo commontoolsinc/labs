@@ -268,10 +268,11 @@ default, its planned end state, and its removal path, plus the propagation paths
   posture on `/api/meta` and those clients adopt it at boot. An explicit
   `EXPERIMENTAL_*` still wins per flag, and `CF_ADOPT_SERVER_FLAGS=false`
   turns adoption off wholesale.
-- Everywhere else — the shell included — the same env var must be set
-  wherever the flag is read; shell-side that means a build-time define, so
-  toggling requires a rebuild, and only the flags the shell defines can be
-  toggled there at all (the registry says which).
+- Everywhere else — the shell included — the same env var must be set wherever
+  the flag is read; shell-side that means a build-time define, so toggling
+  requires a rebuild, and only the flags the shell defines can be toggled there
+  at all; `packages/shell/felt.config.ts` and `packages/shell/src/lib/env.ts`
+  say which.
 
 The environment-backed flags (the only ones settable without editing code) are
 declared once in `EXPERIMENTAL_ENV_VARS`

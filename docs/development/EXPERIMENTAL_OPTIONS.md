@@ -82,18 +82,17 @@ this category default off unless their section says otherwise.
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
-and read by
-`experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
-background piece service all go through that one mapping, so their wirings
+and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
+the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines
-through the same canonical parser, for the flags it defines — each flag's
-section says whether it has one.
-`EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
-env-reachable — a flag that deliberately is not, `commitPreconditions` today,
-is mapped to `null` there, which records the decision rather than leaving an
-omission. The mapping accepts exactly `"true"` and `"false"`; any other
-value is ignored with a warning rather than coerced. See
-[How flags propagate](#how-flags-propagate).
+through the same canonical parser, for the flags it defines;
+`packages/shell/felt.config.ts` and `packages/shell/src/lib/env.ts` are the
+authority on which those are. `EXPERIMENTAL_ENV_VARS` itself is the authority on
+which flags are env-reachable — a flag that deliberately is not,
+`commitPreconditions` today, is mapped to `null` there, which records the
+decision rather than leaving an omission. The mapping accepts exactly `"true"`
+and `"false"`; any other value is ignored with a warning rather than coerced.
+See [How flags propagate](#how-flags-propagate).
 
 A client that is not built alongside the server it talks to — the `cf` binary
 among them — starts from the posture that deployment publishes rather than
@@ -532,15 +531,18 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Status against the test suites.** The runner unit and integration suite
-lanes are green at the default posture on every merge. The suites' runtimes
-read no environment, so the variable does not put them in the off posture;
-with the built-in default flipped at its source, the runner suite passes
-except for four cases that state contracts only the view holds — a proxy
-access count, a lookup that does not re-run on a non-key edit, and the
-unresolved-input refusal twice — and two that assert the default itself. The
-integration suites have not been run at the off posture; the
-[rollout evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
+**Status against the test suites.** The runner unit and integration suite lanes
+are green at the default posture on every merge. The runner unit suite's
+runtimes read no environment, so the variable does not put that suite in the off
+posture; the runner and pattern integration harnesses do read it, so the
+variable is how those lanes would be put at the off posture. With the built-in
+default flipped at its source, the runner unit suite passes except for five
+tests: three stating contracts only the view holds (a proxy access count, a
+lookup that does not re-run on a non-key edit, and the unresolved-input
+refusal), one a crash the eager path keeps, and one asserting the default
+itself. The integration suites have not been run at the off posture; the
+[rollout
+evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
 holds the detail.
 
 One behavior difference is deliberate rather than a defect, and it is the point

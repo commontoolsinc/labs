@@ -133,8 +133,9 @@ The five failing tests, with the assertion each fails on:
   built-in default is `true`, which the method of this run changed. An
   artifact of the method, not of the posture.
 
-The test names above are abbreviated; each is a unique prefix or fragment of
-the name in its file.
+The test names above are abbreviated; each is a unique prefix or fragment of the
+name in its file, except that the aggregate name is templated over three sizes,
+so its `N` is this record's variable.
 
 The counts above include the parents those steps fail. Three of the five are
 contracts the view holds and the eager path does not; one is a crash the
@@ -146,13 +147,13 @@ process environment passed, 1,383 tests and 0 failures, but for the reason
 above it exercised the off posture only in the cases that set the option
 themselves, and it is not counted here.
 
-Files that construct runtimes at both postures within one run:
+Files that exercise the view's behavior at both postures within one run:
 `lazy-materialization-runner.test.ts`; `lift-refusal-disposition.test.ts`, on
 `codex/lift-refusal-disposition` at `f3872d5737`; and
 `handler-lazy-context.test.ts`, on `codex/lazy-handler-context-prototype` at
-`b8da502953`. `patterns-lift.test.ts` is posture-adaptive
-instead: its forwarding-lift case expects one run under the view and two
-eager, whichever posture the ambient runtime resolved.
+`b8da502953`. `patterns-lift.test.ts` is posture-adaptive instead: its
+forwarding-lift case expects one run under the view and two eager, whichever
+posture the ambient runtime resolved.
 
 ## Changes to the view in the period
 
