@@ -139,9 +139,8 @@ must not accidentally inherit it.
 - [ ] Run the relevant equivalence, refusal, snapshot and dependency tests in
       both current flag postures. Resolve unexplained differences and check
       production-like client/server behavior on isolated data. The runner
-      suite was run at both postures, the off posture by flipping the
-      built-in default at its source; the integration suites were not run at
-      the off posture, and the record says so.
+      suite has been run at both postures; the F3 record holds the
+      off-posture result and the integration-suite gap.
 - [ ] Obtain the flag owner's retirement decision with a concrete rollback
       route. No live data mutation is implied by this plan; coordinate any live
       deployment separately.

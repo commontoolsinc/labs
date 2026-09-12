@@ -516,9 +516,11 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 - **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
   `new Runtime({ experimental: { lazyMaterialization: false } })` as a temporary
-  rollback override. The browser shell has no build-time define for this
+  rollback override. The flag is server-authoritative for deployed clients
+  (`EXPERIMENTAL_FLAG_AUTHORITY`), so a server's `false` carries the `cf`
+  clients it serves. The browser shell has no build-time define for this
   flag, so a shell build runs the runtime default and the override does not
-  reach it.
+  reach it: a server rolled back serves browsers running the other arm.
 - **Purpose.** Materialize a lift's argument lazily. The runner marks the
   action's transaction (`markLazyMaterialize`), and `Cell.get()` on a marked
   transaction hands back a schema-observing view instead of building everything
@@ -529,9 +531,16 @@ server](#clients-that-are-not-built-alongside-their-server).
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Status against the test suites.** Both suites pass either way: the runner unit
-suite and the whole integration suite are green with the flag on and with it
-off.
+**Status against the test suites.** The runner unit suite and the integration
+suites are green at the default posture on every merge. The suites' runtimes
+read no environment, so the variable does not put them in the off posture;
+with the built-in default flipped at its source, the runner suite passes
+except for four cases that state contracts only the view holds — a proxy
+access count, a lookup that does not re-run on a non-key edit, and the
+unresolved-input refusal twice — and two that assert the default itself. The
+integration suites have not been run at the off posture; the
+[rollout evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
+holds the detail.
 
 One behavior difference is deliberate rather than a defect, and it is the point
 of the mode: a lift that FORWARDS its argument onward without reading through it
