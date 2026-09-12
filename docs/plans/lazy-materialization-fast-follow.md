@@ -1,11 +1,12 @@
 # Lazy materialization fast-follow
 
 Status: F0 complete; F1 in progress. This plan is the separate follow-up to the
-[pattern computation cost](../history/plans/pattern-computation-cost.md) work,
-whose [implementation record](../history/plans/pattern-computation-cost-implementation.md)
-transferred its D1/D2 measurements here. It owns the remaining handler
-investigation, default-on rollout evidence, flag retirement, and those
-measurements. It does not authorize a live lunch-poll update.
+[computation-cost](../history/plans/pattern-computation-cost.md) arc,
+whose [implementation
+record](../history/plans/pattern-computation-cost-implementation.md) transferred
+its D1/D2 measurements here. It owns the remaining handler investigation,
+default-on rollout evidence, flag retirement, and those measurements. It does
+not authorize a live lunch-poll update.
 
 The [lazy materialization design](lazy-cell-materialization.md) defines the
 schema-observing view and snapshot contracts. Lift arguments use that view under
@@ -17,12 +18,12 @@ integration problem.
 
 ## Scope and decision
 
-Complete the outstanding work in this plan after the computation-cost arc,
-with independent PRs and acceptance evidence. Keep handler semantics separate
-from removing the lift-path
-rollout switch: either can expose a correctness issue the other does not
-address. The flag's owner and removal condition remain recorded in
-[Experimental options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization).
+Complete the outstanding work in this plan after the computation-cost arc, with
+independent PRs and acceptance evidence. Keep handler semantics separate from
+removing the lift-path rollout switch: either can expose a correctness issue the
+other does not address. The flag's owner and removal condition remain recorded
+in [Experimental
+options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization).
 
 ## Execution tracker
 
@@ -30,14 +31,14 @@ Mark a step complete only with its linked evidence. Capture decisions and
 completed investigations in `docs/history/`; update the live contract documents
 in the same PR as behavior changes.
 
-| Step | Depends on       | Deliverable                                                           | State   |
-| ---- | ---------------- | --------------------------------------------------------------------- | ------- |
-| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md) |
-| F1   | F0               | Handler materialization contract and measured prototype               | In progress |
-| F2   | F1               | Reviewed handler integration, or an explicit evidence-backed deferral | Pending |
-| F3   | F0               | Default-on rollout evidence and flag-retirement decision              | Pending |
-| F4   | F3               | Remove the lift rollout switch and redundant fallback dispatch        | Pending |
-| F5   | F2, F4           | Repeat measurement matrix, update guidance, and archive plans         | Pending |
+| Step | Depends on                  | Deliverable                                                           | State                                                                                                  |
+| ---- | --------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md) |
+| F1   | F0                          | Handler materialization contract and measured prototype               | In progress                                                                                            |
+| F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Pending                                                                                                |
+| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Pending                                                                                                |
+| F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                |
+| F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                |
 
 F1/F2 and F3 can proceed independently. F4 does not depend on making handlers
 lazy unless F1 identifies a concrete shared contract that requires that order.
@@ -54,14 +55,18 @@ Do not delete eager materialization that unmarked transactions still require.
       work, graph size, allocation/retention, and disabled-accounting durations
       in separate windows. Preserve their different accounting boundaries.
 
-The [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)
+The [F0
+baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)
 holds the inventory, the posture table, and the per-phase handler dispatch
-measurement from `packages/runner/test/handler-dispatch-cost.bench.ts`. Its
-retention probe was inconclusive and is recorded as such; the representative
-copy was not re-run and its limitations carry forward. Two of its findings
-shape F1: the dependency preflight, not the argument read, is the largest
-fixed cost of a handler dispatch, and a handler's read log is its commit
-precondition set, which a view would narrow.
+measurement from `packages/runner/test/handler-dispatch-cost.bench.ts`; the
+completed-attempt and reactive-body reads the step names are in the
+[representative lunch poll
+rehearsal](../history/development/performance/2026-09-12-representative-lunch-poll-rehearsal.md).
+Its retention probe was inconclusive and is recorded as such; the representative
+copy was not re-run and its limitations carry forward. Two of its findings shape
+F1: the dependency preflight, not the argument read, is the largest fixed cost
+of a handler dispatch, and a handler's read log is its commit conflict set,
+which a view would narrow.
 
 ### F1/F2 — Decide and integrate handler materialization
 

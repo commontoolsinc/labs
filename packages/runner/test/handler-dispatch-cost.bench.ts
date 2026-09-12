@@ -4,7 +4,7 @@
  * the scheduler to a compiled handler and waits for its commit; the timed
  * interval runs from the send to the commit callback. The dispatch's phases —
  * presync, dependency preflight, argument read, body, post-run, commit — are
- * read back from the phase timers the runtime already keeps — as the time
+ * read back from the phase timers the runtime keeps — as the time
  * each timer accumulated between a snapshot before the send and one at the
  * commit callback, so a phase that runs twice in a dispatch counts twice
  * and a phase that did not run in it counts nothing — so the whole dispatch
@@ -21,7 +21,8 @@
  * argument read mints a handle and the body decides what to read. A plain
  * context declares the list as a value, so the argument read materializes
  * every row before the body runs. Read counts are collected in a separate,
- * untimed pass with accounting enabled, and never in the timed samples.
+ * untimed pass with accounting enabled, never in the timed samples, and only
+ * when `HANDLER_DISPATCH_COUNTS=1` is set.
  */
 
 import { Identity } from "@commonfabric/identity";
@@ -116,7 +117,8 @@ const SIZES = [74, 296, 1184] as const;
  * Phase timers a dispatch leaves behind, by logger and key path. The
  * preflight's five steps are read separately; the handler action's timer
  * spans the argument read, the body, the post-run, the trusted-write
- * collection after the body, and the commit's preparation.
+ * collection after the body, and the commit's preparation and synchronous
+ * steps.
  */
 const PHASES = [
   ["scheduler", "scheduler/execute/event/presyncInputs"],
@@ -134,6 +136,9 @@ const PHASES = [
   ["storage.v2.transaction", "commit/commitNative"],
 ] as const;
 
+// Mirrors `IStreamable.send`'s value-and-commit-callback shape; the result
+// cell's key is reached through it because the compiled pattern's result type
+// is not known here.
 type Sender = {
   send(
     value: unknown,
@@ -281,7 +286,9 @@ function phaseDeltas(
   return deltas;
 }
 
-/** Heap in use after a full collection, or `undefined` without `--expose-gc`. */
+/**
+ * Heap in use after a full collection, or `undefined` without `--expose-gc`.
+ */
 function collectedHeapUsed(): number | undefined {
   const gc = (globalThis as { gc?: () => void }).gc;
   if (gc === undefined) return undefined;
@@ -291,56 +298,62 @@ function collectedHeapUsed(): number | undefined {
 
 //
 // Read counts and allocation, collected once per variant before any timed
-// sample, with accounting enabled
+// sample, with accounting enabled. This pass is a load phase rather than a
+// benchmark, and the scheduled benchmark workflow runs every `*.bench.ts` in
+// this directory, so it runs only when `HANDLER_DISPATCH_COUNTS=1` asks for
+// it.
 //
 
-for (const size of SIZES) {
-  for (const workload of WORKLOADS) {
-    const prepared = await prepare(size, true);
-    const attempts: Record<string, unknown>[] = [];
-    const preflights: Record<string, unknown>[] = [];
-    const onTelemetry = (event: Event) => {
-      const { marker } = (event as RuntimeTelemetryEvent).detail;
-      if (marker.type === "scheduler.read-attempt") {
-        attempts.push({ kind: marker.kind, ...marker.reads });
-      }
-      if (marker.type === "scheduler.event.preflight") {
-        preflights.push({
-          skipped: marker.skipped,
-          readCount: marker.readCount,
-          shallowReadCount: marker.shallowReadCount,
-          populateMs: marker.populateMs,
-          txToLogMs: marker.txToLogMs,
-          depCommitMs: marker.depCommitMs,
-          collectMs: marker.collectMs,
-          scheduleMs: marker.scheduleMs,
-        });
-      }
-    };
-    const { nodes } = prepared.runtime.scheduler.accessForTestingOnly;
-    const nodesBefore = nodes.effects.size + nodes.computations.size;
-    const heapBefore = collectedHeapUsed();
-    prepared.runtime.telemetry.addEventListener("telemetry", onTelemetry);
-    await prepared.dispatch(workload);
-    await prepared.drain();
-    prepared.runtime.telemetry.removeEventListener("telemetry", onTelemetry);
-    // Retained after the dispatch settled and the heap was collected again,
-    // so this is what the dispatch left behind rather than what it allocated
-    // while running.
-    const heapAfter = collectedHeapUsed();
-    const nodesAfter = nodes.effects.size + nodes.computations.size;
-    benchDiagnostic(JSON.stringify({
-      size,
-      workload,
-      nodesBefore,
-      nodesAfter,
-      retainedBytes: heapBefore !== undefined && heapAfter !== undefined
-        ? heapAfter - heapBefore
-        : undefined,
-      preflights,
-      attempts,
-    }));
-    await prepared.dispose();
+if (Deno.env.get("HANDLER_DISPATCH_COUNTS") === "1") {
+  for (const size of SIZES) {
+    for (const workload of WORKLOADS) {
+      const prepared = await prepare(size, true);
+      const attempts: Record<string, unknown>[] = [];
+      const preflights: Record<string, unknown>[] = [];
+      const onTelemetry = (event: Event) => {
+        const { marker } = (event as RuntimeTelemetryEvent).detail;
+        if (marker.type === "scheduler.read-attempt") {
+          attempts.push({ kind: marker.kind, ...marker.reads });
+        }
+        if (marker.type === "scheduler.event.preflight") {
+          preflights.push({
+            skipped: marker.skipped,
+            readCount: marker.readCount,
+            shallowReadCount: marker.shallowReadCount,
+            populateMs: marker.populateMs,
+            txToLogMs: marker.txToLogMs,
+            depCommitMs: marker.depCommitMs,
+            collectMs: marker.collectMs,
+            scheduleMs: marker.scheduleMs,
+          });
+        }
+      };
+      const { nodes } = prepared.runtime.scheduler.accessForTestingOnly;
+      const nodesBefore = nodes.effects.size + nodes.computations.size;
+      const heapBefore = collectedHeapUsed();
+      prepared.runtime.telemetry.addEventListener("telemetry", onTelemetry);
+      await prepared.dispatch(workload);
+      await prepared.drain();
+      prepared.runtime.telemetry.removeEventListener("telemetry", onTelemetry);
+      // Intended as what the dispatch left behind, read after it settled and
+      // the heap was collected again. On a runtime this cold the delta is
+      // dominated by setup garbage collected in passing, so it is not a
+      // retention measurement; the record that reads it says so.
+      const heapAfter = collectedHeapUsed();
+      const nodesAfter = nodes.effects.size + nodes.computations.size;
+      benchDiagnostic(JSON.stringify({
+        size,
+        workload,
+        nodesBefore,
+        nodesAfter,
+        retainedBytes: heapBefore !== undefined && heapAfter !== undefined
+          ? heapAfter - heapBefore
+          : undefined,
+        preflights,
+        attempts,
+      }));
+      await prepared.dispose();
+    }
   }
 }
 
@@ -357,7 +370,8 @@ let live:
   | undefined;
 
 // `Deno.bench` has no per-file teardown, so the last variant's runtime is
-// disposed when the process unloads.
+// disposed, as far as a synchronous handler can dispose it, when the process
+// unloads.
 globalThis.addEventListener("unload", () => {
   live?.prepared.dispose();
 });

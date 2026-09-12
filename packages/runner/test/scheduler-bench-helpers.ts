@@ -59,6 +59,7 @@ const timingSummaries = new Map<string, SchedulerTimingSummary>();
 const timingKeys = [
   ["execute", "scheduler/execute"],
   ["execute/event", "scheduler/execute/event"],
+  ["event/presync", "scheduler/execute/event/presyncInputs"],
   ["event/populate", "scheduler/execute/event/pullPopulateDependencies"],
   ["event/log", "scheduler/execute/event/pullTxToReactivityLog"],
   ["event/depCommit", "scheduler/execute/event/pullDepCommitStart"],
