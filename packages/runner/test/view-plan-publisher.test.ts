@@ -400,6 +400,18 @@ describe("view plan publisher", () => {
       expect(inputs()).not.toContain(
         fixture.hidden.getAsNormalizedFullLink().id,
       );
+      await fixture.runtime.editWithRetry((tx) =>
+        choice.withTx(tx).set("neither")
+      );
+      await publish();
+      expect(fixture.publications.calls.at(-1)!.args[2].eligibleActions).not
+        .toContain("same-node-index");
+      expect(inputs()).not.toContain(
+        fixture.input.getAsNormalizedFullLink().id,
+      );
+      expect(inputs()).not.toContain(
+        fixture.hidden.getAsNormalizedFullLink().id,
+      );
       fixture.runtime.scheduler.setViewConsumers(space, []);
       fixture.runtime.scheduler.setViewConsumers(space, [actor]);
       await publish();
@@ -463,5 +475,138 @@ describe("view plan publisher", () => {
     await publish();
     expect(inputs()).toContain(second.getAsNormalizedFullLink().id);
     expect(inputs()).not.toContain(first.getAsNormalizedFullLink().id);
+  });
+
+  it("leaves unsupported component contracts and anonymous views unplanned", async () => {
+    fixture.interest.view.componentContractVersion = "unsupported";
+    await publish();
+    expect(fixture.publications.calls).toHaveLength(0);
+    expect(fixture.observations.calls).toHaveLength(0);
+    fixture.interest.view.componentContractVersion =
+      COMPONENT_READ_CONTRACT_VERSION;
+    fixture.interest.principal = undefined;
+    await publish();
+    expect(fixture.publications.calls).toHaveLength(0);
+    expect(fixture.observations.calls).toHaveLength(0);
+  });
+
+  it("retains a published selection when new observations have the same values", async () => {
+    await publish();
+    fixture.nodes[0].log = { ...fixture.nodes[0].log };
+    await publish();
+    expect(fixture.observations.calls).toHaveLength(2);
+    expect(fixture.publications.calls).toHaveLength(1);
+  });
+
+  it("withdraws a failed selection and rebuilds it after observations recover", async () => {
+    await publish();
+    const original = fixture.publications.calls[0].args[2];
+    fixture.observations.restore();
+    fixture.observations = stub(
+      fixture.runtime.scheduler,
+      "viewExecutionNodes",
+      () => {
+        throw new Error("Observation unavailable");
+      },
+    );
+    await publish();
+    expect(fixture.publications.calls.at(-1)!.args[2]).toEqual({
+      generation: 1,
+      delivery: [],
+      eligibleActions: [],
+      pieces: [],
+      inputs: [],
+      producers: [],
+    });
+    fixture.observations.restore();
+    fixture.observations = stub(
+      fixture.runtime.scheduler,
+      "viewExecutionNodes",
+      () => fixture.nodes,
+    );
+    const reads = fixture.reads.calls.length;
+    await publish();
+    expect(fixture.reads.calls.length).toBeGreaterThan(reads);
+    expect(fixture.publications.calls).toHaveLength(3);
+    expect(fixture.publications.calls.at(-1)!.args[2]).toEqual(original);
+  });
+
+  it("omits unobserved computations and handlers outside the selected space", async () => {
+    fixture.observations.restore();
+    const other = await Identity.fromPassphrase("other observation space");
+    const stream = fixture.runtime.getCell(
+      space,
+      "unannotated handler",
+      undefined,
+    ).getAsNormalizedFullLink();
+    const foreignStream = { ...stream, space: other.did() };
+    const cancelOrdinary = fixture.runtime.scheduler.addEventHandler(
+      () => {},
+      stream,
+    );
+    const actor = { principal: signer.did(), sessionId: "viewer" };
+    const foreignHandler: EventHandler = Object.assign(() => {}, {
+      viewPiece: {
+        ...fixture.root.getAsNormalizedFullLink(),
+        space: other.did(),
+      },
+      viewNodeId: "foreign-handler",
+    });
+    const cancelForeign = fixture.runtime.scheduler.addEventHandler(
+      foreignHandler,
+      foreignStream,
+    );
+    fixture.runtime.scheduler.recordViewHandlerLog(foreignHandler, actor, {
+      reads: [{
+        ...toMemorySpaceAddress(fixture.input.getAsNormalizedFullLink()),
+        space: other.did(),
+      }],
+      shallowReads: [],
+      writes: [],
+    });
+    fixture.runtime.scheduler.register(Object.assign(() => {}, {
+      viewPiece: fixture.root.getAsNormalizedFullLink(),
+      viewNodeId: "unobserved",
+      writes: [fixture.output.getAsNormalizedFullLink()],
+    }));
+    try {
+      expect(
+        fixture.runtime.scheduler.viewExecutionNodes(space, {
+          principal: signer.did(),
+          sessionId: "viewer",
+        }),
+      ).toEqual([]);
+      expect(
+        fixture.runtime.scheduler.viewExecutionNodes(other.did(), actor).map((
+          node,
+        ) => node.id),
+      ).toEqual(["foreign-handler"]);
+    } finally {
+      cancelOrdinary();
+      cancelForeign();
+      fixture.observations = stub(
+        fixture.runtime.scheduler,
+        "viewExecutionNodes",
+        () => fixture.nodes,
+      );
+    }
+  });
+
+  it("omits inline documents from delivered view inputs", async () => {
+    const inline = fixture.runtime.getImmutableCell(space, "constant label");
+    await fixture.runtime.editWithRetry((tx) =>
+      fixture.root.withTx(tx).set({
+        $UI: { type: "vnode", name: "div", props: {}, children: [inline] },
+      })
+    );
+    await publish();
+    const selection = fixture.publications.calls.at(-1)!.args[2];
+    expect(selection.inputs?.map((input) => input.id)).toContain(
+      fixture.root.getAsNormalizedFullLink().id,
+    );
+    expect(selection.inputs?.map((input) => input.id)).not.toContain(
+      inline.getAsNormalizedFullLink().id,
+    );
+    expect(selection.eligibleActions).toEqual([]);
   });
 });

@@ -3,16 +3,22 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
 
 import { Identity } from "@commonfabric/identity";
+import type { Server } from "@commonfabric/memory/v2/server";
 
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { Action } from "../src/scheduler/types.ts";
+import type { Action, EventHandler } from "../src/scheduler/types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   assertLocalReadAvailable,
   localReadFailure,
   localReadsReady,
   LocalReadUnavailable,
+  releaseLocalReadBasis,
+  requireLocalReadCondition,
   restrictToLocalReads,
+  usesLocalReads,
   validateLocalReadBasis,
 } from "../src/storage/local-read-policy.ts";
 
@@ -347,6 +353,258 @@ describe("local-read-policy", () => {
     } finally {
       cancel();
       preparation.restore();
+    }
+  });
+
+  it("requires restrictions before activity and prevents replacing an installed policy", async () => {
+    const input = runtime.getCell(space, "policy ordering", undefined);
+    await input.sync();
+    const tx = runtime.edit();
+    try {
+      restrictToLocalReads(tx.tx);
+      expect(() => restrictToLocalReads(tx.tx)).toThrow("already installed");
+    } finally {
+      tx.abort();
+    }
+    for (const activity of ["read", "write"] as const) {
+      const active = runtime.edit();
+      try {
+        if (activity === "read") input.withTx(active).get();
+        else input.withTx(active).set(1);
+        expect(() => restrictToLocalReads(active.tx)).toThrow("must precede");
+      } finally {
+        active.abort();
+      }
+    }
+  });
+
+  it("latches revoked conditions while allowing a fresh attempt after recovery", () => {
+    const tx = runtime.edit();
+    const address = toMemorySpaceAddress(
+      runtime.getCell(space, "condition", undefined).getAsNormalizedFullLink(),
+    );
+    let current = true;
+    try {
+      expect(() => requireLocalReadCondition(tx.tx, address, () => true))
+        .toThrow("policy is required");
+      expect(localReadsReady(tx)).toBe(true);
+      expect(usesLocalReads(undefined)).toBe(false);
+      releaseLocalReadBasis(tx);
+      assertLocalReadAvailable(tx.tx, address, () => false);
+      restrictToLocalReads(tx.tx);
+      requireLocalReadCondition(tx.tx, address, () => current);
+      current = false;
+      expect(localReadsReady(tx)).toBe(false);
+      const failure = validateLocalReadBasis(tx);
+      expect(failure).toBeInstanceOf(LocalReadUnavailable);
+      expect(failure?.address).toEqual(address);
+      current = true;
+      expect(localReadsReady(tx)).toBe(true);
+      expect(validateLocalReadBasis(tx)).toBe(failure);
+      releaseLocalReadBasis(tx);
+      expect(usesLocalReads(tx)).toBe(true);
+      expect(localReadFailure(tx)).toBe(failure);
+    } finally {
+      tx.abort();
+    }
+  });
+
+  for (const catchSignal of [false, true]) {
+    it(`aborts commit preparation when unavailable data is ${catchSignal ? "caught" : "thrown"}`, async () => {
+      const output = runtime.getCell(space, "prepare result", undefined);
+      const missing = runtime.getCell(space, "prepare missing", undefined);
+      await runtime.editWithRetry((tx) => output.withTx(tx).set("confirmed"));
+      await output.sync();
+      const tx = runtime.edit();
+      restrictToLocalReads(tx.tx);
+      output.withTx(tx).set("preview");
+      using preparation = stub(tx, "prepareForCommit", () => {
+        if (catchSignal) {
+          expect(() => missing.withTx(tx).get()).toThrow(LocalReadUnavailable);
+        } else missing.withTx(tx).get();
+      });
+      const result = await tx.commit();
+      expect(preparation.calls).toHaveLength(1);
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+      expect(output.get()).toBe("confirmed");
+    });
+  }
+
+  for (const disposition of ["commit", "seal"] as const) {
+    it(`rejects a raw ${disposition} after its local input coverage is revoked`, async () => {
+      const output = runtime.getCell(space, "raw result", undefined);
+      await runtime.editWithRetry((tx) => output.withTx(tx).set("confirmed"));
+      await output.sync();
+      const tx = storage.edit();
+      const address = toMemorySpaceAddress(output.getAsNormalizedFullLink());
+      let covered = true;
+      let seals = 0;
+      restrictToLocalReads(tx);
+      expect(tx.write(address, "preview").error).toBeUndefined();
+      assertLocalReadAvailable(tx, address, () => covered);
+      covered = false;
+      const result = disposition === "commit"
+        ? await tx.commit()
+        : await tx.sealInto!({
+          sealSpaceCommit: () => {
+            seals++;
+            return Promise.resolve({ ok: {} });
+          },
+        });
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+      expect(seals).toBe(0);
+      expect(output.get()).toBe("confirmed");
+    });
+  }
+
+  for (const phase of ["handler", "prepare-throw", "prepare-catch"] as const) {
+    it(`finishes an event once when an unavailable input is encountered in ${phase}`, async () => {
+      const output = runtime.getCell(space, "event result", undefined);
+      const missing = runtime.getCell(space, "event missing", undefined);
+      const event = runtime.getCell(space, "event stream", undefined);
+      await runtime.editWithRetry((tx) => {
+        output.withTx(tx).set("confirmed");
+        event.withTx(tx).set({ $stream: true });
+      });
+      await output.sync();
+      await event.sync();
+      let caught: unknown;
+      let finalFailure: unknown;
+      let attempts = 0;
+      const outcomes: string[] = [];
+      const handler: EventHandler = (tx) => {
+        attempts++;
+        restrictToLocalReads(tx.tx);
+        output.withTx(tx).set("preview");
+        if (phase === "handler") {
+          try {
+            missing.withTx(tx).get();
+          } catch (error) {
+            caught = error;
+          }
+        }
+      };
+      const cancel = runtime.scheduler.addEventHandler(
+        handler,
+        event.getAsNormalizedFullLink(),
+      );
+      const prepare = runtime.prepareTxForCommit.bind(runtime);
+      using _preparation = stub(runtime, "prepareTxForCommit", (tx) => {
+        if (usesLocalReads(tx) && phase !== "handler") {
+          if (phase === "prepare-catch") {
+            try {
+              missing.withTx(tx).get();
+            } catch (error) {
+              caught = error;
+            }
+          } else missing.withTx(tx).get();
+        }
+        prepare(tx);
+      });
+      using sync = stub(storage, "syncCell", () => {
+        throw new Error("Unexpected speculative pull");
+      });
+      try {
+        runtime.scheduler.queueEvent(
+          event.getAsNormalizedFullLink(),
+          {},
+          true,
+          (tx) => {
+            outcomes.push(tx.status().status);
+            finalFailure = localReadFailure(tx);
+          },
+        );
+        await runtime.idle();
+        expect(attempts).toBe(1);
+        if (phase !== "prepare-throw") {
+          expect(caught).toBeInstanceOf(LocalReadUnavailable);
+        }
+        expect(finalFailure).toBeInstanceOf(LocalReadUnavailable);
+        expect(outcomes).toEqual(["error"]);
+        expect(output.get()).toBe("confirmed");
+        expect(sync.calls).toHaveLength(0);
+      } finally {
+        cancel();
+      }
+    });
+  }
+
+  it("does not retry a rejected event after its local condition expires", async () => {
+    const output = runtime.getCell(space, "rejected event", undefined);
+    const event = runtime.getCell(space, "rejected event stream", undefined);
+    await runtime.editWithRetry((tx) => {
+      output.withTx(tx).set("confirmed");
+      event.withTx(tx).set({ $stream: true });
+    });
+    await output.sync();
+    await event.sync();
+    const finished = Promise.withResolvers<void>();
+    const outcomes: string[] = [];
+    let current = true;
+    let attempt: IExtendedStorageTransaction | undefined;
+    let attempts = 0;
+    const server = (storage as unknown as { server(): Server }).server();
+    using rejection = stub(server, "transact", (message, publishVerdict) => {
+      current = false;
+      const result: Awaited<ReturnType<typeof server.transact>> = {
+        type: "response",
+        requestId: message.requestId,
+        error: { name: "ConflictError", message: "Input superseded" },
+      };
+      publishVerdict?.(result);
+      return Promise.resolve(result);
+    });
+    const cancel = runtime.scheduler.addEventHandler((tx) => {
+      attempt = tx;
+      attempts++;
+      restrictToLocalReads(tx.tx);
+      requireLocalReadCondition(
+        tx.tx,
+        toMemorySpaceAddress(output.getAsNormalizedFullLink()),
+        () => current,
+      );
+      output.withTx(tx).set("preview");
+    }, event.getAsNormalizedFullLink());
+    try {
+      runtime.scheduler.queueEvent(
+        event.getAsNormalizedFullLink(),
+        {},
+        true,
+        (tx) => {
+          outcomes.push(tx.status().status);
+          finished.resolve();
+        },
+      );
+      await finished.promise;
+      await runtime.idle();
+      expect(attempts).toBe(1);
+      expect(attempt).toBeDefined();
+      expect(localReadFailure(attempt!)).toBeInstanceOf(LocalReadUnavailable);
+      expect(localReadsReady(attempt!)).toBe(true);
+      expect(rejection.calls).toHaveLength(1);
+      expect(outcomes).toEqual(["error"]);
+      expect(output.get()).toBe("confirmed");
+    } finally {
+      cancel();
+    }
+  });
+
+  it("propagates a preparation error unrelated to local data availability", async () => {
+    const output = runtime.getCell(space, "failed preparation", undefined);
+    await runtime.editWithRetry((tx) => output.withTx(tx).set("confirmed"));
+    await output.sync();
+    const tx = runtime.edit();
+    restrictToLocalReads(tx.tx);
+    output.withTx(tx).set("preview");
+    const failure = new Error("Preparation failed");
+    using _preparation = stub(tx, "prepareForCommit", () => {
+      throw failure;
+    });
+    try {
+      await expect(tx.commit()).rejects.toBe(failure);
+      expect(output.get()).toBe("confirmed");
+    } finally {
+      tx.abort();
     }
   });
 });

@@ -5,6 +5,7 @@ import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import type { ViewInterest, ViewPlan } from "@commonfabric/memory/v2";
 
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -510,5 +511,221 @@ describe("view replication lifetimes", () => {
     loaded.resolve();
     await canceled.promise;
     expect(runtime.viewReplication.active(space)).toBe(false);
+  });
+
+  it("coalesces concurrent negotiation into one capability check", async () => {
+    restore[0]();
+    restore[0] = () => {};
+    const ready = Promise.withResolvers<boolean>();
+    using capability = stub(
+      replica,
+      "supportsViewReplication",
+      () => ready.promise,
+    );
+    const first = runtime.viewReplication.enable(space);
+    const second = runtime.viewReplication.enable(space);
+    expect(capability.calls).toHaveLength(1);
+    ready.resolve(true);
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(runtime.viewReplication.active(space)).toBe(true);
+  });
+
+  it("does not acquire a view lease after disposal during negotiation", async () => {
+    restore[0]();
+    restore[0] = () => {};
+    const ready = Promise.withResolvers<boolean>();
+    using _capability = stub(
+      replica,
+      "supportsViewReplication",
+      () => ready.promise,
+    );
+    const acquire = replica.acquireViewInterests.bind(replica);
+    using lease = stub(replica, "acquireViewInterests", acquire);
+    const enabling = runtime.viewReplication.enable(space);
+    await runtime.dispose({ closeStorage: false });
+    ready.resolve(true);
+    expect(await enabling).toBe(false);
+    expect(lease.calls).toHaveLength(0);
+    expect(await runtime.viewReplication.enable(space)).toBe(false);
+    expect(
+      await runtime.viewReplication.mount(
+        runtime.getCell(space, "disposed", undefined),
+        "screen",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("releases a failed initial interest lease and permits a later negotiation", async () => {
+    restore[3]();
+    restore[3] = () => {};
+    const acquire = replica.acquireViewInterests.bind(replica);
+    const leases: ReturnType<typeof acquire>[] = [];
+    using _acquisition = stub(replica, "acquireViewInterests", (onReplaced) => {
+      const lease = acquire(onReplaced);
+      leases.push(lease);
+      return lease;
+    });
+    let fail = true;
+    using _requests = stub(replica, "setViewInterests", (views) => {
+      if (fail) {
+        fail = false;
+        return Promise.reject(new Error("Initial interest failed"));
+      }
+      interests = views;
+      return Promise.resolve(true);
+    });
+    await expect(runtime.viewReplication.enable(space)).rejects.toThrow(
+      "Initial interest failed",
+    );
+    expect(runtime.viewReplication.active(space)).toBe(false);
+    expect(leases).toHaveLength(1);
+    expect(leases[0].isCurrent()).toBe(false);
+    const cancel = await runtime.viewReplication.mount(
+      runtime.getCell(space, "recovered", undefined),
+      "screen",
+    );
+    expect(cancel).toBeDefined();
+    expect(interests.map((view) => view.id)).toEqual(["screen"]);
+    expect(runtime.viewReplication.active(space)).toBe(true);
+    cancel!();
+    await runtime.idle();
+  });
+
+  it("removes a failed mount while retaining another view's demand", async () => {
+    restore[3]();
+    restore[3] = () => {};
+    let fail = true;
+    using _requests = stub(replica, "setViewInterests", (views) => {
+      if (fail && views.some((view) => view.id === "failed")) {
+        fail = false;
+        return Promise.reject(new Error("Mount refused"));
+      }
+      interests = views;
+      return Promise.resolve(true);
+    });
+    const root = runtime.getCell(space, "mount recovery", undefined);
+    const healthy = await runtime.viewReplication.mount(root, "healthy");
+    await expect(runtime.viewReplication.mount(root, "failed")).rejects.toThrow(
+      "Mount refused",
+    );
+    await runtime.idle();
+    expect(interests.map((view) => view.id)).toEqual(["healthy"]);
+    const recovered = await runtime.viewReplication.mount(root, "failed");
+    expect(interests.map((view) => view.id)).toEqual(["healthy", "failed"]);
+    recovered!();
+    healthy!();
+    await runtime.idle();
+    expect(interests).toEqual([]);
+  });
+
+  it("leaves ordinary startup inactive until the view plan installs a graph", async () => {
+    const root = runtime.getCell(space, "unplanned graph", undefined);
+    const cancel = await runtime.viewReplication.mount(root, "screen");
+    expect(await runtime.start(root)).toBe(false);
+    expect(runtime.viewReplication.active(space)).toBe(true);
+    cancel!();
+    await runtime.idle();
+  });
+
+  for (const rejected of [false, true]) {
+    it(`ignores a retired fallback root after its synchronization ${rejected ? "fails" : "finishes"}`, async () => {
+      const root = runtime.getCell(space, "retired fallback", undefined);
+      const healthy = runtime.getCell(space, "retained fallback", undefined);
+      const entered = Promise.withResolvers<void>();
+      const ready = Promise.withResolvers<void>();
+      const syncCell = storage.syncCell.bind(storage);
+      using _sync = stub(storage, "syncCell", async (cell, ...args) => {
+        if (cell.equals(root)) {
+          entered.resolve();
+          await ready.promise;
+          if (rejected) throw new Error("Retired root unavailable");
+        }
+        return await syncCell(cell, ...args);
+      });
+      const started: string[] = [];
+      using _starts = stub(runtime, "start", (cell) => {
+        started.push(cell.getAsNormalizedFullLink().id);
+        return Promise.resolve(true);
+      });
+      const errors: Error[] = [];
+      const cancel = await runtime.viewReplication.mount(
+        root,
+        "retired",
+        (error) => errors.push(error),
+      );
+      await runtime.viewReplication.mount(healthy, "healthy");
+      capable = false;
+      emit([]);
+      try {
+        await entered.promise;
+        cancel!();
+        ready.resolve();
+        await runtime.idle();
+        expect(errors).toEqual([]);
+        expect(started).toEqual([healthy.getAsNormalizedFullLink().id]);
+      } finally {
+        ready.resolve();
+      }
+    });
+  }
+
+  it("admits inline values without claiming producer evidence before negotiation", () => {
+    const inline = runtime.getImmutableCell(space, "literal");
+    const remote = runtime.getCell(space, "unnegotiated", undefined);
+    expect(
+      runtime.viewReplication.permits(
+        toMemorySpaceAddress(inline.getAsNormalizedFullLink()),
+      ),
+    ).toBe(true);
+    expect(
+      runtime.viewReplication.permits(
+        toMemorySpaceAddress(remote.getAsNormalizedFullLink()),
+      ),
+    ).toBe(false);
+    expect(
+      runtime.viewReplication.producers(
+        toMemorySpaceAddress(remote.getAsNormalizedFullLink()),
+      ),
+    ).toEqual(new Set());
+    expect(
+      runtime.viewReplication.producerCurrent(
+        space,
+        "unknown",
+        () => true,
+        () => {},
+      ),
+    ).toBe(false);
+  });
+
+  it("waits for a piece's source identity before installing its graph", async () => {
+    const root = runtime.getCell(space, "source pending", undefined);
+    using starts = stub(
+      runtime.runner,
+      "startViewPiece",
+      () => Promise.resolve(undefined),
+    );
+    const cancel = await runtime.viewReplication.mount(root, "screen");
+    const plan: ViewPlan = {
+      id: "screen",
+      revision: interests[0].revision,
+      generation: 1,
+      eligibleActions: ["preview"],
+      pieces: [root.getAsNormalizedFullLink()],
+    };
+    emit([plan]);
+    await runtime.idle();
+    expect(starts.calls).toHaveLength(0);
+    expect(runtime.viewReplication.pieceCurrent(root.getAsNormalizedFullLink()))
+      .toBe(false);
+    emit([{
+      ...plan,
+      generation: 2,
+      pieces: [{ ...plan.pieces[0], patternIdentity: "source#default" }],
+    }]);
+    await runtime.idle();
+    expect(starts.calls).toHaveLength(1);
+    cancel!();
+    await runtime.idle();
   });
 });

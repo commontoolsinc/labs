@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 
+import { componentReadSchema } from "../src/component-read-contract.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { collectViewRenderReads } from "../src/view-render-reads.ts";
@@ -89,5 +90,64 @@ describe("view render reads", () => {
       await runtime.storageManager.synced();
       await runtime.dispose();
     }
+  });
+
+  it("walks nested visible arrays and inline object properties", async () => {
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: StorageManager.emulate({ as: signer }),
+    });
+    try {
+      const label = runtime.getCell(space, "array label", undefined);
+      const property = runtime.getCell(space, "property label", undefined);
+      const hidden = runtime.getCell(space, "offscreen label", undefined);
+      const root = runtime.getCell(space, "array root", undefined);
+      await runtime.editWithRetry((tx) => {
+        label.withTx(tx).set("visible");
+        property.withTx(tx).set("payload");
+        hidden.withTx(tx).set("offscreen");
+        root.withTx(tx).set([[{
+          type: "vnode",
+          name: "div",
+          offscreen: hidden,
+          props: { payload: { nested: property }, style: { color: "red" } },
+        }], label]);
+      });
+      const result = collectViewRenderReads(runtime, space, {
+        id: "arrays",
+        revision: 0,
+        mode: "speculate",
+        componentContractVersion: "1",
+        query: {
+          roots: [{
+            id: root.getAsNormalizedFullLink().id,
+            selector: { path: [] },
+          }, { id: root.getAsNormalizedFullLink().id, selector: { path: [] } }],
+        },
+      }, runtime.scopeKeyIdentity);
+      expect(result.reads.map((read) => read.id)).toContain(
+        label.getAsNormalizedFullLink().id,
+      );
+      expect(result.reads.map((read) => read.id)).not.toContain(
+        hidden.getAsNormalizedFullLink().id,
+      );
+      expect(result.reads.map((read) => read.id)).toContain(
+        property.getAsNormalizedFullLink().id,
+      );
+      expect(result.bindings).toEqual([]);
+      expect(result.streams).toEqual([]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("returns no binding contract for an undeclared component property", () => {
+    expect(
+      componentReadSchema("custom-component", "value", { type: "string" }, {}),
+    ).toBeUndefined();
+    expect(componentReadSchema("cf-input", "unknown", { type: "string" }, {}))
+      .toBeUndefined();
+    expect(componentReadSchema("cf-input", "value", { type: "string" }, {}))
+      .toEqual({ type: "string" });
   });
 });

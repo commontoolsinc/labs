@@ -862,4 +862,21 @@ describe("view interests", () => {
       ).not.toBeNull();
     }
   });
+
+  it("reuses an ordinary query under another watch ID while retaining visible demand", async () => {
+    await set([watch("of:ordinary")], [view()]);
+    const added = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: "alias-watch",
+      space,
+      sessionId,
+      watches: [{ ...watch("of:ordinary"), id: "another-owner" }],
+    });
+    expect(added.error).toBeUndefined();
+    expect(added.ok?.sync.upserts).toEqual([]);
+    expect(server.viewInterestsForSpace(space)).toHaveLength(1);
+    expect(
+      server.demandedInstancesForSpace(space).map((row) => row.id).toSorted(),
+    ).toEqual(["of:ordinary", "of:render"]);
+  });
 });

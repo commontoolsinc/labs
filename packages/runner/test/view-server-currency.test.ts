@@ -534,4 +534,122 @@ describe("view-server-currency", () => {
       cancelReader();
     }
   });
+
+  it("wakes a parked consumer when a local producer settles with the same output", async () => {
+    plan.eligibleActions.push("upstream");
+    plan.inputs!.push(upstream.getAsNormalizedFullLink());
+    plan.producers![1] = { ...plan.producers![1], basis: undefined };
+    emit([{ ...plan, generation: 2 }]);
+    register({ adopt: false });
+    const cancel = output.sink(() => {});
+    try {
+      await runtime.idle();
+      expect(runs).toBeGreaterThan(0);
+      expect(completedRuns).toBe(0);
+      expect(output.get()).toBe(7);
+      let producerRuns = 0;
+      const producer: Action = Object.assign(
+        (tx: IExtendedStorageTransaction) => {
+          producerRuns++;
+          middle.withTx(tx).set(upstream.withTx(tx).get() * 2);
+        },
+        {
+          viewPiece: root.getAsNormalizedFullLink(),
+          viewNodeId: "upstream",
+          viewLocalOnly: true,
+          writes: [middle.getAsNormalizedFullLink()],
+        },
+      );
+      runtime.scheduler.register(producer);
+      const cancelProducer = middle.sink(() => {});
+      try {
+        await runtime.idle();
+      } finally {
+        cancelProducer();
+      }
+      expect(producerRuns).toBe(1);
+      expect(completedRuns).toBe(1);
+      expect(output.get()).toBe(7);
+    } finally {
+      cancel();
+    }
+  });
+
+  it("blocks only overlapping pending local writers absent from the server plan", async () => {
+    const record = runtime.getCell<{ visible: number; hidden: number }>(
+      space,
+      "local writer record",
+      undefined,
+    );
+    await runtime.editWithRetry((tx) =>
+      record.withTx(tx).set({ visible: 7, hidden: 8 })
+    );
+    await record.sync();
+    plan.inputs!.push(record.getAsNormalizedFullLink());
+    emit([{ ...plan, generation: 2 }]);
+    const consumer = register({ adopt: false });
+    const writer = (path: "visible" | "hidden", annotated: boolean) =>
+      Object.assign(() => {}, {
+        writes: [record.key(path).getAsNormalizedFullLink()],
+        ...(annotated
+          ? {
+            viewPiece: root.getAsNormalizedFullLink(),
+            viewNodeId: `local-${path}`,
+          }
+          : {}),
+      });
+    runtime.scheduler.register(writer("hidden", true));
+    runtime.scheduler.register(writer("visible", false));
+    const allowed = runtime.edit();
+    try {
+      runtime.scheduler.prepareViewAction(allowed, consumer);
+      expect(record.key("visible").withTx(allowed).get()).toBe(7);
+    } finally {
+      allowed.abort();
+    }
+    runtime.scheduler.register(writer("visible", true));
+    const blocked = runtime.edit();
+    try {
+      runtime.scheduler.prepareViewAction(blocked, consumer);
+      expect(() => record.key("visible").withTx(blocked).get()).toThrow(
+        LocalReadUnavailable,
+      );
+    } finally {
+      blocked.abort();
+    }
+    expect(record.get()).toEqual({ visible: 7, hidden: 8 });
+  });
+
+  it("executes an ordinary registration even when given a view identity", async () => {
+    let executions = 0;
+    const action: Action = Object.assign((tx: IExtendedStorageTransaction) => {
+      executions++;
+      output.withTx(tx).set(9);
+    }, { writes: [output.getAsNormalizedFullLink()] });
+    runtime.scheduler.register(action, { adoptViewIdentity: identity });
+    expect(runtime.scheduler.isDirty(action)).toBe(true);
+    const cancel = output.sink(() => {});
+    try {
+      await runtime.idle();
+      expect(executions).toBe(1);
+      expect(output.get()).toBe(9);
+    } finally {
+      cancel();
+    }
+  });
+
+  it("adopts an inline input without acquiring replica coverage for it", () => {
+    input = runtime.getImmutableCell(space, 3);
+    plan.producers![0] = {
+      ...plan.producers![0],
+      basis: { reads: [basis(input), basis(middle)], outputs: [basis(output)] },
+    };
+    emit([{ ...plan, generation: 2 }]);
+    const evidence = proof();
+    expect(evidence).toBeDefined();
+    expect(evidence!.reads.map((read) => read.id)).toContain(
+      input.getAsNormalizedFullLink().id,
+    );
+    expect(runtime.scheduler.isDirty(register())).toBe(false);
+  });
 });

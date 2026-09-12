@@ -74,7 +74,6 @@ import type {
 import { createReadOnlyTransactionError } from "./interface.ts";
 import {
   assertLocalReadAvailable,
-  localReadFailure,
   releaseLocalReadBasis,
   usesLocalReads,
   validateLocalReadBasis,
@@ -1065,9 +1064,11 @@ export class V2StorageTransaction implements IStorageTransaction {
    * action's dependencies from those reads.
    */
   #finish(result: Result<Unit, StorageTransactionFailed>): void {
+    // A rejected scheduler attempt retains eligibility that expired while its
+    // commit waited, so finalization can stop a retry and release the basis.
     if (
       (this as IStorageTransaction).sourceAction === undefined ||
-      localReadFailure(this) === undefined
+      result.error === undefined || validateLocalReadBasis(this) === undefined
     ) {
       releaseLocalReadBasis(this);
     }

@@ -214,8 +214,11 @@ Unknown data differs from confirmed absence. A known absent value may use a
 default or produce an intentional `undefined`; an unknown value cannot do so. An
 unavailable read poisons the whole attempt even if authored code catches the
 signal. Writes and staged work are discarded. Reactive attempts retain wake
-dependencies and park without retries or missing-data pulls. Handler intent
-continues through the ordinary authoritative event path.
+dependencies and park without retries or missing-data pulls. A rejected transaction
+rechecks its input basis before releasing it, retaining an expired basis until
+scheduler finalization. A rejected handler preview whose eligibility has expired
+finishes without retrying. Handler intent continues through the ordinary
+authoritative event path.
 
 The client keeps confirmed UI while a computation is unavailable. It also defers
 local dynamic child-pattern materialization to server-provided roots. Cycles and

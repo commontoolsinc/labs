@@ -176,4 +176,41 @@ describe("storage-view-owner", () => {
     expect(ordinary.get()).toBe("after");
     expect(retained.get()).toBe("retained");
   });
+
+  it("keeps replacement demand intact after retired lease operations", async () => {
+    const replica = manager.open(space).replica;
+    let retired = 0;
+    const first = replica.acquireViewInterests!(() => retired++);
+    await first.set([interest("old", first.nextRevision())]);
+    const replacement = replica.acquireViewInterests!(() => {});
+    const views = [interest("new", replacement.nextRevision())];
+    expect(await replacement.set(views)).toBe(true);
+    expect(retired).toBe(1);
+    expect(first.isCurrent()).toBe(false);
+    expect(() => first.nextRevision()).toThrow();
+    expect(await first.set([])).toBe(false);
+    first.release();
+    expect(replacement.isCurrent()).toBe(true);
+    expect(server.viewInterestsForSpace(space).map((entry) => entry.view))
+      .toEqual(views);
+    replacement.release();
+  });
+
+  it("refuses nonempty view demand when the server does not advertise support", async () => {
+    setServerExecutionConfig(false);
+    const unsupported = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    try {
+      const replica = unsupported.open(space).replica;
+      expect(await replica.supportsViewReplication!()).toBe(false);
+      const owner = replica.acquireViewInterests!(() => {});
+      expect(await owner.set([interest("unsupported", owner.nextRevision())]))
+        .toBe(false);
+      expect(server.viewInterestsForSpace(space)).toEqual([]);
+      owner.release();
+    } finally {
+      await unsupported.close();
+    }
+  });
 });
