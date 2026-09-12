@@ -75,12 +75,19 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 - **The first upgrade preserves legacy attribution.** It fills missing
   structured names from `createdByName` and comment `authorName`, retaining
   nonblank structured names, kinds, avatars, legacy fields, and comment
-  identity. Names without a known kind receive `kind: "legacy"`. Blank strings
-  and the trimmed placeholder `"someone"` supply no attribution. Legacy inputs
-  stay `unknown`; explicit reader schemas materialize strings and keep other
-  values opaque and unchanged. Every source and destination is read through
-  handles before the first write, so an unresolved linked comment or name leaves
-  this step pending. Once complete, later legacy writes are outside this pass.
+  identity. Partially populated author objects retain their other properties;
+  absent or explicitly undefined authors receive new objects. Names without a
+  known kind receive `kind: "legacy"`. Blank strings and the trimmed placeholder
+  `"someone"` supply no attribution. Legacy inputs stay `unknown`; explicit
+  reader schemas materialize strings and keep other values opaque and unchanged.
+  Every source and destination is read through handles before the first write.
+  In the lift, unresolved linked comments or names suspend the step until data
+  arrives. Handlers can conflate absence with unresolved data; ambiguous reads
+  leave the step incomplete without author writes or a version stamp. Content
+  edits can still proceed on version-zero state when their own inputs are
+  available. The lift completes genuine absence, while a standalone handler
+  needs unambiguous inputs to complete migration. Once complete, later legacy
+  writes are outside this pass.
 
   [State upgrade design](state-upgrades.md) describes the sequence, mutation
   boundary, schema bindings, tests, and rollback limits. Legacy writers must be

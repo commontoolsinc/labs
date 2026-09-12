@@ -1009,6 +1009,15 @@ export const appendLink = (
   return link;
 };
 
+/** Author fields that may be only partially populated in stored comments. */
+interface TopicUpgradeComment {
+  /** Structured destination whose existing properties are preserved. */
+  author?: Partial<TopicAuthor>;
+
+  /** Legacy storage key retained for version-zero inputs. */
+  authorName?: unknown;
+}
+
 /** Handles shared by ordered Topic upgrades and every durable mutation. */
 interface TopicUpgradeState {
   /** Number of steps already committed for this topic. */
@@ -1017,19 +1026,28 @@ interface TopicUpgradeState {
   /** Legacy storage key; its spelling remains fixed for version-zero inputs. */
   createdByName: ReadonlyCell<unknown>;
 
-  /** Structured creator destination under its existing declared shape. */
-  createdBy: Writable<TopicAuthor | undefined>;
+  /** Structured creator destination, including partially populated stored data. */
+  createdBy: Writable<Partial<TopicAuthor> | undefined>;
 
   /** Original comment identities, including the fixed legacy `authorName` key. */
-  comments: Writable<Pick<StoredTopicComment, "author" | "authorName">[]>;
+  comments: Writable<TopicUpgradeComment[]>;
 }
+
+/** Object schemas whose properties extend generated mutation contracts. */
+type TopicObjectSchema = Exclude<JSONSchema, boolean>;
+
+/** Generated creator contract, including definitions shared by author reads. */
+const TOPIC_CREATOR_SCHEMA = toSchema<
+  Writable<Partial<TopicAuthor> | undefined>
+>() as TopicObjectSchema;
 
 /** Reader contract that materializes strings while retaining opaque legacy data. */
 const TOPIC_UPGRADE_SCHEMA = {
   type: "object",
+  $defs: TOPIC_CREATOR_SCHEMA.$defs,
   properties: {
     topicStateVersion: toSchema<Writable<number>>(),
-    createdBy: toSchema<Writable<TopicAuthor | undefined>>(),
+    createdBy: TOPIC_CREATOR_SCHEMA,
     // Concrete strings are read; every other legacy value stays opaque.
     // A TypeScript `string | unknown` collapses to opaque-only `unknown`.
     createdByName: {
@@ -1042,7 +1060,7 @@ const TOPIC_UPGRADE_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          author: toSchema<TopicAuthor>(),
+          author: toSchema<Partial<TopicAuthor>>(),
           authorName: { type: ["string", "unknown"] },
         },
       },
@@ -1067,48 +1085,76 @@ type TopicWriteState<K extends keyof TopicInput = never> =
 /**
  * Upgrades version zero to one by filling missing structured author names.
  * Legacy key spellings in this step are storage identifiers and remain fixed.
- * Reads every source and destination before writing, so unresolved links leave
- * the step pending. Existing structured names, kinds, and avatars take priority.
+ * Returns true after completing all writes, or false when reads are incomplete.
+ * Handlers defer ambiguous absent values to the lift, whose reads suspend on
+ * unresolved links. Existing structured names, kinds, and avatars take priority.
  */
-const upgradeLegacyAuthors = (input: TopicUpgradeState): void => {
+const upgradeLegacyAuthors = (
+  input: TopicUpgradeState,
+  fromHandler: boolean,
+): boolean => {
   const { createdByName, createdBy, comments } = input;
 
   const legacyCreatorName = createdByName.get();
   const creator = createdBy.get();
-  const creatorKind = creator?.kind;
-  const creatorName = !creator?.name.trim() &&
+  const storedCreatorName = createdBy.key("name").get();
+  const creatorKind = createdBy.key("kind").get();
+  const creatorName = !storedCreatorName?.trim() &&
       typeof legacyCreatorName === "string" && legacyCreatorName.trim() &&
       legacyCreatorName.trim() !== "someone"
     ? legacyCreatorName
     : undefined;
-  // Resolve every source and destination before making the first write. A
-  // missing linked record must leave completion pending. Read through handles:
-  // optional property reads can turn unresolved links into `undefined`.
-  const commentAuthors = comments.get().map((_, index) => {
+  // Handles keep unresolved reads pending in the lift. Eager handler reads
+  // can return undefined for both absent fields and unresolved links.
+  const storedComments = comments.get();
+  if (storedComments === undefined) return false;
+  const commentAuthors = storedComments.map((_, index) => {
     const comment = comments.key(index);
     const author = comment.key("author").get();
+    const storedName = comment.key("author").key("name").get();
+    const kind = comment.key("author").key("kind").get();
     const legacyName = comment.key("authorName").get();
     return {
       index,
-      name: !author?.name.trim() &&
+      ready: Boolean(storedName?.trim()) ||
+        (author !== undefined && storedName !== undefined &&
+          kind !== undefined && legacyName !== undefined),
+      absent: author === undefined,
+      name: !storedName?.trim() &&
           typeof legacyName === "string" && legacyName.trim() &&
           legacyName.trim() !== "someone"
         ? legacyName
         : undefined,
-      kind: author?.kind,
+      kind,
     };
   });
 
+  if (
+    fromHandler && ((!storedCreatorName?.trim() &&
+      (creator === undefined || storedCreatorName === undefined ||
+        creatorKind === undefined || legacyCreatorName === undefined)) ||
+      commentAuthors.some(({ ready }) => !ready))
+  ) return false;
+
   if (creatorName !== undefined) {
-    createdBy.key("name").set(creatorName);
-    if (!creatorKind) createdBy.key("kind").set("legacy");
+    if (creator === undefined) {
+      createdBy.set({ name: creatorName, kind: "legacy" });
+    } else {
+      createdBy.key("name").set(creatorName);
+      if (!creatorKind) createdBy.key("kind").set("legacy");
+    }
   }
-  commentAuthors.forEach(({ index, name, kind }) => {
+  commentAuthors.forEach(({ index, name, kind, absent }) => {
     if (name === undefined) return;
     const author = comments.key(index).key("author");
-    author.key("name").set(name);
-    if (!kind) author.key("kind").set("legacy");
+    if (absent) {
+      author.set({ name, kind: "legacy" });
+    } else {
+      author.key("name").set(name);
+      if (!kind) author.key("kind").set("legacy");
+    }
   });
+  return true;
 };
 
 /** Ordered, append-only steps; entry zero upgrades state version zero to one. */
@@ -1137,7 +1183,9 @@ const upgradeTopicState = (state: TopicUpgradeState, verb?: string): void => {
     const step = TOPIC_STATE_UPGRADES[index];
     switch (step) {
       case "legacy-authors":
-        upgradeLegacyAuthors(state);
+        // Author fields are additive: content handlers can still edit version
+        // zero while its migration waits for complete reads.
+        if (!upgradeLegacyAuthors(state, verb !== undefined)) return;
         break;
       default: {
         const unhandled: never = step;
@@ -1154,9 +1202,6 @@ const migrateTopicState = lift(
   TOPIC_UPGRADE_SCHEMA,
   toSchema<void>(),
 );
-
-/** Object schemas whose properties extend generated mutation contracts. */
-type TopicObjectSchema = Exclude<JSONSchema, boolean>;
 
 /** Generated object contract extended with the concrete legacy reader. */
 const SUBMIT_PROFILE_COMMENT_STATE_SCHEMA = toSchema<

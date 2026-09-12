@@ -263,6 +263,60 @@ describe("topic-author-migration", () => {
     }
   });
 
+  it("fills explicitly undefined structured authors", async () => {
+    const { argument } = await start({
+      createdByName: "Creator",
+      createdBy: undefined,
+      comments: [{
+        authorName: "Commenter",
+        author: undefined,
+        body: "Body",
+        sentAt: 1,
+      }],
+    });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    expect(errors).toEqual([]);
+    expect(argument.key("topicStateVersion").getRaw()).toBe(1);
+    expect(argument.key("createdBy").key("name").getRaw()).toBe("Creator");
+    expect(argument.key("comments").key(0).key("author").key("name").getRaw())
+      .toBe("Commenter");
+  });
+
+  it("fills partial structured authors without replacing their other fields", async () => {
+    const { argument } = await start({
+      createdByName: "Creator",
+      createdBy: { avatar: "creator.png", extra: "retained creator data" },
+      comments: [{
+        authorName: "Commenter",
+        body: "Body",
+        sentAt: 1,
+        author: { avatar: "commenter.png", extra: "retained comment data" },
+      }],
+    });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    expect(errors).toEqual([]);
+    expect(argument.key("topicStateVersion").getRaw()).toBe(1);
+    expect(argument.key("createdBy").getRaw({ lastNode: "value" })).toEqual({
+      name: "Creator",
+      kind: "legacy",
+      avatar: "creator.png",
+      extra: "retained creator data",
+    });
+    expect(
+      argument.key("comments").key(0).key("author").getRaw({
+        lastNode: "value",
+      }),
+    )
+      .toEqual({
+        name: "Commenter",
+        kind: "legacy",
+        avatar: "commenter.png",
+        extra: "retained comment data",
+      });
+  });
+
   it("preserves non-string legacy values without manufacturing authors", async () => {
     const names = [42, false, null, ["not a name"], {
       displayName: "not a name",
@@ -345,6 +399,143 @@ describe("topic-author-migration", () => {
       } finally {
         cancel();
       }
+    });
+  }
+
+  for (
+    const field of [
+      "creator name",
+      "comment name",
+      "comment",
+      "creator author",
+      "comment author",
+      "creator structured name",
+      "comment structured name",
+      "creator kind",
+      "comment kind",
+    ] as const
+  ) {
+    it(`saves a title while an unresolved ${field} leaves migration incomplete`, async () => {
+      const pending = runtime.getCell<unknown>(space, "pending-handler-input");
+      const firstComment = {
+        authorName: field === "comment name" ? pending : "Commenter",
+        author: field === "comment author" ? pending : {
+          name: field === "comment structured name" ? pending : "",
+          kind: field === "comment kind" ? pending : "legacy",
+        },
+        body: "First",
+        sentAt: 1,
+      };
+      const { argument, result, originalComments } = await start({
+        title: "Original title",
+        topicStateVersion: 0,
+        createdByName: field === "creator name" ? pending : "Creator",
+        createdBy: field === "creator author" ? pending : {
+          name: field === "creator structured name" ? pending : "",
+          kind: field === "creator kind" ? pending : "legacy",
+        },
+        comments: field === "comment"
+          ? [firstComment, pending]
+          : [firstComment],
+      });
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(argument.key("topicStateVersion").getRaw()).toBe(0);
+      const creatorBefore = argument.key("createdBy").getRaw({
+        lastNode: "value",
+      });
+      const commentAuthorBefore = argument.key("comments").key(0).key("author")
+        .getRaw({ lastNode: "value" });
+
+      await result.key("setTitle").pull();
+      result.key("setTitle").send({
+        title: "Saved title",
+        agentName: "Test agent",
+      });
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(argument.key("title").getRaw()).toBe("Saved title");
+      expect(argument.key("titleUpdatedBy").key("name").getRaw()).toBe(
+        "Test agent",
+      );
+      expect(argument.key("topicStateVersion").getRaw()).toBe(0);
+      expect(argument.key("createdBy").getRaw({ lastNode: "value" }))
+        .toEqual(creatorBefore);
+      expect(
+        argument.key("comments").key(0).key("author").getRaw({
+          lastNode: "value",
+        }),
+      )
+        .toEqual(commentAuthorBefore);
+      expect(fabricAwareEqual(
+        argument.key("comments").getRaw({ lastNode: "value" }),
+        originalComments,
+      )).toBe(true);
+      expect(errors).toEqual([]);
+
+      const arrival = runtime.edit();
+      pending.withTx(arrival).set(
+        field === "comment"
+          ? {
+            authorName: "Delayed commenter",
+            body: "Arrived",
+            sentAt: 2,
+          }
+          : field === "creator author" || field === "comment author"
+          ? {
+            name: "Structured author",
+            kind: "person",
+            avatar: "existing.png",
+          }
+          : field === "creator kind" || field === "comment kind"
+          ? "person"
+          : "Delayed name",
+      );
+      expect((await arrival.commit()).error).toBeUndefined();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(argument.key("topicStateVersion").getRaw()).toBe(1);
+      expect(argument.key("title").getRaw()).toBe("Saved title");
+      expect(
+        argument.key("createdBy").key("name").getRaw({ lastNode: "value" }),
+      ).toBe(
+        field === "creator name" || field === "creator structured name"
+          ? "Delayed name"
+          : field === "creator author"
+          ? "Structured author"
+          : "Creator",
+      );
+      expect(
+        argument.key("comments").key(0).key("author").key("name").getRaw({
+          lastNode: "value",
+        }),
+      )
+        .toBe(
+          field === "comment name" || field === "comment structured name"
+            ? "Delayed name"
+            : field === "comment author"
+            ? "Structured author"
+            : "Commenter",
+        );
+      if (field === "comment") {
+        expect(pending.key("author").getRaw({ lastNode: "value" }))
+          .toEqual({ name: "Delayed commenter", kind: "legacy" });
+      }
+      if (field === "creator author" || field === "comment author") {
+        expect(pending.getRaw({ lastNode: "value" })).toEqual({
+          name: "Structured author",
+          kind: "person",
+          avatar: "existing.png",
+        });
+      }
+      if (field === "creator kind" || field === "comment kind") {
+        expect(pending.getRaw()).toBe("person");
+        const author = field === "creator kind"
+          ? argument.key("createdBy")
+          : argument.key("comments").key(0).key("author");
+        expect(author.key("kind").getRaw({ lastNode: "value" })).toBe("person");
+      }
+      expect(errors).toEqual([]);
     });
   }
 });

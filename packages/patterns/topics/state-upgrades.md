@@ -30,8 +30,10 @@ durable mutation, with the verb name in the error.
 Running a Topic runs the upgrade lift. No consumer has to read the result or
 open the author UI for the lift to write. Each headless content verb and browser
 handler also calls the shared runner after validating the request and before its
-first durable write. A handler therefore works on upgraded state even when it
-runs before the lift.
+first durable write. Complete reads let the handler upgrade state even when it
+runs before the lift. Incomplete reads leave the version unchanged; the author
+upgrade is additive, so content mutations can still operate on version-zero
+state when their own inputs are available.
 
 The guarded entry points include comment creation, editing and retraction; link
 creation and retraction; title and body saves; and adding or removing mentions.
@@ -39,25 +41,43 @@ Module-scope browser handlers carry the same upgrade binding as the headless
 handlers. Local draft edits, opening editors, and canceling editors operate on
 session state and do not require an upgrade.
 
-A handler may finish an upgrade and then encounter an unresolved input needed
-for its own mutation. In that case the completed upgrade can commit while the
-requested mutation remains pending. Upgrade progress is independent of whether
-that later mutation completes.
+A handler does not acquire the lift's suspension behavior by calling the same
+runner. A later unavailable input can still prevent that handler's own mutation
+from completing. The upgrade guard neither queues the mutation nor promises a
+retry. Upgrade progress and the requested mutation's outcome are separate.
 
 ## Step contract
 
 Each step reads every source and destination it needs before making its first
-write. It uses cell handles for those reads: an absent optional field is a valid
-input, while an unresolved link must leave the step pending. Optional property
-reads can conflate those cases.
+write. In the lift, cell-handle reads distinguish a valid absent optional field
+from an unresolved link: the unresolved read suspends the lift and registers the
+dependency that runs it again when data arrives. Optional property reads can
+conflate those cases.
 
-After the step returns, the runner writes the next version in the same
-transaction. A transaction can commit writes made before a later unresolved
-read, so reading first is part of correctness. If a later step is blocked,
-earlier completed steps and their version can remain committed. Implementations
-must be deterministic, read no clock, and tolerate an already-upgraded target
-shape. Fabric handles transaction conflicts; the pattern adds no locking or
-revision protocol.
+Handler reads can return `undefined` for both absence and an unresolved link.
+The author step handles that ambiguity conservatively. An unavailable comment
+array leaves the whole step incomplete, without author writes. For a blank
+structured name, the author object, its name and kind, and the legacy name must
+all be defined before a handler can complete the step. A nonblank structured
+name already supplies attribution and does not require a legacy name. The lift
+can complete genuinely absent fields; a standalone handler needs unambiguous
+inputs to complete the step itself.
+
+A step returns `true` only after completing its writes, or `false` for
+incomplete reads. Only `true` lets the runner write the next version in the same
+transaction. An incomplete step stops the sequence. A transaction can commit
+writes made before a later unresolved read, so reading first is part of
+correctness. If a later step is blocked, earlier completed steps and their
+version can remain committed. Implementations must be deterministic, read no
+clock, and tolerate an already-upgraded target shape. Fabric handles transaction
+conflicts; the pattern adds no locking or revision protocol.
+
+Each step must define which mutations remain valid while that step is
+incomplete. The author step preserves the old content shape, so the runner
+returns to the content handler when migration cannot finish. A step that changes
+the shape a handler needs must reject that mutation until its prerequisites are
+complete. Future and invalid versions are always rejected before any durable
+mutation.
 
 A step's legacy field names are permanent storage identifiers. Keep their
 spellings and interpretation fixed when renaming current fields or changing
@@ -76,11 +96,20 @@ classification is unknown. The step leaves source fields, comment identities,
 and unrelated content unchanged. It does not rewrite already-structured
 `"someone"` names or infer identities from profiles.
 
+The internal reader accepts partially populated structured authors. Existing
+objects receive individual name and kind writes, preserving other properties. An
+absent or explicitly undefined author receives a new object; writing a child
+property through an explicitly undefined value is not a valid cell write. Reads
+through the name and kind handles keep unresolved subfields pending in the lift.
+
 The public input fields retain their broad legacy domains. The upgrade reader
 uses the explicit schema type union `["string", "unknown"]`: strings are read as
 values, while non-string legacy data stays opaque. TypeScript's
 `string | unknown` alone collapses to opaque `unknown` and cannot express that
 reader. Both the lift and mutation bindings use the same explicit schema.
+Generated structured-author definitions are also attached at the composed schema
+root: local `$ref` references resolve against that root, including references
+nested beneath the creator and comment projections.
 
 Mutations carry a cell containing the upgrade handles. The cell keeps the nested
 read-only source handle intact through handler state typing; reading the binding
@@ -122,5 +151,12 @@ so that ignoring the version would cause an observable unwanted copy.
 The version tests exercise all durable entry points against future state and
 check both rejection and unchanged data. They also cover invalid versions and a
 standalone browser handler upgrading version-zero state before appending,
-without a Topic lift to do the work for it. New entry points must receive the
-upgrade binding and join this coverage.
+without a Topic lift to do the work for it. A standalone browser save also
+checks that ambiguous inputs preserve the version while allowing the title
+write, then completes the upgrade on another save after data arrives.
+Integration cases send a title mutation while creator names, comment names,
+whole comments, structured authors, and author subfields are unresolved, then
+verify migration recovers without losing the title or overwriting arriving
+structured attribution. Cases with explicitly undefined and partially populated
+authors check object initialization and preservation of existing properties. New
+entry points must receive the upgrade binding and join this coverage.

@@ -182,9 +182,17 @@ export default pattern(() => {
   );
 
   const oldVersion = new Writable(0);
-  const oldCreator = new Writable<TopicAuthor | undefined>();
+  const oldCreator = new Writable<TopicAuthor | undefined>({
+    name: "",
+    kind: "legacy",
+  });
   const oldComments = new Writable<LegacyComment[] | Default<[]>>([
-    { authorName: "Old commenter", body: "Old comment", sentAt: 1 },
+    {
+      authorName: "Old commenter",
+      author: { name: "", kind: "legacy" },
+      body: "Old comment",
+      sentAt: 1,
+    },
   ]);
   const oldDraft = new Writable("New comment");
   const upgradeAndSubmit = submitProfileComment({
@@ -200,8 +208,8 @@ export default pattern(() => {
     profileAvatar: "",
   });
   const assert_upgrade_waits_for_handler = assert(() =>
-    oldVersion.get() === 0 && oldCreator.get() === undefined &&
-    oldComments.get()[0].author === undefined
+    oldVersion.get() === 0 && oldCreator.get()?.name === "" &&
+    oldComments.get()[0].author?.name === ""
   );
   const action_upgrade_and_submit = action(() => upgradeAndSubmit.send());
   const assert_handler_upgraded_before_appending = assert(() =>
@@ -211,6 +219,39 @@ export default pattern(() => {
     oldComments.get()[0].author?.name === "Old commenter" &&
     oldComments.get()[1].author?.name === "Current person" &&
     oldDraft.get() === ""
+  );
+
+  const deferredVersion = new Writable(0);
+  const deferredName = new Writable<string | undefined>();
+  const deferredCreator = new Writable<TopicAuthor>({
+    name: "",
+    kind: "legacy",
+  });
+  const deferredTitle = new Writable("Before");
+  const saveWithIncompleteUpgrade = saveProfileTitle({
+    ...browserState,
+    title: deferredTitle,
+    titleDraft: new Writable("Saved while incomplete"),
+    upgrade: {
+      topicStateVersion: deferredVersion,
+      createdByName: deferredName,
+      createdBy: deferredCreator,
+      comments: new Writable<LegacyComment[]>([]),
+    },
+  });
+  const action_save_with_incomplete_upgrade = action(() =>
+    saveWithIncompleteUpgrade.send()
+  );
+  const assert_handler_leaves_upgrade_incomplete = assert(() =>
+    deferredVersion.get() === 0 && deferredCreator.get().name === "" &&
+    deferredTitle.get() === "Saved while incomplete"
+  );
+  const action_supply_upgrade_input = action(() =>
+    deferredName.set("Arrived creator")
+  );
+  const assert_handler_completes_available_upgrade = assert(() =>
+    deferredVersion.get() === TOPIC_STATE_VERSION &&
+    deferredCreator.get().name === "Arrived creator"
   );
 
   return {
@@ -266,6 +307,11 @@ export default pattern(() => {
       { assertion: assert_upgrade_waits_for_handler },
       { action: action_upgrade_and_submit },
       { assertion: assert_handler_upgraded_before_appending },
+      { action: action_save_with_incomplete_upgrade },
+      { assertion: assert_handler_leaves_upgrade_incomplete },
+      { action: action_supply_upgrade_input },
+      { action: action_save_with_incomplete_upgrade },
+      { assertion: assert_handler_completes_available_upgrade },
     ],
   };
 });
