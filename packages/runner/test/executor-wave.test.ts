@@ -589,6 +589,94 @@ describe("stage D seal-into-wave", () => {
     expect(stored?.document).toEqual({ value: { value: 99 } });
   });
 
+  it("exempts a contribution that read a doc at or after the loop's own direct commit from the conflict on it; one sealed before drops, and one that read the doc stale is refused at its own commit", async () => {
+    // The direct commit writes x and y. A contribution sealed before it
+    // wrote x. Two transactions opened afterwards write y: one read y with
+    // the commit applied, the other read y before the replica took it,
+    // and the replica's claim check at its commit refuses it ahead of the
+    // wave — a stale read never seals.
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const x = runtime.getCell<{ value: number }>(
+      space,
+      "wave-own-x",
+      undefined,
+    );
+    const y = runtime.getCell<{ value: number }>(
+      space,
+      "wave-own-y",
+      undefined,
+    );
+    const xLink = x.getAsNormalizedFullLink();
+    const yLink = y.getAsNormalizedFullLink();
+
+    const before = runtime.edit();
+    stampWaveRunContext(before, {
+      actionId: "derive-x-early",
+      kind: "derivation",
+    });
+    x.withTx(before).set({ value: 1 });
+    expect((await before.commit()).error).toBeUndefined();
+
+    const stale = runtime.edit();
+    stampWaveRunContext(stale, {
+      actionId: "derive-y-stale",
+      kind: "derivation",
+    });
+    const staleSeen = y.withTx(stale).get()?.value ?? 0;
+
+    Engine.applyCommit(engine, {
+      sessionId: "direct-session",
+      principal: signer.did(),
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: xLink.id, value: { value: { value: 50 } } },
+          { op: "set", id: yLink.id, value: { value: { value: 50 } } },
+        ],
+      },
+    });
+    const ownSeq = Engine.serverSeq(engine);
+    await y.sync();
+    expect(y.get()).toEqual({ value: 50 });
+    wave.noteOwnCommit(ownSeq, [
+      { id: xLink.id, scopeKey: "space" },
+      { id: yLink.id, scopeKey: "space" },
+    ]);
+
+    const fresh = runtime.edit();
+    stampWaveRunContext(fresh, {
+      actionId: "derive-y-fresh",
+      kind: "derivation",
+    });
+    const freshSeen = y.withTx(fresh).get()?.value ?? 0;
+    y.withTx(fresh).set({ value: freshSeen + 1 });
+    expect((await fresh.commit()).error).toBeUndefined();
+
+    y.withTx(stale).set({ value: staleSeen + 1 });
+    const staleOutcome = await stale.commit({ resolveAt: "verdict" });
+    expect(staleOutcome.error?.name).toBe("StorageTransactionInconsistent");
+
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions).toEqual([
+      { kind: "dropped" },
+      { kind: "committed" },
+    ]);
+    expect(outcome.supersededWrites).toBe(1);
+    expect(Engine.readState(engine, { id: xLink.id })?.document).toEqual({
+      value: { value: 50 },
+    });
+    expect(Engine.readState(engine, { id: yLink.id })?.document).toEqual({
+      value: { value: 51 },
+    });
+  });
+
   it("commits a completion's memo-state writes authoritatively: a doomed sealed overlay masking the hash doc cannot elide them, so a supersede-drop never tears hash from result (completion-visibility F2)", async () => {
     // The torn-hash interleave this pins closed (the completion-visibility
     // wedge, Link 1 + Link 2):

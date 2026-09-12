@@ -20,6 +20,7 @@ import {
   emptyServingLoopStats,
   type ServingLoopStats,
 } from "../src/executor/stats.ts";
+import { waveSettlementOf } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
 
@@ -240,6 +241,264 @@ describe("ExecutorHost.runLifecycleVerb", () => {
       "second:start",
       "second:end",
     ]);
+  });
+
+  describe("a transaction stamped `directCommit`", () => {
+    // A verb's transaction ordinarily seals into the cycle's wave and is
+    // durable only at the wave commit. Stamped `directCommit`, it commits
+    // to the store on its own, ahead of the wave, so its `commit()` result
+    // is the store's verdict (docs/features/server-pattern-lifecycle.md).
+
+    const marker = (runtime: Runtime) =>
+      runtime.getCell<{ marker: string }>(space, MARKER_CAUSE, undefined);
+
+    it("is durable when its `commit()` resolves, ahead of the wave commit", async () => {
+      host = newHost();
+      let sealed: {
+        settlement: unknown;
+        seen: { marker: string } | undefined;
+      } = { settlement: null, seen: undefined };
+      await host.runLifecycleVerb(space, {
+        name: "mark-directly",
+        run: async (runtime) => {
+          const tx = runtime.edit();
+          runtime.stampServerRun(tx, {
+            actionId: "test-verb/mark-directly",
+            kind: "bookkeeping",
+            directCommit: true,
+          });
+          marker(runtime).withTx(tx).set({ marker: "direct" });
+          runtime.prepareTxForCommit(tx);
+          const outcome = await tx.commit();
+          expect(outcome.error).toBeUndefined();
+          // Still inside the verb, so the cycle's wave has not committed:
+          // a reader opened now sees the write only if it committed on
+          // its own.
+          const reader = clientRuntime();
+          const cell = marker(reader);
+          await cell.sync();
+          sealed = { settlement: waveSettlementOf(tx), seen: cell.get() };
+          return undefined;
+        },
+      });
+      expect(sealed.seen).toEqual({ marker: "direct" });
+      expect(sealed.settlement).toBeUndefined();
+    });
+
+    it("is refused when a document it writes moved past the seq it was stamped at", async () => {
+      host = newHost();
+      const outcome = await host.runLifecycleVerb(space, {
+        name: "mark-late",
+        run: async (runtime) => {
+          const tx = runtime.edit();
+          runtime.stampServerRun(tx, {
+            actionId: "test-verb/mark-late",
+            kind: "bookkeeping",
+            directCommit: true,
+          });
+          marker(runtime).withTx(tx).set({ marker: "stale" });
+          // A client lands its own write on the marker between the stamp
+          // and the commit.
+          const client = clientRuntime();
+          const written = await client.editWithRetry((clientTx) => {
+            marker(client).withTx(clientTx).set({ marker: "client" });
+          });
+          expect(written.error).toBeUndefined();
+          runtime.prepareTxForCommit(tx);
+          return await tx.commit();
+        },
+      });
+      expect(outcome.error?.message).toContain("direct commit rejected");
+      const reader = clientRuntime();
+      const cell = marker(reader);
+      await cell.sync();
+      expect(cell.get()).toEqual({ marker: "client" });
+    });
+
+    it("is refused when a document it read moved past the seq it read, even one it does not write", async () => {
+      host = newHost();
+      const guard = (runtime: Runtime) =>
+        runtime.getCell<{ marker: string }>(space, "direct-guard", undefined);
+      const outcome = await host.runLifecycleVerb(space, {
+        name: "mark-guarded",
+        run: async (runtime) => {
+          await guard(runtime).sync();
+          const tx = runtime.edit();
+          runtime.stampServerRun(tx, {
+            actionId: "test-verb/mark-guarded",
+            kind: "bookkeeping",
+            directCommit: true,
+          });
+          // The write depends on a read of another document, which a
+          // client then moves before the commit.
+          const seen = guard(runtime).withTx(tx).get()?.marker ?? "unset";
+          marker(runtime).withTx(tx).set({ marker: `guarded by ${seen}` });
+          const client = clientRuntime();
+          const written = await client.editWithRetry((clientTx) => {
+            guard(client).withTx(clientTx).set({ marker: "moved" });
+          });
+          expect(written.error).toBeUndefined();
+          runtime.prepareTxForCommit(tx);
+          return await tx.commit();
+        },
+      });
+      expect(outcome.error?.message).toContain("direct commit rejected");
+      const reader = clientRuntime();
+      const cell = marker(reader);
+      await cell.sync();
+      expect(cell.get()).toBeUndefined();
+    });
+
+    it("is refused at the stamp for a run that is not bookkeeping, and at the commit for a write to another space", async () => {
+      host = newHost();
+      const other =
+        (await Identity.fromPassphrase("lifecycle verbs other space"))
+          .did() as MemorySpace;
+      const seen = await host.runLifecycleVerb(space, {
+        name: "mark-elsewhere",
+        run: async (runtime) => {
+          const derivation = runtime.edit();
+          let stampRefusal: string | undefined;
+          try {
+            runtime.stampServerRun(derivation, {
+              actionId: "test-verb/derive-directly",
+              kind: "derivation",
+              directCommit: true,
+            });
+          } catch (error) {
+            stampRefusal = error instanceof Error ? error.message : "";
+          } finally {
+            derivation.abort();
+          }
+          const tx = runtime.edit();
+          runtime.stampServerRun(tx, {
+            actionId: "test-verb/mark-elsewhere",
+            kind: "bookkeeping",
+            directCommit: true,
+          });
+          runtime.getCell<{ marker: string }>(other, MARKER_CAUSE, undefined)
+            .withTx(tx).set({ marker: "elsewhere" });
+          runtime.prepareTxForCommit(tx);
+          return { stampRefusal, commit: await tx.commit() };
+        },
+      });
+      expect(seen.stampRefusal).toContain("only a bookkeeping run");
+      expect(seen.commit.error?.message).toContain(
+        "may write only the serving space",
+      );
+    });
+
+    const PATTERN = [
+      "import { computed, pattern } from 'commonfabric';",
+      "export default pattern<{ n: number }, { total: number }>(",
+      "  ({ n }) => ({ total: computed(() => n * 3) }),",
+      ");",
+    ].join("\n");
+
+    /** Stage a piece of `pattern` with a direct commit, in one verb. */
+    const stageDirectly = (
+      runtime: Runtime,
+      pattern: Awaited<
+        ReturnType<Runtime["patternManager"]["compilePattern"]>
+      >,
+      cause: string,
+    ) => {
+      const piece = runtime.getCell<{ total: number }>(
+        space,
+        cause,
+        pattern.resultSchema,
+      );
+      return runtime.editWithRetry((tx) => {
+        runtime.stampServerRun(tx, {
+          actionId: `test-verb/${cause}`,
+          kind: "bookkeeping",
+          directCommit: true,
+        });
+        void runtime.setup(tx, pattern, { n: 5 }, piece, {
+          initializePieceSourceHistory: true,
+        });
+      }).then((outcome) => ({ outcome, piece }));
+    };
+
+    it("is refused when it read state a verb of the same cycle sealed into the wave", async () => {
+      // The compile's write-back of the closure seals into the cycle's
+      // wave, and the setup reads that closure: pending state, which the
+      // wave could still withdraw.
+      host = newHost();
+      const outcome = await host.runLifecycleVerb(space, {
+        name: "compile-and-stage",
+        run: async (runtime) => {
+          const pattern = await runtime.patternManager.compilePattern({
+            main: "/main.tsx",
+            files: [{ name: "/main.tsx", contents: PATTERN }],
+          }, { space });
+          return (await stageDirectly(runtime, pattern, "staged-too-early"))
+            .outcome;
+        },
+      });
+      expect(outcome.error?.message).toContain(
+        "read state the wave has not committed",
+      );
+    });
+
+    it("lets a piece it stages derive in the same cycle, the derivation written over the documents the commit moved", async () => {
+      // No root ensure, so nothing but the verbs' own work reaches a
+      // cycle's wave. The closure is compiled in a verb of its own, durable
+      // at that cycle's wave commit; the next cycle's verb stages the piece
+      // directly, and the piece's first derivation, which the demand pass
+      // runs once the verb has committed, seals into a wave opened ahead
+      // of the commit.
+      host = new ExecutorHost({
+        server,
+        serviceIdentity: serviceSigner.did(),
+        createRuntime: servingRuntime,
+        policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+        ensureSpaceRoots: false,
+      });
+      const compiled = await host.runLifecycleVerb(space, {
+        name: "compile",
+        run: async (runtime) =>
+          runtime.patternManager.getArtifactEntryRef(
+            await runtime.patternManager.compilePattern({
+              main: "/main.tsx",
+              files: [{ name: "/main.tsx", contents: PATTERN }],
+            }, { space }),
+          )!,
+      });
+      const receipt = await host.runLifecycleVerb(space, {
+        name: "instantiate-directly",
+        run: async (runtime) => {
+          const pattern = (await runtime.patternManager.loadPatternByIdentity(
+            compiled.identity,
+            compiled.symbol,
+            space,
+            { repairCache: false },
+          ))!;
+          const { outcome, piece } = await stageDirectly(
+            runtime,
+            pattern,
+            "directly-staged-piece",
+          );
+          expect(outcome.error).toBeUndefined();
+          return {
+            rootId: piece.getAsNormalizedFullLink().id,
+            resultSchema: pattern.resultSchema,
+          };
+        },
+        demandRoots: (receipt) => [receipt.rootId],
+      });
+      const reader = clientRuntime();
+      const cell = reader.getCell<{ total: number }>(
+        space,
+        "directly-staged-piece",
+        receipt.resultSchema,
+      );
+      await cell.sync();
+      await waitUntil(async () => {
+        await cell.sync();
+        return cell.key("total").get() === 15;
+      }, "the directly staged piece's first derivation");
+    });
   });
 
   it("a SpaceServer that is not active refuses a verb with the parked message", async () => {

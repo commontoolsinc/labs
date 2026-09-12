@@ -112,6 +112,7 @@ export {
 } from "./piece-input-path.ts";
 export {
   confirmServedInstantiate,
+  confirmServedSetSource,
   servedInstantiatePiece,
   type ServedInstantiateReceipt,
   type ServedInstantiateRequest,
@@ -119,5 +120,8 @@ export {
   type ServedLifecycleRefusalCode,
   type ServedPatternRef,
   type ServedPatternSource,
+  servedSetPieceSource,
+  type ServedSetSourceReceipt,
+  type ServedSetSourceRequest,
   servedUploadPattern,
 } from "./served-lifecycle.ts";

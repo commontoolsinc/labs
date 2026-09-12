@@ -1130,6 +1130,91 @@ describe("cli piece parsing", () => {
     expect(seen.ensured).toBeUndefined();
   });
 
+  it("setPiecePattern() asks a serving deployment to replace the source and refreshes the piece here", async () => {
+    // Under the deployment's flag posture the client resolves the program
+    // and sends it; the serving runtime commits the update. What stays here
+    // is the refresh of the piece this connection holds, whose outcome the
+    // receipt reports the way a client-side update's does.
+    const program = { main: "/main.tsx", files: [] };
+    const cell = { name: "the piece's cell" };
+    const seen: { requests: unknown[]; started: unknown[] } = {
+      requests: [],
+      started: [],
+    };
+    let refreshFails = false;
+    const controller = {
+      runtime: { experimental: { serverExecution: true } },
+      getSpace: () => SPACE_DID,
+      getPieceCell: () => Promise.resolve(cell),
+      startPiece: (started: unknown) => {
+        seen.started.push(started);
+        return refreshFails
+          ? Promise.reject(new Error("the piece never settled"))
+          : Promise.resolve();
+      },
+    };
+    const deps = {
+      loadPieces: () => Promise.resolve(controller as any),
+      resolvePieceAddress: () => Promise.resolve(PIECE),
+      getPinnedProgramFromFile: () => Promise.resolve(program as any),
+      loadIdentity: () => Promise.resolve({} as any),
+      setPieceSourceOnServer: (_config: unknown, input: unknown) => {
+        seen.requests.push(input);
+        return Promise.resolve({
+          pieceId: PIECE,
+          pattern: { identity: "B".repeat(43), symbol: "default" },
+          revisionId: "revision-2",
+          seq: 12,
+          detachedOrigin: "system:origin.tsx",
+        });
+      },
+    };
+    const config = {
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+    };
+    const entry = { mainPath: "/main.tsx", repository: "repo" };
+
+    const receipt = await setPiecePattern(config, entry, {}, deps);
+    expect(receipt).toEqual({
+      status: "committed",
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      space: SPACE_DID,
+      seq: 12,
+      revisionId: "revision-2",
+      detachedOrigin: "system:origin.tsx",
+      refresh: { status: "completed" },
+    });
+    expect(seen.requests[0]).toEqual({
+      space: SPACE_DID,
+      piece: PIECE,
+      program,
+      repository: "repo",
+    });
+    expect(seen.started).toEqual([cell]);
+
+    refreshFails = true;
+    const unrefreshed = await setPiecePattern(
+      config,
+      entry,
+      { dangerouslyAllowIncompatibleSchema: true },
+      deps,
+    );
+    expect(seen.requests[1]).toEqual({
+      space: SPACE_DID,
+      piece: PIECE,
+      program,
+      repository: "repo",
+      dangerouslyAllowIncompatibleSchema: true,
+    });
+    expect(unrefreshed.refresh).toEqual({
+      status: "failed",
+      warning: "the piece never settled",
+    });
+  });
+
   it("recreateSpaceRootPattern() targets the explicit space", async () => {
     const seen: { config?: SpaceConfig } = {};
     const pieceId = await recreateSpaceRootPattern({

@@ -2322,6 +2322,141 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSyncedWithCommit issues a receipt while sealing when the caller asks for a direct commit", async () => {
+    // A direct commit is the serving loop's own commit to the store, made
+    // outside the wave, so its verdict is the store's and a receipt minted
+    // from it claims nothing a withdrawal can undo. The runner's part is to
+    // stamp the request and lift the refusal; the routing is the seal
+    // destination's.
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const resultCell = serving.getCell(
+        space,
+        "runSyncedWithCommit direct commit while sealing",
+      );
+      const initial = await compileReceiptPattern(serving, "v1");
+      const candidate = await compileReceiptPattern(serving, "v2");
+      await serving.runSynced(resultCell, initial, {});
+      const before = receiptSourceSnapshot(serving, resultCell);
+      const transition = await receiptSourceTransition(serving, resultCell);
+      const stamped: Array<{
+        tx: IExtendedStorageTransaction;
+        actionId: string;
+        directCommit?: boolean;
+      }> = [];
+      const sealed: IExtendedStorageTransaction[] = [];
+      serving.installSealDestination({
+        // The double commits the inner transaction to the store, which is
+        // what the serving loop's direct commit does.
+        seal: (tx: IExtendedStorageTransaction) => {
+          sealed.push(tx);
+          return tx.tx.commit();
+        },
+      }, {
+        runStamper: (tx, info) => {
+          stamped.push({
+            tx,
+            actionId: info.actionId,
+            ...(info.directCommit === undefined
+              ? {}
+              : { directCommit: info.directCommit }),
+          });
+        },
+      });
+
+      const result = await serving.runSyncedWithCommit(
+        resultCell,
+        candidate,
+        {},
+        {
+          expectedPatternIdentity: before.pattern,
+          pieceSourceTransition: transition,
+          directCommit: true,
+          cfcTrustSnapshot: serving.trustSnapshotForPrincipal(
+            "did:key:requester",
+          ),
+        },
+      );
+      const successor = serving.patternManager.getArtifactEntryRef(candidate)!;
+      expect(result.commit.pattern).toEqual(successor);
+      // The setup transaction reached the destination stamped as a direct
+      // commit and carrying the requester's trust snapshot; the swap the
+      // pointer write triggers stamps its own.
+      const setup = stamped.find((stamp) => stamp.directCommit === true);
+      expect(setup?.actionId).toBe(`piece-run-synced/${resultCell.sourceURI}`);
+      expect(sealed).toContain(setup?.tx);
+      expect(setup?.tx.getCfcState().trustSnapshot?.actingPrincipal).toBe(
+        "did:key:requester",
+      );
+      expect(receiptSourceSnapshot(serving, resultCell).pattern).toEqual(
+        successor,
+      );
+      // The update's authority registered from the committed transaction.
+      expect(
+        serving.grantsModuleDelegation(
+          space,
+          successor.identity,
+          before.pattern.identity,
+        ),
+      ).toBe(true);
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit leaves the piece unstarted when `start` is `false`", async () => {
+    const resultCell = runtime.getCell(space, "runSyncedWithCommit no start");
+    const initial = await compileReceiptPattern(runtime, "v1");
+    const second = await compileReceiptPattern(runtime, "v2");
+    const third = await compileReceiptPattern(runtime, "v3");
+    await runtime.runSynced(resultCell, initial, {});
+    const started: unknown[] = [];
+    using _start = stub(runtime.runner, "start", (cell) => {
+      started.push(cell);
+      return Promise.resolve(true);
+    });
+
+    const unstarted = await runtime.runSyncedWithCommit(
+      resultCell,
+      second,
+      {},
+      {
+        expectedPatternIdentity: receiptSourceSnapshot(runtime, resultCell)
+          .pattern,
+        pieceSourceTransition: await receiptSourceTransition(
+          runtime,
+          resultCell,
+        ),
+        start: false,
+      },
+    );
+    expect(unstarted.commit.pattern).toEqual(
+      runtime.patternManager.getArtifactEntryRef(second),
+    );
+    expect(receiptSourceSnapshot(runtime, resultCell).pattern).toEqual(
+      unstarted.commit.pattern,
+    );
+    expect(started).toEqual([]);
+
+    // Absent, the option keeps the start.
+    await runtime.runSyncedWithCommit(resultCell, third, {}, {
+      expectedPatternIdentity: unstarted.commit.pattern,
+      pieceSourceTransition: await receiptSourceTransition(
+        runtime,
+        resultCell,
+      ),
+    });
+    expect(started).toHaveLength(1);
+  });
+
   it("runSynced refuses to grant update authority in a caller-owned transaction", async () => {
     const resultCell = runtime.getCell(space, "bound source authority");
     const initial = await compileReceiptPattern(runtime, "v1");

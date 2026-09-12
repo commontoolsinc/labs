@@ -18,14 +18,18 @@ import {
 import { ExecutorHost } from "@commonfabric/runner/executor/host";
 import { LoopbackStorageManager } from "@commonfabric/runner/executor/loopback-storage";
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { loadVerifiedSourceClosure } from "../../runner/src/compilation-cache/cell-cache.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { pieceId } from "../src/piece-id.ts";
 import { resolveSlugTargetCell } from "../src/slugs.ts";
 import {
   confirmServedInstantiate,
+  confirmServedSetSource,
   servedInstantiatePiece,
   ServedLifecycleRefusal,
   type ServedPatternSource,
+  servedSetPieceSource,
+  type ServedSetSourceRequest,
   servedUploadPattern,
 } from "../src/ops/served-lifecycle.ts";
 
@@ -57,6 +61,62 @@ const BASE_PROGRAM = programOf([
 const BROKEN_PROGRAM = programOf(
   "import { pattern } from 'commonfabric';\nexport default pattern<{}, {}>(() => ({ label: undefinedName }));\n",
 );
+
+/** `BASE_PROGRAM` with its `seed` argument narrowed to a number. */
+const NUMERIC_SEED_PROGRAM = programOf([
+  "import { NAME, pattern } from 'commonfabric';",
+  "export default pattern<{ seed?: number }, { label: string }>(",
+  "  ({ seed }) => ({",
+  "    [NAME]: 'Served lifecycle',",
+  "    label: seed === undefined ? 'unset' : String(seed),",
+  "  }),",
+  ");",
+  "",
+].join("\n"));
+
+/**
+ * A handler whose write is authorized by its own module, over a field it
+ * binds — the shape a source update must carry writer authority across.
+ */
+function authorizedWriterProgram(version: string): RuntimeProgram {
+  return {
+    main: "/app/main.tsx",
+    files: [
+      {
+        name: "/app/main.tsx",
+        contents: `/// <cts-enable />
+import {
+  handler,
+  pattern,
+  Writable,
+  WriteAuthorizedBy,
+} from "commonfabric";
+import { revision } from "../shared/revision.ts";
+
+const setName = handler<
+  { name: string },
+  { name: Writable<string> }
+>((event, state) => {
+  state.name.set(revision + ":" + event.name);
+});
+
+export default pattern<{ seed?: string }>(() => {
+  const name = new Writable<
+    WriteAuthorizedBy<string, typeof setName>
+  >("initial").for("name");
+  return { name, setName: setName({ name }) };
+});
+`,
+      },
+      {
+        name: "/shared/revision.ts",
+        contents: `/// <cts-enable />
+export const revision = ${JSON.stringify(version)};
+`,
+      },
+    ],
+  };
+}
 
 describe("served lifecycle verbs", () => {
   let server: MemoryV2Server.Server;
@@ -251,6 +311,175 @@ describe("served lifecycle verbs", () => {
       expect(refusal.code).toBe("compile-failed");
       expect(refusal.message).toContain("undefinedName");
       expect(host.stats().lifecycleVerbs).toEqual({ runs: 1, failures: 1 });
+    });
+  });
+
+  describe("setsrc", () => {
+    // The served source update commits its setup transaction directly to
+    // the store, outside the cycle's wave, so the update's module authority
+    // registers from a durable verdict on the serving runtime and a later
+    // runtime reads it from the stored closure.
+
+    // A program is uploaded as a verb of its own, the way the route does
+    // it, so its closure is durable before the update reads it.
+    const patternOf = async (source: ServedPatternSource) =>
+      source.pattern ?? (await served(
+        "upload",
+        (pieces) => servedUploadPattern(pieces, source.program),
+      )).ref;
+
+    const setSource = async (
+      pieceId: string,
+      source: ServedPatternSource,
+      options: Omit<
+        ServedSetSourceRequest,
+        "pieceId" | "pattern" | "actingUser"
+      > = {},
+    ) => {
+      const pattern = await patternOf(source);
+      return await served(
+        "setsrc",
+        (pieces) =>
+          servedSetPieceSource(pieces, {
+            pieceId,
+            pattern,
+            ...options,
+            actingUser: aliceSigner.did(),
+          }),
+        (runtime, receipt) => confirmServedSetSource(runtime, space, receipt),
+      );
+    };
+
+    it("replaces the source a later client reads, with the revision the receipt names, and authorizes the successor over the predecessor", async () => {
+      const created = await instantiate({
+        program: authorizedWriterProgram("v1"),
+      });
+      const candidate = await patternOf({
+        program: authorizedWriterProgram("v2"),
+      });
+      // Registered on the serving runtime from the committed transaction:
+      // read inside the verb, before the cycle's wave could commit.
+      let granted: boolean | undefined;
+      const receipt = await served(
+        "setsrc",
+        async (pieces) => {
+          const receipt = await servedSetPieceSource(pieces, {
+            pieceId: created.pieceId,
+            pattern: candidate,
+            actingUser: aliceSigner.did(),
+          });
+          granted = pieces.runtime.grantsModuleDelegation(
+            space,
+            receipt.pattern.identity,
+            created.pattern.identity,
+          );
+          return receipt;
+        },
+        (runtime, receipt) => confirmServedSetSource(runtime, space, receipt),
+      );
+      expect(receipt.pieceId).toBe(created.pieceId);
+      expect(receipt.pattern.identity).not.toBe(created.pattern.identity);
+      expect(receipt.seq).toBeGreaterThan(0);
+      expect(receipt.detachedOrigin).toBeNull();
+      expect(granted).toBe(true);
+
+      const pieces = await clientPieces();
+      const piece = await pieces.get(receipt.pieceId);
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.pattern);
+      const revisions = getPieceSourceRevisions(piece.getCell());
+      expect(revisions.at(-1)?.revisionId).toBe(receipt.revisionId);
+      expect(revisions.at(-1)?.pattern).toEqual(receipt.pattern);
+      // The stored closure carries the delegation a fresh runtime registers
+      // from.
+      const tx = pieces.runtime.edit();
+      try {
+        const closure = await loadVerifiedSourceClosure(
+          pieces.runtime,
+          space,
+          receipt.pattern.identity,
+          tx,
+        );
+        expect(
+          closure?.get(receipt.pattern.identity)?.delegatedModuleIdentities,
+        ).toContain(created.pattern.identity);
+      } finally {
+        tx.abort();
+      }
+      expect(host.stats().lifecycleVerbs).toEqual({ runs: 3, failures: 0 });
+    });
+
+    it("refuses a source whose argument schema is not backward compatible, and applies it under the dangerous override", async () => {
+      // Created without a seed, so the stored argument satisfies either
+      // schema and only the declared contract stands between the two.
+      const created = await instantiate({ program: BASE_PROGRAM });
+      const refusal = await refusalOf(
+        setSource(created.pieceId, { program: NUMERIC_SEED_PROGRAM }),
+      );
+      expect(refusal.code).toBe("incompatible");
+      expect(refusal.message).toContain("not backward compatible");
+      const unchanged = await clientPieces();
+      expect(
+        getPatternIdentityRef((await unchanged.get(created.pieceId)).getCell()),
+      ).toEqual(created.pattern);
+
+      const receipt = await setSource(
+        created.pieceId,
+        { program: NUMERIC_SEED_PROGRAM },
+        { dangerouslyAllowIncompatibleSchema: true },
+      );
+      const pieces = await clientPieces();
+      expect(
+        getPatternIdentityRef((await pieces.get(created.pieceId)).getCell()),
+      ).toEqual(receipt.pattern);
+    });
+
+    it("refuses a piece the space does not hold, and an address that names none", async () => {
+      const refusal = await refusalOf(
+        setSource("no-such-piece", { program: BASE_PROGRAM }),
+      );
+      expect(refusal.code).toBe("piece-not-found");
+      const malformed = await refusalOf(
+        setSource("", { program: BASE_PROGRAM }),
+      );
+      expect(malformed.code).toBe("piece-not-found");
+    });
+
+    it("refuses an update proved against a pattern the piece is no longer on", async () => {
+      const created = await instantiate({ program: BASE_PROGRAM });
+      const refusal = await refusalOf(
+        setSource(created.pieceId, { program: BASE_PROGRAM }, {
+          expectedPattern: { identity: "elsewhere", symbol: "default" },
+        }),
+      );
+      expect(refusal.code).toBe("source-moved");
+    });
+
+    it("refuses a pattern the space does not hold", async () => {
+      const created = await instantiate({ program: BASE_PROGRAM });
+      const refusal = await refusalOf(
+        setSource(created.pieceId, {
+          pattern: { identity: "no-such-identity", symbol: "default" },
+        }),
+      );
+      expect(refusal.code).toBe("pattern-not-found");
+    });
+
+    it("reports the refresh as deferred on the receipt the served update is built on", async () => {
+      // The served option on the client's own runtime: the commit is the
+      // store's as always there, and the piece is left to whoever runs it.
+      const created = await instantiate({ program: BASE_PROGRAM });
+      const candidate = await patternOf({ program: NUMERIC_SEED_PROGRAM });
+      const pieces = await clientPieces();
+      const pattern = await pieces.runtime.patternManager
+        .loadPatternByIdentity(candidate.identity, candidate.symbol, space);
+      const piece = await pieces.get(created.pieceId);
+      const receipt = await piece.setCompiledPattern(pattern!, {
+        dangerouslyAllowIncompatibleSchema: true,
+        served: { actingUser: aliceSigner.did() },
+      });
+      expect(receipt.status).toBe("committed");
+      expect(receipt.refresh).toEqual({ status: "deferred" });
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
     });
   });
 });

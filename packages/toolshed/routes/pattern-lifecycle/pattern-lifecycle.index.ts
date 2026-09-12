@@ -46,4 +46,5 @@ router.use(
 
 export default router
   .openapi(routes.upload, handlers.upload)
-  .openapi(routes.instantiate, handlers.instantiate);
+  .openapi(routes.instantiate, handlers.instantiate)
+  .openapi(routes.setsrc, handlers.setsrc);

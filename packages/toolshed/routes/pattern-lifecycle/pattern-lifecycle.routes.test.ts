@@ -47,7 +47,7 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
   };
 
   it("rejects an unsigned request on every verb", async () => {
-    for (const verb of ["upload", "instantiate"]) {
+    for (const verb of ["upload", "instantiate", "setsrc"]) {
       const res = await post(`${BASE}/${verb}`);
       expect(res.status).toBe(401);
       expect(await res.json()).toEqual({
@@ -77,6 +77,16 @@ describe("pattern-lifecycle route (transport + middleware)", () => {
       error: expect.stringContaining("serving loop"),
       code: "server-execution-off",
     });
+  });
+
+  it("routes a signed setsrc to its handler, which answers for the posture too", async () => {
+    const res = await signedRequest("setsrc", {
+      space: "did:key:z6MkaaaabbbbccccddddeeeeffffgggghhhhAAAA",
+      piece: "fid1:piece",
+      program: { main: "/main.tsx", files: [] },
+    });
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe("server-execution-off");
   });
 
   it("routes a signed upload to its handler, which answers for the posture too", async () => {

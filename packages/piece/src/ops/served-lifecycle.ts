@@ -1,26 +1,29 @@
 // The pattern-lifecycle verbs as the serving side runs them
 // (docs/features/server-pattern-lifecycle.md): compile a program into a
-// space and create a piece from a pattern. Each runs on a space's serving
-// runtime inside a wave cycle, so every write it makes seals into that
-// cycle's wave and reaches the store as one of the serving loop's own
-// commits. That seat rules out the client-side shape of the same operations
-// in two places: a transaction the runtime seals is accepted at the seal and
-// durable only at the wave commit, so a receipt minted from the transaction
-// is refused (`runSyncedWithCommit`), and the storage manager's full
-// `synced()` waits on that same commit and would deadlock. The verbs here
-// mint their receipts from what they wrote and leave durability to the
-// `confirm` read at the bottom, which the serving loop runs once the wave
-// has committed. Replacing a piece's source is not among them: a source
-// update carries module-update authority the runner publishes only from a
-// transaction that commits to storage itself, and refuses from a wave.
+// space, create a piece from a pattern, and replace a piece's source. Each
+// runs on a space's serving runtime inside a wave cycle. A write the first
+// two make seals into that cycle's wave and reaches the store as one of the
+// serving loop's own commits, which rules out the client-side shape of the
+// same operations in two places: a transaction the runtime seals is
+// accepted at the seal and durable only at the wave commit, so a receipt
+// minted from the transaction is refused (`runSyncedWithCommit`), and the
+// storage manager's full `synced()` waits on that same commit and would
+// deadlock. Those verbs mint their receipts from what they wrote and leave
+// durability to the `confirm` read, which the serving loop runs once the
+// wave has committed. A source update carries module-update authority the
+// runner publishes only from a transaction that commits to storage itself,
+// so its setup transaction commits directly, outside the wave, and its
+// receipt is the store's verdict.
 
 import {
   type Cell,
   compileAndSavePattern,
   entityIdFrom,
   getPatternIdentityRef,
+  getPieceSourceRevisions,
   type MemorySpace,
   type Pattern,
+  PIECE_SOURCE_MOVED,
   resolveSpaceRootPattern,
   type Runtime,
   type RuntimeProgram,
@@ -30,6 +33,12 @@ import { pieceListSchema } from "@commonfabric/runner/schemas";
 import { pieceId as pieceIdOf } from "../piece-id.ts";
 import { claimSlugInTx, prepareSlugClaim } from "../slugs.ts";
 import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
+import {
+  isPieceSourceCompatibilityRefusal,
+  type PatternUpdateReceipt,
+  type PieceController,
+  PieceSourceChangedError,
+} from "./piece-controller.ts";
 import type { PiecesController } from "./pieces-controller.ts";
 
 /** A content-addressed pattern pointer: the closure and the export run. */
@@ -58,7 +67,13 @@ export type ServedLifecycleRefusalCode =
   /** The requested slug already names something, and `force` was not set. */
   | "slug-taken"
   /** The space has no root to register the piece with. */
-  | "no-space-root";
+  | "no-space-root"
+  /** The named piece is not held by the space. */
+  | "piece-not-found"
+  /** The candidate source cannot run over the piece's retained state. */
+  | "incompatible"
+  /** The piece is not on the pattern the update was proved against. */
+  | "source-moved";
 
 /** A served verb's refusal, carrying the code the wire reports. */
 export class ServedLifecycleRefusal extends Error {
@@ -115,6 +130,59 @@ export interface ServedInstantiateReceipt {
   slug?: string;
 }
 
+/** What `setsrc` asks for. */
+export interface ServedSetSourceRequest {
+  /** The piece whose source is replaced. */
+  pieceId: string;
+
+  /**
+   * The pattern the piece moves to: a closure the space already holds. A
+   * program is uploaded first, as a verb of its own, so the closure is
+   * durable before the update's setup transaction reads and extends it.
+   */
+  pattern: ServedPatternRef;
+
+  /** Repository locator stored with the piece's source. */
+  repository?: string;
+
+  /**
+   * Replace the source even when compatibility cannot be proven, or when
+   * the current pattern cannot be loaded at all.
+   */
+  dangerouslyAllowIncompatibleSchema?: boolean;
+
+  /** The pattern the update was proved against; a piece on another refuses. */
+  expectedPattern?: ServedPatternRef;
+
+  /**
+   * The principal the verb acts for. The setup transaction carries this
+   * principal's trust snapshot, as a creation's does
+   * ({@link ServedInstantiateRequest}).
+   */
+  actingUser: string;
+}
+
+/** What `setsrc` hands back: the accepted setup transaction's receipt. */
+export interface ServedSetSourceReceipt {
+  pieceId: string;
+
+  /** The pointer the piece now holds. */
+  pattern: ServedPatternRef;
+
+  /** The source revision the transaction appended. */
+  revisionId: string;
+
+  /**
+   * Position in the space's commit log at which the transaction was
+   * accepted: the seq `cf inspect value-at --seq` and `diff --from/--to`
+   * read.
+   */
+  seq: number;
+
+  /** The origin the update detached, `null` when the piece had none. */
+  detachedOrigin: string | null;
+}
+
 function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (
@@ -159,7 +227,7 @@ export async function servedUploadPattern(
 async function resolveServedPattern(
   pieces: PiecesController,
   source: ServedPatternSource,
-  options: { previousEntryIdentity?: string } = {},
+  options: { previousEntryIdentity?: string; repairCache?: boolean } = {},
 ): Promise<{ pattern: Pattern; ref: ServedPatternRef }> {
   if (source.program !== undefined) {
     return await servedUploadPattern(pieces, source.program, options);
@@ -171,6 +239,9 @@ async function resolveServedPattern(
       ref.identity,
       ref.symbol,
       pieces.getSpace(),
+      options.repairCache === undefined
+        ? undefined
+        : { repairCache: options.repairCache },
     );
   } catch (error) {
     // A closure the space holds but cannot load is, to the caller, one it
@@ -292,6 +363,126 @@ export async function servedInstantiatePiece(
     pattern: ref,
     ...(slugClaim === undefined ? {} : { slug: slugClaim.validSlug }),
   };
+}
+
+/**
+ * Replace a piece's source with a pattern the space holds, through the same
+ * checks a client's update runs — the pin against the pattern it was proved
+ * on, the compatibility assertions, the retained-argument validators — and
+ * one setup transaction that commits directly to the store: the transaction
+ * carries the requester's trust snapshot and the update's module authority,
+ * which registers on this runtime from the store's verdict. The piece is
+ * not started here. A piece the loop
+ * runs is swapped by its pointer watcher, and one it does not run waits for
+ * demand; the caller names the piece's root as the verb's demand for the
+ * latter. Neither the candidate nor the current pattern loads with cache
+ * repair, so the verb seals nothing into the cycle's wave that the update
+ * would rest on or answer for.
+ */
+export async function servedSetPieceSource(
+  pieces: PiecesController,
+  request: ServedSetSourceRequest,
+): Promise<ServedSetSourceReceipt> {
+  const { pattern } = await resolveServedPattern(
+    pieces,
+    { pattern: request.pattern },
+    { repairCache: false },
+  );
+  let piece: PieceController;
+  try {
+    piece = await pieces.get(request.pieceId, false);
+  } catch (error) {
+    throw new ServedLifecycleRefusal("piece-not-found", messageOf(error), {
+      cause: error,
+    });
+  }
+  if (getPatternIdentityRef(piece.getCell()) === undefined) {
+    throw new ServedLifecycleRefusal(
+      "piece-not-found",
+      `piece ${request.pieceId} is not held by the space`,
+    );
+  }
+  await prepareSourceClosureVerification();
+  let receipt: PatternUpdateReceipt;
+  try {
+    receipt = await piece.setCompiledPattern(pattern, {
+      ...(request.repository === undefined
+        ? {}
+        : { repository: request.repository }),
+      ...(request.dangerouslyAllowIncompatibleSchema === true
+        ? { dangerouslyAllowIncompatibleSchema: true }
+        : {}),
+      ...(request.expectedPattern === undefined
+        ? {}
+        : { expectedPattern: request.expectedPattern }),
+      served: { actingUser: request.actingUser },
+    });
+  } catch (error) {
+    throw setSourceRefusal(error);
+  }
+  return {
+    pieceId: request.pieceId,
+    pattern: receipt.ref,
+    revisionId: receipt.revisionId,
+    seq: receipt.seq,
+    detachedOrigin: receipt.detachedOrigin,
+  };
+}
+
+/**
+ * Helper for `servedSetPieceSource()`, which names the refusal a failed
+ * update is: the piece moved off the pattern it was proved against, the
+ * candidate cannot run over the piece's state, or setup refused for a
+ * reason of its own.
+ */
+function setSourceRefusal(error: unknown): ServedLifecycleRefusal {
+  const message = messageOf(error);
+  if (
+    error instanceof PieceSourceChangedError ||
+    message.includes(PIECE_SOURCE_MOVED)
+  ) {
+    return new ServedLifecycleRefusal("source-moved", message, {
+      cause: error,
+    });
+  }
+  if (isPieceSourceCompatibilityRefusal(error)) {
+    return new ServedLifecycleRefusal("incompatible", message, {
+      cause: error,
+    });
+  }
+  return new ServedLifecycleRefusal("setup-failed", message, { cause: error });
+}
+
+/**
+ * The durability read behind {@link servedSetPieceSource}: the piece
+ * document holds the pattern pointer the transaction wrote and the
+ * revision it appended.
+ */
+export async function confirmServedSetSource(
+  runtime: Runtime,
+  space: MemorySpace,
+  receipt: ServedSetSourceReceipt,
+): Promise<void> {
+  const piece = runtime.getCellFromEntityId(
+    space,
+    entityIdFrom(receipt.pieceId),
+  );
+  await piece.sync();
+  const stored = getPatternIdentityRef(piece);
+  if (
+    stored === undefined ||
+    stored.identity !== receipt.pattern.identity ||
+    stored.symbol !== receipt.pattern.symbol ||
+    !getPieceSourceRevisions(piece).some((revision) =>
+      revision.revisionId === receipt.revisionId
+    )
+  ) {
+    throw new Error(
+      `piece ${receipt.pieceId} does not hold pattern ` +
+        `${receipt.pattern.identity}#${receipt.pattern.symbol} at revision ` +
+        `${receipt.revisionId}: the source update did not commit`,
+    );
+  }
 }
 
 /**
