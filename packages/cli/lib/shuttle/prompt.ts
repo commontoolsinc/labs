@@ -39,6 +39,7 @@
 import { EditBuffer } from "../view/editbuffer.ts";
 import type { Key } from "../view/keys.ts";
 import { completeLine } from "./completion.ts";
+import { recordedForm } from "./handles.ts";
 import { LineHistory, recall } from "./history.ts";
 import {
   escapeControlCharacters,
@@ -155,8 +156,11 @@ export interface PromptTerminal {
  *   the cursor at the end of the line.
  *
  * `up` and `down` are ordinary bindings rather than any of those: they walk
- * the lines this run typed (`history.ts`), which is a value the prompt holds
- * beside the line being edited and nothing reads.
+ * the lines this run has taken (`history.ts`), which is a value the prompt
+ * holds beside the line being edited and nothing reads. A line goes in with its
+ * handles written out as the rows they named, so a line recalled after a later
+ * listing acts on what it acted on first; what the screen holds is untouched,
+ * the line having been drawn as it was typed and ended where it was run.
  *
  * Cancelling is honest about what it can reach. The line is abandoned and the
  * prompt comes back, but a read already sent to the server is not something
@@ -216,8 +220,12 @@ export async function runPrompt(
       terminal.finish();
       buffer.setText("");
       // Recorded where the line is taken rather than where it settles, which
-      // is what puts a line still running under the first `up`.
-      history.record(line);
+      // is what puts a line still running under the first `up`. What is
+      // recorded is the line with its handles written out as the rows they
+      // name (`recordedForm`, `handles.ts`), and the handles read are the ones
+      // the line itself is about to read: a line runs against the listing
+      // standing when it was taken, and nothing has run between the two.
+      history.record(recordedForm(line, shuttle.session.handles));
       running = start(line, shuttle, deps);
       // Nothing is drawn: the prompt for the next line appears when the line
       // settles, or when a key is typed before it does, so a line that

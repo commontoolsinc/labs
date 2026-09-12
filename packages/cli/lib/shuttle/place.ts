@@ -979,15 +979,8 @@ function movePlace(
   // level this module can walk to, so it comes back for the handle table the
   // way a wish target comes back for the connection. In any later segment `%`
   // is an ordinary character of a data key.
-  if (operand.startsWith(HANDLE_SIGIL)) {
-    const cut = operand.indexOf("/");
-    return {
-      kind: "handle",
-      handle: cut === -1 ? operand : operand.slice(0, cut),
-      rest: cut === -1 ? "" : operand.slice(cut + 1),
-      operand,
-    };
-  }
+  const handled = handleMove(operand);
+  if (handled !== undefined) return handled;
   return moveBySegments(from, operand, operand, verb);
 }
 
@@ -1506,6 +1499,32 @@ const SCOPE_HEAD = `${RELATIVE_HEAD}@`;
  * rather than by three authors spelling one character the same way.
  */
 export const HANDLE_SIGIL = "%";
+
+/**
+ * How a handle operand divides — the handle at its head, and the walk written
+ * after it — and nothing for an operand written as no handle.
+ *
+ * {@link HANDLE_SIGIL} at the head is the whole of the test, and the walk is
+ * whatever follows the first separator. A handle written with a trailing
+ * separator and one written without carry the same empty walk, so `%4` and
+ * `%4/` name the row and nothing inside it alike.
+ *
+ * It is a function rather than a branch inside {@link movePlace} because two
+ * readers ask it. {@link movePlace} hands back what it returns, and the
+ * recording that writes a line's handles out as the rows they named reads a
+ * token through it (`recordedForm`, `handles.ts`), so where the handle ends
+ * and the walk begins is decided once instead of twice.
+ */
+export function handleMove(operand: string): HandleMove | undefined {
+  if (!operand.startsWith(HANDLE_SIGIL)) return undefined;
+  const cut = operand.indexOf("/");
+  return {
+    kind: "handle",
+    handle: cut === -1 ? operand : operand.slice(0, cut),
+    rest: cut === -1 ? "" : operand.slice(cut + 1),
+    operand,
+  };
+}
 
 /**
  * The sentence a refusal adds where `operand` is a scope word written with no

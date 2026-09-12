@@ -11,10 +11,11 @@
  * was given. That is what lets a value print bare where nothing in it needs
  * more, which is the common case and the point.
  *
- * {@link tailOfLine} is the third, and it is here for the same reason: where
- * a token ends is this module's question whether the line is whole or still
- * being typed, and a completion that answered it for itself would be a
- * second grammar to keep in step with this one.
+ * {@link tailOfLine} and {@link tokensOfLine} are the third and the fourth,
+ * and both are here for the same reason: where a token ends is this module's
+ * question whether the line is whole or still being typed, and a completion
+ * or a recording that answered it for itself would be a second grammar to
+ * keep in step with this one.
  *
  * What a token then means is decided elsewhere — `place.ts` reads an operand
  * as a reference or as one of the navigation spellings, and a verb reads its
@@ -171,6 +172,47 @@ export function tailOfLine(line: string): LineTail | undefined {
     : { before: tokens, head: line, prefix: "" };
 }
 
+/** One token of a line, and the run of the line it was written across. */
+export interface LineToken {
+  /** What the split reads the token as, rather than how it is spelled. */
+  readonly value: string;
+
+  /** Where the token opens on the line. */
+  readonly start: number;
+
+  /** The offset just past the token's last character. */
+  readonly end: number;
+}
+
+/**
+ * The tokens of `line`, each carrying where it was written, and nothing where
+ * the line is one the split refuses.
+ *
+ * It is {@link splitLine} with the spans kept, for the one caller that writes
+ * a line back out with some of its tokens replaced and the rest of it exactly
+ * as it was typed: the lines a run records, where a handle is written out as
+ * the row it named (`handles.ts`). A caller that had only the values would
+ * have to print the tokens it kept as well as the ones it replaced, and a
+ * printed token is a spelling of its value rather than the spelling that was
+ * typed.
+ *
+ * The span is the token's whole spelling, its quotes included, so the text
+ * between one token's end and the next one's start is the separators alone.
+ *
+ * A line the split refuses has no tokens to give, and nothing comes back for
+ * the same reason {@link tailOfLine} gives nothing: a token with no end is a
+ * token this cannot say the span of.
+ */
+export function tokensOfLine(line: string): readonly LineToken[] | undefined {
+  const scanned = scanLine(line);
+  if (scanned.kind === "refused") return undefined;
+  return scanned.tokens.map((value, index) => ({
+    value,
+    start: scanned.starts[index],
+    end: scanned.ends[index],
+  }));
+}
+
 /**
  * Whether `character` separates two tokens, which is the one question the
  * split asks of a character before any other.
@@ -193,6 +235,12 @@ type LineScan =
     /** Where each of them opened on the line, in the same order. */
     readonly starts: readonly number[];
     /**
+     * Where each of them ended, in the same order: the offset just past the
+     * token's last character, which is where the separator that closed it
+     * stands and is the line's length for a token the line's end closed.
+     */
+    readonly ends: readonly number[];
+    /**
      * Whether the last token was still open when the line ended — which is
      * what tells a token being typed from one a separator finished.
      */
@@ -212,6 +260,7 @@ type LineScan =
 function scanLine(line: string): LineScan {
   const tokens: string[] = [];
   const starts: number[] = [];
+  const ends: number[] = [];
   let current = "";
   let started = false;
   let openedTokenAt = 0;
@@ -242,6 +291,7 @@ function scanLine(line: string): LineScan {
       if (started) {
         tokens.push(current);
         starts.push(openedTokenAt);
+        ends.push(index);
         current = "";
         started = false;
       }
@@ -279,8 +329,9 @@ function scanLine(line: string): LineScan {
   if (started) {
     tokens.push(current);
     starts.push(openedTokenAt);
+    ends.push(line.length);
   }
-  return { kind: "scanned", tokens, starts, unterminated: started };
+  return { kind: "scanned", tokens, starts, ends, unterminated: started };
 }
 
 /**

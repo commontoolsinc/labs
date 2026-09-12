@@ -27,6 +27,7 @@ import {
   separatesTokens,
   splitLine,
   tailOfLine,
+  tokensOfLine,
 } from "../lib/shuttle/line.ts";
 
 /**
@@ -460,6 +461,46 @@ describe("line", () => {
         else expect(tail.before).toEqual([]);
       }
       expect(refused.sort()).toEqual(['"', "'"]);
+    });
+  });
+
+  describe("tokensOfLine()", () => {
+    it("returns each token with the run of the line it was written across", () => {
+      expect(tokensOfLine("cd a b")).toEqual([
+        { value: "cd", start: 0, end: 2 },
+        { value: "a", start: 3, end: 4 },
+        { value: "b", start: 5, end: 6 },
+      ]);
+    });
+
+    it("returns a quoted token's span over its whole spelling, quotes included", () => {
+      // The span is what a caller writes a replacement across, so it has to
+      // cover every character the token was written with. A span read off the
+      // value's length would leave the closing quote behind.
+
+      expect(tokensOfLine("cd 'a b'")).toEqual([
+        { value: "cd", start: 0, end: 2 },
+        { value: "a b", start: 3, end: 8 },
+      ]);
+    });
+
+    it("ends a token at the separator that closed it, not at the line's end", () => {
+      expect(tokensOfLine("cd  slugs ")).toEqual([
+        { value: "cd", start: 0, end: 2 },
+        { value: "slugs", start: 4, end: 9 },
+      ]);
+    });
+
+    it("returns no tokens for a line with nothing on it", () => {
+      expect(tokensOfLine("   ")).toEqual([]);
+    });
+
+    it("returns nothing where the line ends in a quote that never closes", () => {
+      expect(tokensOfLine("cd 'a b")).toBeUndefined();
+    });
+
+    it("returns nothing where the line ends in a backslash escaping nothing", () => {
+      expect(tokensOfLine("cd a\\")).toBeUndefined();
     });
   });
 });

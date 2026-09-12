@@ -1,13 +1,20 @@
 /**
- * Unit tests for what a `%n` operand names: the row a listing numbered, and
- * the place that listing was read at.
+ * Unit tests for what a `%n` operand names — the row a listing numbered, and
+ * the place that listing was read at — and for the line a run records, which
+ * is that reading written back out.
  *
- * The claims divide in two. One is about the spelling — which tokens are a
- * handle at all — and it is closed by the digits: a listing prints `%3` and
- * nothing else, so every other spelling names no row. The other is about the
- * lookup, and what it turns on is that the row and the place come back
- * together, since a row's name is a name inside a place and neither alone
+ * The lookup's claims divide in two. One is about the spelling — which tokens
+ * are a handle at all — and it is closed by the digits: a listing prints `%3`
+ * and nothing else, so every other spelling names no row. The other is about
+ * the lookup itself, and what it turns on is that the row and the place come
+ * back together, since a row's name is a name inside a place and neither alone
  * names a cell.
+ *
+ * The recording's claims divide the same way. Either a token bound to a row,
+ * and the case says what the row is written as; or it bound to nothing, and
+ * the case says the token comes back the characters it was typed with. The
+ * second half is the larger one, since every token a line holds that is no
+ * operand belongs to it.
  *
  * Nothing here reads or walks, so every case drives the whole of it with no
  * connection and no fabric.
@@ -18,18 +25,43 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
-import { resolveHandle } from "../lib/shuttle/handles.ts";
+import { recordedForm, resolveHandle } from "../lib/shuttle/handles.ts";
 import type { ListingHandles, ListingRow } from "../lib/shuttle/listing.ts";
-import { placeAtSpaceRoot } from "../lib/shuttle/place.ts";
+import {
+  CurrentPlace,
+  type Place,
+  placeAtSpaceRoot,
+} from "../lib/shuttle/place.ts";
+import { moved } from "./shuttle-place-helpers.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
+
+/** The piece a listing inside one was read at. */
+const PIECE = "of:fid1:abcdefghijklmnop";
+
+/** A second piece, for the cases about recalling somewhere else. */
+const OTHER_PIECE = "of:fid1:ponmlkjihgfedcba";
+
+/** The reference naming the row `title` of the listing {@link IN_PIECE} made. */
+const TITLE_REFERENCE = `/${PIECE}@space/items/title`;
 
 /** Helper for the cases below, which is the place a listing was read at. */
 const AT = placeAtSpaceRoot(SPACE);
 
+/** Helper for the cases below, which is a place standing inside a piece. */
+const IN_PIECE: Place = {
+  position: { kind: "piece", space: SPACE, piece: PIECE, path: ["items"] },
+  scope: "space",
+};
+
 /** Helper for the cases below, which is a listing numbering `rows`. */
 function listed(...rows: ListingRow[]): ListingHandles {
   return { place: AT, rows };
+}
+
+/** Helper for the cases below, which is a listing a piece numbered `rows` in. */
+function listedInPiece(...rows: ListingRow[]): ListingHandles {
+  return { place: IN_PIECE, rows };
 }
 
 /** Helper for the cases below, which is one row called `name`. */
@@ -134,6 +166,247 @@ describe("handles", () => {
       expect(found(resolveHandle(listed(), "%1"))).toBe(
         "`%1` names no row: the listing numbered none.",
       );
+    });
+  });
+
+  describe("recordedForm()", () => {
+    it("returns the line with a handle written out as the row's own operand", () => {
+      expect(recordedForm("cd %1", listed(row("thermo"), row("tracker"))))
+        .toBe("cd thermo");
+    });
+
+    it("returns a spelling a later listing's numbering does not move", () => {
+      // The claim the recording exists for. A handle is a reference until the
+      // next listing, and a recalled line outlives listings, so the recorded
+      // line has to name the row rather than the number: `%1` names the other
+      // row once the second listing has run, and the line recorded against the
+      // first goes on naming what it acted on.
+
+      expect(recordedForm("set %1/target 25", listed(row("thermo"), row("t"))))
+        .toBe("set thermo/target 25");
+      const renumbered = listed(row("tracker"), row("thermo"));
+      expect(found(resolveHandle(renumbered, "%1"))).toBe("tracker");
+    });
+
+    it("returns a line carrying no handle as the string it was given", () => {
+      // Byte for byte, so the runs of whitespace and the quoting are the ones
+      // that were typed. A recording that split the line and printed its
+      // tokens back would pass a comparison of the words and fail this.
+
+      expect(recordedForm("ls   'first name'  ", listed(row("a")))).toBe(
+        "ls   'first name'  ",
+      );
+    });
+
+    it("returns the text around a handle untouched, the separators included", () => {
+      expect(recordedForm("cd   %1  ", listed(row("thermo"))))
+        .toBe("cd   thermo  ");
+    });
+
+    it("returns every handle on the line written out, not the first alone", () => {
+      expect(recordedForm("link %1 %2", listed(row("a"), row("b"))))
+        .toBe("link a b");
+    });
+
+    it("returns a later handle written out though an earlier named no row", () => {
+      // A token that bound to nothing stops nothing: the walk over the line
+      // carries on to the tokens after it, which bound to what they bound to.
+
+      expect(recordedForm("link %3 %1", listed(row("a"), row("b"))))
+        .toBe("link %3 a");
+    });
+
+    it("returns the walk written after a handle as a further segment", () => {
+      expect(recordedForm("set %1/target 25", listed(row("thermo"))))
+        .toBe("set thermo/target 25");
+    });
+
+    it("returns a handle written with a trailing separator as the row alone", () => {
+      // `%1/` names the row and nothing inside it, the walk after the handle
+      // being empty, so the operand written for it carries no separator
+      // either — one written there would name a segment with no name.
+
+      expect(recordedForm("get %1/", listed(row("thermo")))).toBe("get thermo");
+    });
+
+    it("returns a row a piece listed as the reference naming that row", () => {
+      // A key is a name inside one piece, and two pieces hold a `title`
+      // apiece, so a line recorded with the key's own name would read
+      // whichever piece the prompt stands on when it comes back.
+
+      expect(recordedForm("get %1", listedInPiece(row("title"))))
+        .toBe(`get ${TITLE_REFERENCE}`);
+    });
+
+    it("returns a reference that reaches the row from another piece", () => {
+      // The claim the reference is for, read as what it names: the recorded
+      // token aimed from a piece that is not the listing's reaches the row the
+      // listing numbered, and a `title` standing in the piece it was aimed
+      // from is not what it reached.
+
+      const recorded = recordedForm("get %1", listedInPiece(row("title")));
+      const elsewhere = new CurrentPlace(SPACE);
+      moved(elsewhere, `/${OTHER_PIECE}`);
+      expect(elsewhere.aim(recorded.slice("get ".length), "get").move).toEqual({
+        kind: "moved",
+        place: {
+          position: {
+            kind: "piece",
+            space: SPACE,
+            piece: PIECE,
+            path: ["items", "title"],
+          },
+          scope: "space",
+        },
+      });
+    });
+
+    it("returns the walk written after such a handle as further segments", () => {
+      expect(recordedForm("set %1/target 25", listedInPiece(row("title"))))
+        .toBe(`set ${TITLE_REFERENCE}/target 25`);
+    });
+
+    it("returns a walk closed by a separator without a nameless segment", () => {
+      // The walk drops a trailing separator, so `%1/target/` and `%1/target`
+      // name one cell. Carried into the reference whole it would end in a
+      // segment with no name in it, which names another.
+
+      expect(recordedForm("set %1/target/ 25", listedInPiece(row("title"))))
+        .toBe(`set ${TITLE_REFERENCE}/target 25`);
+    });
+
+    it("returns the row's own name in the reference, not the operand", () => {
+      // The two differ exactly where no bare operand reaches the row: the
+      // operand is then the rendering the row prints as, and a rendering
+      // nested inside a second reference names nothing. The name is a segment,
+      // and the reference escapes the separator in it.
+
+      expect(recordedForm(
+        "get %1",
+        listedInPiece({
+          name: "a/b",
+          kind: "value",
+          operand: `/@${SPACE}/${PIECE}@space/items/a~1b`,
+        }),
+      )).toBe(`get /${PIECE}@space/items/a~1b`);
+    });
+
+    it("returns a handle whose walk backs out through `..` as it was typed", () => {
+      // A `..` is a level in a walk and a key's name in a reference, so the
+      // two would read one token as two cells. The handle stays, and goes on
+      // naming what it named.
+
+      expect(recordedForm("get %1/../other", listedInPiece(row("title"))))
+        .toBe("get %1/../other");
+    });
+
+    it("returns a row a facet listed as the operand the listing printed", () => {
+      // A piece's id names it from wherever the line comes back, so nothing is
+      // gained by writing it a second way — and the place a facet listing was
+      // read at is no piece for a reference to be built from.
+
+      expect(recordedForm("cd %1", {
+        place: {
+          position: { kind: "facet", space: SPACE, facet: "pieces" },
+          scope: "space",
+        },
+        rows: [row(OTHER_PIECE, "piece")],
+      })).toBe(`cd ${OTHER_PIECE}`);
+    });
+
+    it("returns a row whose operand needs quoting as a quoted token", () => {
+      expect(recordedForm("cd %1", listed(row("first name"))))
+        .toBe("cd 'first name'");
+    });
+
+    it("returns a handle the line quoted written out as the row", () => {
+      // The reading is over the token's value rather than over the characters
+      // the line holds, which is the same value the operand grammar reads.
+
+      expect(recordedForm("cd '%1'", listed(row("thermo")))).toBe("cd thermo");
+    });
+
+    it("returns a callable row as the receiver's reference and the verb name", () => {
+      // Two tokens for one, and no single token would do: the handle carries a
+      // receiver and a verb name, and a verb name is interface vocabulary
+      // rather than a data path, so nothing an operand spells names one.
+
+      const callable: ListingRow = { name: "add-reply", kind: "callable" };
+      expect(recordedForm('call %1 \'{"text":"jam"}\'', {
+        place: IN_PIECE,
+        rows: [callable],
+      })).toBe(
+        "call /of:fid1:abcdefghijklmnop@space/items add-reply " +
+          '\'{"text":"jam"}\'',
+      );
+    });
+
+    it("returns a callable row as typed where a walk is written after it", () => {
+      // A walk written after a handle ends at a cell, and a cell is a receiver
+      // rather than a verb, so such a token carries no name for the two-token
+      // spelling to be made of.
+
+      expect(recordedForm("get %1/deeper", {
+        place: IN_PIECE,
+        rows: [{ name: "add-reply", kind: "callable" }],
+      })).toBe("get %1/deeper");
+    });
+
+    it("returns a callable row as typed where the listing stood at no piece", () => {
+      // The receiver is the place the listing was read at, and a place that is
+      // no piece is no receiver. Nothing is written rather than a reference
+      // made up for it.
+
+      expect(recordedForm("call %1", listed({ name: "x", kind: "callable" })))
+        .toBe("call %1");
+    });
+
+    it("returns a row the listing offered no operand for as typed", () => {
+      // Neither the name nor the reference reaches such a row, so there is no
+      // spelling to write in the handle's place.
+
+      expect(recordedForm("cd %1", listed({ name: "-x", kind: "value" })))
+        .toBe("cd %1");
+    });
+
+    it("returns a handle that named no row as typed, so it names none again", () => {
+      expect(recordedForm("set %3 5", listed(row("a"), row("b"))))
+        .toBe("set %3 5");
+    });
+
+    it("returns a handle written before any listing as typed", () => {
+      expect(recordedForm("cd %1", undefined)).toBe("cd %1");
+    });
+
+    it("returns `%0` as typed, no listing having numbered one", () => {
+      expect(recordedForm("cd %0", listed(row("a")))).toBe("cd %0");
+    });
+
+    it("returns a handle standing in an option's value as typed", () => {
+      // What a token after an option is for is the verb's table to say, and a
+      // `%1` written there is a character of that value rather than a handle:
+      // the line sent it nowhere near the handle table, so a recording that
+      // wrote a row out there would replay a line that acts differently.
+
+      expect(recordedForm("ls --limit %1", listed(row("1"), row("2"))))
+        .toBe("ls --limit %1");
+    });
+
+    it("returns a handle inside a callable's own section as typed", () => {
+      // The section's tokens are the callable's input, and the call sent the
+      // characters `%2`. A replay sending anything else would send the verb an
+      // argument the first call never sent it.
+
+      expect(recordedForm("call %1 --text %2", listed(row("a"), row("b"))))
+        .toBe("call a --text %2");
+    });
+
+    it("returns a handle standing where the verb goes as typed", () => {
+      expect(recordedForm("%1", listed(row("a")))).toBe("%1");
+    });
+
+    it("returns a line the split refuses as the string it was given", () => {
+      expect(recordedForm("cd 'a %1", listed(row("a")))).toBe("cd 'a %1");
     });
   });
 });

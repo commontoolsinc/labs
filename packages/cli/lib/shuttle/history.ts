@@ -1,6 +1,12 @@
 /**
- * The lines a run has typed, and the traversal `up` and `down` make over
+ * The lines a run has taken, and the traversal `up` and `down` make over
  * them.
+ *
+ * A line arrives here written as it will be recalled rather than as it was
+ * typed: what it is recorded as is decided where it is taken, a handle on it
+ * written out as the row it named (`recordedForm`, `handles.ts`). Nothing here
+ * reads a line or changes one — what it is handed is what it holds and hands
+ * back.
  *
  * It is the run's own memory and nothing outside the process holds it: a
  * shuttle that exits takes its lines with it. Persistent, searchable history
@@ -45,7 +51,7 @@ export class LineHistory {
   #at = 0;
 
   /**
-   * Records `line` as a line this run typed, and returns the traversal to the
+   * Records `line` as a line this run took, and returns the traversal to the
    * line being typed.
    *
    * Two lines are not recorded, and each is its own decision. A line that is

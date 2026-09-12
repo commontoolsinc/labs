@@ -855,19 +855,55 @@ produce.
 
 ## Recall and completion
 
-`up` and `down` walk the lines this run typed. What they walk is those lines
-and the line being typed — one position each, the line being typed last — so
-an edit made at any of them is held there until the line is ended, and
-everything that ends a line ends the traversal with it: running the line, and
-`ctrl-c`. There is no wrap: `up` at the oldest line and `down` at the line
+`up` and `down` walk the lines this run has taken. What they walk is those
+lines and the line being typed — one position each, the line being typed
+last — so an edit made at any of them is held there until the line is ended,
+and everything that ends a line ends the traversal with it: running the line,
+and `ctrl-c`. There is no wrap: `up` at the oldest line and `down` at the line
 being typed each leave the prompt as it is. A line with nothing on it is not
 recorded, nor is one identical to the line recorded last, and the comparison is
 against that one line alone — comparing against every line would drop a line
 from the middle of the run and leave the order no longer the order it was
-typed in. What is recorded is the line exactly as it was typed, at the moment
-it is taken rather than when it settles, so `up` reaches a line that is still
-running. The recall is the run's own memory; persistent history is a separate
-feature ([`futures.md`](futures.md)).
+typed in. A line is recorded at the moment it is taken rather than when it
+settles, so `up` reaches a line that is still running. The recall is the run's
+own memory; persistent history is a separate feature
+([`futures.md`](futures.md)).
+
+**A line is recorded with each `%n` replaced by what it bound to when it ran.**
+A handle is a reference only until the next listing, and a recalled line
+outlives listings, so a line recorded as it was typed would — replayed after a
+listing had renumbered — act on whichever row its number names then, and report
+that as what the line did. What is written in the handle's place is a spelling
+that reaches the row from anywhere the session stands. A row `pieces/` or
+`slugs/` listed stands as the id or the slug the listing printed, each of which
+names the piece from wherever the line comes back. A row a piece listed stands
+as the reference naming that piece and the path to the row —
+`/of:fid1:…@space/title` — rather than the key's own name, a key being a name
+inside one piece where two pieces hold a `title` apiece; the space is left out,
+one shuttle serving one space. A callable row stands as the two tokens `call`
+takes in its place — the receiver's reference and the verb name — since no
+operand names a verb. What the screen holds is untouched: the line was drawn as
+it was typed, and the replacement is what `up` puts back.
+
+What the reference costs is length: a recalled line naming a cell inside a piece
+runs some sixty characters longer than the handle did, and is harder to edit for
+it. A shorter spelling can be designed later; what it may not cost is a line
+that acts on a cell other than the one it acted on.
+
+A walk written after the handle rides the reference as further segments, and
+one that backs out through `..` does not: in a walk `..` is the level above,
+and in a reference it is a key's name, so a token holding one is recorded as it
+was typed and goes on naming what it named.
+
+Three other tokens are recorded as they were typed. A
+handle that named no row is one — `%0`, a number past the listing, a handle
+written before any listing — and a row that neither its name nor a reference
+reaches is another. The third is every token the operand grammar does not read:
+the verb, and everything from the first token that reads as an option, since
+from there what a token is for is the verb's own table to say, and a `%2`
+standing in an option's value or inside a callable's own section is a character
+of that value rather than a handle. A line carrying no handle is recorded
+character for character, its spacing and its quoting included.
 
 `tab` completes the token the line ends in, and it completes that token only:
 with the cursor anywhere else on the line it does nothing, the token being
