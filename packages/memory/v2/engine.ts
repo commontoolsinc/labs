@@ -2484,14 +2484,8 @@ const readStateForScopeKey = (
     row.data?.length ?? -1,
   );
   let document: EntityDocument | null;
-  const cached = engine.documentCache.get(cacheKey);
+  const cached = cachedDocumentForRevision(engine, cacheKey);
   if (cached !== undefined) {
-    // Insertion order is the eviction order, so a hit re-inserts: the entry
-    // just read becomes the last to go.
-    engine.documentCache.delete(cacheKey);
-    engine.documentCache.set(cacheKey, cached);
-    engine.documentCacheStats.hits++;
-    engine.documentCacheCoordinator?.touched(engine);
     document = cached.document;
   } else {
     engine.documentCacheStats.misses++;
@@ -7171,17 +7165,12 @@ const reconstructPatchedDocument = (
 
   let baseSeq = 0;
   let baseOpIndex = -1;
-  let document = emptyEntityDocument();
   if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
     baseSeq = snapshotRow.seq;
     baseOpIndex = Number.MAX_SAFE_INTEGER;
-    document = decodeStoredDocument(snapshotRow.value);
   } else if (baseRow) {
     baseSeq = baseRow.seq;
     baseOpIndex = baseRow.op_index;
-    if (baseRow.op === "set") {
-      document = decodeStoredDocument(baseRow.data);
-    }
   }
 
   const patches = engine.statements.selectPatches.all({
@@ -7194,7 +7183,53 @@ const reconstructPatchedDocument = (
     op_index: opIndex,
   }) as Array<{ data: string; seq: number; op_index: number }>;
 
-  for (const patch of patches) {
+  // A cached revision is an immutable prefix of this exact branch, scope,
+  // and operation range. Replaying its suffix preserves frozen subtrees
+  // instead of decoding and rebuilding the prefix at every commit.
+  let document: EntityDocument | undefined;
+  let replayFrom = 0;
+  for (let index = patches.length - 1; index >= 0; index--) {
+    const patch = patches[index];
+    const cached = cachedDocumentForRevision(
+      engine,
+      documentCacheKey(
+        branch,
+        id,
+        scopeKey,
+        patch.seq,
+        patch.op_index,
+        "patch",
+        patch.data.length,
+      ),
+    );
+    if (cached?.document !== undefined && cached.document !== null) {
+      document = cached.document;
+      replayFrom = index + 1;
+      break;
+    }
+  }
+  if (document === undefined) {
+    if (snapshotRow && snapshotRow.seq === baseSeq) {
+      document = decodeStoredDocument(snapshotRow.value);
+    } else if (baseRow?.op === "set") {
+      document = cachedDocumentForRevision(
+        engine,
+        documentCacheKey(
+          branch,
+          id,
+          scopeKey,
+          baseRow.seq,
+          baseRow.op_index,
+          baseRow.op,
+          baseRow.data?.length ?? -1,
+        ),
+      )?.document ?? decodeStoredDocument(baseRow.data);
+    } else {
+      document = emptyEntityDocument();
+    }
+  }
+
+  for (const patch of patches.slice(replayFrom)) {
     document = applyPatchToDocument(
       document,
       decodeStoredPatchList(patch.data),
@@ -7339,22 +7374,34 @@ const documentCacheKey = (
   `${branch}\u0000${id}\u0000${scopeKey}\u0000${seq}\u0000${opIndex}` +
   `\u0000${op}\u0000${dataLength}`;
 
+/** Looks up a revision and records its use without publishing staged entries. */
+const cachedDocumentForRevision = (
+  engine: Engine,
+  key: string,
+): DocumentCacheEntry | undefined => {
+  const staged = engine.stagedDocumentCache?.get(key);
+  if (staged !== undefined) {
+    engine.documentCacheStats.hits++;
+    return staged;
+  }
+  const cached = engine.documentCache.get(key);
+  if (cached !== undefined) {
+    engine.documentCache.delete(key);
+    engine.documentCache.set(key, cached);
+    engine.documentCacheStats.hits++;
+    engine.documentCacheCoordinator?.touched(engine);
+  }
+  return cached;
+};
+
 /**
  * Remember the document a revision decodes to.
  *
- * A read taken inside an open transaction is not remembered. Commits read
- * their own uncommitted rows — snapshot materialization asks for the state it
- * has just written — and a transaction that goes on to throw leaves SQLite as
- * it was while this map would keep describing a revision that never happened.
- * A retry then writes its own revision at the sequence and operation index the
- * rolled-back one had, and had that entry survived, patch data of the same
- * length would answer to the same key. Declining to record is what closes
- * that, rather than clearing the map afterwards: it holds for every writer
- * rather than for the one that remembered to.
- *
- * Nothing stops a read inside a transaction from being SERVED. An entry was
- * recorded from durable state, and a transaction that has written its own
- * revision resolves to that revision's own sequence — a different key.
+ * `applyCommit()` stages decoded revisions privately for reuse within its
+ * transaction. Success publishes those entries; rollback discards them, so
+ * a retry at the same sequence and operation index cannot reuse discarded
+ * content. A read in an arbitrary external transaction can use durable entries
+ * but declines to record newly decoded revisions.
  *
  * Eviction is least-recently-read, against a byte budget and an entry cap
  * (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a working set that fits stays
