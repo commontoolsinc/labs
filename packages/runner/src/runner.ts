@@ -12,6 +12,7 @@ import {
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   combineSchemaForLink,
   resolveSchemaRefsCanonical,
@@ -233,6 +234,64 @@ export {
 export { validateAndCheckReactives } from "./sandbox/result-normalization.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
+
+/**
+ * A handler's argument schema divided into the part describing its event and
+ * the part describing its bound context, keyed by the interned handler schema
+ * so the division is made once per module rather than once per dispatch.
+ */
+const handlerArgumentSchemaSplits = new WeakMap<
+  object,
+  { event: JSONSchema; context: JSONSchema }
+>();
+
+/**
+ * Divides a generated handler schema into two root object schemas: one
+ * selecting `$event`, one selecting and requiring `$ctx`. Each carries the
+ * handler schema's definitions, so a `$ref` inside either half still
+ * resolves. Returns `undefined` for a schema that is not the generated
+ * `{ $event, $ctx }` shape — a `cid:` reference at rest among them — which
+ * sends the caller down the whole-argument read.
+ */
+function handlerArgumentSchemaSplit(
+  argumentSchema: JSONSchema | undefined,
+): { event: JSONSchema; context: JSONSchema } | undefined {
+  if (
+    !isObjectNotArray(argumentSchema) ||
+    !isObjectNotArray(argumentSchema.properties)
+  ) {
+    return undefined;
+  }
+  const cached = handlerArgumentSchemaSplits.get(argumentSchema);
+  if (cached !== undefined) return cached;
+  const { $event, $ctx } = argumentSchema.properties;
+  if ($event === undefined || $ctx === undefined) return undefined;
+  const root = resolveExternalRootRefForStructure(argumentSchema);
+  const legacyDefinitions = isObjectNotArray(root.definitions)
+    ? { definitions: root.definitions }
+    : {};
+  const split = {
+    event: internSchema(cfcSchemaWithInheritedDefs(
+      {
+        type: "object",
+        properties: { $event: $event as JSONSchema },
+        ...legacyDefinitions,
+      },
+      root.$defs,
+    )),
+    context: internSchema(cfcSchemaWithInheritedDefs(
+      {
+        type: "object",
+        properties: { $ctx: $ctx as JSONSchema },
+        required: ["$ctx"],
+        ...legacyDefinitions,
+      },
+      root.$defs,
+    )),
+  };
+  handlerArgumentSchemaSplits.set(argumentSchema, split);
+  return split;
+}
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
   enabled: true,
   level: "warn",
@@ -9190,6 +9249,42 @@ export class Runner {
   }
 
   /**
+   * Like `#readJavaScriptArgument()`, except that under lazy materialization
+   * the bound context is read through a view while the event payload is read
+   * eagerly, and `tx` is left marked for the body; the caller's post-run
+   * clears the mark. The payload arrives inline, small, and already judged by
+   * the closed-world gate, and reading it eagerly keeps its delivery the same
+   * in both postures — a declared event field the payload does not satisfy
+   * reads as an absent event, never as a refusal inside the body. The context
+   * is where a handler binds a collection, and a view hands the body the paths
+   * it touches and nothing else. The context read's root guard stands in for
+   * the whole argument's: a context that fails it reads as an argument that
+   * did not resolve.
+   */
+  #readJavaScriptHandlerArgument(
+    module: Module,
+    inputsCell: Cell<any>,
+    tx: IExtendedStorageTransaction,
+  ): { argument: any; isValidArgument: boolean } {
+    const split = this.#runtime.experimental.lazyMaterialization
+      ? handlerArgumentSchemaSplit(module.argumentSchema)
+      : undefined;
+    if (split === undefined) {
+      return this.#readJavaScriptArgument(module, inputsCell, tx);
+    }
+    const event = inputsCell.asSchema(split.event).get();
+    tx.markLazyMaterialize(true);
+    const context = inputsCell.asSchema(split.context).get();
+    if (context === undefined) {
+      return { argument: undefined, isValidArgument: false };
+    }
+    return {
+      argument: { $event: event?.$event, $ctx: context.$ctx },
+      isValidArgument: true,
+    };
+  }
+
+  /**
    * What an action's argument was validated against and what it was
    * validated from, for the invalid-input diagnostics. The raw binding is
    * the inputs as bound — links unresolved — so building this reads no
@@ -9956,18 +10051,53 @@ export class Runner {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
 
-      let popFrameAfterReturn = true;
-      try {
-        const inputsCell = this.#runtime.getImmutableCell(
-          resultCell.space,
-          eventInputs,
-          undefined,
-          tx,
+      const inputsCell = this.#runtime.getImmutableCell(
+        resultCell.space,
+        eventInputs,
+        undefined,
+        tx,
+      );
+      // A refusal — the body touched context its schema no longer describes,
+      // or reached a document this replica does not hold yet — is disposed of
+      // as a handler that did not run. The scheduler's event finalize
+      // withdraws the transaction, the writes the body made before the
+      // refusal with it, and re-runs the dispatch: parked on the load the
+      // run's own reads registered when the refusal was a cold document,
+      // otherwise on the backoff that bounds a permanent mismatch
+      // (events.md §5). No receipt is written and no result pattern starts,
+      // so a refusal after a write publishes nothing.
+      const disposeRefusal = (refusal: unknown): undefined => {
+        tx.markLazyMaterialize(false);
+        const message = refusal instanceof Error
+          ? refusal.message
+          : String(refusal);
+        logger.info(
+          "stream",
+          () => [
+            "handler context stopped matching its schema -- not running",
+            message,
+          ],
         );
+        this.#updateInvalidInputFlag(name, false, module, inputsCell);
+        tx.dispatchedHandlerNotRun = {
+          reason: `handler context stopped matching its schema: ${message}`,
+        };
+        return undefined;
+      };
+
+      let popFrameAfterReturn = true;
+      // Assigned inside the try, and reachable from the catch: a refusal that
+      // escaped the body takes the same disposition as one it swallowed.
+      let postRun: ((result: any) => any) | undefined;
+      try {
         logger.timeStart("stream", "readInputs");
         const { argument, isValidArgument } = (() => {
           try {
-            return this.#readJavaScriptArgument(module, inputsCell, tx);
+            return this.#readJavaScriptHandlerArgument(
+              module,
+              inputsCell,
+              tx,
+            );
           } finally {
             logger.timeEnd("stream", "readInputs");
           }
@@ -10022,9 +10152,15 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = (result: any) => {
+        postRun = (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
+            tx.markLazyMaterialize(false);
+            // Recorded as well as thrown, so a body that caught the refusal
+            // does not get to finish a handling built on data its schema does
+            // not describe.
+            const refusal = tx.takeSchemaRefusal();
+            if (refusal !== undefined) return disposeRefusal(refusal);
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.#resolvePendingSpaceNamesAndRetry(frame, tx);
             }
@@ -10045,7 +10181,19 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(postRun)
+          // An async body reaches mismatching data after an `await`, so its
+          // refusal arrives as a rejection the synchronous catch below never
+          // sees. Any other rejection stays a handler error.
+          ? result
+            .then(postRun)
+            .catch((error: unknown) => {
+              if (isSchemaMismatchError(error)) {
+                tx.takeSchemaRefusal();
+                return disposeRefusal(error);
+              }
+              tx.markLazyMaterialize(false);
+              throw error;
+            })
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
@@ -10064,6 +10212,11 @@ export class Runner {
           return this.#resolvePendingSpaceNamesAndRetry(frame, tx)
             .finally(() => popFrame(frame));
         }
+        if (isSchemaMismatchError(error)) {
+          tx.takeSchemaRefusal();
+          return disposeRefusal(error);
+        }
+        tx.markLazyMaterialize(false);
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
       } finally {

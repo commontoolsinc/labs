@@ -128,12 +128,16 @@ type Sender = {
   ): void;
 };
 
-/** A runtime with the pattern running over a seeded list of `size` rows. */
-async function prepare(size: number, readStats: boolean) {
+/**
+ * A runtime in the given flag posture with the pattern running over a seeded
+ * list of `size` rows.
+ */
+async function prepare(size: number, readStats: boolean, lazy: boolean) {
   const storage = StorageManager.emulate({ as: identity });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
+    experimental: { lazyMaterialization: lazy },
   });
   if (readStats) {
     runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
@@ -249,51 +253,54 @@ function collectedHeapUsed(): number | undefined {
 
 for (const size of SIZES) {
   for (const workload of WORKLOADS) {
-    const prepared = await prepare(size, true);
-    const attempts: Record<string, unknown>[] = [];
-    const preflights: Record<string, unknown>[] = [];
-    const onTelemetry = (event: Event) => {
-      const { marker } = (event as RuntimeTelemetryEvent).detail;
-      if (marker.type === "scheduler.read-attempt") {
-        attempts.push({ kind: marker.kind, ...marker.reads });
-      }
-      if (marker.type === "scheduler.event.preflight") {
-        preflights.push({
-          skipped: marker.skipped,
-          readCount: marker.readCount,
-          shallowReadCount: marker.shallowReadCount,
-          populateMs: marker.populateMs,
-          txToLogMs: marker.txToLogMs,
-          depCommitMs: marker.depCommitMs,
-          collectMs: marker.collectMs,
-          scheduleMs: marker.scheduleMs,
-        });
-      }
-    };
-    const { nodes } = prepared.runtime.scheduler.accessForTestingOnly;
-    const nodesBefore = nodes.effects.size + nodes.computations.size;
-    const heapBefore = collectedHeapUsed();
-    prepared.runtime.telemetry.addEventListener("telemetry", onTelemetry);
-    await prepared.dispatch(workload);
-    await prepared.drain();
-    prepared.runtime.telemetry.removeEventListener("telemetry", onTelemetry);
-    // Retained after the dispatch settled and the heap was collected again,
-    // so this is what the dispatch left behind rather than what it allocated
-    // while running.
-    const heapAfter = collectedHeapUsed();
-    const nodesAfter = nodes.effects.size + nodes.computations.size;
-    benchDiagnostic(JSON.stringify({
-      size,
-      workload,
-      nodesBefore,
-      nodesAfter,
-      retainedBytes: heapBefore !== undefined && heapAfter !== undefined
-        ? heapAfter - heapBefore
-        : undefined,
-      preflights,
-      attempts,
-    }));
-    await prepared.dispose();
+    for (const lazy of [false, true]) {
+      const prepared = await prepare(size, true, lazy);
+      const attempts: Record<string, unknown>[] = [];
+      const preflights: Record<string, unknown>[] = [];
+      const onTelemetry = (event: Event) => {
+        const { marker } = (event as RuntimeTelemetryEvent).detail;
+        if (marker.type === "scheduler.read-attempt") {
+          attempts.push({ kind: marker.kind, ...marker.reads });
+        }
+        if (marker.type === "scheduler.event.preflight") {
+          preflights.push({
+            skipped: marker.skipped,
+            readCount: marker.readCount,
+            shallowReadCount: marker.shallowReadCount,
+            populateMs: marker.populateMs,
+            txToLogMs: marker.txToLogMs,
+            depCommitMs: marker.depCommitMs,
+            collectMs: marker.collectMs,
+            scheduleMs: marker.scheduleMs,
+          });
+        }
+      };
+      const { nodes } = prepared.runtime.scheduler.accessForTestingOnly;
+      const nodesBefore = nodes.effects.size + nodes.computations.size;
+      const heapBefore = collectedHeapUsed();
+      prepared.runtime.telemetry.addEventListener("telemetry", onTelemetry);
+      await prepared.dispatch(workload);
+      await prepared.drain();
+      prepared.runtime.telemetry.removeEventListener("telemetry", onTelemetry);
+      // Retained after the dispatch settled and the heap was collected again,
+      // so this is what the dispatch left behind rather than what it allocated
+      // while running.
+      const heapAfter = collectedHeapUsed();
+      const nodesAfter = nodes.effects.size + nodes.computations.size;
+      benchDiagnostic(JSON.stringify({
+        size,
+        workload,
+        lazy,
+        nodesBefore,
+        nodesAfter,
+        retainedBytes: heapBefore !== undefined && heapAfter !== undefined
+          ? heapAfter - heapBefore
+          : undefined,
+        preflights,
+        attempts,
+      }));
+      await prepared.dispose();
+    }
   }
 }
 
@@ -303,35 +310,38 @@ for (const size of SIZES) {
 
 for (const size of SIZES) {
   for (const workload of WORKLOADS) {
-    let dispatches = 0;
-    let prepared: Awaited<ReturnType<typeof prepare>> | undefined;
-    Deno.bench({
-      name: `${workload} (${size} rows)`,
-      group: `handler-dispatch-${size}`,
-      baseline: workload === "scalarKey",
-      n: 7,
-      warmup: 1,
-      async fn(b) {
-        prepared ??= await prepare(size, false);
-        if (workload === "mutate" && dispatches > 0) await prepared.reseed();
-        b.start();
-        const elapsed = await prepared.dispatch(workload);
-        b.end();
-        await prepared.drain();
-        dispatches += 1;
-        const value = prepared.out.get();
-        const expected = prepared.expected(workload);
-        if (value !== expected) {
-          throw new Error(`Expected ${expected}, received ${value}`);
-        }
-        benchDiagnostic(JSON.stringify({
-          size,
-          workload,
-          dispatch: dispatches,
-          elapsed,
-          phases: lastPhaseTimes(),
-        }));
-      },
-    });
+    for (const lazy of [false, true]) {
+      let dispatches = 0;
+      let prepared: Awaited<ReturnType<typeof prepare>> | undefined;
+      Deno.bench({
+        name: `${lazy ? "lazy" : "eager"} ${workload} (${size} rows)`,
+        group: `handler-dispatch-${size}-${workload}`,
+        baseline: !lazy,
+        n: 7,
+        warmup: 1,
+        async fn(b) {
+          prepared ??= await prepare(size, false, lazy);
+          if (workload === "mutate" && dispatches > 0) await prepared.reseed();
+          b.start();
+          const elapsed = await prepared.dispatch(workload);
+          b.end();
+          await prepared.drain();
+          dispatches += 1;
+          const value = prepared.out.get();
+          const expected = prepared.expected(workload);
+          if (value !== expected) {
+            throw new Error(`Expected ${expected}, received ${value}`);
+          }
+          benchDiagnostic(JSON.stringify({
+            size,
+            workload,
+            lazy,
+            dispatch: dispatches,
+            elapsed,
+            phases: lastPhaseTimes(),
+          }));
+        },
+      });
+    }
   }
 }
