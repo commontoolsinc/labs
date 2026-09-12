@@ -100,14 +100,26 @@ calls, which is the signature of concurrent spans that
 `skills/perf-investigation/SKILL.md` names with this exact row. The enclosing
 `syncCellsForRunningPattern` is the number, and it does not grow.
 
-What does change is `workerLag`'s **count**: 12 against 45, nearly four times as
-many lag events for the same twelve clicks. That is the worker's event loop
-being kept from running, which is the shape the idle share already suggested,
-and it is where the next pass should start.
+What does change is `workerLag`'s **count**, and it replicates. Three
+sixty-click runs, twelve clicks measured at each end, at machine loads from 9.7
+to 14.6:
 
-The run these came from was taken while the machine climbed from load 9.7 to
-10.3 and its plateau was not clean, so treat the figures as a direction rather
-than a measurement. Repeat them on a quiet machine before building on them.
+| run | fresh | plateau |
+| --- | ---: | ---: |
+| 1 | 12 | 45 |
+| 2 | 11 | 41 |
+| 3 | 11 | 50 |
+
+Four times as many event-loop lag events for the same twelve clicks, while
+`syncCellsForRunningPattern` holds at 11 against 12 — the work is the same and
+the loop is blocked far more often. A count survives a loaded machine in a way
+the millisecond columns beside it do not, which is why this is the row to
+build on.
+
+**So the plateau is the worker's event loop being kept from running**, not the
+worker doing more. That is consistent with the 49% idle share, and it is the
+statement the next pass should try to falsify. The milliseconds above were
+taken on a machine climbing through load 10, so treat those as direction only.
 
 **So the instrument has to change.** Every measurement in this plan above has
 been a CPU profile or a logger count, and neither can see time in which nothing
