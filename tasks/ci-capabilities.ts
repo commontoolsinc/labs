@@ -30,6 +30,7 @@ export type CapabilityId =
   | "jq"
   | "browser"
   | "git-history"
+  | "github-api"
   | "toolshed"
   | "toolshed-baked"
   | "toolshed-baked-opposite"
@@ -75,6 +76,13 @@ export interface CapabilityContext {
    * without a machine that has neither.
    */
   exec?: Exec;
+
+  /**
+   * The GitHub API token the lane took out of its own environment, for
+   * the suites that declared they need one. Absent where the lane was
+   * handed none.
+   */
+  githubToken?: string;
 
   /**
    * How a capability asks a server it started what it is serving. A
@@ -312,6 +320,55 @@ const gitHistory: Capability = {
       }
     }
     return exported({});
+  },
+};
+
+/** The environment variable a lane is handed the token in. */
+export const GITHUB_TOKEN_VARIABLE = "GITHUB_TOKEN";
+
+/**
+ * Takes the GitHub API token out of this process and answers with it.
+ *
+ * A child process inherits what its parent holds, so a token left in the
+ * lane's own environment reaches every test in the lane whether or not
+ * its suite asked for one. Taking it out is what makes the declaration
+ * mean something, and it has to happen whether or not any batch in the
+ * lane opens `github-api` — a lane that opens nothing is the one where a
+ * token left behind reaches the most.
+ *
+ * Answers with nothing where the lane was handed no token, which is the
+ * state on a workstation and in a job whose workflow passes none.
+ */
+export function takeGithubToken(): string | undefined {
+  const token = Deno.env.get(GITHUB_TOKEN_VARIABLE);
+  Deno.env.delete(GITHUB_TOKEN_VARIABLE);
+  return token === undefined || token.length === 0 ? undefined : token;
+}
+
+/**
+ * A token for the GitHub API, handed to the suites that ask the service a
+ * question and to no others.
+ *
+ * A lane runs the repository's own gates beside pattern and integration
+ * tests, and one gate asks GitHub what each action pin resolves to.
+ * Sixty requests an hour is what the service allows a caller with no
+ * token, shared across everything else reaching it from that address, so
+ * the gate needs one.
+ *
+ * What it exports is the token the lane took out of its own environment
+ * before it opened anything, handed back here.
+ */
+const githubApi: Capability = {
+  id: "github-api",
+  description: "a token for the GitHub API",
+  open(context) {
+    return Promise.resolve(
+      exported(
+        context.githubToken === undefined
+          ? {}
+          : { [GITHUB_TOKEN_VARIABLE]: context.githubToken },
+      ),
+    );
   },
 };
 
@@ -624,6 +681,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     jq,
     browser,
     gitHistory,
+    githubApi,
     toolshed,
     toolshedBaked,
     toolshedBakedOpposite,

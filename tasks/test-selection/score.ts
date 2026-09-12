@@ -763,10 +763,20 @@ export function trimWindows(state: IdentityState, today: string): void {
   // term's denominator, the flake rate's, and how recently `lastRun` saw
   // the test. They are kept for the longer of the two windows, and each
   // reader reads back only as far as its own.
-  drop(state.runsByDay, Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS));
+  const longest = Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS);
+  drop(state.runsByDay, longest);
   drop(state.failuresByDay, CHURN_WINDOW_DAYS);
   drop(state.flakesByDay, FLAKE_WINDOW_DAYS);
   drop(state.costByDay, COST_WINDOW_DAYS);
+  // A failure on the default branch waits here for a later run to judge
+  // it, and a test the branch does not go red for is one no run has to
+  // arrive for. So this is aged like everything else, over the longest
+  // window a state keeps: a failure nothing has judged in that time is
+  // one the branch has carried for that long, and crediting a catch for
+  // it afterwards would credit the test with a fix it did not find.
+  state.pendingMain = state.pendingMain.filter((pending) =>
+    daysBetween(pending.day, today) <= longest
+  );
 }
 
 /**

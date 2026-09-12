@@ -134,8 +134,66 @@ export const FILL_DENSITY_SHARE = 0.25;
 /** The share spent on items the value ordering did not pick. */
 export const FILL_EXPLORATION_SHARE = 0.15;
 
+/**
+ * The most a suite's fitted slope may come to.
+ *
+ * The slope says what one more second of test time costs a batch in wall
+ * time. A batch that takes several times the sum of its tests' own
+ * durations is one whose cost is fixed rather than marginal — process
+ * startup and module load — and the intercept is what carries that. A
+ * slope far above this is the fit mis-attributing fixed cost, which
+ * charges every identity of the suite for it and prices the suite out of
+ * every lane.
+ */
+export const MAX_SUITE_CORRECTION = 4;
+
+/**
+ * The largest a suite must have been charged for one batch before its
+ * fitted slope is believed.
+ *
+ * A slope says what one more second of test time costs, and it is read
+ * far outside the range it was fitted over: a suite charged six seconds
+ * in every batch anybody has seen may be charged thousands the first
+ * time a lane packs it whole. Inside a narrow range the fixed cost
+ * dominates and the slope is noise, so fitting one there and reading it
+ * out there is how a lane comes to believe that six thousand seconds of
+ * tests are free.
+ *
+ * Below this the slope is one, which is the reading that needs no
+ * evidence: a second of test time costs a second.
+ */
+export const MIN_CORRECTION_SPAN_SECONDS = LANE_BUDGET_SECONDS / 10;
+
+/**
+ * Observations a suite needs before its slope is fitted at all.
+ *
+ * Two points fit a line exactly, so a line through two of them says
+ * whatever they say and nothing about their noise. Below this the slope
+ * is one and the intercept carries the whole difference. It is low
+ * because both directions a slope can be wrong in are already bounded:
+ * too high by `MAX_SUITE_CORRECTION`, and too low by the intercept being
+ * raised afterwards to cover every observation.
+ */
+export const MIN_CORRECTION_SAMPLES = 3;
+
 /** The flake rate above which an item leaves the selectable set. */
 export const FLAKE_EXCLUSION_RATE = 0.005;
+
+/**
+ * The suites whose failures always fail the run, whatever their flake
+ * rate.
+ *
+ * A repository gate reads the working tree and answers yes or no. A gate
+ * that disagrees with itself is a bug in the gate rather than a test too
+ * noisy to judge a change by, and excusing it would let every real
+ * failure of that gate through with it. So a gate above
+ * `FLAKE_EXCLUSION_RATE` is neither held back from a pull request nor
+ * excused on the default branch: it runs, and it gates.
+ */
+export const ALWAYS_GATING_SUITES: ReadonlySet<string> = new Set([
+  "repo-gates",
+  "repo-history-gates",
+]);
 
 /**
  * What an item that has ever disagreed with itself runs, however rarely
@@ -353,10 +411,10 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why:
       "Up when more should fit in a lane; down when five minutes is longer " +
-      "than anybody will wait for a first answer. The lane jobs that this " +
-      "bounds do not exist yet; when they do, their work-step and job " +
-      "timeouts in `deno.yml` have to move with it, and nothing checks " +
-      "that until they are written.",
+      "than anybody will wait for a first answer. The `lane-work-timeout` " +
+      "anchor in `deno.yml` is the same number in minutes, and " +
+      "`lane-job-timeout` is ten above it; both move with this one, and " +
+      "nothing checks that.",
   },
   {
     name: "LANE_PROLOGUE_SECONDS",
@@ -391,7 +449,9 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "chosen",
     why: "Up when the run on `main` uses more jobs than it needs; down when " +
-      "`main` takes too long to say something broke.",
+      "`main` takes too long to say something broke. The " +
+      "`full-lane-work-timeout` anchor in `deno.yml` is the same number in " +
+      "minutes, and `full-lane-job-timeout` is ten above it.",
   },
   {
     name: "FULL_LANE_BUDGET_SECONDS",
@@ -604,6 +664,43 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when the unselected corpus is going stale; down when lanes spend " +
       "the share on tests that never find anything.",
+  },
+  {
+    name: "ALWAYS_GATING_SUITES",
+    value: ALWAYS_GATING_SUITES.size,
+    unit: "suites",
+    setBy: "chosen",
+    why: "Add a suite whose failures are never noise, so that a flake rate " +
+      "cannot excuse one; remove one whose failures a change's author " +
+      "cannot act on.",
+  },
+  {
+    name: "MIN_CORRECTION_SPAN_SECONDS",
+    value: MIN_CORRECTION_SPAN_SECONDS,
+    unit: "seconds",
+    setBy: "derived",
+    why:
+      "A tenth of a lane's budget. Down when a suite's real slope is going " +
+      "unbelieved for too long; up when a slope fitted inside a narrow " +
+      "range is being read far outside it.",
+  },
+  {
+    name: "MAX_SUITE_CORRECTION",
+    value: MAX_SUITE_CORRECTION,
+    unit: "multiple of a suite's own test time",
+    setBy: "chosen",
+    why: "Up when a suite really does take several times its tests' own time " +
+      "per second of them; down when a fitted slope is pricing a suite out " +
+      "of every lane.",
+  },
+  {
+    name: "MIN_CORRECTION_SAMPLES",
+    value: MIN_CORRECTION_SAMPLES,
+    unit: "batches",
+    setBy: "chosen",
+    why:
+      "Up when a slope is being fitted from too little and swinging about; " +
+      "down when a suite's real slope takes too long to be believed.",
   },
   {
     name: "FLAKE_EXCLUSION_RATE",

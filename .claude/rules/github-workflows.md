@@ -40,57 +40,62 @@ job fails with it.
 Both aliases point at YAML anchors declared in the `env:` block at the top of
 the file, which is where the minutes themselves are written. Add a work step
 and you add the alias, not a number; a job that needs its own bound adds a pair
-of anchors there, as the CLI integration suites have. The deploy jobs are the
-exception and carry no bound, because a deploy's duration is set by a script in
-another repository. `tasks/ci-workflow.test.ts` names those and holds every
-other job to the shape: it fails the `Check` job when a bound is missing, when
-it is written as a number rather than an alias, or when a step's anchor is
-fewer than ten minutes below its job's.
+of anchors there, as the lanes have. A lane's work bound is
+`LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS` from
+`tasks/test-selection/policy.ts` written in minutes — the bound the lane is
+killed at, which the budget it is packed against is derived from — so the
+anchor and that constant move together. The deploy jobs are
+the exception and carry no bound, because a deploy's duration is set by a
+script in another repository. `tasks/ci-workflow.test.ts` names those and holds
+every other job to the shape: it fails when a bound is missing, when it is
+written as a number rather than an alias, or when a step's anchor is fewer than
+ten minutes below its job's.
 
-## A test job ships test records
+## Adding a test surface is not a workflow edit
 
-Every job that runs tests sets `CF_TEST_RECORDS_DIR` to a workspace spool
-and ends with a `📤 Ship test records` step using the
-`./.github/actions/test-records-ship` composite action, `if: always()`,
-with the job's display name, its matrix leg in `artifact:`, and a
-`--junit` specification when the job produces JUnit XML. Command-level
-steps wrap their command in `deno task run-recorded <kind> <scope> <name>
---`. The contract is `docs/specs/test-records.md`; the wiring recipe is
-"Covering a new test surface" in `docs/development/test-records.md`. A job
-without the ship step runs fine and records nothing — which is how a new
-job silently falls out of the flake and duration history.
+A pull request runs five `pr-tests` lanes and a push runs one `full-tests` lane
+per share of the corpus, and both run the same script. Which tests each of them
+runs comes from `tasks/test-topology.ts` and the manifest, so a new test
+surface is a suite under `tasks/test-topology/` and never a job here. `deno task
+check-test-topology` fails on a test file no suite accounts for, and on a step
+under `.github/` that records a test by hand — a lane records what it ran
+through the suite that owns it, so a recording step in a workflow is either a
+test no suite knows about or a second run of one a lane already carries.
 
-A job whose every test another workflow already records against the same
-commit is the exception, and it records nothing: no spool directory, no
-`run-recorded` wrapper, no ship step. Recording there would file each of
-those tests twice against one commit. The Dashboard workflow's tests job
-is the one such job, and the relay does not follow that workflow. The
-exemption covers tests, not jobs, so a test that runs only in such a job
-is recorded there.
+`tasks/ci-workflow.test.ts` holds that to a checked property: it lists the
+things a workflow may not name — a suite, a shard count, a server-execution
+arm, a skip list — and fails on any of them.
 
-A check that no lane can be asked to run is the other exception, and it
-records nothing either: no spool directory, no `run-recorded` wrapper, no
-ship step. `docs/specs/test-records.md` under "Recording" holds the
-criterion. The `Coverage Check` job in `deno.yml` is one, because it reads
-the coverage artifacts of every test job in its own run; the CFC Property
-Suite's audit step is the other, because it reads the corpus the suite in
-the step before it has just written. A gate comparing against a base ref
-is not this: `check-baselines-append-only` and `check-test-aliases` each
-resolve a merge base, and both record.
+## A workflow that runs tests ships test records
 
-Which of a job's steps are wrapped is a separate question from either
-exemption. A wrapper records the command under it, so it belongs on a
-command that is itself the check and not on one whose own tests are the
-checks — the wrapper passes recording through, so a wrapped test command
-files a summary of the invocation beside whatever its tests record. The
-CFC Property Suite's test step is the case to learn from: it runs
-`deno test` directly, which without a `--junit-path` to ingest records
-nothing, so its wrapper's line was the job's only record of a step whose
-tests CI records through `workspace-unit`. That step and the audit step
-together leave that workflow taking no part in test records at all.
+The two lane jobs set `CF_TEST_RECORDS_DIR` to a workspace spool and end with a
+`📤 Ship test records` step using the `./.github/actions/test-records-ship`
+composite action, `if: always()`, with the job's display name and its lane
+number in `artifact:`. Neither carries a `variant:` or a `junit:` input: a lane
+may hold default and non-default batches at once, so a job-wide variant could
+not represent it, and the lane runner gathers each batch's records as it
+finishes and applies that suite's own variant there. The contract is
+`docs/specs/test-records.md`; the wiring recipe is "Covering a new test surface"
+in `docs/development/test-records.md`.
 
-## Before splitting or rebalancing jobs
+A workflow whose every test another workflow already records against the same
+commit records nothing: no spool directory, no `run-recorded` wrapper, no ship
+step. Recording there would file each of those tests twice against one commit.
+The Dashboard workflow's tests job is one, and the relay does not follow that
+workflow.
 
-`docs/development/CI_PERFORMANCE.md` says when that work is worth starting and,
-more usefully, when to stop. Read it first; the answer is often that the jobs
-are already close enough.
+A check that no lane can be asked to run records nothing either, for the same
+three reasons. `docs/specs/test-records.md` under "Recording" holds the
+criterion. The `Coverage Report` job in `deno.yml` is one, because it reads the
+coverage artifacts of every lane in its own run; the CFC Property Suite's audit
+step is the other, because it reads the corpus the suite in the step before it
+has just written. A gate comparing against a base ref is not this:
+`check-baselines-append-only` and `check-test-aliases` each resolve a merge
+base, and both record — through their suite, inside a lane.
+
+## Before reaching for a job
+
+`docs/development/CI_PERFORMANCE.md` says what a slow run calls for, and the
+answer is almost never a job: the packer decides what goes where, and
+`deno task test-selection plan --dry-run` says what it would decide before
+anything runs.

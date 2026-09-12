@@ -14,27 +14,6 @@ const PERMISSIONS = [
 // `deno task check` (tasks/check.sh), so the test run skips it.
 const BASE_FLAGS = ["--no-check"];
 
-// Optional sharding for CI fan-out. CLI_TEST_SHARD uses the same one-based
-// "i/n" syntax as PATTERN_INTEGRATION_SHARD. Ordinary files advance through
-// the shards in sorted order, starting with the second shard and wrapping after
-// the last. An unset variable runs every test file for local development.
-function parseCliTestShard(): { index: number; count: number } {
-  const raw = Deno.env.get("CLI_TEST_SHARD");
-  if (!raw) return { index: 0, count: 1 };
-  const match = raw.match(/^(\d+)\/(\d+)$/);
-  if (!match) {
-    throw new Error(
-      `Invalid CLI_TEST_SHARD "${raw}"; expected "i/n" (1-based).`,
-    );
-  }
-  const index = Number(match[1]) - 1;
-  const count = Number(match[2]);
-  if (count < 1 || index < 0 || index >= count) {
-    throw new Error(`CLI_TEST_SHARD "${raw}" out of range.`);
-  }
-  return { index, count };
-}
-
 // Test files that cannot run beside another file. `deno test --parallel` runs
 // each file on its own thread of one process, so a file belongs here when it
 // changes state the whole process shares: a test that reads an environment
@@ -83,7 +62,7 @@ const ALL_ACCESS_TESTS = [
 
 // Tests that need a live toolshed named by API_URL. This runner excludes
 // them: its --allow-net=127.0.0.1 grant cannot reach an arbitrary API_URL.
-// The CI cli-integration-test job runs them against its toolshed; each
+// The `cli-deno` suite runs them against the toolshed its lane opened; each
 // file's header documents the direct local invocation.
 const INTEGRATION_TESTS = [
   "test/piece-integration.test.ts",
@@ -169,10 +148,7 @@ if (missingIntegrationTests.length > 0) {
 }
 const unitTests = allTests.filter((test) => !integration.has(test));
 
-const shard = parseCliTestShard();
-const tests = unitTests.filter((_, index) =>
-  (index + 1) % shard.count === shard.index
-);
+const tests = unitTests;
 
 const parallelTests = tests.filter((test) =>
   !serial.has(test) && !allAccess.has(test)
