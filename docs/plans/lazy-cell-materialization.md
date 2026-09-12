@@ -573,6 +573,6 @@ slipping past a prepared boundary is untested.
   touches. That is the larger win for genuinely huge data and depends on this
   work landing first; it belongs with
   [shaped reads and verb results](shaped-reads-and-verb-results.md).
-- Making **handlers** lazy, unless Stage 5 records the decision to include them.
+- Making **handlers** lazy: Stage 5 records the decision to keep them eager.
 - Replacing the schema-less `createQueryResultProxy`. It remains the view for an
   absent or `true` schema, and the lazy view delegates to it.
