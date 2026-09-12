@@ -381,13 +381,21 @@ describe("handler lazy context", () => {
     // runner would set, and holds its transaction open across a barrier while
     // a second runtime on the same store writes a row it never touched.
 
+    /** What the second runtime writes while the handler holds its barrier. */
+    type ConcurrentWrite =
+      | "untouched-row-field"
+      | "touched-row-field"
+      | "append";
+
     /**
      * Dispatches one event to a handler that reads the first row under the
-     * given posture, then waits at `gate`; returns how many times the handler
-     * ran once everything settled, and the callback statuses.
+     * given posture, then waits at `gate` while the second runtime performs
+     * `write`; returns how many times the handler ran once everything
+     * settled, and the callback statuses.
      */
     async function runAgainstConcurrentWrite(
       lazy: boolean,
+      write: ConcurrentWrite = "untouched-row-field",
     ): Promise<{ runs: number; statuses: string[] }> {
       env = createSchedulerTestRuntime(import.meta.url);
       const { runtime, tx, storageManager } = env;
@@ -446,23 +454,32 @@ describe("handler lazy context", () => {
         );
         await entered.promise;
 
-        // The write the handler's commit may or may not conflict with: row 1,
-        // which the body never touched.
+        // The write the handler's commit may or may not conflict with.
         const siblingItems = sibling.runtime.getCell<Item[]>(
           space,
           "shared-items",
           undefined,
         );
-        const write = sibling.runtime.edit();
-        siblingItems.key(1).key("label").withTx(write).set("changed");
-        expect((await write.commit()).error).toBeUndefined();
+        const edit = sibling.runtime.edit();
+        switch (write) {
+          case "untouched-row-field":
+            siblingItems.key(1).key("label").withTx(edit).set("changed");
+            break;
+          case "touched-row-field":
+            siblingItems.key(0).key("label").withTx(edit).set("row0-changed");
+            break;
+          case "append":
+            siblingItems.withTx(edit).push({ label: "appended" });
+            break;
+        }
+        expect((await edit.commit()).error).toBeUndefined();
         await sibling.runtime.idle();
         await sibling.runtime.scheduler.idleWithPendingCommits();
 
         gate.resolve();
         await runtime.idle();
         await runtime.scheduler.idleWithPendingCommits();
-        expect(out.get()).toBe(4);
+        expect(out.get()).toBe(write === "touched-row-field" ? 12 : 4);
         return { runs, statuses };
       } finally {
         await sibling.runtime.dispose({ closeStorage: false });
@@ -479,6 +496,29 @@ describe("handler lazy context", () => {
       const outcome = await runAgainstConcurrentWrite(true);
       expect(outcome.statuses).toEqual(["done"]);
       expect(outcome.runs).toBe(1);
+    });
+
+    it("retries a lazy handler's commit when the row it touched changed underneath it", async () => {
+      const outcome = await runAgainstConcurrentWrite(
+        true,
+        "touched-row-field",
+      );
+      expect(outcome.statuses).toEqual(["done"]);
+      expect(outcome.runs).toBeGreaterThan(1);
+    });
+
+    it("retries a lazy handler's commit when a row was appended underneath it", async () => {
+      // An append changes the list's own document, which the view read to
+      // reach row 0, so the list is in the read set either way.
+      const outcome = await runAgainstConcurrentWrite(true, "append");
+      expect(outcome.statuses).toEqual(["done"]);
+      expect(outcome.runs).toBeGreaterThan(1);
+    });
+
+    it("retries an eager handler's commit when a row was appended underneath it", async () => {
+      const outcome = await runAgainstConcurrentWrite(false, "append");
+      expect(outcome.statuses).toEqual(["done"]);
+      expect(outcome.runs).toBeGreaterThan(1);
     });
   });
 });
