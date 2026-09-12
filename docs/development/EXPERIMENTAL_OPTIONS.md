@@ -512,7 +512,7 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 ### `lazyMaterialization`
 
-**Last checked:** 2026-08-09. **Status:** implemented, on by default.
+**Last checked:** 2026-09-12. **Status:** implemented, on by default.
 
 - **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
   `new Runtime({ experimental: { lazyMaterialization: false } })` as a temporary
@@ -548,7 +548,9 @@ readings on a marked transaction pin — the schema view and the schema-less
 proxy; unmarked reads are untouched, so the standing handle long-lived consumers
 rely on keeps tracking current state.
 
-Still unbuilt, and recorded in the plan: handlers materialize eagerly.
+Handlers materialize eagerly by decision: the [handler context
+record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+holds the measurements and the conditions for revisiting.
 
 ### `readerSchemaPrecedence`
 
