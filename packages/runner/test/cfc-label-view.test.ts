@@ -456,6 +456,7 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
+          observes: "followRef",
           label: {
             confidentiality: expect.arrayContaining(["link-slot-only"]),
           },
@@ -627,14 +628,15 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            confidentiality: expect.arrayContaining([
-              "personal-space",
-              "shared-space",
-            ]),
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            confidentiality: ["shared-space"],
+            integrity: ["authored-by-bob"],
+          },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: {
+            confidentiality: ["personal-space"],
+            integrity: ["selected-by-alice"],
           },
         }, {
           path: ["details"],
@@ -657,14 +659,16 @@ describe("CFC label view helpers", () => {
           path: [],
           label: {
             confidentiality: expect.arrayContaining([
-              "personal-space",
               "shared-space",
               "target-detail",
             ]),
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
+          },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: {
+            confidentiality: ["personal-space"],
           },
         }],
       });
@@ -749,12 +753,11 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
-          },
+          label: { integrity: ["authored-by-bob"] },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: { integrity: ["selected-by-alice"] },
         }],
       });
     } finally {
@@ -841,12 +844,11 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
-          },
+          label: { integrity: ["authored-by-bob"] },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: { integrity: ["selected-by-alice"] },
         }],
       });
     } finally {
@@ -1024,12 +1026,7 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
-          },
+          label: { integrity: ["authored-by-bob"] },
         }],
       });
     } finally {
@@ -1131,24 +1128,22 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-first",
-              "authored-first",
-            ]),
-          },
+          label: { integrity: ["authored-first"] },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: { integrity: ["selected-first"] },
         }],
       });
       expect(cfcLabelViewForCell(recovered[1])).toEqual({
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-second",
-              "authored-second",
-            ]),
-          },
+          label: { integrity: ["authored-second"] },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: { integrity: ["selected-second"] },
         }],
       });
     } finally {
@@ -1236,24 +1231,22 @@ describe("CFC label view helpers", () => {
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-first",
-              "authored-shared",
-            ]),
-          },
+          label: { integrity: ["authored-shared"] },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: { integrity: ["selected-first"] },
         }],
       });
       expect(cfcLabelViewForCell(recovered[1])).toEqual({
         version: 1,
         entries: [{
           path: [],
-          label: {
-            integrity: expect.arrayContaining([
-              "selected-second",
-              "authored-shared",
-            ]),
-          },
+          label: { integrity: ["authored-shared"] },
+        }, {
+          path: [],
+          observes: "followRef",
+          label: { integrity: ["selected-second"] },
         }],
       });
       expect(

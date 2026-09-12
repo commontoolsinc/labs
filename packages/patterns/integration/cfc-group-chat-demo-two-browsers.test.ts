@@ -124,6 +124,7 @@ describe(
         space: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identities[0],
+        cfcFlowLabels: "persist",
       });
 
       // Pre-create the space-root (default) pattern so each browser's

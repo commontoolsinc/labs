@@ -115,6 +115,7 @@ describe("sx2 events (Phase 3 gates)", () => {
       space: `${SPACE_NAME}-sx2-events`,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
     const sourcePath = join(
       import.meta.dirname!,

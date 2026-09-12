@@ -623,16 +623,16 @@ Unlike the Category 1 flags, most of these are not simple on/off booleans; they
 are staged dials, usually `off` then `observe` (evaluate and emit diagnostics
 but do not reject) then `enforce` (reject on a violation).
 
-They are not wired to environment variables. Instead, the first-party posture is
-set once in `coreOptions`, the shared core that every construction preset
-composes, in
+They are not wired to environment variables. The shared first-party enforcement
+posture is set in `coreOptions`, which every construction preset composes, in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts).
 `coreOptions` pins `cfcEnforcementMode` to `enforce-explicit`; the other CFC
-dials are deliberately left on their constructor defaults (`off` or none) there,
-with a comment marking `coreOptions` as the one place to flip a dial when a
-first-party rollout begins. So the place to advance a CFC rollout across the
-whole fleet is that one function, not each call site. A few presets accept
-per-environment overrides: `patternTest` and `unitTest` take a laxer
+dials retain their constructor defaults (`off` or none) in that shared core.
+`productionServer` pins flow labels to `persist`, and the shell, deployed CLI,
+and per-space serving Runtime select persistence in their host options. These
+writers supply complete reference history to precise readers. Other dials remain
+independent host choices. A few presets accept per-environment overrides:
+`patternTest` and `unitTest` take a laxer
 `cfcEnforcementMode`, and `browserWorker` and `remoteClient` take
 host-controlled `cfcEnforcementMode` and `cfcFlowLabels` — the shell supplies
 the former's from its initialization data, and cf-harness supplies the
@@ -782,10 +782,23 @@ the per-epic implementation notes).
   integrity, which no store policy states, so its value entries are kept and a
   labeled collection an attributed writer maintains still grows per element.
   Propagation runs only when the enforcement mode is at least `observe`; it
-  derives and stores labels but never rejects on its own.
-- **Current default and planned end state.** `off` by default. The target is to
-  move toward `persist` as the downstream egress gates (render ceiling, sink
-  ceilings, and the LLM path) come online.
+  derives and stores labels. Unresolved reference provenance records a refusal;
+  the enforcement mode determines whether that refusal rejects the attempt.
+- **Reference profile.** `persist` writes independently labeled references in
+  CFC envelope version 2. Acquisition and selection confidentiality travel with
+  the binding; following it consumes every hop and current target restrictions.
+  Runtime and worker readers must support the profile before it is enabled.
+  Opaque worker transfer tokens preserve acquisition; serialized display labels
+  and raw addresses cannot recreate it. Legacy references with incomplete
+  acquisition history require trusted re-acquisition. See
+  [CFC references](../specs/cfc-references.md) for verification and rollout limits.
+- **Current default and planned end state.** The Runtime constructor defaults
+  to `off`. The shell, deployed `cf` CLI, `productionServer` preset (toolshed
+  and background workers), and per-space serving Runtime select `persist` so
+  their writes carry complete reference acquisition history for precise readers.
+  Embedding controllers that write for those readers must also select `persist`. The
+  remaining hosts move toward `persist` as downstream egress gates (render
+  ceiling, sink ceilings, and the LLM path) come online.
 - **Status on 2026-07-08.** Implemented and in staged rollout; the core
   propagation work is done and further stages are tracked in the S16 design doc.
 - **Path to removal.** Flow-label propagation is load-bearing for the S16 audit
@@ -806,6 +819,11 @@ the per-epic implementation notes).
   `enforce` records a rejection reason when a write's integrity falls below the
   floor. The floor tests the integrity of the written value, not of the reads
   that produced it.
+- **Linked contents.** Runtime resolves current target evidence for a floor,
+  including concrete wildcard contributions. A relationship endorsement on the
+  receiving reference cannot satisfy a content floor. Storage retains ordinary
+  revision preconditions for evidence reads; it does not interpret CFC policy.
+  Unsupported atomic verification across spaces fails closed.
 - **Current default and planned end state.** `off` by default. The target is to
   move toward `enforce` once field testing confirms the floor does not
   over-reject legitimate writes.

@@ -226,6 +226,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       (e) => e.origin === "label-metadata",
     );
     expect(templates.map((e) => [e.path.join("/"), e.observes])).toEqual([
+      ["cfc/labels/value", "labelMetadata"],
       [
         "cfc/labels/value/confidentiality/clauses/*/alternatives/*",
         "labelMetadata",
@@ -241,8 +242,8 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       ]);
       expect(entry.label.integrity).toBeUndefined();
     }
-    // Presence/type/kind stay public: NO template materializes for them
-    // (absence = public under the §4.6.4.2 default profile).
+    // Presence/type/kind share the base shape template, with no additional
+    // per-field template.
     expect(templates.some((e) => e.path.at(-1) === "type")).toBe(false);
     expect(templates.some((e) => e.path.at(-1) === "kind")).toBe(false);
   });
@@ -273,10 +274,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(stored.some((e) => e.origin === "label-metadata")).toBe(false);
   });
 
-  it("mints nothing when the derived label has no protected fields", async () => {
-    // All-public atoms (string tags; authored-attribution claims whose every
-    // field is table-public) have nothing source-protected to label: no
-    // templates.
+  it("protects derived label shape even when its fields add no restrictions", async () => {
+    // The tags have no protected fields, but their presence was selected
+    // under confidentiality. The base template preserves that dependency.
 
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria-pub", { keep: true }, [
@@ -294,7 +294,10 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
 
     const stored = entriesOf(outId);
     expect(stored.some((e) => e.origin === "derived")).toBe(true);
-    expect(stored.some((e) => e.origin === "label-metadata")).toBe(false);
+    expect(
+      stored.filter((e) => e.origin === "label-metadata").map((e) => e.path),
+    )
+      .toEqual([["cfc", "labels", "value"]]);
   });
 
   it("overwrite replaces the templates with the payload entry they describe", async () => {
@@ -322,9 +325,10 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     ]);
 
     const outId = await deriveOutDoc(rt, "mp-out-replace", plainId);
-    expect(entriesOf(outId).some((e) => e.origin === "label-metadata")).toBe(
-      false,
-    );
+    expect(
+      entriesOf(outId).filter((e) => e.origin === "label-metadata")
+        .map((e) => e.path),
+    ).toEqual([["cfc", "labels", "value"]]);
 
     // Overwrite under J = caveat(SOURCE_A): templates appear with it.
     const txB = rt.edit();
@@ -344,7 +348,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     txB.prepareCfc();
     expect((await txB.commit()).ok).toBeDefined();
     const afterB = entriesOf(outId).filter(
-      (e) => e.origin === "label-metadata",
+      (e) => e.origin === "label-metadata" && e.path.length > 3,
     );
     expect(afterB.length).toBe(2);
     for (const entry of afterB) {
@@ -371,7 +375,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     txC.prepareCfc();
     expect((await txC.commit()).ok).toBeDefined();
     const afterC = entriesOf(outId).filter(
-      (e) => e.origin === "label-metadata",
+      (e) => e.origin === "label-metadata" && e.path.length > 3,
     );
     expect(afterC.length).toBe(2);
     for (const entry of afterC) {
@@ -454,13 +458,16 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const templates = entriesOf(listId).filter(
       (e) => e.origin === "label-metadata",
     );
-    // Container-anchored entries (enumerate + frozen shape at []) and the
-    // three `*`-child twins each carry the caveat J: one whole-atom + one
-    // `source` template per target path — 4 total, the slot pair with the
-    // `*` target segment.
+    // The container, wildcard child, and concrete slot each carry the caveat
+    // J through three metadata templates: base shape, whole atom, and source.
     expect(templates.map((e) => e.path.join("/")).sort()).toEqual([
+      "cfc/labels/value",
+      "cfc/labels/value/*",
       "cfc/labels/value/*/confidentiality/clauses/*/alternatives/*",
       "cfc/labels/value/*/confidentiality/clauses/*/alternatives/*/source",
+      "cfc/labels/value/0",
+      "cfc/labels/value/0/confidentiality/clauses/*/alternatives/*",
+      "cfc/labels/value/0/confidentiality/clauses/*/alternatives/*/source",
       "cfc/labels/value/confidentiality/clauses/*/alternatives/*",
       "cfc/labels/value/confidentiality/clauses/*/alternatives/*/source",
     ]);
@@ -555,7 +562,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const templates = entriesOf(outId).filter(
       (e) => e.origin === "label-metadata",
     );
-    expect(templates.length).toBe(2);
+    expect(templates.length).toBe(3);
     // The templates carry the committed form — no plaintext source anywhere.
     expect(containsCfcFieldCommitment(templates)).toBe(true);
     expect(JSON.stringify(templates)).not.toContain("did:key:remote-a");
@@ -765,6 +772,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     // indices across the concatenated per-entry clause lists. The caveat is
     // the second alternative of its clause, so the alternative index is 1.
     expect(paths).toEqual([
+      "cfc/labels/value",
       "cfc/labels/value/confidentiality/clauses/0/alternatives/1",
       "cfc/labels/value/confidentiality/clauses/0/alternatives/1/source",
       "cfc/labels/value/confidentiality/clauses/1/alternatives/1",
@@ -796,11 +804,12 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("unreachable");
     expect(result.atoms).toHaveLength(1);
-    // The templates are the label CARRIER now: the consumed labels come from
-    // them, not from the in-hand fallback (the entry's own confidentiality).
+    // Field and atom templates label their respective consultations. The
+    // base metadata-shape observation also consumes the entry's own
+    // confidentiality.
     expect(consumedConfidentiality).toContainEqual("tmpl-source-label");
     expect(consumedConfidentiality).toContainEqual("tmpl-atom-label");
-    expect(consumedConfidentiality).not.toContainEqual("secret");
+    expect(consumedConfidentiality).toContainEqual("secret");
     // Per-consultation records at concrete paths: the source-field consult
     // resolved the field template; the whole-atom projection consumed the
     // atom template.
@@ -975,8 +984,8 @@ describe("CFC template metadata population (Stage B): derivation unit properties
     const single = deriveLabelMetadataTemplateEntries([
       derivedEntry([caveatAtom(SOURCE_A)]),
     ]);
-    // Whole-atom template + one `source` field template.
-    expect(single.map((e) => e.path.at(-1))).toEqual(["*", "source"]);
+    // Metadata shape, whole-atom, and source-field templates.
+    expect(single.map((e) => e.path.at(-1))).toEqual(["body", "*", "source"]);
 
     // Many clauses, an anyOf with several alternatives, extra public atoms:
     // same field kinds → same entry count.
@@ -990,7 +999,11 @@ describe("CFC template metadata population (Stage B): derivation unit properties
       ]),
     ]);
     expect(manyClauses.length).toBe(single.length);
-    expect(manyClauses.map((e) => e.path.at(-1))).toEqual(["*", "source"]);
+    expect(manyClauses.map((e) => e.path.at(-1))).toEqual([
+      "body",
+      "*",
+      "source",
+    ]);
 
     // A second protected field KIND (User.subject is commitment-classified,
     // i.e. protected) adds exactly one per-field template.
@@ -1001,6 +1014,7 @@ describe("CFC template metadata population (Stage B): derivation unit properties
       ]),
     ]);
     expect(twoKinds.map((e) => e.path.at(-1))).toEqual([
+      "body",
       "*",
       "source",
       "subject",
@@ -1014,7 +1028,7 @@ describe("CFC template metadata population (Stage B): derivation unit properties
     const smuggling = deriveLabelMetadataTemplateEntries([
       derivedEntry([{ kind: "authored-by", subject: caveatAtom() }]),
     ]);
-    expect(smuggling.map((e) => e.path.at(-1))).toEqual(["*"]);
+    expect(smuggling.map((e) => e.path.at(-1))).toEqual(["body", "*"]);
 
     // Deeper smuggling shapes stay whole-atom-only through the nested scan:
     // an ARRAY under a public wrapper field whose element is itself a
@@ -1026,7 +1040,7 @@ describe("CFC template metadata population (Stage B): derivation unit properties
         subject: [{ kind: "authored-by", subject: caveatAtom() }],
       }]),
     ]);
-    expect(nestedArray.map((e) => e.path.at(-1))).toEqual(["*"]);
+    expect(nestedArray.map((e) => e.path.at(-1))).toEqual(["body", "*"]);
 
     // ...and a bare commitment marker nested under a public wrapper field
     // (protected content wherever it sits, mirroring the projection walk's
@@ -1037,9 +1051,9 @@ describe("CFC template metadata population (Stage B): derivation unit properties
         subject: { digestOf: "committed-nested" },
       }]),
     ]);
-    expect(nestedMarker.map((e) => e.path.at(-1))).toEqual(["*"]);
+    expect(nestedMarker.map((e) => e.path.at(-1))).toEqual(["body", "*"]);
 
-    // An all-public nested shape mints nothing through the same scan.
+    // Public fields need only the base metadata shape template.
     expect(deriveLabelMetadataTemplateEntries([
       derivedEntry([{
         kind: "authored-by",
@@ -1048,7 +1062,7 @@ describe("CFC template metadata population (Stage B): derivation unit properties
           subject: "did:key:bob",
         }],
       }]),
-    ])).toEqual([]);
+    ])).toMatchObject([{ path: ["cfc", "labels", "value", "body"] }]);
   });
 
   it("derives nothing from non-containment or template entries", () => {
@@ -1091,7 +1105,7 @@ describe("CFC template metadata population (Stage B): derivation unit properties
         { digestOf: "abc" },
       ]),
     ]);
-    expect(derived.map((e) => e.path.at(-1))).toEqual(["*"]);
+    expect(derived.map((e) => e.path.at(-1))).toEqual(["body", "*"]);
   });
 
   it("resolves the most specific template with wildcard segments (replace-down)", () => {

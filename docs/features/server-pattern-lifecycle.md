@@ -75,7 +75,9 @@ not an existence oracle over the deployment's spaces.
 The verb's own writes are the serving loop's, under the space's lease. The
 instantiation transaction carries the requester's CFC trust snapshot, so a
 label setup mints attributes to the requester rather than to the serving
-identity.
+identity. Under precise CFC, the trusted request boundary acquires explicit
+document links in the argument before setup. That acquisition records the
+reference; reading its target still consumes the target's content labels.
 
 ## Where a verb runs
 

@@ -1241,190 +1241,6 @@ describe("runtime-processor", () => {
       expect(result.piece.cell.schema).toBeUndefined();
     });
 
-    it("returns a cell inside a piece under the piece's result schema at its path when its links carry none, syncing the piece's root alone", async () => {
-      const targetRef: CellRef = {
-        id: "of:fid1-parent-piece" as CellRef["id"],
-        space,
-        scope: "space",
-        path: ["activityTab"],
-      };
-      const landingRef: CellRef = { ...targetRef, path: [] };
-      const slugRef: CellRef = {
-        id: "of:fid1-slug-doc" as CellRef["id"],
-        space,
-        scope: "space",
-        path: [],
-      };
-      const activityTabSchema = {
-        type: "object",
-        properties: {
-          "$NAME": { type: "string" },
-          "$UI": { type: "object" },
-        },
-        required: ["$NAME", "$UI"],
-      };
-      const resultSchema = {
-        type: "object",
-        properties: {
-          activityTab: activityTabSchema,
-          other: { type: "string" },
-        },
-      };
-      let landingSynced = false;
-      const landingCell = mockCell(landingRef, {
-        patternIdentity: { identity: "pattern-identity", symbol: "default" },
-        resultSchema,
-        onSync: () => {
-          landingSynced = true;
-        },
-      });
-      let targetSynced = false;
-      const targetCell = mockCell(targetRef, {
-        onSync: () => {
-          targetSynced = true;
-        },
-      });
-      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
-      const pieces = {
-        getSpace: () => space,
-        getPieceCell: () => {
-          throw new Error(
-            "nested output-cell slug redirects should not load as pieces",
-          );
-        },
-      };
-      const processor = buildProcessor({
-        runtime: runtimeLandingIn(
-          slugCell,
-          { ref: landingRef, cell: landingCell },
-          targetCell,
-        ),
-        cc: pieces,
-        space,
-      });
-
-      const result = await processor.handlePieceGet({
-        type: RequestType.PieceGet,
-        pieceId: fid("slug-doc"),
-        space,
-        runIt: true,
-      });
-
-      expect(landingSynced).toBe(true);
-      expect(targetSynced).toBe(false);
-      expect(result.piece.cell).toMatchObject({
-        ...targetRef,
-        schema: activityTabSchema,
-      });
-    });
-
-    it("returns a cell inside a piece under the schema the links along its path carry, over the result schema at that path", async () => {
-      // What a stored link on the path says it is read under wins, as it
-      // does for a piece cell `getPieceCell()` resolves: the result schema
-      // is what the piece declared, and the link is what is there.
-      const targetRef: CellRef = {
-        id: "of:fid1-parent-piece" as CellRef["id"],
-        space,
-        scope: "space",
-        path: ["activityTab"],
-      };
-      const landingRef: CellRef = { ...targetRef, path: [] };
-      const slugRef: CellRef = {
-        id: "of:fid1-slug-doc" as CellRef["id"],
-        space,
-        scope: "space",
-        path: [],
-      };
-      const linkedSchema: NonNullable<CellRef["schema"]> = {
-        type: "object",
-        properties: { entries: { type: "array" } },
-      };
-      const landingCell = mockCell(landingRef, {
-        patternIdentity: { identity: "pattern-identity", symbol: "default" },
-        resultSchema: {
-          type: "object",
-          properties: { activityTab: { type: "object" } },
-        },
-        linkedSchema,
-      });
-      const targetCell = mockCell(targetRef);
-      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
-      const processor = buildProcessor({
-        runtime: runtimeLandingIn(
-          slugCell,
-          { ref: landingRef, cell: landingCell },
-          targetCell,
-        ),
-        cc: { getSpace: () => space },
-        space,
-      });
-
-      const result = await processor.handlePieceGet({
-        type: RequestType.PieceGet,
-        pieceId: fid("slug-doc"),
-        space,
-        runIt: true,
-      });
-
-      expect(result.piece.cell).toMatchObject({
-        ...targetRef,
-        schema: linkedSchema,
-      });
-    });
-
-    it("returns a cell inside a piece under the schema the redirect carries when the links along its path carry none", async () => {
-      const redirectSchema: NonNullable<CellRef["schema"]> = {
-        type: "object",
-        properties: { entries: { type: "array" } },
-      };
-      const targetRef: CellRef = {
-        id: "of:fid1-parent-piece" as CellRef["id"],
-        space,
-        scope: "space",
-        path: ["activityTab"],
-        schema: redirectSchema,
-      };
-      const landingRef: CellRef = {
-        id: targetRef.id,
-        space,
-        scope: "space",
-        path: [],
-      };
-      const slugRef: CellRef = {
-        id: "of:fid1-slug-doc" as CellRef["id"],
-        space,
-        scope: "space",
-        path: [],
-      };
-      const landingCell = mockCell(landingRef, {
-        patternIdentity: { identity: "pattern-identity", symbol: "default" },
-        resultSchema: {
-          type: "object",
-          properties: { activityTab: { type: "object" } },
-        },
-      });
-      const targetCell = mockCell(targetRef);
-      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
-      const processor = buildProcessor({
-        runtime: runtimeLandingIn(
-          slugCell,
-          { ref: landingRef, cell: landingCell },
-          targetCell,
-        ),
-        cc: { getSpace: () => space },
-        space,
-      });
-
-      const result = await processor.handlePieceGet({
-        type: RequestType.PieceGet,
-        pieceId: fid("slug-doc"),
-        space,
-        runIt: true,
-      });
-
-      expect(result.piece.cell).toMatchObject(targetRef);
-    });
-
     it("loads slug redirects to piece cells through the pieces controller", async () => {
       const pieceRef: CellRef = {
         id: "of:fid1-piece" as CellRef["id"],
@@ -3671,6 +3487,11 @@ describe("runtime-processor", () => {
         processor: buildProcessor({
           runtime: {
             edit: () => tx,
+            editWithRetry: (action: (candidate: unknown) => object) => {
+              action(tx);
+              prepared = true;
+              return tx.commit();
+            },
             prepareTxForCommit: (candidate: unknown) => {
               expect(candidate).toBe(tx);
               prepared = true;
@@ -3860,6 +3681,72 @@ describe("runtime-processor", () => {
   });
 
   describe("direct cell appends", () => {
+    it("retains both concurrent appends when reference metadata conflicts", async () => {
+      const server = new MemoryV2Server.Server({
+        authorizeSessionOpen: () => cfcSigner.did(),
+        sessionOpenAuth: { audience: testSessionOpenAudience },
+      });
+      const runtimes = [0, 1].map(() => {
+        const storageManager = new SharedV2StorageManager({
+          as: cfcSigner,
+          memoryHost: new URL("memory://"),
+        }, server);
+        return new Runtime({
+          apiUrl: new URL("http://localhost/"),
+          storageManager,
+          cfcFlowLabels: "persist",
+        });
+      });
+      const schema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { optionId: { type: "string" } },
+          required: ["optionId"],
+        },
+      } as const;
+      const cells = runtimes.map((runtime) =>
+        runtime.getCell(cfcSigner.did(), "concurrent-client-appends", schema)
+      );
+      try {
+        expect(
+          (await runtimes[0].editWithRetry((tx) => {
+            cells[0].withTx(tx).set([]);
+          })).error,
+        ).toBeUndefined();
+        await cells[1].sync();
+        await cells[1].pull();
+
+        const outcomes = await Promise.allSettled(runtimes.map((runtime, i) => {
+          const processor = buildProcessor({ runtime });
+          const { cell } = processor.handleGetCell({
+            type: RequestType.GetCell,
+            space: cfcSigner.did(),
+            cause: "concurrent-client-appends",
+            schema,
+          });
+          return processor.handleCellPush({
+            type: RequestType.CellPush,
+            cell,
+            values: [{ optionId: i === 0 ? "library" : "studio" }],
+            awaitCommit: true,
+          });
+        }));
+        expect(outcomes.map((outcome) => outcome.status))
+          .toEqual(["fulfilled", "fulfilled"]);
+        await cells[0].pull();
+        expect(cells[0].get()?.map((entry) => entry.optionId).sort())
+          .toEqual(["library", "studio"]);
+        expect(cells[0].key(0).resolveAsCell().getAsNormalizedFullLink().id)
+          .not.toBe(
+            cells[0].key(1).resolveAsCell().getAsNormalizedFullLink().id,
+          );
+      } finally {
+        for (const runtime of runtimes) await runtime.dispose();
+        await server.close();
+      }
+    });
+
     it("keeps object members distinct across independent callers", async () => {
       const signer = await Identity.fromPassphrase(
         `direct-cell-push-${crypto.randomUUID()}`,

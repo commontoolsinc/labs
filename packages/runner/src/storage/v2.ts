@@ -31,6 +31,7 @@ import {
   type ClientCommit,
   type CommitClass,
   type CommitPrecondition,
+  type CommitReadValidation,
   DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
@@ -58,6 +59,7 @@ import {
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { pathsOverlap } from "@commonfabric/memory/v2/path";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -97,6 +99,7 @@ import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq, recordCommitSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import {
+  type CommitReadBasis,
   IMemoryAddress,
   IMergedChanges,
   IOperationStorageCapability,
@@ -141,7 +144,9 @@ import {
   getTransactionWriteAttempts,
 } from "./transaction-inspection.ts";
 import {
+  getAuthorizationReadBasis,
   getBlindStructuralTarget,
+  isAuthorizationRead,
   isDurableReadTx,
   isInternalVerifierRead,
   isMergeableOpRead,
@@ -150,6 +155,7 @@ import {
   isReadMarkedAsAttemptedWrite,
   notifyCommitRejected,
   recordCoverageWait,
+  requiresCommitReadValidation,
 } from "./reactivity-log.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
@@ -180,8 +186,8 @@ export type CfcSchemaDocumentSyncer = (
   document: EntityDocument | undefined,
 ) => Promise<Error | undefined>;
 
-// A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
-// part of the write; that read is dropped from its conflict set.
+// Document CFC metadata can be read for write bookkeeping. Authorization reads
+// at this path retain their revision dependency in the commit's conflict set.
 const isCfcLabelPath = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "cfc";
 
@@ -403,6 +409,9 @@ type PendingVersion =
       localSeq: number;
       op: "patch";
       patches: PatchOp[];
+      replayPatches?: PatchOp[];
+      replayDependencies?: readonly number[];
+      replayInvalid?: boolean;
       value: EntityDocument;
     }
     | {
@@ -457,6 +466,7 @@ type PendingPatchLogContext = {
 };
 
 type ConfirmedCommitRead = {
+  validation?: CommitReadValidation;
   id: URI;
   scope?: CellScope;
   path: DocumentPath;
@@ -465,6 +475,7 @@ type ConfirmedCommitRead = {
 };
 
 type PendingCommitRead = {
+  validation?: CommitReadValidation;
   id: URI;
   scope?: CellScope;
   path: DocumentPath;
@@ -503,7 +514,13 @@ const pendingVersion = (
   localSeq: number,
   operation:
     | { op: "set"; value: EntityDocument }
-    | { op: "patch"; patches: PatchOp[]; value: EntityDocument }
+    | {
+      op: "patch";
+      patches: PatchOp[];
+      replayPatches?: PatchOp[];
+      replayDependencies?: readonly number[];
+      value: EntityDocument;
+    }
     | { op: "delete" },
 ): PendingVersion => ({ localSeq, ...operation });
 
@@ -531,6 +548,7 @@ const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
   logContext: PendingPatchLogContext,
+  authoritative = false,
 ): EntityDocument | undefined => {
   switch (pending.op) {
     case "delete":
@@ -538,19 +556,25 @@ const applyPendingVersion = (
     case "set":
       return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
-      // Replay the layer's OPS over the base — never combine values. The
-      // patch vocabulary is semantic (append / add-unique / increment /
-      // splice / ...), so replaying re-folds the layer against whatever
-      // base the server delivered, exactly as the server folds it on
-      // accept — the client and the server share this applyPatch. Spine
-      // materialization comes from the ops that allow it (createMissing),
-      // mirroring the server's mergeable disposition, and the ops can only
-      // express this layer's own writes, so a dropped sibling's data is
-      // unrepresentable in the result (CT-1872 1a).
+      // A withdrawn layer may have supplied part of the authored snapshot.
+      // Hide the complete local layer, including companion fields, until its
+      // verdict; wire admission still decides its independent operations.
+      if (!authoritative && pending.replayInvalid) return base;
+      // Replay this layer's operations over the base. Semantic append /
+      // add-unique / increment intents retain their deltas. A generated
+      // fixed-array diff has local replacement patches so a competing
+      // update cannot create slots absent from its authored value and
+      // companion metadata. Confirmation uses the admitted wire patches.
+      // The client and server share applyPatch. Spine materialization comes
+      // from ops that allow it (createMissing). The snapshot dependency guard
+      // above prevents fixed-array replay from restoring a withdrawn layer's
+      // prefix; ordinary operation replay carries only its own writes.
       try {
         return applyPatchToDocument(
           base,
-          pending.patches as PatchOp[],
+          authoritative
+            ? pending.patches
+            : pending.replayPatches ?? pending.patches,
         ) as EntityDocument;
       } catch (error) {
         if (!(error instanceof PatchApplyError)) {
@@ -603,7 +627,12 @@ const materializePendingVersions = (
   let value = interleaved ? promotion.base : confirmed.value;
   for (const entry of entries) {
     if (isCoveredPendingVersion(confirmed, entry)) continue;
-    value = applyPendingVersion(value, entry, logContext);
+    value = applyPendingVersion(
+      value,
+      entry,
+      logContext,
+      entry.acceptedSeq !== undefined && entry.acceptedSeq <= confirmed.seq,
+    );
   }
   return value;
 };
@@ -873,10 +902,10 @@ const compactCommitReads = <
     const dependencyKey = "seq" in candidate
       ? `confirmed:${
         normalizeCellScope(candidate.scope)
-      }:${candidate.id}:${candidate.seq}`
+      }:${candidate.id}:${candidate.seq}:${candidate.validation ?? "required"}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
         dependencyKeyFor(candidate.localSeq)
-      }:${candidate.basisSeq}`;
+      }:${candidate.basisSeq}:${candidate.validation ?? "required"}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -1489,6 +1518,20 @@ export class StorageManager implements IStorageManager {
    */
   async ensureSpaceInitialized(space: MemorySpace): Promise<void> {
     await this.open(space).ensureSession?.();
+  }
+
+  /**
+   * Waits for this manager's already-running, key-backed initialization.
+   * A session mount can create the store before its genesis ACL lands; the
+   * caller must check that ACL after readiness. Opens no provider and does
+   * not adopt unrelated or populated ACL-less spaces.
+   */
+  async waitForPendingSpaceInitialization(space: MemorySpace): Promise<void> {
+    if (
+      this.#genesisPhase.get(space)?.phase !== "in-flight" ||
+      (space !== this.as.did() && !this.#spaceIdentities.has(space))
+    ) return;
+    await this.#providers.get(space)?.ensureSession();
   }
 
   async resolveEventAttention(
@@ -3196,6 +3239,8 @@ type NativeCommitOperation =
     id: URI;
     scope?: CellScope;
     patches: PatchOp[];
+    replayPatches?: PatchOp[];
+    replayDependencies?: readonly number[];
     value: EntityDocument;
   }
   | { op: "delete"; id: URI; scope?: CellScope };
@@ -4418,6 +4463,29 @@ export class SpaceReplica
     return this.#visibleDocument(uri, scope, identity);
   }
 
+  /** @inheritDoc */
+  getDocumentReadBasis(
+    uri: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    excludeSpeculative = false,
+  ): CommitReadBasis {
+    const record = this.#docs.get(
+      docKey(uri, this.instanceKey(scope, identity)),
+    );
+    return Object.freeze({
+      seq: record?.confirmed.seq ?? 0,
+      localSeqs: Object.freeze([
+        ...new Set(
+          record?.pending.filter((version) =>
+            !excludeSpeculative ||
+            !this.#speculativeLocalSeqs.has(version.localSeq)
+          ).map((version) => version.localSeq) ?? [],
+        ),
+      ].sort((left, right) => left - right)),
+    });
+  }
+
   /** ISpaceReplica.getNonSpeculativeDocument (RULED 2026-08-21;
    * verification-coverage.md OW47, second producer): the doc's view
    * over confirmed state plus only its DURABLE pending layers,
@@ -5065,6 +5133,10 @@ export class SpaceReplica
                 id: operation.id,
                 scope: operation.scope,
                 patches: operation.patches,
+                ...(operation.replayPatches === undefined ? {} : {
+                  replayPatches: operation.replayPatches,
+                  replayDependencies: operation.replayDependencies,
+                }),
                 value: toExplicitDocument(operation.value),
               }
               : {
@@ -5139,6 +5211,10 @@ export class SpaceReplica
             id: operation.id,
             scope: operation.scope,
             patches: operation.patches,
+            ...(operation.replayPatches === undefined ? {} : {
+              replayPatches: operation.replayPatches,
+              replayDependencies: operation.replayDependencies,
+            }),
             value: toExplicitDocument(operation.value),
           }
           : {
@@ -6622,6 +6698,7 @@ export class SpaceReplica
 
     const commitReads: IReadActivity[] = [];
     for (const read of reads) {
+      const authorization = isAuthorizationRead(read.meta);
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
@@ -6631,14 +6708,15 @@ export class SpaceReplica
         read.id.startsWith("cid:") ||
         // Blind UI-input write-target reads are replaced by one structural
         // parent read after buildReads' main loop.
-        isReadIgnoredForCommit(read.meta) ||
+        (!authorization && isReadIgnoredForCommit(read.meta)) ||
         // Reference-resolution shape reads stay reactive but do not constrain
         // the commit; recursive reads remain value dependencies.
-        (isReadExcludedFromConflict(read.meta) &&
+        (!authorization && isReadExcludedFromConflict(read.meta) &&
           read.nonRecursive === true) ||
-        // Runtime verifier reads of the CFC label are point-in-time policy
-        // observations, not consumed values.
-        (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path))
+        // Label lookups used only for bookkeeping carry no authorization
+        // decision. Required evidence keeps its revision precondition.
+        (!authorization && isInternalVerifierRead(read.meta) &&
+          isCfcLabelPath(read.path))
       ) {
         continue;
       }
@@ -6649,11 +6727,14 @@ export class SpaceReplica
       // used the element count that a concurrent mergeable op changes.
       const readsMergeableOpArrayLength = opPaths !== undefined &&
         opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
+      // A surviving sibling intent cannot discard the reads of an abandoned
+      // operation whose value is carried by an ordinary covering patch.
       if (
-        opPaths !== undefined &&
+        !authorization && opPaths !== undefined &&
         !readsMergeableOpArrayLength &&
-        (isMergeableOpRead(read.meta) ||
-          isReadMarkedAsAttemptedWrite(read.meta) ||
+        (((isMergeableOpRead(read.meta) ||
+          isReadMarkedAsAttemptedWrite(read.meta)) &&
+          opPaths.some((opPath) => pathsOverlap(opPath, read.path))) ||
           isCfcLabelPath(read.path) ||
           opPaths.some((opPath) =>
             isStrictPrefixPath(opPath, read.path) ||
@@ -6783,8 +6864,9 @@ export class SpaceReplica
     // nonRecursive read at this parent (emitted after the loop).
     const structuralTarget = getBlindStructuralTarget(source);
 
-    // Pending bases belong to a document instance and the speculative-layer
-    // policy. Every path read in this synchronous build shares that same stack.
+    // Replica-derived pending bases belong to a document instance and the
+    // speculative-layer policy. Paths without a captured read basis share
+    // that stack within this synchronous build.
     const pendingLayersByDocument = [
       new Map<string, number[]>(),
       new Map<string, number[]>(),
@@ -6796,15 +6878,17 @@ export class SpaceReplica
     // carries its own `meta.seq`). Shared by the per-read loop below and the blind
     // write's structural precondition so the two emission sites stay in lockstep.
     //
-    // Both the layers and the confirmed seq are read from the replica as the
-    // commit is built, not from the transaction's own snapshot of the doc,
-    // and a frame can land between the two. What the transaction owes this
-    // site (03-commit-model.md §3.3.4) is its commit-time claim check,
-    // passed before its reads are built: `claim()` in
-    // transaction/attestation.ts re-reads every doc the transaction
-    // snapshotted from this replica, and a differing value rejects the
-    // transaction locally as `StorageTransactionInconsistent`. So the
-    // content the transaction read is the content at the basis named here.
+    // Ordinary reads take their layers and confirmed seq from the replica
+    // when the commit is built. The transaction's immediate claim check
+    // (03-commit-model.md §3.3.4) establishes that their snapshotted content
+    // still matches that view, rejecting changed values locally as
+    // `StorageTransactionInconsistent` before the read set reaches the wire.
+    //
+    // Authorization reads supply the stricter `readBasis` captured when their
+    // evidence was observed. Equal content does not rebase that dependency:
+    // an intervening policy change that restores the same value must still
+    // conflict. These revision preconditions remain even when a server-judged
+    // value-hash or absence pin exempts a document from the local claim check.
     //
     // `excludeSpeculativeLayers` (verification-coverage.md OW47, the client
     // own-write durability seam): the blind write's structural read passes
@@ -6825,10 +6909,9 @@ export class SpaceReplica
     // internal-verifier read of the write-target doc, whose VALUE the
     // transaction read path serves from the same non-speculative stack
     // (v2-transaction.ts) — the verifier verifies durable policy state
-    // and names the durable basis, together. A verifier read AT the CFC
-    // metadata path leaves the conflict set in the loop below and never
-    // reaches this emission, so the producer here is a verifier read at
-    // another path, a document's ["schema"] member among them.
+    // and names the durable basis, together. Required verifier reads include
+    // CFC metadata and schema bindings; their admission basis matches the
+    // durable state used to verify them.
     // Content-addressed (cid:)
     // reads keep their ordinary overlay value there — identical to the
     // durable content by construction — while this exclusion still
@@ -6847,6 +6930,11 @@ export class SpaceReplica
       nonRecursive: boolean,
       confirmedSeq?: number,
       excludeSpeculativeLayers = false,
+      readBasis?: CommitReadBasis,
+      validation: CommitReadValidation = source !== undefined &&
+          requiresCommitReadValidation(source)
+        ? "required"
+        : "elidable",
     ) => {
       const recordKey = docKey(id, this.instanceKey(scope, identity));
       const record = this.#docs.get(recordKey);
@@ -6864,7 +6952,9 @@ export class SpaceReplica
       const layersByDocument = pendingLayersByDocument[
         excludeSpeculativeLayers ? 1 : 0
       ];
-      let layers = layersByDocument.get(recordKey);
+      let layers = readBasis === undefined
+        ? layersByDocument.get(recordKey)
+        : [...readBasis.localSeqs];
       if (layers === undefined) {
         layers = [
           ...new Set(
@@ -6879,7 +6969,10 @@ export class SpaceReplica
         ].sort((left, right) => left - right);
         layersByDocument.set(recordKey, layers);
       }
-      const shape = nonRecursive ? { nonRecursive: true } : {};
+      const shape = {
+        validation,
+        ...(nonRecursive ? { nonRecursive: true } : {}),
+      };
       if (layers.length > 0) {
         pending.push({
           id,
@@ -6888,7 +6981,8 @@ export class SpaceReplica
           localSeq: layers.length === 1 ? layers[0] : layers,
           // The true confirmed basis this doc's view sat on — the same value
           // the confirmed branch below emits (CT-1910).
-          basisSeq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          basisSeq: readBasis?.seq ?? confirmedSeq ?? record?.confirmed.seq ??
+            0,
           ...shape,
         });
       } else {
@@ -6896,7 +6990,7 @@ export class SpaceReplica
           id,
           scope,
           path,
-          seq: confirmedSeq ?? record?.confirmed.seq ?? 0,
+          seq: readBasis?.seq ?? confirmedSeq ?? record?.confirmed.seq ?? 0,
           ...shape,
         });
       }
@@ -6918,12 +7012,15 @@ export class SpaceReplica
         // verify-durable and name-durable travel together. Confined to
         // the blind-write tx shape: `structuralTarget` survives the
         // unmark exactly so commit-time emission can recognize it, and
-        // a verifier read in any other tx keeps naming every layer. The
-        // verifier reads that arrive here are the ones outside the CFC
-        // metadata path, which the loop above drops outright.
+        // a verifier read in any other tx keeps naming every layer.
         (source !== undefined && isDurableReadTx(source)) ||
           (structuralTarget !== undefined &&
             isInternalVerifierRead(read.meta)),
+        getAuthorizationReadBasis(read.meta),
+        isAuthorizationRead(read.meta) ||
+          (source !== undefined && requiresCommitReadValidation(source))
+          ? "required"
+          : "elidable",
       );
     }
     // The blind UI-input write's single structural existence/shape precondition: a
@@ -7917,7 +8014,29 @@ export class SpaceReplica
   ): void {
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
-    record.pending.push(pendingVersion(localSeq, pending));
+    const version = pendingVersion(localSeq, pending);
+    // Unknown includes an accepted source pruned from the bounded ack cache.
+    // Withhold only its optimistic snapshot; admission and wire confirmation
+    // remain available without this local evidence.
+    if (
+      version.op === "patch" &&
+      version.replayDependencies?.some((dependency) =>
+        !record.pending.some((entry) => entry.localSeq === dependency) &&
+        !this.#ackedSeqsByLocalSeq.has(dependency)
+      )
+    ) {
+      version.replayInvalid = true;
+    }
+    record.pending.push(version);
+  }
+
+  /** Records an accepted local commit, including directly confirmed seals. */
+  #recordAcknowledgedCommit(localSeq: number, seq: number): void {
+    this.#ackedSeqsByLocalSeq.set(localSeq, seq);
+    if (this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS) {
+      const oldest = this.#ackedSeqsByLocalSeq.keys().next();
+      if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
+    }
   }
 
   /**
@@ -7942,17 +8061,11 @@ export class SpaceReplica
     // The retirement floor's ack record (speculation.md §4): known at
     // VERDICT time, before any parking — a parked promotion changes when
     // the value becomes visible, not that the origin acked.
-    this.#ackedSeqsByLocalSeq.set(localSeq, applied.seq);
+    this.#recordAcknowledgedCommit(localSeq, applied.seq);
     // The same seq, on the transaction that produced the commit: its caller
     // can name the commit after the bounded record above has forgotten it.
     if (source !== undefined) {
       recordCommitSeq(source, this.#space, applied.seq);
-    }
-    if (
-      this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS
-    ) {
-      const oldest = this.#ackedSeqsByLocalSeq.keys().next();
-      if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
     }
     // The input barrier's own-echo race repair (Phase 2 revisit (a)):
     // the frame can OUTRUN this verdict handler on the same socket, so
@@ -8072,6 +8185,7 @@ export class SpaceReplica
   ): void {
     // The accept is being applied (immediately at verdict, or promoted
     // off the parked set): release any read-barrier waiter (whenApplied).
+    this.#recordAcknowledgedCommit(localSeq, applied.seq);
     this.#resolveAppliedWaiter(localSeq);
     const keys = new Map(
       this.#touchedOf(operations, identity).map((touched) => [
@@ -8088,14 +8202,22 @@ export class SpaceReplica
     // change notification for exactly the shadowed docs, so scheduler
     // dirtiness registers BEFORE `unappliedForeignSeqFloor` lifts and
     // the serving loop's next wave derives over the foreign value.
-    // Flag-gated: the OFF arm keeps today's silent flip byte-for-byte
-    // (the residual is self-healing there and the timing delta is not a
-    // recorded acceptance — see the Phase-2 PR's Flags).
-    const shadowTouched = getServerExecutionConfig()
-      ? [...keys.entries()]
-        .filter(([key]) => this.#shadowedForeignSeqs.has(key))
-        .map(([, address]) => address)
-      : [];
+    // The serving input barrier enables foreign-shadow notifications.
+    // Local fixed-array replay has its own promotion notification below,
+    // independent of that barrier.
+    // Fixed-array replay can differ from the wire result when admission
+    // allows a disjoint update. Its promotion changes the visible value
+    // even without the serving input barrier, and must notify readers.
+    const shadowTouched = [...keys.entries()]
+      .filter(([key, address]) =>
+        (getServerExecutionConfig() && this.#shadowedForeignSeqs.has(key)) ||
+        this.#record(address.id, address.scope, undefined, address.scopeKey)
+          .pending.some((entry) =>
+            entry.localSeq === localSeq && entry.op === "patch" &&
+            entry.replayPatches !== undefined
+          )
+      )
+      .map(([, address]) => address);
     const shouldNotifyShadowSubscribers = shadowTouched.length > 0 &&
       this.#hasNotificationSubscribers();
     const shouldNotifyShadowSinks = shadowTouched.length > 0 &&
@@ -8122,7 +8244,6 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
-      const pending = record.pending[lastPendingIndex]!;
       const previousConfirmed = record.confirmed;
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
@@ -8147,7 +8268,7 @@ export class SpaceReplica
             space: this.#space,
             id,
             scope,
-          });
+          }, true);
         }
         promoted = confirmedVersion(applied.seq, value, coverClass);
         const lastApplied = entries.at(-1)!.localSeq;
@@ -8158,7 +8279,11 @@ export class SpaceReplica
           ? { base, entries }
           : { base: value, entries: [] };
       } else if (record.confirmed.seq < applied.seq) {
-        if (firstPendingIndex === 0) {
+        const hasLocalReplay = pendingIndexes.some((index) => {
+          const entry = record.pending[index]!;
+          return entry.op === "patch" && entry.replayPatches !== undefined;
+        });
+        if (firstPendingIndex === 0 && !hasLocalReplay) {
           const prefix = materializedVersionThroughPending(
             record,
             { space: this.#space, id, scope },
@@ -8175,13 +8300,20 @@ export class SpaceReplica
             reusedSuffix = cache.prefixes.slice(lastPendingIndex + 1);
           }
         } else {
-          promoted = confirmedVersion(
-            applied.seq,
-            applyPendingVersion(record.confirmed.value, pending, {
+          // The admitted result is the wire operation folded over confirmed
+          // state. A cached optimistic replacement may hide a peer's accepted
+          // array-prefix edit, so it cannot become the confirmed value.
+          let value = record.confirmed.value;
+          for (const index of pendingIndexes) {
+            value = applyPendingVersion(value, record.pending[index]!, {
               space: this.#space,
               id,
               scope,
-            }),
+            }, true);
+          }
+          promoted = confirmedVersion(
+            applied.seq,
+            value,
             coverClass,
           );
         }
@@ -8264,6 +8396,13 @@ export class SpaceReplica
       record.pending = record.pending.filter((entry) =>
         entry.localSeq !== localSeq
       );
+      for (const entry of record.pending) {
+        if (
+          entry.op === "patch" && entry.replayDependencies?.includes(localSeq)
+        ) {
+          entry.replayInvalid = true;
+        }
+      }
       dropMaterializedSuffix(record, firstPendingIndex);
       const promotion = record.confirmed.localWavePromotion;
       const lastApplied = promotion?.entries.at(-1)?.localSeq;

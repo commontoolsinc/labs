@@ -154,6 +154,7 @@ describe("lunch poll: two users vote on a shared option", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: hostIdentity,
+      cfcFlowLabels: "persist",
     });
 
     // Create the space-root (default) pattern up front, the way a real space

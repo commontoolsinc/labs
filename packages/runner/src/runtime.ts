@@ -1,10 +1,17 @@
-import { fabricFromNativeValue } from "@commonfabric/data-model";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+  isKeyableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
+import {
+  dataUriFromValue,
+  isFabricDataUri,
+} from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
@@ -65,6 +72,8 @@ import type {
 import { registerBuiltins } from "./builtins/index.ts";
 import {
   type Cell,
+  type CellLinkInput,
+  convertCellsToLinks,
   createCell,
   internCellLinkSchema,
   isCell,
@@ -87,6 +96,7 @@ import {
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
+  createSigilLinkFromParsedLink,
   inlineExternalSchemaRefsInValue,
   isCellLink,
   isNormalizedFullLink,
@@ -95,7 +105,11 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { addressKey } from "./link-types.ts";
+import {
+  resolveLinkTracingDereferences,
+  schemaScopeForLinkAtDepth,
+} from "./link-resolution.ts";
+import { addressKey, toMemorySpaceAddress } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
   buildCfcReadCeiling,
@@ -116,12 +130,34 @@ import {
   type CfcTrustConfigInput,
   type CfcWriteFloorMode,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
+  joinCfcObservedConfidentiality,
   linkCfcLabelView,
+  mergeCfcLabelViews,
   type PolicySnapshot,
   resolveCfcDials,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
+import {
+  carryCfcReferenceProvenance,
+  cfcReferenceBinding,
+  cfcReferenceBindingMatches,
+  cfcReferenceConfidentialityForView,
+  getCfcReferenceProvenance,
+  getCfcReferenceView,
+  withCfcReferenceConfidentiality,
+} from "./cfc/reference-provenance.ts";
+import {
+  acquiredImmutableReference,
+  carryImmutableReferenceTables,
+  type CfcImmutableReference,
+  withImmutableReferenceTable,
+} from "./cfc/immutable-reference.ts";
+import { assertSerializableReferenceScope } from "./cfc/reference-scope.ts";
+import {
+  deriveFlowJoin,
+  pendingReferenceSlotConfidentiality,
+} from "./cfc/prepare.ts";
 import {
   cfcPolicyManifestDocId,
   type PolicyArtifactManifestV1,
@@ -920,8 +956,28 @@ function isMemorySpaceDID(value: string): boolean {
  * reached anywhere inside a value bound for the data model has to become its
  * link first.
  */
-function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
-  return isCell(value) ? value.toSigilLinkOrNull() : value;
+function cellAsLink(
+  value: object | ((...args: never[]) => unknown),
+  retainScope: boolean,
+): unknown {
+  if (!isCell(value)) return value;
+  const serialized = value.toSigilLinkOrNull();
+  if (!retainScope || serialized === null) return serialized;
+  const link = value.getAsNormalizedFullLink();
+  const cap = schemaScopeForLinkAtDepth(
+    { ...link, scopeCaps: undefined },
+    link.path.length,
+  );
+  if (cap === undefined) return serialized;
+  // Immutable inputs carry reference restrictions, not the Cell's value
+  // projection. Keep uncapped identities independent of reader schemas.
+  const scoped = value.asSchema({ scope: cap });
+  return carryCfcReferenceProvenance(
+    scoped,
+    createSigilLinkFromParsedLink(scoped.getAsNormalizedFullLink(), {
+      includeSchema: true,
+    }),
+  );
 }
 
 /**
@@ -2217,6 +2273,110 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
+      acquireReference: (source, sourceAcquisition, tx) => {
+        const value = tx.readValueOrThrow({ ...source, id: source.id as URI });
+        if (!isCellLink(value)) return undefined;
+        const actual = parseLink(value, { ...source, id: source.id as URI });
+        const input = tx.getCfcState().writePolicyInputs.findLast((input) =>
+          input.kind === "link-write" && input.reference !== undefined &&
+          tx.isRuntimeWritePolicyInput(input) &&
+          deepEqual(input.target, source) &&
+          cfcReferenceBindingMatches(input.reference, actual)
+        );
+        const reference = input?.kind === "link-write"
+          ? input.reference
+          : undefined;
+        const literalAcquisition = isFabricDataUri(source.id)
+          ? acquiredImmutableReference(sourceAcquisition, source, actual)
+          : undefined;
+        const acquisition = reference ?? literalAcquisition;
+        if (acquisition === undefined) return undefined;
+        return {
+          binding: cfcReferenceBinding(actual),
+          ...(acquisition.scopeCaps !== undefined && {
+            scopeCaps: acquisition.scopeCaps,
+          }),
+          confidentiality: joinCfcObservedConfidentiality([
+            acquisition.confidentiality,
+            sourceAcquisition?.confidentiality ?? [],
+            pendingReferenceSlotConfidentiality(tx, source),
+            deriveFlowJoin(tx).confidentiality,
+          ]),
+        };
+      },
+      resolveContentTarget: (
+        address,
+        destinationSpace,
+        lastNode,
+        tx,
+        projectionPath,
+      ) => {
+        if (address.space !== destinationSpace) return undefined;
+        const source = this.getCellFromLink(
+          { ...address, id: address.id as URI },
+          undefined,
+          tx,
+        ).key(...projectionPath).getAsNormalizedFullLink();
+        let blocked = false;
+        const { link, traces } = resolveLinkTracingDereferences(
+          this,
+          tx,
+          source,
+          lastNode,
+          {
+            onScopeBlocked: () => blocked = true,
+            silentFailures: true,
+            requestMissingDocs: false,
+          },
+        );
+        // Storage can bind these reads atomically only within the write space.
+        if (
+          blocked || link.pendingHopDoc ||
+          traces.some((trace) => trace.target.space !== destinationSpace)
+        ) return undefined;
+        const memoryAddress = toMemorySpaceAddress(link);
+        const result = tx.read(memoryAddress);
+        const references = [source, ...traces.map((trace) => trace.source)];
+        if (!result.ok) {
+          const missing = result.error;
+          if (
+            missing.name !== "NotFoundError" ||
+            missing.source.value === undefined || missing.path[0] !== "value"
+          ) return undefined;
+          // The loaded envelope proves absence of the value root or a
+          // descendant. Parent shape protects applicability, and this read
+          // still binds the source revision at commit.
+          return {
+            address: link,
+            value: undefined,
+            references,
+            absenceParent: {
+              ...link,
+              path: missing.path.slice(1, -1),
+            },
+          };
+        }
+        if (result.ok.value === undefined) {
+          // A missing final slot reads successfully as undefined. Its parent
+          // distinguishes absence from a present, explicitly undefined value.
+          const parent = tx.read({
+            ...memoryAddress,
+            path: memoryAddress.path.slice(0, -1),
+          }, { nonRecursive: true });
+          if (!parent.ok || !isKeyableObjectOrArray(parent.ok.value)) {
+            return undefined;
+          }
+          if (!Object.hasOwn(parent.ok.value, memoryAddress.path.at(-1)!)) {
+            return {
+              address: link,
+              value: undefined,
+              references,
+              absenceParent: { ...link, path: link.path.slice(0, -1) },
+            };
+          }
+        }
+        return { address: link, value: result.ok.value, references };
+      },
       resolvePolicyManifest: (
         reference,
         tx,
@@ -3322,7 +3482,7 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    const carriedLabelView = cfcLabelView ??
+    let carriedLabelView = cfcLabelView ??
       (isSigilLink(cellLink)
         ? linkCfcLabelView(cellLink)
         : isNormalizedFullLink(cellLink)
@@ -3342,6 +3502,27 @@ export class Runtime {
       }
       : undefined;
     if (!link) throw new Error("Invalid cell link");
+    const reference = getCfcReferenceProvenance(cellLink);
+    if (reference !== undefined) {
+      if (!cfcReferenceBindingMatches(reference, link as NormalizedFullLink)) {
+        throw new Error("Reference acquisition does not match its binding");
+      }
+      const referenceView = getCfcReferenceView(cellLink);
+      const mergedView = mergeCfcLabelViews([carriedLabelView, referenceView]);
+      carriedLabelView = carryImmutableReferenceTables(
+        [carriedLabelView, referenceView],
+        withCfcReferenceConfidentiality(
+          mergedView,
+          joinCfcObservedConfidentiality([
+            cfcReferenceConfidentialityForView(mergedView),
+            reference.confidentiality,
+          ]),
+        ),
+      );
+      if (reference.scopeCaps !== undefined) {
+        link = { ...link, scopeCaps: reference.scopeCaps };
+      }
+    }
     if ("cfcLabelView" in link) {
       const { cfcLabelView: _cfcLabelView, ...cleanLink } = link as
         & NormalizedLink
@@ -3369,6 +3550,29 @@ export class Runtime {
       undefined,
       carriedLabelView,
     );
+  }
+
+  /**
+   * Acquires explicit document references in independently chosen host input.
+   * Existing carriers retain their private selection history. New references
+   * name a document and inherit the supplied space when omitted; target
+   * contents and their labels are observed when the reference is followed.
+   * This is a trusted host entry point for external input.
+   */
+  acquireExternalInput(space: MemorySpace, data: CellLinkInput): FabricValue {
+    return convertCellsToLinks(data, {
+      transformLink: (_cell, link) => {
+        if (getCfcReferenceProvenance(link) !== undefined) return link;
+        const parsed = parseLink(link);
+        if (parsed?.id === undefined) {
+          throw new Error("An external reference must name a document");
+        }
+        return this.getCellFromLink({
+          ...parsed,
+          space: parsed.space ?? space,
+        }).getAsLink();
+      },
+    });
   }
 
   /**
@@ -3436,13 +3640,68 @@ export class Runtime {
     // (see inlineExternalSchemaRefsInValue): the document is its id, so a
     // content-addressed reference inside it has no carrying write to install
     // its closure.
-    const asDataURI = dataUriFromValue(
-      inlineExternalSchemaRefsInValue(
-        fabricFromNativeValue(
-          flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+    const captured: Array<{
+      path: readonly string[];
+      reference: CfcImmutableReference["reference"];
+    }> = [];
+    const nestedViews: Array<CfcLabelView | undefined> = [];
+    const precise =
+      (tx?.getCfcState().flowLabelsMode ?? this.cfcFlowLabels) === "persist";
+    const flattened = flattenBuilderArtifacts(data, {
+      replaceOther: (value) => cellAsLink(value, precise),
+    });
+    const value = precise
+      ? convertCellsToLinks(flattened, {
+        allowLinkFreeFabricInstances: true,
+        transformLink: (_cell, link, path) => {
+          const reference = getCfcReferenceProvenance(link);
+          if (reference !== undefined) {
+            const actual = parseLink(link, {
+              space,
+              id: reference.binding.id as URI,
+              scope: reference.binding.scope,
+              path: [],
+            });
+            if (!cfcReferenceBindingMatches(reference, actual)) {
+              throw new Error("Reference acquisition is unresolved");
+            }
+            assertSerializableReferenceScope(
+              actual.schema,
+              reference.scopeCaps,
+            );
+            captured.push({ path, reference });
+            nestedViews.push(getCfcReferenceView(link));
+          }
+          return link;
+        },
+      })
+      : fabricFromNativeValue(flattened);
+    const asDataURI = dataUriFromValue(inlineExternalSchemaRefsInValue(value));
+    if (precise) {
+      const inherited = carryImmutableReferenceTables(
+        [cfcLabelView, ...nestedViews],
+        cfcLabelView,
+      );
+      const selected = carryImmutableReferenceTables(
+        [inherited],
+        withCfcReferenceConfidentiality(
+          inherited,
+          joinCfcObservedConfidentiality([
+            cfcReferenceConfidentialityForView(inherited),
+            tx === undefined ? [] : deriveFlowJoin(tx).confidentiality,
+          ]),
         ),
-      ),
-    );
+      );
+      cfcLabelView = withImmutableReferenceTable(
+        selected,
+        captured.map(
+          ({ path, reference }) => ({
+            source: { space, id: asDataURI, scope: "space", path },
+            reference,
+          }),
+        ),
+      );
+    }
     return createCell(
       this,
       {

@@ -7,12 +7,14 @@ import {
 } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import type { Runtime } from "../runtime.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "./observation.ts";
 import {
   type CfcLabelView,
   type CfcLabelViewEntry,
+  cfcLabelViewForDereferenceTraces,
   cfcLabelViewFromMetadata,
   getCarriedCfcLabelView,
   mergeCfcLabelViews,
@@ -74,6 +76,7 @@ const storedMetadataForCell = (
         {
           space: link.space,
           id: link.id,
+          scope: link.scope,
         },
       ),
       readFailed: false,
@@ -92,7 +95,7 @@ const linkedValueMetadataForCell = (
   }
   try {
     const tx = cell.runtime.readTx(cell.tx);
-    const value = tx.readValueOrThrow(link);
+    const value = tx.readValueOrThrow(link, { meta: internalVerifierRead });
     if (!isPrimitiveCellLink(value)) {
       return { linkedValue: undefined, readFailed: false };
     }
@@ -164,6 +167,7 @@ export const cfcLabelViewForCell = (
 type ResolvedMetadataResult = StoredMetadataResult & {
   /** The resolved doc's path, which the view is rebased against. */
   path: readonly string[];
+  referenceView?: CfcLabelView;
 };
 
 /**
@@ -187,6 +191,7 @@ const resolvedMetadataForCell = (
   }
   try {
     const tx = cell.runtime.readTx(cell.tx);
+    const traceStart = tx.getCfcState().dereferenceTraces.length;
     // `markIfcCrossings` is what a read entry point passes. On the CLI's path
     // it changes nothing observable: the cell carries no transaction, so
     // `readTx` mints a throwaway that is never committed and the marks die
@@ -204,6 +209,11 @@ const resolvedMetadataForCell = (
       }),
       readFailed: false,
       path: resolved.path,
+      referenceView: cfcLabelViewForDereferenceTraces(
+        tx,
+        tx.getCfcState().dereferenceTraces.slice(traceStart),
+        getCarriedCfcLabelView(cell),
+      ),
     };
   } catch {
     return { metadata: undefined, readFailed: true, path: link.path };
@@ -211,21 +221,13 @@ const resolvedMetadataForCell = (
 };
 
 /**
- * {@link cfcLabelViewForCellWithStatus}, plus the label stored on the doc the
- * selected path RESOLVES to.
+ * Joins the selected cell's label view, reference history from every crossed
+ * link, and the resolved document's stored labels. All entries are rebased to
+ * the selected path. Link traces contribute only when resolution crosses them;
+ * a direct cell retains its own carried and stored labels.
  *
- * For an inspection surface that answers "what is the label here" about a path
- * a person typed, the one-hop read is not enough: a path that crosses a link
- * part way through reports no label for a value that plainly carries one. This
- * merges the resolved doc's stored label into the same view, rebased so its
- * entries stay relative to the selected cell.
- *
- * Strictly additive. Every view the one-hop read produces is still in the
- * merge, and merging is keyed per (observation class, path) with a union of the
- * labels, so a leaf-link read — where the resolution lands on the same doc the
- * one hop already found — returns exactly what it returns today. `readFailed`
- * stays fail-closed across both: a resolution that throws is a failed read, not
- * an absent label.
+ * The merge unions labels per observation class and path. A failed metadata
+ * read or resolution sets `readFailed`, so inspection can fail closed.
  */
 export const cfcLabelViewForResolvedCellWithStatus = (
   cell: unknown,
@@ -249,6 +251,7 @@ export const cfcLabelViewForResolvedCellWithStatus = (
   return {
     view: mergeCfcLabelViews([
       unresolved.view,
+      resolved.referenceView,
       cfcLabelViewFromMetadata(resolved.metadata, resolved.path),
     ]),
     readFailed: unresolved.readFailed || resolved.readFailed,

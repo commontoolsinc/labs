@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -376,6 +377,59 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         super.set(this.getRawUntyped());
       }
     }
+
+    await t.step(
+      "blocks public text reached through a confidential selection",
+      async () => {
+        const selectionTx = runtime.edit();
+        const selected = runtime.getCell(
+          signer.did(),
+          "cfc-render-private-selection",
+          undefined,
+          selectionTx,
+        );
+        writeSeedEnvelopeDoc(selectionTx, signer.did());
+        selectionTx.writeOrThrow({
+          ...selected.getAsNormalizedFullLink(),
+          path: [],
+        }, {
+          value: unsignedReleaseText.getAsLink(),
+          cfc: {
+            version: 2,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                observes: "followRef",
+                origin: "link",
+                label: { confidentiality: [healthRecordAtom] },
+              }],
+            },
+          },
+        });
+        await selectionTx.commit();
+        const acquired = selected.withTx(undefined).resolveAsCell();
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: { maxConfidentiality: [] },
+          children: [acquired as never],
+        });
+        try {
+          await t.settle();
+          const text = collector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          expect(text).not.toContain("Unsigned release note");
+          expect(text).toContain("Content hidden by policy");
+        } finally {
+          cancel();
+        }
+      },
+    );
 
     await t.step(
       "blocks a confidential cell above the boundary max confidentiality",
@@ -1370,6 +1424,114 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             ),
             false,
           );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "keeps reference endorsements out of the rendered text floor",
+      async () => {
+        const selectionTx = runtime.edit();
+        const selected = runtime.getCell(
+          signer.did(),
+          "cfc-render-endorsed-reference",
+          undefined,
+          selectionTx,
+        );
+        writeSeedEnvelopeDoc(selectionTx, signer.did());
+        selectionTx.writeOrThrow({
+          ...selected.getAsNormalizedFullLink(),
+          path: [],
+        }, {
+          value: unsignedReleaseText.getAsLink(),
+          cfc: {
+            version: 2,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                observes: "followRef",
+                label: { integrity: [signedReleaseAtom] },
+              }],
+            },
+          },
+        });
+        await selectionTx.commit();
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
+          },
+          children: [selected.withTx(undefined).resolveAsCell() as never],
+        });
+        try {
+          await t.settle();
+          const text = collector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          expect(text).not.toContain("Unsigned release note");
+          expect(text).toContain("Content hidden by integrity policy");
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "retains a value endorsement on the selected text slot",
+      async () => {
+        const selectionTx = runtime.edit();
+        const selected = runtime.getCell(
+          signer.did(),
+          "cfc-render-endorsed-slot",
+          undefined,
+          selectionTx,
+        );
+        writeSeedEnvelopeDoc(selectionTx, signer.did());
+        selectionTx.writeOrThrow({
+          ...selected.getAsNormalizedFullLink(),
+          path: [],
+        }, {
+          value: unsignedReleaseText.getAsLink(),
+          cfc: {
+            version: 2,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                observes: "value",
+                label: { integrity: [signedReleaseAtom] },
+              }],
+            },
+          },
+        });
+        await selectionTx.commit();
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const cancel = reconciler.mount({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: signedReleaseAtom,
+          },
+          children: [selected.withTx(undefined) as never],
+        });
+        try {
+          await t.settle();
+          const text = collector.getOpsOfType("create-text").map((op) =>
+            op.text
+          );
+          expect(text).toContain("Unsigned release note");
+          expect(text).not.toContain("Content hidden by integrity policy");
         } finally {
           cancel();
         }

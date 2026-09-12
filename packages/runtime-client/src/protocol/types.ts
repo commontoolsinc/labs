@@ -53,6 +53,8 @@ export type MessageId = number;
  * becomes on the wire, and what one is rebuilt from at the other end.
  */
 export type CellRef = NormalizedFullLink & {
+  /** Opaque acquisition issued by this connection's worker. */
+  cfcReferenceToken?: string;
   /**
    * The cell's display label, present only where the read that produced
    * this ref asked for one.
@@ -203,6 +205,9 @@ export enum RequestType {
    * with a ref to it.
    */
   GetCell = "runtime:getCell",
+
+  /** Acquires an address explicitly through the authenticated host. */
+  AcquireCell = "runtime:acquireCell",
 
   /** Answers with a ref to the home space's own cell. */
   GetHomeSpaceCell = "runtime:getHomeSpaceCell",
@@ -1399,6 +1404,14 @@ export type GetCellRequest = BaseRequest & {
    * The schema to read the cell under, where one is wanted.
    */
   schema?: JSONSchema;
+};
+
+/** Fresh host acquisition; this does not restore a transferred reference. */
+export type AcquireCellRequest = BaseRequest & {
+  type: RequestType.AcquireCell;
+
+  /** The independently selected document address and projection. */
+  address: NormalizedFullLink;
 };
 
 /**
@@ -2843,6 +2856,7 @@ export type IPCClientRequest =
   | SqliteQueryRequest
   | SqliteExecRequest
   | GetCellRequest
+  | AcquireCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
   | ListEventAttentionRequest
@@ -3522,6 +3536,10 @@ export type Commands = {
   };
   [RequestType.GetCell]: {
     request: GetCellRequest;
+    response: CellResponse;
+  };
+  [RequestType.AcquireCell]: {
+    request: AcquireCellRequest;
     response: CellResponse;
   };
   [RequestType.GetHomeSpaceCell]: {

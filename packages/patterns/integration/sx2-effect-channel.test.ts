@@ -91,6 +91,7 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       space: `${SPACE_NAME}-sx2-effects`,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
       navigateCallback: (target) => {
         navigations.push(target.getAsNormalizedFullLink().id);
       },

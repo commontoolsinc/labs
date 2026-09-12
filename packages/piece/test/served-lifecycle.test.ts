@@ -6,6 +6,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { createSession, Identity, type Session } from "@commonfabric/identity";
 import type { DID, MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -63,8 +67,10 @@ describe("served lifecycle verbs", () => {
   let host: ExecutorHost;
   let session: Session;
   let cleanups: Array<() => Promise<void>>;
+  let preciseReferences: boolean;
 
   beforeEach(async () => {
+    preciseReferences = false;
     server = new MemoryV2Server.Server({
       store: new URL(`memory://served-lifecycle-${crypto.randomUUID()}`),
       authorizeSessionOpen(message) {
@@ -91,6 +97,7 @@ describe("served lifecycle verbs", () => {
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
           servingPosture: true,
+          cfcFlowLabels: preciseReferences ? "persist" : "off",
           experimental: { serverExecution: true },
         });
         return Promise.resolve({
@@ -176,6 +183,29 @@ describe("served lifecycle verbs", () => {
   };
 
   describe("instantiate", () => {
+    it("acquires an explicit linked argument on a precise serving runtime", async () => {
+      preciseReferences = true;
+      const client = await clientPieces();
+      const tx = client.runtime.edit();
+      const seed = client.runtime.getCell<string>(
+        space,
+        "served-lifecycle-linked-seed",
+        undefined,
+        tx,
+      );
+      seed.set("linked seed");
+      expect((await tx.commit()).error).toBeUndefined();
+      const input = fabricFromJsonValue(jsonFromFabricValue(seed.getAsLink()));
+      const receipt = await instantiate({ program: BASE_PROGRAM }, {
+        seed: input,
+      });
+      const later = await clientPieces();
+      const piece = await later.get(receipt.pieceId);
+      const argument = later.getArgument<{ seed: string }>(piece.getCell());
+      await argument.sync();
+      expect(argument.get()).toEqual({ seed: "linked seed" });
+    });
+
     it("creates a piece a later client reads with the pattern pointer and argument the verb wrote", async () => {
       const receipt = await instantiate({ program: BASE_PROGRAM }, {
         seed: "planted",

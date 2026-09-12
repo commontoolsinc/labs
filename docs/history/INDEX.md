@@ -78,6 +78,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Executed plans and work orders
 
+- [cfc-reference-confidentiality.md](plans/cfc-reference-confidentiality.md) — reference confidentiality implementation plan for spec ca3b3e6: independently labeled bindings, preserved acquisition history, trusted Runtime content verification, and conservative legacy and cross-space support boundaries.
 - [server-pattern-verbs-seed.md](plans/server-pattern-verbs-seed.md) — the seed that recorded the ruled 2026-08-24 direction for the pattern lifecycle verbs as server calls, executed September 2026 for `upload` and `instantiate`, which run on the space's serving runtime under `EXPERIMENTAL_SERVER_EXECUTION` with `cf` requesting them, while `setsrc` stays client-side because a source update's module authority needs a transaction that commits to storage itself; the live contract is `docs/features/server-pattern-lifecycle.md`.
 - [read-cost-budgets.md](plans/read-cost-budgets.md) — completed A3 plan for opt-in pattern-test read budgets, transaction-attempt coverage, failure diagnostics, and executable pass/fail demonstrations; shipped in #7257, September 2026.
 

@@ -1289,8 +1289,9 @@ the durable rows of §5 carry APPENDS, never effect state).
   carriage pattern, sanctioned in protocol.md §7 — and DELETED on
   delivery-ack: a queue that empties, never history, so the
   no-per-run-persistence lesson holds. A row carries the event
-  (payload bounded by the event, never graph-scaled) plus the
-  acting
+  (payload and optional opaque `runtimeReferenceContext`, bounded by the event
+  and its immutable reference contents, without reading target document graphs)
+  plus the acting
   identity (`actingPrincipal` + `actingSession`) + `capabilityRef`
   that the target's admission validates and stamps `firedAt` from —
   actor inheritance crosses spaces through exactly this carriage

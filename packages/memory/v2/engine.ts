@@ -470,6 +470,7 @@ CREATE TABLE IF NOT EXISTS execution_outbox (
                                       --   horizon keys on it (events §4)
   payload           TEXT    NOT NULL, -- the event payload, JSON —
                                       --   bounded by the event
+  runtime_reference_context TEXT,    -- opaque Runtime event attestation
   acting_principal  TEXT,             -- the originating chain actor
   acting_session    TEXT,             --   (absent for sessionless chains)
   sessionless_space_scope INTEGER,    -- the OW15 declaration (protocol §2's
@@ -1932,6 +1933,12 @@ ADD COLUMN ${column} TEXT;
 // the sidecar id, and NULL declaration means "not declared" — exactly the
 // fail-closed reading the carve-out requires.
 const migrateExecutionOutboxEventCarriage = (database: Database): void => {
+  if (!hasColumn(database, "execution_outbox", "runtime_reference_context")) {
+    database.exec(`
+ALTER TABLE execution_outbox
+ADD COLUMN runtime_reference_context TEXT;
+`);
+  }
   if (!hasColumn(database, "execution_outbox", "target_stream_link")) {
     database.exec(`
 ALTER TABLE execution_outbox
@@ -3258,6 +3265,14 @@ const validateEventAppends = (
         );
       }
 
+      if (
+        entry.runtimeReferenceContext !== undefined &&
+        typeof entry.runtimeReferenceContext !== "string"
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries malformed runtimeReferenceContext`,
+        );
+      }
       // The firedAt stamp, per admitting class (protocol.md §2).
       let firedAt: StreamEventFiredAt;
       if (commitClass === "derived") {
@@ -5583,12 +5598,11 @@ const applyCommitTransaction = (
     }
   }
 
-  // An identity commit leaves every document it writes as the space
-  // already holds it, so applying the commit changes nothing. A commit that
-  // changes nothing cannot have observed anything wrongly in a way that
-  // matters, so its reads' staleness is not checked (03-commit-model.md
-  // §3.6.1) and every operation elides like a content-addressed re-set.
-  // Only the staleness scan is waived: a pending read naming an unresolved
+  // An identity commit leaves every document it writes unchanged, permitting
+  // staleness to be waived for explicitly elidable reads (03-commit-model.md
+  // §3.6.1). Required reads protect outcomes beyond those document operations
+  // and remain validated. Only the staleness scan is waived: a pending read
+  // naming an unresolved
   // or rejected layer still refuses the commit, which is what keeps the
   // client's cascade and the server's verdict in agreement (09-invariants.md,
   // INV-4 and INV-6). Every comparison reads the stored document under the
@@ -5783,6 +5797,13 @@ const applyCommitTransaction = (
     ) {
       throw error;
     }
+    validateConfirmedReads(
+      engine,
+      branch,
+      commit,
+      { principal, sessionId },
+      { elideOptionalStaleness: true },
+    );
     for (const opIndex of commit.operations.keys()) {
       elidedOpIndexes.add(opIndex);
     }
@@ -5793,7 +5814,7 @@ const applyCommitTransaction = (
       principal,
       branch,
       commit,
-      { checkStaleness: false },
+      { elideOptionalStaleness: true },
     );
   }
 
@@ -6424,11 +6445,22 @@ const validateCommitPreconditions = (
   }
 };
 
+/** Validates the read's opt-in to identity staleness elision. */
+const validateReadValidation = (read: { validation?: unknown }): void => {
+  if (
+    read.validation !== undefined && read.validation !== "required" &&
+    read.validation !== "elidable"
+  ) {
+    throw new ProtocolError("unsupported commit read validation");
+  }
+};
+
 const validateConfirmedReads = (
   engine: Engine,
   branch: BranchName,
   commit: ClientCommit,
   scopeContext: { principal?: string; sessionId: SessionId },
+  options: { elideOptionalStaleness?: boolean } = {},
 ): void => {
   // A commit is evaluated under one connection principal/session context.
   // Every confirmed read in the commit resolves declared user/session scope
@@ -6437,9 +6469,13 @@ const validateConfirmedReads = (
   const conflicts: ConfirmedReadConflict[] = [];
   const staleInstances = new Map<BranchName, Map<ScopeKey, Set<EntityId>>>();
   for (const read of commit.reads.confirmed) {
+    validateReadValidation(read);
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
+    if (options.elideOptionalStaleness && read.validation === "elidable") {
+      continue;
+    }
     const scope = read.scope ?? DEFAULT_SCOPE;
     let staleScopes = staleInstances.get(readBranch);
     let staleIds = staleScopes?.get(scopeKey);
@@ -6556,13 +6592,13 @@ const resolvePendingReads = (
   principal: string | undefined,
   branch: BranchName,
   commit: ClientCommit,
-  // An identity commit resolves its dependencies but skips the staleness
-  // scan: it changes nothing, so a stale basis decides nothing.
-  options: { checkStaleness: boolean } = { checkStaleness: true },
+  options: { elideOptionalStaleness?: boolean } = {},
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
   for (const read of commit.reads.pending) {
+    validateReadValidation(read);
+    const scopeKey = resolveScopeKey(read.scope, { principal, sessionId });
     // An array localSeq names EVERY pending layer the read's view sat on:
     // each element must have resolved to an accepted commit, and staleness
     // is checked exactly once, from the basis §3.6.3 selects — the declared
@@ -6603,16 +6639,18 @@ const resolvePendingReads = (
     // deviation persists for it alone
     // (docs/specs/memory-v2/09-invariants.md, INV-1).
     // The declared basis is validated whether or not the scan runs: an
-    // identity commit's reads are exempt from staleness, not from the
-    // protocol.
+    // identity commit may waive an elidable read's staleness, never its
+    // protocol requirements.
     const trueBasis = pendingReadBasisSeq(engine, read);
-    if (!options.checkStaleness) continue;
+    if (options.elideOptionalStaleness && read.validation === "elidable") {
+      continue;
+    }
     const conflictSeq = trueBasis !== undefined
       ? findConflictSeq(
         engine,
         branch,
         read.id,
-        resolveScopeKey(read.scope, { principal, sessionId }),
+        scopeKey,
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
@@ -6622,7 +6660,7 @@ const resolvePendingReads = (
         engine,
         branch,
         read.id,
-        resolveScopeKey(read.scope, { principal, sessionId }),
+        scopeKey,
         basis!.seq,
         read.path,
         read.nonRecursive ?? false,

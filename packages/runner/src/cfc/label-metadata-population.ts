@@ -23,11 +23,10 @@ import type { IFCLabel, LabelEntryOrigin, LabelMapEntry } from "./types.ts";
 //                                     name present in the entry's atoms
 //
 // Entry count is O(#source-bearing-field-kinds) per labeled path — the
-// clause/alternative axes ride the `*` wildcards, so counts are independent
-// of how many clauses or alternatives the label has (the same one-level-up
-// entry-count wall §5 dissolves). Presence/`type`/`kind` and table-`public`
-// fields mint NOTHING: absence of a metadata entry is PUBLIC under the
-// §4.6.4.2 default profile, and public entries are never materialized.
+// clause/alternative axes ride the `*` wildcards. A base template at
+// `/cfc/labels/value/...target` also protects the shape of a derived label,
+// including presence, type, kind, count, ordering, and empty query results.
+// Public field classification adds no further restriction to that context.
 //
 // The labels minted are the SAME §4.6.4.2 interim population rule the
 // introspection surface computes in hand (source-identity confidentiality
@@ -78,21 +77,20 @@ export const isLabelMetadataTemplateEntry = (
 ): boolean => entry.origin === LABEL_METADATA_TEMPLATE_ORIGIN;
 
 /**
- * Whether the entry's own effective confidentiality is a sound population
- * label for its source-bearing fields: true exactly for the components
- * produced by the §8.9.2 conservative join — `derived` (the per-tx flow
- * stamp) and `structure` (the same join stamped on container shape,
- * §8.5.6.1) — whose label contains each influencing source's confidentiality
- * by construction. Declared/authored entries, link-carried pointer labels,
- * the external-ingest mark, label-metadata templates themselves and legacy
- * (component-less) entries carry no such containment guarantee and stay
- * fail-closed (spec §4.6.4.2, merged via specs#14). Shared by the mint
- * (which entries GET templates) and the introspection surface (which entries'
- * fields are observable at all) so the two cannot drift.
+ * Whether an entry contains the restrictions on the sources it describes.
+ * Derived and structure entries carry the conservative flow join. Version-2
+ * link entries with an explicit followRef class carry complete acquisition
+ * history. Untouched legacy links in an upgraded envelope do not qualify.
+ * The mint and introspection surface share this gate, so a sibling template
+ * cannot make fields from an unauthenticated entry observable.
  */
 export const cfcEntryHasDerivedContainment = (
-  entry: Pick<LabelMapEntry, "origin">,
-): boolean => entry.origin === "derived" || entry.origin === "structure";
+  entry: Pick<LabelMapEntry, "origin" | "observes">,
+  metadataVersion: 1 | 2 = 1,
+): boolean =>
+  entry.origin === "derived" || entry.origin === "structure" ||
+  (metadataVersion === 2 && entry.origin === "link" &&
+    entry.observes === "followRef");
 
 /**
  * The §4.6.4.2 public/protected split for one atom field, shared by the mint
@@ -211,12 +209,13 @@ const scanAlternative = (
  */
 export const deriveLabelMetadataTemplateEntries = (
   entries: readonly LabelMapEntry[],
+  metadataVersion: 1 | 2 = 1,
 ): LabelMapEntry[] => {
   const out: LabelMapEntry[] = [];
   for (const entry of entries) {
     if (
       isLabelMetadataTemplateEntry(entry) ||
-      !cfcEntryHasDerivedContainment(entry)
+      !cfcEntryHasDerivedContainment(entry, metadataVersion)
     ) {
       continue;
     }
@@ -224,6 +223,20 @@ export const deriveLabelMetadataTemplateEntries = (
     if (confidentiality.length === 0) {
       continue;
     }
+    // Selecting which labels exist exposes the same control dependencies
+    // as selecting the value. This template also covers an empty query result,
+    // type/kind tests, and the number and order of returned clauses (§8.2.4).
+    out.push({
+      path: [
+        "cfc",
+        "labels",
+        "value",
+        ...canonicalizeLogicalPath(entry.path),
+      ],
+      label: { confidentiality: [...confidentiality] },
+      origin: LABEL_METADATA_TEMPLATE_ORIGIN,
+      observes: "labelMetadata",
+    });
     const fields = new Set<string>();
     let anyProtected = false;
     for (const clause of confidentiality) {

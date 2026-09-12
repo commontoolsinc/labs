@@ -30,7 +30,7 @@
  *    further out. {@link experimentalOptionsForDeployedClient} is what such
  *    a client calls instead of {@link experimentalOptionsFromEnv}.
  * 4. Every preset composes the same {@link coreOptions}, so the invariant
- *    posture (today: the CFC dials) is written once. The conformance test
+ *    enforcement posture is written once. The conformance test
  *    (`runner/test/runtime-presets.test.ts`) pins each preset's full output
  *    as a golden, so any change to fleet posture is a visible diff there.
  *
@@ -62,8 +62,8 @@
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
  * |                            | remoteClient/browserWorker (host-controlled      |
  * |                            | rollout)                                         |
- * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
- * |                            | delta (host-controlled rollout)                  |
+ * | cfcFlowLabels              | productionServer pins persist; core-default off |
+ * |                            | remoteClient / browserWorker host-controlled     |
  * | cfcWriteFloor              | core-default (off); remoteClient delta           |
  * |                            | (host-controlled rollout) — flip in coreOptions  |
  * |                            | when a first-party rollout begins                |
@@ -721,16 +721,10 @@ interface CoreParams {
    * ({@link MAX_ENFORCEMENT_CFC_OPTIONS}). Applied in {@link coreOptions},
    * under the per-preset host dials, so a host that raises
    * `cfcEnforcementMode` or `cfcFlowLabels` for one session still wins.
-   * Unset means the fleet posture: the core pin plus constructor defaults.
+   * Unset means the core enforcement pin and each preset's declared defaults.
    */
   cfcPosture?: CfcPosture;
 }
-
-/**
- * The invariant first-party posture, written once. Rollout dials (the CFC
- * modes) get flipped HERE, in one reviewed place, for every preset user at
- * once — the constructor defaults then only govern non-preset constructions.
- */
 
 /**
  * The first-party server-execution default for the DEPLOYED-TOPOLOGY
@@ -765,6 +759,7 @@ export function withServerExecutionDefault(
   };
 }
 
+/** Shared enforcement posture, beneath each preset's declared host options. */
 function coreOptions(params: CoreParams): RuntimeOptions {
   return {
     apiUrl: params.apiUrl,
@@ -776,9 +771,9 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
     // cfcTrustConfig / cfcSinkMaxConfidentiality /
     // cfcReadMaxConfidentiality / cfcReadOnExceed ride the constructor
-    // defaults (off / none) — deliberately absent here until a first-party
-    // rollout begins. A caller that opts into `cfcPosture` gets the named
-    // bundle's values instead, for this one runtime.
+    // defaults (off / none). Deployment writers select persistent flow labels
+    // in their host preset or options. A caller that opts into `cfcPosture`
+    // gets the named bundle's values for this runtime.
     ...presetCfcOptions({
       ...(params.cfcPosture !== undefined
         ? { cfcPosture: params.cfcPosture }
@@ -941,7 +936,8 @@ export const runtimePresets = {
   /**
    * Long-running server process (toolshed, background-piece-service main and
    * worker). Remote storage, real fetch, patterns fetch against the
-   * deployment's own API base.
+   * deployment's own API base. Persistent flow labels make its reference
+   * writes readable by precise CFC clients.
    */
   productionServer(params: ProductionServerPresetParams): RuntimeOptions {
     return {
@@ -949,6 +945,7 @@ export const runtimePresets = {
         ...params,
         experimental: withServerExecutionDefault(params.experimental),
       }),
+      cfcFlowLabels: "persist",
       patternEnvironment: { apiUrl: params.patternApiUrl ?? params.apiUrl },
       ...(params.consoleHandler !== undefined
         ? { consoleHandler: params.consoleHandler }
@@ -965,7 +962,8 @@ export const runtimePresets = {
   /**
    * Short-lived client runtime operating against a deployed API (cast-admin,
    * pieces controller, `cf acl` / `cf piece`). Same posture as
-   * productionServer; the deltas are collectors and caches.
+   * productionServer; flow-label persistence, collectors, and caches are
+   * selected by the client host.
    */
   remoteClient(params: RemoteClientPresetParams): RuntimeOptions {
     return {

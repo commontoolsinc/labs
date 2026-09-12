@@ -644,8 +644,8 @@ export async function loadPieces(
     "loadPieces.runtime",
     () =>
       // Shared first-party posture for client runtimes against a deployed
-      // API (CT-1814); collectors and the navigate hook are this CLI's
-      // declared deltas.
+      // API (CT-1814); reference persistence, collectors, and navigation
+      // are this CLI's declared host choices.
       new Runtime({
         ...runtimePresets.remoteClient({
           apiUrl: new URL(config.apiUrl),
@@ -655,6 +655,8 @@ export async function loadPieces(
             spaceIdentity: session.spaceIdentity,
           }),
           experimental,
+          // CLI writes are consumed by the shell's precise reference reader.
+          cfcFlowLabels: "persist",
           errorHandlers: [
             (error) => {
               runtimeErrors.push({

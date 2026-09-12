@@ -772,6 +772,7 @@ describe("cf-code-editor collaboration", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: alice,
+      cfcFlowLabels: "persist",
     });
     await cc.ensureDefaultPattern();
 

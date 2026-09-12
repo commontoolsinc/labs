@@ -11,9 +11,11 @@ import { pattern } from "../builder/pattern.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { MAX_PATH_RESOLUTION_LENGTH } from "../link-resolution.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
+import {
+  isNormalizedFullLink,
+  type NormalizedFullLink,
+} from "../link-types.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
-import { snapshotQueryResult } from "../query-result-proxy.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -39,6 +41,7 @@ import {
 } from "./list-element-rollback.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
 import { ownedCell } from "./runtime-owned-store.ts";
+import { resolveCellReference } from "./resolve-cell-reference.ts";
 import {
   cellIdentityKey,
   narrowestCellScope,
@@ -64,8 +67,8 @@ interface Candidate {
   /** Source identity, including duplicate occurrence. */
   key: string;
 
-  /** Original element address, held as data rather than a dereferenced link. */
-  element: NormalizedFullLink;
+  /** Live selected reference; numeric-only extrema do not acquire elements. */
+  element?: Cell<unknown>;
 }
 
 /** One subtree's partial result. */
@@ -133,19 +136,14 @@ export function aggregateNode(
     const args = inputs.withTx(tx);
     const operation = args.key("operation").get() as AggregateOperation;
     const mode = args.key("mode").get();
+    const selectingElement = operation === "minBy" || operation === "maxBy";
     const publish = (state: AggregateState) => {
       if (operation === "sum") sendResult(tx, aggregateSumValue(state.sum!));
       else if (operation === "countTruthy") sendResult(tx, state.count!);
-      else if (operation === "minBy" || operation === "maxBy") {
+      else if (selectingElement) {
         sendResult(
           tx,
-          state.candidate
-            ? runtime.getCellFromLink(
-              snapshotQueryResult(state.candidate.element),
-              undefined,
-              tx,
-            )
-            : undefined,
+          state.candidate?.element,
         );
       } else {
         sendResult(
@@ -182,7 +180,6 @@ export function aggregateNode(
       state = empty();
       const values = args.key("values").get() as number[];
       const keys = args.key("keys").get() as string[];
-      const elements = args.key("elements").get() as NormalizedFullLink[];
       for (let index = 0; index < values.length; index++) {
         const value = values[index];
         if (value === undefined) return;
@@ -198,7 +195,9 @@ export function aggregateNode(
               candidate: {
                 score: value,
                 key: keys[index],
-                element: elements[index],
+                ...(selectingElement
+                  ? { element: args.key("elements").key(index) }
+                  : {}),
               },
             },
           );
@@ -207,10 +206,50 @@ export function aggregateNode(
     } else if (mode === "empty") {
       state = empty();
     } else {
-      const left = args.key("left").get() as AggregateState | undefined;
-      const right = args.key("right").get() as AggregateState | undefined;
+      const readState = (side: "left" | "right") => {
+        const source = args.key(side);
+        const state = source.get() as AggregateState | undefined;
+        if (!selectingElement || !state?.candidate) return state;
+        const elementSlot = source.key("candidate").key("element");
+        const storedElement = elementSlot.getRawUntyped();
+        // Legacy combine states store a normalized address as ordinary data.
+        // Precise acquisition requires a live reference slot, so those states
+        // must be recomputed before enabling the precise profile.
+        if (isNormalizedFullLink(storedElement)) {
+          if (tx.getCfcState().flowLabelsMode === "persist") {
+            throw new Error(
+              "Legacy aggregate references require recomputation before precise CFC",
+            );
+          }
+          return {
+            candidate: {
+              score: state.candidate.score,
+              key: state.candidate.key,
+              element: runtime.getCellFromLink(storedElement, undefined, tx),
+            },
+          };
+        }
+        // Score and identity are values. The element remains a live reference
+        // slot so child-state serialization retains its acquisition evidence.
+        return {
+          candidate: {
+            score: state.candidate.score,
+            key: state.candidate.key,
+            element: elementSlot,
+          },
+        };
+      };
+      const left = readState("left");
+      const right = readState("right");
       if (!left || !right) return;
       state = combine(left, right);
+    }
+    if (selectingElement && state.candidate) {
+      state.candidate.element = resolveCellReference(
+        runtime,
+        tx,
+        state.candidate.element!,
+      );
     }
     if (args.key("final").get()) publish(state);
     else sendResult(tx, state);
@@ -409,7 +448,9 @@ export function aggregate(
               final,
               keys: block.map(([, key]) => key),
               values: block.map(([index]) => cells[index]),
-              elements: block.map(([index]) => elementSlots[index]),
+              ...(selectingElement
+                ? { elements: block.map(([index]) => elementCells[index]) }
+                : {}),
             },
           );
         }

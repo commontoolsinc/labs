@@ -264,6 +264,7 @@ export async function seedTopicBoard(
   };
 
   const cc = await initializePiecesController({
+    cfcFlowLabels: "persist",
     space: options.spaceName,
     apiUrl: options.apiUrl,
     identity: options.identity,

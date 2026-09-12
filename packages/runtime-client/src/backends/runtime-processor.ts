@@ -64,7 +64,9 @@ import {
   isCellResult,
   isLoopbackHostname,
   KeepAsCell,
+  markCellDocumentSynced,
   markDurableReadTx,
+  narrowerScopeCap,
   type NormalizedFullLink,
   normalizeSpaceHost,
   parseLink,
@@ -85,13 +87,14 @@ import {
 } from "@commonfabric/runner";
 import type { RuntimeOptions } from "@commonfabric/runner";
 import {
+  carryCfcReferenceProvenance,
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
   createRuntimeSpaceMembershipProvider,
+  getCarriedCfcLabelView,
   redactCaveatSourcesForDisplay,
   type RenderConfidentialityResolver,
   type SpaceMembershipProvider,
-  stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
@@ -110,6 +113,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
+  type AcquireCellRequest,
   type ActionRunTraceResponse,
   BooleanResponse,
   type CellGetCfcLabelRequest,
@@ -243,6 +247,7 @@ import {
   ownerClient,
   type WorkerClient,
 } from "./worker-client.ts";
+import { ReferenceRegistry } from "./reference-registry.ts";
 import {
   assertFabricLoggerFlags,
   createCellRef,
@@ -348,22 +353,25 @@ function isSqliteDbRefValue(value: unknown): boolean {
 
 function sqliteParamForRuntime(
   runtime: Runtime,
+  registry: ReferenceRegistry,
   value: FabricValue,
   tx?: IExtendedStorageTransaction,
 ): unknown {
   if (value instanceof FabricBytes) return value;
   if (isCellRef(value)) {
-    const cell = getCell(runtime, value);
+    const cell = getCell(runtime, value, registry);
     return tx ? cell.withTx(tx) : cell;
   }
   if (Array.isArray(value)) {
-    return value.map((member) => sqliteParamForRuntime(runtime, member, tx));
+    return value.map((member) =>
+      sqliteParamForRuntime(runtime, registry, member, tx)
+    );
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([key, member]) => [
         key,
-        sqliteParamForRuntime(runtime, member, tx),
+        sqliteParamForRuntime(runtime, registry, member, tx),
       ]),
     );
   }
@@ -371,32 +379,78 @@ function sqliteParamForRuntime(
 }
 
 /**
- * Converts a runtime cell value into the client wire domain. Each link it
- * mints for a cell carries the display form of that cell's CFC label view,
- * with every caveat's source redacted. A sigil link already in the value is
- * rebuilt as the container it is, view and all; stored data carries no view
- * on a link, the persist seam having stripped it, so the minted links are
- * where a view crosses.
+ * Converts runtime values through the canonical link walker. Display labels
+ * are redacted; issued tokens retain acquired reference restrictions inside
+ * this processor for a subsequent client import.
  */
-function cellValueForClient(value: unknown): FabricValue {
+function cellValueForClient(
+  value: unknown,
+  registry: ReferenceRegistry,
+  cycleRoot: Cell<unknown>,
+): FabricValue {
   return convertCellsToLinks(
     value as Parameters<typeof convertCellsToLinks>[0],
     {
       includeSchema: true,
       keepAsCell: KeepAsCell.All,
+      cycleRoot,
       doNotConvertCellResults: true,
       includeCfcLabelView: true,
+      transformLink: (cell, link) => registry.exportLink(link, cell),
     },
   );
 }
 
+/** Projects a metadata target while retaining the caller's follow caps. */
+function metadataTargetWithScopeCaps(
+  source: NormalizedFullLink,
+  target: NormalizedFullLink,
+  projectionDepth?: number,
+): NormalizedFullLink {
+  const path = target.path;
+  type ScopeCap = NonNullable<NormalizedFullLink["scopeCaps"]>[number];
+  const caps = new Map<number, ScopeCap["scope"]>();
+  const addCap = (depth: number, scope: ScopeCap["scope"] | undefined) => {
+    const cap = narrowerScopeCap(caps.get(depth), scope);
+    if (cap !== undefined) caps.set(depth, cap);
+  };
+  for (const { depth, scope } of target.scopeCaps ?? []) addCap(depth, scope);
+  let schemaCap = narrowerScopeCap(
+    ContextualFlowControl.getSchemaScopeCap(source.schema),
+    ContextualFlowControl.getAsCellFollowScopeCap(source.schema),
+  );
+  for (const { depth, scope } of source.scopeCaps ?? []) {
+    if (projectionDepth !== undefined) {
+      addCap(projectionDepth + depth, scope);
+    } else if (depth <= source.path.length) {
+      // A manifest entry starts a new path domain. Its inherited restrictions
+      // apply at every hop onto the returned target.
+      schemaCap = narrowerScopeCap(schemaCap, scope);
+    }
+  }
+  // The caller's leaf schema caps ancestor hops too. Keep that floor as
+  // private caps while the metadata target retains its own value schema.
+  for (let depth = 0; depth <= path.length; depth++) addCap(depth, schemaCap);
+  return {
+    ...target,
+    path,
+    ...(caps.size > 0 && {
+      scopeCaps: [...caps].sort(([a], [b]) => a - b).map(([depth, scope]) => ({
+        depth,
+        scope,
+      })),
+    }),
+  };
+}
+
 function sqliteParamsForRuntime(
   runtime: Runtime,
+  registry: ReferenceRegistry,
   params: SqliteParams,
   tx?: IExtendedStorageTransaction,
 ): ReadonlyArray<unknown> | Record<string, unknown> {
   const decode = (value: FabricValue) =>
-    sqliteParamForRuntime(runtime, value, tx);
+    sqliteParamForRuntime(runtime, registry, value, tx);
   return params.kind === "positional"
     ? params.values.map(decode)
     : Object.fromEntries(
@@ -730,6 +784,7 @@ type RuntimeOperationSession = {
  */
 export class RuntimeProcessor {
   #runtime: Runtime;
+  readonly #referenceRegistry: ReferenceRegistry;
   #cc: PiecesController;
   #spaces = new Map<DID, PiecesController>();
   #identity: Identity;
@@ -818,6 +873,7 @@ export class RuntimeProcessor {
     securityContext: RuntimeSecurityContext,
   ) {
     this.#runtime = runtime;
+    this.#referenceRegistry = new ReferenceRegistry(runtime);
     this.#cc = cc;
     this.#spaces.set(initSpace, cc);
     this.#identity = identity;
@@ -1065,6 +1121,7 @@ export class RuntimeProcessor {
   dispose(): Promise<void> {
     if (this.#disposingPromise) return this.#disposingPromise;
     this.#isDisposed = true;
+    this.#referenceRegistry.clear();
     this.#disposingPromise = (async () => {
       this.#telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
@@ -1242,25 +1299,54 @@ export class RuntimeProcessor {
           "use getCfcLabel for the redacted display view",
       );
     }
-    let cell = getCell(this.#runtime, request.cell);
+    let cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
     if (request.meta !== undefined) {
-      const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
+      const referenceView = getCarriedCfcLabelView(cell);
+      const source = cell.getAsNormalizedFullLink();
       if (
         request.meta === "pattern" || request.meta === "argument" ||
         request.meta === "result"
       ) {
         // For the meta link fields, use the meta linked cell instead
-        const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
-        const link = getMetaLink(rootCell, request.meta);
+        const link = getMetaLink(cell, request.meta);
         if (link === undefined) return { value: undefined };
-        cell = this.#runtime.getCellFromLink({
-          ...link,
-          path: [...link.path, ...request.cell.path],
-        });
+        const projected = this.#runtime.getCellFromLink(
+          link,
+          undefined,
+          undefined,
+          referenceView,
+        ).key(...source.path).getAsNormalizedFullLink();
+        cell = this.#runtime.getCellFromLink(
+          metadataTargetWithScopeCaps(source, projected, link.path.length),
+          undefined,
+          undefined,
+          referenceView,
+        );
       } else {
-        // For meta cells that aren't link cells, return the raw data
+        // Metadata reads are host acquisitions. Issue references in manifests
+        // under the requesting handle's history so their client handles can
+        // be used without fabricating a token or discarding that selection.
         return {
-          value: rootCell.getMetaRaw(request.meta) as FabricValue,
+          value: convertCellsToLinks(cell.getMetaRaw(request.meta), {
+            transformLink: (_source, link) => {
+              const target = this.#runtime.getCellFromLink(
+                metadataTargetWithScopeCaps(
+                  source,
+                  parseLink(link, cell),
+                ),
+                undefined,
+                undefined,
+                referenceView,
+              );
+              return this.#referenceRegistry.exportLink(
+                target.getAsLink({
+                  includeSchema: true,
+                  keepAsCell: KeepAsCell.All,
+                }),
+                target,
+              );
+            },
+          }),
         };
       }
     }
@@ -1273,11 +1359,13 @@ export class RuntimeProcessor {
     // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
     // the envelope's encoding carries one to the main thread with its class,
     // so what the response holds is what the cell held.
-    const converted = cellValueForClient(value);
+    const converted = cellValueForClient(value, this.#referenceRegistry, cell);
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
-    const refField = request.includeRef ? { cell: createCellRef(cell) } : {};
+    const refField = request.includeRef
+      ? { cell: createCellRef(cell, undefined, this.#referenceRegistry) }
+      : {};
     if (!request.includeCfcLabel) {
       return { value: converted, ...refField };
     }
@@ -1296,7 +1384,7 @@ export class RuntimeProcessor {
   async handleCellPull(
     request: CellPullRequest,
   ): Promise<CellGetResponse> {
-    await getCell(this.#runtime, request.cell).pull();
+    await getCell(this.#runtime, request.cell, this.#referenceRegistry).pull();
     // A client pull is the freshness barrier, not a cache sample. Reactive
     // quiescence can expose a lazy scoped target before the commit that creates
     // its value has registered or landed. Cross the commit-aware fixpoint in
@@ -1316,9 +1404,13 @@ export class RuntimeProcessor {
     if (request.value === undefined) {
       throw new TypeError("Cell initialize requires a defined value.");
     }
-    const initial = mapCellRefsToSigilLinks(request.value);
+    const initial = mapCellRefsToSigilLinks(
+      request.value,
+      this.#referenceRegistry,
+    );
     const result = await this.#runtime.editWithRetry((tx) => {
-      const cell = getCell(this.#runtime, request.cell).withTx(tx);
+      const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry)
+        .withTx(tx);
       // Initialization materializes the same backing value a whole-cell write
       // targets. A schema default is a readable fallback, not proof that the
       // cell has been stored, and a write redirect is an address rather than
@@ -1338,10 +1430,10 @@ export class RuntimeProcessor {
             "Cell backing value is incompatible with its schema.",
           );
         }
-        return cellValueForClient(projected);
+        return cellValueForClient(projected, this.#referenceRegistry, cell);
       }
       cell.set(initial);
-      return cellValueForClient(initial);
+      return cellValueForClient(initial, this.#referenceRegistry, cell);
     });
     if (result.error) throw new Error(result.error.message);
     return { value: result.ok };
@@ -1350,7 +1442,7 @@ export class RuntimeProcessor {
   /**
    * Handles a `CellSetRequest`. A `CellHandle.set()` is a blind leaf overwrite
    * (last-write-wins); `CellHandle.push()` sends only appended members and
-   * uses `Cell.push()`'s native mergeable operation. The decision is made by
+   * retries conflicting appends against fresh state. The decision is made by
    * _method_, never by inspecting the value's shape.
    */
   handleCellSet(request: CellSetRequest): void | Promise<void> {
@@ -1365,25 +1457,33 @@ export class RuntimeProcessor {
   }
 
   handleCellPush(request: CellPushRequest): void | Promise<void> {
-    const tx = this.#runtime.edit();
     // A frame ordinal distinguishes members within one append. The operation
-    // cause distinguishes first members minted by independent client runtimes.
-    const frame = pushFrame({
-      cause: `runtime-client cell push ${crypto.randomUUID()}`,
-      runtime: this.#runtime,
-      tx,
-      space: request.cell.space,
-      generatedIdCounter: 0,
+    // cause distinguishes callers and keeps member identities stable across
+    // retries when companion reference metadata requires a fresh basis.
+    const cause = `runtime-client cell push ${crypto.randomUUID()}`;
+    const cell = getCell(
+      this.#runtime,
+      request.cell,
+      this.#referenceRegistry,
+    ) as Cell<FabricValue[]>;
+    const values = request.values.map((value) =>
+      mapCellRefsToSigilLinks(value, this.#referenceRegistry)
+    );
+    const commit = this.#runtime.editWithRetry((tx) => {
+      const frame = pushFrame({
+        cause,
+        runtime: this.#runtime,
+        tx,
+        space: request.cell.space,
+        generatedIdCounter: 0,
+      });
+      try {
+        cell.withTx(tx).push(...values);
+      } finally {
+        popFrame(frame);
+      }
+      return {};
     });
-    try {
-      const cell = getCell(this.#runtime, request.cell) as Cell<FabricValue[]>;
-      const values = request.values.map(mapCellRefsToSigilLinks);
-      cell.withTx(tx).push(...values);
-    } finally {
-      popFrame(frame);
-    }
-    this.#runtime.prepareTxForCommit(tx);
-    const commit = tx.commit();
     if (request.awaitCommit) return this.#requireCellCommit(commit);
     this.#observeCellCommit(commit, "push");
   }
@@ -1419,7 +1519,8 @@ export class RuntimeProcessor {
       }
       return { ...existing.target, sessionKey, session: existing };
     }
-    const link = getCell(this.#runtime, cell).resolveAsCell()
+    const link = getCell(this.#runtime, cell, this.#referenceRegistry)
+      .resolveAsCell()
       .getAsNormalizedFullLink();
     const provider = this.#runtime.storageManager.open(link.space);
     const capability = hasOperationStorageCapability(provider)
@@ -1640,8 +1741,11 @@ export class RuntimeProcessor {
    * through `handleCellSet()`.
    */
   applyCellSet(request: CellSetRequest) {
-    const cell = getCell(this.#runtime, request.cell);
-    const value = mapCellRefsToSigilLinks(request.value);
+    const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
+    const value = mapCellRefsToSigilLinks(
+      request.value,
+      this.#referenceRegistry,
+    );
     return this.#runtime.commitUiCellWrite(cell, value, {
       blind: true,
       supersedeKey: this.#operationSessionKey(request.cell),
@@ -1650,8 +1754,10 @@ export class RuntimeProcessor {
 
   handleCellSend(request: CellSendRequest): void | Promise<void> {
     const tx = this.#runtime.edit();
-    const cell = getCell(this.#runtime, request.cell);
-    cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
+    const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
+    cell.withTx(tx).send(
+      mapCellRefsToSigilLinks(request.event, this.#referenceRegistry),
+    );
     this.#runtime.prepareTxForCommit(tx);
     const commit = tx.commit();
     if (request.awaitCommit) return this.#requireCellCommit(commit);
@@ -1697,7 +1803,7 @@ export class RuntimeProcessor {
       return { value: false };
     }
 
-    const cell = getCell(this.#runtime, request.cell);
+    const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
 
     const cancel = cell.sink((value, cfcLabel) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
@@ -1713,7 +1819,11 @@ export class RuntimeProcessor {
             `  schema: ${JSON.stringify(request.cell.schema)}`,
         );
       }
-      const converted = cellValueForClient(value);
+      const converted = cellValueForClient(
+        value,
+        this.#referenceRegistry,
+        cell,
+      );
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel
@@ -1754,9 +1864,9 @@ export class RuntimeProcessor {
   }
 
   handleCellResolveAsCell(request: CellResolveAsCellRequest): CellResponse {
-    const cell = getCell(this.#runtime, request.cell);
+    const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
     const resolved = cell.resolveAsCell();
-    const ref = createCellRef(resolved);
+    const ref = createCellRef(resolved, undefined, this.#referenceRegistry);
     if (
       ref.schema && typeof ref.schema === "object" &&
       !Array.isArray(ref.schema)
@@ -1784,7 +1894,7 @@ export class RuntimeProcessor {
     // Label reads must use the runtime's stored cell identity. The request
     // schema is client-supplied view context, not trusted label provenance.
     const { schema: _schema, ...cellRef } = request.cell;
-    const cell = getCell(this.#runtime, cellRef);
+    const cell = getCell(this.#runtime, cellRef, this.#referenceRegistry);
     // Pure, non-blocking read of the CURRENT local store — no sync. getCfcLabel
     // is the display-label seam, and its only callers are reactive UI components
     // (cf-cfc-label, cf-cfc-authorship, cf-profile-badge) that subscribe to the
@@ -1810,7 +1920,7 @@ export class RuntimeProcessor {
   async handleSqliteQuery(
     request: SqliteQueryRequest,
   ): Promise<SqliteQueryResponse> {
-    const cell = getCell(this.#runtime, request.cell);
+    const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry);
     const db = await this.#pullSqliteDbRef(cell);
     // A direct IPC query has no runner result cell on which to persist the
     // label derived from result-column provenance. Refuse that database shape
@@ -1832,7 +1942,11 @@ export class RuntimeProcessor {
       ? undefined
       : encodeSqliteParams(
         request.sql,
-        sqliteParamsForRuntime(this.#runtime, request.params),
+        sqliteParamsForRuntime(
+          this.#runtime,
+          this.#referenceRegistry,
+          request.params,
+        ),
       );
     const result = await provider.sqliteQuery(db, request.sql, params);
     return {
@@ -1848,21 +1962,31 @@ export class RuntimeProcessor {
   }
 
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
-    const source = getCell(this.#runtime, request.cell);
+    const source = getCell(
+      this.#runtime,
+      request.cell,
+      this.#referenceRegistry,
+    );
     const db = await this.#pullSqliteDbRef(source);
     const result = await this.#runtime.editWithRetry((tx) => {
       markDurableReadTx(tx);
       const params = request.params === undefined
         ? undefined
-        : sqliteParamsForRuntime(this.#runtime, request.params, tx);
-      const cell = getCell(this.#runtime, request.cell).withTx(
-        tx,
-      ) as unknown as Cell<unknown> & {
-        exec(
-          sql: string,
-          params?: ReadonlyArray<unknown> | Record<string, unknown>,
-        ): void;
-      };
+        : sqliteParamsForRuntime(
+          this.#runtime,
+          this.#referenceRegistry,
+          request.params,
+          tx,
+        );
+      const cell = getCell(this.#runtime, request.cell, this.#referenceRegistry)
+        .withTx(
+          tx,
+        ) as unknown as Cell<unknown> & {
+          exec(
+            sql: string,
+            params?: ReadonlyArray<unknown> | Record<string, unknown>,
+          ): void;
+        };
       if (cell.getRaw({ lastNode: "value" }) === undefined) {
         cell.asSchema<SqliteDbRef>({
           type: "object",
@@ -1937,6 +2061,7 @@ export class RuntimeProcessor {
     };
   }
 
+  /** Acquires a cause through the authenticated host bootstrap boundary. */
   handleGetCell(request: GetCellRequest): CellResponse {
     const cell = this.#runtime.getCell(
       request.space,
@@ -1945,14 +2070,30 @@ export class RuntimeProcessor {
     );
 
     return {
-      cell: createCellRef(cell, request.schema),
+      cell: createCellRef(cell, request.schema, this.#referenceRegistry),
     };
+  }
+
+  /** Acquires a fresh host address without accepting serialized provenance. */
+  handleAcquireCell(request: AcquireCellRequest): CellResponse {
+    const { space, id, scope, path, schema, overwrite, scopeCaps } =
+      request.address;
+    const cell = this.#runtime.getCellFromLink({
+      space,
+      id,
+      scope,
+      path,
+      ...(schema !== undefined && { schema }),
+      ...(overwrite !== undefined && { overwrite }),
+      ...(scopeCaps !== undefined && { scopeCaps }),
+    });
+    return { cell: createCellRef(cell, undefined, this.#referenceRegistry) };
   }
 
   handleGetHomeSpaceCell(_request: GetHomeSpaceCellRequest): CellResponse {
     const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     return {
-      cell: createCellRef(homeSpaceCell),
+      cell: createCellRef(homeSpaceCell, undefined, this.#referenceRegistry),
     };
   }
 
@@ -1982,7 +2123,11 @@ export class RuntimeProcessor {
     const homePattern = await homeCC.ensureDefaultPattern();
 
     return {
-      cell: createCellRef(homePattern.getCell()),
+      cell: createCellRef(
+        homePattern.getCell(),
+        undefined,
+        this.#referenceRegistry,
+      ),
     };
   }
 
@@ -2135,7 +2280,7 @@ export class RuntimeProcessor {
       start: request.run ?? true,
     }, request.cause);
     return {
-      piece: createPieceRef(piece.getCell()),
+      piece: createPieceRef(piece.getCell(), this.#referenceRegistry),
     };
   }
 
@@ -2153,11 +2298,13 @@ export class RuntimeProcessor {
         reconcile: true,
         start: false,
       });
-      if (stored) return { piece: createPieceRef(stored) };
+      if (stored) {
+        return { piece: createPieceRef(stored, this.#referenceRegistry) };
+      }
     }
     const piece = await cc.ensureDefaultPattern();
     return {
-      piece: createPieceRef(piece.getCell()),
+      piece: createPieceRef(piece.getCell(), this.#referenceRegistry),
     };
   }
 
@@ -2167,7 +2314,7 @@ export class RuntimeProcessor {
     const cc = this.#getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {
-      piece: createPieceRef(piece.getCell()),
+      piece: createPieceRef(piece.getCell(), this.#referenceRegistry),
     };
   }
 
@@ -2212,16 +2359,19 @@ export class RuntimeProcessor {
     // arrives, plus what the server resolves at the address itself when the
     // value stored there is a link.
     await requestedCell.sync();
+    const requestedValue = requestedCell.getRaw();
     const redirect = parseLink(
-      requestedCell.getRaw(),
+      requestedValue,
       requestedCell.getAsNormalizedFullLink(),
     );
     if (redirect?.overwrite === "redirect") {
-      const target = this.#runtime.getCellFromLink({
-        ...redirect,
-        space: redirect.space ?? cc.getSpace(),
-        scope: redirect.scope ?? "space",
-      });
+      const target = this.#runtime.getCellFromLink(
+        carryCfcReferenceProvenance(requestedValue, {
+          ...redirect,
+          space: redirect.space ?? cc.getSpace(),
+          scope: redirect.scope ?? "space",
+        }),
+      );
       const targetLink = target.getAsNormalizedFullLink();
       // The document the redirect lands in, at its root. Whether it is a
       // piece, and the result schema a cell inside it takes, are its
@@ -2240,22 +2390,28 @@ export class RuntimeProcessor {
       const hasPattern = getPatternIdentityRef(landing) !== undefined ||
         landing.getMetaRaw("pattern") !== undefined;
       if (!hasPattern) {
-        return { piece: createPieceRef(target) };
+        return { piece: createPieceRef(target, this.#referenceRegistry) };
       }
       if (targetLink.path.length > 0) {
         // The schema a cell inside a piece is read under: what the links
         // along its path carry, as `getPieceCell()` resolves a piece cell
         // reached with a path; else what the redirect itself carries; else
-        // the piece's result schema at that path. Reached through the
-        // landing document, whose sync it shares, so that nothing here
-        // starts a watch at the path.
-        const inside = landing.key(...targetLink.path);
+        // the piece's result schema at that path. The landing document's
+        // sync covers this handle, whose acquisition and scope restrictions
+        // remain attached while the linked schema is resolved.
+        const inside = target;
+        markCellDocumentSynced(inside);
         const linked = inside.asSchemaFromLinks();
         if (linked.getAsNormalizedFullLink().schema !== undefined) {
-          return { piece: createPieceRef(linked) };
+          return { piece: createPieceRef(linked, this.#referenceRegistry) };
         }
         if (targetLink.schema !== undefined) {
-          return { piece: createPieceRef(inside.asSchema(targetLink.schema)) };
+          return {
+            piece: createPieceRef(
+              inside.asSchema(targetLink.schema),
+              this.#referenceRegistry,
+            ),
+          };
         }
         const resultSchema = landing.getMetaRaw("schema") as
           | JSONSchema
@@ -2263,10 +2419,10 @@ export class RuntimeProcessor {
         const cell = resultSchema === undefined ? inside : inside.asSchema(
           ContextualFlowControl.schemaAtPath(resultSchema, targetLink.path),
         );
-        return { piece: createPieceRef(cell) };
+        return { piece: createPieceRef(cell, this.#referenceRegistry) };
       }
       const cell = await cc.getPieceCell(landing, request.runIt ?? false);
-      return { piece: createPieceRef(cell) };
+      return { piece: createPieceRef(cell, this.#referenceRegistry) };
     }
 
     const cell = await cc.getPieceCell(
@@ -2277,7 +2433,7 @@ export class RuntimeProcessor {
     );
 
     return {
-      piece: createPieceRef(cell),
+      piece: createPieceRef(cell, this.#referenceRegistry),
     };
   }
 
@@ -2331,7 +2487,10 @@ export class RuntimeProcessor {
           space,
           request.slug,
         );
-        return { piece: createPieceRef(piece), pathAfter: [] };
+        return {
+          piece: createPieceRef(piece, this.#referenceRegistry),
+          pathAfter: [],
+        };
       }
       const { piece, pathAfter } = await resolveSlugReference(
         this.#runtime,
@@ -2339,7 +2498,10 @@ export class RuntimeProcessor {
         request.slug,
         [request.member],
       );
-      return { piece: createPieceRef(piece), pathAfter };
+      return {
+        piece: createPieceRef(piece, this.#referenceRegistry),
+        pathAfter,
+      };
     } catch (error) {
       // A reference reaching nothing is what the caller asked about, so it
       // comes back as an answer. Everything else — a transport fault, a
@@ -2389,7 +2551,7 @@ export class RuntimeProcessor {
     const pieces = this.#getSpaceCtx(request.space);
     const piecesCell = await pieces.getPieceRegistry();
     return {
-      cell: createCellRef(piecesCell),
+      cell: createCellRef(piecesCell, undefined, this.#referenceRegistry),
     };
   }
 
@@ -2452,7 +2614,7 @@ export class RuntimeProcessor {
       this.#getSpaceCtx(request.destinationSpace),
       { copyData: request.copyData === true },
     );
-    return { piece: createPieceRef(clone.getCell()) };
+    return { piece: createPieceRef(clone.getCell(), this.#referenceRegistry) };
   }
 
   async handlePieceUpdateSource(
@@ -2899,6 +3061,8 @@ export class RuntimeProcessor {
         return await this.handleSqliteExec(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
+      case RequestType.AcquireCell:
+        return this.handleAcquireCell(request);
       case RequestType.GetHomeSpaceCell:
         return this.handleGetHomeSpaceCell(request);
       case RequestType.EnsureHomePatternRunning:
@@ -3054,13 +3218,13 @@ export class RuntimeProcessor {
       return;
     }
 
-    // CustomEvent.detail was JSON.stringify'd on the main thread (invoking
-    // CellHandle.toJSON), so sigil links in it bypass getCell /
-    // cellRefToSigilLink — strip any main-thread cfcLabelView copies before
-    // a handler can write them (inv-12 Stage 0; codex/cubic review).
+    // Events use the same acquisition import as explicit cell writes.
     const dispatched = mount.reconciler.dispatchEvent(
       request.handlerId,
-      stripSigilCfcLabelViews(request.event) as typeof request.event,
+      mapCellRefsToSigilLinks(
+        request.event,
+        this.#referenceRegistry,
+      ) as typeof request.event,
     );
     if (!dispatched) {
       console.warn(
@@ -3091,11 +3255,20 @@ export class RuntimeProcessor {
 
     // Get the cell from the runtime and apply rendererVDOMSchema
     // The schema has a [UI] property definition that handles VDOM unwrapping
-    const rawCell = getCell(this.#runtime, cellRef);
+    const rawCell = getCell(this.#runtime, cellRef, this.#referenceRegistry);
     const cell = rawCell.asSchema(rendererVDOMSchema);
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
+      exportCellRef: (cell, ref) => {
+        const issued = createCellRef(cell, ref.schema, this.#referenceRegistry);
+        return issued.cfcReferenceToken === undefined ? ref : {
+          ...ref,
+          cfcReferenceToken: issued.cfcReferenceToken,
+        };
+      },
+      transformLink: (cell, link) =>
+        this.#referenceRegistry.exportLink(link, cell),
       renderDeclassificationPolicy: this.#renderDeclassificationPolicy,
       renderConfidentialityCeiling: this.#renderConfidentialityCeiling,
       resolveRenderConfidentiality: this.#renderConfidentialityResolver,
@@ -3277,10 +3450,16 @@ export class RuntimeProcessor {
       },
 
       navigateCallback: (target) => {
-        const link = parseLink(target.getAsLink()) as NormalizedFullLink;
+        if (!processor) {
+          throw new Error("Navigation requires an initialized processor");
+        }
         postToClient({
           type: NotificationType.NavigateRequest,
-          targetCellRef: link,
+          targetCellRef: createCellRef(
+            target,
+            undefined,
+            processor.#referenceRegistry,
+          ),
         });
       },
 
