@@ -3292,8 +3292,6 @@ describe("runtime-processor", () => {
     });
 
     it("reads the cell's own stored label without syncing", () => {
-      // Keeping the cell live is the caller's job, so the read syncs nothing.
-
       const ref: CellRef = {
         id: "of:cfc-label-pure-read" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3345,9 +3343,10 @@ describe("runtime-processor", () => {
           }],
         },
       });
-      // No sync: the label is read from the current store. A not-yet-loaded doc
-      // would yield an empty label that self-heals when the reactive caller's
-      // subscription delivers it.
+      // No sync: keeping the cell live is the caller's job, and the label is
+      // read from the current store. A not-yet-loaded doc would yield an empty
+      // label that self-heals when the reactive caller's subscription delivers
+      // it.
       expect(synced).toBe(false);
     });
 
