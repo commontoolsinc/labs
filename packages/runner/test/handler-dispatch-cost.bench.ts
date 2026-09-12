@@ -4,8 +4,11 @@
  * the scheduler to a compiled handler and waits for its commit; the timed
  * interval runs from the send to the commit callback. The dispatch's phases —
  * presync, dependency preflight, argument read, body, post-run, commit — are
- * read back from the phase timers the runtime already keeps, so the whole
- * dispatch and its parts come from the same run. The runtime's drains after
+ * read back from the phase timers the runtime already keeps — as the time
+ * each timer accumulated between a snapshot before the send and one after
+ * the drain, so a phase that runs twice in a dispatch counts twice and a
+ * phase that did not run in it counts nothing — so the whole dispatch and
+ * its parts come from the same run. The runtime's drains after
  * the callback sit outside the timed interval, and so does the re-seeding
  * of the list after the one workload that writes to it, so every sample
  * dispatches over a list of the size its name states. Those timers are kept
@@ -234,13 +237,36 @@ async function prepare(size: number, readStats: boolean) {
   return { runtime, out, dispatch, drain, reseed, expected, dispose };
 }
 
-/** The phase timers' last samples, in milliseconds, keyed by phase path. */
-function lastPhaseTimes(): Record<string, number> {
-  const times: Record<string, number> = {};
+/**
+ * The phase timers' accumulated time and sample count, keyed by phase path.
+ * Two snapshots bracketing a dispatch give the time each phase spent in it,
+ * however many times it ran, and no sample from an earlier dispatch.
+ */
+function phaseTotals(): Record<string, { totalTime: number; count: number }> {
+  const totals: Record<string, { totalTime: number; count: number }> = {};
   for (const [loggerName, key] of PHASES) {
-    times[key] = getLogger(loggerName).getTimeStats(key)?.lastTime ?? 0;
+    const stats = getLogger(loggerName).getTimeStats(key);
+    totals[key] = {
+      totalTime: stats?.totalTime ?? 0,
+      count: stats?.count ?? 0,
+    };
   }
-  return times;
+  return totals;
+}
+
+/** The time and sample count each phase added between two snapshots. */
+function phaseDeltas(
+  before: ReturnType<typeof phaseTotals>,
+  after: ReturnType<typeof phaseTotals>,
+): Record<string, { ms: number; samples: number }> {
+  const deltas: Record<string, { ms: number; samples: number }> = {};
+  for (const key of Object.keys(after)) {
+    deltas[key] = {
+      ms: after[key].totalTime - before[key].totalTime,
+      samples: after[key].count - before[key].count,
+    };
+  }
+  return deltas;
 }
 
 /** Heap in use after a full collection, or `undefined` without `--expose-gc`. */
@@ -323,10 +349,12 @@ for (const size of SIZES) {
       async fn(b) {
         prepared ??= await prepare(size, false);
         if (workload === "mutate" && dispatches > 0) await prepared.reseed();
+        const before = phaseTotals();
         b.start();
         const elapsed = await prepared.dispatch(workload);
         b.end();
         await prepared.drain();
+        const phases = phaseDeltas(before, phaseTotals());
         dispatches += 1;
         const value = prepared.out.get();
         const expected = prepared.expected(workload);
@@ -338,7 +366,7 @@ for (const size of SIZES) {
           workload,
           dispatch: dispatches,
           elapsed,
-          phases: lastPhaseTimes(),
+          phases,
         }));
       },
     });
