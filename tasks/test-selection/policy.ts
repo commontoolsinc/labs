@@ -148,6 +148,23 @@ export const FILL_EXPLORATION_SHARE = 0.15;
 export const MAX_SUITE_CORRECTION = 4;
 
 /**
+ * The largest a suite must have been charged for one batch before its
+ * fitted slope is believed.
+ *
+ * A slope says what one more second of test time costs, and it is read
+ * far outside the range it was fitted over: a suite charged six seconds
+ * in every batch anybody has seen may be charged thousands the first
+ * time a lane packs it whole. Inside a narrow range the fixed cost
+ * dominates and the slope is noise, so fitting one there and reading it
+ * out there is how a lane comes to believe that six thousand seconds of
+ * tests are free.
+ *
+ * Below this the slope is one, which is the reading that needs no
+ * evidence: a second of test time costs a second.
+ */
+export const MIN_CORRECTION_SPAN_SECONDS = LANE_BUDGET_SECONDS / 10;
+
+/**
  * Observations a suite needs before its slope is fitted at all.
  *
  * Two points fit a line exactly, so a line through two of them says
@@ -656,6 +673,16 @@ export const DIALS: readonly Dial[] = [
     why: "Add a suite whose failures are never noise, so that a flake rate " +
       "cannot excuse one; remove one whose failures a change's author " +
       "cannot act on.",
+  },
+  {
+    name: "MIN_CORRECTION_SPAN_SECONDS",
+    value: MIN_CORRECTION_SPAN_SECONDS,
+    unit: "seconds",
+    setBy: "derived",
+    why:
+      "A tenth of a lane's budget. Down when a suite's real slope is going " +
+      "unbelieved for too long; up when a slope fitted inside a narrow " +
+      "range is being read far outside it.",
   },
   {
     name: "MAX_SUITE_CORRECTION",

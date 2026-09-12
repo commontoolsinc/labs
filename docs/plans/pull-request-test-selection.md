@@ -3904,6 +3904,16 @@ third. Holding the slope at one pushes that difference into the
 intercept, which is charged whatever the batch holds. Only a negative
 slope is meaningless.
 
+What both bounds leave is the range the slope is read over. A slope is
+fitted from what a suite has been charged and read far outside it: a
+suite charged six seconds in every batch anybody has seen may be charged
+thousands the first time a lane packs it whole. Inside a narrow range the
+fixed cost dominates and the slope is noise, and a slope of nothing read
+at six thousand seconds says those tests are free. So a slope is believed
+only where the suite has been charged at least
+`MIN_CORRECTION_SPAN_SECONDS` for one batch, and is one otherwise, which
+is the reading that needs no evidence.
+
 `unitOverhead` stays empty. A lane times its batches and not the units
 inside them, so nothing measures what one more file costs a batch that
 already runs others; a suite's intercept carries it, which charges a

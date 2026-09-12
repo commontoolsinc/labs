@@ -15,7 +15,11 @@ import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
 } from "../lane-measurement.ts";
-import { MAX_SUITE_CORRECTION, MIN_CORRECTION_SAMPLES } from "./policy.ts";
+import {
+  MAX_SUITE_CORRECTION,
+  MIN_CORRECTION_SAMPLES,
+  MIN_CORRECTION_SPAN_SECONDS,
+} from "./policy.ts";
 
 /** One measurement, as a lane spools it. */
 function measured(name: string, seconds: number): TestRecord {
@@ -169,8 +173,8 @@ describe("what a lane costs beyond the tests it runs", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          planned: 10 + i,
-          spent: 10 + 2 * (10 + i),
+          planned: MIN_CORRECTION_SPAN_SECONDS + i,
+          spent: 10 + 2 * (MIN_CORRECTION_SPAN_SECONDS + i),
         })),
       );
       expect(fitted.correction).toBeCloseTo(2, 6);
@@ -195,15 +199,15 @@ describe("what a lane costs beyond the tests it runs", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          planned: 0.1 * i,
-          spent: 20 + 50 * (0.1 * i),
+          planned: MIN_CORRECTION_SPAN_SECONDS * (1 + i),
+          spent: 20 + 50 * MIN_CORRECTION_SPAN_SECONDS * (1 + i),
         })),
       );
       expect(fitted.correction).toBe(MAX_SUITE_CORRECTION);
       // What the cap moved off the slope is on the intercept, so no
       // observation is under-predicted.
       for (let i = 0; i < MIN_CORRECTION_SAMPLES; i++) {
-        const planned = 0.1 * i;
+        const planned = MIN_CORRECTION_SPAN_SECONDS * (1 + i);
         expect(fitted.overhead + fitted.correction * planned)
           .toBeGreaterThanOrEqual(20 + 50 * planned - 1e-9);
       }
@@ -216,16 +220,33 @@ describe("what a lane costs beyond the tests it runs", () => {
       const seen: BatchObservation[] = [
         ...Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          planned: 10 + i,
-          spent: 10 + 2 * (10 + i),
+          planned: MIN_CORRECTION_SPAN_SECONDS + i,
+          spent: 10 + 2 * (MIN_CORRECTION_SPAN_SECONDS + i),
         })),
-        { suite: "s", planned: 15, spent: 90 },
+        { suite: "s", planned: MIN_CORRECTION_SPAN_SECONDS, spent: 900 },
       ];
       const fitted = fitSuite(seen);
       for (const one of seen) {
         expect(fitted.overhead + fitted.correction * one.planned)
           .toBeGreaterThanOrEqual(one.spent - 1e-9);
       }
+    });
+
+    it("believes no slope from a suite nothing has charged much for", () => {
+      // A slope is read far outside the range it was fitted over: a
+      // suite charged six seconds in every batch anybody has seen may be
+      // charged thousands the first time a lane packs it whole. Inside a
+      // narrow range the fixed cost dominates and the slope is noise,
+      // which is how a lane comes to believe six thousand seconds of
+      // tests are free.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES + 3 }, (_, i) => ({
+          suite: "s",
+          planned: 2 + 0.5 * i,
+          spent: 41,
+        })),
+      );
+      expect(fitted.correction).toBe(1);
     });
 
     it("fits a suite whose batch runs faster than the sum of its tests", () => {
@@ -237,8 +258,8 @@ describe("what a lane costs beyond the tests it runs", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          planned: 50 + 10 * i,
-          spent: (50 + 10 * i) / 3,
+          planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          spent: MIN_CORRECTION_SPAN_SECONDS * (2 + i) / 3,
         })),
       );
       expect(fitted.correction).toBeCloseTo(1 / 3, 6);
@@ -249,8 +270,8 @@ describe("what a lane costs beyond the tests it runs", () => {
       const fitted = fitSuite(
         Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
           suite: "s",
-          planned: 10 + 10 * i,
-          spent: 60 - 0.5 * (10 + 10 * i),
+          planned: MIN_CORRECTION_SPAN_SECONDS * (2 + i),
+          spent: 500 - 0.5 * MIN_CORRECTION_SPAN_SECONDS * (2 + i),
         })),
       );
       expect(fitted.correction).toBe(0);

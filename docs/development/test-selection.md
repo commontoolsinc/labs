@@ -222,6 +222,7 @@ setting to fix.
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `ALWAYS_GATING_SUITES` | 2 | suites | chosen | Add a suite whose failures are never noise, so that a flake rate cannot excuse one; remove one whose failures a change's author cannot act on. |
+| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
 | `MAX_SUITE_CORRECTION` | 4 | multiple of a suite's own test time | chosen | Up when a suite really does take several times its tests' own time per second of them; down when a fitted slope is pricing a suite out of every lane. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |

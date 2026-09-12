@@ -36,6 +36,7 @@ import {
   LANE_PROLOGUE_SECONDS,
   MAX_SUITE_CORRECTION,
   MIN_CORRECTION_SAMPLES,
+  MIN_CORRECTION_SPAN_SECONDS,
 } from "./policy.ts";
 
 /** One thing a lane measured about itself, and the day it measured it. */
@@ -204,9 +205,16 @@ export function fitSuite(
 ): { overhead: number; correction: number } {
   if (observations.length === 0) return { overhead: 0, correction: 1 };
   const distinct = new Set(observations.map((o) => o.planned));
+  const largest = Math.max(...observations.map((o) => o.planned));
   let correction = 1;
+  // A slope is read far outside the range it was fitted over: a suite
+  // charged six seconds in every batch anybody has seen may be charged
+  // thousands the first time a lane packs it whole. So one is fitted
+  // only where the suite has been charged enough for a slope to mean
+  // anything, and otherwise stays at the reading that needs no evidence.
   if (
-    distinct.size > 1 && observations.length >= MIN_CORRECTION_SAMPLES
+    distinct.size > 1 && observations.length >= MIN_CORRECTION_SAMPLES &&
+    largest >= MIN_CORRECTION_SPAN_SECONDS
   ) {
     const n = observations.length;
     const meanX = observations.reduce((t, o) => t + o.planned, 0) / n;
