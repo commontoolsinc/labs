@@ -64,6 +64,7 @@ export interface WorkerOptions {
 
   /** Experimental runtime options to forward to the worker. */
   experimental?: {
+    /** Whether the runtime uses the modern cell representation. */
     modernCellRep?: boolean;
   };
 }
@@ -181,8 +182,8 @@ export class WorkerController extends EventTarget {
    * space, toolshed, identity, and experimental options. Called once the
    * worker announces itself ready.
    *
-   * @throws If the controller is not uninitialized, or if the request fails,
-   *   which leaves the controller in the `Error` state.
+   * @throws If the controller is not uninitialized. Also if the request
+   *   fails, which leaves the controller in the `Error` state.
    */
   async startInitialize() {
     if (this.#state !== WorkerState.Uninitialized) {
@@ -206,7 +207,8 @@ export class WorkerController extends EventTarget {
   /**
    * Runs the piece `bg` names in the worker, resolving when the run finishes.
    *
-   * @throws If the worker is not ready, or if the run fails or times out.
+   * @throws If the worker is not ready, or if the run fails, times out, or
+   *   is cut off by `shutdown()`.
    */
   async runPiece(
     bg: Cell<BGPieceEntry>,

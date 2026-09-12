@@ -27,7 +27,7 @@ type SpaceManagerLike = Pick<SpaceManager, "start" | "stop" | "watch">;
 
 /** Options for constructing a `BackgroundPieceService`. */
 export interface BackgroundPieceServiceOptions {
-  /** Identity the service runs as, and hands each space's worker. */
+  /** Identity each space's worker runs as. */
   identity: Identity;
 
   /** URL of the toolshed the workers talk to. */
@@ -139,7 +139,9 @@ export class BackgroundPieceService {
    * the registry's entries: starts a manager for each space with an enabled
    * entry, hands every manager the entries for its space, and stops the
    * manager of a space with no enabled entry left. Returns the `Cancel` that
-   * undoes the watches it registered.
+   * undoes the watches it registered, which the registry sink runs before the
+   * next invocation so that each round's watches replace the last; returns
+   * nothing when the service is not running.
    */
   #ensurePieces(pieces: readonly Cell<BGPieceEntry>[]) {
     // FIXME(ja): space managers should watch their own pieces!

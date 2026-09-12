@@ -32,8 +32,8 @@ export interface PieceSchedulerOptions extends WorkerOptions {
   deactivationTimeoutMs?: number;
 
   /**
-   * How long after a run its piece runs again, in milliseconds; a minute by
-   * default.
+   * How long after a successful run its piece runs again, in milliseconds,
+   * and the unit of the backoff after a failed one; a minute by default.
    */
   rerunIntervalMs?: number;
 }
@@ -73,7 +73,7 @@ export class SpaceManager {
 
   /**
    * Constructs an instance for the space `options` names, and starts its
-   * worker controller. Runs nothing until `start()`.
+   * worker controller. Runs no piece until `start()`.
    */
   constructor(options: PieceSchedulerOptions) {
     this.#did = options.did;
@@ -211,7 +211,7 @@ export class SpaceManager {
   }
 
   /**
-   * The scheduling loop: while running, hands the head of the queue to
+   * Runs the scheduling loop: while running, hands the head of the queue to
    * `#processPiece()` once it is due, the worker is ready, and no piece is in
    * flight, polling between checks.
    */
@@ -291,8 +291,9 @@ export class SpaceManager {
   }
 
   /**
-   * Handler for a change to a watched entry, which schedules a piece that has
-   * become enabled and drops one that has become disabled.
+   * Handler for a watched entry's value, run when the watch is established
+   * and again on each change, which schedules a piece that is enabled and not
+   * yet scheduled, and drops one that has become disabled.
    */
   #updatePieceStatus(raw: BGPieceEntry, entry: Cell<BGPieceEntry>) {
     const pieceId = raw.pieceId;
@@ -340,8 +341,9 @@ export class SpaceManager {
   }
 
   /**
-   * Records a failed run on the entry and queues a retry with a linearly
-   * growing delay; the third failure in a row disables the piece instead.
+   * Records a failed run on the entry and, if the piece is still enabled,
+   * queues a retry with a linearly growing delay; the third failure in a row
+   * disables the piece instead.
    */
   #onProcessFail(
     pieceId: string,

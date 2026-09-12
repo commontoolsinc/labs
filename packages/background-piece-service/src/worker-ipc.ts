@@ -9,13 +9,13 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** The kinds of request a controller sends its worker. */
 export enum WorkerIPCMessageType {
-  /** Set the worker up for its space; the first request, sent once. */
+  /** Request to set the worker up for its space; the first one, sent once. */
   Initialize = "initialize",
 
-  /** Run one piece's background updater. */
+  /** Request to run one piece's background updater. */
   Run = "run",
 
-  /** Tear the worker's runtime down ahead of termination. */
+  /** Request to tear the worker's runtime down ahead of termination. */
   Cleanup = "cleanup",
 }
 
@@ -40,6 +40,7 @@ export type InitializationData = {
 
   /** Experimental runtime options, forwarded from the service's own runtime. */
   experimental?: {
+    /** Whether the runtime uses the modern cell representation. */
     modernCellRep?: boolean;
   };
 };
@@ -74,18 +75,37 @@ export function isRunData(value: unknown): value is RunData {
  * A request from a controller to its worker, tagged by kind and numbered so
  * that the response can be matched to it.
  */
-export type WorkerIPCRequest = {
-  type: WorkerIPCMessageType.Initialize;
-  msgId: number;
-  data: InitializationData;
-} | {
-  type: WorkerIPCMessageType.Run;
-  msgId: number;
-  data: RunData;
-} | {
-  type: WorkerIPCMessageType.Cleanup;
-  msgId: number;
-};
+export type WorkerIPCRequest =
+  /** Set the worker up, with what it needs to serve its space. */
+  | {
+    /** Kind of the request. */
+    type: WorkerIPCMessageType.Initialize;
+
+    /** Number the response carries back, unique among the worker's requests. */
+    msgId: number;
+
+    /** The request's payload. */
+    data: InitializationData;
+  }
+  /** Run one piece's background updater. */
+  | {
+    /** Kind of the request. */
+    type: WorkerIPCMessageType.Run;
+
+    /** Number the response carries back, unique among the worker's requests. */
+    msgId: number;
+
+    /** The request's payload. */
+    data: RunData;
+  }
+  /** Tear the worker's runtime down ahead of termination. */
+  | {
+    /** Kind of the request. */
+    type: WorkerIPCMessageType.Cleanup;
+
+    /** Number the response carries back, unique among the worker's requests. */
+    msgId: number;
+  };
 
 /** Returns whether `value` is a `WorkerIPCRequest`, its payload included. */
 export function isWorkerIPCRequest(value: unknown): value is WorkerIPCRequest {

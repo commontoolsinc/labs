@@ -89,8 +89,8 @@ const console = {
 
 /**
  * Console handler of the worker's runtime, which prefixes a piece's console
- * output with the piece's id and renders each argument through
- * `safeFormat()`.
+ * output with the piece's id, or a placeholder when the message names none,
+ * and renders each argument through `safeFormat()`.
  *
  * @throws If the worker has no space, or the message names a different one.
  */
@@ -172,7 +172,8 @@ export function resetWorkerStateForTesting(): void {
 /**
  * Sets the worker up for its space: derives its identity from the encoded
  * key pair, opens a session, builds the runtime with telemetry bridged in,
- * and readies the pieces controller. A second call does nothing.
+ * and readies the pieces controller. A call while already initialized does
+ * nothing.
  */
 export async function initialize(
   data: InitializationData,
@@ -251,7 +252,7 @@ export async function initialize(
 /**
  * Tears the worker down: forgets its loaded pieces and session, syncs and
  * disposes the runtime, detaches the telemetry bridge, and flushes
- * telemetry. Does nothing when the worker was never initialized.
+ * telemetry. Does nothing when the worker is not initialized.
  */
 export async function cleanup(): Promise<void> {
   // FIXME(ja) should we make sure we kill the worker?

@@ -62,7 +62,8 @@ export interface MainDependencies {
 
 /**
  * Returns the worker timeout `args` names with `--timeout`, in milliseconds,
- * or the default when the argument is absent or not a number.
+ * or the default when the argument is absent or does not start with an
+ * integer.
  */
 export function parseWorkerTimeout(args: string[]): number {
   const { timeout } = parseArgs(args, {
@@ -83,16 +84,15 @@ export function parseWorkerTimeout(args: string[]): number {
 /**
  * Constructs the service's runtime: a production-server runtime talking to
  * the toolshed `env` names, running as `identity`. The experimental flags are
- * read from the environment through the runner's own mapping, so that this
- * service, toolshed, and the CLI resolve them alike; the service forwards
- * this runtime's resolved flags to every worker it starts.
+ * read from the environment through the runner's own mapping; the service
+ * forwards this runtime's resolved flags to every worker it starts.
  */
 export function createRuntime(
   env: EnvVars,
   identity: Identity,
   /**
    * Reads one environment variable; injectable for tests, like `loadEnv()`'s
-   * `source`. The EXPERIMENTAL_* flags are read here rather than in
+   * `source`. The `EXPERIMENTAL_*` flags are read here rather than in
    * `loadEnv()`, since `EnvVars` does not declare them.
    */
   readEnv: EnvReader = (key) => Deno.env.get(key),
@@ -140,8 +140,8 @@ export function shutdown(
  * `SIGTERM`, and initializes the service under a startup span. Returns the
  * running service.
  *
- * @throws Whatever the service's `initialize()` throws, after recording it
- *   on the span.
+ * @throws Whatever `getIdentity()` throws, and whatever the service's
+ *   `initialize()` throws, the latter after recording it on the startup span.
  */
 export async function startBackgroundPieceService(
   args: string[] = Deno.args,

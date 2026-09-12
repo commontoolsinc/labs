@@ -1,7 +1,7 @@
 /**
- * Helpers shared by the service, its workers, and the admin tooling: identity
- * derivation, id validation, and reads and writes of the registry of
- * background pieces.
+ * Helpers shared by the service, the admin tooling, and the registration entry
+ * point `lib.ts` exports: identity derivation, id validation, and reads and
+ * writes of the registry of background pieces.
  */
 
 import { Identity } from "@commonfabric/identity";

@@ -4,8 +4,9 @@
 
 /**
  * OpenTelemetry for the service: the tracer and meter providers, registered
- * when `OTEL_ENABLED` is set and left as the API's no-op instruments
- * otherwise, and the accessors the rest of the service reaches them through.
+ * when `OTEL_ENABLED` is true and absent otherwise, and the accessors the rest
+ * of the service reaches them through, which return the API's no-op
+ * instruments while no provider is registered.
  */
 
 import {
@@ -119,8 +120,9 @@ export async function shutdownOpenTelemetry(): Promise<void> {
 /**
  * Registers the tracer and meter providers, exporting to the OTLP collector
  * `cfg` names, when telemetry is enabled; does nothing when it is disabled or
- * already initialized. A setup failure is logged and leaves telemetry off, so
- * the service boots regardless.
+ * already initialized. A setup failure is logged rather than thrown, so the
+ * service boots regardless: one in the tracer setup leaves telemetry off, and
+ * one in the metrics setup leaves tracing registered and metrics off.
  */
 export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
   if (_provider || !cfg.OTEL_ENABLED) {

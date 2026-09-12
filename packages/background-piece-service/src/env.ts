@@ -1,6 +1,7 @@
 /**
  * The environment this service reads: each variable it recognizes, with the
- * default that stands in for an unset one, parsed once at load into `env`.
+ * default, where one exists, that stands in for an unset one, parsed once at
+ * load into `env`.
  */
 
 import { z } from "zod";
@@ -38,7 +39,7 @@ const envSchema = z.object({
   ),
   OTEL_SERVICE_NAME: z.string().default("bg-piece-service"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
-  // The EXPERIMENTAL_* feature flags are not declared here: the runtime
+  // The `EXPERIMENTAL_*` feature flags are not declared here: the runtime
   // construction site reads them through the canonical mapping
   // (`experimentalOptionsFromEnv` / EXPERIMENTAL_ENV_VARS in
   // @commonfabric/runner runtime-presets), shared with toolshed and the CLI
