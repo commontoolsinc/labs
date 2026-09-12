@@ -4,9 +4,9 @@
 
 Reduce repeated collection work in Topicboard and individual Topics while
 preserving their authored data, public behavior, identities, and bounded demand
-shapes. Use the maintained collection mechanisms from #7155 where measurements
-justify them. Ship improvements in independently reviewable changes, then
-rehearse and coordinate an upgrade of existing pieces.
+shapes. Use maintained collection indexes and named aggregates where
+measurements justify them. Ship improvements in independently reviewable
+changes, then rehearse and coordinate an upgrade of existing pieces.
 
 This plan authorizes no live writes by itself. Implementation, synthetic demos,
 and isolated copy rehearsals can proceed before a deployment window is chosen.
@@ -16,9 +16,9 @@ The implementation surfaces are
 [the topic](../../packages/patterns/topics/topic.tsx). Contracts are documented
 in [collection indexes](../features/collection-indexes.md),
 [aggregates](../features/collection-aggregates.md), and
-[read accounting](../features/read-accounting.md). The related authoring and
-adoption guide is proposed in
-[#7400](https://github.com/commontoolsinc/labs/pull/7400).
+[read accounting](../features/read-accounting.md). Authoring examples and
+operation-selection guidance live in
+[reactive collections](../common/concepts/reactive-collections.md).
 
 ## Expected improvements and limits
 
@@ -184,10 +184,12 @@ board's package does not upgrade those existing children.
    improvement changes only derived computation, a public result, or persisted
    state.
 2. Confirm the target runtime/compiler supports the operators. Reconcile with
-   [Topics state upgrades #7345](https://github.com/commontoolsinc/labs/pull/7345)
-   before a stored-state change; track that work's landing and deployed status
-   during T6. Pure derivation changes need not depend on its author migration.
-   If persisted state must change, specify version handling, idempotency, legacy
+   the Topics pattern's stored-state upgrade mechanism before a stored-state
+   change. During T6, document the deployed version contract and migration steps
+   in the [Topics documentation](../../packages/patterns/topics/README.md), or
+   establish that mechanism and its repository documentation before relying on
+   it. Pure derivation changes need not require a stored-state migration. If
+   persisted state must change, specify version handling, idempotency, legacy
    writers, and rollback limits explicitly rather than forcing a schema
    override.
 3. Acquire a consistent snapshot through the owner/operator and follow the
