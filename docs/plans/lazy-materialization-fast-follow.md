@@ -1,8 +1,10 @@
 # Lazy materialization fast-follow
 
-Status: F0 complete; F1 in progress. This plan is the separate follow-up to the
-[computation-cost](../history/plans/pattern-computation-cost.md) arc,
-whose [implementation
+Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
+deferral needed, with three bullets carried forward; F3, F4, and F5 pending.
+This plan is the separate follow-up to the
+[computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
+[implementation
 record](../history/plans/pattern-computation-cost-implementation.md) transferred
 its D1/D2 measurements here. It owns the remaining handler investigation,
 default-on rollout evidence, flag retirement, and those measurements. It does
@@ -31,18 +33,21 @@ Mark a step complete only with its linked evidence. Capture decisions and
 completed investigations in `docs/history/`; update the live contract documents
 in the same PR as behavior changes.
 
-| Step | Depends on                  | Deliverable                                                           | State                                                                                                  |
-| ---- | --------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md) |
-| F1   | F0                          | Handler materialization contract and measured prototype               | In progress                                                                                            |
-| F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Pending                                                                                                |
-| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Pending                                                                                                |
-| F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                |
-| F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                |
+| Step | Depends on                  | Deliverable                                                           | State                                                                                                                                                                  |
+| ---- | --------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                 |
+| F1   | F0                          | Handler materialization contract and measured prototype               | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)        |
+| F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md) |
+| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Pending                                                                                                                                                                |
+| F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                                                                                |
+| F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
 
 F1/F2 and F3 can proceed independently. F4 does not depend on making handlers
-lazy unless F1 identifies a concrete shared contract that requires that order.
-Do not delete eager materialization that unmarked transactions still require.
+lazy: F1 identified no shared contract that would require that order. Its
+blocker is what a narrower read set does to a handler's commit — it changes
+which concurrent writes the commit refuses — where on the lift path it changes
+only when a node re-runs. Do not delete eager materialization that unmarked
+transactions still require.
 
 ### F0 — Establish the baseline
 
@@ -70,28 +75,56 @@ which a view would narrow.
 
 ### F1/F2 — Decide and integrate handler materialization
 
-- [ ] Specify which bound context paths can be lazy and which event-payload
+- [x] Specify which bound context paths can be lazy and which event-payload
       checks must complete before the body runs. Start from the existing
       `$event` / `$ctx` split and closed-world event gate; do not weaken payload
       validation as a side effect of narrower context reads.
 - [ ] Define touched required-field refusal, optional mismatch, missing linked
       data, and caught refusal. Distinguish cold input withdrawal from permanent
       invalidity; do not consume an event that never ran or commit partial
-      handler writes as a successful handling.
+      handler writes as a successful handling. Defined and pinned for client and
+      served dispatches; a client dispatch under server execution with no served
+      carriage seals its skip rather than withdrawing it, and a refusal after a
+      write on that arm is left open.
 - [ ] Pin receipt identity, duplicate delivery, retry, and effect behavior in
       both client and server execution. Test that a refusal after a write does
-      not publish that write or an external effect.
+      not publish that write or an external effect. Retry, the receipt on the
+      committing run, and the withdrawn write are pinned by the deferred
+      prototype's tests, which are not in the tree; receipt identity across a
+      duplicate delivery, external effects, and the served execution path are
+      not pinned anywhere, and the deferral leaves them open.
 - [ ] Test read/write snapshots, defaults and absent-path dependencies,
       cross-space context, labels read before and after policy preparation,
       escaped views, and asynchronous handler continuations where supported.
-- [ ] Compare a scalar read from a large bound context with a full walk and with
+      Asynchronous continuations, a result built from values read through
+      the view, and an absent optional field are pinned by the deferred
+      prototype's tests, which are not in the tree; a view itself escaping
+      into result handling, snapshots, a default followed by the value's
+      arrival, cross-space context, and labels around policy preparation are
+      not pinned anywhere, and the deferral leaves them open.
+- [x] Compare a scalar read from a large bound context with a full walk and with
       mutation-heavy handlers. Measure argument setup separately from the body
       and commit preparation so work is not merely moved out of a counter.
-- [ ] Review the proposed contract and measured prototype. Implement the lazy
+- [x] Review the proposed contract and measured prototype. Implement the lazy
       context path if it preserves the event contract with a useful measured
       consequence; otherwise record the specific blocker, alternatives, and
       condition for revisiting it. A deferral must be explicit, not an unchecked
       handler exception hidden in a completed lift rollout.
+
+The [F1
+record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+holds the contract, the prototype, its tests, and the measurements. The outcome
+is a deferral: the prototype preserves the event contract, but its measured
+consequence is a win only for a handler that reads a whole list and touches
+little of it, a shape the collection guidance already steers authors away from,
+and a cost in the body for the full walks the exemplar's handlers rely on; and a
+view narrows the read log a handler's commit is checked against to the paths the
+body touched, so a concurrent write to a field of a row the body never read
+stops conflicting with its commit. The record names the conditions under which
+the prototype is worth taking up again. Three bullets above stay open because
+the deferred prototype was not verified against everything they name; the record
+lists what its tests pinned and what they did not, and whoever takes the
+prototype up finishes them.
 
 Use the existing transaction mark, schema-refusal state, snapshot view and
 event-finalization paths. Keep the mark's lifetime bounded to the argument/body

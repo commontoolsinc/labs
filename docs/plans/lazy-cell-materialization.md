@@ -440,9 +440,13 @@ diffing and the scheduler's own reads keep eager semantics.
       path. Logged at info level as a non-run, not reported as an action error.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
-- [ ] Handlers still materialize eagerly. Deliberate for now: the lift path is
-      where the measured cost is, and a handler's argument carries an event
-      payload whose shape the same guard has not been exercised against.
+- [x] Handlers materialize eagerly, by decision rather than by omission. The
+      [fast-follow](lazy-materialization-fast-follow.md) built and measured a
+      lazy bound-context prototype and deferred it: a view narrows the read
+      log a handler's commit is checked against, and its measured win is
+      confined to a shape the collection guidance already steers away from.
+      The [record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+      names the conditions for taking it up again.
 
 ### Stage 6 — Rollout
 
