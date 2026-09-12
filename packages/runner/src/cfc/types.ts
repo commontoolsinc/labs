@@ -645,6 +645,11 @@ export type PreparedDigestInput = {
   readonly referenceObservations?: readonly CfcReferenceObservation[];
 };
 
+/** A synchronous release refusal before the effect starts any work. */
+export const POST_COMMIT_RELEASE_REJECTED = Symbol(
+  "post-commit-release-rejected",
+);
+
 export type PostCommitSideEffect = {
   id: string;
   kind: string;
@@ -657,7 +662,9 @@ export type PostCommitSideEffect = {
    * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
   nonce?: string;
 
-  flush(tx: unknown): void | Promise<void>;
+  flush(
+    tx: unknown,
+  ): void | Promise<void> | typeof POST_COMMIT_RELEASE_REJECTED;
 
   /**
    * Called instead of {@link flush} when the work this effect stands for will

@@ -11,6 +11,7 @@ import {
 import type { DID } from "@commonfabric/identity";
 import { toValuePath } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
+
 import { $conn, CellHandle, type RuntimeClient } from "@/mod.ts";
 import { RuntimeConnection } from "@/client/connection.ts";
 import { EventEmitter } from "@/client/emitter.ts";

@@ -708,7 +708,8 @@ the target's `eventWatermark` makes processing exactly-once.
   ("each new input lifts the previous generation" now holds without
   requiring a next input). Bounds, normative: the advance covers only
   COMMITTED seqs — no speculative advance; it fires at most once per
-  quiescence transition (armed by content-carrying wave commits,
+  quiescence transition (armed by content-carrying own derived commits,
+  including standalone effect completions,
   consumed on seal); its own advance-only commit is NEVER chased — the
   one derived commit W does not cover at quiescence is the final
   advance-carrying bookkeeping commit itself, definitionally (covering

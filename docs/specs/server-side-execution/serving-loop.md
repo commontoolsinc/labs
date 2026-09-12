@@ -204,14 +204,13 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   the engine with no watch registered, while a `sync()` of a held
   document is answered from the replica, and the feed's admitted
   commits (plane (d)) re-read the documents the replica holds — so the
-  runtime walks
-  the schema once, over what it actually reads, and the memory server
-  never walks it for the serving session at all. The one chase the read-through
-  keeps is the frame validator's delivery guarantee: the `cid:` schema
-  documents a read document's link positions and its `schema` metadata
-  member reference, and those a schema document's own refs name, are
-  read with it, to a fixpoint, exactly as a session's frame carries
-  them. Reads
+  runtime walks the schema once, over what it actually reads, and the
+  memory server never walks it for the serving session at all. The
+  read-through preserves the frame validator's delivery guarantee: it
+  reads the `cid:` schema documents referenced by an accessed document's
+  link positions or schema metadata, and follows the schema documents'
+  own references to a fixpoint, just as a session's frame carries them.
+  This applies to content-addressed documents as well. Reads
   run at the engine's head, as delivered frames do; writes and
   foreign-space reads stay on the session. Two rules a session frame
   follows hold here in the read-through's own form. Protocol.md §3's
@@ -220,7 +219,10 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   read of such an instance that finds the lease row lapsed runs the
   renew arm first (the lost-then-reacquire step the renew timer takes,
   taken at the moment the lapse is found) and is served under the
-  reacquired tenure, or withheld as the tenure parks; space-scoped
+  reacquired tenure, or withheld as the tenure parks. During initialization,
+  lease loss withholds the read and invalidates activation; that partially
+  initialized runtime is disposed rather than reused under a new tenure.
+  Space-scoped
   documents and the service's own instances are delivered to any
   session, so they are read without consulting the row. And an address
   the store holds nothing at leaves no record, as a pull that delivered
@@ -283,7 +285,7 @@ processes* (deploy overlap, partition) it holds via the lease:
   the in-process residue is a local obligation, not wire machinery.
 - Acquire with a conditional write; TTL 15 s; renew every 5 s **by direct
   table update — a lease renewal is NEVER a commit** (v1's renewal-adjacent
-  traffic was part of the storm). The renew has TWO drivers (stage C
+  traffic was part of the storm). Periodic renewal has two drivers (stage C
   tuning T3, 2026-08-18): the interval timer, and a MID-WAVE renew issued
   from the serving scheduler's cooperative macrotask yield (§3) once the
   tenure has gone TTL/3 without a renewal — the timer rides the macrotask
@@ -294,6 +296,26 @@ processes* (deploy overlap, partition) it holds via the lease:
   commit. Impl: `space-server.ts` `#renewIfDue` on
   `Runtime.servingYieldObserver`; pinned in
   `executor-cooperative-yield.test.ts` (ii).
+- Renewal starts immediately after acquisition and covers runtime creation,
+  foreign basis reads, and delegated append recovery. Initialization remains
+  distinct from an active serving loop. Before launch, a direct renewal checks
+  that the lease is still live even if synchronous work delayed timer callbacks.
+  A renewal failure or lease-store exception invalidates initialization: the
+  outstanding initialization await finishes, then its runtime is disposed,
+  its renewal timer is cleared, and its lease is released. Observer cleanup
+  failures cannot skip the factory disposer; observer cleanup and disposer
+  failures cannot skip lease release. Host shutdown waits
+  for this lifecycle before returning. After initialization loses its lease,
+  the host clears that activation's in-flight record and re-evaluates live
+  sessions, undelivered events, and retained warm requests. Matching demand
+  starts a fresh tenure after the failure-park backoff; repeated initialization
+  losses extend that backoff, and a committed wave clears the streak. Warm
+  notices arriving during initialization or its cleanup remain obligations of
+  the successor. Initial acquisition refusal on a rival's lease does not
+  schedule another attempt, and host shutdown cancels a pending backoff. A
+  lifecycle-verb request whose activation fails receives the not-served error;
+  the request alone is not a persistent reactivation criterion. These
+  boundaries are covered by `test/executor/activation-lease.test.ts`.
 - On renewal failure or expiry: the SpaceServer MUST stop committing
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
@@ -331,6 +353,7 @@ defines the ordered publication/response barrier before deferral.
 ```
 on activate(space):
   acquire lease (else park)
+  start lease renewal through initialization
   runtime = new Runtime(serverPosture)   // flag ON, egress allow,
                                          // builtins registered
   load graph structure for demanded values + queued events (§1 —
@@ -339,6 +362,7 @@ on activate(space):
   re-mark the dirty frontier from the basis index (§3b, §6):
     a node is dirty iff a recorded input seq is behind that doc's head
   subscribe(space, from = the head the index scan ran against)
+  verify the initialization tenure remains live (else dispose and park)
 
 on commits [s..n] arriving (the wave's input batch; commits arriving
 mid-wave belong to the NEXT wave — natural double-buffering, no timers):
@@ -392,13 +416,17 @@ on drain-settle (TRUE quiescence: a settled non-exhausted cycle, no
 contributions, no pending events, the drain empty — S1, RULED
 2026-08-19; protocol.md §4's quiescence-advance amendment):
   additionally advance W over the space's own committed derived tail
-  (the wave commits contiguously above the input coverage point),
+  (own waves and standalone effect completions contiguously above the
+  input coverage point),
   sealed as an advance-only wave and pushed through the ordinary
   watermark-doc channel — client retirement floors that include a
   pushed derived commit's seq become reachable on a quiet space (the
   swatch-stall class fix). At most once per quiescence transition
-  (latched by content-carrying wave commits, consumed on seal); the
-  advance's own bookkeeping commit is never chased; any non-own seq
+  (latched by content-carrying own derived commits, consumed on seal); a
+  completion arriving after an advance chose its target keeps a later advance
+  owed. Each successful advance-only commit is counted even when that newer
+  completion keeps the latch armed. The advance's own bookkeeping commit
+  is never chased; any non-own seq
   above the coverage point stops the advance below it (fail-closed —
   its coverage arrives input-driven). Counted: settleAdvances.
 
@@ -1216,6 +1244,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **In-flight dedupe**: one outstanding effect per (key, result
   target) per space; the target includes its resolved user/session instance.
   A second miss on the same (key, target) attaches to the in-flight effect.
+  Before dispatch, each accepted attachment retains its own release check.
+  A synchronous release refusal selects the next attachment under that
+  attachment's captured run context. Once an attachment dispatches, the key
+  deduplicates until its work and readable completion retire; a thrown error
+  or rejected work promise does not select another attachment.
   Completion acceptance follows the currently selected request in that
   instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
@@ -1301,6 +1334,21 @@ the durable rows of §5 carry APPENDS, never effect state).
   write-free writebacks, and identical re-asserts are idempotent at
   the store. For appends, idempotence is the `eventId` dedupe
   horizon.
+- When several accepted contributions to one document share a
+  wave sequence, their settled local value includes every contribution in
+  local sealing order. Local promotion also preserves that order between
+  verdicts, including in the view that excludes speculative pending layers.
+  An authoritative frame at the same sequence already
+  contains the wave's value and prevents replay of accepted contributions;
+  a newer frame also takes
+  precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
+  space, user, and session instances, including reordered verdict delivery,
+  withdrawal, and noncommutative appends. Foreign provisioning groups
+  contributions by actor and grant, so one wave can commit several batches
+  to a foreign space in a different order from local sealing. Accepted verdicts
+  for each space follow that space's server sequence, retaining sealing order
+  within each batch. The settled replica therefore matches the engine when
+  nonadjacent contributions share a foreign batch.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.

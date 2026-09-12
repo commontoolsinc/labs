@@ -124,6 +124,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
@@ -3791,7 +3792,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           }
           for (const effect of this.#cfcState.outbox) {
             try {
-              await effect.flush(this);
+              const flushed = effect.flush(this);
+              if (flushed === POST_COMMIT_RELEASE_REJECTED) continue;
+              await flushed;
               this.#cfcInstrumentation.onOutboxFlush?.(effect);
             } catch (error) {
               logger.error(
