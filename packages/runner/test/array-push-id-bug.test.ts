@@ -57,7 +57,7 @@ describe("CT-1173: array push anchors its elements", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame);
+    const pushed = pushFrame(frame);
 
     try {
       // Minted inside the frame: `Cell.push` anchors from the frame its cell was
@@ -72,7 +72,7 @@ describe("CT-1173: array push anchors its elements", () => {
       inFrame.push({ name: "Alice" });
       inFrame.push({ name: "Bob" });
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
 
     // Read back the raw array data
@@ -118,7 +118,7 @@ describe("CT-1173: array push anchors its elements", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame);
+    const pushed = pushFrame(frame);
 
     try {
       // Push multiple items with all fields populated
@@ -126,7 +126,7 @@ describe("CT-1173: array push anchors its elements", () => {
       arrayCell.push({ name: "Bob", priority: 2, createdAt: 2000 });
       arrayCell.push({ name: "Charlie", priority: 3, createdAt: 3000 });
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
 
     // Read back via the cell's get() method (which resolves links)
