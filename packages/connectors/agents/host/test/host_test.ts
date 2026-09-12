@@ -176,6 +176,7 @@ class FakeDriver implements AgentDriver {
 class FakeTarget implements AgentsHostTarget {
   healthValues: Record<string, unknown>[] = [];
   publications: CollectedSource[][] = [];
+  sessionSpools: CollectedSource["sessions"][] = [];
   allocatedObservationSequences: number[] = [];
   observationSequences: number[] = [];
   checkoutDirectories: string[][] = [];
@@ -207,7 +208,7 @@ class FakeTarget implements AgentsHostTarget {
     return sequence;
   }
 
-  publish(
+  async publish(
     collected: CollectedSource[],
     options?: {
       observationSequence?: number;
@@ -216,7 +217,17 @@ class FakeTarget implements AgentsHostTarget {
       onCommit?: () => void;
     },
   ): Promise<number> {
-    this.publications.push(structuredClone(collected));
+    const captured: CollectedSource[] = [];
+    for (const source of collected) {
+      this.sessionSpools.push(source.sessions);
+      captured.push({
+        source: structuredClone(source.source),
+        sessions: await Array.fromAsync(source.sessions),
+        complete: source.complete,
+        errors: structuredClone(source.errors),
+      });
+    }
+    this.publications.push(captured);
     if (options?.observationSequence !== undefined) {
       this.observationSequences.push(options.observationSequence);
     }
@@ -419,6 +430,10 @@ Deno.test("AgentsHost publishes sessions, health, and lifecycle activity", async
     assertEquals(await host.start(), 1);
     assertEquals(target.publications.length, 1);
     assertEquals(target.publications[0][0].source.id, "codex");
+    await assertRejects(
+      () => Array.fromAsync(target.sessionSpools[0]),
+      Deno.errors.NotFound,
+    );
     assertEquals(target.checkoutDirectories, [[
       "/workspace/checkouts/project",
     ]]);
@@ -1036,6 +1051,10 @@ Deno.test("AgentsHost reports post-commit health failure", async () => {
       () => host.synchronize("health-failure", controller.signal),
       Error,
       "health publication rejected",
+    );
+    await assertRejects(
+      () => Array.fromAsync(target.sessionSpools.at(-1)!),
+      Deno.errors.NotFound,
     );
     assertEquals(host.health().sync?.status, "failed");
     assertEquals(

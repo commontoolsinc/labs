@@ -54,10 +54,17 @@ view for indexes and user interfaces.
 
 ### Collection and preparation
 
-`collectSource()` walks every inventory page from one driver. It then reads each
-listed session. A provider or session read error is returned in the collection
-result instead of discarding successfully read sessions. An optional owner
-signal stops work at provider call boundaries.
+`collectSource()` reads one inventory page at a time. It reads each listed
+session and writes an immutable snapshot to a private temporary spool before
+requesting the next session. The result holds a count and an asynchronous
+iterator over the spool. A provider or session read error makes the collection
+incomplete while retaining successfully collected sessions. Cancellation and
+spool failures remove the temporary files and reject the collection.
+
+The host collects sources sequentially and owns their spools until publication
+finishes. It removes them on success, cancellation, and failure. Collection runs
+outside the target's mutation queue so command receipts and targeted refreshes
+can proceed while a provider is being read.
 
 `prepareSession()` derives the stable session key, divides native events into
 chunks, computes content hashes, and computes a snapshot hash. The snapshot hash
@@ -76,6 +83,25 @@ The next publication creates a fresh scope.
 Fabric space. It stores native event chunks before the session manifest. It then
 publishes the recent and complete indexes after all changed session graphs have
 committed.
+
+The target reads snapshots from the spool one at a time. It prepares and commits
+one event chunk at a time, then writes the session manifest. The host supplies
+`createPublicationRuntime` on the Fabric connection. The target uses one fresh
+runtime for index reconciliation and a separate runtime for each changed
+session. Each runtime has its own storage manager and is disposed after its
+commits settle, releasing its document replica and storage watches.
+
+Graph reads synchronize each document with a `false` schema. Writes use the same
+document-only synchronization barrier and mark the protected cell handle as
+synchronized before applying its write policy. Explicit link traversal decides
+which child documents to read. Index reconciliation preserves manifest links.
+
+Memory use during collection is proportional to one provider snapshot and one
+inventory page. Publication holds one prepared session, one chunk's graph plan,
+and index metadata. Each provider's `readSession()` still returns a whole
+session; the full corpus is held on disk. Targeted refreshes also spool each
+completed read before waiting for publication. Independent provider reads can
+proceed concurrently, and pending publications hold spool descriptors.
 
 The target compares snapshot hashes with the previous index. It does not rewrite
 an unchanged session graph. It still refreshes source capabilities, recent
@@ -155,7 +181,8 @@ A host normally performs these steps:
    owner DID.
 4. Open `CommandLedger`, create `CommandWorker`, and call
    `recoverUnpublishedReceipts()`.
-5. Run `collectSource()` for each driver and publish all results together.
+5. Collect each driver's sessions into a temporary spool, publish all source
+   results together, and dispose the spools.
 6. Subscribe to or poll each target's command cell and pass values to
    `CommandWorker.handle()`.
 7. Publish host-defined health details when they change.

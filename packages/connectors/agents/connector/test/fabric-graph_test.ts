@@ -472,8 +472,13 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
   }
 });
 
-function fakeCell(id = "of:parent") {
-  const cell = {
+async function fakeCell(id = "of:parent") {
+  const identity = await Identity.fromPassphrase("stable graph write fixture");
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: StorageManager.emulate({ as: identity }),
+  });
+  const cell = Object.assign(runtime.getCell(identity.did(), { id }), {
     getAsNormalizedFullLink: () => ({
       space: "did:test:space",
       id,
@@ -484,8 +489,8 @@ function fakeCell(id = "of:parent") {
     asSchema: () => cell,
     setRawUntyped: () => {},
     applyCfcSchemaToExistingValue: () => {},
-  };
-  return cell;
+  });
+  return { cell, [Symbol.asyncDispose]: () => runtime.dispose() };
 }
 
 Deno.test("stable graph hydrates the owner-schema cell before writing", async () => {
@@ -499,8 +504,13 @@ Deno.test("stable graph hydrates the owner-schema cell before writing", async ()
     id: "of:parent",
     path: [],
   };
-  const protectedCell = {
+  await using fixture = await fakeCell();
+  const protectedCell = Object.assign(fixture.cell, {
     getAsNormalizedFullLink: () => link,
+    asSchema: (schema: unknown) => {
+      assertEquals(schema, false);
+      return protectedCell;
+    },
     sync: () => {
       syncs++;
       hydrated = true;
@@ -512,7 +522,7 @@ Deno.test("stable graph hydrates the owner-schema cell before writing", async ()
       writes++;
     },
     applyCfcSchemaToExistingValue: () => assertEquals(hydrated, true),
-  };
+  });
   const makeCell = () => ({
     getAsNormalizedFullLink: () => link,
     asSchema: () => {
@@ -558,6 +568,7 @@ Deno.test("stable graph hydrates the owner-schema cell before writing", async ()
 });
 
 Deno.test("stable graph writes await one commit", async () => {
+  await using fixture = await fakeCell();
   const commitStarted = Promise.withResolvers<void>();
   const commitResult = Promise.withResolvers<{
     ok: Record<string, never>;
@@ -589,7 +600,7 @@ Deno.test("stable graph writes await one commit", async () => {
     connection as any,
     [{
       // deno-lint-ignore no-explicit-any -- focused cell fixture.
-      cell: fakeCell() as any,
+      cell: fixture.cell as any,
       value: () => ({ value: "ready" }),
     }],
   ).finally(() => settled = true);
@@ -602,6 +613,7 @@ Deno.test("stable graph writes await one commit", async () => {
 });
 
 Deno.test("stable graph writes surface a commit failure without retrying", async () => {
+  await using fixture = await fakeCell();
   const commitError = {
     name: "ConflictError",
     message: "commit rejected",
@@ -633,7 +645,7 @@ Deno.test("stable graph writes surface a commit failure without retrying", async
         connection as any,
         [{
           // deno-lint-ignore no-explicit-any -- focused cell fixture.
-          cell: fakeCell() as any,
+          cell: fixture.cell as any,
           value: () => ({ value: "ready" }),
         }],
       ),
@@ -656,12 +668,20 @@ Deno.test("stable graph hydration bounds concurrent child syncs", async () => {
     (_, index) => linkRefFrom({ id: `of:child-${index}`, path: [], space }),
   );
   const parent = {
+    asSchema: (schema: unknown) => {
+      assertEquals(schema, false);
+      return parent;
+    },
     sync: () => Promise.resolve(),
     getRaw: () => links,
   };
   const runtime = {
     storageManager: { synced: () => Promise.resolve() },
     getCellFromLink: (link: { id: string }) => ({
+      asSchema(schema: unknown) {
+        assertEquals(schema, false);
+        return this;
+      },
       async sync() {
         started++;
         active++;

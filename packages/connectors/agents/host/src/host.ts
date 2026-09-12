@@ -665,11 +665,13 @@ export class AgentsHost {
 
     try {
       await this.#publishHealth(signal);
-      const collected = await Promise.all(
-        [...this.#drivers.entries()].map(([sourceId, driver]) =>
-          this.#collectSource(sourceId, driver, signal)
-        ),
-      );
+      await using collections = new AsyncDisposableStack();
+      const collected: CollectedSource[] = [];
+      for (const [sourceId, driver] of this.#drivers) {
+        collected.push(
+          await this.#collectSource(sourceId, driver, collections, signal),
+        );
+      }
       signal?.throwIfAborted();
       const checkoutDirectories = this.#checkoutRoots.length > 0
         ? await this.#discoverCheckouts(
@@ -758,6 +760,7 @@ export class AgentsHost {
   async #collectSource(
     sourceId: string,
     driver: AgentDriver,
+    collections: AsyncDisposableStack,
     signal?: AbortSignal,
   ): Promise<CollectedSource> {
     const state = this.#sources.get(sourceId)!;
@@ -767,18 +770,7 @@ export class AgentsHost {
       undefined,
       sourceId,
     );
-    let collected: CollectedSource;
-    try {
-      collected = await collectSource(driver, signal);
-    } catch (error) {
-      signal?.throwIfAborted();
-      collected = {
-        source: driver.source,
-        sessions: [],
-        errors: [{ message: errorMessage(error) }],
-        complete: false,
-      };
-    }
+    const collected = collections.use(await collectSource(driver, signal));
 
     state.capabilities = structuredClone(driver.source.capabilities);
     state.sessionCount = collected.sessions.length;

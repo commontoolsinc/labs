@@ -945,6 +945,8 @@ function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
  * ```
  */
 export class Runtime {
+  static #ambientConfigUsers = 0;
+  #holdsAmbientConfig = false;
   #tearingDownWrites = false;
   readonly #writeTeardown = new AbortController();
 
@@ -1449,10 +1451,9 @@ export class Runtime {
     // Validate-then-apply: option combinations are refused BEFORE any
     // process-global write (the ambient experimental-flag propagation
     // below, the server-execution enabler), so a refused construction
-    // leaves no trace in the process — the try/catch further down rolls
-    // back only the enabler, and everything above it must not need
-    // rolling back. A serving runtime uses the DEFAULT trust-snapshot
-    // provider — the run stamper attaches per-run snapshots via
+    // leaves no trace in the process. The try/catch further down releases
+    // the runtime's ambient config ownership. A serving runtime uses the
+    // DEFAULT trust-snapshot provider — the run stamper attaches per-run snapshots via
     // trustSnapshotForPrincipal (serving-loop.md §3c), whose revision is
     // the runtime's own; a custom provider would be silently bypassed
     // for every acting run and would compose a revision the stamper
@@ -1504,6 +1505,9 @@ export class Runtime {
     this.experimental.computedCellIds ??= true;
     this.experimental.plainResultReceipts ??= true;
     this.experimental.lazyMaterialization ??= true;
+
+    const previousModernCellRep = getModernCellRepConfig();
+    const previousCommitPreconditions = getCommitPreconditionsConfig();
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -1558,6 +1562,8 @@ export class Runtime {
     this.experimental.serverExecution = this.#explicitServerExecution ??
       getServerExecutionConfig();
     this.servingPosture = options.servingPosture === true;
+    Runtime.#ambientConfigUsers++;
+    this.#holdsAmbientConfig = true;
     // Everything below can throw (URL parsing, host validation, engine
     // construction). The enabler claimed above is process-global state,
     // so a THROWING construction must roll it back — a leaked enabler
@@ -1751,6 +1757,9 @@ export class Runtime {
       this.#defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
+      this.#releaseAmbientConfig();
+      setModernCellRepConfig(previousModernCellRep);
+      setCommitPreconditionsConfig(previousCommitPreconditions);
       throw error;
     }
   }
@@ -2028,14 +2037,11 @@ export class Runtime {
    * Passing `false` makes closing the CALLER's job — nothing else will. Note
    * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
    *
-   * Either way this resets the PROCESS-GLOBAL experimental config to defaults
-   * (`resetModernCellRepConfig` and friends) — except
-   * `readerSchemaPrecedence`, which dispose leaves standing: serving
-   * runtimes are per-space and idle-disposed, so a teardown reset would
-   * lift a live rollback from under the survivors. Under a non-default
-   * flag that is visible to a second runtime still running against the
-   * same store, which is exactly the caller this option serves — so set
-   * the flags per process, not per runtime, if two of them must agree.
+   * The last runtime's disposal resets the process-global modernCellRep and
+   * commitPreconditions settings to defaults. Disposing one of several live
+   * runtimes leaves those settings in effect. Explicit construction changes
+   * remain process-global. readerSchemaPrecedence stays in effect after every
+   * runtime has been disposed.
    */
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
@@ -2043,9 +2049,11 @@ export class Runtime {
     try {
       await this.#disposeInner(closeStorage);
     } finally {
-      // Exception-safe: a rejecting teardown step must not leak the
-      // process-global enabler (the reset would then never fire).
+      // Release process-global flag ownership after teardown, including a
+      // failed teardown. The last runtime resets modernCellRep and
+      // commitPreconditions; the last serverExecution enabler resets that flag.
       this.#releaseServerExecutionEnabler();
+      this.#releaseAmbientConfig();
     }
 
     // Clear the current runtime reference
@@ -2140,17 +2148,7 @@ export class Runtime {
     } finally {
       this.#tearingDownWrites = true;
       this.#writeTeardown.abort();
-      // Released whatever happened above. `storageManager.close()` can reject
-      // — through a provider's `replica.close()` — and it is the one await
-      // here that can. Every statement below is synchronous field-clearing
-      // that cannot fail in turn, so running them on the error path costs
-      // nothing while skipping them strands the process: the config resets
-      // are PROCESS-GLOBAL, and one skipped leaves a non-default experimental
-      // flag set for every runtime built afterwards, with nothing to put it
-      // back.
-      //
-      // The error still propagates. What changes is how much has been
-      // released by the time it does, not whether disposal fails.
+      // Release local services after every teardown outcome.
       this.scheduler.dispose();
       this.runner.dispose();
 
@@ -2163,24 +2161,16 @@ export class Runtime {
       // Dispose the Engine (clears compiler/runtime state and the console
       // hook)
       this.harness.dispose();
+    }
+  }
 
-      // Reset experimental config to defaults. serverExecution releases
-      // this runtime's ENABLER (stage F): the flag resets only when the
-      // last live enabler process-wide goes — disposing a flag-less
-      // runtime, or parking one serving runtime of several, must not clear
-      // the ambient flag other owners and the memory server's admission
-      // still depend on (mid-wave `derived` commits would be refused as
-      // unclaimable). A single-runtime test keeps its stage-A cleanup
-      // contract: the last enabler's dispose resets. Released in
-      // #releaseServerExecutionEnabler (also called from the dispose
-      // catch), so a REJECTING async teardown cannot leak the enabler.
+  /** Releases ambient settings when the last runtime finishes teardown. */
+  #releaseAmbientConfig(): void {
+    if (!this.#holdsAmbientConfig) return;
+    this.#holdsAmbientConfig = false;
+    if (--Runtime.#ambientConfigUsers === 0) {
       resetModernCellRepConfig();
       resetCommitPreconditionsConfig();
-      // readerSchemaPrecedence deliberately does NOT reset here: a server
-      // runs one serving runtime per space and disposes idle ones while
-      // the rest live, so a dispose-time reset would lift a rollback out
-      // from under them. The ambient changes only when a construction
-      // sets it (last construction wins).
     }
   }
 

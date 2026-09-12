@@ -231,6 +231,91 @@ describe("ExperimentalOptions", () => {
       expect(getCommitPreconditionsConfig()).toBe(true);
       expect(getServerExecutionConfig()).toBe(false);
     });
+
+    for (const firstDisposed of [0, 1]) {
+      it(`keeps ambient config until both runtimes are disposed, disposing runtime ${firstDisposed} first`, async () => {
+        const runtimes = [true, false].map((explicit) =>
+          new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager: StorageManager.emulate({ as: signer }),
+            experimental: {
+              ...(explicit ? { modernCellRep: true } : {}),
+              commitPreconditions: false,
+            },
+          })
+        );
+        try {
+          await runtimes[firstDisposed].dispose();
+          expect(getModernCellRepConfig()).toBe(true);
+          expect(getCommitPreconditionsConfig()).toBe(false);
+          await runtimes[firstDisposed].dispose();
+          expect(getModernCellRepConfig()).toBe(true);
+          expect(getCommitPreconditionsConfig()).toBe(false);
+        } finally {
+          await runtimes[1 - firstDisposed].dispose();
+        }
+        expect(getModernCellRepConfig()).toBe(false);
+        expect(getCommitPreconditionsConfig()).toBe(true);
+      });
+    }
+
+    it("restores a surviving runtime's settings when another construction fails", async () => {
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: StorageManager.emulate({ as: signer }),
+        experimental: { modernCellRep: true, commitPreconditions: false },
+      });
+      const failedStorage = StorageManager.emulate({ as: signer });
+      try {
+        expect(() =>
+          new Runtime({
+            apiUrl: "invalid URL" as never,
+            storageManager: failedStorage,
+            experimental: { modernCellRep: false, commitPreconditions: true },
+          })
+        ).toThrow("Invalid URL");
+        expect(getModernCellRepConfig()).toBe(true);
+        expect(getCommitPreconditionsConfig()).toBe(false);
+      } finally {
+        await failedStorage.close();
+        await runtime.dispose();
+      }
+      expect(getModernCellRepConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(true);
+    });
+
+    it("releases ambient config ownership when construction or disposal fails", async () => {
+      const failedStorage = StorageManager.emulate({ as: signer });
+      try {
+        expect(() =>
+          new Runtime({
+            apiUrl: "invalid URL" as never,
+            storageManager: failedStorage,
+            experimental: { modernCellRep: true, commitPreconditions: false },
+          })
+        ).toThrow("Invalid URL");
+      } finally {
+        await failedStorage.close();
+      }
+      expect(getModernCellRepConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(true);
+
+      const storage = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: { modernCellRep: true, commitPreconditions: false },
+      });
+      runtime.scheduler.idle = () =>
+        Promise.reject(new Error("disposal failed"));
+      try {
+        await expect(runtime.dispose()).rejects.toThrow("disposal failed");
+        expect(getModernCellRepConfig()).toBe(false);
+        expect(getCommitPreconditionsConfig()).toBe(true);
+      } finally {
+        await storage.close();
+      }
+    });
   });
 });
 

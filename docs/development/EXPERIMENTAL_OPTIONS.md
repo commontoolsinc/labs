@@ -1764,13 +1764,17 @@ server](#clients-that-are-not-built-alongside-their-server).
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser the web worker is a separate JavaScript context, so its flags
   are independent of the main thread.
-- For most flags, creating a new `Runtime` overwrites the ambient config and
-  disposing it resets to the defaults. Two exceptions: `serverExecution`'s
-  enabler is an OWNED refcounted claim — acquired at construction, released
-  by that runtime's dispose (or its throwing construction) — so a co-hosted
-  runtime's dispose cannot lift another's live claim; and
-  `readerSchemaPrecedence` is construction-set only — dispose leaves it
-  standing, since serving runtimes are per-space and idle-disposed.
+- Creating a `Runtime` applies its experimental settings to their ambient
+  controls. The last runtime's disposal resets `modernCellRep` and
+  `commitPreconditions` to their defaults. Disposing one of several live
+  runtimes preserves those settings. Failed construction and disposal also
+  release ownership, and repeated disposal releases it only once. Failed
+  construction restores the preceding settings.
+- `serverExecution` counts explicit enablers separately. Construction acquires
+  an enabler; disposal or failed construction releases it. The last enabler's
+  release resets the flag.
+- `readerSchemaPrecedence` is set during construction. Disposal leaves it in
+  effect.
 
 ---
 

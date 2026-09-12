@@ -509,6 +509,8 @@ Deno.test("Codex driver enumerates persisted active and archived threads", async
     assertEquals(snapshot.complete, true);
     assertEquals(snapshot.summary.active, true);
     assertEquals(snapshot.events.length, 2);
+    assertEquals(Object.hasOwn(snapshot.summary.raw, "turns"), false);
+    assertEquals(snapshot.summary.raw.id, "thread-1");
     assertEquals(snapshot.normalizedMessages[0].textPreview, "hello");
     assertEquals(
       snapshot.normalizedMessages.map((message) => message.rawIndex),

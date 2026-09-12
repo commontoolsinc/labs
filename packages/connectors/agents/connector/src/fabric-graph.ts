@@ -4,6 +4,7 @@ import {
   type Cell,
   cfcAtom,
   type JSONSchema,
+  markCellDocumentSynced,
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
@@ -15,6 +16,27 @@ export interface AgentFabricConnection {
   runtime: Runtime;
   spaceDid: MemorySpace;
   ownerDid: string;
+
+  /**
+   * Creates a runtime with an independent storage manager for a publication.
+   * The connector disposes it after its writes settle. Long-lived hosts supply
+   * this factory to release transcript documents and their storage watches.
+   */
+  createPublicationRuntime?: () => Runtime;
+}
+
+/** Opens a publication scope and owns the runtime created for it. */
+export function openPublicationConnection(
+  connection: AgentFabricConnection,
+): AgentFabricConnection & AsyncDisposable {
+  const runtime = connection.createPublicationRuntime?.();
+  return {
+    ...connection,
+    runtime: runtime ?? connection.runtime,
+    async [Symbol.asyncDispose]() {
+      await runtime?.dispose();
+    },
+  };
 }
 
 export const AGENT_CONNECTOR_WRITER_ID = "commonfabric.agents-connector";
@@ -176,8 +198,11 @@ export async function pushStableCellGraph(
     offset += HYDRATION_BATCH_SIZE
   ) {
     await Promise.all(
-      uniqueCells.slice(offset, offset + HYDRATION_BATCH_SIZE).map((cell) =>
-        cell.sync()
+      uniqueCells.slice(offset, offset + HYDRATION_BATCH_SIZE).map(
+        async (cell) => {
+          await cell.asSchema(false).sync();
+          markCellDocumentSynced(cell);
+        },
       ),
     );
   }
@@ -281,7 +306,7 @@ async function resolveStableGraphLinks(
     const pending = (async () => {
       const child = connection.runtime.getCellFromLink(
         link as Parameters<Runtime["getCellFromLink"]>[0],
-      );
+      ).asSchema(false);
       await child.sync();
       await connection.runtime.storageManager.synced();
       return await resolveStableGraphLinks(
@@ -345,11 +370,12 @@ export async function readStableCellGraphValue(
   cache: Map<string, Promise<unknown>> = new Map(),
   options: { preserveLinkFields?: ReadonlySet<string> } = {},
 ): Promise<unknown> {
-  await cell.sync();
+  const rawCell = cell.asSchema(false);
+  await rawCell.sync();
   await connection.runtime.storageManager.synced();
   return await resolveStableGraphLinks(
     connection,
-    cell.getRaw(),
+    rawCell.getRaw(),
     cache,
     options.preserveLinkFields ?? new Set(),
   );
