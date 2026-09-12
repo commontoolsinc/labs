@@ -150,6 +150,11 @@ describe("client holdings", () => {
   });
 
   it("refuses visible roots before sending them to an unsupported server", async () => {
+    setServerExecutionConfig(true);
+    cleanups.push(() => {
+      resetServerExecutionConfig();
+      return Promise.resolve();
+    });
     const server = newServer("unsupported-view");
     const transport = new DroppableTransport(server, false, true);
     const client = await connect({ transport });
