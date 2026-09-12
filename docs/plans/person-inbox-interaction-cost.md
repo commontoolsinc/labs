@@ -81,6 +81,34 @@ Worker CPU per click *falls* — 808 ms to 506 ms — while wall time rises. Hal
 of a plateaued click is the worker doing nothing. Only one frame grows
 materially (`ownKeys`, +346 ms), and it is nowhere near the gap.
 
+**First readings from the waiting side, and a trap to avoid repeating.** The
+worker's own timing statistics report durations under `totalTime`, not `total`;
+a readout keyed on `total` returns zero for every row and reads as "the spans
+record no time", which is wrong. With that fixed, over twelve clicks at each
+end:
+
+| key | fresh n / ms | plateau n / ms |
+| --- | ---: | ---: |
+| `runner.loop/workerLag` | 12 / 9340 | **45** / 5157 |
+| `runner/start/syncCellsForRunningPattern` | 11 / 3709 | 12 / 2270 |
+| `memory.v2.client/watchAdd/request` | 22 / 10428 | 24 / 6554 |
+| `runner/start/resumeCellSync` | 2431 / 469271 | 2652 / 284214 |
+
+Two things to read carefully. `resumeCellSync`'s totals are not wall time —
+469 seconds inside a run of minutes, at a near-uniform 193 ms across 2431
+calls, which is the signature of concurrent spans that
+`skills/perf-investigation/SKILL.md` names with this exact row. The enclosing
+`syncCellsForRunningPattern` is the number, and it does not grow.
+
+What does change is `workerLag`'s **count**: 12 against 45, nearly four times as
+many lag events for the same twelve clicks. That is the worker's event loop
+being kept from running, which is the shape the idle share already suggested,
+and it is where the next pass should start.
+
+The run these came from was taken while the machine climbed from load 9.7 to
+10.3 and its plateau was not clean, so treat the figures as a direction rather
+than a measurement. Repeat them on a quiet machine before building on them.
+
 **So the instrument has to change.** Every measurement in this plan above has
 been a CPU profile or a logger count, and neither can see time in which nothing
 runs. The next pass wants the waiting side: `CF_MEMORY_FRAME_LOG` with
