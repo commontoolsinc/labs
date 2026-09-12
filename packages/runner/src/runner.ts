@@ -207,6 +207,8 @@ import { createRef } from "./create-ref.ts";
 import {
   diffAndUpdate,
   initializeScopedArgumentSlots,
+  scopedArgumentInitializationTargets,
+  sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
@@ -4217,6 +4219,81 @@ export class Runner {
         ?.selection;
       initialSchedulerRehydrationAvailable = false;
       try {
+        if (
+          this.#runtime.servingPosture &&
+          this.#runtime.experimental.serverExecution &&
+          sessionScopedArgumentKeys(pattern.argumentSchema).length > 0
+        ) {
+          const selection = schedulerRehydration.implementationSelection;
+          const argument = getMetaLink(resultCell.withTx(actualTx), "argument");
+          const bindings = argument ? [argument] : [];
+          const declaredTargets = bindings.flatMap((link) =>
+            sessionScopedArgumentKeys(pattern.argumentSchema).map((key) => ({
+              ...link,
+              scope: "user" as const,
+              path: [...link.path, key],
+            }))
+          );
+          const initialize: Action = async (runTx) => {
+            if (selection && !selection.matches(runTx)) return;
+            const argument = getMetaLink(resultCell.withTx(runTx), "argument");
+            if (argument) {
+              const targets = scopedArgumentInitializationTargets(
+                this.#runtime,
+                runTx,
+                argument,
+                pattern.argumentSchema,
+              );
+              Object.assign(initialize, {
+                materializerWriteEnvelopes: dedupeNormalizedLinks([
+                  ...declaredTargets,
+                  ...targets,
+                ]),
+              });
+              // Initialization needs the actor's whole user document: diffing
+              // a partially delivered row can remove unseen sibling fields.
+              await Promise.all(
+                targets.map((target) =>
+                  syncCellForIdentity(
+                    this.#runtime.getCellFromLink({
+                      ...target,
+                      path: [],
+                      schema: false,
+                    }),
+                    runTx.tx.scopeKeyIdentity,
+                  )
+                ),
+              );
+              initializeScopedArgumentSlots(
+                this.#runtime,
+                runTx,
+                argument,
+                pattern.argumentSchema,
+              );
+            }
+          };
+          Object.assign(initialize, {
+            implementationHash: "cf:runner/scoped-input-initialization",
+            schedulerInstanceKey: programActionInstanceKey(
+              schedulerActionInstanceKey({
+                process: resultCell.getAsNormalizedFullLink(),
+                reads: bindings,
+                writes: bindings,
+              }),
+              selection,
+            ),
+            reads: bindings,
+            writes: [],
+            materializerWriteEnvelopes: declaredTargets,
+            pattern,
+          });
+          selection?.actions.add(initialize);
+          addNodeCancel(() => selection?.actions.delete(initialize));
+          addNodeCancel(this.#runtime.scheduler.subscribe(
+            initialize,
+            schedulerRehydration,
+          ));
+        }
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
           this.#instantiateNode(

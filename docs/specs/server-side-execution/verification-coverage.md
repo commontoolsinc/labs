@@ -25,7 +25,7 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Shared fetch, `fetchProgram`, and direct LLM user/session isolation are covered. Other effect callers, provider/tool reads, and later-user session initialization remain open. |
+| OW28-supersession-family / OW28-instance-family | Partial: shared fetch, `fetchProgram`, and direct LLM user/session isolation are covered. Caller-specific lifecycle, initialization, and remaining provider/tool read obligations are detailed below. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
@@ -2748,13 +2748,12 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   completion itself retains the current watermark; a later quiescent cycle covers its
   sequence without requiring another authored input.
 
-  Remaining investigation obligations: tool-loop LLM requests, `llmDialog`,
-  non-clearance SQLite instance keys, and the provider READ partition.
-  Direct response controls do not discharge the provider/tool READ partition.
-  OW53's SQLite acting-identity, owner, and clearance fixes remain closed.
-  Owed: one- and two-demander request/completion regressions for the remaining
-  callers, without reopening fixed SQLite cases or counting compile coverage
-  twice.
+  Remaining investigation obligations include shared tool-loop LLM requests
+  and provider/tool READ partitioning. Caller-specific coverage and residuals
+  are detailed in this row and OW53 below. OW53's SQLite acting-identity,
+  owner, and clearance fixes remain closed. Owed: one- and two-demander
+  request/completion regressions for remaining callers, without reopening
+  covered cases or counting compile coverage twice.
 
   Child-input default creation is covered separately from builtin instance
   identity. `executor-compile-and-run.test.ts` passes uninitialized
@@ -2768,13 +2767,38 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   `scoped-default-writable.test.ts` covers direct projection of an absent
   defaulted slot, its write destination, and its dependency behavior.
 
-  A separate session-initialization gap remains: after one user initializes
-  a `PerSession` input, a later user's intermediate user instance can lack
-  its session redirect. Completing that hop must preserve an explicitly
-  supplied reference to the same field in user scope; pointer shape alone
-  cannot distinguish that reference from an automatically created redirect.
-  Owed: durable initialization ownership and a later-user, two-session
-  handler regression, including explicit-reference and reload controls.
+  Later-user session initialization is covered by the static and compiled
+  child host cases: the first user changes a missing or seeded `PerSession`
+  input, the serving runtime reloads, and two later sessions of another user
+  independently update their child inputs. Automatic space-to-user links carry
+  a non-addressing `scopeInitialization: "session"` declaration. A graph-owned
+  action discovers demanded user instances through reads and initializes only
+  absent continuations, after loading the actor's user document. Explicit
+  same-address reference replacement survives reload and keeps the later
+  user's sessions sharing their user input; the first user's initialized
+  session value remains intact.
+  `scoped-session-initialization.test.ts` covers declaration preservation and
+  removal, raw copies, modern and legacy wire forms, unchanged cause identity,
+  CFC integrity filtering, explicit values and undefined ancestors, and a
+  conflicting explicit replacement. Unmarked stored links remain conservative:
+  they are not automatically migrated based on pointer shape. The caller-driven
+  rematerialization path and this compatibility boundary are specified in
+  [scoped cell instances](../scoped-cell-instances.md).
+  `scheduler-wave-withdrawal.test.ts` covers a pure leaf reader whose result is
+  withdrawn even though rollback preserves its input value, plus accepted,
+  canceled, superseded-run, equal-value no-op, partial no-op, write-free local
+  acceptance, abandoned-wave, and direct output/precondition/foreign-failure
+  controls. Held bodies and seals cannot transfer retry obligations to a new
+  registration; departed or replacement scoped instances cannot be revived.
+  A shared-space trigger control retries only the withdrawn user instance while
+  preserving its CFC trigger metadata and the accepted sibling.
+  `storage-write-elision-provenance.test.ts` covers raw value, deletion, and batch
+  elision over pending state, internal read classification, confirmed-only and
+  own-unsealed-only controls, conservative replacement over an older pending
+  document, and the UI-blind and foreign read-only boundaries. The serving fan-out
+  storm case retains its original initial-convergence and bounded-wave
+  assertions while session-slot initialization races authored writes.
+
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,

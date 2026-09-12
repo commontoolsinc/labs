@@ -20,6 +20,12 @@ export interface SchedulerGateState {
 
 export interface SchedulerNode {
   readonly action: Action;
+  /** Invalidated on removal, including when the same action is registered again. */
+  registrationToken: object;
+
+  /** The latest sealed run that can still owe dependency-withdrawal recovery. */
+  pendingWaveRun?: object;
+
   // Monotonic registration ordinal, assigned once when the record is first
   // created and preserved across re-subscribe and re-registration (first
   // registration wins). The deterministic tie-break in `topologicalSort`
@@ -124,6 +130,7 @@ export class NodeRegistry {
 
     const record: SchedulerNode = {
       action,
+      registrationToken: {},
       ordinal: this.#nextOrdinal++,
       kind,
       status: "never-ran",
@@ -149,6 +156,8 @@ export class NodeRegistry {
   remove(action: Action): SchedulerNode | undefined {
     const record = this.#records.get(action);
     if (!record) return undefined;
+    record.registrationToken = {};
+    delete record.pendingWaveRun;
     this.#all.delete(record);
     this.#activeEffects.delete(action);
     this.#activeComputations.delete(action);

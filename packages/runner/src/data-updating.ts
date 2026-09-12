@@ -66,6 +66,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import {
   getCellOrThrow,
@@ -84,7 +85,10 @@ import type {
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
-import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
+import {
+  ignoreReadForScheduling,
+  linkResolutionProbe,
+} from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
 
@@ -467,7 +471,88 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
-/** Materialize absent scoped input slots behind a pattern's argument reference. */
+/** Declared input fields whose default storage continues through a user row. */
+export function sessionScopedArgumentKeys(
+  schema: JSONSchema | undefined,
+): string[] {
+  const resolved = resolveSchema(schema);
+  if (!isObjectOrArray(resolved) || !isObjectOrArray(resolved.properties)) {
+    return [];
+  }
+  return Object.keys(resolved.properties).filter((key) =>
+    declaredCellScope(ContextualFlowControl.getSchemaAtPath(schema, [key])) ===
+      "session"
+  );
+}
+
+/** The default initialization declaration carried by a stored link value. */
+function scopeInitialization(value: unknown): "session" | undefined {
+  if (!isPrimitiveCellLink(value)) return undefined;
+  return (linkRefPayload(value) as Record<string, unknown>)
+      .scopeInitialization === "session"
+    ? "session"
+    : undefined;
+}
+
+/** A space-to-user default link whose missing user instances continue to session. */
+function sessionInitializationLink(
+  target: NormalizedFullLink,
+  base: NormalizedFullLink,
+) {
+  return linkRefFrom({
+    ...linkRefPayload(createSigilLinkFromParsedLink(target, { base })),
+    scopeInitialization: "session",
+  });
+}
+
+/** The canonical user continuation named by an automatic session default. */
+function sessionInitializationTarget(
+  value: unknown,
+  source: NormalizedFullLink,
+): NormalizedFullLink | undefined {
+  if (source.scope !== "space" || scopeInitialization(value) !== "session") {
+    return undefined;
+  }
+  const target = parseLink(value, source);
+  return target && areNormalizedLinksSame(target, { ...source, scope: "user" })
+    ? target
+    : undefined;
+}
+
+/** User slots whose presence must be loaded before initializing a session default. */
+export function scopedArgumentInitializationTargets(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  argument: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): NormalizedFullLink[] {
+  if (!getServerExecutionConfig()) return [];
+  let blocked = false;
+  const container = resolveLink(runtime, tx, argument, "value", {
+    onScopeBlocked: () => blocked = true,
+  });
+  if (
+    blocked || container.pendingHopDoc || container.scope !== "space" ||
+    isFabricDataUri(container.id)
+  ) return [];
+  const value = tx.readValueOrThrow(container, {
+    nonRecursive: true,
+    meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+  });
+  if (!isKeyableObjectNotArray(value) || isPrimitiveCellLink(value)) return [];
+  return sessionScopedArgumentKeys(schema).flatMap((key) => {
+    const source = { ...container, path: [...container.path, key] };
+    const target = Object.hasOwn(value, key)
+      ? sessionInitializationTarget(
+        tx.readValueOrThrow(source, { meta: linkResolutionProbe }),
+        source,
+      )
+      : { ...source, scope: "user" as const };
+    return target ? [target] : [];
+  });
+}
+
+/** Materialize absent scoped input slots and declared session continuations. */
 export function initializeScopedArgumentSlots(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
@@ -499,12 +584,90 @@ export function initializeScopedArgumentSlots(
     if (scope === undefined || scopeRank(scope) <= scopeRank(container.scope)) {
       continue;
     }
-    if (Object.hasOwn(value, key)) continue;
     const childLink: NormalizedFullLink = {
       ...container,
       path: [...container.path, key],
       schema: childSchema,
     };
+    const present = Object.hasOwn(value, key);
+    if (
+      getServerExecutionConfig() && scope === "session" &&
+      container.scope === "space"
+    ) {
+      // The declaration is a link-value dependency, including changes that
+      // preserve the containing object's key set and the reference address.
+      const target = present
+        ? sessionInitializationTarget(
+          tx.readValueOrThrow(childLink, { meta: linkResolutionProbe }),
+          childLink,
+        )
+        : { ...childLink, scope: "user" as const };
+      if (!target) continue;
+      let targetBlocked = false;
+      const resolvedTarget = resolveLink(runtime, tx, target, "top", {
+        onScopeBlocked: () => targetBlocked = true,
+      });
+      if (
+        targetBlocked || resolvedTarget.pendingHopDoc ||
+        !areNormalizedLinksSame(target, resolvedTarget)
+      ) continue;
+      if (!present) {
+        changes.push(...normalizeAndDiff(
+          runtime,
+          tx,
+          childLink,
+          sessionInitializationLink(target, childLink),
+          argumentLink,
+          options,
+          { seen: new Map() },
+          undefined,
+        ));
+      }
+      const parent = tx.readValueOrThrow({
+        ...target,
+        path: target.path.slice(0, -1),
+      }, options);
+      // The leaf absence remains a commit dependency when a concurrent write
+      // fills the slot without changing its parent's nonrecursive shape.
+      tx.readValueOrThrow(target, options);
+      if (
+        parent !== undefined && (
+          !isKeyableObjectNotArray(parent) || isPrimitiveCellLink(parent) ||
+          Object.hasOwn(parent, target.path.at(-1)!)
+        )
+      ) continue;
+      if (parent === undefined) {
+        // Missing containers may be created, but an explicitly undefined
+        // ancestor is an authored value and must not be replaced by a record.
+        const address = toMemorySpaceAddress(target);
+        let presentAncestor = false;
+        for (let depth = address.path.length - 1; depth > 0; depth--) {
+          const owner = tx.readOrThrow({
+            ...address,
+            path: address.path.slice(0, depth - 1),
+          }, options);
+          if (owner === undefined) continue;
+          presentAncestor = !isKeyableObjectNotArray(owner) ||
+            Object.hasOwn(owner, address.path[depth - 1]);
+          break;
+        }
+        if (presentAncestor) continue;
+      }
+      changes.push(...normalizeAndDiff(
+        runtime,
+        tx,
+        target,
+        createSigilLinkFromParsedLink({ ...target, scope: "session" }, {
+          base: target,
+        }),
+        argumentLink,
+        options,
+        { seen: new Map() },
+        undefined,
+      ));
+      continue;
+    }
+    if (present) continue;
     changes.push(...scopedRedirectChanges(
       runtime,
       tx,
@@ -549,7 +712,9 @@ function scopedRedirectChanges(
     runtime,
     tx,
     link,
-    createSigilLinkFromParsedLink(target, { base: link }),
+    viaUser
+      ? sessionInitializationLink(target, link)
+      : createSigilLinkFromParsedLink(target, { base: link }),
     context,
     options,
     state,
@@ -939,7 +1104,7 @@ export function normalizeAndDiff(
           runtime,
           tx,
           link,
-          createSigilLinkFromParsedLink(userLink, { base: link }) as unknown,
+          sessionInitializationLink(userLink, link),
           context,
           options,
           state,
@@ -1302,7 +1467,8 @@ export function normalizeAndDiff(
     }
     if (
       isPrimitiveCellLink(currentValue) &&
-      areLinksSame(newValue, currentValue, link)
+      areLinksSame(newValue, currentValue, link) &&
+      scopeInitialization(newValue) === scopeInitialization(currentValue)
     ) {
       diffLogger.debug(
         "diff",

@@ -2362,6 +2362,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * through a higher-level diff path such as `markReadAsAttemptedWrite`.
    * Runner-owned system metadata writes may also use this directly when they
    * are intentionally out of phase-1 value-surface CFC scope.
+   * Outside UI blind-write mode, elision over pending state retains an internal
+   * commit dependency; this does not add attempted-target coverage.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
@@ -2800,6 +2802,13 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /** Whether this exact document instance has an unpromoted local write. */
+  hasPendingWrite(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   /**
    * The doc's NON-speculative document: confirmed state plus only the

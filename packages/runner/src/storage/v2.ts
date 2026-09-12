@@ -4465,8 +4465,12 @@ export class SpaceReplica
   /** Whether an optimistic local write for this doc is still pending — not
    *  yet promoted into the confirmed mirror (a parked accept keeps it
    *  pending until its marker arrives; CT-1927). */
-  hasPendingWrite(id: URI, scope?: CellScope): boolean {
-    const record = this.#docs.get(this.#docKeyOf({ id, scope }));
+  hasPendingWrite(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
     return record !== undefined && record.pending.length > 0;
   }
 
