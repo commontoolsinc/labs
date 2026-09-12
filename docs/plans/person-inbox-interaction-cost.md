@@ -215,36 +215,59 @@ of whether it is understood. Add it under the lane
 paced band rather than an absolute: what regresses is the gap between a paced
 click and an eager one.
 
-## Stage 7 — The result pull deep-traverses the whole result
+## Stage 7 — Two result pulls per click, each walking the whole result
 
-The largest single item left, found after stage 2 flattened the profile.
+The largest item left, and the measurement it was waiting for is taken.
 
-`deepTraverse` accounts for **33% of a click's wall time** — 1084 ms of a
-3289 ms four-click round — reached from an action named `pull:<uri>`, with its
-cost in what it touches rather than in itself (`createViewProxy`,
-`resolveLinkTracingDereferences`, `getOwnPropertyDescriptor`).
+**What happens.** Every click on a thread runs **exactly two `Cell.pull()`
+calls**, and each deep-traverses the entire result because the cell it pulls
+carries no schema. `pull()` walks its value when the link's schema is absent or
+true, since without one there is nothing to say which nested values to read as
+dependencies. Instrumented over five consecutive paced clicks on a 37-thread
+list, one per line:
 
-`Cell.pull()` deep-traverses its value when the cell's link carries no schema
-or a true schema, because without one there is nothing to tell it which nested
-values to read as dependencies. The runner pulls the result cell after every
-commit (`runner.ts`, `#pullCellOnceInPullMode`, from a commit callback), and
-builds that cell with `getCellFromLink(resultLink)` — so if the normalized
-result link carries no schema, every commit re-walks the entire result. For
-this pattern that is 37 threads of pre-rendered detail, on an interaction that
-changes one text node.
+| click | event → detail visible | of which traversal | pulls |
+| ---: | ---: | ---: | ---: |
+| 0 | 384 ms | 237 ms | 2 |
+| 1 | 378 ms | 248 ms | 2 |
+| 2 | 379 ms | 268 ms | 2 |
+| 3 | 398 ms | 261 ms | 2 |
+| 4 | 401 ms | 257 ms | 2 |
 
-**Ruled out already:** the render root. `cf-render` renders the `full` kind
-with a bare cast rather than `rendererVDOMSchema`, which looked like the same
-fault; applying the schema there changed neither the counters (766 logged
-operations either way) nor `deepTraverse`'s share (3.3% self against 3.1%).
-That change was reverted — it touches every pattern's render path and bought
-nothing measurable. The sink that traverses is the result pull, not the render.
+**About 65% of a click.** Skipping the traversal outright — a diagnostic, not a
+fix, since it is what registers the dependencies — took the same five clicks to
+138, 217, 168, 144 and 180 ms. So this is worth roughly halving what a click
+still costs.
 
-**What to establish first**, the way stage 1 was: whether the result link
-genuinely arrives schemaless, and if so why — the pattern's result schema
-exists, so either normalization drops it or this cell is built from a link that
-never had it. Only then is there a fix to design, and the choice of what schema
-a result pull should carry is a runtime decision, not a local edit.
+**Where the pulls come from.** Not the client: an IPC `handleCellPull` was
+marked and never fired, so both are runner-internal. The internal sites are
+`#pullCellOnceInPullMode`, reached from the deferred-start and
+`#startFromServedState` paths and from `#pullCellOnceAfterSuccessfulCommit` —
+all of which read as **once per piece start**, not once per interaction. Two of
+them firing on every click is the part that does not add up, and it is where to
+start.
+
+**So there are two candidate fixes, and the first is the better one:**
+
+1. **Stop the starts.** If a click is starting or re-starting a piece that is
+   already running, both pulls and both traversals go away together, and the
+   start itself is a cost nobody asked for. Establish first whether the piece is
+   genuinely being started twice per click, or whether one of these sites is
+   reached by another route.
+2. **Give the pull a schema.** `#pullCellOnceInPullMode` builds its cell with
+   `getCellFromLink(resultCell.getAsNormalizedFullLink())`, so a result cell
+   that carries no schema produces a schemaless pull. A start pull that carried
+   the pattern's result schema would register the same dependencies without the
+   walk. That is a runtime decision about what a start pull should demand, not a
+   local edit.
+
+**One lead ruled out.** The render root looked like the same fault:
+`cf-render` renders the `full` kind with a bare cast rather than
+`rendererVDOMSchema`. Applying the schema there changed neither the counters
+(766 logged operations either way) nor `deepTraverse`'s share (3.3% self
+against 3.1%), and a separate instrument showed **zero** traversing sinks during
+a click. It was reverted: it touches every pattern's render path and bought
+nothing. The traversal is in the pull, not the sink and not the render.
 
 ## Order, and why
 
@@ -255,8 +278,8 @@ a result pull should carry is a runtime decision, not a local edit.
 4. ~~**Stage 3's local half**~~ — landed; the pass is down to 7.1% of wall.
 5. ~~**Stage 6**~~ — landed: a benchmark that guards the curve's shape, and the
    authoring rule in `pattern-dev` and `pattern-critic`.
-6. **Stage 7** — now the largest remaining item at 33% of a click, and the one
-   with a measurement to take before a fix can be designed.
+6. **Stage 7** — the largest remaining item at ~65% of a click, measured, with
+   two candidate fixes and a prize of roughly halving what a click costs.
 7. **Stage 4a** — small, and it is a correctness bug. The root cause is known;
    what is missing is a harness that reproduces it.
 8. **Stage 3's structural half** — a CFC design decision, not a measurement.
