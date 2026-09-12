@@ -41,41 +41,55 @@ and degraded phases, holding the counted work fixed:
 `isPrefix` scales with the whole; the dereference-trace machinery is the part
 that grows out of proportion. Both sit on the same structure.
 
-## Stage 8 — The degradation is delayed, not cured
+## Stage 8 — The degradation is delayed, not cured — and it is waiting, not compute
 
 Stage 2's note that "a paced round after an eager one recovers fully" was taken
-from sequences of three rounds. Over five it does not hold, on either side of
-the schema fix. Paced-round medians, `paced, eager, paced, paced, paced`, six
-clicks each, on a 37-thread list:
+from sequences of three rounds. Over sixty clicks it does not hold.
 
-| arm | 1 | (eager) | 3 | 4 | 5 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| before the schema fix | 341 | 1065 | 320 | 309 | **802** |
-| after it | 255 | 413 | 363 | **876** | 845 |
+**It is the product's, not the harness's.** The first readings came through a
+recorder that attaches a MutationObserver per shadow root on every click and
+re-walks the whole DOM on every animation frame — either could grow with the
+click count. Re-measured with a prober that installs no observers, resolves the
+shadow roots once, and waits by reading one `<style>` element, paced on
+`rt.idle()`:
 
-Both arms climb to the same plateau, around 800-850 ms. So the degradation
-stage 2 appeared to cure is **delayed rather than removed**, and the schema
-fix does not cause it — it reaches it sooner, having less other work in the
-way.
+| clicks | 0-5 | 6-11 | 12-17 | 18-23 | 24-29 | 30-35 | 42-47 | 54-59 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| median ms | 386 | 335 | 318 | 835 | 817 | 772 | 737 | 768 |
 
-Read against three-round sequences this looked like a regression in the schema
-fix: its round-3 figure (876) against the other arm's (320) is 2.7×, and that
-is a comparison of a degraded state with one that has not degraded yet. The
-honest comparison is condition by condition, and the fix is better or equal in
-each:
+It arrives around click 18-24, roughly doubles, and then holds flat for forty
+more clicks. The machine's load *fell* across that run (8.72 to 7.4), so load
+is not the cause.
 
-| condition | before | after |
+**Only a new runtime clears it.** Reaching the plateau and then applying each
+candidate, six clicks per round: rewriting `people` with the same value gives
+447 then 727 — no recovery; reloading the page gives 376 then 415 — full
+recovery. That is the same signature the pre-stage-2 degradation had, so stage 2
+and stage 7 raised the threshold (about 8 clicks to about 24) without removing
+the cause.
+
+**And it is not CPU.** Profiling the worker over the first twelve clicks and
+the last twelve of a sixty-click run:
+
+| | fresh | plateau |
 | --- | ---: | ---: |
-| fresh paced click | 341-424 ms | 213-255 ms |
-| during eager clicking | 1065-2080 ms | 413-563 ms |
-| the plateau, after enough clicking | ~800 ms | ~850 ms |
+| wall | 10276 ms | 11995 ms |
+| busy worker CPU | 9697 ms | 6076 ms |
+| idle share | 6% | **49%** |
 
-**What this leaves.** The plateau is now the largest thing on this path, and
-nothing above measures it: every A/B in this plan was taken on a fresh or
-nearly-fresh pane. The next pass should start by characterising it — what
-accumulates, whether it is the same structure stage 2 indexed or a different
-one, and whether a data change or a reload clears it, as the pre-stage-2
-version did.
+Worker CPU per click *falls* — 808 ms to 506 ms — while wall time rises. Half
+of a plateaued click is the worker doing nothing. Only one frame grows
+materially (`ownKeys`, +346 ms), and it is nowhere near the gap.
+
+**So the instrument has to change.** Every measurement in this plan above has
+been a CPU profile or a logger count, and neither can see time in which nothing
+runs. The next pass wants the waiting side: `CF_MEMORY_FRAME_LOG` with
+`summarize-frame-log.ts` for what crosses the wire, the memory server's queue
+time against handle time (a queue time that dwarfs handle time is head-of-line
+blocking, fixed at the frame in front), and the IPC rows in
+`collectBrowserLoadSummary`. `skills/perf-investigation/SKILL.md` covers all
+three under "Frames are the sync point" and "A counter says how often; only a
+span says by how much".
 
 ## Where this has got to
 
@@ -87,7 +101,7 @@ stores linked read-only, `serverExecution` off at both ends, a machine at load
 | --- | ---: | ---: |
 | paced click, median | 1482 ms | 213-255 ms |
 | during eager clicking | 1711 ms | 413-563 ms |
-| after enough clicking | — | ~850 ms, and see stage 8 |
+| after ~20 clicks | — | ~800 ms, half of it the worker idle; see stage 8 |
 | 1 person's data (52 messages) | 187-524 ms | 327-358 ms |
 | 5 people's data (150 messages) | 10.7-19.5 s | 309-368 ms |
 
