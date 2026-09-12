@@ -1,5 +1,8 @@
 # Incremental collection aggregates
 
+For authoring recipes alongside `map`, `filter`, and `reduce`, see
+[reactive collections](../common/concepts/reactive-collections.md).
+
 Array-valued `Cell` and `Writable` inputs expose named aggregates. These methods
 build reactive computations in a pattern body. Predicate and score callbacks
 receive an element, its reactive index, and the source array; captured values
