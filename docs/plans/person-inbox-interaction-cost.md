@@ -41,6 +41,31 @@ and degraded phases, holding the counted work fixed:
 `isPrefix` scales with the whole; the dereference-trace machinery is the part
 that grows out of proportion. Both sit on the same structure.
 
+## Where this has got to
+
+Measured on the same rig throughout — the unmodified pattern, live connector
+stores linked read-only, `serverExecution` off at both ends, a machine at load
+7-11 and never idle.
+
+| | at the start | now |
+| --- | ---: | ---: |
+| paced click, median | 1482 ms | 230 ms |
+| click after eager clicking | 1711 ms | recovers to the paced band |
+| 1 person's data (52 messages) | 187-524 ms | 327-358 ms |
+| 5 people's data (150 messages) | 10.7-19.5 s | 309-368 ms |
+
+The last two rows are the finding that started this, and it is gone. Cost used
+to track how many rows the queries returned rather than how many were rendered —
+one person with 38 rows on screen beat five people with 6 — and the ladder is
+now flat across a threefold difference in returned rows. The cross-session
+comparison is loose (the live stores moved from 40 threads to 37 between the
+two), but not by anything like the margin.
+
+What is left is three design questions rather than three edits: what a child
+piece's identity should depend on (stage 7's root), how a flow-relevance memo
+should be keyed (stage 3), and a harness that can reproduce a cross-session
+write refusal (stage 4a).
+
 ## Stage 1 — Stop the dereference-trace set from growing — **not built**
 
 **Where.** `ExtendedStorageTransaction.recordCfcDereferenceTrace`
