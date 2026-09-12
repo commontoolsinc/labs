@@ -21,8 +21,8 @@ The prototype, its tests, and the posture benchmark are on the branch
 `b8da502953b1793719bebf76c02b5539ad1d278d`, built on `9b61f01934`: the [F0
 baseline](2026-09-11-lazy-materialization-f0-baseline.md)'s revision plus the
 first two of that record's commits, which add the presync timer and the
-benchmark as it then stood. One defect the stage found on the lift path has its
-fix on a branch of its own, `codex/lift-refusal-disposition`, and on the
+benchmark as it then stood. One defect the F0 inventory found on the lift path
+has its fix on a branch of its own, `codex/lift-refusal-disposition`, and on the
 prototype branch as well; see [What ships](#what-ships).
 
 ## The contract
@@ -147,8 +147,11 @@ lazy one commit on its first run. A write to a field of the first row, which the
 body read, makes both postures' commits retry, and so does an append to the
 list, which changes the list's shape at the path the view read to reach row 0, a
 path in the read set under either posture. So what a view removes from the read
-set is exactly the fields of rows the body did not touch; the list and the rows
-it did touch stay in it.
+set is the fields of rows the body did not touch. The list stays in it, and so
+does each row the body touched, whole: the block's rows are inline objects, and
+a view takes a recursive read at the slot to derive an inline element's identity
+(`createArrayView` in `schema-view.ts`). A row held as a separately addressed
+cell registers only the fields the body read.
 
 Not exercised by the prototype's tests: a mismatched event payload, whose
 absent-event delivery follows from the payload being read eagerly and unmarked
@@ -293,10 +296,11 @@ changes which concurrent writes a commit refuses. A handler whose walk touches
 one field of every row keeps its guard against appends and against changes to
 that field — the lunch poll's `addOption` and `removeOption` read every vote's
 `optionId`, and a concurrent cast either appends or rewrites the vote it names,
-`optionId` included, so their guards survive a view — and loses it against a
-change to any other field of those rows. There is no way for a handler to say
-which of its reads are for conflict detection rather than for the value, so
-where the change bites, it bites silently.
+`optionId` included, so their guards survive a view — and, where rows are
+separately addressed cells, loses it against a change to any other field of
+those rows. There is no way for a handler to say which of its reads are for
+conflict detection rather than for the value, so where the change bites, it
+bites silently.
 
 **The measured win is confined to a shape the guidance already steers away
 from.** A handler that reads a whole list and touches one element is what keyed

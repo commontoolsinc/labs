@@ -548,7 +548,9 @@ readings on a marked transaction pin — the schema view and the schema-less
 proxy; unmarked reads are untouched, so the standing handle long-lived consumers
 rely on keeps tracking current state.
 
-Still unbuilt, and recorded in the plan: handlers materialize eagerly.
+Handlers materialize eagerly by decision: the [handler context
+record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+holds the measurements and the conditions for revisiting.
 
 ### `readerSchemaPrecedence`
 
