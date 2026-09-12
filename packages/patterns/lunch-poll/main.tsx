@@ -39,7 +39,7 @@
  * everyone's current vote in the entry's `votes` list — the option title is
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
- * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
+ * those embedded snapshots via a plain `computed`.
  * Live voting stays on the in-cell `votes` array. Each history entry — and each
  * embedded vote — carries a frozen display name plus the profile cell of whoever
  * it refers to, so attribution stays correct through renames and roster
@@ -74,6 +74,7 @@ import {
   entityRefToString,
   equals,
   getEntityId,
+  type GroupIndex,
   handler,
   NAME,
   pattern,
@@ -1044,51 +1045,28 @@ const memoByVoter = <T,>(
     compute,
   );
 
-/** A vote as the tally holds it: read off the reactive list once. */
-type VoteRecord = Pick<Vote, "voter" | "voteType">;
+/** Maintains linked vote groups for per-option tally consumers. */
+const indexVotesByOption = pattern<
+  { votes: Cell<Vote[]> },
+  { index: GroupIndex<string, Vote> }
+>(
+  ({ votes }) => ({ index: votes.groupBy((vote) => vote.optionId) }),
+);
 
-/**
- * Reads each vote off the poll's list once and groups the records by option.
- *
- * Every element and property read on a reactive list is a runtime call — a
- * link resolved and a labeled view built — so the tally takes its votes from
- * this one pass rather than scanning the list once per option and again per
- * color.
- */
-const groupVotesByOption = (
-  votes: readonly Vote[],
-): Map<string, VoteRecord[]> => {
-  const byOption = new Map<string, VoteRecord[]>();
-  for (const vote of votes) {
-    const voter = vote.voter;
-    const optionId = vote.optionId;
-    const record: VoteRecord = {
-      voteType: vote.voteType,
-      ...(voter === undefined ? {} : { voter }),
-    };
-    const group = byOption.get(optionId);
-    if (group === undefined) {
-      byOption.set(optionId, [record]);
-    } else {
-      group.push(record);
-    }
-  }
-  return byOption;
-};
-
-const tallyOptions = (
-  options: readonly Option[],
+/** Tallies one option from its maintained vote group. */
+const tallyOption = (
+  option: Option,
   votes: readonly Vote[],
   users: readonly User[],
   // The union the call site actually has: inside a `computed` the viewer's
   // profile arrives unwrapped, and `equals` compares either form. Narrowing
   // to the cell alone would only push a cast to the caller.
   viewer: LunchProfile | LunchProfileCell | undefined,
-): OptionTally[] => {
-  // A vote carries its voter's identity, so the display name and swatch colour
+): OptionTally => {
+  // A vote carries its voter's identity, so the display name and swatch color
   // are looked up from the roster by comparison. A voter who has left the
   // roster still tallies; they just render without a name. The roster is read
-  // once, and each voter is compared once however many votes they cast.
+  // once per option, and repeated voters share identity comparisons.
   const roster = users.map((u) => {
     const profile = u.profile;
     return {
@@ -1109,40 +1087,27 @@ const tallyOptions = (
   const viewerIs = memoByVoter((voter) => equals(voter, viewer));
   const isSelf = (voter: LunchProfileCell | undefined): boolean =>
     viewer !== undefined && voter !== undefined && viewerIs(voter);
-  const byOption = groupVotesByOption(votes);
-  const tallies = options.map((option): OptionTally => {
-    const optionVotes = byOption.get(option.id) ?? [];
-    let green = 0;
-    let yellow = 0;
-    let red = 0;
-    for (const v of optionVotes) {
-      if (v.voteType === "green") green++;
-      else if (v.voteType === "yellow") yellow++;
-      else if (v.voteType === "red") red++;
-    }
+  let green = 0;
+  let yellow = 0;
+  let red = 0;
+  const voters = votes.map((v) => {
+    const voteType = v.voteType;
+    const voter = v.voter;
+    if (voteType === "green") green++;
+    else if (voteType === "yellow") yellow++;
+    else if (voteType === "red") red++;
+    const entry = rosterOf(voter);
+    const name = entry?.name ?? "";
     return {
-      option,
-      green,
-      yellow,
-      red,
-      voters: optionVotes.map((v) => {
-        const entry = rosterOf(v.voter);
-        const name = entry?.name ?? "";
-        return {
-          name,
-          voteType: v.voteType,
-          color: entry?.color ?? "#888",
-          initials: initialsByName.get(name) ??
-            getInitials(name, participantNames),
-          isSelf: isSelf(v.voter),
-        };
-      }),
+      name,
+      voteType,
+      color: entry?.color ?? "#888",
+      initials: initialsByName.get(name) ??
+        getInitials(name, participantNames),
+      isSelf: isSelf(voter),
     };
   });
-  return [...tallies].sort((a, b) => {
-    if (a.red !== b.red) return a.red - b.red;
-    return b.green - a.green;
-  });
+  return { option, green, yellow, red, voters };
 };
 
 // 📊 Lunch stats: per-place visit count + green/yellow/red tallies, derived from
@@ -1492,7 +1457,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     );
     // Rank from today's votes only — the tallies, swatches, and top choice all
     // reflect the current day.
-    const ranked = tallyOptions(options, todaysVotes, users, viewerProfileCell);
+    const votesByOption = indexVotesByOption({ votes: todaysVotes });
+    const optionTallies = options.map((option) => {
+      const optionVotes = votesByOption.index.lookup(option.id);
+      return computed(() =>
+        tallyOption(option, optionVotes, users, viewerProfileCell)
+      );
+    });
+    const ranked = computed(() =>
+      [...optionTallies].sort((a, b) => (a.red - b.red) || (b.green - a.green))
+    );
 
     const topChoice = todayVoteCount > 0 && ranked.length > 0
       ? ranked[0]
