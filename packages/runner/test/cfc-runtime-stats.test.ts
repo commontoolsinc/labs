@@ -33,6 +33,8 @@ describe("CFC runtime stats", () => {
       cfcRelevantTx: 0,
       flowLabelProbesComputed: 0,
       flowLabelProbeMemoHits: 0,
+      dereferenceTracesRecorded: 0,
+      dereferenceTracesMax: 0,
       cfcPreparedTx: 0,
       cfcPrepareRejects: 0,
       cfcDigestInvalidations: 0,
@@ -171,6 +173,8 @@ describe("CFC runtime stats", () => {
       // probe's own counters are exercised in cfc-flow-probe-memo.test.ts.
       flowLabelProbesComputed: 0,
       flowLabelProbeMemoHits: 0,
+      dereferenceTracesRecorded: 0,
+      dereferenceTracesMax: 0,
       cfcPreparedTx: 3,
       cfcPrepareRejects: 1,
       cfcDigestInvalidations: 1,
