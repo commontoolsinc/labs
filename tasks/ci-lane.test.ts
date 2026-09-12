@@ -1588,9 +1588,15 @@ describe("what a lane records about itself", () => {
     // reader that took it apart itself could not part company with the
     // writer.
     expect(batchMeasurement(batchMeasurementName("workspace-unit", false)))
-      .toEqual({ suite: "workspace-unit", measured: false });
+      .toEqual({ suite: "workspace-unit", measured: false, kind: "spent" });
     expect(batchMeasurement(batchMeasurementName("workspace-unit", true)))
-      .toEqual({ suite: "workspace-unit", measured: true });
+      .toEqual({ suite: "workspace-unit", measured: true, kind: "spent" });
+    // The planned half names the same suite, and says which half it is.
+    expect(
+      batchMeasurement(
+        batchMeasurementName("workspace-unit", false, "planned"),
+      ),
+    ).toEqual({ suite: "workspace-unit", measured: false, kind: "planned" });
     expect(batchMeasurement("ci-lane setup deno")).toBeUndefined();
     expect(batchMeasurement("ci-lane batch ")).toBeUndefined();
   });

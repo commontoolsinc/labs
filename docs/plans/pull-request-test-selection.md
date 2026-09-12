@@ -3865,6 +3865,47 @@ If the rest never landed it would still have been worth it, which is why
 it is the one part worth splitting off if the change has to be split at
 all.
 
+### What a lane costs beyond its tests
+
+A test's own cost is what a runner measured for it. A lane pays more: it
+opens the capabilities its batches need, starts a runner per batch, and
+loads a module per file. None of that is in any test's duration, and all
+of it is in the five minutes a lane has.
+
+The packer charges each of those already — `setupCost` the first time a
+lane opens a capability, a suite's `overhead` the first time a lane holds
+that suite, and `correction` against every identity's own cost — and what
+it charges them from is `tasks/test-selection/calibrate.ts`, fitted from
+what lanes have spent.
+
+The inputs are the lane's own measurements, which reach the store as
+ordinary records. A lane writes one per capability it opened and two per
+batch: what it spent, and what the packer charged it. The second is what
+makes a fit possible at all, since the packer's figure cannot be
+recovered from the records a batch produced — those say what the tests
+took, not what the packer thought they would.
+
+Every figure errs high, for the reason every cost estimate here does. A
+`setupCost` is the ninetieth percentile of what that capability was seen
+to take. A suite's slope comes from observations that disagree about how
+long the same planned work took, and is never below one; with fewer than
+two such observations there is nothing to say about how the cost grows,
+and the intercept carries the whole difference. The intercept is then
+raised until no observation is under-predicted, because a least-squares
+line sits in the middle of its observations by construction, and for this
+quantity the middle means half the lanes running past their budget.
+
+`unitOverhead` stays empty. A lane times its batches and not the units
+inside them, so nothing measures what one more file costs a batch that
+already runs others; a suite's intercept carries it, which charges a
+batch of one file what a batch of many was seen to cost.
+
+The first run of the lanes measured this and nothing read it. Five lanes
+of run 34666650680 spent 20.5 seconds opening `toolshed-baked`, 20.2 on
+`toolshed-baked-opposite`, 14.8 on `fuse` and 2.8 on `toolshed` — 58.3
+seconds in the lane that opened all four — and the packer charged that
+lane nothing for any of it. All five ran past the five-minute bound.
+
 ### Part two — the topology
 
 The topology goes in, and both `main` and the `ci: full` label start using

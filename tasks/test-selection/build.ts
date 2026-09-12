@@ -44,6 +44,7 @@ import {
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
 import { isLaneMeasurement } from "../lane-measurement.ts";
+import { type LaneObservation, laneObservationsOf } from "./calibrate.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   type Calibration,
@@ -117,6 +118,15 @@ export interface AggregateState {
    * what the tree still says nothing about.
    */
   unclaimed?: string[];
+
+  /**
+   * What lanes have measured about themselves, against the day each ran.
+   * A lane's cost beyond its tests is fitted from this, and it is kept
+   * here rather than recomputed because a publisher run folds a few
+   * hours of objects and a fit wants the window `COST_WINDOW_DAYS`
+   * names.
+   */
+  lanes?: LaneObservation[];
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -266,6 +276,9 @@ export interface ReadReport {
 
   /** Every passing duration, by identity key and then by day. */
   durations: Map<string, Map<string, number[]>>;
+
+  /** What the lanes in this object measured about themselves. */
+  lanes: LaneObservation[];
 }
 
 /**
@@ -281,6 +294,7 @@ export function readReport(
   const observations: Observation[] = [];
   const surfaces = new Map<string, Surface>();
   const durations = new Map<string, Map<string, number[]>>();
+  const lanes: LaneObservation[] = [];
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
     if (
@@ -290,6 +304,13 @@ export function readReport(
       continue;
     }
     const day = dayOf(group.context.startedAt);
+    // What a lane spent on its own setup and on each of its batches is
+    // not scored, and not discarded either: it is what the packer's
+    // charges for both are fitted from. One group is one lane's
+    // artifact, so a batch's two halves are here together.
+    lanes.push(
+      ...laneObservationsOf(report.objectName, group.records, day),
+    );
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
       // A lane measuring its own setup or one of its batches is not a
@@ -331,7 +352,7 @@ export function readReport(
       byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
     }
   }
-  return { observations, surfaces, durations };
+  return { observations, surfaces, durations, lanes };
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -601,6 +622,7 @@ export class Fold {
   readonly #resolver: AliasResolver;
   readonly #today: string;
   #observations = 0;
+  #lanes: LaneObservation[] = [];
 
   constructor(
     aggregate: AggregateState,
@@ -621,6 +643,7 @@ export class Fold {
         .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
     this.#context = parseContext(aggregate.context);
+    this.#lanes = [...aggregate.lanes ?? []];
     this.#folded = [...aggregate.folded];
     // The array is what is persisted; membership is asked once per listed
     // object per run, and the list grows without bound, so the question
@@ -758,6 +781,11 @@ export class Fold {
     for (const state of this.#states.values()) {
       trimWindows(state, this.#today);
     }
+    // Aged the way every other window is, so what a lane cost a week ago
+    // stops deciding what the packer charges today.
+    const lanes = this.#lanes.filter((lane) =>
+      daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS
+    );
     return {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
@@ -766,6 +794,7 @@ export class Fold {
         context: serializeContext(this.#context),
         compacted: this.#compacted,
         states: Object.fromEntries(this.#states),
+        lanes,
       },
       states: this.#states,
       surfaces: this.#surfaces,
@@ -783,6 +812,13 @@ export class Fold {
       if (known === undefined || isFileBacked(surface)) {
         this.#surfaces.set(key, surface);
       }
+    }
+    // A day past the cost window is dropped again by the same `finish`
+    // that would keep it, so reading one buys nothing and a bootstrap
+    // holds sixty days of them at once.
+    for (const lane of read.lanes) {
+      if (daysBetween(lane.day, this.#today) > COST_WINDOW_DAYS) continue;
+      this.#lanes.push(lane);
     }
     for (const [key, byDay] of read.durations) {
       let known = this.#samples.get(key);

@@ -42,6 +42,7 @@ import {
   storePrefix,
 } from "./test-records-config.ts";
 import { rollupShards } from "./test-records-compact.ts";
+import { calibrate, laneObservations } from "./test-selection/calibrate.ts";
 import {
   type AggregateState,
   buildManifest,
@@ -627,6 +628,13 @@ export async function publish(
     seed: ulid(),
     commit,
     runs: runs.size,
+    // What a lane costs beyond the tests it runs, from what lanes have
+    // spent. Without it the packer charges nothing for opening a
+    // capability, starting a runner, or loading a module, and a lane
+    // packed to its budget runs past the bound it is killed at.
+    calibration: calibrate(
+      laneObservations(folded.aggregate.lanes ?? []),
+    ),
   });
   // What the coverage gate compares a pull request against. It comes from
   // outside the fold, because the counts are published by the full run on

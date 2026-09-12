@@ -588,6 +588,7 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
+  plannedSeconds = 0,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -649,9 +650,19 @@ export async function runBatch(
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
+      // What the lane spent, and what the packer charged it. Both halves
+      // are known only here — the packer's figure cannot be recovered
+      // from the records the batch produced, and those records are not
+      // available to the packer — and the pair is what the calibration
+      // this lane packed against is fitted from.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
+        ok,
+      ),
+      timingRecord(
+        batchMeasurementName(batch.suite.id, coverage !== undefined, "planned"),
+        plannedSeconds,
         ok,
       ),
     ]);
@@ -1212,6 +1223,7 @@ export async function runLane(
         // lane.
         opened.envFor(batch.suite.needs),
         batchCoverage(options, batch.suite.id, seen.coverage),
+        chosenFor(batch.suite.id, mine.selections).seconds,
       );
       conflicts.push(...result.conflicts);
       // The records decide, rather than the command's exit status: a
