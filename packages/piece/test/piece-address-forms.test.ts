@@ -1,10 +1,11 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 
 import { taggedHashStringOf } from "@commonfabric/data-model";
 import { createSession, Identity } from "@commonfabric/identity";
-import { type Cell, Runtime } from "@commonfabric/runner";
+import { type Cell, isCell, Runtime } from "@commonfabric/runner";
+import { viewPieceSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../../runner/src/builder/factory.ts";
@@ -108,6 +109,67 @@ describe("piece address forms", () => {
         reconcile: false,
       });
       expect(calls).toEqual([controller.getSpace()]);
+    } finally {
+      await viewer.dispose({ closeStorage: false });
+    }
+  });
+
+  it("starts a view piece by synchronizing its UI tip without executing the graph", async () => {
+    const viewer = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      clientClass: "web",
+      experimental: { serverExecution: true, viewScopedReplication: true },
+    });
+    try {
+      const session = await createSession({
+        identity: signer,
+        spaceName: "view-start-controller",
+      });
+      const controller = new PiecesController(session, viewer);
+      const remote = viewer.getCell(
+        pieces.getSpace(),
+        "view-start-piece",
+        undefined,
+      );
+      await viewer.editWithRetry((tx) => {
+        remote.withTx(tx).set({ $NAME: "Server output", $UI: "Rendered UI" });
+      });
+      using enabling = stub(
+        viewer.viewReplication,
+        "enable",
+        () => Promise.resolve(true),
+      );
+      using starting = spy(viewer, "start");
+      using projecting = spy(remote, "asSchema");
+      await controller.startPiece(remote);
+      expect(enabling.calls.map((call) => call.args)).toEqual([[remote.space]]);
+      expect(starting.calls).toHaveLength(0);
+      expect(projecting.calls.map((call) => call.args)).toEqual([[
+        viewPieceSchema,
+      ]]);
+      const syncError = new Error("UI tip synchronization failed");
+      {
+        using syncing = stub(
+          storageManager,
+          "syncCell",
+          () => Promise.reject(syncError),
+        );
+        await expect(controller.startPiece(remote)).rejects.toBe(syncError);
+        expect(syncing.calls).toHaveLength(1);
+        expect(syncing.calls[0].args[0]).toBe(projecting.calls[1].returned);
+      }
+      const tip = projecting.calls[0].returned?.asSchema<{
+        $NAME: string;
+        $UI: Cell<unknown>;
+      }>(viewPieceSchema).get();
+      expect(tip?.$NAME).toBe("Server output");
+      expect(isCell(tip?.$UI)).toBe(true);
+      if (!isCell(tip?.$UI)) throw new Error("Expected an opaque UI Cell");
+      expect(tip.$UI.getAsNormalizedFullLink().path).toEqual(["$UI"]);
+      expect(tip.$UI.asSchema<string>({ type: "string" }).get()).toBe(
+        "Rendered UI",
+      );
     } finally {
       await viewer.dispose({ closeStorage: false });
     }

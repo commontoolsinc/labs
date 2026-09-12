@@ -1,9 +1,10 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { spy } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 
 import { ChangeSet } from "@codemirror/state";
 
+import { aclDocId } from "../acl.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -74,6 +75,35 @@ describe("view interests", () => {
     return response<WatchSetResult>(messages, requestId).sync;
   }
 
+  async function resume() {
+    const initial = response<SessionOpenResult>(messages, "open");
+    connection.close();
+    connection = server.connect((message) => messages.push(message));
+    const offset = messages.length;
+    await connection.receive(encodeMemoryBoundary({
+      type: "hello",
+      protocol: MEMORY_PROTOCOL,
+      flags: getMemoryProtocolFlags(),
+    }));
+    const hello = messages[offset] as HelloOkMessage;
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "resume-evaluation",
+      space,
+      session: {
+        sessionId: initial.sessionId,
+        sessionToken: initial.sessionToken,
+      },
+      invocation: {
+        iss: principal,
+        aud: hello.sessionOpen!.audience,
+        challenge: hello.sessionOpen!.challenge.value,
+      },
+    }));
+    expect(response<SessionOpenResult>(messages, "resume-evaluation").resumed)
+      .toBe(true);
+  }
+
   beforeEach(async () => {
     requests = 0;
     messages = [];
@@ -127,6 +157,167 @@ describe("view interests", () => {
   afterEach(async () => {
     await server.close();
     resetServerExecutionConfig();
+  });
+
+  it("excludes the serving principal from visible client demand", async () => {
+    await set([], [view()]);
+    expect(server.viewInterestsForSpace(space, { excludePrincipal: principal }))
+      .toEqual([]);
+    expect(server.viewInterestsForSpace(space, { excludePrincipal: "another" }))
+      .toHaveLength(1);
+  });
+
+  it("refuses view interests when server execution is disabled", async () => {
+    setServerExecutionConfig(false);
+    const result = await server.watchSet({
+      type: "session.watch.set",
+      requestId: "disabled",
+      space,
+      sessionId,
+      watches: [],
+      views: [view()],
+    });
+    expect(result.error?.name).toBe("ProtocolError");
+    expect(server.viewInterestsForSpace(space)).toEqual([]);
+  });
+
+  it("requires a newer revision to change an existing view", async () => {
+    await set([], [view(1)]);
+    for (const revision of [1, 0]) {
+      const result = await server.watchSet({
+        type: "session.watch.set",
+        requestId: "stale-view",
+        space,
+        sessionId,
+        watches: [],
+        views: [{ ...view(revision), query: query("of:support") }],
+      });
+      expect(result.error?.name).toBe("ProtocolError");
+      expect(server.viewInterestsForSpace(space)[0].view).toEqual(view(1));
+    }
+    const sync = await set([], [{ ...view(2), query: query("of:support") }]);
+    expect(sync.removes.map((entry) => entry.id)).toEqual(["of:render"]);
+    expect(sync.upserts.map((entry) => entry.id)).toEqual(["of:support"]);
+  });
+
+  it("refuses replacement through watch addition while a view is mounted", async () => {
+    await set([watch("of:ordinary")], [view()]);
+    const result = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: "replace-watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "of:ordinary",
+        kind: "graph",
+        query: query("of:support"),
+      }],
+    });
+    expect(result.error?.name).toBe("ProtocolError");
+    expect(
+      server.demandedInstancesForSpace(space).map((entry) => entry.id)
+        .toSorted(),
+    )
+      .toEqual(["of:ordinary", "of:render"]);
+    const sync = await set([watch("of:ordinary")]);
+    expect(sync.upserts.map((entry) => entry.id).toSorted())
+      .toEqual(["of:ordinary", "of:render"]);
+  });
+
+  it("refuses invalid planner generations without replacing valid delivery", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    expect(
+      await server.setViewSelection(space, handle, {
+        generation: 1,
+        delivery: [query("of:support")],
+      }),
+    ).toBe(true);
+    for (const generation of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(server.setViewSelection(space, handle, {
+        generation,
+        delivery: [],
+      })).rejects.toThrow("Invalid view selection");
+    }
+    const sync = await set([]);
+    expect(sync.viewPlans?.[0].generation).toBe(1);
+    expect(sync.upserts.map((entry) => entry.id)).toContain("of:support");
+  });
+
+  it("rechecks read authority before accepting a planner selection", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.writeDocument(space, aclDocId(space), { [space]: "OWNER" });
+    server.options.acl = { mode: "enforce" };
+    expect(
+      await server.setViewSelection(space, handle, {
+        generation: 1,
+        delivery: [query("of:support")],
+      }),
+    ).toBe(false);
+    expect(server.viewInterestsForSpace(space)[0].selectionGeneration)
+      .toBeUndefined();
+  });
+
+  it("does not publish a selection evaluated across session replacement", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    const evaluate = server.evaluateWatchSet.bind(server);
+    const sync = server.syncSessionForConnection.bind(server);
+    const replacing = Promise.withResolvers<void>();
+    let resuming: Promise<void> | undefined;
+    using _sync = stub(server, "syncSessionForConnection", (...args) => {
+      replacing.resolve();
+      return sync(...args);
+    });
+    using _evaluation = stub(server, "evaluateWatchSet", async (...args) => {
+      const result = await evaluate(...args);
+      if (resuming === undefined) {
+        resuming = resume();
+        await replacing.promise;
+      }
+      return result;
+    });
+    expect(
+      await server.setViewSelection(space, handle, {
+        generation: 1,
+        delivery: [query("of:support")],
+      }),
+    ).toBe(false);
+    await resuming;
+    expect(server.viewInterestsForSpace(space)[0].selectionGeneration)
+      .toBeUndefined();
+  });
+
+  it("does not publish a watch replacement evaluated across session replacement", async () => {
+    await set([], [view()]);
+    const evaluate = server.evaluateWatchSet.bind(server);
+    const sync = server.syncSessionForConnection.bind(server);
+    const replacing = Promise.withResolvers<void>();
+    let resuming: Promise<void> | undefined;
+    using _sync = stub(server, "syncSessionForConnection", (...args) => {
+      replacing.resolve();
+      return sync(...args);
+    });
+    using _evaluation = stub(server, "evaluateWatchSet", async (...args) => {
+      const result = await evaluate(...args);
+      if (resuming === undefined) {
+        resuming = resume();
+        await replacing.promise;
+      }
+      return result;
+    });
+    const result = await server.watchSet({
+      type: "session.watch.set",
+      requestId: "replaced-session",
+      space,
+      sessionId,
+      watches: [],
+      views: [{ ...view(1), query: query("of:support") }],
+    });
+    expect(result.error?.name).toBe("SessionError");
+    await resuming;
+    expect(server.viewInterestsForSpace(space)[0].view).toEqual(view());
   });
 
   it("evaluates render demand once when adding supporting delivery", async () => {
@@ -197,6 +388,8 @@ describe("view interests", () => {
   });
 
   it("updates visible link demand incrementally and retires unreachable misses", async () => {
+    const changed = spy();
+    server.setServerExecutionObserver({ demandChanged: changed });
     const linked = (id: string) => ({
       primary: { "/": { "link@1": { id, path: [], space } } },
     });
@@ -225,12 +418,15 @@ describe("view interests", () => {
     const demanded = () =>
       server.demandedInstancesForSpace(space).map((row) => row.id);
     expect(demanded()).toContain("of:unborn");
+    const notifications = changed.calls.length;
     const evaluations = spy(server, "evaluateWatchSet");
     try {
       await server.writeDocument(space, "of:render", linked("of:arriving"));
       await server.flushSessions();
       expect(demanded()).not.toContain("of:unborn");
       expect(demanded()).toContain("of:arriving");
+      expect(changed.calls.slice(notifications).map((call) => call.args))
+        .toEqual([[space, "push-growth", principal]]);
       messages.length = 0;
       await server.writeDocument(space, "of:unborn", { label: "orphan" });
       await server.flushSessions();
@@ -245,6 +441,9 @@ describe("view interests", () => {
             : []
         ),
       ).toContain("of:arriving");
+      await server.writeDocument(space, "of:render", linked("of:next-missing"));
+      await server.flushSessions();
+      expect(demanded()).toContain("of:next-missing");
       expect(evaluations.calls).toHaveLength(0);
     } finally {
       evaluations.restore();

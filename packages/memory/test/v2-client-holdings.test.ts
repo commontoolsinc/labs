@@ -48,10 +48,16 @@ class DroppableTransport implements Transport {
 
   #server: Server;
   readonly #stripSessionHoldings: boolean;
+  readonly #stripViewReplication: boolean;
 
-  constructor(server: Server, stripSessionHoldings = false) {
+  constructor(
+    server: Server,
+    stripSessionHoldings = false,
+    stripViewReplication = false,
+  ) {
     this.#server = server;
     this.#stripSessionHoldings = stripSessionHoldings;
+    this.#stripViewReplication = stripViewReplication;
   }
 
   async send(payload: string): Promise<void> {
@@ -92,12 +98,18 @@ class DroppableTransport implements Transport {
   }
 
   #project<T>(message: T): T {
-    if (this.#stripSessionHoldings) {
+    if (this.#stripSessionHoldings || this.#stripViewReplication) {
       const framed = message as { type?: string; flags?: object };
       if (framed.type === "hello.ok" && framed.flags !== undefined) {
         return {
           ...framed,
-          flags: { ...framed.flags, sessionHoldings: false },
+          flags: {
+            ...framed.flags,
+            ...(this.#stripSessionHoldings ? { sessionHoldings: false } : {}),
+            ...(this.#stripViewReplication
+              ? { viewScopedReplicationV1: false }
+              : {}),
+          },
         } as T;
       }
     }
@@ -135,6 +147,34 @@ describe("client holdings", () => {
   const cleanups: (() => Promise<void>)[] = [];
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
+  });
+
+  it("refuses visible roots before sending them to an unsupported server", async () => {
+    const server = newServer("unsupported-view");
+    const transport = new DroppableTransport(server, false, true);
+    const client = await connect({ transport });
+    cleanups.push(() => client.close(), () => server.close());
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    const views = [{
+      id: "screen",
+      revision: 0,
+      mode: "render" as const,
+      componentContractVersion: "1",
+      query: { roots: [] },
+    }];
+    const sent = transport.sent.length;
+    await expect(session.viewSetSync(views)).rejects.toThrow(
+      "Server does not support view-scoped replication",
+    );
+    await expect(session.watchSetSync([], undefined, views)).rejects.toThrow(
+      "Server does not support view-scoped replication",
+    );
+    expect(transport.sent).toHaveLength(sent);
+    expect(server.viewInterestsForSpace(SPACE)).toEqual([]);
+    await session.close();
+    const closeError = session.closeError;
+    session.handleConnectionFailure(new Error("late connection failure"));
+    expect(session.closeError).toBe(closeError);
   });
 
   it("declares current replica holdings when replacing visible roots", async () => {
