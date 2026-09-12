@@ -151,7 +151,9 @@ set is the fields of rows the body did not touch. The list stays in it, and so
 does each row the body touched, whole: the block's rows are inline objects, and
 a view takes a recursive read at the slot to derive an inline element's identity
 (`createArrayView` in `schema-view.ts`). A row held as a separately addressed
-cell registers only the fields the body read.
+cell registers its shape and the fields the body read, so a concurrent replace
+of another existing field of that row stops conflicting while a whole-row write
+still does.
 
 Not exercised by the prototype's tests: a mismatched event payload, whose
 absent-event delivery follows from the payload being read eagerly and unmarked
@@ -297,9 +299,9 @@ one field of every row keeps its guard against appends and against changes to
 that field — the lunch poll's `addOption` and `removeOption` read every vote's
 `optionId`, and a concurrent cast either appends or rewrites the vote it names,
 `optionId` included, so their guards survive a view — and, where rows are
-separately addressed cells, loses it against a change to any other field of
-those rows. There is no way for a handler to say which of its reads are for
-conflict detection rather than for the value, so where the change bites, it
+separately addressed cells, loses it against a replace of any other existing
+field of those rows. There is no way for a handler to say which of its reads are
+for conflict detection rather than for the value, so where the change bites, it
 bites silently.
 
 **The measured win is confined to a shape the guidance already steers away
