@@ -1160,6 +1160,35 @@ describe("data-updating", () => {
       expect(raw[0]).toEqual({ name: "Ada" });
     });
 
+    it("stores each array-element object as a link when one is supplied", () => {
+      // The positive half of the case above, over the same call: with an id
+      // source each object leaves a link to a document of its own, and two
+      // objects at two positions leave two distinct documents.
+
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "anchor source stores links",
+        undefined,
+        tx,
+      );
+      let seed = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ name: "Ada" }, { name: "Grace" }],
+        "anchor source stores links",
+        undefined,
+        () => seed++,
+      );
+
+      const raw = testCell.getRaw() as unknown[];
+      const ids = raw.map((entry) => parseLink(entry)?.id);
+      expect(ids).toEqual([expect.any(String), expect.any(String)]);
+      expect(ids[0]).not.toBe(ids[1]);
+      expect(ids).not.toContain(testCell.getAsNormalizedFullLink().id);
+    });
+
     it("draws anchor ids pre-order: containing element before nested children", () => {
       // The id source is consumed for an anchored element BEFORE the
       // recursion into its content, so an element containing its own
