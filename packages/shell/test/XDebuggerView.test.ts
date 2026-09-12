@@ -114,8 +114,8 @@ describe("XDebuggerView", () => {
         // The handler runs fire-and-forget from `@click`, and logs a runtime
         // operation that fails. When the failure is a disposal race (logout, a
         // runtime swap) the operation was canceled rather than broken, so the
-        // log is suppressed through `this.rt?.signal.aborted`; such a
-        // rejection must neither log nor escape as an unhandled rejection.
+        // log is suppressed when the runtime's `signal.aborted` is set; such
+        // a rejection must neither log nor escape as an unhandled rejection.
 
         it("logs a failure while the runtime is alive", async () => {
           const spy = captureConsoleError();
