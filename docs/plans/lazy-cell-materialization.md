@@ -1,8 +1,12 @@
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
-remains is removing the flag and the eager path for lift arguments, plus the
-handler materialization listed under Stage 5.
+remains is removing the flag and the eager path for lift arguments; handler
+materialization is settled under Stage 5.
+
+The remaining execution sequence and acceptance gates are owned by the separate
+[lazy materialization fast-follow](lazy-materialization-fast-follow.md). This
+document retains the view and snapshot design and its implementation record.
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
 reader touches any of it. A lift declaring a list of a thousand entries gets a
@@ -436,9 +440,13 @@ diffing and the scheduler's own reads keep eager semantics.
       path. Logged at info level as a non-run, not reported as an action error.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
-- [ ] Handlers still materialize eagerly. Deliberate for now: the lift path is
-      where the measured cost is, and a handler's argument carries an event
-      payload whose shape the same guard has not been exercised against.
+- [x] Handlers materialize eagerly, by decision rather than by omission. The
+      [fast-follow](lazy-materialization-fast-follow.md) built and measured a
+      lazy bound-context prototype and deferred it: a view narrows the read
+      log a handler's commit is checked against, and its measured win is
+      confined to a shape the collection guidance already steers away from.
+      The [record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+      names the conditions for taking it up again.
 
 ### Stage 6 — Rollout
 
@@ -462,7 +470,9 @@ diffing and the scheduler's own reads keep eager semantics.
       link resolution now applies the same rule, which is also where an eager
       read of such a link used to answer `undefined`.
       `gideon-tests/proxy-length-repro` pins it.
-- [ ] Soak on default-on before removing the flag.
+- [ ] Soak on default-on before removing the flag. F3/F4 in the
+      [fast-follow plan](lazy-materialization-fast-follow.md) own the evidence,
+      retirement decision and implementation sequence.
 
 ## Testing
 
@@ -563,6 +573,6 @@ slipping past a prepared boundary is untested.
   touches. That is the larger win for genuinely huge data and depends on this
   work landing first; it belongs with
   [shaped reads and verb results](shaped-reads-and-verb-results.md).
-- Making **handlers** lazy, unless Stage 5 records the decision to include them.
+- Making **handlers** lazy: Stage 5 records the decision to keep them eager.
 - Replacing the schema-less `createQueryResultProxy`. It remains the view for an
   absent or `true` schema, and the lazy view delegates to it.

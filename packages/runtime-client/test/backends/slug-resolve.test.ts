@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
@@ -22,10 +23,9 @@ import {
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { buildProcessor } from "./build-processor.ts";
 import { RequestType } from "@/protocol/mod.ts";
 import { createCellRef, getCell } from "@/backends/utils.ts";
-import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
+import { buildProcessor } from "./build-processor.ts";
 
 const signer = await Identity.fromPassphrase("runtime-client slug resolve");
 const space = signer.did();

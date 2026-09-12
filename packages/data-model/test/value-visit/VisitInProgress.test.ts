@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { type FabricContainerValue, type FabricValue } from "@/interface.ts";
@@ -61,9 +63,9 @@ describe("VisitInProgress", () => {
             ["object", inner],
             ["value", null],
             ["primitive", null, "null"],
-            ["visitedMapping", inner, "b", null],
+            ["visitedFabricPlainObjectEntry", inner, "b", null],
             ["visitedElement", array, 1, inner],
-            ["visitedMapping", root, "a", array],
+            ["visitedFabricPlainObjectEntry", root, "a", array],
           ]);
         });
 
@@ -96,6 +98,7 @@ describe("VisitInProgress", () => {
 
         it("passes a `FabricInstance` through `visitFabricContainer()` to `visitFabricInstance()`", () => {
           const rec = new Recorder();
+          rec.onInstance = () => undefined;
           const instance = new FabricMap(new Map([["k", 1]]));
 
           visit(instance, rec);
@@ -185,7 +188,7 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("reports the original element, not its replacement, to `visitedArrayElement()`", () => {
+        it("reports the original element, not its replacement, to `visitedFabricArrayElement()`", () => {
           const rec = new Recorder();
           rec.onValue = (v) => (v === "x") ? replace(42) : DO_VISIT_SUBTYPE;
           const array = ["x"];
@@ -285,7 +288,7 @@ describe("VisitInProgress", () => {
       });
 
       describe("`mainResult` results", () => {
-        it("ends the visit from `visitedArrayElement()`, skipping later elements", () => {
+        it("ends the visit from `visitedFabricArrayElement()`, skipping later elements", () => {
           const rec = new Recorder();
           rec.onVisitedElement = (i) =>
             (i === 1) ? mainResult("at 1") : undefined;
@@ -299,15 +302,18 @@ describe("VisitInProgress", () => {
           expect(rec.events.map((e) => e[1])).not.toContain(30);
         });
 
-        it("ends the visit from `visitedMapping()`, skipping later mappings", () => {
+        it("ends the visit from `visitedFabricPlainObjectEntry()`, skipping later mappings", () => {
           const rec = new Recorder();
           rec.onVisitedMapping = () => mainResult("first");
           const object = { a: 1, b: 2 };
 
           expect(visit(object, rec)).toEqual(mainResult("first"));
-          expect(rec.events.filter((e) => e[0] === "visitedMapping")).toEqual([
-            ["visitedMapping", object, "a", 1],
-          ]);
+          expect(
+            rec.events.filter((e) => e[0] === "visitedFabricPlainObjectEntry"),
+          )
+            .toEqual([
+              ["visitedFabricPlainObjectEntry", object, "a", 1],
+            ]);
           expect(rec.events.map((e) => e[1])).not.toContain(2);
         });
 
@@ -320,10 +326,10 @@ describe("VisitInProgress", () => {
           expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
             ["primitive", "a", "string"],
           ]);
-          expect(rec.names).not.toContain("visitedMapping");
+          expect(rec.names).not.toContain("visitedFabricPlainObjectEntry");
         });
 
-        it("ends the visit from `visitedArrayGap()`, for a gap before an element", () => {
+        it("ends the visit from `visitedFabricArrayGap()`, for a gap before an element", () => {
           const rec = new Recorder();
           rec.onVisitedGap = () => mainResult("gap");
 
@@ -332,7 +338,7 @@ describe("VisitInProgress", () => {
           expect(rec.names).not.toContain("visitedElement");
         });
 
-        it("ends the visit from `visitedArrayGap()`, for a gap at the end", () => {
+        it("ends the visit from `visitedFabricArrayGap()`, for a gap at the end", () => {
           const rec = new Recorder();
           rec.onVisitedGap = () => mainResult("gap");
 
@@ -409,16 +415,20 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("reports each mapping to `visitedMapping()` whichever of keys or values is recursed", () => {
+        it("reports each mapping to `visitedFabricPlainObjectEntry()` whichever of keys or values is recursed", () => {
           for (const form of [DO_RECURSE_KEYS, DO_RECURSE_VALUES]) {
             const rec = new Recorder();
             rec.onPlainObject = () => form;
             const object = { a: 1 };
 
             visit(object, rec);
-            expect(rec.events.filter((e) => e[0] === "visitedMapping"))
+            expect(
+              rec.events.filter((e) =>
+                e[0] === "visitedFabricPlainObjectEntry"
+              ),
+            )
               .toEqual([
-                ["visitedMapping", object, "a", 1],
+                ["visitedFabricPlainObjectEntry", object, "a", 1],
               ]);
           }
         });
@@ -442,7 +452,7 @@ describe("VisitInProgress", () => {
 
           visit({ a: 1 }, rec);
           expect(rec.names).not.toContain("primitive");
-          expect(rec.names).not.toContain("visitedMapping");
+          expect(rec.names).not.toContain("visitedFabricPlainObjectEntry");
         });
 
         it("honors a `recurse` returned directly from `visitValue()`, without subtype dispatch", () => {
@@ -485,13 +495,116 @@ describe("VisitInProgress", () => {
             /Cannot use `recurse` result with non-container: /,
           );
         });
+      });
 
-        it("throws for a `recurse` on a `FabricInstance`", () => {
+      describe("`FabricInstance` recursion", () => {
+        // `FabricLink` and `FabricError` are the fixtures because their
+        // codecs are real. A link's state is its payload, the very object,
+        // which makes the sequence easy to state; an error's state is built
+        // fresh on each encode and can hold a `cause`, which is what a cycle
+        // through an instance needs.
+
+        it("visits the state under the instance, then reports both to `visitedFabricInstance()`", () => {
           const rec = new Recorder();
-          rec.onInstance = () => DO_RECURSE_KEYS_VALUES;
+          const payload = { id: "fid1:abc" };
+          const link = new FabricLink(payload);
+
+          expect(visit(link, rec)).toBeUndefined();
+          expect(rec.events).toEqual([
+            ["value", link],
+            ["container", link],
+            ["instance", link],
+            ["value", payload],
+            ["container", payload],
+            ["object", payload],
+            ["value", "fid1:abc"],
+            ["primitive", "fid1:abc", "string"],
+            ["visitedFabricPlainObjectEntry", payload, "id", "fid1:abc"],
+            ["visitedInstance", link, payload],
+          ]);
+        });
+
+        it("visits the state its codec encodes", () => {
+          const rec = new Recorder();
+          const error = new FabricError({
+            type: "TypeError",
+            message: "boom",
+            stack: undefined,
+            cause: undefined,
+          });
+
+          visit(error, rec);
+          expect(rec.events.filter((e) => e[0] === "visitedInstance")).toEqual([
+            ["visitedInstance", error, {
+              type: "TypeError",
+              name: null,
+              message: "boom",
+            }],
+          ]);
+          expect(rec.events.filter((e) => e[0] === "primitive")).toEqual([
+            ["primitive", "TypeError", "string"],
+            ["primitive", null, "null"],
+            ["primitive", "boom", "string"],
+          ]);
+        });
+
+        it("reports a cycle through an instance at the instance", () => {
+          const holder: Record<string, unknown> = {};
+          const error = new FabricError({
+            type: "Error",
+            message: "m",
+            stack: undefined,
+            cause: holder as FabricValue,
+          });
+          holder.err = error;
+
+          const rec = new Recorder();
+
+          visit(error, rec);
+          expect(rec.events.filter((e) => e[0] === "cycle")).toEqual([
+            ["cycle", error, 0, 3],
+          ]);
+        });
+
+        it("ends the visit from inside the state, before `visitedFabricInstance()`", () => {
+          const rec = new Recorder();
+          rec.onPrimitive = (v) =>
+            (v === "boom") ? mainResult("found") : undefined;
+          const error = new FabricError({
+            type: "Error",
+            message: "boom",
+            stack: undefined,
+            cause: undefined,
+          });
+
+          expect(visit(error, rec)).toEqual(mainResult("found"));
+          expect(rec.names).not.toContain("visitedInstance");
+        });
+
+        it("ends the visit from `visitedFabricInstance()`", () => {
+          const rec = new Recorder();
+          rec.onVisitedInstance = () => mainResult("after");
+          const link = new FabricLink({ id: "fid1:abc" });
+
+          expect(visit([link, 1], rec)).toEqual(mainResult("after"));
+          expect(rec.events.map((e) => e[1])).not.toContain(1);
+        });
+
+        it("iterates nothing for `DO_RECURSE_KEYS` on an instance", () => {
+          const rec = new Recorder();
+          rec.onInstance = () => DO_RECURSE_KEYS;
+          const link = new FabricLink({ id: "fid1:abc" });
+
+          visit(link, rec);
+          expect(rec.names).not.toContain("visitedInstance");
+          expect(rec.names).not.toContain("primitive");
+        });
+
+        it("throws from the codec for an instance whose codec is a stub", () => {
+          const rec = new Recorder();
           const instance = new FabricMap(new Map());
 
-          expect(() => visit(instance, rec)).toThrow(/not yet visitable/);
+          expect(() => visit(instance, rec)).toThrow(/not yet implemented/);
         });
       });
 

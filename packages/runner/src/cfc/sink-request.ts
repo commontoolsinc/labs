@@ -2,7 +2,11 @@ import type { FabricValue } from "@commonfabric/api";
 import { fabricAwareEqual } from "@commonfabric/data-model";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
-import type { CfcPrepareState, WritePolicyInput } from "./types.ts";
+import {
+  type CfcPrepareState,
+  POST_COMMIT_RELEASE_REJECTED,
+  type WritePolicyInput,
+} from "./types.ts";
 
 type SinkRequestPolicyInput = Extract<
   WritePolicyInput,
@@ -148,9 +152,9 @@ export function enqueueSinkRequestPostCommitEffect(
   tx.enqueuePostCommitEffect({
     id: effectId,
     idempotencyKey: options?.idempotencyKey ?? effectId,
-    // The other half of this effect's outcome. The outbox drops a second
-    // effect staged under a key it is already holding, and drops this with it,
-    // so one request is abandoned once however many times it is staged.
+    // Each transaction keeps one effect per key, including this callback.
+    // The serving outbox retains accepted attachments' release checks until
+    // one dispatches; this callback belongs only to transaction abandonment.
     abandon: onRejected === undefined ? undefined : (error) => {
       console.error(
         `[cfc] ${kind} was abandoned before it started; the request is not ` +
@@ -164,7 +168,7 @@ export function enqueueSinkRequestPostCommitEffect(
       );
     },
     kind,
-    flush: async (committedTx) => {
+    flush: (committedTx) => {
       const reason = verifySinkRequestRelease(
         committedTx as { getCfcState(): SinkRequestPolicyState },
         sink,
@@ -192,9 +196,9 @@ export function enqueueSinkRequestPostCommitEffect(
           });
         }
         options?.onReleaseRejected?.();
-        return;
+        return POST_COMMIT_RELEASE_REJECTED;
       }
-      await flush(committedTx as IExtendedStorageTransaction);
+      return flush(committedTx as IExtendedStorageTransaction);
     },
   });
 }

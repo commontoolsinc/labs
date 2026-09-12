@@ -2,6 +2,13 @@
 // SDK probes the environment as it loads, which needs --allow-sys; it loads
 // only when telemetry is switched on.
 
+/**
+ * OpenTelemetry for the service: the tracer and meter providers, registered
+ * when `OTEL_ENABLED` is true and absent otherwise, and the accessors the rest
+ * of the service reaches them through, which return the API's no-op
+ * instruments while no provider is registered.
+ */
+
 import {
   context,
   type Meter,
@@ -11,6 +18,7 @@ import {
 } from "@opentelemetry/api";
 import type { MeterProvider } from "@opentelemetry/sdk-metrics";
 import type { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+
 import { env, type EnvVars } from "./env.ts";
 
 /** The subset of env the tracer setup needs (injectable for tests). */
@@ -28,10 +36,18 @@ let _provider: BasicTracerProvider | undefined;
 // when telemetry is off or has been shut down, so init/shutdown stay idempotent.
 let _meterProvider: MeterProvider | undefined;
 
+/**
+ * Returns the registered tracer provider, or `undefined` when telemetry is
+ * off or has been shut down.
+ */
 export function getTracerProvider() {
   return _provider;
 }
 
+/**
+ * Returns the registered meter provider, or `undefined` when telemetry is
+ * off or has been shut down.
+ */
 export function getMeterProvider() {
   return _meterProvider;
 }
@@ -101,6 +117,13 @@ export async function shutdownOpenTelemetry(): Promise<void> {
   }
 }
 
+/**
+ * Registers the tracer and meter providers, exporting to the OTLP collector
+ * `cfg` names, when telemetry is enabled; does nothing when it is disabled or
+ * already initialized. A setup failure is logged rather than thrown, so the
+ * service boots regardless: one in the tracer setup leaves telemetry off, and
+ * one in the metrics setup leaves tracing registered and metrics off.
+ */
 export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
   if (_provider || !cfg.OTEL_ENABLED) {
     if (!cfg.OTEL_ENABLED) {

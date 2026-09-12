@@ -11106,7 +11106,7 @@ export class Runner {
         resolvedOutputSpot,
       );
     } finally {
-      popFrame(builtinFrame);
+      if (builtinFrame) popFrame(builtinFrame);
     }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats

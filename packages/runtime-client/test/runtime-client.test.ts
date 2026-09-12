@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
+
 import { attachOptionsFrom, RuntimeClient } from "@/runtime-client.ts";
 import { findKeyMaterial } from "@/shared/key-material.ts";
 import {

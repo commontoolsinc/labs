@@ -54,8 +54,8 @@ import {
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
-
 import * as V2Storage from "@commonfabric/runner/storage/v2";
+
 import {
   type CellRef,
   type CfcLabelView,
@@ -160,7 +160,7 @@ const createRuntime = (
 const fid = (seed: string) => taggedHashStringOf(seed);
 
 describe("runtime-processor", () => {
-  describe("renderConfidentialityResolverFor (H3b)", () => {
+  describe("renderConfidentialityResolverFor", () => {
     it("returns undefined when no ceiling is configured", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
@@ -290,10 +290,10 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("resolves a cross-space Space label the space's ACL grants (§4.9.3)", async () => {
-      // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
-      // reads each space's ACL doc. A space whose declared ACL grants the acting
-      // user READ resolves; one that does not (no ACL / residency only) blocks.
+    it("resolves a cross-space Space label the space's ACL grants", async () => {
+      // The helper wires a runtime-backed membership provider that reads each
+      // space's ACL doc. A space whose declared ACL grants the acting user READ
+      // resolves; one that does not (no ACL / residency only) blocks.
 
       const { runtime, storageManager } = createRuntime();
       const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
@@ -348,7 +348,7 @@ describe("runtime-processor", () => {
     });
   });
 
-  describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
+  describe("renderMembershipProviderFor", () => {
     it("returns undefined when no ceiling is configured", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
@@ -2742,7 +2742,7 @@ describe("runtime-processor", () => {
       });
     });
 
-    it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    it("redacts `Caveat.source` from the introspection response", async () => {
       const ref: CellRef = {
         id: "of:cfc-caveat-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3291,7 +3291,7 @@ describe("runtime-processor", () => {
       expect(sourceSynced).toBe(false);
     });
 
-    it("reads the cell's own stored label without syncing (caller owns liveness)", () => {
+    it("reads the cell's own stored label without syncing", () => {
       const ref: CellRef = {
         id: "of:cfc-label-pure-read" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3343,9 +3343,10 @@ describe("runtime-processor", () => {
           }],
         },
       });
-      // No sync: the label is read from the current store. A not-yet-loaded doc
-      // would yield an empty label that self-heals when the reactive caller's
-      // subscription delivers it.
+      // No sync: keeping the cell live is the caller's job, and the label is
+      // read from the current store. A not-yet-loaded doc would yield an empty
+      // label that self-heals when the reactive caller's subscription delivers
+      // it.
       expect(synced).toBe(false);
     });
 
@@ -5063,7 +5064,7 @@ describe("runtime-processor", () => {
     });
   });
 
-  describe("worker/host server-execution posture agreement (review 2026-08-11 m7)", () => {
+  describe("worker/host server-execution posture agreement", () => {
     it("threads the host's declared serverExecution flag through the params mapper verbatim", () => {
       const params = browserWorkerParamsFromInitializationData(
         {
@@ -5082,7 +5083,7 @@ describe("runtime-processor", () => {
       expect(params.experimental).toEqual({ serverExecution: true });
     });
 
-    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default (OFF-arm-neutral)", () => {
+    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default", () => {
       assertServerExecutionPostureAgreement(
         { serverExecution: true },
         { experimental: { serverExecution: true } },
@@ -5097,7 +5098,7 @@ describe("runtime-processor", () => {
       );
     });
 
-    it("refuses LOUDLY when the host declared ON but the worker resolved OFF (the silent F10 revert, now surfaced)", () => {
+    it("refuses LOUDLY when the host declared ON but the worker resolved OFF", () => {
       expect(() =>
         assertServerExecutionPostureAgreement(
           { serverExecution: true },
@@ -5303,10 +5304,11 @@ describe("runtime-processor", () => {
         expect(processor.accessForTestingOnly.getSpaceCtx(homeSpace)).toBe(
           processor.accessForTestingOnly.cc,
         );
+        // A JavaScript caller that omits the space: `undefined as never`
+        // hands the guard the value such a call arrives with, past the `DID`
+        // the signature requires.
         expect(() =>
-          (processor.accessForTestingOnly.getSpaceCtx as (
-            s?: string,
-          ) => unknown)()
+          processor.accessForTestingOnly.getSpaceCtx(undefined as never)
         ).toThrow("name a space");
       } finally {
         await runtime.dispose();

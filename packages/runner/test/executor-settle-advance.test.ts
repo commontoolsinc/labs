@@ -69,8 +69,10 @@ import {
 } from "../src/executor/watermark.ts";
 import { stampSpeculationRunContext } from "../src/speculation/overlay-destination.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
+import { markEffectCompletion } from "../src/executor/effect-completion.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
+import { waitOnDelivery } from "./support/wait-on-delivery.ts";
 
 const spaceSigner = await Identity.fromPassphrase("settle advance space");
 const space = spaceSigner.did() as MemorySpace;
@@ -703,5 +705,319 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
     });
     expect(settled).toBeGreaterThanOrEqual(foldSeq);
     cancelDemand();
+  });
+  for (const mode of ["empty", "content", "overlay"] as const) {
+    const writeback = mode !== "empty";
+    const withOverlay = mode === "overlay";
+    it(`${withOverlay ? "retires a divergent layer over its own completion" : writeback ? "covers its own completion tail" : "keeps an empty completion from creating a commit"} while another accepted request remains unresolved`, async () => {
+      const ready = Promise.withResolvers<Runtime>();
+      onServingRuntime = (runtime) => {
+        ready.resolve(runtime);
+        return Promise.resolve();
+      };
+      host = newHost();
+      openClient();
+      const clientResult = clientRuntime.getCell<{
+        value?: number;
+        pending?: boolean;
+      }>(space, "s1-effect-result");
+      await clientResult.sync();
+      const cancelDemand = clientResult.sink(() => {});
+      const releaseFirst = Promise.withResolvers<void>();
+      const releaseOther = Promise.withResolvers<void>();
+      const wmCell = watermarkCell(clientRuntime, space);
+      let cancelWatermark: (() => void) | undefined;
+      let holdWatermark = false;
+      const heldNotices: Array<
+        Parameters<typeof server.noteExecutorCommit>[0]
+      > = [];
+      const noteExecutorCommit = server.noteExecutorCommit.bind(server);
+      if (withOverlay) {
+        await wmCell.sync();
+        cancelWatermark = wmCell.sink(() => {});
+        // The existing subscription receives the completion before the
+        // advance-only notice, allowing a client derivation to observe it.
+        server.noteExecutorCommit = (notice) => {
+          if (
+            holdWatermark && notice.space === space &&
+            notice.class === "derived" && notice.writes.length > 0 &&
+            notice.writes.every((write) =>
+              write.id === SERVER_EXECUTION_WATERMARK_DOC_ID
+            )
+          ) {
+            heldNotices.push(notice);
+          } else {
+            noteExecutorCommit(notice);
+          }
+        };
+      }
+      try {
+        const serving = await ready.promise;
+        await waitUntil(
+          () => host!.spaceServer(space)?.active === true,
+          "the empty serving graph to activate",
+        );
+        const engine = await server.engineForSpace(space);
+        const result = serving.getCell<{
+          value?: number;
+          pending?: boolean;
+        }>(space, "s1-effect-result");
+        await result.sync();
+        const issuedFirst = Promise.withResolvers<void>();
+        const issuedOther = Promise.withResolvers<void>();
+        const completedFirst = Promise.withResolvers<void>();
+        let otherCompleted = false;
+        const original = serving.edit();
+        stampWaveRunContext(original, {
+          actionId: "s1-effect-start",
+          kind: "derivation",
+        });
+        result.withTx(original).set({});
+        original.enqueuePostCommitEffect({
+          id: "s1-first-effect",
+          kind: "fetchTest-start",
+          flush: async () => {
+            issuedFirst.resolve();
+            await releaseFirst.promise;
+            try {
+              const completion = serving.edit();
+              markEffectCompletion(completion, "s1-first-effect");
+              if (writeback) {
+                result.withTx(completion).set({ value: 7, pending: false });
+              }
+              expect((await completion.commit()).error).toBeUndefined();
+              completedFirst.resolve();
+            } catch (error) {
+              completedFirst.reject(error);
+              throw error;
+            }
+          },
+        });
+        original.enqueuePostCommitEffect({
+          id: "s1-other-effect",
+          kind: "fetchTest-start",
+          flush: async () => {
+            issuedOther.resolve();
+            await releaseOther.promise;
+            otherCompleted = true;
+          },
+        });
+        expect((await original.commit()).error).toBeUndefined();
+        await Promise.all([issuedFirst.promise, issuedOther.promise]);
+        const id = result.getAsNormalizedFullLink().id;
+        const originalRecord = Engine.selectCommitsSince(engine, {
+          fromSeq: 0,
+          limit: 10_000,
+        }).findLast((record) => record.writes.some((write) => write.id === id));
+        expect(originalRecord).toBeDefined();
+        await waitUntil(
+          () => readWatermarkSeq(engine) >= originalRecord!.seq,
+          "the original wave tail to be covered with both requests held",
+        );
+        expect(host.stats().memo.inflight).toBe(2);
+        if (withOverlay) {
+          await waitOnDelivery({
+            manager: clientManager,
+            wants: (deliveredSpace, id) =>
+              deliveredSpace === space &&
+              id === SERVER_EXECUTION_WATERMARK_DOC_ID,
+            predicate: () => (wmCell.get()?.seq ?? 0) >= originalRecord!.seq,
+            label: "the original wave's watermark to reach the client",
+          });
+          holdWatermark = true;
+        }
+        const headBefore = Engine.serverSeq(engine);
+        const authoredBefore = authoredCount(engine);
+        releaseFirst.resolve();
+        await completedFirst.promise;
+        await waitUntil(
+          () => host!.stats().memo.inflight === 1,
+          "only the unrelated request to remain in flight",
+        );
+        expect(otherCompleted).toBe(false);
+        const completionRecords = Engine.selectCommitsSince(engine, {
+          fromSeq: headBefore,
+          limit: 10_000,
+        }).filter((record) => record.writes.some((write) => write.id === id));
+        if (writeback) {
+          expect(completionRecords).toHaveLength(1);
+          const completion = completionRecords[0];
+          expect(completion.class).toBe("derived");
+          expect(completion.holder).toBe(host.spaceServer(space)!.holder);
+          if (withOverlay) {
+            await waitOnDelivery({
+              manager: clientManager,
+              wants: (deliveredSpace, deliveredId) =>
+                deliveredSpace === space && deliveredId === id,
+              predicate: () => clientResult.key("value").get() === 7,
+              label: "the committed completion to reach the client",
+            });
+            expect(wmCell.get()?.seq ?? 0).toBeLessThan(completion.seq);
+            const overlay = clientRuntime.speculationOverlay!;
+            const speculative = clientRuntime.edit();
+            stampSpeculationRunContext(speculative, {
+              actionId: "s1-completion-rederivation",
+              kind: "derivation",
+            });
+            expect(clientResult.withTx(speculative).key("value").get()).toBe(7);
+            clientResult.withTx(speculative).key("pending").set(true);
+            expect((await speculative.commit()).error).toBeUndefined();
+            expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
+            expect(clientResult.key("pending").get()).toBe(true);
+            expect(Engine.readState(engine, { id })?.document).toMatchObject({
+              value: { value: 7, pending: false },
+            });
+            holdWatermark = false;
+            for (const notice of heldNotices.splice(0)) {
+              noteExecutorCommit(notice);
+            }
+          }
+          await waitUntil(
+            () => readWatermarkSeq(engine) >= completion.seq,
+            `the own completion at seq ${completion.seq} to be covered while the unrelated request stays held`,
+          );
+          if (withOverlay) {
+            await waitOnDelivery({
+              manager: clientManager,
+              wants: (deliveredSpace, deliveredId) =>
+                deliveredSpace === space &&
+                (deliveredId === SERVER_EXECUTION_WATERMARK_DOC_ID ||
+                  deliveredId === id),
+              predicate: () =>
+                clientRuntime.speculationOverlay!.entryCount(space) === 0 &&
+                clientResult.key("pending").get() === false,
+              label:
+                "the divergent pending layer to retire after completion coverage",
+            });
+            expect(clientResult.key("value").get()).toBe(7);
+          }
+        } else {
+          expect(completionRecords).toEqual([]);
+          expect(Engine.serverSeq(engine)).toBe(headBefore);
+        }
+        expect(otherCompleted).toBe(false);
+        expect(host.stats().memo.inflight).toBe(1);
+        expect(authoredCount(engine)).toBe(authoredBefore);
+      } finally {
+        holdWatermark = false;
+        for (const notice of heldNotices) noteExecutorCommit(notice);
+        server.noteExecutorCommit = noteExecutorCommit;
+        releaseFirst.resolve();
+        releaseOther.resolve();
+        cancelWatermark?.();
+        cancelDemand();
+      }
+    });
+  }
+  it("preserves a completion committed inside an older advance's seal window", async () => {
+    const engine = await server.engineForSpace(space);
+    const ready = Promise.withResolvers<Runtime>();
+    const injected = Promise.withResolvers<void>();
+    const completionId = "of:s1-completion-mid-advance";
+    let armed = false;
+    let injectionStarted = false;
+    let selectedAdvance: number | undefined;
+    onServingRuntime = (runtime) => {
+      const edit = runtime.edit.bind(runtime);
+      runtime.edit = () => {
+        const tx = edit();
+        const write = tx.writeValueOrThrow.bind(tx);
+        let watermark: number | undefined;
+        tx.writeValueOrThrow = (link, value) => {
+          if (
+            link.id === SERVER_EXECUTION_WATERMARK_DOC_ID &&
+            typeof value === "number"
+          ) {
+            watermark = value;
+          }
+          return write(link, value);
+        };
+        const commit = tx.commit.bind(tx);
+        tx.commit = async () => {
+          if (
+            armed && !injectionStarted && watermark !== undefined &&
+            watermark > maxAuthoredSeq(engine)
+          ) {
+            injectionStarted = true;
+            selectedAdvance = watermark;
+            try {
+              const completion = edit();
+              markEffectCompletion(completion, "s1-mid-advance-effect");
+              completion.writeValueOrThrow({
+                ...watermarkDocLink(space),
+                id: completionId as ReturnType<typeof watermarkDocLink>["id"],
+                path: [],
+              }, { value: 7 });
+              expect((await completion.commit()).error).toBeUndefined();
+              injected.resolve();
+            } catch (error) {
+              injected.reject(error);
+              throw error;
+            }
+          }
+          return commit();
+        };
+        return tx;
+      };
+      ready.resolve(runtime);
+      return Promise.resolve();
+    };
+    host = newHost();
+    openClient();
+    const clientResult = clientRuntime.getCell<unknown>(
+      space,
+      "s1-completion-seed",
+    );
+    await clientResult.sync();
+    const cancelDemand = clientResult.sink(() => {});
+    try {
+      const serving = await ready.promise;
+      await waitUntil(
+        () => host!.spaceServer(space)?.active === true,
+        "the serving graph to activate",
+      );
+      armed = true;
+      const seed = serving.edit();
+      stampWaveRunContext(seed, {
+        actionId: "s1-completion-seed",
+        kind: "derivation",
+      });
+      serving.getCell<unknown>(space, "s1-completion-seed").withTx(seed).set({
+        ready: true,
+      });
+      expect((await seed.commit()).error).toBeUndefined();
+      await injected.promise;
+      const completion = Engine.selectCommitsSince(engine, { fromSeq: 0 }).find(
+        (record) => record.writes.some((write) => write.id === completionId),
+      );
+      expect(completion).toBeDefined();
+      expect(completion!.class).toBe("derived");
+      expect(completion!.seq).toBeGreaterThan(selectedAdvance!);
+      expect(
+        completion!.writes.some((write) =>
+          write.id === SERVER_EXECUTION_WATERMARK_DOC_ID
+        ),
+      ).toBe(false);
+      const authoredBefore = authoredCount(engine);
+      await waitUntil(
+        () => readWatermarkSeq(engine) >= completion!.seq,
+        `completion ${
+          completion!.seq
+        } after advance target ${selectedAdvance} to retain its own advance`,
+      );
+      const advances = Engine.selectCommitsSince(engine, { fromSeq: 0 }).filter(
+        (record) =>
+          record.class === "derived" && record.writes.length === 1 &&
+          record.writes[0].id === SERVER_EXECUTION_WATERMARK_DOC_ID,
+      );
+      expect(advances).toHaveLength(2);
+      await waitUntil(
+        () => host!.stats().settleAdvances.count === advances.length,
+        "both advance-only commits to be counted",
+      );
+      expect(authoredCount(engine)).toBe(authoredBefore);
+    } finally {
+      cancelDemand();
+    }
   });
 });

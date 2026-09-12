@@ -71,7 +71,7 @@ describe("CT-1173: array push with complex objects", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame);
+    const pushed = pushFrame(frame);
 
     try {
       // Push first person (Alice)
@@ -122,7 +122,7 @@ describe("CT-1173: array push with complex objects", () => {
         createdAt: 3000,
       });
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
 
     // Read back via get()
@@ -175,7 +175,7 @@ describe("CT-1173: array push with complex objects", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame1);
+    const pushed1 = pushFrame(frame1);
     try {
       // Minted inside the frame: `Cell.push` anchors from the frame its cell was
       // constructed in, which is what makes the counter reset below observable.
@@ -195,7 +195,7 @@ describe("CT-1173: array push with complex objects", () => {
           createdAt: 1000,
         });
     } finally {
-      popFrame();
+      popFrame(pushed1);
     }
 
     // Second frame - push Bob (simulating a separate handler call)
@@ -207,7 +207,7 @@ describe("CT-1173: array push with complex objects", () => {
       generatedIdCounter: 0, // NOTE: Counter resets!
       inHandler: true,
     };
-    pushFrame(frame2);
+    const pushed2 = pushFrame(frame2);
     try {
       runtime.getCell<Person[]>(space, "test-separate-pushes", undefined, tx)
         .push({
@@ -225,7 +225,7 @@ describe("CT-1173: array push with complex objects", () => {
           createdAt: 2000,
         });
     } finally {
-      popFrame();
+      popFrame(pushed2);
     }
 
     const items = arrayCell.get();
