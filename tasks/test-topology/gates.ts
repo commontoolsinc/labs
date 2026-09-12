@@ -560,7 +560,9 @@ async function patternCompatSuite(root: string): Promise<Suite> {
           Deno.execPath(),
           "task",
           name,
-          ...(whole ? [] : ["--only", ...keys.map((key) => byKey.get(key)!)]),
+          // One flag per pattern: the task's parser takes a single value
+          // after each `--only`, and refuses the second path of a list.
+          ...(whole ? [] : keys.flatMap((key) => ["--only", byKey.get(key)!])),
         ],
         cwd: context.root,
       }]);
