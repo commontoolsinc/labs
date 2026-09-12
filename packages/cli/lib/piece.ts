@@ -5306,7 +5306,37 @@ export async function sinkCellValue(
   // selected cell before its own read (`packages/piece`), which is what makes
   // the two agree.
   await cell.pull();
-  return settledSink(cell, () => pieces.runtime.idle(), onSettled);
+  return settledSink(
+    await readThrough(cell),
+    () => pieces.runtime.idle(),
+    onSettled,
+  );
+}
+
+/**
+ * Helper for {@link sinkCellValue}, which is the cell a read of the same path
+ * reads its value through: the one behind an `asCell` handle where the slot
+ * holds one, and the slot's own cell everywhere else.
+ *
+ * A path crossing an `asCell` field selects a cell whose value *is* a handle,
+ * and what a read serves is what stands behind it (`PiecePropIo.get`,
+ * `packages/piece`). A subscription on the outer cell fires when the handle
+ * stored at the slot is replaced and at no other time, so a change to the
+ * value behind it would settle nothing the caller could see — the watch and
+ * the read would be about two different cells, which is the one thing they may
+ * not be.
+ *
+ * The stored slot decides rather than the projection, and in that order: an
+ * `asCell` projection materializes even an absent or explicitly undefined slot
+ * as a `Cell`, so asking the projection first would follow a handle standing
+ * for nothing. That is the order the read takes for the same reason.
+ */
+async function readThrough(cell: Cell<unknown>): Promise<Cell<unknown>> {
+  if (cell.getRaw() === undefined) return cell;
+  const held = cell.get();
+  if (!isCell(held)) return cell;
+  await held.pull();
+  return held as Cell<unknown>;
 }
 
 /**

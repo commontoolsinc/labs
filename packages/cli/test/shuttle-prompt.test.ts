@@ -970,6 +970,7 @@ describe("prompt", () => {
       keys: (framed: Promise<void>) => AsyncIterable<Key>,
       sink: () => Promise<() => void> = () => Promise.resolve(() => {}),
       refuseAnnounce = false,
+      refuseUnframe = false,
     ): {
       writes: Promise<Write[]>;
       drawn: Write[];
@@ -980,6 +981,10 @@ describe("prompt", () => {
       const framer = framing(writes);
       const terminal: PromptTerminal = {
         ...framer,
+        unframe: () => {
+          if (refuseUnframe) throw new Error("The screen would not go back.");
+          framer.unframe();
+        },
         keys: {
           [Symbol.asyncIterator]: () =>
             keys(drawn.promise)[Symbol.asyncIterator](),
@@ -1189,6 +1194,30 @@ describe("prompt", () => {
         "The terminal would not take it.",
       );
       expect(cancelled).toBe(1);
+    });
+
+    it("ends the line though giving the screen back is what failed", async () => {
+      // Two things a run owes a terminal on its way out, and they are not one:
+      // the screen goes back, and the line the person was typing is ended.
+      // Sharing a `try` makes the first the gate on the second, so a terminal
+      // that refuses the unframe leaves the run with its last line unfinished
+      // — which is the transcript a reader is left holding.
+      //
+      // Kills: wrapping both calls in one `try`, which records no `finish`.
+
+      const run = driving(
+        opening("watch title", typed("q")),
+        () => Promise.resolve(() => {}),
+        false,
+        true,
+      );
+      // The refusal ends the run, so what it drew on the way out is read off
+      // the array rather than off an answer there is none of.
+      await expect(run.writes).rejects.toThrow("The screen would not go back.");
+      // The last write and not merely one of them: a line ended earlier in the
+      // run writes a `finish` too, so asking whether any was written is the
+      // assertion that passes whether or not the way out wrote its own.
+      expect(run.drawn.at(-1)?.kind).toBe("finish");
     });
 
     it("drops what was typed ahead of a `ctrl-c` that closed the lens", async () => {

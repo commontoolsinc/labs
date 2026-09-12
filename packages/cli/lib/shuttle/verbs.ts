@@ -1658,12 +1658,14 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     run: where,
     arity: { operands: "none" },
     usage: "where",
-    summary: "Writes the whole ambient record: connection and place.",
+    summary:
+      "Writes the whole ambient record: connection, place, and what is watched.",
     detail:
       "Every dimension this process holds prints, one to a line: what it " +
-      "connects\nas, and the two halves of the place `pwd` prints. Nothing " +
-      "here reads, so\na shuttle whose connection will not open still says " +
-      "what it was launched\nas and where it stands.",
+      "connects\nas, the two halves of the place `pwd` prints, and the " +
+      "watches this run\nhas armed, which `watches` numbers. Nothing here " +
+      "reads, so a shuttle whose\nconnection will not open still says what " +
+      "it was launched as, where it\nstands, and what it is watching.",
   }],
   ["wish", {
     run: wish,

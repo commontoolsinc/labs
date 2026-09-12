@@ -83,19 +83,25 @@ describe("lens", () => {
             .toEqual(Array(ROWS).fill(COLUMNS));
         });
 
-        it("returns no more rows than a two-row terminal has", () => {
-          // The frame is drawn onto the whole screen, so a frame taller than
-          // the screen scrolls its own top row away — and the top row is the
-          // one naming the cell. Two rows is the size at which the two edges
-          // are the whole of it, and a transition row is what does not fit.
+        it("fills a two-row terminal exactly", () => {
+          // The frame is drawn onto the whole screen, so its height is the
+          // screen's: one row taller scrolls its own top row away — and that
+          // row is the one naming the cell — while one row shorter leaves
+          // whatever the frame replaced still on screen under it. Two rows is
+          // the size at which the two edges are the whole of it, and the
+          // transition row is what does not fit.
+          //
+          // Exactly rather than at most, because at most is the assertion that
+          // cannot fail in the direction a frame drawn short would fail.
           //
           // Kills: adding the transition row outside the room left for it,
-          // which returns three rows for a screen with two.
+          // which returns three rows for a screen with two; and dropping a row
+          // the screen has room for, which returns one.
 
           const driven = driving("cell @space", 2, COLUMNS);
           driven.lens.showing({ replies: 14 });
           driven.lens.showing({ replies: 15 });
-          expect(last(driven).length).toBeLessThanOrEqual(2);
+          expect(last(driven).length).toBe(2);
         });
 
         it("returns every row at one width on a five-column terminal", () => {
@@ -103,6 +109,13 @@ describe("lens", () => {
           // fitted to the room left after their own framing, and a row that
           // came back wider than the rest would put the right edge in two
           // columns at exactly the width where there is no room to spare.
+          //
+          // Bounded to text a column wide, which is what this drives: a label
+          // whose first character is drawn double-width does not fit the one
+          // column the edge has left at this size, and the edge comes back a
+          // column over. That is a defect of its own rather than a gap here,
+          // and it is tracked outside this change — so read this as the width
+          // holding for single-width text, and not as the width holding.
           //
           // Kills: fitting either edge's text against the full width rather
           // than the width less its framing.

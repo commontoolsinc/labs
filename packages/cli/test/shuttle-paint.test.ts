@@ -294,6 +294,34 @@ describe("paint", () => {
       );
     });
 
+    it("writes a row a terminal would act on as the picture of itself", () => {
+      // A frame row is composed from what a cell holds, which is data a user
+      // program authored and no door of shuttle's has held. Written through,
+      // an escape sequence in one reaches the terminal as an instruction: it
+      // can clear the screen, move the cursor off the row it was given, or
+      // draw a frame of its own over this one. The line written above the
+      // prompt passes the same class through `escapeControlCharacters`
+      // (`above`), and a frame is the same terminal.
+      //
+      // Kills: concatenating rows verbatim, which sends `\x1b[2J` on as a
+      // clear-screen rather than as the glyph naming the escape.
+
+      const drawn = screenOf(["\x1b[2Jgone"]);
+      expect(drawn).not.toContain("\x1b[2J");
+      expect(drawn).toContain("\u241b[2Jgone");
+    });
+
+    it("leaves a row already held to that class alone", () => {
+      // The escape is idempotent, a glyph being no longer a character a
+      // terminal acts on, so a row composed through a renderer that already
+      // held it reaches the screen unchanged rather than doubly escaped.
+      //
+      // Kills: an escape that rewrites its own output.
+
+      expect(screenOf(["plain \u241b[2J text"]))
+        .toContain("plain \u241b[2J text");
+    });
+
     it("turns line wrapping off around the drawing", () => {
       // A row filling the last column carries the cursor onto the next line,
       // and on the last row of the screen that scrolls the frame up by one.

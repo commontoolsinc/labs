@@ -317,6 +317,30 @@ describe("watch", () => {
         .toEqual([{ at: ["a", "b", 1], from: 2, to: 3 }]);
     });
 
+    it("reports a lost key named for an inherited one as lost", () => {
+      // The union of both sides' own keys decides what is walked, but reading
+      // the value back by index reaches the prototype: at a key named for
+      // something `Object.prototype` carries, the side that does not hold it
+      // answers with the inherited member rather than with nothing. A reader
+      // is then told the cell now holds a function, which it does not.
+      //
+      // Kills: reading `after[key]` directly, which reports the transition as
+      // `"x" → <function toString>` instead of as a key that went.
+
+      expect(changesBetween({ toString: "x" }, {}))
+        .toEqual([{ at: ["toString"], from: "x", to: undefined }]);
+    });
+
+    it("reports a gained key named for an inherited one as gained", () => {
+      // The same in the other direction, where the inherited member would be
+      // reported as the value the key used to hold.
+      //
+      // Kills: reading `before[key]` directly.
+
+      expect(changesBetween({}, { toString: "x" }))
+        .toEqual([{ at: ["toString"], from: undefined, to: "x" }]);
+    });
+
     it("reports two distinct byte sequences as one change", () => {
       // A `FabricSpecialObject` keeps its state in private fields and has no
       // enumerable own properties, so a walk that compares by properties reads

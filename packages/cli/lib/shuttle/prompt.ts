@@ -411,15 +411,20 @@ export async function runPrompt(
     // is closed first because that costs no terminal. Nothing is drawn on the
     // way past: the prompt this ended at is the last thing a run has to say.
     lens?.close();
-    try {
-      terminal.unframe();
-      terminal.finish();
-    } catch {
-      // A terminal that will not take this writing is one nothing here could
-      // put back, and a throw raised on the way out would replace whatever
-      // ended the run — which is what a reader needs. What holds the screen
-      // back either way is the restore the terminal's own owner makes on
-      // every way out of a run (`withPromptTerminal`, `terminal.ts`).
+    // Each on its own rather than both under one `try`: giving the screen back
+    // and ending the line are two things a run owes a terminal, and sharing
+    // one would make the first the gate on the second — a terminal that
+    // refuses the unframe would leave the last line unfinished as well.
+    for (const putBack of [() => terminal.unframe(), () => terminal.finish()]) {
+      try {
+        putBack();
+      } catch {
+        // A terminal that will not take this writing is one nothing here could
+        // put back, and a throw raised on the way out would replace whatever
+        // ended the run — which is what a reader needs. What holds the screen
+        // back either way is the restore the terminal's own owner makes on
+        // every way out of a run (`withPromptTerminal`, `terminal.ts`).
+      }
     }
   }
 }

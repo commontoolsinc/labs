@@ -164,12 +164,28 @@ export function takingScreen(): string {
  * terminal's last column exactly would otherwise carry the cursor onto the
  * next line, and on the last row of the screen that scrolls the frame up by
  * one; every row is positioned from the top, so nothing here needs the wrap.
+ *
+ * Every row is held to {@link escapeControlCharacters} on the way out, which
+ * is the treatment {@link above} gives the line it writes and for the same
+ * reason: a frame is composed from what a cell holds, which is data a user
+ * program authored and no door of shuttle's has held. A sequence written
+ * through would reach the terminal as an instruction rather than as text, and
+ * could move the cursor off the row it was given, clear the screen, or draw
+ * over the frame around it. The holding is here, at the terminal itself, so
+ * that no composer of a row can be the one that forgot; a glyph is not a
+ * character a terminal acts on, so a row already held arrives unchanged.
+ *
+ * The positioning and the clear are composed after it, which is what keeps
+ * them the frame's own: they are this function's instructions to the terminal
+ * rather than anything a row said.
  */
 export function screenOf(rows: readonly string[]): string {
   return [
     `${CSI}?7l`,
     ...rows.map((row, index) =>
-      `${term.moveTo(index + 1, 1)}${term.clearLine}${row}`
+      `${term.moveTo(index + 1, 1)}${term.clearLine}${
+        escapeControlCharacters(row)
+      }`
     ),
     `${CSI}?7h`,
   ].join("");

@@ -262,11 +262,26 @@ function walk(
     for (
       const key of new Set([...Object.keys(before), ...Object.keys(after)])
     ) {
-      walk([...at, key], before[key], after[key], found);
+      walk([...at, key], held(before, key), held(after, key), found);
     }
     return;
   }
   found.push({ at, from: before, to: after });
+}
+
+/**
+ * Helper for {@link walk}, which is what `value` holds at `key`, and nothing
+ * where it holds no such key of its own.
+ *
+ * Asked of the value's own keys rather than by indexing it, because the keys
+ * walked are the union of both sides' and indexing reaches the prototype: at a
+ * key named for something `Object.prototype` carries — `toString` among them —
+ * the side without it would answer with the inherited member, and a key that
+ * went would be reported as a cell that now holds a function. What a cell
+ * reads at a key it does not hold is nothing, and that is what this is.
+ */
+function held(value: ReadonlyRecord, key: string): unknown {
+  return Object.hasOwn(value, key) ? value[key] : undefined;
 }
 
 /**

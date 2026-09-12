@@ -75,6 +75,9 @@ function driving(): { pieces: PiecesController; driven: Driven } {
       return cell;
     },
     get: () => held,
+    // What the slot stores, which is what decides whether the subscription
+    // reads through a handle. A case that holds a plain value stores one.
+    getRaw: () => held,
     pull: () => {
       calls.push("pull");
       return Promise.resolve(held);
@@ -304,6 +307,25 @@ describe("sinkCellValue()", () => {
       pulled: driven.calls.indexOf("pull"),
       subscribed: driven.calls.indexOf("sink"),
     }).toEqual({ pulled: 2, subscribed: 3 });
+  });
+
+  it("subscribes to the slot itself where it holds a plain value", async () => {
+    // The other side of reading through an `asCell` handle. A path that
+    // crosses one selects a cell whose value is the handle, and the
+    // subscription belongs behind it; a path that does not selects the cell
+    // that holds the value, and following anything further would subscribe to
+    // something no read of the path reaches. One pull is what says which
+    // happened: reading through takes a second.
+    //
+    // Kills: treating whatever the slot answers with as a handle, which pulls
+    // twice for a cell holding a string.
+
+    const { pieces, driven } = driving();
+    await sinkCellValue(config, ["title"], () => {}, {}, {
+      loadPieces: () => Promise.resolve(pieces),
+      ...RESOLVES,
+    });
+    expect(driven.calls.filter((call) => call === "pull").length).toBe(1);
   });
 
   it("starts nothing, the start being the caller's own act", async () => {
