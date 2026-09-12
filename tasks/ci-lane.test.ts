@@ -32,6 +32,7 @@ import {
   spoolRecords,
   unitsForRun,
 } from "./ci-lane.ts";
+import { MEASURED_BATCH_SUFFIX } from "./lane-measurement.ts";
 import { census } from "./test-selection/census.ts";
 import type { CommandContext, Suite } from "./test-topology/suite.ts";
 import {
@@ -1578,6 +1579,45 @@ describe("what a lane records about itself", () => {
     await Deno.remove(spool, { recursive: true });
   });
 
+  it("names what a measured batch cost apart from what an unmeasured one did", async () => {
+    // Instrumenting a run costs it time, and how much is a property of
+    // the suite rather than a constant. One correction fitted over both
+    // would charge every unmeasured run part of what an instrumented one
+    // costs, and charge a measured one less than it takes.
+    const spooledNames = async (coverage?: { dir: string }) => {
+      const workDir = await Deno.makeTempDir({ prefix: "lane-measured-" });
+      const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+      try {
+        await runBatch(
+          {
+            suite: suite({ id: "workspace-unit", units: ["one"] }),
+            units: [],
+            runs: new Map(),
+          },
+          lane,
+          workDir,
+          spool,
+          {},
+          coverage,
+        );
+        const written: string[] = [];
+        for await (const entry of Deno.readDir(spool)) {
+          if (entry.isFile) {
+            written.push(await Deno.readTextFile(`${spool}/${entry.name}`));
+          }
+        }
+        return written.join("");
+      } finally {
+        await Deno.remove(workDir, { recursive: true });
+        await Deno.remove(spool, { recursive: true });
+      }
+    };
+    expect(await spooledNames()).toContain('ci-lane batch workspace-unit"');
+    expect(await spooledNames({ dir: "/coverage" })).toContain(
+      `ci-lane batch workspace-unit${MEASURED_BATCH_SUFFIX}`,
+    );
+  });
+
   /**
    * A batch whose one invocation spools exactly this record, run against
    * a suite declaring the surface and variant given.
@@ -1849,6 +1889,7 @@ describe("reading a batch's records against what it was asked to run", () => {
       excused: [],
       silent: [],
       unaccounted: [],
+      failedUnits: [],
     });
   });
 
@@ -1901,6 +1942,20 @@ describe("reading a batch's records against what it was asked to run", () => {
       new Set(),
     );
     expect(found.silent).toEqual([UNIT]);
+  });
+
+  it("names the unit a failure was seen in, excused or not", () => {
+    // A measured set holding that unit measured its member through a
+    // failing test, so its number is short by whatever that test would
+    // have reached.
+    const excused = testIdentityKey({ k: "unit", s: "bakery", n: "flaky" });
+    const found = accountFor(
+      batch(),
+      asked("flaky"),
+      [record("flaky", "fail")],
+      new Set([excused]),
+    );
+    expect(found.failedUnits).toEqual([UNIT]);
   });
 
   it("names an identity no record accounts for", () => {

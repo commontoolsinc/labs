@@ -18,6 +18,7 @@
  *   deno run -A tasks/coverage-report.ts --reports coverage-artifacts
  */
 
+import * as path from "@std/path";
 import { walk } from "@std/fs/walk";
 import {
   measuredSetCoverageMetric,
@@ -36,6 +37,7 @@ import {
   measuredSetDirectory,
   measuredSets,
 } from "./test-selection/coverage.ts";
+import { COVERAGE_FAILURE_MARKER } from "./ci-lane.ts";
 
 /** What the command line asked for. */
 export interface ReportOptions {
@@ -150,17 +152,26 @@ export async function repositoryFigures(
  * contains, so a run that lost a set's report leaves the previous run's
  * figure standing, where a zero-coverage figure would tell every later
  * pull request that the member's whole source had gone uncovered.
+ *
+ * So is a set a lane marked as measured through a failing test. The run
+ * stayed green because a flake rate excused that failure, and the number
+ * is short by whatever the failing test would have reached; publishing it
+ * would hold every later pull request to a bar this run did not clear
+ * either.
  */
 export async function measuredSetFigures(
   options: ReportOptions,
 ): Promise<Figure[]> {
   const suites = await loadTopology(options.root);
-  const members = await readWorkspaceMembers(options.root);
+  const members = (await readWorkspaceMembers(
+    path.join(options.root, "deno.jsonc"),
+  )).map((member) => member.replace(/^\.\//, ""));
   const reports = await collectSetReports(options.reports);
   const figures: Figure[] = [];
   for (const ref of measuredSets(suites)) {
     const found = reports.get(measuredSetDirectory(ref));
     if (found === undefined || found.length === 0) continue;
+    if (await measuredThroughAFailure(found)) continue;
     const lcov = (await Promise.all(found.map((at) => Deno.readTextFile(at))))
       .join("\n");
     const debt = await collectMeasuredSetDebt({
@@ -179,6 +190,26 @@ export async function measuredSetFigures(
     });
   }
   return figures;
+}
+
+/**
+ * Whether any lane marked this set as measured through a failing test.
+ * The marker sits beside the report in the set's own directory, which is
+ * why a lane gives each set a directory rather than a file.
+ */
+async function measuredThroughAFailure(
+  reports: readonly string[],
+): Promise<boolean> {
+  for (const report of reports) {
+    const at = path.join(path.dirname(report), COVERAGE_FAILURE_MARKER);
+    try {
+      await Deno.stat(at);
+      return true;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+  }
+  return false;
 }
 
 /** Says what this run measured, in the job summary. */

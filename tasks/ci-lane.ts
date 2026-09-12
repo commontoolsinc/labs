@@ -60,6 +60,7 @@ import {
   measuredMembersOf,
   measuredSetDirectory,
   measuredSetName,
+  measuredSets,
 } from "./test-selection/coverage.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
@@ -67,6 +68,7 @@ import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
+  MEASURED_BATCH_SUFFIX,
 } from "./lane-measurement.ts";
 
 /** What the lane was asked to do. */
@@ -484,6 +486,49 @@ export function batchCoverage(
  * from the declarations, so an unscored report costs a conversion and
  * nothing else.
  */
+/**
+ * What a lane writes beside a set's report when the units it measured
+ * through held a failure the run did not fail for.
+ *
+ * Coverage measured through a failing unit is short by whatever that
+ * unit would have reached, and a run excusing a flaky failure stays
+ * green, so nothing else downstream would know. The report still merges
+ * into the repository-wide figure, which is a trend; what this stops is
+ * the set's own number becoming the baseline every later pull request is
+ * held to.
+ */
+export const COVERAGE_FAILURE_MARKER = "measured-through-a-failure.txt";
+
+/**
+ * Marks each measured set whose units a lane saw fail, beside the report
+ * it wrote for that set.
+ */
+export async function markMeasuredFailures(
+  options: LaneOptions,
+  suites: readonly Suite[],
+  failed: ReadonlySet<string>,
+): Promise<string[]> {
+  if (failed.size === 0) return [];
+  const root = coverageRoot(options);
+  const marked: string[] = [];
+  for (const ref of measuredSets(suites)) {
+    const hit = ref.set.units.filter((unit) =>
+      failed.has(`${ref.suite}\t${unit}`)
+    );
+    if (hit.length === 0) continue;
+    const at = path.join(
+      root,
+      COVERAGE_REPORT_DIR,
+      measuredSetDirectory(ref),
+      COVERAGE_FAILURE_MARKER,
+    );
+    await Deno.mkdir(path.dirname(at), { recursive: true });
+    await Deno.writeTextFile(at, `${hit.sort().join("\n")}\n`);
+    marked.push(measuredSetName(ref));
+  }
+  return marked.sort();
+}
+
 export async function convertCoverage(
   options: LaneOptions,
 ): Promise<{ ok: boolean; reports: string[] }> {
@@ -601,7 +646,8 @@ export async function runBatch(
     spoolRecords(spool, [
       ...records,
       timingRecord(
-        `${LANE_MEASUREMENT_PREFIX}batch ${batch.suite.id}`,
+        `${LANE_MEASUREMENT_PREFIX}batch ${batch.suite.id}` +
+          (coverage === undefined ? "" : MEASURED_BATCH_SUFFIX),
         seconds,
         ok,
       ),
@@ -633,6 +679,13 @@ export interface Accounting {
    * while satisfying any weaker test.
    */
   unaccounted: string[];
+
+  /**
+   * The units a failure was seen in, whether or not it was excused. A
+   * measured set holding one of these measured its member through a
+   * failing test.
+   */
+  failedUnits: string[];
 }
 
 /**
@@ -660,12 +713,14 @@ export function accountFor(
   const excused: string[] = [];
   const heard = new Set<string>();
   const heardUnits = new Set<string>();
+  const failedUnits = new Set<string>();
   for (const record of records) {
     const location = batch.suite.locate(record);
     if (location?.level === "unit") heardUnits.add(location.unit);
     const key = testIdentityKey(record.test);
     heard.add(key);
     if (record.outcome !== "fail") continue;
+    if (location?.level === "unit") failedUnits.add(location.unit);
     (nonGating.has(key) ? excused : gating).push(key);
   }
   const unaccounted = asked
@@ -684,6 +739,7 @@ export function accountFor(
     excused: [...new Set(excused)].sort(),
     silent: silent.sort(),
     unaccounted: [...new Set(unaccounted)].sort(),
+    failedUnits: [...failedUnits].sort(),
   };
 }
 
@@ -1122,6 +1178,10 @@ export async function runLane(
   }
   let ok = true;
   const conflicts: TestRecord[] = [];
+  // Units a failure was seen in, as `suite\tunit` keys. A set holding one
+  // of these measured its member through a failing test, so its number is
+  // short by whatever that test would have reached.
+  const failedUnits = new Set<string>();
   // What a failure here is allowed not to fail the run for. A pull
   // request holds these back rather than running them, so the set is
   // empty there and the whole of this is the full run's.
@@ -1165,6 +1225,9 @@ export async function runLane(
       if (accounting.silent.length > 0) ok = false;
       if (accounting.gating.length > 0) ok = false;
       if (!excusing && accounting.excused.length > 0) ok = false;
+      for (const unit of accounting.failedUnits) {
+        failedUnits.add(`${batch.suite.id}\t${unit}`);
+      }
       // A batch that failed with no failing record of its own failed
       // somewhere the records cannot see — a runner that could not
       // start, a command that died before reporting.
@@ -1191,7 +1254,8 @@ export async function runLane(
   // for a report that was never complete.
   const converted = await convertCoverage(options);
   if (!converted.ok) ok = false;
-  describeCoverage(seen.coverage, converted.reports);
+  const marked = await markMeasuredFailures(options, suites, failedUnits);
+  describeCoverage(seen.coverage, converted.reports, marked);
   return ok;
 }
 
@@ -1203,8 +1267,13 @@ export async function runLane(
 export function describeCoverage(
   gate: CoverageGateSelection,
   reports: readonly string[],
+  marked: readonly string[] = [],
 ): void {
-  if (gate.reached.length === 0 && reports.length === 0) return;
+  if (
+    gate.reached.length === 0 && reports.length === 0 && marked.length === 0
+  ) {
+    return;
+  }
   const lines = ["## Coverage", ""];
   if (gate.off !== undefined) {
     lines.push(`No measured set is forced: ${gate.off}.`, "");
@@ -1228,6 +1297,14 @@ export function describeCoverage(
     for (const report of reports) {
       lines.push(`- ${named.get(report) ?? report}`);
     }
+  }
+  if (marked.length > 0) {
+    lines.push(
+      "",
+      "Measured through a failing test, so no baseline is published:",
+      "",
+    );
+    for (const set of marked) lines.push(`- ${set}`);
   }
   say(lines);
 }

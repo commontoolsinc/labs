@@ -574,6 +574,21 @@ describe("score", () => {
       expect(Object.keys(state.runsByDay)).toEqual(["2026-08-20"]);
       expect(Object.keys(state.costByDay)).toEqual([]);
     });
+
+    it("drops a failure on the default branch nothing has judged", () => {
+      // A failure waits here for a later run to pass the test, and a
+      // test the branch does not go red for is one no such run has to
+      // arrive for. Nothing would bound this otherwise.
+      const state = emptyState();
+      state.pendingMain = [
+        { day: "2026-01-01", commit: "old", source: "main" },
+        { day: "2026-08-19", commit: "new", source: "main" },
+      ];
+      trimWindows(state, "2026-08-20");
+      expect(state.pendingMain.map((pending) => pending.commit)).toEqual([
+        "new",
+      ]);
+    });
   });
 
   describe("days", () => {

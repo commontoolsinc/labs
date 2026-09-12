@@ -22,6 +22,17 @@ export const LANE_MEASUREMENT_SURFACE = { kind: "gate", scope: "ci" };
 /** What the lane's own measurements are named for. */
 export const LANE_MEASUREMENT_PREFIX = "ci-lane ";
 
+/**
+ * How a batch run with coverage on is named apart from one run without.
+ *
+ * Instrumenting a run costs it time, and how much is a property of the
+ * suite rather than a constant. The two are separate measurements for
+ * that reason: fitting one correction over both would charge every
+ * unmeasured run part of what an instrumented one costs, and charge a
+ * measured one less than it takes.
+ */
+export const MEASURED_BATCH_SUFFIX = " with coverage";
+
 /** Whether an identity is the lane measuring itself rather than a test. */
 export function isLaneMeasurement(test: TestIdentity): boolean {
   return test.k === LANE_MEASUREMENT_SURFACE.kind &&

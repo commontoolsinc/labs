@@ -5,9 +5,11 @@ import {
   describe as summarize,
   type Figure,
   joinReports,
+  measuredSetFigures,
   parseReportArgs,
 } from "./coverage-report.ts";
 import { COVERAGE_METRIC_PREFIX } from "./coverage-metrics.ts";
+import { COVERAGE_FAILURE_MARKER } from "./ci-lane.ts";
 
 /** A directory holding one LCOV report at `at`, relative to its root. */
 async function reportsIn(
@@ -60,6 +62,34 @@ describe("what the full run publishes about coverage", () => {
     // A run whose lanes reported nothing scores an empty report rather
     // than raising, which charges every tracked line as uncovered.
     expect(await joinReports("/nonexistent-coverage-artifacts")).toBe("");
+  });
+
+  it("publishes no baseline for a set measured through a failure", async () => {
+    // A lane that excused a flaky failure stayed green, and the number
+    // is short by whatever that failing test would have reached.
+    // Publishing it would hold every later pull request to a bar this
+    // run did not clear either.
+    const root = await reportsIn({
+      "lane-1/lcov/sets/workspace-unit/packages_memory/coverage.lcov":
+        "SF:/a.ts\nend_of_record\n",
+      [`lane-1/lcov/sets/workspace-unit/packages_memory/${COVERAGE_FAILURE_MARKER}`]:
+        "packages/memory/test/one.test.ts\n",
+    });
+    try {
+      const figures = await measuredSetFigures({
+        reports: root,
+        out: "/dev/null",
+        runId: 1,
+        sha: "abc",
+        createdAt: "2026-09-01T00:00:00Z",
+        root: Deno.cwd(),
+      });
+      expect(
+        figures.some((figure) => figure.name.includes("packages/memory")),
+      ).toBe(false);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
   });
 
   it("names the workspace figure in the summary", () => {

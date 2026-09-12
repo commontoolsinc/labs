@@ -3945,11 +3945,11 @@ exercised on the branch on its own.
       line already runs past the exclusion rate. `fullLaneCount`'s work
       sum counts the extra runs, which it does not today, so the floor its
       search starts from is not an underestimate.
-- [ ] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
+- [x] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
       waits there until a later run judges it, and an excluded test that
       stays broken no longer turns `main` red, so nothing bounds what
       accumulates.
-- [ ] A measured set whose lane held a non-gating failure is reported
+- [x] A measured set whose lane held a non-gating failure is reported
       rather than having a baseline published from it, the same way the
       gate already reports a run with a failing test.
 - [ ] `explain <identity>` gains the runs it is given and whether it is
@@ -3989,7 +3989,7 @@ exercised on the branch on its own.
       now fit the run's budget, and the measured sets past
       `LOCAL_COVERAGE_MAX_SECONDS`. Both read the fitted costs of the
       lanes, which have none until the lanes run.
-- [ ] A measured batch records its duration under a surface of its own, so
+- [x] A measured batch records its duration under a surface of its own, so
       that what a unit costs with coverage on is fitted separately from
       what it costs without. Until then the packer charges a measured
       unit what an unmeasured run of it costs, which is an underestimate
