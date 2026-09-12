@@ -98,29 +98,33 @@ recovers fully — 431 ms, then eager, then 400 ms. `isPrefix` no longer appears
 in the profile's top ten at all; what is left is flat, with no frame above 8%
 of a healthy round.
 
-## Stage 3 — Do not run the pass at all when there is nothing to find
+## Stage 3 — Do not run the pass at all when there is nothing to find — **part landed**
 
-**Where.** The same chain, one level up.
+**What landed.** `coveredByTrace` is computed on demand rather than for every
+read. Only a link-resolution probe needs it inside the walk, and of the two
+consumers only `deriveFlowJoin` reads it off the observation; the hot caller,
+`flowLabelWorkExists`, never does. An interleaved A/B put it about a tenth
+ahead in both pairs, with counted work per click at 766 logged operations
+against 798.
 
-**What is wrong.** The bench piece declares **no CFC labels**: the stores were
-linked with an empty contract and no lens was applied. The entire
-`flowLabelWorkExists` pass runs on every reactive action commit to conclude
-that there is no flow work to do. That is the largest available saving and the
-one most likely to be structural rather than local.
+**Where that leaves the pass.** `flowLabelWorkExists` is now **7.1% of wall**
+(232 ms of a four-click round), against 13.4 seconds before stage 2. It is no
+longer the place to look.
 
-**Investigate before designing.** One hypothesis was tested and failed:
-`probeFlowLabelWork` memoizes a negative verdict against an activity epoch that
-every journaled read advances, so the memo looked like it could never hit.
-Forcing the verdict to hold for the whole transaction changed nothing — 40-row
-clicks stayed inside the run-to-run spread. So either these transactions are
-flow-relevant and no negative verdict is ever memoized, or the probe is not
-called often enough per commit for memoization to matter. Establish which
-before touching the memo: the `flowLabelProbesComputed` / `flowLabelProbeMemoHits`
-counters already exist on `getCfcStats()` and answer it in one run.
+**What is still unexplained, and is the interesting number.** The counters say
+~11 probes evaluated and ~11 memoized per click, against **2 CFC-relevant
+transactions in an entire session**. So eleven full evaluations per click
+conclude, every time, that there is no flow work to do.
 
-If the transactions are genuinely flow-relevant with no labels declared, the
-question becomes what makes them so, and that is a CFC design question rather
-than a performance one. Raise it as such rather than optimizing around it.
+The memo that would fix that is keyed on an activity epoch every journaled read
+advances. Narrowing it is not simply "invalidate on a new document": the
+verdict depends on the read's CLASS as well as its document — a document
+holding only link-origin entries is relevant to a probe read and not to a value
+read — so two reads of one document can disagree. The invalidation key would
+have to be the (document, read shape) pair, which the transaction does not
+compute at journal time. That is a CFC design decision rather than a
+performance edit, and it wants the owner of
+`docs/specs/cfc-commit-preparation.md` rather than a measurement.
 
 ## Stage 4 — Two write refusals that stop a host driving the pattern
 
@@ -211,18 +215,52 @@ of whether it is understood. Add it under the lane
 paced band rather than an absolute: what regresses is the gap between a paced
 click and an eager one.
 
+## Stage 7 — The result pull deep-traverses the whole result
+
+The largest single item left, found after stage 2 flattened the profile.
+
+`deepTraverse` accounts for **33% of a click's wall time** — 1084 ms of a
+3289 ms four-click round — reached from an action named `pull:<uri>`, with its
+cost in what it touches rather than in itself (`createViewProxy`,
+`resolveLinkTracingDereferences`, `getOwnPropertyDescriptor`).
+
+`Cell.pull()` deep-traverses its value when the cell's link carries no schema
+or a true schema, because without one there is nothing to tell it which nested
+values to read as dependencies. The runner pulls the result cell after every
+commit (`runner.ts`, `#pullCellOnceInPullMode`, from a commit callback), and
+builds that cell with `getCellFromLink(resultLink)` — so if the normalized
+result link carries no schema, every commit re-walks the entire result. For
+this pattern that is 37 threads of pre-rendered detail, on an interaction that
+changes one text node.
+
+**Ruled out already:** the render root. `cf-render` renders the `full` kind
+with a bare cast rather than `rendererVDOMSchema`, which looked like the same
+fault; applying the schema there changed neither the counters (766 logged
+operations either way) nor `deepTraverse`'s share (3.3% self against 3.1%).
+That change was reverted — it touches every pattern's render path and bought
+nothing measurable. The sink that traverses is the result pull, not the render.
+
+**What to establish first**, the way stage 1 was: whether the result link
+genuinely arrives schemaless, and if so why — the pattern's result schema
+exists, so either normalization drops it or this cell is built from a link that
+never had it. Only then is there a fix to design, and the choice of what schema
+a result pull should carry is a runtime decision, not a local edit.
+
 ## Order, and why
 
 1. ~~**4b's error rendering**~~ — landed. A few lines, and it unblinded the rest.
 2. ~~**Stage 1**~~ — measured first, and the measurement said no. Rescoped.
 3. ~~**Stage 2**~~ — landed, and it carried the whole symptom: 3.8× on a paced
    click, and the persistent degradation gone.
-4. **Stage 4a** — small, and it is a correctness bug.
-5. **Stage 3** — now the largest remaining item, and the least understood.
-   ~11 full probe evaluations per click against 2 CFC-relevant transactions in
-   a whole session is the number to explain.
-6. **Stages 5 and 6** — the writing down. Stage 6's rule is the highest-value
-   item in this plan per hour spent, and the one that will get dropped first.
+4. ~~**Stage 3's local half**~~ — landed; the pass is down to 7.1% of wall.
+5. ~~**Stage 6**~~ — landed: a benchmark that guards the curve's shape, and the
+   authoring rule in `pattern-dev` and `pattern-critic`.
+6. **Stage 7** — now the largest remaining item at 33% of a click, and the one
+   with a measurement to take before a fix can be designed.
+7. **Stage 4a** — small, and it is a correctness bug. The root cause is known;
+   what is missing is a harness that reproduces it.
+8. **Stage 3's structural half** — a CFC design decision, not a measurement.
+9. **Stage 5** — the writing down, in loom's own performance notes.
 
 After stage 2 the profile has no hotspot left. The next tier, by share of a
 degraded round, is `sortAndCompactPaths` (13.7%), `#findNode` (9.7%),
