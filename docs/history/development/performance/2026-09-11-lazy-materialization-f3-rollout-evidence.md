@@ -124,9 +124,10 @@ The five failing tests, with the assertion each fails on:
   produces the refusal the case waits on.
 - `unresolved-input-lift.test.ts`, "a hop-target dead-end disposes the run":
   under the eager posture the body ran with `undefined` in a slot its schema
-  promised a value for and threw `TypeError: Cannot read properties of
-  undefined (reading 'split')`. That is the crash the unresolved-input
-  refusal exists to prevent, and the eager arm still carries it.
+  promised a value for and threw
+  `TypeError: Cannot read properties of undefined (reading 'split')`. That is
+  the crash the unresolved-input refusal exists to prevent, and the eager arm
+  still carries it.
 - `experimental-options.test.ts`, two steps, "respects explicitly-set flags
   (all true)" and "merges provided flags with defaults": both assert the
   built-in default is `true`, which the method of this run changed. An
