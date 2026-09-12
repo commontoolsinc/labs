@@ -10,6 +10,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Interaction cost in the unified inbox](person-inbox-interaction-cost.md)
+  sequences the runtime work behind a thread open that costs 124 ms paced and
+  ~1 s once a session has been clicked through faster than it settles:
+  deduplicating the dereference-trace set, indexing the per-read prefix scan
+  that consults it, the flow-relevance pass that runs with no labels declared,
+  two write refusals that stop a host setting an input at all, and the
+  authoring rule that a display cap bounds the render and not the transaction.
 - [Pattern computation cost: implementation sequence](pattern-computation-cost-implementation.md)
   executes the design in PR #7155 with checkable measurement, collection
   operator, multi-replica correctness, and authoring-guidance stages.
