@@ -1467,9 +1467,9 @@ type SchedulerRehydrationSubscriptionOptions = {
   };
 };
 
-// Whether resumed nodes should hold their initial run until the space syncs,
-// from either the rehydration path or the flag-off await-sync path. Used to
-// propagate the intent to cross-space child runs and container-minting builtins.
+// Whether resumed nodes should hold their initial run until the space syncs.
+// Used to propagate the intent to cross-space child runs and container-minting
+// builtins.
 function defersInitialRunUntilSynced(
   options: SchedulerRehydrationSubscriptionOptions,
 ): boolean {
