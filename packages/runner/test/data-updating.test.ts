@@ -1137,8 +1137,10 @@ describe("data-updating", () => {
 
   describe("array-element anchoring in normalizeAndDiff", () => {
     it("stores array-element objects inline when no anchor id source is supplied", () => {
-      // `diffAndUpdate` without an anchor id source is the frameless write:
-      // objects in arrays stay inline rather than becoming documents.
+      // A direct `diffAndUpdate` call with no id source: objects in arrays
+      // stay inline rather than becoming documents. The `Cell` write paths
+      // always pass one, so this shape is reached by a caller that builds the
+      // walk itself.
       const testCell = runtime.getCell<unknown>(
         space,
         "no anchor source stores inline",
