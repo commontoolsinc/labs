@@ -183,6 +183,25 @@ type Selection = PerSession<{
 }>;
 ```
 
+### Interaction Cost Review
+
+What an interaction costs is set by how many rows the queries returned, not by
+how many the pattern renders. A display cap is a render bound and nothing else,
+so a `slice(0, LIMIT)` beside a statement with a wide `LIMIT` is the shape to
+flag: the pane pays for every row the statement returned, whether or not it
+shows them. Measured on the unified inbox: one person with 38 rows on screen
+opened a thread in 320ms, five people with 6 rows on screen took 1.4-3.5s.
+
+| Violation                                                                          | Fix                                                                                        |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| a render-side cap (`slice`, `take`, a `limit` prop) presented as the bound on cost | Bound the statement — a narrower `LIMIT` or predicate — and keep the render cap for layout |
+| a widened statement `LIMIT` added to "show more" without a paging story            | Page the query rather than raising its ceiling                                             |
+| a control that can fire again before the previous change settles                   | Disable or debounce it while the graph converges                                           |
+
+`docs/history/development/performance/2026-09-11-person-inbox-click-cost.md`
+carries the measurements; `skills/perf-investigation/SKILL.md` is the route to
+take when a pattern is actually slow rather than merely shaped this way.
+
 ### Visual Review Reminder
 
 When UI is important to the pattern, also look for:
