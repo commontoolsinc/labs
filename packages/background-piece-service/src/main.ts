@@ -1,3 +1,10 @@
+/**
+ * Entry point of the service binary: reads the environment, builds the runtime
+ * and the service, wires shutdown to `SIGINT` and `SIGTERM`, and starts it.
+ * Everything the entry point reaches outside itself is injectable, so a test
+ * can drive it without a process, a network, or a signal.
+ */
+
 import { parseArgs } from "@std/cli/parse-args";
 
 import type { Identity } from "@commonfabric/identity";
@@ -15,23 +22,49 @@ import { getTracer, initOpenTelemetry, shutdownOpenTelemetry } from "./otel.ts";
 import { BackgroundPieceService } from "./service.ts";
 import { getIdentity } from "./utils.ts";
 
-// 10 minute timeout
+/**
+ * How long a worker request may run before it fails, absent a `--timeout`
+ * argument: ten minutes.
+ */
 export const DEFAULT_WORKER_TIMEOUT_MS = 10 * 60000;
 
+/**
+ * The part of a `BackgroundPieceService` the entry point drives, so a test can
+ * stand one in.
+ */
 type ServiceLike = Pick<BackgroundPieceService, "initialize" | "stop">;
 
+/** Everything the entry point reaches outside itself, each one replaceable. */
 export interface MainDependencies {
+  /** The parsed environment. */
   env: EnvVars;
+
+  /** Derives the identity the service runs as. */
   getIdentity: typeof getIdentity;
+
+  /** Constructs the runtime the service reads the registry through. */
   createRuntime: (env: EnvVars, identity: Identity) => Runtime;
+
+  /** Constructs the service. */
   createService: (
     options: ConstructorParameters<typeof BackgroundPieceService>[0],
   ) => ServiceLike;
+
+  /** Registers a handler for a process signal. */
   addSignalListener: typeof Deno.addSignalListener;
+
+  /** Exits the process. */
   exit: typeof Deno.exit;
+
+  /** Writes a line of startup output. */
   log: typeof console.log;
 }
 
+/**
+ * Returns the worker timeout, in milliseconds, that the `--timeout` argument
+ * in `args` names, or the default when the argument is absent or does not
+ * start with an integer.
+ */
 export function parseWorkerTimeout(args: string[]): number {
   const { timeout } = parseArgs(args, {
     string: [
@@ -48,16 +81,24 @@ export function parseWorkerTimeout(args: string[]): number {
   return DEFAULT_WORKER_TIMEOUT_MS;
 }
 
+/**
+ * Constructs the service's runtime: a production-server runtime talking to
+ * the toolshed `env` names, running as `identity`. The experimental flags are
+ * read from the environment through the runner's own mapping; the service
+ * forwards this runtime's resolved flags to every worker it starts.
+ */
 export function createRuntime(
   env: EnvVars,
   identity: Identity,
-  // Injectable for tests, mirroring loadEnv's `source`. The EXPERIMENTAL_*
-  // flags are read through the canonical runner mapping rather than declared
-  // in EnvVars (CT-1814), so they are read here, not in loadEnv.
+  /**
+   * Reads one environment variable; injectable for tests, like `loadEnv()`'s
+   * `source`. The `EXPERIMENTAL_*` flags are read here rather than in
+   * `loadEnv()`, since `EnvVars` does not declare them.
+   */
   readEnv: EnvReader = (key) => Deno.env.get(key),
 ): Runtime {
-  // Shared first-party posture (CT-1814). This runtime's experimental flags
-  // are the single source the service forwards to its workers (service.ts).
+  // Shared first-party posture. This runtime's experimental flags are the
+  // single source the service forwards to its workers (service.ts).
   return new Runtime(runtimePresets.productionServer({
     apiUrl: new URL(env.API_URL),
     storageManager: StorageManager.open({
@@ -68,6 +109,11 @@ export function createRuntime(
   }));
 }
 
+/**
+ * Returns the signal handler that stops `service`, flushes telemetry, and
+ * exits the process through `exit`, exiting even when the stop or the flush
+ * fails.
+ */
 export function shutdown(
   service: Pick<BackgroundPieceService, "stop">,
   exit: typeof Deno.exit = Deno.exit,
@@ -88,6 +134,15 @@ export function shutdown(
       });
 }
 
+/**
+ * Starts the service: initializes telemetry, derives the identity, builds the
+ * runtime and the service, registers the shutdown handler for `SIGINT` and
+ * `SIGTERM`, and initializes the service under a startup span. Returns the
+ * running service.
+ *
+ * @throws Whatever `getIdentity()` throws, and whatever the service's
+ *   `initialize()` throws, the latter after recording it on the startup span.
+ */
 export async function startBackgroundPieceService(
   args: string[] = Deno.args,
   dependencies: MainDependencies = {
@@ -113,7 +168,7 @@ export async function startBackgroundPieceService(
   const runtime = dependencies.createRuntime(dependencies.env, identity);
   // The server-execution v2 posture this service RESOLVED (the
   // productionServer preset: an explicit EXPERIMENTAL_SERVER_EXECUTION,
-  // else the first-party default — ON since the Phase 7 flip). Logged at
+  // else the first-party default). Logged at
   // startup so the deployed-topology posture gate, and an operator reading
   // service logs, can verify the arm the binary actually runs — the role
   // /api/meta's `experimental` plays for toolshed; this binary has no HTTP
@@ -163,6 +218,10 @@ export async function startBackgroundPieceService(
   return service;
 }
 
+/**
+ * Runs `start()` when this module is the program's main module, which is how
+ * the binary starts; a test passes `isMain` explicitly.
+ */
 export async function runIfMain(
   isMain = import.meta.main,
   start: () => Promise<unknown> = startBackgroundPieceService,

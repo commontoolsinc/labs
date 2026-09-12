@@ -970,7 +970,7 @@ describe("WorkerController", () => {
         toolshedUrl: "http://localhost:8000",
         identity: await Identity.generate({ implementation: "noble" }),
       });
-      await controller.initializeResolve;
+      await controller.ready;
       assertEquals(controller.isReady(), true);
 
       const entry = new FakeEntryCell(pieceEntry());
@@ -994,7 +994,7 @@ describe("WorkerController", () => {
         toolshedUrl: "http://localhost:8000",
         identity: await Identity.generate({ implementation: "noble" }),
       });
-      await errorController.initializeResolve;
+      await errorController.ready;
       let errorSeen = false;
       errorController.addEventListener("error", (event) => {
         assert(event instanceof WorkerControllerErrorEvent);
@@ -1013,7 +1013,7 @@ describe("WorkerController", () => {
         identity: await Identity.generate({ implementation: "noble" }),
         timeoutMs: 1,
       });
-      await controller.initializeResolve;
+      await controller.ready;
       await assertRejects(
         () =>
           (controller as never as {
@@ -1095,7 +1095,7 @@ describe("WorkerController", () => {
         identity: await Identity.generate({ implementation: "noble" }),
         timeoutMs: 1,
       });
-      await controller.initializeResolve;
+      await controller.ready;
       const worker = MockWorker.instances.at(-1)!;
       worker.respond = false;
 
@@ -1118,7 +1118,7 @@ describe("WorkerController", () => {
         toolshedUrl: "http://localhost:8000",
         identity: await Identity.generate({ implementation: "noble" }),
       });
-      await controller.initializeResolve;
+      await controller.ready;
       const worker = MockWorker.instances.at(-1)!;
       worker.respond = false;
 
