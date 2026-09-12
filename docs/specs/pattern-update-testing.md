@@ -483,7 +483,7 @@ specification:
   load failures — it has no eyes on them — so a path that *depends* on such a
   load succeeding is outside what a green run asserts. Two consequences worth
   naming: the replay runtime opens no piece, so nothing follows an origin
-  during it (CFC enforcement stays at its `enforce-explicit` default), and the
+  during it (CFC enforcement stays at its `enforce-strict` default), and the
   heal above is the parent re-creating children, not the production
   roll-forward repair — that path has its own assertion in
   `packages/runner/test/pattern-pointer-unloadable-swap.test.ts`;

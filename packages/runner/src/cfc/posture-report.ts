@@ -299,14 +299,14 @@ export interface ResolvedCfcDials {
  * carries, which is a different question with a different answer.
  */
 export const RUNTIME_CFC_DIAL_DEFAULTS: ResolvedCfcDials = Object.freeze({
-  cfcEnforcementMode: "enforce-explicit",
-  cfcFlowLabels: "off",
-  cfcWriteFloor: "off",
-  cfcTriggerReadGating: false,
+  cfcEnforcementMode: "enforce-strict",
+  cfcFlowLabels: "persist",
+  cfcWriteFloor: "enforce",
+  cfcTriggerReadGating: true,
   cfcDecomposedEnvelopes: false,
-  cfcPolicyEvaluation: "off",
-  cfcLabelMetadataProtection: "off",
-  cfcDeclaredMonotonicity: "off",
+  cfcPolicyEvaluation: "enforce",
+  cfcLabelMetadataProtection: "enforce",
+  cfcDeclaredMonotonicity: "observe",
 });
 
 /** A dial whose values are the named rungs of a ladder. */

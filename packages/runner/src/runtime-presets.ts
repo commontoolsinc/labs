@@ -58,25 +58,23 @@
  * |                            | passes what                                      |
  * |                            | `experimentalOptionsForDeployedClient` resolved  |
  * |                            | from the server it talks to (Gate 3)             |
- * | cfcEnforcementMode         | core-pinned `"enforce-explicit"`; overridable in |
+ * | cfcEnforcementMode         | core-pinned `"enforce-strict"`; overridable in   |
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
  * |                            | remoteClient/browserWorker (host-controlled      |
  * |                            | rollout)                                         |
- * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
- * |                            | delta (host-controlled rollout)                  |
- * | cfcWriteFloor              | core-default (off); remoteClient delta           |
- * |                            | (host-controlled rollout) — flip in coreOptions  |
- * |                            | when a first-party rollout begins                |
- * | cfcTriggerReadGating       | core-default (off) — flip in coreOptions when a  |
- * |                            | first-party rollout begins                       |
+ * | cfcFlowLabels              | core-pinned `"persist"`; remoteClient /          |
+ * |                            | browserWorker delta (host-controlled rollout)    |
+ * | cfcWriteFloor              | core-pinned `"enforce"`; remoteClient delta      |
+ * |                            | (host-controlled)                                |
+ * | cfcTriggerReadGating       | core-pinned `true`                               |
  * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
  * |                            | reader resolves stored roots' references         |
- * | cfcPolicyEvaluation        | core-default (off) — same                        |
- * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
- * |                            | rollout: observe first, then enforce)            |
- * | cfcDeclaredMonotonicity    | core-default (off) — same (WP5 §8.12.1 rollout:  |
- * |                            | observe first, then enforce)                     |
- * | cfcPolicyRecords           | core-default (none declared) — same              |
+ * | cfcPolicyEvaluation        | core-pinned `"enforce"`                          |
+ * | cfcLabelMetadataProtection | core-pinned `"enforce"` (inv-12 Stage 1)         |
+ * | cfcDeclaredMonotonicity    | core-pinned `"observe"` (WP5 §8.12.1; `enforce`  |
+ * |                            | once per-principal mints move to `derived`)      |
+ * | cfcPolicyRecords           | core-default (none declared) — flip in           |
+ * |                            | coreOptions when a first-party rollout begins    |
  * | cfcPrefixProvenanceStats   | core-default (off) — measurement opt-in, per     |
  * |                            | deployment (value-level provenance Stage 0)      |
  * | cfcTrustConfig             | core-default (none declared) — same              |
@@ -123,12 +121,17 @@
  * |                            | it hand-rolls its options deliberately           |
  *
  * One named departure a caller can opt into: `cfcPosture: "max-enforcement"`
- * (a `CoreParams` field) swaps the core-default CFC dial rows above for the
- * {@link MAX_ENFORCEMENT_CFC_OPTIONS} bundle, for that one runtime. The
- * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`,
- * `cfcWriteFloor`) still apply over the bundle, so a session-level raise wins
- * either way, and a session that wants the floor's `observe` rung rather than
- * the bundle's `enforce` asks for it the same way.
+ * (a `CoreParams` field) lays the {@link MAX_ENFORCEMENT_CFC_OPTIONS} bundle
+ * over the core CFC dial rows above, for that one runtime. What the bundle
+ * adds beyond the core pins is the deployment configuration and the last
+ * rung the pins hold back from: the standard prompt-caveat policy records,
+ * the per-sink confidentiality ceilings, and `cfcDeclaredMonotonicity` at
+ * `enforce`. It names no enforcement mode, so a runtime taking it keeps
+ * the core's `enforce-strict` pin. The per-preset host dials
+ * (`cfcEnforcementMode`, `cfcFlowLabels`, `cfcWriteFloor`) still apply over
+ * the bundle, which is how a host dials one of them somewhere else — a
+ * session that wants the floor's `observe` rung rather than the bundle's
+ * `enforce` asks for it the same way.
  */
 
 import { toCompactDebugString } from "@commonfabric/data-model";
@@ -633,14 +636,16 @@ export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality =
  * its enforcing value, as one named opt-in bundle (CT-2075 ran them together
  * and found they co-exist as one system; this is that experiment's dial set,
  * landed at the seam it designated). A preset caller opts in through
- * {@link CoreParams.cfcPosture}; the fleet posture in {@link coreOptions}
- * is unchanged.
+ * {@link CoreParams.cfcPosture}. The core pins in {@link presetCfcOptions}
+ * hold most of these dials at the same rungs, so what selecting the bundle
+ * adds is the deployment configuration — the prompt-caveat policy records and
+ * the per-sink ceilings — plus `cfcDeclaredMonotonicity` at `enforce`.
  *
  * Deliberately NOT in the bundle:
- * - `cfcEnforcementMode` — the core pin (`enforce-explicit`) stands; a host
- *   raises one session to `enforce-strict` through its own preset dial
- *   (remoteClient/browserWorker), and the bundle's `persist` flow labels are
- *   what make that raise conform (strict requires persist).
+ * - `cfcEnforcementMode` — the core pin (`enforce-strict`) stands, and the
+ *   bundle's `persist` flow labels are what make that rung conform (strict
+ *   requires persist). A host dials one session below it through its own
+ *   preset dial (patternTest/unitTest).
  * - `cfcDecomposedEnvelopes` — gated on every deployed reader resolving
  *   stored roots' references, a readiness question, not an enforcement one.
  * - `cfcTrustConfig` — deployment-specific declarations; nothing generic to
@@ -681,10 +686,18 @@ export interface PresetCfcParams {
 export const presetCfcOptions = (
   params: PresetCfcParams,
 ): Partial<RuntimeOptions> => ({
-  // Pinned, not defaulted: several sites pinned this individually so that a
-  // changed constructor default could not silently relax them; the pin now
-  // lives once. Same value as the constructor default today.
-  cfcEnforcementMode: "enforce-explicit",
+  // Pinned, not defaulted: several sites pinned these individually so that a
+  // changed constructor default could not silently relax them; the pins now
+  // live once. Same values as the constructor defaults today — the strict end
+  // state of the deployment-mode matrix
+  // (docs/specs/cfc-enforcement-matrix.md §3).
+  cfcEnforcementMode: "enforce-strict",
+  cfcFlowLabels: "persist",
+  cfcWriteFloor: "enforce",
+  cfcTriggerReadGating: true,
+  cfcPolicyEvaluation: "enforce",
+  cfcLabelMetadataProtection: "enforce",
+  cfcDeclaredMonotonicity: "observe",
   ...(params.cfcPosture === "max-enforcement"
     ? MAX_ENFORCEMENT_CFC_OPTIONS
     : {}),
@@ -770,15 +783,12 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     apiUrl: params.apiUrl,
     storageManager: params.storageManager,
     experimental: params.experimental,
-    // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
-    // cfcDecomposedEnvelopes /
-    // cfcPolicyEvaluation / cfcLabelMetadataProtection /
-    // cfcDeclaredMonotonicity / cfcPolicyRecords /
-    // cfcTrustConfig / cfcSinkMaxConfidentiality /
-    // cfcReadMaxConfidentiality / cfcReadOnExceed ride the constructor
-    // defaults (off / none) — deliberately absent here until a first-party
-    // rollout begins. A caller that opts into `cfcPosture` gets the named
-    // bundle's values instead, for this one runtime.
+    // `presetCfcOptions` carries the CFC pins. cfcDecomposedEnvelopes /
+    // cfcPolicyRecords / cfcTrustConfig / cfcSinkMaxConfidentiality /
+    // cfcReadMaxConfidentiality / cfcReadOnExceed are not among them: they
+    // ride the constructor defaults (off / none) until a first-party rollout
+    // begins. A caller that opts into `cfcPosture` gets the named bundle's
+    // values over the pins, for this one runtime.
     ...presetCfcOptions({
       ...(params.cfcPosture !== undefined
         ? { cfcPosture: params.cfcPosture }

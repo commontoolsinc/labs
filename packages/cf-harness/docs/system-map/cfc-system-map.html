@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-11", sha: "97ea55b2af" };
+    const SNAPSHOT = { date: "2026-09-11", sha: "b3f7972f24" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1510,13 +1510,13 @@
       g_write: {
         t: "Write gate",
         status: "shipped",
-        short: "enforce-explicit",
+        short: "enforce-strict",
         boundary: "runner → space",
       },
       g_render: {
         t: "Render ceiling",
-        status: "partial",
-        short: "off by default",
+        status: "shipped",
+        short: "on by default",
         boundary: "TCB → person",
       },
       g_conn: {
@@ -1810,7 +1810,7 @@
         kind: "Harness service",
         band: "agent",
         body:
-          `<p>The service the weaver pings. An explicit host Loom configuration also backs <code>loom_compose</code> and its two read tools. Task <code>loomId</code> is captured per turn; completed results include only verified current-turn Loom receipts beside named pieces. Composition passes the existing command-authority gate and a held-token custody check, not a new flow-aware Loom-store commit gate. Bad input refs are a 400 before any turn spends, and so is a <code>patternRefs</code> entry outside the id grammar; a task may attach up to eight published pattern ids beside its input cells, which the run resolves through the index before its first model turn and seeds as searched hits, and an id the index does not hold fails the run by name rather than running without it. CLI and console assemble the <em>same</em> session from one config, so a console cannot lag the CLI. The console's fabric session defaults to the <code>max-enforcement</code> posture: policy evaluation on, public-only ceilings on the fetch sinks, enforcement mode pinned at <code>enforce-explicit</code> (not strict, so writer-fit misfits flag rather than reject). The fabric session reads its enforcement and flow-label rungs from the preset composition; the launcher supplies the posture name, flow labels and enforcement mode as launcher defaults and prints the trio beside one source, so a preset change is not picked up by the launcher's defaults on its own.</p><p>The console is started as a property of starting the fabric: <code>start-local-dev.sh --cf-harness</code> derives identity, space, toolshed URL, store path and the two <code>runsc-cfc</code> sidecar directories from the fabric it is starting and from Docker's runtime registration, clears ambient environment, prints each value beside its source, and fails loudly without taking the pair down. Its HTTP surface has no token cookie and no <code>Origin</code> allowlist; a <code>Host</code> allowlist over every route and a JSON content type on <code>/api/*</code> POSTs are the whole of it, so the network in front of it is the boundary.</p>`,
+          `<p>The service the weaver pings. An explicit host Loom configuration also backs <code>loom_compose</code> and its two read tools. Task <code>loomId</code> is captured per turn; completed results include only verified current-turn Loom receipts beside named pieces. Composition passes the existing command-authority gate and a held-token custody check, not a new flow-aware Loom-store commit gate. Bad input refs are a 400 before any turn spends, and so is a <code>patternRefs</code> entry outside the id grammar; a task may attach up to eight published pattern ids beside its input cells, which the run resolves through the index before its first model turn and seeds as searched hits, and an id the index does not hold fails the run by name rather than running without it. CLI and console assemble the <em>same</em> session from one config, so a console cannot lag the CLI. The console's fabric session defaults to the <code>max-enforcement</code> posture: policy evaluation on, public-only ceilings on the fetch sinks, enforcement mode at the core's <code>enforce-strict</code> pin, so writer-fit misfits reject. The fabric session reads its enforcement and flow-label rungs from the preset composition; the launcher supplies the posture name, flow labels and enforcement mode as launcher defaults and prints the trio beside one source, so a preset change is not picked up by the launcher's defaults on its own.</p><p>The console is started as a property of starting the fabric: <code>start-local-dev.sh --cf-harness</code> derives identity, space, toolshed URL, store path and the two <code>runsc-cfc</code> sidecar directories from the fabric it is starting and from Docker's runtime registration, clears ambient environment, prints each value beside its source, and fails loudly without taking the pair down. Its HTTP surface has no token cookie and no <code>Origin</code> allowlist; a <code>Host</code> allowlist over every route and a JSON content type on <code>/api/*</code> POSTs are the whole of it, so the network in front of it is the boundary.</p>`,
         threats: ["t16", "t17", "t18"],
         links: [["one config for CLI and console", 6743], [
           "turn lifecycle",
@@ -1941,7 +1941,7 @@
         band: "tcb",
         threats: ["t13", "t8"],
         body:
-          `<p>The one place policy meaning lives. On every transaction it derives labels onto computed values (the store put <code>finance</code> on every field of today's dashboard with a verified <code>TransformedBy</code> atom) and runs the gates:</p><ul><li><b>Sink ceiling</b>: a release's consumed labels must fit the sink's ceiling.</li><li><b>Writer fit</b> and <b>write floor</b>: what a writer may put where, and the integrity a written value must carry. Writer-fit misfits reject only under <code>enforce-strict</code>; under the console's <code>enforce-explicit</code> they persist and flag.</li><li><b>Policy evaluation</b>: exchange rules that can discharge a clause before the fit; only ever loosens, fails closed on fuel or lookup.</li><li><b>Render ceiling</b>: the same fit for the display sink.</li></ul><p>Its posture is a set of orthogonal dials, not an on/off switch.</p>`,
+          `<p>The one place policy meaning lives. On every transaction it derives labels onto computed values (the store put <code>finance</code> on every field of today's dashboard with a verified <code>TransformedBy</code> atom) and runs the gates:</p><ul><li><b>Sink ceiling</b>: a release's consumed labels must fit the sink's ceiling.</li><li><b>Writer fit</b> and <b>write floor</b>: what a writer may put where, and the integrity a written value must carry. Writer-fit misfits reject under <code>enforce-strict</code>, which is the default rung; below it they persist and flag.</li><li><b>Policy evaluation</b>: exchange rules that can discharge a clause before the fit; only ever loosens, fails closed on fuel or lookup.</li><li><b>Render ceiling</b>: the same fit for the display sink.</li></ul><p>Its posture is a set of orthogonal dials, not an on/off switch.</p>`,
         links: [["the label reader was broken, the store was fine", 6751]],
       },
       spaces: {
@@ -1958,7 +1958,7 @@
         kind: "TCB · configuration",
         band: "tcb",
         body:
-          `<p>Two things, both operator-owned. The <b>dials</b> are runtime options: the enforcement matrix names five (enforcement mode, flow-label persistence, write floor, trigger-read gating, policy evaluation) and the runtime resolves eight; the console's <code>max-enforcement</code> bundle sets six of them together with the policy records and the sink ceilings, and the preset over it pins the enforcement mode at <code>enforce-explicit</code>. The <b>policy snapshot</b> is the digest-bound set of exchange-rule records and grants. Records are <code>ambient</code> (apply to every label) or <code>referenced</code> (fire only where the label names them by hash). The harness publishes this posture as <code>projected</code> before the session runtime exists, not as an attestation of a constructed runtime.</p>`,
+          `<p>Two things, both operator-owned. The <b>dials</b> are runtime options: the enforcement matrix names five (enforcement mode, flow-label persistence, write floor, trigger-read gating, policy evaluation) and the runtime resolves eight; the console's <code>max-enforcement</code> bundle sets six of them together with the policy records and the sink ceilings, and the preset over it pins the enforcement mode at <code>enforce-strict</code>. The <b>policy snapshot</b> is the digest-bound set of exchange-rule records and grants. Records are <code>ambient</code> (apply to every label) or <code>referenced</code> (fire only where the label names them by hash). The harness publishes this posture as <code>projected</code> before the session runtime exists, not as an attestation of a constructed runtime.</p>`,
         threats: ["t14"],
         close: [
           "There is no door for a policy record to reach a harness runtime: config exposes a posture name only (CT-2175 question 4).",
@@ -2113,7 +2113,7 @@
       },
       g_write: {
         body:
-          `<p>Every transaction commits through the runner's boundary pass. The enforcement mode is <code>enforce-explicit</code> by default and in the console's bundle, so a recorded reason rejects the commit, including a labeled write with no resolvable policy input. The write floor and trigger-read gating are further reason sources on their own dials. Writer fit is not: its misfit rejects only under <code>enforce-strict</code>, and persists-and-flags under explicit, which is what runs today.</p>`,
+          `<p>Every transaction commits through the runner's boundary pass. The enforcement mode is <code>enforce-strict</code> by default, so a recorded reason rejects the commit, including a labeled write with no resolvable policy input. The write floor and trigger-read gating are further reason sources on their own dials, both enforcing by default. Writer fit rejects here too: its misfit rejects under <code>enforce-strict</code>, and persists-and-flags at every rung below.</p>`,
         why:
           "The place labels are derived and persisted; everything downstream reads what this wrote.",
         close: [
@@ -2122,11 +2122,10 @@
       },
       g_render: {
         body:
-          `<p>The display sink. When the shell renders a piece, the runner can fit the value's labels against a render ceiling with <code>sinkClass: display</code>; it is the precedent for every non-network release site. It is implemented but off by default: a browser profile has to populate the ceiling (<code>commonfabric.cfcRenderCeiling()</code> in localStorage, dogfood only, expected to over-block until exchange resolution lands). In today's demo the panel showed finance values because no ceiling was populated, not because a fit admitted them.</p>`,
-        why:
-          "The person is a sink too. This is the last gate before human eyes, and today it is open.",
+          `<p>The display sink. When the shell renders a piece, the runner can fit the value's labels against a render ceiling with <code>sinkClass: display</code>; it is the precedent for every non-network release site. It is on by default; a browser profile opts out with <code>commonfabric.cfcRenderCeiling(false)</code>, which is what the localStorage key records. A panel that shows a labeled value does so because a fit admitted it.</p>`,
+        why: "The person is a sink too. This is the last gate before human eyes.",
         close: [
-          "Turn the ceiling on by default once exchange resolution can discharge what a person is entitled to see (CT-2202 item 4).",
+          "Retire the per-profile opt-out and make the ceiling unconditional (CT-2202 item 4).",
         ],
       },
       g_conn: {

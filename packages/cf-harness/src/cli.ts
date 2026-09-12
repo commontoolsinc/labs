@@ -547,8 +547,9 @@ Options:
   --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
                                 all three --fabric-* session flags go together
   --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict for the fabric
-                                session's runtime (raise-only; distinct from
-                                --cfc-enforcement-mode, which governs the harness)
+                                session's runtime (enforcing rungs only; distinct
+                                from --cfc-enforcement-mode, which governs the
+                                harness)
   --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
                                 the fabric session's runtime
   --fabric-cfc-posture <name>   max-enforcement: opt the fabric session's runtime

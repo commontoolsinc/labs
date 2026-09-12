@@ -221,7 +221,7 @@ network confinement model.
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
-- default CFC mode of `enforce-explicit`, which fails closed on an observation
+- default CFC mode of `enforce-strict`, which fails closed on an observation
   whose trusted mediation metadata is absent
 - spec-aligned `PromptSlotBound` prompt-slot evidence
 - Loom run manifest intake through `--run-manifest`
@@ -1315,8 +1315,9 @@ than a run failure, and the next tool call retries the construction.
 Three further flags set the session runtime's CFC dials, and each needs the
 three session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
-`enforce-strict` — raise-only, since the session's runtime preset already pins
-`enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
+`enforce-strict`; the session's runtime preset already pins `enforce-strict`, so
+stating the dial either restates that rung or lowers the session to
+`enforce-explicit`. Under `enforce-strict`, a pattern whose writes carry
 confidentiality its target's declared policy does not admit has its commit
 refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
 accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
@@ -1333,14 +1334,17 @@ two per-dial flags still apply over the bundle, so
 --fabric-cfc-enforcement-mode enforce-strict`
 is the full-strictness configuration. These dials govern the fabric session's
 runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
-policy and the sandbox. The two are set independently up to one tie: under a
-session raised to `enforce-strict`, a harness dial nobody set follows the
-session rather than the harness default (recorded as source `fabric-session`),
-and a harness dial stated weaker than the session refuses startup naming both
-flags. A resume has no such tie to settle: the recorded mode stands, and a
-session that would raise the harness dial above it refuses the resume. Nothing
-else about the two families is derived; `--fabric-cfc-posture` sets the
-flow-label dial, not the enforcement mode.
+policy and the sandbox. The two are set independently up to one tie, which fires
+only where the session outranks what the harness dial would otherwise resolve.
+Both default to `enforce-strict`, so a run that states neither has no tie to
+settle and records source `default`. Where something weaker reaches the harness
+dial — an inherited mode, or one a run manifest names — a session at
+`enforce-strict` carries it up, recorded as source `fabric-session`. A harness
+dial stated weaker than the session refuses startup naming both flags. A resume
+has no such tie to settle: the recorded mode stands, and a session that would
+raise the harness dial above it refuses the resume. Nothing else about the two
+families is derived; `--fabric-cfc-posture` sets the flow-label dial, not the
+enforcement mode.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured

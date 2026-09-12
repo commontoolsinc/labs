@@ -299,7 +299,7 @@ describe(
         // `runtimePresets.patternTest`'s pin, so a move there lands as a
         // failure in this test rather than as a quietly different harness.
         expect((await initParticipant(server, {})).cfcEnforcementMode)
-          .toBe("enforce-explicit");
+          .toBe("enforce-strict");
       } finally {
         await server.close().catch(() => {});
       }

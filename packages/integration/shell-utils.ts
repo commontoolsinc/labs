@@ -212,12 +212,12 @@ const RENDER_CEILING_KEY = "cfcRenderCeiling";
  *
  * `true` writes `"true"`, `false` writes `"false"`, and undefined removes the
  * key. What each of those means is
- * `packages/shell/src/lib/render-ceiling.ts`'s to decide;
- * `isCfcRenderCeilingEnabled` reads the key as `=== "true"`, so `false` and
- * undefined select the same profile there and differ only in what the caller
- * said. Removing the key on undefined is what stops one navigation inheriting
- * the side the previous navigation over the same page asked for, one page
- * serving every case in a file.
+ * `packages/shell/src/lib/render-ceiling.ts`'s to decide; the key records an
+ * opt-out, read as `!== "false"`, so `true` and undefined select the ceiling
+ * and only `false` turns it off. Removing the key on undefined is what stops
+ * one navigation inheriting the side the previous navigation over the same
+ * page asked for, one page serving every case in a file — and a caller that
+ * states nothing gets the ceiling, which is the posture a shell host runs.
  *
  * The worker runtime reads the key when it is constructed, at login, so this
  * runs after the navigation that gives the page an origin to store it against

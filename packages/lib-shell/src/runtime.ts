@@ -141,18 +141,18 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
 
   /**
-   * Flow-label propagation dial (S16). Shell hosts default to "observe"
-   * (Epic H1): derive the per-tx conservative join and emit diagnostics,
-   * persisting nothing — the measurement stage before "persist".
+   * Flow-label propagation dial (S16). Shell hosts default to "persist"
+   * (Epic H2): derive the per-tx conservative join and write it as a
+   * `derived` label component on every value write.
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
 
   /**
-   * Populate the default render confidentiality ceiling (Epic H3a). When
-   * true, the worker's display sinks gate labeled values against the
-   * §8.10.6 profile for the acting identity and author-supplied
-   * render-boundary declassification is denied. Dogfood flag, default off
-   * (= today's unbounded rendering).
+   * Populate the default render confidentiality ceiling. Defaults to on:
+   * the worker's display sinks gate labeled values against the §8.10.6
+   * profile for the acting identity, and author-supplied render-boundary
+   * declassification is denied. `false` opts a host out, which renders
+   * labeled content ungated.
    */
   cfcRenderCeiling?: boolean;
 
@@ -315,7 +315,7 @@ export function createRuntimeClientOptions({
   apiUrl,
   spaceHostMap,
   experimental,
-  cfcEnforcementMode = "enforce-explicit",
+  cfcEnforcementMode = "enforce-strict",
   // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
   // flow-label dial at "persist" — the per-tx conservative join is derived AND
   // written as a `derived` label component on every value write. This
@@ -327,12 +327,14 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
-  // Hosts opt into the §8.10.6 display ceiling. The worker resolves shared
+  // The §8.10.6 display ceiling, on by default. The worker resolves shared
   // `Space` labels through verified reader membership before the reconciler
   // fits them against the acting user's identity atoms and the admitted
   // influence-class caveat kinds. Author-supplied render declassification is
-  // denied, and labels that still do not fit the ceiling stay blocked.
-  cfcRenderCeiling = false,
+  // denied, and labels that still do not fit the ceiling stay blocked. The
+  // shell's per-profile `commonfabric.cfcRenderCeiling(false)` toggle opts a
+  // browser profile back out.
+  cfcRenderCeiling = true,
   trustSnapshot,
   forwardWorkerConsole,
   patternCoverage,

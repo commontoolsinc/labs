@@ -215,9 +215,9 @@ const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
  * sinks. `--fabric-cfc-posture none` turns it off for a run that wants the
  * first-party default instead.
  *
- * The bundle leaves the enforcement pin at `enforce-explicit`; raising to
- * `enforce-strict` stays a deliberate per-session move, so it has its own flag
- * and no default here.
+ * The bundle names no enforcement mode, so the session keeps the core's
+ * `enforce-strict` pin. Lowering to `enforce-explicit` is a deliberate
+ * per-session move, so it has its own flag and no default here.
  */
 const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
 
