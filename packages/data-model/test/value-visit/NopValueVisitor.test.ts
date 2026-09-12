@@ -19,9 +19,10 @@ describe("NopValueVisitor", () => {
     expect(vis.visitNonFabricValue(new Date(0))).toBeUndefined();
     expect(vis.visitPrimitive(1, "number")).toBeUndefined();
     expect(vis.visitValue(1)).toBeUndefined();
-    expect(vis.visitedArrayElement([1], 0, 1)).toBeUndefined();
-    expect(vis.visitedArrayGap([], 0, 1)).toBeUndefined();
-    expect(vis.visitedMapping({}, "k", 1)).toBeUndefined();
+    expect(vis.visitedFabricArrayElement([1], 0, 1)).toBeUndefined();
+    expect(vis.visitedFabricArrayGap([], 0, 1)).toBeUndefined();
+    expect(vis.visitedFabricInstance(instance, {})).toBeUndefined();
+    expect(vis.visitedFabricPlainObjectEntry({}, "k", 1)).toBeUndefined();
   });
 
   it("completes a visit of a nested value without descending", () => {
