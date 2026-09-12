@@ -171,7 +171,8 @@ export class WorkerController extends EventTarget {
 
   /**
    * Settles when the worker's initialization finishes: resolved once the
-   * worker is ready, rejected with the error that stopped it. A worker that
+   * worker is ready, rejected with the error that stopped it, or with the
+   * request's timeout when the worker dies mid-initialization. A worker that
    * dies before announcing itself ready never starts initialization, and
    * leaves this pending.
    */
