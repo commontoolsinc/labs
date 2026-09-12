@@ -64,9 +64,9 @@ holds the inventory, the posture table, and the per-phase handler dispatch
 measurement from `packages/runner/test/handler-dispatch-cost.bench.ts`. Its
 retention probe was inconclusive and is recorded as such; the representative
 copy was not re-run and its limitations carry forward. Two of its findings
-shape F1: the dependency preflight, not the argument read, dominates a
-handler dispatch, and a handler's read log is its commit precondition set,
-which a view would narrow.
+shape F1: the dependency preflight, not the argument read, is the largest
+fixed cost of a handler dispatch, and a handler's read log is its commit
+precondition set, which a view would narrow.
 
 ### F1/F2 — Decide and integrate handler materialization
 

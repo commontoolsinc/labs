@@ -5,7 +5,12 @@
  * interval runs from the send to the commit callback. The dispatch's phases —
  * presync, dependency preflight, argument read, body, post-run, commit — are
  * read back from the phase timers the runtime already keeps, so the whole
- * dispatch and its parts come from the same run.
+ * dispatch and its parts come from the same run. The runtime's drains after
+ * the callback sit outside the timed interval, and so does the re-seeding
+ * of the list after the one workload that writes to it, so every sample
+ * dispatches over a list of the size its name states. Those timers are kept
+ * per process, one active start per key, so the runtimes here run one at a
+ * time.
  *
  * Two context shapes are measured. A handle context binds the list as a
  * `Writable` cell, which is what the lunch poll's handlers declare, so the
@@ -146,6 +151,7 @@ async function prepare(size: number, readStats: boolean) {
   }));
   const votes = runtime.getCell<typeof rows>(space, "votes", undefined, tx);
   votes.set(rows);
+  const initialAmount = rows[0].amount;
   const out = runtime.getCell<number>(space, "out", undefined, tx);
   out.set(0);
   const argument = runtime.getCell<{ votes: unknown; out: unknown }>(
@@ -166,6 +172,7 @@ async function prepare(size: number, readStats: boolean) {
   if (committed.error) throw new Error("Benchmark seeding failed");
   await runtime.idle();
 
+  /** Sends one event and resolves, with the elapsed time, at its commit. */
   const dispatch = async (workload: Workload): Promise<number> => {
     const settled = Promise.withResolvers<string>();
     const start = performance.now();
@@ -177,19 +184,33 @@ async function prepare(size: number, readStats: boolean) {
     if (status !== "done") {
       throw new Error(`Dispatch of ${workload} settled as ${status}`);
     }
-    await runtime.idle();
-    await runtime.scheduler.idleWithPendingCommits();
     return elapsed;
   };
 
-  const expected = (workload: Workload, dispatches: number): number => {
+  /** Waits for whatever the dispatch left running. */
+  const drain = async (): Promise<void> => {
+    await runtime.idle();
+    await runtime.scheduler.idleWithPendingCommits();
+  };
+
+  /** Puts the list back as it was seeded, so a write leaves no trace. */
+  const reseed = async (): Promise<void> => {
+    const write = runtime.edit();
+    votes.withTx(write).set(rows);
+    out.withTx(write).set(0);
+    const written = await write.commit();
+    if (written.error) throw new Error("Benchmark re-seeding failed");
+    await drain();
+  };
+
+  const expected = (workload: Workload): number => {
     switch (workload) {
       case "scalarKey":
       case "scalarGet":
       case "plainScalar":
-        return 1;
+        return initialAmount;
       case "mutate":
-        return 1 + dispatches;
+        return initialAmount + 1;
       case "walk":
       case "plainWalk":
         return size * (size + 1) / 2;
@@ -201,7 +222,7 @@ async function prepare(size: number, readStats: boolean) {
     await storage.close();
   };
 
-  return { runtime, out, dispatch, expected, dispose };
+  return { runtime, out, dispatch, drain, reseed, expected, dispose };
 }
 
 /** The phase timers' last samples, in milliseconds, keyed by phase path. */
@@ -227,8 +248,8 @@ function collectedHeapUsed(): number | undefined {
 //
 
 for (const size of SIZES) {
-  const prepared = await prepare(size, true);
   for (const workload of WORKLOADS) {
+    const prepared = await prepare(size, true);
     const attempts: Record<string, unknown>[] = [];
     const preflights: Record<string, unknown>[] = [];
     const onTelemetry = (event: Event) => {
@@ -254,6 +275,7 @@ for (const size of SIZES) {
     const heapBefore = collectedHeapUsed();
     prepared.runtime.telemetry.addEventListener("telemetry", onTelemetry);
     await prepared.dispatch(workload);
+    await prepared.drain();
     prepared.runtime.telemetry.removeEventListener("telemetry", onTelemetry);
     // Retained after the dispatch settled and the heap was collected again,
     // so this is what the dispatch left behind rather than what it allocated
@@ -271,8 +293,8 @@ for (const size of SIZES) {
       preflights,
       attempts,
     }));
+    await prepared.dispose();
   }
-  await prepared.dispose();
 }
 
 //
@@ -287,16 +309,18 @@ for (const size of SIZES) {
       name: `${workload} (${size} rows)`,
       group: `handler-dispatch-${size}`,
       baseline: workload === "scalarKey",
-      n: 5,
+      n: 7,
       warmup: 1,
       async fn(b) {
         prepared ??= await prepare(size, false);
+        if (workload === "mutate" && dispatches > 0) await prepared.reseed();
         b.start();
         const elapsed = await prepared.dispatch(workload);
         b.end();
+        await prepared.drain();
         dispatches += 1;
         const value = prepared.out.get();
-        const expected = prepared.expected(workload, dispatches);
+        const expected = prepared.expected(workload);
         if (value !== expected) {
           throw new Error(`Expected ${expected}, received ${value}`);
         }
