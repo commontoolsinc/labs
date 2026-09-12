@@ -381,6 +381,144 @@ describe("CFC UI contract matching", () => {
       release();
     }
   });
+
+  it("resolves a contract from a direct `cid:` reference", () => {
+    const release = acquireSchemaRegistryLease();
+    try {
+      const document = trustedPatternUiActionSchema as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(document);
+      registerSchemaDocument(hash, document);
+      const reference = { $ref: `cid:${hash}` } as unknown as JSONSchema;
+      const contract = {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      };
+
+      expect(uiContractFromSchema(reference)).toEqual(contract);
+      expect(uiContractsFromSchema(reference)).toEqual([{
+        path: [],
+        contract,
+      }]);
+    } finally {
+      release();
+    }
+  });
+
+  it("resolves a direct `cid:` document's descendants against that document's $defs", () => {
+    const release = acquireSchemaRegistryLease();
+    try {
+      const document = {
+        type: "object",
+        properties: { action: { $ref: "#/$defs/Action" } },
+        $defs: { Action: trustedPatternUiActionSchema },
+      } as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(document);
+      registerSchemaDocument(hash, document);
+
+      const contracts = uiContractsFromSchema(
+        { $ref: `cid:${hash}` } as unknown as JSONSchema,
+      );
+
+      expect(contracts).toEqual([{
+        path: ["action"],
+        contract: {
+          helper: "UiAction",
+          action: "SubmitDirectCommand",
+          trustedPattern: "TrustedDirectCommandSurface",
+          requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+        },
+      }]);
+    } finally {
+      release();
+    }
+  });
+
+  it("follows a local pointer inside an external document that the referring document also used", () => {
+    // Both documents name a `Panel` definition. The outer one was followed on
+    // the way in; the external document's `#/$defs/Panel` is another ref,
+    // read in another document, not a cycle.
+    const release = acquireSchemaRegistryLease();
+    try {
+      const document = {
+        type: "object",
+        properties: { action: { $ref: "#/$defs/Panel" } },
+        $defs: { Panel: trustedPatternUiActionSchema },
+      } as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(document);
+      registerSchemaDocument(hash, document);
+
+      const contracts = uiContractsFromSchema({
+        $ref: "#/$defs/Panel",
+        $defs: {
+          Panel: {
+            type: "object",
+            properties: { inner: { $ref: `cid:${hash}` } },
+          },
+        },
+      } as unknown as JSONSchema);
+
+      expect(contracts).toEqual([{
+        path: ["inner", "action"],
+        contract: {
+          helper: "UiAction",
+          action: "SubmitDirectCommand",
+          trustedPattern: "TrustedDirectCommandSurface",
+          requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+        },
+      }]);
+    } finally {
+      release();
+    }
+  });
+
+  it("resolves one definition name in two external documents to each document's own", () => {
+    // `Panel` is a submit action in one document and a disclosure in the
+    // other. Read as siblings, and read with the second nested inside the
+    // first, each document's `#/$defs/Panel` names its own definition.
+    const release = acquireSchemaRegistryLease();
+    try {
+      const submit = {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      };
+      const disclosure = { helper: "UiDisclosure", kind: "Secret" };
+      const disclosing = {
+        type: "object",
+        properties: { action: { $ref: "#/$defs/Panel" } },
+        $defs: { Panel: { type: "string", ifc: { uiContract: disclosure } } },
+      } as unknown as JSONSchema;
+      const disclosingHash = internSchemaAsTaggedHashString(disclosing);
+      registerSchemaDocument(disclosingHash, disclosing);
+      const submitting = {
+        type: "object",
+        properties: {
+          action: { $ref: "#/$defs/Panel" },
+          next: { $ref: `cid:${disclosingHash}` },
+        },
+        $defs: { Panel: trustedPatternUiActionSchema },
+      } as unknown as JSONSchema;
+      const submittingHash = internSchemaAsTaggedHashString(submitting);
+      registerSchemaDocument(submittingHash, submitting);
+
+      expect(uiContractsFromSchema({
+        type: "object",
+        properties: {
+          a: { $ref: `cid:${submittingHash}` },
+          b: { $ref: `cid:${disclosingHash}` },
+        },
+      } as unknown as JSONSchema)).toEqual([
+        { path: ["a", "action"], contract: submit },
+        { path: ["a", "next", "action"], contract: disclosure },
+        { path: ["b", "action"], contract: disclosure },
+      ]);
+    } finally {
+      release();
+    }
+  });
 });
 
 describe("CFC trusted UI event enforcement", () => {
