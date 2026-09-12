@@ -170,8 +170,10 @@ export class WorkerController extends EventTarget {
   }
 
   /**
-   * Settles when the worker is initialized: resolved once it is ready,
-   * rejected with the error that stopped it.
+   * Settles when the worker's initialization finishes: resolved once the
+   * worker is ready, rejected with the error that stopped it. A worker that
+   * dies before announcing itself ready never starts initialization, and
+   * leaves this pending.
    */
   get ready(): Promise<void> {
     return this.#initializeDeferred.promise;

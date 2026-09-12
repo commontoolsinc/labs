@@ -61,9 +61,9 @@ export interface MainDependencies {
 }
 
 /**
- * Returns the worker timeout `args` names with `--timeout`, in milliseconds,
- * or the default when the argument is absent or does not start with an
- * integer.
+ * Returns the worker timeout, in milliseconds, that the `--timeout` argument
+ * in `args` names, or the default when the argument is absent or does not
+ * start with an integer.
  */
 export function parseWorkerTimeout(args: string[]): number {
   const { timeout } = parseArgs(args, {
