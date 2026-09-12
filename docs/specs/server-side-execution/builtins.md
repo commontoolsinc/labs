@@ -114,8 +114,10 @@ running. Refusal restores a binding while its attempt owns that physical
 publication coordinate; an accepted selection of another target supersedes it,
 while a withdrawn publication does not. Refusal does not append an assistant
 response for an uncommitted user message. Accepted claims retain local ownership
-before outbox dispatch, including across the remote-heartbeat age. Graph stop
-aborts active turns and clears matching accepted claims; later acceptance or
+before outbox dispatch, even when the stored `lastActivity` timestamp is older
+than the five-minute threshold for considering another replica's request
+inactive (`REQUEST_TIMEOUT` in `llm-dialog.ts`). Graph stop aborts active turns
+and clears matching accepted claims; later acceptance or
 dispatch cannot restart the stopped dialog. A provider release rejection clears
 its undispatched claim without replacing an active turn. These lifecycle
 guarantees do not establish actor partitioning for management-tool reads or the
