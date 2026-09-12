@@ -430,6 +430,26 @@ a mismatched document is rejected and never enters the registry. Because
 external refs are hash-covered content, verifying each document
 individually verifies the whole closure against the root reference.
 
+Every walk over a closure is one implementation:
+`walkSchemaDocumentClosure` in `@commonfabric/data-model-schema`
+(`schema-closure.ts`), whose `verifySchemaDocument` is the identity check
+above. The walk owns the worklist, the dedupe, the verification of a
+stored value, and the following of a verified document's own refs. A
+site supplies where a document comes from and what a miss means, and
+nothing else: the commit boundary resolves a hash against the commit's
+own sets and then the store and refuses the commit on a miss; result
+assembly and selector validation read through the query's manager at
+its seq and fail the query; the traversal reads through the transaction
+so the dependency is recorded, reports an absent document on the
+missing-target channel, and lets the schema select nothing; the replica
+resolves against the arriving frame before its store; the transaction
+and the registry walk the realm registry, staging a document or
+memoizing completeness. A site that already holds a document verified —
+the registry, or a cache keyed by the document's version — hands it over
+as verified and the walk follows it without re-hashing; a site that
+holds a document and everything behind it settles the hash, and the walk
+stops there.
+
 The same identity check is the class test. `cid:` holds more document
 classes than schema documents — blobs among them — and a delivery site
 cannot name the class of a directly pulled document, so a document is a

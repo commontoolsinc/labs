@@ -101,10 +101,11 @@ it — `js-compiler`, `llm`, and `html` among the packages that arrive this way.
 Counting dynamic imports as well takes it to 596 modules.
 
 The transactional core does not: `packages/memory/v2/engine.ts` reaches 124
-modules and 35,000 lines, none of them from `runner`, since the content-addressed schema
-vocabulary it validates commits with sits in `@commonfabric/data-model-schema`.
-The engine is a runner-free store; what the runtime's weight attaches to is the
-query and delivery layer above it, through the seam this document describes.
+modules and 35,000 lines, none of them from `runner`, since the
+content-addressed schema vocabulary it validates commits with sits in
+`@commonfabric/data-model-schema`. The engine is a runner-free store; what the
+runtime's weight attaches to is the query and delivery layer above it, through
+the seam this document describes.
 
 Those figures are the static closure over value imports, which
 `deno info --json <entry>` reports: walk `dependencies[].code` from the root,
