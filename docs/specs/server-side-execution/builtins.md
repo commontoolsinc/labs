@@ -130,6 +130,20 @@ request is queued; `llm` publishes only its latest request's successful result.
 Queue completion writes remain bound to the issuing identity and read the live
 input label basis. This queue behavior applies with server execution on or off.
 
+Served `sqliteQuery` keeps equal non-clearance query hashes across readers,
+while its outbox key and in-flight RPC set resolve the result's user or session
+instance. Each completion and refusal captures its result target and binds the
+issuing identity before reading the stored claim. Pending publication ownership
+is separate for each result and physical output binding; accepted actions and
+refusal publications supersede older targets only after commit and wave
+acceptance. Distinct bindings may link the same pending or settled result.
+These tokens retire on acceptance, refusal, or replacement; memoization stays
+in the result cells.
+
+This result lifecycle does not select the database file. The SQLite provider
+READ still resolves a scoped database from its transport session. Explicit
+request-instance authorization for that RPC remains a separate obligation.
+
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of
 the memo key, and each (query, reader) pair materializes its own

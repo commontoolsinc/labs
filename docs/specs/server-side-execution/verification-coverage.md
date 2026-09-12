@@ -25,7 +25,7 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Shared fetch, `fetchProgram`, and direct LLM user/session isolation are covered. Other effect callers, provider/tool reads, and later-user session initialization remain open. |
+| OW28-supersession-family / OW28-instance-family | Partial: shared fetch, `fetchProgram`, and direct LLM user/session isolation are covered. Caller-specific lifecycle, initialization, and remaining provider/tool read obligations are detailed below. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
@@ -2665,8 +2665,8 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   obligations rather than claims that every caller has this failure.
 - OW28-instance-family — PARTIALLY CLOSED. Served `compileAndRun`, the
   shared `fetch.ts` builtins (`fetchText`, `fetchBinary`, `fetchJson`, and
-  `fetchJsonUnchecked`), `llm`, `generateText`, and `generateObject` pass the
-  requesting identity to `effectTargetKey`.
+  `fetchJsonUnchecked`), `llm`, `generateText`, `generateObject`, and
+  `sqliteQuery` pass the requesting identity to `effectTargetKey`.
   Fetch keeps its request id, cancellation, and abandonment state per resolved
   scope instance. Its claim, result, error, abandonment, and teardown reads use
   that same identity; an authoritative claim records its validated input hash
@@ -2690,6 +2690,17 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   sharing one builtin closure. `executor-llm-supersession.test.ts` covers
   concurrent responses landing in distinct user and session instances, with
   no service-instance result.
+
+  Non-clearance `sqliteQuery` uses the resolved result instance for outbox and
+  in-flight RPC identity while preserving reader-independent query hashes.
+  `sqlite-served-instances.test.ts` covers independent user/session completions
+  and refusals, a captured result target across scope changes, shared results
+  across distinct bindings, memo selection, and withdrawn publications.
+  `executor-sqlite-instances.test.ts` drives a service-identity host with one
+  requester, two users, and two sessions against a space database, including
+  reverse completion order. These controls rely on the storage replica
+  promoting every accepted same-sequence contribution; they do not test which
+  user/session database file the provider reads.
 
   `fetchProgram` captures the requesting identity for its cache-instance key
   and asynchronous claim, completion, refusal, and teardown reads and writes.
@@ -2748,13 +2759,12 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   completion itself retains the current watermark; a later quiescent cycle covers its
   sequence without requiring another authored input.
 
-  Remaining investigation obligations: tool-loop LLM requests, `llmDialog`,
-  non-clearance SQLite instance keys, and the provider READ partition.
-  Direct response controls do not discharge the provider/tool READ partition.
-  OW53's SQLite acting-identity, owner, and clearance fixes remain closed.
-  Owed: one- and two-demander request/completion regressions for the remaining
-  callers, without reopening fixed SQLite cases or counting compile coverage
-  twice.
+  Remaining investigation obligations include shared tool-loop LLM requests
+  and provider/tool READ partitioning. Caller-specific coverage and residuals
+  are detailed in this row and OW53 below. OW53's SQLite acting-identity,
+  owner, and clearance fixes remain closed. Owed: one- and two-demander
+  request/completion regressions for remaining callers, without reopening
+  covered cases or counting compile coverage twice.
 
   Child-input default creation is covered separately from builtin instance
   identity. `executor-compile-and-run.test.ts` passes uninitialized
@@ -9212,13 +9222,12 @@ supply; OW29/OW32/OW34 closed):
     exist, so a run whose two halves disagree is an identity-model
     question no ruling has decided — `sqliteRunActingPrincipal`
     tripwires on it (fails loud, citing this row) rather than
-    picking whose rows a cleared read admits; the per-instance
-    effect-key gap for NON-clearance
-    user/session-scoped queries (a reader-blind hash by design
-    means one scope-name-widened outbox key across ALL the scope's
-    instances, session and user alike — no live surface; the fix
-    direction is the instance key joining the effect target key);
-    and the
+    picking whose rows a cleared read admits. The non-clearance user/session
+    result-key and lifecycle gap is covered by the raw and ExecutorHost
+    controls in OW28-instance-family.
+    They use a space database and reader-independent query hashes.
+    Cleared-query hashing and acting/owner selection follow the OW53 rules
+    above. The remaining distinct surface is the
     provider READ RPC's partition resolution (recorded 2026-08-22
     by the session-identity build, flagged not filled): a
     sub-space-scoped db's ON-DISK partition resolves from the
