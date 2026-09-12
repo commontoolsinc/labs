@@ -340,8 +340,8 @@ function containsCidPrefixedRef(schema: JSONSchemaObj): boolean {
  * The tagged hash a stored document's {@link SCHEMA_META_MEMBER}
  * references: one for the reference form, none for the inline or absent
  * forms. Throws {@link MalformedSchemaMetaError} for the malformed form.
- * A `cid:` schema document's own `schema` member is not a metadata
- * position, and callers exclude those documents before asking.
+ * This inspects document-level metadata. A `schema` keyword inside a schema
+ * document's `value` belongs to that schema and is not a metadata position.
  */
 export function collectSchemaMetaRefHashes(
   document: unknown,
@@ -398,8 +398,9 @@ function localDefName(ref: string): string | undefined {
 /**
  * Collects the local definition names referenced anywhere in `fragment`,
  * refusing every construct the decomposition cannot represent. `fragment` is
- * a root body or a definition body — never a `$defs` holder itself, which is
- * why an inner `$defs` is a nested scope and refused.
+ * a root body or a definition body — never a `$defs` holder itself. The
+ * decomposed form carries one definition map, at the root, so a `$defs`
+ * inside a fragment has no place in it and is refused rather than dropped.
  */
 function scanFragment(
   fragment: JSONSchema,
@@ -409,7 +410,7 @@ function scanFragment(
   if (!isObjectNotArray(fragment)) return;
   if (fragment.$defs !== undefined) {
     throw new SchemaNotDecomposableError(
-      "a subschema declares its own `$defs` scope",
+      "a subschema declares its own `$defs`",
     );
   }
   if (fragment.definitions !== undefined) {

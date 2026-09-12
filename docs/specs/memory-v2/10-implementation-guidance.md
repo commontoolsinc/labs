@@ -127,6 +127,29 @@ request as idempotent only if the watch definition is identical. If the
 definition differs, reject the request and require the client to use
 `session.watch.set` to replace the full watch set.
 
+Watch additions stage changes to graph selectors, missed-target ownership,
+document caches, schema dependency counts, and operation cursors. Evaluation,
+operation snapshot attachment, and wire conversion finish before publication.
+Once the engine is acquired, the captured session must still be the registry's
+current session. Staging through publication then runs synchronously:
+temporary maps read through the exclusively held session state, copy mutable
+containers only for touched keys, and commit into the original maps on success.
+Discard failed stages; never retain a chain of staged maps in a live session.
+Shared evaluation-cache entries require independent clones.
+
+Operation snapshots retain their declaration list and cursor map across engine
+access. A concurrent watch replacement owns its own cursor map.
+
+Ordinary additions index watch IDs and maintain only changed interests.
+Incremental refresh reconciles each changed scoped key against delivered
+entries, operation watches, and remaining misses on every branch. The last
+miss owner leaving must retire an interest unless another source still owns
+it. Watch replacement recomputes complete provenance; normalizing an accepted
+list with duplicate IDs also recomputes it because an operation owner can
+depart. Schema dependency counts bound refresh revalidation by distinct schema
+hashes, while every dependency still verifies against the space's own stored
+closure, including when its referrer has not changed.
+
 ## 5. Transaction Contract
 
 The runner-facing transaction contract does not change.

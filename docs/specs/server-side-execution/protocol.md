@@ -71,6 +71,26 @@ authored, and the scheduler's stamping choke points are exactly where
 derivation-kind runs divert (speculation.md §2's posture rows) — so
 this ruling NAMES the landed boundary rather than changing it.
 
+*(AMENDED 2026-09-09 — the pattern-lifecycle verbs as server calls,
+RULED 2026-08-24 and BUILT: the client-authored classification above is
+the posture of a runtime running the whole stack. A `cf` client connected
+to a deployment running the serving loop no longer performs the
+instantiation transaction itself: `cf piece new` sends the program it
+resolved to `/api/pattern-lifecycle/*`, and the space's serving runtime
+compiles it and materializes the piece — the setup transaction, stamped
+`bookkeeping` under the space's lease and carrying the requester's trust
+snapshot — as a step of a wave cycle
+([docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md)).
+The scheduler tell is unchanged: the verb's writes are still commits made
+outside the scheduler, made now by the serving side on the requester's
+behalf, the registry entry and the slug in the same transaction as the
+piece. A source replacement stays the client's authored act: it publishes
+module update authority, which module-loading.md requires from an owned
+setup transaction that commits to storage, and a wave's withdrawable
+acceptance cannot supply that. Every other client of the piece controller —
+the shell, the background piece service — keeps the client-side shape
+until its own migration.)*
+
 **The `system` class is PRODUCER-defined, its contents exemplary
 (RULED 2026-08-05).** The stamp rides the memory server's generic
 direct-write path (`Server.writeDocument`,
@@ -678,7 +698,8 @@ the target's `eventWatermark` makes processing exactly-once.
   ("each new input lifts the previous generation" now holds without
   requiring a next input). Bounds, normative: the advance covers only
   COMMITTED seqs — no speculative advance; it fires at most once per
-  quiescence transition (armed by content-carrying wave commits,
+  quiescence transition (armed by content-carrying own derived commits,
+  including standalone effect completions,
   consumed on seal); its own advance-only commit is NEVER chased — the
   one derived commit W does not cover at quiescence is the final
   advance-carrying bookkeeping commit itself, definitionally (covering

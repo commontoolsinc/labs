@@ -223,10 +223,13 @@ const typeAccepts = (declared: unknown, actual: string): boolean => {
  * property. Eager traversal evaluates each branch against the schema around it;
  * combining here is that rule, decided on the schema instead of the value.
  *
- * The union's `$defs` ride along whatever the combination kept of them: a
+ * The union's `$defs` ride along, over whatever the combination kept: a
  * branch is routinely a `$ref` into them, and the schema it resolves to can
  * hold further refs — `RenderNode` refers to itself — which have nowhere to
- * point once the definitions are gone.
+ * point once the definitions are gone. A name the branch carried of its own
+ * yields to the union's, which is the definition the ref named all along;
+ * names only the branch carries — a resolved view's namespaced ref-site
+ * definitions — stay.
  */
 const branchWithOuter = (
   schema: JSONSchemaObj,
@@ -240,8 +243,8 @@ const branchWithOuter = (
   return {
     ...combined as JSONSchemaObj,
     $defs: {
-      ...schema.$defs,
       ...(isObjectOrArray(combined.$defs) ? combined.$defs : {}),
+      ...schema.$defs,
     },
   };
 };
@@ -276,8 +279,9 @@ const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
 };
 
 /**
- * A branch with its `$ref` resolved in its definition scope: its own `$defs`,
- * or the union's when it declares none.
+ * A branch with its `$ref` resolved against the union's `$defs`, which take
+ * the place of any the branch declares of its own; a union declaring none
+ * leaves the branch to resolve as the document it is.
  *
  * A branch that will not resolve narrows to `false` — nothing matches it. It
  * cannot be left as it was: a bare `$ref` declares no `type` and no `required`,
@@ -331,7 +335,7 @@ const narrowForValue = (
   if (!isObjectOrArray(schema)) return schema;
   const rawBranches = schema.anyOf ?? schema.oneOf;
   if (!Array.isArray(rawBranches) || rawBranches.length === 0) return schema;
-  // Resolve `$ref` branches against this schema's own `$defs` first. A branch
+  // Resolve `$ref` branches against this schema's `$defs`. A branch
   // written as a bare `$ref` carries no `type`, no `required` and no `asCell`,
   // so matching it decides nothing: every branch survives, the union never
   // narrows, and whatever the branches declared — including a property the

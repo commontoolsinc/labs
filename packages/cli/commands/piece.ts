@@ -41,6 +41,7 @@ import {
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
 import { listFlags } from "../lib/refusal.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
+import { suppressDeferredSkewNote } from "../lib/version-check.ts";
 import {
   parseReadSection,
   readSectionAsksVerbHelp,
@@ -115,6 +116,7 @@ import {
   setPieceSlug,
   SpaceConfig,
   stepPiece,
+  UnknownPieceVerbError,
 } from "../lib/piece.ts";
 import type {
   CachedResultField,
@@ -213,7 +215,7 @@ export function setsrcSuccessLine(
 ): string {
   return `Committed source update for piece ${config.piece} (Pattern Ref: ${
     formatPatternIdentity(update.ref)
-  }, Revision: ${update.revisionId})`;
+  }, Revision: ${update.revisionId}, Seq: ${update.seq})`;
 }
 
 /** A warning for work which failed after storage accepted the source update. */
@@ -223,7 +225,7 @@ export function setsrcRefreshWarning(
   return update.refresh.status === "failed"
     ? `Source revision ${update.revisionId} committed as ${
       formatPatternIdentity(update.ref)
-    }, but refreshing the running piece failed: ${update.refresh.warning}`
+    } at seq ${update.seq}, but refreshing the running piece failed: ${update.refresh.warning}`
     : undefined;
 }
 
@@ -838,6 +840,7 @@ export function reportVerbInputErrorOrRethrow(
   const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
   if (report) {
     observer?.finish("failed");
+    suppressDeferredSkewNote();
     exitWithDataError(report, deps);
   }
   throw error;
@@ -872,6 +875,7 @@ export function exitPieceCallFailure(
 ): never {
   observer.finish("failed");
   if (error instanceof ValidationError) {
+    if (phase === "initial_sync") suppressDeferredSkewNote();
     throw error;
   }
   const printError = deps?.printError ?? console.error;
@@ -3605,14 +3609,19 @@ export async function callFromCommand(
             Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
           ),
         },
-      ).catch((error) =>
-        reportVerbInputErrorOrRethrow(
+      ).catch((error) => {
+        if (error instanceof UnknownPieceVerbError) {
+          observer.finish("failed");
+          suppressDeferredSkewNote();
+          exitWithDataError({ message: error.message }, dataErrorSinks);
+        }
+        return reportVerbInputErrorOrRethrow(
           error,
           pieceConfig.piece,
           dataErrorSinks,
           observer,
-        )
-      ),
+        );
+      }),
       waitControl.boundSeconds,
     );
     // The bag goes whole, here and at the failure exit below. Re-listing the

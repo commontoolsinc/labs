@@ -68,6 +68,22 @@ events (e.g. attesting an authentic DOM origin).
 
 ## 2. Lifecycle, end to end
 
+An admitted entry can exist in the store before the serving replica sees it.
+Before queuing a durable event, the drain validates both `eventId` and `seq`
+at the stored index in the replica. On a mismatch, it publishes this space's
+pending subscription frames and awaits an ordered response on the serving
+connection. This barrier consumes published input without waiting for sealed
+wave writes to become durable. A drain pass attempts it at most once.
+
+After the response, the drain reads the stored entries again, finds the same
+immutable identity, and validates its current index in the replica. A consumed
+or compacted entry needs no dispatch. A failed synchronization or a view still
+hidden by a local write defers that entry and every later arrival across streams.
+Scheduler quiescence does not establish completion for these unqueued events:
+the space watermark stays below the earliest deferred sequence until a fresh
+scan can process it. The existing input wake and deferral backstop re-arm that
+scan. Ending the serving tenure abandons an outstanding drain continuation.
+
 ```
 client                          server (SpaceServer)
 ------                          --------------------
@@ -266,7 +282,11 @@ ambient-state one.
   client-written ones; a flag-ON client's diverted echo publishes that
   same address on its transaction, and the durable-ack coupling settles
   the sender's callback only after the handling consequenced — the
-  receipt is durable before the address is ever dereferenced.
+  receipt is durable before the address is ever dereferenced. A sender
+  that needs only its own act on the record takes the send's
+  `onAppended` hook, which settles when the append is durable and
+  carries the delivery outcome; the commit callback keeps the coupling
+  above, and a client that reads the receipt waits for it there.
   Exactly-once for the write is the single serving writer plus the
   store's CAS on the result cell ("all handlers write result cells
   (even if the value is undefined), and the CAS for that is the

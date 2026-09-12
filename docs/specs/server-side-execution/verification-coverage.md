@@ -25,11 +25,11 @@ The status corrections in this register are bounded to the rows below:
 | OW18 / OW45 source freshness | Tenure activation ensures root existence; explicit opens follow source, including served wish-sidecar opens. |
 | OW28 | Closed: accepted compile effects, child execution, restart, supersession, and independently reactive user/session program selection have direct coverage. |
 | OW28-createRef | Closed: the compile cache snapshots program content, separates compilation with and without a space, and persists shared compiles into each requested space when CFC is enforced. |
-| OW28-supersession-family / OW28-instance-family | Investigation follow-ups; reproduce current residuals and reconcile the instance family with OW53. |
+| OW28-supersession-family / OW28-instance-family | Shared fetch, `fetchProgram`, and direct LLM user/session isolation are covered. Other effect callers, provider/tool reads, and later-user session initialization remain open. |
 | OW30 | Stream sibling validation is fixed; the non-Stream counter/container observation remains unresolved. |
 | OW31 residual (vii) | Read-triggered remount is implemented; automatic replay of the entire watch set remains separate. |
 | OW55 | Open: serving pattern-source trust, with root creation and wish sidecars among its consumers. |
-| OW56 finding 2 | Closed: source following has one owner, the opener. Server-owned materialization/compilation remains future work. |
+| OW56 finding 2 | Closed: source following has one owner, the opener. ON upload and instantiate run on the serving runtime; source updates, other client creation paths, and compiled-byte trust remain separate OW56 work. |
 | OW58 | Closed: resolved-error notice commits release the drain guard. |
 | OW60 | Open: unresolved flag-ON client echoes are still skipped. |
 
@@ -1120,9 +1120,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   cost is recorded, not a correctness need). Stage-A residuals,
   FLAGGED (not filled): (i) an effect COMPLETION for a per-instance
   run seals its local layer under the outbox carriage's identity
-  (matching its engine row) but the writeback transaction is unstamped,
-  so its hash-guard READS resolve the service's instances — a
-  per-instance node's effect completion is unpinned; (ii) a
+  (matching its engine row) but a builtin that leaves its writeback transaction unstamped reads the
+  service's instances in its hash guard. OW28-instance-family records the
+  remaining callers and the fetch/compile closure; (ii) a
   handler-only write to a never-written PerUser slot lands at the
   slot's base scope (the handler's handle carries no scope cap until
   the slot redirects — pre-existing OFF behavior, verified at OFF;
@@ -1172,14 +1172,15 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   own pins (served preflight/presync identity, `Cell.sync` identity,
   the traversal kick identity, `SpaceReplica.#buildReads()` identity,
   `WatchView` key). Residuals SHARPENED, still flagged: (i) effect
-  completion — the writeback tx is unstamped, so its hash-guard reads resolve
-  the service's instances while the seal is under the carriage identity;
+  completion — remaining unstamped builtin writebacks read the service's
+  instances while the seal is under the carriage identity (the current
+  caller boundary is OW28-instance-family);
   `SpaceReplica.#buildReads()` then attests the CARRIAGE identity's records (a
   never-
   loaded record yields seq-0 confirmed reads); the engine does not
   reject a mis-attested basis on derived commits today, so the
   consequence is confined to local cascade/hash-guard tracking — but
-  any per-user node with an effect is served with an unattested basis;
+  those remaining per-user effect paths have an unattested basis;
   fix shape: stamp the completion tx with the carriage identity at
   `markEffectCompletion` (needs the runtime's outbox carriage — a
   stamper hook, threaded through the builtins), NOT filled here;
@@ -1310,10 +1311,10 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
   (`structureLoadTerminal`) — no per-cycle ensure churn — and a
   commit touching one of the load's observed docs RE-ARMS it
-  (`structureLoadRearmed`); the re-armed retry is SETTLE-GATED
-  (retrying inside the re-arming cycle reads the replica's stale
-  pre-commit state and would re-terminalize the not-yet case the
-  re-arm exists to keep sound — caught red during the build). The
+  (`structureLoadRearmed`); the retry follows replica application within the
+  settle loop and finishes its demanded derivations before watermark coverage.
+  Admissions racing confirmation also invalidate a missing-metadata verdict.
+  The
   demanded-structure load pass moved UNDER the wave's flush deadline
   (single-flighted across cycles; completion wakes the loop), so a
   slow ensure no longer throttles input consumption. The conflation
@@ -1331,6 +1332,13 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   RETIRED with this row — the surface runs in CI's ON arm, carrying
   the amplification-ratio gate. Source-following ownership and the
   server's root-existence coverage are recorded by OW18 below.
+  The `executor/space-server-terminal-structure.test.ts` controls observe the
+  real engine's durable result at every covering commit for creation during
+  confirmation, across a flush deadline, through an owning backlink, and with
+  sealed writes pending. `executor/space-server-terminal-confirmation.test.ts`
+  covers traversed-address demand, departure and return, sync failure, and
+  teardown. `ensure-piece-running-scope.test.ts` distinguishes same-ID links
+  across scopes from true cycles under both execution postures.
 
 - OW18 — CLOSED as a move-everything obligation. Tenure activation ensures
   that the space root exists without following the root's source. Source
@@ -2617,26 +2625,121 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   CFC-disabled calls share compilation without issuing replication. This cache
   boundary is shared by OFF and the served compiler; closing it does not
   discharge OW28's serving port.
-- OW28-supersession-family — INVESTIGATE: LLM completion abandonment when
-  inputs change A→B→A during A's in-flight effect. The preserved OW28 branch
-  reports that run-counter cancellation abandons a completion to which the
-  final A attaches through outbox deduplication. Current `llm.ts` retains
-  run-counter cancellation, but the family has no fresh reproduction in the
-  coverage audit. Reproduce the current request/partial/completion lifecycle
-  before choosing a fix; completion must either land for the current request
-  or release the superseded effect. Trigger: the next served LLM supersession
-  scenario. This is an investigation obligation, not a confirmed-current
-  claim that every LLM or fetch builtin wedges.
-- OW28-instance-family — INVESTIGATE with OW53's residuals:
-  `effectTargetKey` accepts an explicit resolution identity. Served
-  `compileAndRun` supplies it, and its completion reads and child selection
-  use the same user or session instance. The other builtin callers retain
-  their scope-name keys unless they explicitly supply that identity. OW53
-  closes SQLite's served acting-identity/clearance fixes and separately names
-  non-SQLite unstamped hash-guard reads, non-clearance instance keys, and the
-  provider READ partition. Owed: one- and two-demander regressions for those
-  narrowed requests, without reopening fixed SQLite cases or counting the
-  compile regression twice.
+- OW28-supersession-family — PARTIALLY CLOSED: served `llm`, `generateText`,
+  and direct `generateObject` accept unqueued completions by the selected
+  request hash in the resolved output instance. Returning from A to B to A while the original
+  A remains in flight attaches to that A through outbox deduplication; a local
+  run generation does not discard its result. A pending request hash is a
+  selection marker, not a settled memo hit.
+
+  `executor-llm-supersession.test.ts` drives controlled responses through a real
+  serving host and outbox, covering A→B and A→B→A, stale responses, model errors,
+  and suppression of durable partial writes. `llm-served-lifecycle.test.ts`
+  covers withdrawn contributions, reissue after withdrawal, and initial and
+  superseded dispatch refusals, including the result announcement. It also
+  proves space→user→space result rebinding with serving both on and off,
+  retirement of settled state, retention across uncommitted staging, and
+  delayed refusals after withdrawal or instance retirement. It also covers
+  refusal of a duplicate accepted request, accepted memo/empty publication
+  superseding an older scope, per-binding announcement ownership for a shared
+  result, bounded retry ownership, and OFF/served queue completion parity.
+  The shared-result binding checks observe the raw publication callback;
+  the host suite separately proves durable user/session result isolation.
+  These are no-network direct-provider controls; they do not establish tool-loop,
+  `llmDialog`, or other effect-family supersession. Those remain investigation
+  obligations rather than claims that every caller has this failure.
+- OW28-instance-family — PARTIALLY CLOSED. Served `compileAndRun`, the
+  shared `fetch.ts` builtins (`fetchText`, `fetchBinary`, `fetchJson`, and
+  `fetchJsonUnchecked`), `llm`, `generateText`, and `generateObject` pass the
+  requesting identity to `effectTargetKey`.
+  Fetch keeps its request id, cancellation, and abandonment state per resolved
+  scope instance. Its claim, result, error, abandonment, and teardown reads use
+  that same identity; an authoritative claim records its validated input hash
+  with the claim id and activity timestamp. The `fetch-served-instances` tests
+  pin user/session key separation and sharing at the declared scope.
+  `executor-fetch-instances` pins a service-identity host with one requester,
+  two users, two sessions, and one request superseding or failing while the
+  neighboring instance completes independently. Idle and completed instances
+  retire without accumulating graph cleanup callbacks; a returning session
+  can issue again, and graph stop still aborts a pending owner. Direct staged
+  tests pin equivalent-request retirement, late-refusal ownership, and each
+  issuance's representative identity while an earlier request is held. Refusal
+  publication tests cover scope changes, shared results across distinct output
+  bindings, memo and empty results, and withdrawn waves; output binding
+  publication is independent of ownership of the request's result fields.
+
+  LLM lifecycle state is partitioned by the resolved output instance, and
+  completion reads bind that identity before checking the selected request
+  or its live input label basis. `served-llm-instances.test.ts` covers
+  deterministic same-user keys, separate user/session keys, and two users
+  sharing one builtin closure. `executor-llm-supersession.test.ts` covers
+  concurrent responses landing in distinct user and session instances, with
+  no service-instance result.
+
+  `fetchProgram` captures the requesting identity for its cache-instance key
+  and asynchronous claim, completion, refusal, and teardown reads and writes.
+  It retains accepted requests before dispatch and one controller per dispatched
+  resolution. `executor-fetch-program-instances.test.ts` covers space, user,
+  and session completion, two users, two sessions, reverse completion order,
+  isolated errors, A→B→A with both URLs retained in the cache, and teardown
+  despite one cleanup failure. `fetch-program-served-lifecycle.test.ts` covers
+  stop before dispatch, rejected release checks, late publication acceptance,
+  shared physical bindings across actors, independent bindings sharing a pending
+  result, stale-peer takeover after refusal publication, and withdrawn
+  publication. A refused request may publish its binding without owning the
+  resolution represented by a peer's cache claim. These controls exercise local
+  program responses; cancellation of resolver network requests remains separate.
+  Same-binding retry controls hold the original refusal until the retry commits
+  or withdraws: only accepted publication suppresses the earlier announcement.
+  They also cover an accepted different target between retries and preservation
+  of accepted-target visibility after a refusal write fails.
+
+  The program lifecycle controls also admit duplicate accepted contributions
+  through the real `SpaceOutbox` under a held dispatch budget. A release refusal
+  selects a surviving accepted attachment; refusing every attachment releases
+  the claim. Component handoff controls also admit immediately after real wave
+  settlement, before runtime-wide settlement, and cover one surviving attachment
+  and complete refusal. The serving loop waits for wave settlement before
+  admitting its effects, so publication acceptance precedes release checks.
+  `executor-outbox-budget.test.ts` covers the selected run context,
+  readable-completion deduplication, immediate re-admission after all refusals,
+  and the absence of fallback after a dispatched request fails.
+  `cfc-sink-release-reject-surfaced.test.ts` checks that inline release refusals
+  increment refusal statistics without counting an effect as flushed.
+
+  `memory-v2-wave-promotion.test.ts` covers the storage boundary those completion
+  guards depend on: all accepted contributions to one document at the same wave
+  sequence remain visible after settlement, across space, user, and session
+  instances. Noncommutative appends retain sealing order between local verdicts,
+  including when the reader excludes speculative pending layers. Authoritative
+  frames prevent replay of accepted contributions, and withdrawing an earlier
+  pending layer preserves already accepted sibling operations.
+  A received acceptance records its sequence before promotion resumes, so a
+  confirmed view covering that sequence does not replay the pending operation.
+  Frames alone do not prove coverage of unresolved or later-wave receipts;
+  those operations and speculative neighbors remain visible. The storage
+  controls cover both receipt/frame orders, cached reads, and notifications.
+  Real wave and engine controls cover consecutive home waves and foreign
+  contributions grouped by actor and grant: accepted verdicts follow each
+  space's server sequence, retaining sealing order within a batch. Nonadjacent
+  contributions sharing a foreign batch produce the same settled value in the
+  replica and engine, while delegated user instances remain separate.
+
+  Standalone effect completions join the serving loop's own derived tail for
+  the drain-settle watermark advance. `executor-settle-advance.test.ts` covers
+  a completed request while another accepted request remains unresolved,
+  with an empty-completion control that creates no commit, a divergent client
+  overlay, and a completion arriving during an older advance's seal. The
+  completion itself retains the current watermark; a later quiescent cycle covers its
+  sequence without requiring another authored input.
+
+  Remaining investigation obligations: tool-loop LLM requests, `llmDialog`,
+  non-clearance SQLite instance keys, and the provider READ partition.
+  Direct response controls do not discharge the provider/tool READ partition.
+  OW53's SQLite acting-identity, owner, and clearance fixes remain closed.
+  Owed: one- and two-demander request/completion regressions for the remaining
+  callers, without reopening fixed SQLite cases or counting compile coverage
+  twice.
 
   Child-input default creation is covered separately from builtin instance
   identity. `executor-compile-and-run.test.ts` passes uninitialized
@@ -9084,16 +9187,12 @@ supply; OW29/OW32/OW34 closed):
     (`llm-dialog.ts:2426` — same family, named untouched by OW34 §7
     and by this close; no ON surface pins it yet); NOTE-6 below
     (delegated read sessions' demand under the process DID —
-    label-inert, unchanged); the OTHER effect kinds' UNSTAMPED
-    writebacks — every non-sqlite effect kind: the
-    `fetch*`/`generate*` families, `llm`, and llm-dialog (which
-    additionally marks completions at 4 sites with bare
-    `llmDialog:`-prefixed keys never widened by `effectTargetKey` —
-    a separate pre-existing quirk) — whose hash-guard reads still
-    resolve the service's instances (the OW17 stage-A flag's
-    remaining scope after this row's sqlite carve-out; the
-    space-server.ts `#commitEffectCompletion` comment names the
-    split); the acting≠demanded split: every context the stamper
+    label-inert, unchanged); llm-dialog's unstamped lifecycle reads and
+    completion keys, plus shared provider/tool reads. Shared fetch,
+    `fetchProgram`, `llm`, and the direct `generate*` completion paths bind
+    their hash-guard reads to the issuing identity; OW28-instance-family
+    records their coverage and the remaining caller boundaries.
+    The acting≠demanded split: every context the stamper
     produces derives `acting` FROM the demanded pair where both
     exist, so a run whose two halves disagree is an identity-model
     question no ruling has decided — `sqliteRunActingPrincipal`
@@ -9242,31 +9341,26 @@ supply; OW29/OW32/OW34 closed):
     identity. The coverage audit does not claim a new cross-origin experiment.
     Trigger: the serving pattern-source trust pass; close when the chosen
     posture and its regression coverage land.
-  - **OW56 — FUTURE (optimize-phase-future) — the server owns program
-    materialization AND compilation; clients wait (minted 2026-08-21
-    with the S-C ruling).** The owner's stated ideal, verbatim:
+  - **OW56 — PARTIALLY CLOSED — server-owned program materialization
+    and compilation.** Under ON, the upload and instantiate lifecycle
+    verbs compile and materialize on the serving runtime. `cf piece new`
+    requests this path. The request settles after the verb's wave commits
+    and durable confirmation succeeds; the receipt does not promise that
+    the piece's first derivation has completed. The contract is
+    [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).
+    `executor-lifecycle-verbs.test.ts` covers the host's queue and durable
+    settlement; `packages/piece/test/served-lifecycle.test.ts` covers the
+    operations through a real memory server and serving host.
 
-    > ideally compilation happens on the server and clients just wait
-    > for it, but if that isn't the case yet, then let's mark this for
-    > a later improvement and do (b)
-
-    — owner, 2026-08-21 (option (b), the client-side heal, was
-    subsequently SKIPPED the same day by the follow-on ruling on the
-    lift-path evidence — the OW45 row carries it; the ideal STANDS as
-    the direction that dissolves the whole class: no client-written
-    program docs means no lost program commits, no die-before-flush
-    orphan window, and no client heal to design). Pairs with OW44's
-    ruled coupling (lazy client instantiation — the client not
-    running the pattern immediately — is the client half of the same
-    family; server-side compilation is the server half). It also
-    addresses the owner's newly-raised concerns beyond durability:
-    client-written TRANSPILED CODE INTEGRITY (who attests the bytes a
-    client compiled — adjacent to OW55's pattern-fetch trust surface)
-    and VERSION-UPDATE FRESHNESS (a client compiling on an old
-    runtime version writes stale-toolchain closures; an explorer is
-    mapping this now and its findings may extend this row). Trigger:
-    optimize-phase-future; closing it also retires the OW45 row's
-    named die-before-flush residual.
+    Source update/check and browser/background creation still use their
+    client paths. Serving source updates requires registering module-update
+    authority at wave settlement; migrating each remaining client is
+    separate work. Clients also resolve local program files and may run
+    the opened graph speculatively. The served creation path therefore
+    does not discharge Finding 1's compiled-byte trust obligation or
+    OW45's die-before-flush residual for the remaining client-written
+    program paths. These boundaries remain open alongside OW44's lazy
+    client-instantiation work.
 
     The write-topology explorer's two findings extend this row (explorer
     map 2026-08-21, verified against main), ruled FOLLOW-UP not

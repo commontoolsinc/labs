@@ -16,7 +16,11 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { seedIdentity, seedTopicBoard } from "./topic-board-fixture.ts";
+import {
+  parseTopicBoardDemand,
+  seedIdentity,
+  seedTopicBoard,
+} from "./topic-board-fixture.ts";
 
 const flags = parseArgs(Deno.args, {
   string: [
@@ -24,6 +28,7 @@ const flags = parseArgs(Deno.args, {
     "space",
     "passphrase",
     "topics",
+    "demand",
     "crossrefs",
     "citing-topics",
     "body-words",
@@ -48,6 +53,7 @@ function count(name: string): number {
 }
 
 const topicCount = count("topics");
+const demand = parseTopicBoardDemand(flags.demand);
 const output = required("out");
 const startedAt = performance.now();
 
@@ -56,6 +62,7 @@ const fixture = await seedTopicBoard({
   spaceName: required("space"),
   identity: await seedIdentity(required("passphrase")),
   topicCount,
+  demand,
   crossrefsPerTopic: count("crossrefs"),
   citingTopics: count("citing-topics"),
   bodyWords: count("body-words"),

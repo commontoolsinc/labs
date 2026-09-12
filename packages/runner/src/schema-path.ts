@@ -4,6 +4,7 @@ import { schemaWithProperties } from "@commonfabric/data-model-schema";
 
 import type { JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 
 /**
  * Whether a schema can expose a path in its materialized projection.
@@ -46,9 +47,7 @@ export function schemaPathSelection(
         const { [keyword]: _branches, ...outer } = resolved;
         if (keyword === "allOf" && branches.includes(false)) return false;
         return branches.some((branch) => {
-          const branchRoot = typeof branch === "object"
-            ? { ...branch, $defs: { ...resolved.$defs, ...branch.$defs } }
-            : branch;
+          const branchRoot = cfcSchemaWithInheritedDefs(branch, resolved.$defs);
           const child = typeof branchRoot === "object"
             ? ContextualFlowControl.resolveSchemaRefsOrThrow(branchRoot)
             : branchRoot;

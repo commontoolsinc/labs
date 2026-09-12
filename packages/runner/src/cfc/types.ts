@@ -55,6 +55,40 @@ export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
 export const CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE =
   "runtime.owned-store";
 
+// A store no pattern declares a policy on: a document the runtime mints to hold
+// its own bookkeeping, at an id whose shape says nothing about who mints it.
+// The compilation cache's source and compiled records carry it, along with any
+// document anchoring splits out of a marked value. Their ids are minted from
+// causes built on a module's content-derived identity, or derived from such an
+// id; no pattern names one, and their fields are the cache's own record of a
+// module. `target` is that
+// document, named whole; `sources` names the document it was derived from where
+// there is one, and is empty where the claim stands on the document alone.
+//
+// The prepare gate reads it for the §8.12.4 writer-fit measurement, which
+// quantifies over the paths a schema could have declared a policy at, and takes
+// it only where `target` names a whole document AND the input was recorded
+// under {@link runtimeWritePolicyAuthorization}.
+//
+// The runtime's OWN schemas do describe some of those fields — the cache's
+// write schemas carry an `addIntegrity` declaration on the delegation metadata.
+// The skip is unconditional over that route, as it is for the two id classes,
+// so a confidentiality declaration added to one of those schemas would be a
+// read floor and not a write ceiling.
+//
+// The marker names the store for one transaction, and that is the whole of what
+// this claim needs: the measurement runs over documents the transaction taking
+// it wrote, so the transaction that asks is the transaction that recorded it.
+// {@link CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE} carries an enrollment
+// beside it because route 2 answers for stores a later transaction writes.
+//
+// Skipping the ceiling is not releasing the value. The write stays a flow stamp
+// target, so the join lands on it as the `derived` component, a later read of
+// the document carries that clause, and the egress gates are unchanged.
+// `docs/specs/cfc-enforcement-matrix.md` §4 carries the reasoning.
+export const CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE =
+  "runtime.undeclarable-store";
+
 /**
  * Marks a write-policy input as one the runtime itself recorded.
  *
@@ -600,6 +634,11 @@ export type PreparedDigestInput = {
   readonly labelMetadataObservations?: readonly CfcLabelMetadataObservation[];
 };
 
+/** A synchronous release refusal before the effect starts any work. */
+export const POST_COMMIT_RELEASE_REJECTED = Symbol(
+  "post-commit-release-rejected",
+);
+
 export type PostCommitSideEffect = {
   id: string;
   kind: string;
@@ -612,7 +651,9 @@ export type PostCommitSideEffect = {
    * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
   nonce?: string;
 
-  flush(tx: unknown): void | Promise<void>;
+  flush(
+    tx: unknown,
+  ): void | Promise<void> | typeof POST_COMMIT_RELEASE_REJECTED;
 
   /**
    * Called instead of {@link flush} when the work this effect stands for will

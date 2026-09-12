@@ -55,6 +55,7 @@ import {
   inspectPiece,
   listPieces,
   newPiece,
+  type PieceConfig,
   PieceResultProjectionError,
   PieceVerbReadError,
   recreateSpaceRootPattern,
@@ -77,7 +78,8 @@ const ID = "~/.my.key";
 // The 43-character id length matches the entity ids the runtime mints, and
 // clears the runner parser's handle-length threshold.
 const LLM_HANDLE = `of:fid1:${"baedreiabcdefghijklmnopqrstuvwxyz0123456789"}`;
-const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const SPACE_DID =
+  "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK" as const;
 const OTHER_SPACE_DID =
   "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
@@ -1057,6 +1059,77 @@ describe("cli piece parsing", () => {
     ).toThrow();
   });
 
+  it("newPiece() asks a serving deployment to create the piece and keeps only the start", async () => {
+    // The connection carries the deployment's flag posture; under it the
+    // client resolves the program, sends it with the name and the registry
+    // request, leaves the space root to the serving loop, and starts the
+    // piece it is handed back unless told not to.
+    const program = { main: "/main.tsx", files: [] };
+    const cell = { name: "the new piece's cell" };
+    const seen: {
+      ensured?: true;
+      requests: unknown[];
+      started: unknown[];
+    } = { requests: [], started: [] };
+    const controller = {
+      runtime: { experimental: { serverExecution: true } },
+      getSpace: () => SPACE_DID,
+      ensureDefaultPattern: () => {
+        seen.ensured = true;
+        return Promise.resolve();
+      },
+      getPieceCell: () => Promise.resolve(cell),
+      startPiece: (started: unknown) => {
+        seen.started.push(started);
+        return Promise.resolve();
+      },
+    };
+    const deps = {
+      loadPieces: () => Promise.resolve(controller as any),
+      getPinnedProgramFromFile: () => Promise.resolve(program as any),
+      loadIdentity: () => Promise.resolve({} as any),
+      instantiatePieceOnServer: (_config: unknown, input: unknown) => {
+        seen.requests.push(input);
+        return Promise.resolve({
+          pieceId: PIECE,
+          pattern: { identity: "i", symbol: "default" },
+          slug: "named",
+        });
+      },
+    };
+    const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const entry = { mainPath: "/main.tsx", repository: "repo" };
+
+    const started = await newPiece(config, entry, { slug: "named" }, deps);
+    expect(started).toBe(PIECE);
+    expect(seen.requests[0]).toEqual({
+      space: SPACE_DID,
+      program,
+      repository: "repo",
+      slug: "named",
+      register: true,
+    });
+    expect(seen.started).toEqual([cell]);
+
+    const unstarted = await newPiece(
+      config,
+      entry,
+      { start: false, force: true },
+      deps,
+    );
+    expect(unstarted).toBe(PIECE);
+    expect(seen.requests[1]).toEqual({
+      space: SPACE_DID,
+      program,
+      repository: "repo",
+      force: true,
+      register: true,
+      start: false,
+    });
+    expect(seen.started).toEqual([cell]);
+    expect(seen.ensured).toBeUndefined();
+  });
+
   it("recreateSpaceRootPattern() targets the explicit space", async () => {
     const seen: { config?: SpaceConfig } = {};
     const pieceId = await recreateSpaceRootPattern({
@@ -1524,6 +1597,13 @@ describe("cli piece parsing", () => {
       { selection: { filter } },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         deriveSelectedValue: (runtime, space, source, selection) => {
           expect(runtime).toBe(controller.runtime as any);
@@ -1557,6 +1637,13 @@ describe("cli piece parsing", () => {
       { selection: { filter: parseSelectionFilter(".active") } },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         deriveSelectedValue: () => Promise.reject(selectionError),
       },
@@ -1597,6 +1684,13 @@ describe("cli piece parsing", () => {
       { selection: { filter: parseSelectionFilter(".active") } },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         deriveSelectedValue: () =>
           Promise.reject(
@@ -1629,6 +1723,18 @@ describe("cli piece parsing", () => {
     };
     const deps = {
       loadPieces: () => Promise.resolve(controller as any),
+      loadPieceForRead: (
+        _pieces: unknown,
+        id: string,
+        step: boolean,
+        scope: PieceConfig["pieceScope"],
+      ) =>
+        (controller.get as (...args: unknown[]) => Promise<never>)(
+          id,
+          step,
+          undefined,
+          scope,
+        ),
       resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
     const options = {
@@ -1680,6 +1786,18 @@ describe("cli piece parsing", () => {
     };
     const deps = {
       loadPieces: () => Promise.resolve(controller as any),
+      loadPieceForRead: (
+        _pieces: unknown,
+        id: string,
+        step: boolean,
+        scope: PieceConfig["pieceScope"],
+      ) =>
+        (controller.get as (...args: unknown[]) => Promise<never>)(
+          id,
+          step,
+          undefined,
+          scope,
+        ),
       resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
 
@@ -1819,6 +1937,13 @@ describe("cli piece parsing", () => {
       { step: true },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
@@ -1898,6 +2023,13 @@ describe("cli piece parsing", () => {
       { step: true, input: true },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
@@ -1977,6 +2109,13 @@ describe("cli piece parsing", () => {
       { step: true },
       {
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
@@ -2020,6 +2159,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     ).catch((error) => error);
     expect(error).toBeInstanceOf(PieceResultProjectionError);
@@ -2049,6 +2195,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).resolves.toBeUndefined();
   });
@@ -2088,6 +2241,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).rejects.toThrow(PieceResultProjectionError);
   });
@@ -2112,6 +2272,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).rejects.toThrow("network unreachable");
   });
@@ -2141,6 +2308,13 @@ describe("cli piece parsing", () => {
       {
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
         loadPieces: () => Promise.resolve(controller as any),
+        loadPieceForRead: (_pieces, id, step, scope) =>
+          (controller.get as (...args: unknown[]) => Promise<never>)(
+            id,
+            step,
+            undefined,
+            scope,
+          ),
       },
     )).resolves.toBeUndefined();
   });
@@ -2204,6 +2378,7 @@ describe("cli piece parsing", () => {
     };
 
     const guardDeps = (piece: unknown) => ({
+      loadPieceForRead: () => Promise.resolve(piece as never),
       resolvePieceAddress: (_pieces: unknown, id: string) =>
         Promise.resolve(id),
       loadPieces: () =>
@@ -2655,6 +2830,8 @@ describe("cli piece parsing", () => {
       ref: { identity: "B".repeat(43), symbol: "default" },
       revisionId: "revision-2",
       detachedOrigin: null,
+      space: SPACE_DID,
+      seq: 12,
       refresh: { status: "completed" as const },
     };
     const { config, update } = await setPieceSourceFromCommand(
@@ -2711,12 +2888,14 @@ describe("cli piece parsing", () => {
         ref: { identity: "B".repeat(43), symbol: "default" },
         revisionId: "revision-2",
         detachedOrigin: null,
+        space: SPACE_DID,
+        seq: 12,
         refresh: { status: "completed" },
       },
     )).toBe(
       `Committed source update for piece ${PIECE} ` +
         `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
-        `Revision: revision-2)`,
+        `Revision: revision-2, Seq: 12)`,
     );
   });
 
@@ -2726,6 +2905,8 @@ describe("cli piece parsing", () => {
       ref: { identity: "B".repeat(43), symbol: "default" },
       revisionId: "revision-2",
       detachedOrigin: null,
+      space: SPACE_DID,
+      seq: 12,
       refresh: { status: "completed" as const },
     };
     const rendered: string[] = [];
@@ -2759,7 +2940,7 @@ describe("cli piece parsing", () => {
     expect(rendered).toEqual([
       `Committed source update for piece ${PIECE} ` +
       `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
-      `Revision: revision-2)`,
+      `Revision: revision-2, Seq: 12)`,
     ]);
     expect(warned).toEqual([]);
     expect(exitCodes).toEqual([]);
@@ -2777,6 +2958,8 @@ describe("cli piece parsing", () => {
       ref: { identity: "B".repeat(43), symbol: "default" },
       revisionId: "revision-2",
       detachedOrigin: null,
+      space: SPACE_DID,
+      seq: 12,
       refresh: {
         status: "failed" as const,
         warning: "dependency unavailable",
@@ -2816,11 +2999,12 @@ describe("cli piece parsing", () => {
     expect(rendered).toEqual([
       `Committed source update for piece ${PIECE} ` +
       `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
-      `Revision: revision-2)`,
+      `Revision: revision-2, Seq: 12)`,
     ]);
     expect(warned).toEqual([
       `Source revision revision-2 committed as ` +
-      `cf:module/${"B".repeat(43)}#default, but refreshing the running ` +
+      `cf:module/${"B".repeat(43)}#default at seq 12, but refreshing the ` +
+      `running ` +
       `piece failed: dependency unavailable`,
     ]);
     expect(hinted).toHaveLength(1);
@@ -2865,6 +3049,8 @@ describe("cli piece parsing", () => {
                 ref: { identity: "B".repeat(43), symbol: "default" },
                 revisionId: "revision-2",
                 detachedOrigin: null,
+                space: SPACE_DID,
+                seq: 12,
                 refresh: {
                   status: "failed" as const,
                   warning: "dependency unavailable",
@@ -4607,6 +4793,8 @@ describe("cli piece parsing", () => {
                   },
                   revisionId: "revision-2",
                   detachedOrigin: null,
+                  space: SPACE_DID,
+                  seq: 12,
                   refresh: { status: "completed" as const },
                 });
               },

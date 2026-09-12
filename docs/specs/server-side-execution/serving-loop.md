@@ -45,6 +45,14 @@ toolshed process
 A space is ACTIVE when it has ≥1 live client session or undelivered
 events; otherwise it MAY be parked (runtime disposed, lease released).
 Activation on: session open, event append, or explicit warm request.
+*(AMENDED 2026-09-09: a fourth trigger — a pattern-lifecycle verb
+request, which the host queues on the space's serving loop; the loop
+runs it ahead of a cycle's event drain, its seals joining that cycle's
+wave, and once the wave has committed re-announces the documents the
+verb staged to itself as a warm-marked notice — the same carrier as the
+provisioning path's — so the next cycle loads and derives the staged
+piece; the request settles at the verb's own wave commit —
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -192,14 +200,17 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   `SERVER_EXECUTION_STORE_READ_THROUGH=true` in the toolshed bootstrap,
   default OFF) the home space's reads leave the session instead: a
   document the replica does not hold is read synchronously from the
-  engine on first access, a `sync()` resolves from the engine with no
-  watch registered, and the feed's admitted commits (plane (d)) re-read
-  the documents the replica holds — so the runtime walks the schema
-  once, over what it actually reads, and the memory server never walks
-  it for the serving session at all. The one chase the read-through
-  keeps is the frame validator's delivery guarantee: the `cid:` schema
-  documents a read document's link positions reference are read with
-  it, to a fixpoint, exactly as a session's frame carries them. Reads
+  engine on first access and a `sync()` of that document resolves from
+  the engine with no watch registered, while a `sync()` of a held
+  document is answered from the replica, and the feed's admitted
+  commits (plane (d)) re-read the documents the replica holds — so the
+  runtime walks the schema once, over what it actually reads, and the
+  memory server never walks it for the serving session at all. The
+  read-through preserves the frame validator's delivery guarantee: it
+  reads the `cid:` schema documents referenced by an accessed document's
+  link positions or schema metadata, and follows the schema documents'
+  own references to a fixpoint, just as a session's frame carries them.
+  This applies to content-addressed documents as well. Reads
   run at the engine's head, as delivered frames do; writes and
   foreign-space reads stay on the session. Two rules a session frame
   follows hold here in the read-through's own form. Protocol.md §3's
@@ -307,6 +318,15 @@ derived consequences are fully committed. Persisted in the space (one
 well-known doc, updated in the same transaction as derived commits — never
 its own commit).
 
+An event whose sidecar synchronization fails or whose replica view does not
+hold its stored `(eventId, seq)` has not entered the scheduler. A quiet scheduler
+therefore cannot establish coverage for it. The drain retains the earliest such
+sequence across cycles, clamping both input-head and quiescent-tail advancement
+below it. A fresh scan re-evaluates this floor; ending the serving tenure clears
+it. This composes with the foreign-write shadow floor and does not wait for
+sealed-write durability. [Event visibility](events.md#2-lifecycle-end-to-end)
+defines the ordered publication/response barrier before deferral.
+
 ```
 on activate(space):
   acquire lease (else park)
@@ -356,10 +376,12 @@ on wave budget exhaustion — EITHER trigger (deadline RULED, owner
 2026-08-04): (a) a cascade that will not quiesce within the
 scheduler's pass budget, or (b) the CONSEQUENCE-FLUSH DEADLINE — a
 wave still running at T_flush commits what is sealed so far. ONE
-mechanism for both: commit the wave anyway — the in-memory state is
-a consistent snapshot — count wavesBudgetExhausted, and advance W NOT AT
-ALL: an exhausted wave's commit carries no watermark movement
-(`derivedThrough` stays at the current W). Continuation waves carry the
+mechanism for both: close a wave when it has sealed contributions or pending
+effects, count `wavesBudgetExhausted`, and keep W unchanged. A zero-delta
+cycle with no pending effects closes no wave and makes no durable commit,
+but still increments the exhaustion counter. A committed exhausted wave
+contains a consistent sealed snapshot; its `derivedThrough` stays at the
+current W. Continuation waves carry the
 cascade as dirtiness; W jumps to the top of the pending input batch only
 at true quiescence. Crash recovery stays sound because the basis index
 re-marks the truncated dirty frontier (§3b, §6) and memo hits suppress
@@ -369,13 +391,17 @@ on drain-settle (TRUE quiescence: a settled non-exhausted cycle, no
 contributions, no pending events, the drain empty — S1, RULED
 2026-08-19; protocol.md §4's quiescence-advance amendment):
   additionally advance W over the space's own committed derived tail
-  (the wave commits contiguously above the input coverage point),
+  (own waves and standalone effect completions contiguously above the
+  input coverage point),
   sealed as an advance-only wave and pushed through the ordinary
   watermark-doc channel — client retirement floors that include a
   pushed derived commit's seq become reachable on a quiet space (the
   swatch-stall class fix). At most once per quiescence transition
-  (latched by content-carrying wave commits, consumed on seal); the
-  advance's own bookkeeping commit is never chased; any non-own seq
+  (latched by content-carrying own derived commits, consumed on seal); a
+  completion arriving after an advance chose its target keeps a later advance
+  owed. Each successful advance-only commit is counted even when that newer
+  completion keeps the latch armed. The advance's own bookkeeping commit
+  is never chased; any non-own seq
   above the coverage point stops the advance below it (fail-closed —
   its coverage arrives input-driven). Counted: settleAdvances.
 
@@ -418,9 +444,14 @@ Light waves never reach the deadline and stay single-commit — the
 zero-delta case, which is why this is a trigger on the EXISTING
 exhaustion machinery rather than a new commit topology. T_flush is
 a policy knob (order 50–100 ms), tuned in Phase 6 with the other
-budgets; `wavesBudgetExhausted` counts both triggers, and the
-amplification budget's inspection rule treats deadline flushes
-under load as a legitimate re-baseline reason (testing.md §4).
+budgets. The configured default is 100 ms. `wavesBudgetExhausted` counts
+exhausted cycles, including those with no wave closure or durable commit;
+`waves` counts closures, including vacuous or aborted outcomes. Their ratio
+is not a committed-wave exhaustion fraction. The amplification budget's
+inspection rule treats deadline flushes under load as a reason to inspect
+and, with the required evidence, re-baseline (testing.md §4). The deadline
+allows sealed consequences to become visible under sustained multi-user
+input while full input coverage remains gated on quiescence.
 
 **Sealing order makes the first flush worth flushing**: events and
 their handler consequences MUST seal ahead of deep demanded
@@ -949,7 +980,15 @@ the 2026-08-24 ruling; the owner may re-rule it).
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is
-  the scheduler's ordering.
+  the scheduler's ordering. The input seq is the serverSeq the wave was
+  opened at, and any seal opens one when none is open. A wave nothing
+  sealed into is discarded at the next cycle's start and again ahead of
+  the cycle's own watermark write, so the wave a cycle commits was opened
+  at or after its predecessor's commit landed: a seal arriving while that
+  commit is in flight (a read probe against the serving runtime) would
+  otherwise leave a wave whose basis the loop's own commit has already
+  passed, and the next cycle's writes to the documents it touched — the
+  watermark advance among them — would be dropped against it.
 - Failure isolation is per action: an aborted tx discards only its own
   writes; the wave keeps the rest.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
@@ -1143,10 +1182,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   activity). Canonicalization: sorted keys, no undefined, links by entity
   id + path.
 - **Storage**: the result is an ordinary cell commit; the memo key is
-  written alongside the result (same doc, `requestHash` field). No new
-  tables.
-- **Hit rule**: if the recomputed key equals the stored key, the stored
-  result IS the node's value — no effect fires. This is what makes
+  written alongside the result (same doc, `requestHash` field). A builtin
+  may also write this field with `pending: true` to select the current
+  request; that marker alone is not a stored result. No new tables.
+- **Hit rule**: if the recomputed key equals the stored key and a settled
+  result or error is present, the stored result IS the node's value — no effect fires. This is what makes
   restart-recovery safe: recompute pure nodes, re-derive keys, reuse
   results.
 - **Miss rule**: enqueue the effect on the outbox with the key AND
@@ -1177,8 +1217,15 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   completion commit and consumption is covered by recovery: the basis
   index shows the consumers stale against the result doc's head (§6).
 - **In-flight dedupe**: one outstanding effect per (key, result
-  target) per space; a second miss on the same (key, target)
-  attaches to the in-flight effect. Two DISTINCT result targets
+  target) per space; the target includes its resolved user/session instance.
+  A second miss on the same (key, target) attaches to the in-flight effect.
+  Before dispatch, each accepted attachment retains its own release check.
+  A synchronous release refusal selects the next attachment under that
+  attachment's captured run context. Once an attachment dispatches, the key
+  deduplicates until its work and readable completion retire; a thrown error
+  or rejected work promise does not select another attachment.
+  Completion acceptance follows the currently selected request in that
+  instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
   each egresses (RULED 2026-08-13; the earlier per-key-only
   wording promised a cross-target sharing that §4's own miss
@@ -1191,7 +1238,7 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.
 
-FORBIDDEN: re-firing an effect whose stored key matches; effect retry
+FORBIDDEN: re-firing an effect whose settled stored result has a matching key; effect retry
 timers inside the loop; a "pending effects" table (the EFFECT half of
 the outbox is
 process-local; on crash, missing results are re-missed from keys —
@@ -1261,6 +1308,21 @@ the durable rows of §5 carry APPENDS, never effect state).
   write-free writebacks, and identical re-asserts are idempotent at
   the store. For appends, idempotence is the `eventId` dedupe
   horizon.
+- When several accepted contributions to one document share a
+  wave sequence, their settled local value includes every contribution in
+  local sealing order. Local promotion also preserves that order between
+  verdicts, including in the view that excludes speculative pending layers.
+  An authoritative frame at the same sequence already
+  contains the wave's value and prevents replay of accepted contributions;
+  a newer frame also takes
+  precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
+  space, user, and session instances, including reordered verdict delivery,
+  withdrawal, and noncommutative appends. Foreign provisioning groups
+  contributions by actor and grant, so one wave can commit several batches
+  to a foreign space in a different order from local sealing. Accepted verdicts
+  for each space follow that space's server sequence, retaining sealing order
+  within each batch. The settled replica therefore matches the engine when
+  nonadjacent contributions share a foreign batch.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.
@@ -1324,6 +1386,15 @@ escalate.
 
 ## 7. Counters (implement with the loop, not after)
 
+`events.visibilityBarriers` counts ordered publication/response attempts for
+lagging event views. `visibilityRecoveries` counts matching identities after
+those attempts, and `visibilityDeferrals` counts scans that still stop at a
+mismatched identity. `deferredRescansArmed` and `deferredRescansFired` count
+scheduled backstops and callbacks that ran during an active tenure, across all
+transient drain outcomes. An armed timer can be unnecessary if input wakes the
+drain first; these counters do not equate each deferral with an elapsed timer
+interval or each cycle with a durable commit.
+
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
@@ -1339,7 +1410,9 @@ demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
 pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
-drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
+drainInFlightSkips, visibilityBarriers, visibilityRecoveries,
+visibilityDeferrals, deferredRescansArmed, deferredRescansFired,
+lt1LeftoversPurged, lt1LateSealsRefused,
 orphanDeliveriesRefused, handlerNotRunDeferrals, loadParkDeferrals,
 loadParkFailures,
 deliveryDeferralsActive, deliveryFailuresActive,
@@ -1363,17 +1436,32 @@ docs never materialized, verification-coverage.md OW46) is a
 health-stats fact instead of an undifferentiated share of the
 per-attempt `structureLoadDeferred` aggregate; the streak clears when
 the root starts or terminalizes;
-`structureLoadTerminal`/`structureLoadRearmed` carry the
-demand-cycle terminal state (stage P2-F, the OW19 design): a root
-confirmed synced with no pattern meta parks TERMINAL — counted per
-terminalization, no per-cycle churn — and a commit touching one of
-the load's observed docs RE-ARMS it (the retry is settle-gated so it
-reads the re-arming commit's applied state); the demanded-structure
-load pass itself runs UNDER §3's flush deadline (single-flighted
-across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts waves whose W
-advance was actually clamped below the input batch head by the
-Phase-2 settle input barrier — inbound foreign novelty still
-shadowed by a parked own write; the clamp is honesty, not failure,
+`structureLoadTerminal`/`structureLoadRearmed` carry the demand-cycle terminal
+state. A root with no pattern metadata is confirmed by a second owning-result
+traversal, including the scoped-to-space fallback. Each traversal syncs the
+complete addresses it reads; cycle detection distinguishes scopes. Confirmation
+does not subscribe to additional addresses formed by combining observed IDs
+with other scopes. A confirmed root parks terminal, counted once, and a commit
+touching an observed document re-arms it. Admissions racing either traversal
+invalidate a no-metadata verdict when they touch an observed document; pending
+foreign novelty hidden by a sealed write also prevents terminalization. These
+invalidated attempts count as deferrals.
+
+The retry follows frame application within the settle loop. Its structure load
+and demanded derivations finish before the watermark covers the triggering
+input. A shadowed retry waits for the replica's shadow-flip signal, allowing
+the wave to commit the sealed writes that make its input visible. The load pass
+runs under §3's flush deadline and is single-flighted across cycles of one
+tenure. Demand departure drops terminal decisions; a new tenure starts its own
+pass. Park cancels structure loading at its next asynchronous boundary, before
+any subsequent piece start. Completion from a parked tenure cannot publish a
+terminal decision; park does not wait for unresolved pattern loading.
+`watermarkClamped` counts
+non-exhausted cycles whose foreign-write shadow floor is below an input batch
+head above W. An event-visibility floor can constrain the same cycle, so the
+counter does not isolate the marginal effect of the shadow floor. The shadow
+clamp covers inbound foreign novelty still hidden by a parked own write; it
+is honesty, not failure,
 and lifts by itself; `storeReads` counts the engine reads that the store
 read-through posture (§1 plane (a)) performs for serving replicas, and
 `storeRefreshes` counts the held documents it re-reads off the feed, both
@@ -1436,9 +1524,13 @@ registry deltas; the label is wall time, review MINOR-3);
 `demandChanged`, the `session.watch.set`/`.add` notifies, and the warm
 request's staged-instance captures — the third kept apart so
 `watchWakes` keeps meaning exactly the session-watch notifies) BEFORE the
-300 ms-grace coalescing — a burst is several notifies but one demand pass,
-so these exceed the pass-wake count (review NIT-5); the service (loopback)
-session's notifies are DROPPED — its tracked-set growth is the serving
+300 ms grace coalesces notifications into one pending callback. Each
+notification advances the demand generation; a notification racing a pass
+can require another pass after it completes. Input-driven cycles reconcile
+demand before a held grace callback fires, so 300 ms is not a universal
+cold-session latency floor. Count notifications, callbacks, passes, wave
+closures, and durable commits separately. The service (loopback) session's
+notifies are DROPPED — its tracked-set growth is the serving
 graph's own reads, not client demand (review MINOR-4). `demandArrivals`
 (top-level) the root-level arrival re-arm's count. The `settle` block is
 SERVER SETTLE per authored input — admission (the feed's admitted-commit

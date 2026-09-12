@@ -35,14 +35,14 @@ import {
 } from "@commonfabric/test-support/records";
 import {
   coverageMetricGroupName,
-  ownTestsCoverageMember,
+  coverageMetricMeasuredSet,
 } from "../ci-check-lib.ts";
 import type { WithheldReason } from "./manifest.ts";
 import {
   COVERAGE_COMMENT_LINES,
   EXCLUDED_FROM_COVERAGE_GATE,
   FLAKE_WINDOW_DAYS,
-  LOCAL_COVERAGE_MAX_PACKAGES,
+  LOCAL_COVERAGE_MAX_SETS,
   RENAME_MARGIN,
   RENAME_SIMILARITY,
   RENAME_SUGGESTIONS,
@@ -196,24 +196,29 @@ export interface CoverageRise {
   groups: Array<{ group: string; from: number; to: number }>;
 }
 
-/** Which route let a package's rise reach the default branch. */
-export type PackageRoute =
+/** Which route let a measured set's rise reach the default branch. */
+export type MeasuredSetRoute =
   | "excluded"
   | "over-the-cap"
   | "elsewhere"
   | "gated";
 
-/** A rise in one covered package's own-tests number. */
-export interface PackageRise {
+/** A rise in one measured set's number. */
+export interface MeasuredSetRise {
+  /** The suite and the member the set pairs, as one name. */
+  set: string;
+
+  /** The workspace member whose lines rose. */
   member: string;
+
   from: number;
   to: number;
-  route: PackageRoute;
+  route: MeasuredSetRoute;
 
   /** Present for `excluded`: the reason the exclusion list gives. */
   reason?: string;
 
-  /** Present for `over-the-cap`: how many covered packages were touched. */
+  /** Present for `over-the-cap`: how many measured sets were reached. */
   touched?: number;
 }
 
@@ -238,7 +243,7 @@ export interface RenameSuggestion {
 export interface Report {
   firstFailures: FirstFailure[];
   coverageRise?: CoverageRise;
-  packageRises: PackageRise[];
+  measuredSetRises: MeasuredSetRise[];
   flakyNewTests: FlakyNewTest[];
   renames: RenameSuggestion[];
 }
@@ -247,7 +252,7 @@ export interface Report {
 export function reportIsEmpty(report: Report): boolean {
   return report.firstFailures.length === 0 &&
     report.coverageRise === undefined &&
-    report.packageRises.length === 0 &&
+    report.measuredSetRises.length === 0 &&
     report.flakyNewTests.length === 0 &&
     report.renames.length === 0;
 }
@@ -275,6 +280,14 @@ export interface ReportInput {
 
   /** The source groups this change touched. */
   touched: ReadonlySet<string>;
+
+  /**
+   * The measured sets the change reached, and whether the coverage gate
+   * ran over them. Worked out from the declarations by the same function
+   * the gate runs, so the note and the gate cannot come to different
+   * answers about which sets were gated.
+   */
+  coverageGate: { reached: readonly string[]; ran: boolean };
 
   /** The day the comment is written, which dates an alias line. */
   day: string;
@@ -375,15 +388,15 @@ export function groupFigures(figures: CoverageFigures): Map<string, number> {
 }
 
 /**
- * Every covered package's own-tests figure: its source measured by only
- * its own tests. A run measures the whole of this however much of the
- * corpus it ran, which is what makes it the one per-package figure worth
+ * Every measured set's figure: one member's source measured by one
+ * suite's tests alone. A run measures the whole of this however much of
+ * the corpus it ran, which is what makes it the one figure worth
  * comparing between two runs.
  */
-export function ownTestsFigures(
+export function measuredSetFigures(
   figures: CoverageFigures,
 ): Map<string, number> {
-  return figuresNamed(figures, ownTestsCoverageMember);
+  return figuresNamed(figures, coverageMetricMeasuredSet);
 }
 
 function figuresNamed(
@@ -430,61 +443,52 @@ export function coverageRise(input: ReportInput): CoverageRise | undefined {
   return { from: before, to: after, groups };
 }
 
-/** The covered packages a change touched, which is what the cap counts. */
-export function coveredPackagesTouched(
-  touched: ReadonlySet<string>,
-): string[] {
-  return [...touched]
-    .filter((group) =>
-      group.startsWith("packages/") && !EXCLUDED_FROM_COVERAGE_GATE.has(group)
-    )
-    .sort();
-}
-
 /**
- * Each covered package whose own-tests number rose, and what let the
- * rise past the per-package gate.
+ * Each measured set whose number rose, and what let the rise past the
+ * coverage gate.
  *
  * Three of the four are the ways a rise reaches the default branch with
  * the gate never having had an opinion, and they call for different
  * things: nothing, a look at the exclusion list, and a look at the
  * change respectively. The fourth is the state where the gate did
- * measure the package and passed it, which means the two measurements
+ * measure the set and passed it, which means the two measurements
  * disagree and is worth saying plainly rather than describing as one of
  * the other three.
  */
-export function packageRises(input: ReportInput): PackageRise[] {
+export function measuredSetRises(input: ReportInput): MeasuredSetRise[] {
   // A change that touched no source at all could not have moved which
-  // lines any package's own tests reach, and the figures move a little
-  // between runs on their own.
+  // lines any set's tests reach, and the figures move a little between
+  // runs on their own.
   if (input.touched.size === 0) return [];
-  const before = ownTestsFigures(input.coverageBefore);
-  const after = ownTestsFigures(input.coverage);
-  const touched = coveredPackagesTouched(input.touched);
-  const rises: PackageRise[] = [];
-  for (const [member, lines] of after) {
-    const was = before.get(member);
+  const before = measuredSetFigures(input.coverageBefore);
+  const after = measuredSetFigures(input.coverage);
+  const { reached, ran } = input.coverageGate;
+  const rises: MeasuredSetRise[] = [];
+  for (const [set, lines] of after) {
+    const was = before.get(set);
     if (was === undefined || lines <= was) continue;
-    // The exclusion list is asked first, because a package on it is one
-    // the gate would not have measured whatever else the change touched.
+    const member = set.slice(set.indexOf("/") + 1);
+    // The exclusion list is asked first, because a member on it carries
+    // no set the gate would have measured whatever else was reached.
     const excluded = EXCLUDED_FROM_COVERAGE_GATE.get(member);
-    const rise: PackageRise = {
+    const rise: MeasuredSetRise = {
+      set,
       member,
       from: was,
       to: lines,
       route: excluded !== undefined
         ? "excluded"
-        : touched.length > LOCAL_COVERAGE_MAX_PACKAGES
+        : !ran && reached.length > 0
         ? "over-the-cap"
-        : touched.includes(member)
+        : ran && reached.includes(set)
         ? "gated"
         : "elsewhere",
     };
-    if (rise.route === "over-the-cap") rise.touched = touched.length;
+    if (rise.route === "over-the-cap") rise.touched = reached.length;
     if (rise.route === "excluded") rise.reason = excluded;
     rises.push(rise);
   }
-  return rises.sort((a, b) => a.member < b.member ? -1 : 1);
+  return rises.sort((a, b) => a.set < b.set ? -1 : 1);
 }
 
 /**
@@ -673,7 +677,7 @@ export function buildReport(input: ReportInput): Report {
   return {
     firstFailures: firstFailures(input),
     ...(rise === undefined ? {} : { coverageRise: rise }),
-    packageRises: packageRises(input),
+    measuredSetRises: measuredSetRises(input),
     flakyNewTests: flakyNewTests(input),
     renames: renames(input),
   };
@@ -732,18 +736,19 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "nothing to say about whether it ran this test.",
 };
 
-/** What the comment says about each route past the per-package gate. */
-const ROUTE_PROSE: Record<PackageRoute, string> = {
-  excluded: "The package is on `EXCLUDED_FROM_COVERAGE_GATE`, so nothing " +
-    "gates it. The exclusion list is what to look at.",
-  "over-the-cap": "The change touched more covered packages than " +
-    `\`LOCAL_COVERAGE_MAX_PACKAGES\` (${LOCAL_COVERAGE_MAX_PACKAGES}) ` +
-    "allows, so the per-package gate did not run at all. There is nothing " +
+/** What the comment says about each route past the coverage gate. */
+const ROUTE_PROSE: Record<MeasuredSetRoute, string> = {
+  excluded: "The member is on `EXCLUDED_FROM_COVERAGE_GATE`, so it carries " +
+    "no measured set and nothing gates it. The exclusion list is what to " +
+    "look at.",
+  "over-the-cap": "The change reached more measured sets than " +
+    `\`LOCAL_COVERAGE_MAX_SETS\` (${LOCAL_COVERAGE_MAX_SETS}) ` +
+    "allows, so the coverage gate did not run at all. There is nothing " +
     "to do about the gate; the rise itself is the thing to look at.",
-  elsewhere: "The change did not touch this package, so the gate had " +
-    "nothing to compare and something elsewhere moved which lines the " +
-    "package's own tests reach. The change is what to look at.",
-  gated: "The gate measured this package on the pull request and passed " +
+  elsewhere: "The change did not touch this member, so the gate had " +
+    "nothing to compare and something elsewhere moved which lines this " +
+    "set's tests reach. The change is what to look at.",
+  gated: "The gate measured this set on the pull request and passed " +
     "it, so the two measurements disagree. That is worth looking at on " +
     "its own, before the rise.",
 };
@@ -823,25 +828,25 @@ export function renderReport(
     }
   }
 
-  if (report.packageRises.length > 0) {
+  if (report.measuredSetRises.length > 0) {
     out.push("");
-    out.push("### A covered package's own tests reach less than they did");
+    out.push("### A measured set reaches less of its package than it did");
     out.push("");
     out.push(
-      "The per-package coverage gate exists to catch this before it lands. " +
-        "It did not, and this is why.",
+      "The coverage gate exists to catch this before it lands. It did not, " +
+        "and this is why.",
     );
-    for (const rise of report.packageRises) {
+    for (const rise of report.measuredSetRises) {
       out.push("");
       out.push(
-        `- \`${rise.member}\`: ${rise.from} to ${rise.to} uncovered lines. ` +
+        `- \`${rise.set}\`: ${rise.from} to ${rise.to} uncovered lines. ` +
           ROUTE_PROSE[rise.route],
       );
       if (rise.reason !== undefined) {
         out.push(`  The list gives the reason: ${rise.reason}`);
       }
       if (rise.touched !== undefined) {
-        out.push(`  The change touched ${rise.touched} covered packages.`);
+        out.push(`  The change reached ${rise.touched} measured sets.`);
       }
     }
   }

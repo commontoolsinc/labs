@@ -686,13 +686,22 @@ describe("Phase 3 events-down (serving side)", () => {
     // settle callback fires from the append + authoritative consequence
     // outcome — captured here, asserted after the consequence lands.
     let ackStatus: string | undefined;
+    // The sender's own act — the append — settles `onAppended` on its
+    // own, ahead of the handling: a caller that only needs its event on
+    // the record waits there.
+    let appended: { delivered: boolean } | undefined;
     (result.key("bump") as unknown as {
       send(
         value: unknown,
         onCommit?: (tx: { status(): { status: string } }) => void,
+        options?: { onAppended?: (delivery: { delivered: boolean }) => void },
       ): unknown;
     }).send({}, (ackTx) => {
       ackStatus = ackTx.status().status;
+    }, {
+      onAppended: (delivery) => {
+        appended = delivery;
+      },
     });
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
@@ -708,6 +717,9 @@ describe("Phase 3 events-down (serving side)", () => {
       () => sidecarIdsIn(engine).length === 1,
       "the event append to land",
     );
+    await waitUntil(() => appended !== undefined, "the append to settle");
+    expect(appended).toEqual({ delivered: true });
+    expect(ackStatus).toBeUndefined();
     const sidecarId = sidecarIdsIn(engine)[0];
     await waitUntil(
       () => {
@@ -4504,6 +4516,7 @@ describe("Phase 3 events-down (serving side)", () => {
 
     GatedStorageManager.loadParkFailHits = 0;
     const gate = Promise.withResolvers<void>();
+    const park = Promise.withResolvers<void>();
     try {
       // Warm the piece and stream `a`'s sidecar, ungated.
       send("a");
@@ -4524,7 +4537,9 @@ describe("Phase 3 events-down (serving side)", () => {
         id.startsWith("of:stream-events:") && id !== aSidecarId;
       servingManager!.syncGate = gate.promise;
 
-      // Fail A2's head-event load park while the pass is held.
+      // Hold A2's load until B's sidecar sync has entered the same pass.
+      GatedStorageManager.loadParkSettle = park.promise;
+      const deferralsBefore = host.stats().events.loadParkDeferrals;
       GatedStorageManager.loadParkFailDocId = argumentId;
       GatedStorageManager.loadParkFailAddress = {
         space,
@@ -4547,19 +4562,27 @@ describe("Phase 3 events-down (serving side)", () => {
         "B1's append to land on its own sidecar",
       );
 
-      // The window: a pass held at B's sidecar sync, with A2's park
-      // already failed inside it.
+      // Reject only after both gates are held, so the failure belongs to
+      // the pass that is still waiting for B's sidecar sync.
       await waitUntil(
         () =>
           (servingManager?.syncGateHits ?? 0) > 0 &&
           GatedStorageManager.loadParkFailHits > 0,
-        "a drain pass held at B's sidecar with A2's park already failed",
+        "a drain pass held at B's sidecar with A2's load pending",
       );
+
+      park.reject(new Error("memory session revoked: unauthorized (pin seam)"));
+      await waitUntil(
+        () => host!.stats().events.loadParkDeferrals > deferralsBefore,
+        "A2's load failure to defer while B's sidecar sync remains held",
+      );
+      expect(storedLog()).toEqual(["A"]);
 
       // HEAL FIRST, then release: with the load healthy, an unbarriered
       // pass would queue B1 and dispatch it immediately — the overtake.
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
+      GatedStorageManager.loadParkSettle = undefined;
       servingManager!.syncGateWhen = undefined;
       servingManager!.syncGate = undefined;
       gate.resolve();
@@ -4573,8 +4596,10 @@ describe("Phase 3 events-down (serving side)", () => {
       // THE PIN: arrival order held across the mid-pass gap.
       expect(storedLog()).toEqual(["A", "A", "B"]);
     } finally {
+      park.resolve();
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
+      GatedStorageManager.loadParkSettle = undefined;
       if (servingManager !== undefined) {
         servingManager.syncGateWhen = undefined;
         servingManager.syncGate = undefined;

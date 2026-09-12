@@ -867,6 +867,11 @@ export class WaveAccumulator
    * ride this wave's transaction. */
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
 
+  /** Transactions holding staged appends no seal has taken yet: the
+   * source of `hasUnsealedAppends`, which reads their status so one that
+   * aborted before sealing stops counting. */
+  readonly #txsWithStagedAppends = new Set<IExtendedStorageTransaction>();
+
   readonly #sealedTxs = new WeakSet<object>();
   readonly #onUnstampedSeal: (() => void) | undefined;
   readonly #onEarlyEmitRefusal: (() => void) | undefined;
@@ -1022,6 +1027,20 @@ export class WaveAccumulator
     return this.#contributions.some((c) => c.outboundAppends.length > 0);
   }
 
+  /** Whether an append is staged by a transaction that can still seal.
+   * Such an append rides the transaction's contribution once it seals,
+   * so a wave holding one is not empty even with no contribution. A
+   * transaction that is done or failed without sealing no longer counts:
+   * its appends can never ride. */
+  get hasUnsealedAppends(): boolean {
+    for (const tx of this.#txsWithStagedAppends) {
+      const status = tx.tx.status().status;
+      if (status === "ready" || status === "pending") return true;
+      this.#txsWithStagedAppends.delete(tx);
+    }
+    return false;
+  }
+
   /** The FOREIGN spaces sealed contributions target (protocol.md §2b's
    * provisioning commits). The serving loop resolves these spaces'
    * co-hosted engines BEFORE driving the commit step, so the sink's
@@ -1066,6 +1085,12 @@ export class WaveAccumulator
         },
       };
     }
+    // The seal takes the transaction's staged appends here, whatever its
+    // outcome: a refused or failed seal is as terminal for them as an
+    // accepted one, since the transaction seals once, so none of them can
+    // keep the wave counted as holding work.
+    const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
+    this.#txsWithStagedAppends.delete(tx);
     const context = waveRunContextOf(tx);
     // seal() runs one tx at a time: sealInto hands spaces back through
     // sealSpaceCommit below, and actions run serially per space
@@ -1172,7 +1197,6 @@ export class WaveAccumulator
       // (its cascadesCross/consequenceOf folds run for every committed
       // contribution), and dropping the entry here lost the appends
       // silently.
-      const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
       if (
         assembly.spaces.length === 0 && pendingAppends.length === 0 &&
         !localAcceptance
@@ -1370,6 +1394,7 @@ export class WaveAccumulator
       this.#pendingAppendsByTx.set(tx, pending);
     }
     pending.push(entry);
+    this.#txsWithStagedAppends.add(tx);
   }
 
   /**
@@ -3004,6 +3029,10 @@ export class WaveAccumulator
     orphanRefused: ReadonlySet<number> = new Set(),
   ): void {
     this.#reportRequeuedEvents(outcome, (idx) => requeued.has(idx));
+    const acceptedBySpace = new Map<
+      MemorySpace,
+      Array<{ contribution: SealedSpaceContribution; seq: number }>
+    >();
     for (const contribution of this.#contributions) {
       const idx = contribution.index;
       const context = contribution.context;
@@ -3079,7 +3108,18 @@ export class WaveAccumulator
         const seq = space.space === this.#space ? homeSeq : foreignSeqs.get(
           this.#foreignBatchKeyFor(space.space, context),
         ) ?? homeSeq;
-        space.resolveVerdict({ committed: { seq } });
+        const accepted = acceptedBySpace.get(space.space) ?? [];
+        accepted.push({ contribution: space, seq });
+        acceptedBySpace.set(space.space, accepted);
+      }
+    }
+    // Foreign batches group by actor and grant, so their server order can
+    // differ from contribution order. Each replica promotes accepted
+    // batches in server order, preserving seal order within one batch.
+    for (const accepted of acceptedBySpace.values()) {
+      accepted.sort((a, b) => a.seq - b.seq);
+      for (const { contribution, seq } of accepted) {
+        contribution.resolveVerdict({ committed: { seq } });
       }
     }
   }

@@ -1,7 +1,7 @@
 import { normalize } from "@std/path/posix";
 
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
-import { taggedHashStringOf } from "@commonfabric/data-model";
+import { type FabricValue, taggedHashStringOf } from "@commonfabric/data-model";
 import type {
   BuilderSourceSitesV1,
   PatternCoverageSpan,
@@ -14,6 +14,10 @@ import type { JSONSchema } from "../builder/types.ts";
 import { type Cell, isCell } from "../cell.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
 import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  runtimeWritePolicyAuthorization,
+} from "../cfc/types.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
@@ -820,6 +824,83 @@ export function codeFieldVerifies(
   return parseLink(stored, cell)?.id === `cid:${taggedHashStringOf(code)}`;
 }
 
+/**
+ * Name `doc` to the §8.12.4 writer-fit measurement as a store no pattern
+ * declares a policy on.
+ *
+ * A cache document holds the compiler's own record of a module: the `cid:`
+ * document its bytes live in, its filename, the identities of its imports, and
+ * the predecessor identities its writer authority descends from. No pattern
+ * names it and no pattern-authored schema describes a field on it — the
+ * schemas that do are the cache's own, further down this file, and they
+ * declare integrity alone. That, not the content addressing, is what leaves
+ * the ceiling empty: §17.1 makes content-addressing under the causal path an
+ * implementation detail that does not change IFC semantics. What the content
+ * address does decide is the id shape, which is why the class is named here
+ * rather than enumerated in `isUndeclarableIdClass` (`cfc/prepare.ts`): the id
+ * the cache's cause mints is an ordinary `of:fid1:<hash>`, so there is nothing
+ * for a predicate over id strings to recognize.
+ *
+ * Spec §18.6.2 names the class — "program/source text
+ * loaded to execute the handler", beside the `cid:` schema documents — and
+ * calls both public infrastructure. The bytes themselves already take that
+ * route: a `cid:` document is outside the flow join on both sides, so what
+ * remains on the record is the compiler's bookkeeping.
+ *
+ * Without the marker, any transaction that both reads labeled data and reaches
+ * a cache write is refused at `enforce-strict` — which a piece's source
+ * transition does by construction, because it stages a module's delegation
+ * union on the same transaction that moves the piece's source pointer.
+ *
+ * A cache document is not on §8.12.5's route 2, whose declaration would be the
+ * other answer. Route 2 declares one piece's flow join as the store's policy,
+ * so it wants a store keyed on that piece's own nodes. A cache document is
+ * keyed on module content: every piece in the space running that module
+ * addresses it, and it outlives all of them. What route 2 leaves behind is
+ * also permanent — a `declared` entry per measured path, which §8.12.1 does
+ * not let back, on a document nothing collects — where the flow stamp this
+ * keeps is a per-value component §8.12.8 replaces on overwrite.
+ *
+ * The write stays a flow stamp target, which is where this stops short of
+ * §18.6.2's write-side mirror — that section says the same addresses are not
+ * value-write targets at all, which would leave the record unstamped too.
+ * Safety invariant 9 is why it does not go that far. The delegation metadata
+ * holds module identities, and §17.7 says holding one grants no access to the
+ * artifact it names, so the content written here is public. WHICH identity
+ * appears is the other question: a transaction that read a labeled value and
+ * chose a successor by it writes that choice here, and §8.11.3 puts a
+ * decision's label on every downstream output whatever the output's own
+ * content is. That is the router attack at one bit per update, so the stamp
+ * stays and the ceiling is what the marker skips. The module's bytes are
+ * unaffected either way, being in a `cid:` document of their own.
+ *
+ * Every write to a cache record goes through here, whichever field it touches.
+ * The claim is about the document, so a write site that skipped it would leave
+ * the same refusal waiting for whichever transaction first reaches that site
+ * carrying a join. `anchorValueAsEntity` carries the claim down the same way
+ * it carries a runtime-owned store's, because a document anchored out of a
+ * marked value holds part of that value at an id derived from it; the cache's
+ * own records are written raw, with their import edges inline, so nothing
+ * here anchors.
+ */
+export function recordUndeclarablePolicyStore(
+  tx: IExtendedStorageTransaction,
+  doc: Cell<unknown>,
+): void {
+  const link = doc.getAsNormalizedFullLink();
+  tx.recordCfcWritePolicyInput({
+    kind: "structural-provenance",
+    target: {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: [...link.path],
+    },
+    claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+    sources: [],
+  }, runtimeWritePolicyAuthorization);
+}
+
 /** Attribute cache-document writes to the trusted compiler builtin. */
 function withCompileCacheBuiltin<T>(
   tx: IExtendedStorageTransaction,
@@ -836,42 +917,6 @@ function withCompileCacheBuiltin<T>(
     tx.setCfcImplementationIdentity(priorIdentity);
   }
 }
-
-/**
- * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
- * source/compiled doc's `imports` array holds LIVE links to per-edge element
- * docs (the cell layer hoists each `{specifier, link}` element into its own
- * derived doc); the element doc's own `link` field is a *quoted* link — data,
- * not a traversal edge — so this schema pulls exactly the doc plus its edge
- * element docs and stops. A schema-less `sync()` normalizes to the rejecting
- * selector and delivers only the root, leaving the element docs unknown to
- * the replica — then the re-write touches them blind and needs a rejected
- * commit plus conflict repair. With the element docs client-known up front,
- * the re-write diffs against true state and commits on the first attempt.
- * Recursion is deliberately omitted: the write-target
- * pre-sync enumerates every module doc itself, so each doc only needs its
- * own edges — nothing beyond the write set loads (the lazy-by-default
- * posture for code docs is untouched).
- */
-export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
-  type: "object",
-  properties: {
-    delegatedModuleIdentities: {
-      type: "array",
-      items: { type: "string" },
-    },
-    imports: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          specifier: { type: "string" },
-          link: true,
-        },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
 
 /**
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
@@ -912,6 +957,7 @@ export function writeSourceDocs(
         undefined,
         tx,
       );
+      recordUndeclarablePolicyStore(tx, baseCell);
       // Preserve product annotations on the entry doc only. Annotations are
       // only written there; reading every dependency doc here turns unrelated
       // stale cache cells into writeback conflict preconditions.
@@ -929,30 +975,54 @@ export function writeSourceDocs(
       const cell = delegatedModuleIdentities.length > 0
         ? baseCell.asSchema(sourceDocWriteSchema())
         : baseCell;
-      cell.set({
-        kind: "source",
-        identity,
-        code: codeLink(space, doc.code, tx),
-        filename: doc.filename,
-        imports: doc.imports.map((imp) => ({
-          specifier: imp.specifier,
-          link: runtime.getCell(
-            space,
-            sourceDocKey(imp.identity),
-            undefined,
-            tx,
-          ).getAsLink(),
-        })),
-        ...(delegatedModuleIdentities.length > 0
-          ? { delegatedModuleIdentities }
-          : {}),
-        ...(isObjectOrArray(existingAnnotations)
-          ? { annotations: existingAnnotations }
-          : {}),
-      } as StoredSourceDoc);
+      writeCacheRecord(
+        cell,
+        {
+          kind: "source",
+          identity,
+          code: codeLink(space, doc.code, tx),
+          filename: doc.filename,
+          imports: doc.imports.map((imp) => ({
+            specifier: imp.specifier,
+            link: runtime.getCell(
+              space,
+              sourceDocKey(imp.identity),
+              undefined,
+              tx,
+            ).getAsLink(),
+          })),
+          ...(delegatedModuleIdentities.length > 0
+            ? { delegatedModuleIdentities }
+            : {}),
+          ...(isObjectOrArray(existingAnnotations)
+            ? { annotations: existingAnnotations }
+            : {}),
+        } satisfies StoredSourceDoc,
+      );
     }
   });
   return effectiveModuleDelegations;
+}
+
+/**
+ * Writes a cache record whole, and only when the stored record differs.
+ *
+ * The write is raw: each `imports` element is stored inline in the record,
+ * and the write touches no document but the record's own, so a write of the
+ * same record from any session lands on that one document, and an unchanged
+ * record is not written at all. The diff walk is not usable here, because it
+ * anchors every plain object in an array into a document of its own, named
+ * by the ambient frame's counter and cause; a second session writing the
+ * same record names the documents the first session minted, without having
+ * read them, and its commit is refused as stale. A stored record whose
+ * elements sit in documents of their own differs from the one written and is
+ * rewritten whole; those element documents are left untouched.
+ */
+function writeCacheRecord(
+  cell: Cell<unknown>,
+  record: StoredSourceDoc | StoredCompiledDoc,
+): void {
+  cell.setRawUntyped(record as unknown as FabricValue, true);
 }
 
 /**
@@ -1477,6 +1547,7 @@ export function stageModuleDelegations(
       if (source.get()?.identity !== identity) {
         throw new Error(`source update artifact ${identity} is unavailable`);
       }
+      recordUndeclarablePolicyStore(tx, source);
       source.asSchema(sourceDocWriteSchema()).key("delegatedModuleIdentities")
         .set([...predecessors]);
       if (runtimeVersion !== undefined) {
@@ -1494,6 +1565,7 @@ export function stageModuleDelegations(
               `compiled source update artifact ${identity} is untrusted`,
             );
           }
+          recordUndeclarablePolicyStore(tx, compiled);
           compiled.asSchema(compiledDocWriteSchema()).key(
             "delegatedModuleIdentities",
           )
@@ -1548,6 +1620,7 @@ export function writeCompiledDocs(
         schema,
         tx,
       );
+      recordUndeclarablePolicyStore(tx, cell);
       // Fix B: derive the record surface from the compiled body once, here, so
       // the boot-time record build reads it instead of re-parsing per load. A
       // data entry has no record surface and its bytes are not JavaScript, so
@@ -1571,7 +1644,7 @@ export function writeCompiledDocs(
       if (policyManifests !== undefined) {
         runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
-      cell.set({
+      writeCacheRecord(cell, {
         kind: module.isData ? "data" : "compiled",
         identity: module.identity,
         code: codeLink(space, module.js, tx),

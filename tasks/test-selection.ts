@@ -33,6 +33,11 @@ import { fetchManifest } from "./test-selection/store.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
 import { census } from "./test-selection/census.ts";
+import {
+  measuredSetName,
+  type MeasuredSetRef,
+  measuredSets,
+} from "./test-selection/coverage.ts";
 import type { Manifest } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
@@ -109,26 +114,50 @@ export function dialLines(): string[] {
   return lines;
 }
 
-/** Each gated member and its baseline, as the lines `coverage` prints. */
+/**
+ * Each measured set and its baseline, then every workspace member that
+ * carries no set and the reason it does not.
+ *
+ * The two halves answer the two questions somebody brings here: what am I
+ * being compared against, and why is my package not gated.
+ */
 export function coverageLines(
   manifest: Manifest | undefined,
+  sets: readonly MeasuredSetRef[],
   members: readonly string[],
 ): string[] {
-  const width = Math.max(...members.map((member) => member.length));
-  const baselines = new Map(
-    (manifest?.coverageBaselines ?? []).map((base) => [base.member, base]),
+  const names = sets.map(measuredSetName);
+  const ungated = members.filter((member) =>
+    !sets.some((ref) => ref.set.member === member)
   );
-  return members.map((member) => {
-    const excluded = EXCLUDED_FROM_COVERAGE_GATE.get(member);
-    if (excluded !== undefined) {
-      return `${pad(member, width)}  not gated: ${excluded}`;
-    }
-    const baseline = baselines.get(member);
+  const width = Math.max(
+    1,
+    ...names.map((name) => name.length),
+    ...ungated.map((member) => member.length),
+  );
+  const baselines = new Map(
+    (manifest?.coverageBaselines ?? []).map((
+      base,
+    ) => [`${base.suite}/${base.member}`, base]),
+  );
+  const lines = sets.map((ref, index) => {
+    const name = names[index]!;
+    const baseline = baselines.get(name);
     const against = baseline === undefined
       ? "no baseline yet"
       : `${baseline.uncoveredLines} uncovered lines at ${baseline.commit}`;
-    return `${pad(member, width)}  gated, against ${against}`;
+    const units = ref.set.units.length;
+    return `${pad(name, width)}  ${units} ${units === 1 ? "unit" : "units"}, ` +
+      `against ${against}`;
   });
+  for (const member of ungated) {
+    const excluded = EXCLUDED_FROM_COVERAGE_GATE.get(member);
+    lines.push(
+      `${pad(member, width)}  no measured set: ` +
+        `${excluded ?? "it has no Deno-only tests"}`,
+    );
+  }
+  return lines;
 }
 
 /** The workspace members the coverage gate has an opinion about. */
@@ -492,10 +521,13 @@ export async function dispatch(
       return 0;
     case "coverage": {
       // The one mode that reads a manifest and carries on without one:
-      // which members are gated is a fact about the tree, and only the
-      // baseline each is measured against comes from a manifest.
+      // which sets exist is a fact about the tree, and only the baseline
+      // each is measured against comes from a manifest.
       const manifest = await sources.manifest();
-      for (const line of coverageLines(manifest, await sources.members())) {
+      const sets = measuredSets(await sources.topology());
+      for (
+        const line of coverageLines(manifest, sets, await sources.members())
+      ) {
         console.log(line);
       }
       return 0;
