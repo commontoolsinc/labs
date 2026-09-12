@@ -9690,9 +9690,19 @@ export class Runner {
     });
   }
 
+  /**
+   * `schema` is what stops the pull walking the whole result. `Cell.pull()`
+   * deep-traverses its value when the link carries no schema, because without
+   * one there is nothing to say which nested values to read as dependencies —
+   * and the result of a child instantiation is re-pulled whenever the returned
+   * artifact changes, so the walk is paid per interaction and its cost is the
+   * result's size rather than the change's. A schema registers the same
+   * dependencies as it reads.
+   */
   #pullCellOnceAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
+    schema?: JSONSchema,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -9700,7 +9710,7 @@ export class Runner {
         return;
       }
       this.#pullCellOnceInPullMode(
-        this.#runtime.getCellFromLink<T>(resultLink),
+        this.#runtime.getCellFromLink<T>(resultLink, schema),
       );
     });
   }
@@ -9865,7 +9875,7 @@ export class Runner {
         );
         this.releaseChild(resultCell, undefined);
       });
-      this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell);
+      this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell, resultSchema);
     }
 
     const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??
