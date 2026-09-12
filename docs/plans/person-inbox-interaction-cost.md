@@ -41,79 +41,62 @@ and degraded phases, holding the counted work fixed:
 `isPrefix` scales with the whole; the dereference-trace machinery is the part
 that grows out of proportion. Both sit on the same structure.
 
-## Stage 1 — Stop the dereference-trace set from growing
+## Stage 1 — Stop the dereference-trace set from growing — **not built**
 
 **Where.** `ExtendedStorageTransaction.recordCfcDereferenceTrace`
-(`packages/runner/src/storage/extended-storage-transaction.ts:1695`).
+(`packages/runner/src/storage/extended-storage-transaction.ts`).
 
-**What is wrong.** The trace is appended unconditionally:
+**What this stage asked first.** Whether the scanned set grows. It does not.
+`dereferenceTracesRecorded` and `dereferenceTracesMax` were added to
+`getCfcStats()` and carried to a page through the existing logger-counts
+response, and across the healthy → eager → degraded sequence the per-click
+figure is **flat at ~750 traces recorded, with the largest set any one
+transaction held at 249**. The flow-label probe counters are flat too: ~11
+evaluated and ~11 memoized per click, in both states.
 
-```text
-const changesDigest = this.#cfcState.prepare.status === "prepared" &&
-  !traces.some((recorded) => cfcDereferenceTracesEqual(recorded, trace));
-traces.push(deepFreeze(trace));
-```
+So the stage is rescoped rather than built, which is what putting the
+measurement first was for. The trace set is not a leak; it is simply large, and
+what made it expensive was the scan over it. That is stage 2, and stage 2 alone
+turned out to carry the whole symptom.
 
-The scan decides whether to invalidate the digest. It does **not** decide
-whether to store. A dereference the transaction has already performed is
-recorded again, so re-resolving the same links appends duplicates. And
-`#cfcState.dereferenceTraces` is cleared in `abort()` and nowhere else — a
-committing transaction never drops them.
+The unconditional append in `recordCfcDereferenceTrace` — the equality scan
+beside the push decides only whether the digest is invalidated, not whether the
+trace is stored — is still a duplicate store, and the list is still cleared in
+`abort()` and nowhere else. With the scan indexed it costs memory rather than
+time, so it is worth tidying but is no longer a performance item.
 
-**The change.** Make the set a set. The existing equality
-(`cfcDereferenceTracesEqual`) already defines the identity; key the traces by
-it — a `Map` keyed on the canonicalized `(space, id, scope, path)` — so a
-repeat is a lookup rather than an append, and the digest question is answered
-by whether the key was new. Two things must be preserved and are worth stating
-in the change: the frozen record stays identity-stable once stored, and the
-digest still binds the trace *set*, which a deduplicated store expresses more
-directly than a list with repeats.
-
-**Confirm before building.** The investigation proves the scanned structure got
-more expensive; it did not instrument the list's length. First measurement of
-this stage: record `dereferenceTraces.length` per commit across the healthy →
-eager → degraded sequence. If it does not grow, the cause is elsewhere on the
-same path and this stage is rescoped rather than built — that is the point of
-putting it first.
-
-**Landed when.** Eight eager clicks stay inside the paced band (~124 ms) on
-one person's data, and the phase A/B CPU comparison above collapses to
-parity.
-
-## Stage 2 — Make the per-read scan not linear
+## Stage 2 — Make the per-read scan not linear — **landed**
 
 **Where.** `probeBelongsToDereference` inside `forEachFlowObservation`
-(`packages/runner/src/cfc/prepare.ts:2154`, scan at `:2178`), reached from
-`prepareForCommit` → `probeFlowLabelWork` → `flowLabelWorkExists`.
+(`packages/runner/src/cfc/prepare.ts`), reached from `prepareForCommit` →
+`probeFlowLabelWork` → `flowLabelWorkExists`.
 
-**What is wrong.** For each of the transaction's read activities, the probe
-asks whether a recorded dereference covers that read, by scanning every trace
-source recorded for that document:
+**What was wrong.** For each of the transaction's read activities, the probe
+asked whether a recorded dereference covers that read by scanning every trace
+source recorded for that document — up to 249 of them, once per read, with a
+closure allocated per comparison.
 
-```text
-for (const read of tx.getReadActivities?.() ?? []) {
-  const coveredByTrace = probeBelongsToDereference(space, id, scope, path);
-  //  → sources.some((source) => isPrefix(source, logicalPath))
-}
-```
+**What landed.** `PathPrefixIndex`
+(`packages/runner/src/cfc/path-prefix-index.ts`) indexes those sources by path
+segment, so the query costs the read path's length rather than the set's size.
+`isPrefix` treats `"*"` as matching any segment on either side, so the walk
+carries a frontier rather than a single node; a test compares the index against
+a copy of `isPrefix` across a generated corpus of 2,000-plus cases, which is
+the only thing that makes the substitution safe.
 
-`traceSourcesByDoc` is built once per call, which is right. The remaining cost
-is O(reads × sources per document × path length), and `isPrefix` allocates a
-closure per call — `prefix.every(...)` shows separately in the profile at 2.6%.
+**Measured**, same rig, same 39-row list, same counters either side
+(750 traces, 11 probes, 798 logged operations per click):
 
-**The change.** Index the sources by path prefix instead of scanning them.
-A per-document trie keyed on path segments answers "is any recorded source a
-prefix of this path" in path-length time rather than in sources time, and it is
-built once per call exactly where the map is built now. The `"*"` wildcard
-`isPrefix` admits has to be carried into the trie rather than lost — that is
-the part of this change that needs care and a test of its own. Rewriting
-`isPrefix` itself as an index loop removes the per-call closure and is worth
-doing whether or not the trie lands.
+| | before | after | |
+| --- | ---: | ---: | --- |
+| paced click, median | 1482 ms | 387 ms | **3.8× faster** |
+| after eager clicking, median | 1711 ms | 392 ms | **4.4× faster** |
 
-**Worth.** About a third of the click's worker CPU at the sizes measured, in
-both the healthy and the degraded state. Independent of stage 1: stage 1 stops
-the set growing, stage 2 makes a set of any size cheap to consult. Ship them
-separately so each one's measurement is readable.
+And the symptom stage 1 was named for is gone with it: a paced round after an
+eager one used to stay degraded (~920 ms against a ~124 ms first round) and now
+recovers fully — 431 ms, then eager, then 400 ms. `isPrefix` no longer appears
+in the profile's top ten at all; what is left is flat, with no frame above 8%
+of a healthy round.
 
 ## Stage 3 — Do not run the pass at all when there is nothing to find
 
@@ -219,16 +202,22 @@ click and an eager one.
 
 ## Order, and why
 
-1. **4b's error rendering** — a few lines, and it unblinds everything else.
-2. **Stage 1** — confirm the list grows, then stop it growing. This is what a
-   person feels: it is the difference between a pane that stays fast and one
-   that is slow for the rest of the session.
-3. **Stage 2** — a third of the remaining CPU, for every pattern, not this one.
+1. ~~**4b's error rendering**~~ — landed. A few lines, and it unblinded the rest.
+2. ~~**Stage 1**~~ — measured first, and the measurement said no. Rescoped.
+3. ~~**Stage 2**~~ — landed, and it carried the whole symptom: 3.8× on a paced
+   click, and the persistent degradation gone.
 4. **Stage 4a** — small, and it is a correctness bug.
-5. **Stage 3** — potentially the largest saving, and the least understood.
-   Investigate with the counters that already exist before designing anything.
+5. **Stage 3** — now the largest remaining item, and the least understood.
+   ~11 full probe evaluations per click against 2 CFC-relevant transactions in
+   a whole session is the number to explain.
 6. **Stages 5 and 6** — the writing down. Stage 6's rule is the highest-value
    item in this plan per hour spent, and the one that will get dropped first.
+
+After stage 2 the profile has no hotspot left. The next tier, by share of a
+degraded round, is `sortAndCompactPaths` (13.7%), `#findNode` (9.7%),
+`createViewProxy` (7.2%) and `resolveLinkTracingDereferences` (7.1%) — all path
+and link machinery, none of them dominant. Expect the next win to be structural
+(stage 3's "do not run the pass") rather than another leaf.
 
 Stages 1, 2 and 3 are labs runtime changes and belong in their own tasks, so a
 pattern change cannot quietly grow a runtime refactor. Nothing in this plan

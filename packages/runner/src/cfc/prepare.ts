@@ -73,6 +73,7 @@ import {
   isMachineryRead,
   isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
+import { PathPrefixIndex } from "./path-prefix-index.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -2150,7 +2151,7 @@ const forEachFlowObservation = (
   // read arrives via the ordinary reads of the target document. Recognize
   // them by the recorded trace sources: a probe at-or-below a followed
   // slot's path in the same document belongs to that dereference.
-  let traceSourcesByDoc: Map<string, (readonly string[])[]> | undefined;
+  let traceSourcesByDoc: Map<string, PathPrefixIndex> | undefined;
   const probeBelongsToDereference = (
     space: MemorySpace,
     id: URI,
@@ -2167,15 +2168,14 @@ const forEachFlowObservation = (
         });
         let sources = traceSourcesByDoc.get(key);
         if (sources === undefined) {
-          sources = [];
+          sources = new PathPrefixIndex();
           traceSourcesByDoc.set(key, sources);
         }
-        sources.push(canonicalizeLogicalPath(trace.source.path));
+        sources.add(canonicalizeLogicalPath(trace.source.path));
       }
     }
     const sources = traceSourcesByDoc.get(targetKey({ space, id, scope }));
-    return sources !== undefined &&
-      sources.some((source) => isPrefix(source, logicalPath));
+    return sources !== undefined && sources.hasPrefixOf(logicalPath);
   };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) {
