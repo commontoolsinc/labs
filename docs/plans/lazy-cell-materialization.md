@@ -435,9 +435,10 @@ chain so a wrapper and the transaction it wraps answer alike.
 materialization and the body, and unmarks it before the result is written, so
 diffing and the scheduler's own reads keep eager semantics.
 
-- [x] A refusal — thrown out of the body, or caught inside it and found on the
-      transaction afterwards — writes an undefined result through the ordinary
-      path. Logged at info level as a non-run, not reported as an action error.
+- [x] A refusal — thrown out of the body, synchronously or as an async body's
+      rejection, or caught inside it and found on the transaction afterwards —
+      writes an undefined result through the ordinary path. Logged at info
+      level as a non-run, not reported as an action error.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The
