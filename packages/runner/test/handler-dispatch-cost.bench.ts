@@ -9,9 +9,10 @@
  * commit callback, so a phase that runs twice in a dispatch counts twice
  * and a phase that did not run in it counts nothing — so the whole dispatch
  * and its parts come from the same interval. The runtime's drains after
- * the callback sit outside the timed interval, and so does the re-seeding
- * of the list after the one workload that writes to it, so every sample
- * dispatches over a list of the size its name states. Those timers are kept
+ * the callback sit outside the timed interval, and so does the reset of the
+ * counter before each sample and of the list after the one workload that
+ * writes to it, so every sample dispatches over a list of the size its name
+ * states and writes a value the store does not hold. Those timers are kept
  * per process, one active start per key, so the runtimes here run one at a
  * time.
  *
@@ -210,10 +211,16 @@ async function prepare(size: number, readStats: boolean) {
     await runtime.scheduler.idleWithPendingCommits();
   };
 
-  /** Puts the list back as it was seeded, so a write leaves no trace. */
-  const reseed = async (): Promise<void> => {
+  /**
+   * Puts the counter, and for `mutate` the list, back as seeded, so every
+   * sample's handler writes a value the store does not already hold and the
+   * expected-value check can fail. The list is re-seeded only where a
+   * sample wrote to it, since re-seeding 1,184 rows before every sample
+   * would leave the next dispatch collecting that commit's garbage.
+   */
+  const reseed = async (workload: Workload): Promise<void> => {
     const write = runtime.edit();
-    votes.withTx(write).set(rows);
+    if (workload === "mutate") votes.withTx(write).set(rows);
     out.withTx(write).set(0);
     const written = await write.commit();
     if (written.error) throw new Error("Benchmark re-seeding failed");
@@ -349,6 +356,12 @@ let live:
   | { key: string; prepared: Awaited<ReturnType<typeof prepare>> }
   | undefined;
 
+// `Deno.bench` has no per-file teardown, so the last variant's runtime is
+// disposed when the process unloads.
+globalThis.addEventListener("unload", () => {
+  live?.prepared.dispose();
+});
+
 for (const size of SIZES) {
   for (const workload of WORKLOADS) {
     const key = `${size}/${workload}`;
@@ -365,7 +378,7 @@ for (const size of SIZES) {
           live = { key, prepared: await prepare(size, false) };
         }
         const { prepared } = live;
-        if (workload === "mutate" && dispatches > 0) await prepared.reseed();
+        if (dispatches > 0) await prepared.reseed(workload);
         const before = phaseTotals();
         b.start();
         const elapsed = await prepared.dispatch(workload);

@@ -44,11 +44,12 @@ at the pinned revision, found by searching for their names:
   the environment variable and assigns server authority; `runner.ts` reads it
   once, at the lift path's argument read, to decide whether to mark the
   transaction. - **The mark.** `markLazyMaterialize` and `isLazyMaterialize` on
-  `IExtendedStorageTransaction` ([`storage/interface.ts`](../../../../packages/r
-  unner/src/storage/interface.ts)), implemented on the transaction and on
-  `TransactionWrapper` in [`extended-storage-
-  transaction.ts`](../../../../packages/runner/src/storage/extended-storage-
-  transaction.ts), with the per-layer set in [`reactivity-
+  `IExtendedStorageTransaction`
+  ([`storage/interface.ts`](../../../../packages/runner/src/storage/interface.ts)),
+  implemented on the transaction and on `TransactionWrapper` in
+  [`extended-storage-
+  transaction.ts`](../../../../packages/runner/src/storage/extended-storage-transaction.ts),
+  with the per-layer set in [`reactivity-
   log.ts`](../../../../packages/runner/src/storage/reactivity-log.ts).
   `validateAndTransform` in
   [`schema.ts`](../../../../packages/runner/src/schema.ts) branches to the view
@@ -57,9 +58,10 @@ at the pinned revision, found by searching for their names:
   proxy.ts`](../../../../packages/runner/src/query-result-proxy.ts) pins a
   schema-less proxy to its transaction when marked. - **The refusal.**
   `noteSchemaRefusal` and `takeSchemaRefusal` on the same interface, recorded by
-  the view in [`schema-view.ts`](../../../../packages/runner/src/schema-
-  view.ts), by the unresolved-input arm in `schema.ts`, and by the collection
-  index key builtin in [`builtins/collection-index-
+  the view in
+  [`schema-view.ts`](../../../../packages/runner/src/schema-view.ts), by the
+  unresolved-input arm in `schema.ts`, and by the collection index key builtin
+  in [`builtins/collection-index-
   key.ts`](../../../../packages/runner/src/builtins/collection-index-key.ts).
   `clearSchemaRefusal`, on the same interface, is how the view withdraws a
   refusal it catches itself, so that only the refusals a reader saw stay
@@ -135,9 +137,8 @@ transaction. In dispatch order, the reads it and the scheduler take are:
    and for a reactive result, a result pattern instantiated and run through the
    normal eager path.
 7. **Trusted-write collection**, `trustedEventWriteCandidatesFromTransaction` in
-   [`scheduler/reactivity.ts`](../../../../packages/runner/src/scheduler/reactiv
-   ity.ts), after the body returns: reads the transaction's write log, not
-   cells.
+   [`scheduler/reactivity.ts`](../../../../packages/runner/src/scheduler/reactivity.ts),
+   after the body returns: reads the transaction's write log, not cells.
 8. **Commit**, on the dispatch transaction, with the read log as its
    preconditions.
 
@@ -167,19 +168,19 @@ These stay whatever F2 and F4 decide:
 Three files stand nearest the handler question, and only two exercise a
 dispatched handler:
 
-- [`lazy-materialization-runner.test.ts`](../../../../packages/runner/test/lazy-
-  materialization-runner.test.ts) marks a transaction by hand and reads a cell
-  through it. It covers the view and the refusal on a marked read. It
-  instantiates no lift and dispatches no handler, so it is not evidence about
-  either runner path. - [`stream-handler-unresolved-
-  argument.test.ts`](../../../../packages/runner/test/stream-handler-unresolved-
-  argument.test.ts) dispatches to a compiled handler whose argument does not
-  resolve, and pins the withdraw-and-re-run disposition with the flag on its
-  default. - [`scheduler-event-handler-not-
-  run.test.ts`](../../../../packages/runner/test/scheduler-event-handler-not-
-  run.test.ts) pins the scheduler's handling of `dispatchedHandlerNotRun` for
-  client dispatches: re-run, park on loads, backoff limit, one-shot, and the
-  events-down echo.
+-
+[`lazy-materialization-runner.test.ts`](../../../../packages/runner/test/lazy-materialization-runner.test.ts)
+marks a transaction by hand and reads a cell through it. It covers the view and
+the refusal on a marked read. It instantiates no lift and dispatches no handler,
+so it is not evidence about either runner path. - [`stream-handler-unresolved-
+argument.test.ts`](../../../../packages/runner/test/stream-handler-unresolved-argument.test.ts)
+dispatches to a compiled handler whose argument does not resolve, and pins the
+withdraw-and-re-run disposition with the flag on its default. -
+[`scheduler-event-handler-not-
+run.test.ts`](../../../../packages/runner/test/scheduler-event-handler-not-run.test.ts)
+pins the scheduler's handling of `dispatchedHandlerNotRun` for client
+dispatches: re-run, park on loads, backoff limit, one-shot, and the events-down
+echo.
 
 The lift path's flag-sensitive behavior is pinned by [`patterns-
 lift.test.ts`](../../../../packages/runner/test/patterns-lift.test.ts) (a
@@ -195,21 +196,20 @@ how the flag is read and published.
 
 ### Method
 
-[`handler-dispatch-cost.bench.ts`](../../../../packages/runner/test/handler-
-dispatch-cost.bench.ts) compiles one pattern with six handlers over a `votes`
-list and an `out` counter, seeds the list with 74, 296, or 1,184 inline rows of
-the same shape the [scalar read width baseline](2026-09-11-lazy-scalar-read-
-width.md) used, and sends one event per sample through the scheduler. The timed
-interval runs from the send to the commit callback; the drains that wait for
-whatever the dispatch left running come after it. Around each sample it
-snapshots the accumulated time of each phase timer the runtime keeps, so a
-phase's figure is what it added during that dispatch, however many times it ran,
-and a phase that did not run adds nothing; the whole and the parts come from the
-same dispatch, and the counter is checked against the expected value. The one
-workload that writes has its list re-seeded after each sample, outside the timed
-interval, so every sample dispatches over a list of the stated size. The phase
-timers are kept once per process, with one active start per key, so the
-benchmark runs its runtimes one at a time.
+[`handler-dispatch-cost.bench.ts`](../../../../packages/runner/test/handler-dispatch-cost.bench.ts)
+compiles one pattern with six handlers over a `votes` list and an `out` counter,
+seeds the list with 74, 296, or 1,184 inline rows of the same shape the [scalar
+read width baseline](2026-09-11-lazy-scalar-read-width.md) used, and sends one
+event per sample through the scheduler. The timed interval runs from the send to
+the commit callback; the drains that wait for whatever the dispatch left running
+come after it. Around each sample it snapshots the accumulated time of each
+phase timer the runtime keeps, so a phase's figure is what it added during that
+dispatch, however many times it ran, and a phase that did not run adds nothing;
+the whole and the parts come from the same dispatch, and the counter is checked
+against the expected value. The one workload that writes has its list re-seeded
+after each sample, outside the timed interval, so every sample dispatches over a
+list of the stated size. The phase timers are kept once per process, with one
+active start per key, so the benchmark runs its runtimes one at a time.
 
 | Workload      | Bound context      | Body                                                                 |
 | ------------- | ------------------ | -------------------------------------------------------------------- |
@@ -231,14 +231,14 @@ From the repository root:
 deno bench -A --v8-flags=--expose-gc packages/runner/test/handler-dispatch-cost.bench.ts
 ```
 
-Each variant requested seven samples after one warmup; nine invocations were
-recorded per variant, and the values below are the median of the eight after
-the first. The storage
-manager is the in-memory emulation, so commit cost is local and no network is
-represented. No linked rows and no cross-space context are represented; the
-representative-copy limitations recorded in the
-[lunch-poll rehearsal](2026-09-12-representative-lunch-poll-rehearsal.md)
-carry forward unchanged, and the live poll was not touched.
+Each variant requested seven samples after one warmup; `deno bench` ran nine
+invocations per variant, one more than requested, and the values below are the
+median of the eight after the first. The storage manager is the in-memory
+emulation, so commit cost is local and no network is represented. No linked rows
+and no cross-space context are represented; the representative-copy limitations
+recorded in the [lunch-poll
+rehearsal](2026-09-12-representative-lunch-poll-rehearsal.md) carry forward
+unchanged, and the live poll was not touched.
 
 ### Timing, in milliseconds per dispatch
 
@@ -252,34 +252,38 @@ collecting invalid upstream nodes, scheduling them) over the same passes.
 body and the commit's preparation and synchronous steps; `Commit` sums the
 transaction's three commit timers, which run inside that span. `Commit` is
 recorded by a process-wide logger rather than per transaction, so its figure is
-every commit in the sample window; the preflight's two read-only commits are in
-it, bounded by `scalarKey`'s whole column, and the dispatch transaction's own
-commit is the rest. `Rest` is what no timer attributes: the elapsed time less
-the presync, the two preflight columns, and the handler action. The snapshot
-window is the elapsed one, from the send to the commit callback.
+every commit in the sample window. The preflight's two commits are read-only,
+and a commit with no write space returns before the three commit timers start,
+so the column is the dispatch transaction's own commit plus any other commit
+that landed in the window. `Rest` is what no timer attributes: the elapsed time
+less the presync, the two preflight columns, and the handler action. The phase
+snapshots bracket the dispatch from before the send to the continuation after
+its commit callback; the handler action and the commit's synchronous steps end
+before the callback fires, so the phase figures fall inside the elapsed
+interval.
 
 | Rows  | Workload      | Elapsed | Presync | Populate | Steps | ArgRead | Body  | PostRun | Handler | Commit | Rest  |
 | ----- | ------------- | ------- | ------- | -------- | ----- | ------- | ----- | ------- | ------- | ------ | ----- |
-| 74 | `scalarKey` | 9.8 | 0.23 | 3.38 | 0.69 | 0.08 | 0.10 | 0.13 | 0.61 | 0.11 | 4.9 |
-| 74 | `scalarGet` | 11.6 | 0.19 | 2.75 | 0.51 | 0.07 | 0.54 | 0.11 | 1.55 | 0.50 | 6.6 |
-| 74 | `walk` | 16.2 | 0.19 | 2.69 | 0.56 | 0.06 | 0.99 | 0.12 | 2.64 | 0.81 | 10.1 |
-| 74 | `mutate` | 17.3 | 0.36 | 5.26 | 0.87 | 0.09 | 0.57 | 0.13 | 1.58 | 0.27 | 9.3 |
-| 74 | `plainScalar` | 18.7 | 1.22 | 3.99 | 0.59 | 0.99 | 0.06 | 0.22 | 2.59 | 0.52 | 10.3 |
-| 74 | `plainWalk` | 20.2 | 1.33 | 3.20 | 0.51 | 1.03 | 0.05 | 0.16 | 2.81 | 0.79 | 12.4 |
-| 296 | `scalarKey` | 20.3 | 0.28 | 10.07 | 2.27 | 0.06 | 0.10 | 0.13 | 0.59 | 0.11 | 7.0 |
-| 296 | `scalarGet` | 30.6 | 0.32 | 11.46 | 1.50 | 0.06 | 2.37 | 0.19 | 5.16 | 1.76 | 12.1 |
-| 296 | `walk` | 55.6 | 0.33 | 11.84 | 1.36 | 0.07 | 5.00 | 0.21 | 10.78 | 3.48 | 31.3 |
-| 296 | `mutate` | 30.5 | 0.40 | 14.79 | 1.74 | 0.07 | 0.83 | 0.11 | 1.67 | 0.27 | 11.9 |
-| 296 | `plainScalar` | 33.9 | 2.63 | 9.90 | 2.53 | 1.72 | 0.05 | 0.15 | 4.01 | 1.34 | 14.8 |
-| 296 | `plainWalk` | 61.5 | 5.50 | 11.88 | 1.50 | 4.50 | 0.07 | 0.21 | 10.58 | 3.50 | 32.0 |
-| 1,184 | `scalarKey` | 74.2 | 0.49 | 52.03 | 8.31 | 0.08 | 0.11 | 0.15 | 0.69 | 0.12 | 12.6 |
-| 1,184 | `scalarGet` | 103.8 | 0.46 | 41.56 | 7.73 | 0.08 | 8.94 | 0.22 | 16.74 | 5.74 | 37.3 |
-| 1,184 | `walk` | 190.6 | 0.42 | 38.88 | 6.13 | 0.07 | 18.60 | 0.24 | 36.25 | 10.96 | 109.0 |
-| 1,184 | `mutate` | 92.6 | 0.49 | 44.75 | 8.80 | 0.07 | 2.28 | 0.12 | 3.77 | 0.40 | 34.8 |
-| 1,184 | `plainScalar` | 110.8 | 9.09 | 39.72 | 5.76 | 7.91 | 0.05 | 0.17 | 16.17 | 5.16 | 40.1 |
-| 1,184 | `plainWalk` | 230.0 | 19.83 | 40.25 | 6.49 | 19.18 | 0.08 | 0.24 | 39.25 | 11.28 | 124.2 |
+| 74 | `scalarKey` | 11.2 | 0.26 | 3.43 | 0.74 | 0.08 | 0.11 | 0.11 | 0.63 | 0.12 | 6.2 |
+| 74 | `scalarGet` | 15.5 | 0.31 | 3.85 | 0.68 | 0.08 | 0.74 | 0.16 | 2.07 | 0.64 | 8.6 |
+| 74 | `walk` | 21.7 | 0.27 | 3.65 | 0.62 | 0.08 | 1.27 | 0.16 | 3.41 | 1.02 | 13.7 |
+| 74 | `mutate` | 12.1 | 0.25 | 3.16 | 0.57 | 0.07 | 0.53 | 0.10 | 1.15 | 0.21 | 6.9 |
+| 74 | `plainScalar` | 13.5 | 0.74 | 3.01 | 0.52 | 0.50 | 0.06 | 0.12 | 1.51 | 0.46 | 7.7 |
+| 74 | `plainWalk` | 19.2 | 1.18 | 2.95 | 0.49 | 0.93 | 0.05 | 0.12 | 2.49 | 0.79 | 12.1 |
+| 296 | `scalarKey` | 17.8 | 0.21 | 8.53 | 1.89 | 0.06 | 0.09 | 0.10 | 0.51 | 0.12 | 6.6 |
+| 296 | `scalarGet` | 25.7 | 0.22 | 8.79 | 1.22 | 0.05 | 1.74 | 0.10 | 3.99 | 1.43 | 11.5 |
+| 296 | `walk` | 47.0 | 0.26 | 9.91 | 1.31 | 0.06 | 4.01 | 0.17 | 9.00 | 2.96 | 26.5 |
+| 296 | `mutate` | 26.8 | 0.33 | 12.04 | 1.66 | 0.06 | 0.77 | 0.10 | 1.43 | 0.24 | 11.3 |
+| 296 | `plainScalar` | 32.5 | 2.27 | 9.30 | 2.42 | 1.71 | 0.06 | 0.14 | 4.06 | 1.36 | 14.5 |
+| 296 | `plainWalk` | 62.5 | 6.45 | 11.57 | 1.92 | 5.18 | 0.09 | 0.20 | 10.53 | 3.26 | 32.0 |
+| 1,184 | `scalarKey` | 58.8 | 0.41 | 39.80 | 6.22 | 0.07 | 0.12 | 0.12 | 0.62 | 0.13 | 11.7 |
+| 1,184 | `scalarGet` | 86.6 | 0.31 | 35.72 | 5.41 | 0.06 | 7.85 | 0.16 | 14.15 | 4.97 | 31.0 |
+| 1,184 | `walk` | 212.3 | 0.48 | 43.26 | 7.64 | 0.08 | 20.83 | 0.23 | 39.57 | 11.99 | 121.3 |
+| 1,184 | `mutate` | 94.7 | 0.49 | 46.08 | 6.34 | 0.07 | 2.16 | 0.12 | 3.08 | 0.41 | 38.8 |
+| 1,184 | `plainScalar` | 145.1 | 11.20 | 51.23 | 5.91 | 9.85 | 0.09 | 0.21 | 19.47 | 6.09 | 57.3 |
+| 1,184 | `plainWalk` | 243.0 | 21.03 | 46.00 | 6.61 | 20.05 | 0.10 | 0.22 | 40.86 | 12.18 | 128.4 |
 
-Eight earlier runs of this benchmark on the same revision, some with a wider
+Nine earlier runs of this benchmark on the same revision, some with a wider
 timed interval, some reading each timer's last sample rather than its
 accumulated time, and some while a review or a test suite shared the machine,
 put `scalarKey` at 1,184 rows between 56 and 99 ms elapsed and `walk` between
@@ -288,8 +292,8 @@ phases carry the time; the absolute figures move by up to a factor of two
 between runs on this machine, most of that in the runs taken under shared
 load, and are observations, not thresholds.
 
-`Rest` grows with the list on the whole-list workloads: at 1,184 rows it is 13
-ms for `scalarKey`, 37 for `scalarGet`, 109 for `walk`, and 124 for `plainWalk`.
+`Rest` grows with the list on the whole-list workloads: at 1,184 rows it is 12
+ms for `scalarKey`, 31 for `scalarGet`, 121 for `walk`, and 128 for `plainWalk`.
 It is the time outside every timer this record reads: the scheduler's ticks
 between the phases, the presync transaction's setup, the commit's asynchronous
 remainder after its synchronous steps, and the callback's delivery. That it
@@ -330,7 +334,7 @@ schema-less query-result proxy and would count accesses.
 The scheduler held one node before and after every dispatch: a handler with a
 plain result adds nothing to the graph. The retained-heap probe, a full
 collection before and after the one dispatch on each variant's fresh runtime,
-gave deltas from 1.9 MB below zero to 0.2 MB above it with no relation to the
+gave deltas from 1.9 MB below zero to 0.1 MB above it with no relation to the
 workload: a heap that shrinks across a dispatch is collecting the runtime's
 own setup garbage, not measuring what the dispatch retained. This record makes
 no retention claim; a retention measurement needs a runtime warmed past its
@@ -341,9 +345,9 @@ setup and more samples than this pass takes.
 1. **The dependency preflight is the largest fixed cost of a handler dispatch,
    and it does not depend on what the handler reads.** At 1,184 rows it resolves
    one link per row, twice, whatever the workload, and its two populate steps
-   take 39 to 52 ms of every dispatch. For the handle-context workloads that
-   read little, that is most of what the timers attribute: 52 of `scalarKey`'s
-   74 ms. For the whole-list workloads the handler action is comparable, and a
+   take 36 to 51 ms of every dispatch. For the handle-context workloads that
+   read little, that is most of what the timers attribute: 40 of `scalarKey`'s
+   59 ms. For the whole-list workloads the handler action is comparable, and a
    share of the elapsed time remains unattributed by any timer (the `Rest`
    column). The first preflight pass is reported skipped and the second runs;
    both walk the full list. Which condition skips the first pass was not
@@ -351,19 +355,19 @@ setup and more samples than this pass takes.
 2. **The argument read is negligible for a handle context and linear for a plain
    one.** With `Writable<Vote[]>` the read mints a handle in under a quarter of
    a millisecond at every size. With `Vote[]` it materializes every row: 2 to 5
-   ms at 296 rows and 8 to 19 ms at 1,184. The two plain workloads read the same
-   list, and this measurement does not establish what separates their figures;
-   the workloads run in a fixed order and a variant's runtime lives across its
-   own samples, so position and retention within a variant are not ruled out.
-   The presync pays about the same as the argument read. The lunch poll's
-   handlers bind their collections as handles; the plain values they bind are
-   scalars such as a name or a clock tick.
+   ms at 296 rows and 10 to 20 ms at 1,184. The two plain workloads read the
+   same list, and this measurement does not establish what separates their
+   figures; the workloads run in a fixed order and a variant's runtime lives
+   across its own samples, so position and retention within a variant are not
+   ruled out. The presync pays about the same as the argument read. The lunch
+   poll's handlers bind their collections as handles; the plain values they bind
+   are scalars such as a name or a clock tick.
 3. **A whole-list read inside the body costs what a plain context's argument
    read costs, and the commit after it grows with the read set.** The body timer
    spans the whole body, so it cannot isolate the read: at 1,184 rows
-   `scalarGet`'s body, a whole-list read and one element, is 8.9 ms, and
-   `walk`'s, the same read and a sum over every row, is 18.6 ms. The commit
-   after either is 5.7 and 11.0 ms against 0.12 ms after `scalarKey`'s keyed
+   `scalarGet`'s body, a whole-list read and one element, is 7.9 ms, and
+   `walk`'s, the same read and a sum over every row, is 20.8 ms. The commit
+   after either is 5.0 and 12.0 ms against 0.13 ms after `scalarKey`'s keyed
    read; the write is identical in those three, so the difference is the read
    set the commit carries.
 4. **A handler's read log is its commit precondition set.** The lunch poll's
@@ -381,10 +385,11 @@ setup and more samples than this pass takes.
 ## What F1 takes from here
 
 The measured lever on the handler path is not the argument read. Making the
-argument read lazy would save under a millisecond for a handle context and 8 to
-19 ms at 1,184 rows for a plain one, while the two preflight passes spend 39 to
-52 ms on every dispatch regardless. A lazy body read of a handle could save most
-of the 8.9 ms a whole-list `get()` and one element cost, and the 5.7 ms commit that follows, when the body touches little of the list, at the price of finding
+argument read lazy would save under a millisecond for a handle context and 10 to
+20 ms at 1,184 rows for a plain one, while the two preflight passes spend 36 to
+51 ms on every dispatch regardless. A lazy body read of a handle could save most
+of the 7.9 ms a whole-list `get()` and one element cost, and the 5.0 ms commit
+that follows, when the body touches little of the list, at the price of finding
 4 above. Those are the two consequences F1's contract and prototype have to
 weigh, with the same benchmark extended by a posture dimension so the comparison
 holds inputs fixed.
