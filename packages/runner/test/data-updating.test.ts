@@ -1137,8 +1137,10 @@ describe("data-updating", () => {
 
   describe("array-element anchoring in normalizeAndDiff", () => {
     it("stores array-element objects inline when no anchor id source is supplied", () => {
-      // `diffAndUpdate` without an anchor id source is the frameless write:
-      // objects in arrays stay inline rather than becoming documents.
+      // A direct `diffAndUpdate` call with no id source: objects in arrays
+      // stay inline rather than becoming documents. The `Cell` write paths
+      // always pass one, so this shape is reached by a caller that builds the
+      // walk itself.
       const testCell = runtime.getCell<unknown>(
         space,
         "no anchor source stores inline",
@@ -1156,6 +1158,72 @@ describe("data-updating", () => {
       const raw = testCell.getRaw() as unknown[];
       expect(parseLink(raw[0])).toBe(undefined);
       expect(raw[0]).toEqual({ name: "Ada" });
+    });
+
+    it("stores each array-element object as a link when one is supplied", () => {
+      // The positive half of the case above, over the same call: with an id
+      // source each object leaves a link to a document of its own, and two
+      // objects at two positions leave two distinct documents.
+
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "anchor source stores links",
+        undefined,
+        tx,
+      );
+      let seed = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [{ name: "Ada" }, { name: "Grace" }],
+        "anchor source stores links",
+        undefined,
+        () => seed++,
+      );
+
+      const raw = testCell.getRaw() as unknown[];
+      const ids = raw.map((entry) => parseLink(entry)?.id);
+      expect(ids).toEqual([expect.any(String), expect.any(String)]);
+      expect(ids[0]).not.toBe(ids[1]);
+      expect(ids).not.toContain(testCell.getAsNormalizedFullLink().id);
+    });
+
+    it("leaves an element that arrives as a link alone", () => {
+      // An element already carrying a link is stored as that link and draws
+      // no id: nothing re-homes a value the writer addressed by reference.
+
+      const target = runtime.getCell<unknown>(
+        space,
+        "link element target",
+        undefined,
+        tx,
+      );
+      const testCell = runtime.getCell<unknown>(
+        space,
+        "link element container",
+        undefined,
+        tx,
+      );
+      const link = createSigilLinkFromParsedLink(
+        target.getAsNormalizedFullLink(),
+      );
+      let draws = 0;
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        [link],
+        "link element container",
+        undefined,
+        () => `seed-${draws++}`,
+      );
+
+      expect(draws).toBe(0);
+      const raw = testCell.getRaw() as unknown[];
+      expect(parseLink(raw[0], testCell)?.id).toBe(
+        target.getAsNormalizedFullLink().id,
+      );
     });
 
     it("draws anchor ids pre-order: containing element before nested children", () => {
