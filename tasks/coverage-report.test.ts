@@ -11,6 +11,9 @@ import {
 import { COVERAGE_METRIC_PREFIX } from "./coverage-metrics.ts";
 import { COVERAGE_FAILURE_MARKER } from "./ci-lane.ts";
 
+/** The repository this test reads the workspace members of. */
+const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+
 /** A directory holding one LCOV report at `at`, relative to its root. */
 async function reportsIn(
   files: Record<string, string>,
@@ -82,7 +85,7 @@ describe("what the full run publishes about coverage", () => {
         runId: 1,
         sha: "abc",
         createdAt: "2026-09-01T00:00:00Z",
-        root: Deno.cwd(),
+        root: REPOSITORY,
       });
       expect(
         figures.some((figure) => figure.name.includes("packages/memory")),
