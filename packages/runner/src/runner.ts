@@ -9691,13 +9691,20 @@ export class Runner {
   }
 
   /**
-   * `schema` is what stops the pull walking the whole result. `Cell.pull()`
+   * Pull the result cell once, after this transaction commits successfully.
+   *
+   * `schema` decides whether that pull walks the whole result. `Cell.pull()`
    * deep-traverses its value when the link carries no schema, because without
-   * one there is nothing to say which nested values to read as dependencies —
-   * and the result of a child instantiation is re-pulled whenever the returned
-   * artifact changes, so the walk is paid per interaction and its cost is the
-   * result's size rather than the change's. A schema registers the same
-   * dependencies as it reads.
+   * one there is nothing to say which nested values to read as dependencies;
+   * given one it registers the same dependencies as it reads. That matters
+   * because a child instantiation is re-run whenever the returned artifact
+   * changes, so the walk is paid per interaction and costs the result's size
+   * rather than the change's.
+   *
+   * Passing it is not yet universal: only the child-instantiation caller in
+   * `#writeJavaScriptActionResult` supplies one, that being the site whose cost
+   * was measured. The other callers here, and the three that reach
+   * `#pullCellOnceInPullMode` directly, still pull schemaless.
    */
   #pullCellOnceAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,

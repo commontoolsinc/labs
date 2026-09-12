@@ -73,7 +73,6 @@ import {
   isMachineryRead,
   isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
-import { PathPrefixIndex } from "./path-prefix-index.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -111,6 +110,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { PathPrefixIndex } from "./path-prefix-index.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type CfcRefusalDetail,

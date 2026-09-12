@@ -38,6 +38,18 @@ describe("commitFailure", () => {
     expect(result.message).toContain("17");
   });
 
+  it("renders a Result whose fields refer to each other", () => {
+    // The fallback path runs inside error handling, so it has to survive what
+    // a commit error actually carries: a transaction whose reads and writes
+    // refer back to it. `JSON.stringify` throws on that.
+    const conflict: Record<string, unknown> = { name: "ConflictError" };
+    conflict.transaction = { of: conflict };
+    const result = commitFailure(conflict);
+    expect(result).toBeInstanceOf(Error);
+    expect(result.name).toBe("ConflictError");
+    expect(result.message.length).toBeGreaterThan(0);
+  });
+
   it("ignores a non-Error reason and still produces an Error", () => {
     const result = commitFailure({
       name: "ConflictError",

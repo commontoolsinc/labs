@@ -13,14 +13,17 @@
  * child, and a `"*"` segment follows every child. The two are held together by
  * a test that compares them across a generated corpus.
  */
+
 type PathPrefixNode = {
   children: Map<string, PathPrefixNode>;
   terminal: boolean;
 };
 
+/** A set of paths, queried for whether any of them prefixes a given path. */
 export class PathPrefixIndex {
   #root: PathPrefixNode = { children: new Map(), terminal: false };
 
+  /** Add a path to the set. Adding the same path twice is a no-op. */
   add(path: readonly string[]): void {
     let node = this.#root;
     for (const segment of path) {
