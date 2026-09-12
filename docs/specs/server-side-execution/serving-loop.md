@@ -1093,6 +1093,40 @@ deliberate: a survivor whose writes were dropped per-doc still lands
 its BASIS ROWS — its reads are true, and no recompute-owed mark
 exists.
 
+A contribution whose **read dependency is withdrawn** has a separate
+invalidation obligation. The accumulator records when its withdrawn-read
+closure discards an entire reactive run. Once the replica finishes rolling
+that run back, the scheduler re-arms its current, still-registered instance
+against the next wave's basis. This covers a read of an unchanged field through
+a pending document whose sibling field was discarded: rollback leaves the
+read's value equal, so a value-change notification alone cannot recover the
+withdrawn result. The retry preserves the run's consumed CFC trigger reads and
+does not dirty accepted sibling instances. Removing the action or its scoped
+instance invalidates that registration's obligation, including a run whose body
+or seal is still pending. A newer sealed publication makes the old withdrawal
+inert. An equal-value run with no new
+contribution preserves the outstanding publication's recovery obligation and
+keeps its refreshed subscriptions. This settlement observer is outside the
+pending-commit barrier that the serving loop drains before committing its wave.
+
+An ordinary raw write elided against pending state retains internal commit
+provenance for that dependency. A later run that elides one pending output and
+writes another must withdraw if the elided value is discarded. Read-only foreign
+spaces carry the same internal dependency into the wave, including a write-free
+local-acceptance contribution. The basis is conservative at document granularity:
+when an older pending layer exists, repeating the transaction's own replacement
+can retain that layer's dependency too. Its withdrawal can require one fresh run
+even when the replacement did not need the old value. These reads do not create
+scheduling subscriptions or CFC value taint. UI-blind writes retain their existing
+blind-write behavior;
+this provenance does not extend the raw API's CFC attempted-target coverage.
+
+This dependency invalidation does not re-arm a direct output supersession, a
+failed foreign writer, or a failed commit precondition. Those dispositions
+retain their existing dependency and demand rules. A reader of a failed
+contribution can recompute from the rolled-back state without retrying its
+failed producer.
+
 **The event REQUEUE above is not events.md §5's event DROP** (T3).
 Two different conflict notions share the vocabulary of this section
 and must not be collapsed:

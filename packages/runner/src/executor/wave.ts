@@ -341,9 +341,17 @@ export function waveRunContextOf(
 // caller whose side effects must wait for durability (the pattern swap's
 // teardown + reinstantiation, §3e) awaits this instead. Attached by the
 // accumulator at seal, same side-table mechanism as the run context.
+type WaveSettlement = Result<
+  Unit,
+  StorageTransactionRejected & {
+    /** This run read a contribution whose optimistic state was withdrawn. */
+    readDependencyWithdrawn?: true;
+  }
+>;
+
 const waveSettlements = new WeakMap<
   IExtendedStorageTransaction,
-  Promise<Result<Unit, StorageTransactionRejected>>
+  Promise<WaveSettlement>
 >();
 
 const requiresWaveAcceptance = new WeakSet<IStorageTransaction>();
@@ -359,7 +367,7 @@ export function requireWaveAcceptance(tx: IExtendedStorageTransaction): void {
  * outside a wave or with neither sealed writes nor opted-in local state. */
 export function waveSettlementOf(
   tx: IExtendedStorageTransaction,
-): Promise<Result<Unit, StorageTransactionRejected>> | undefined {
+): Promise<WaveSettlement> | undefined {
   return waveSettlements.get(tx);
 }
 
@@ -559,6 +567,8 @@ export interface WaveLease {
 
 /** One sealed action run held by the accumulator. */
 interface WaveContribution {
+  /** Set only by the closure that invalidates reads of withdrawn state. */
+  readDependencyWithdrawn?: true;
   index: number;
   context: WaveRunContext;
 
@@ -1241,7 +1251,7 @@ export class WaveAccumulator
         }
       }
       this.#sealedTxs.add(tx);
-      this.#contributions.push({
+      const contribution: WaveContribution = {
         index: this.#contributions.length,
         context,
         spaces: assembly.spaces,
@@ -1251,13 +1261,18 @@ export class WaveAccumulator
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
         discoveredScope: assembly.discoveredScope,
-      });
+      };
+      this.#contributions.push(contribution);
       waveSettlements.set(
         tx,
-        emptySettlement?.promise ?? Promise.all(
+        (emptySettlement?.promise ?? Promise.all(
           assembly.spaces.map((space) => space.sealed.settled),
-        ).then((settled) =>
+        ).then((settled): Result<Unit, StorageTransactionRejected> =>
           settled.find((outcome) => outcome.error !== undefined) ?? { ok: {} }
+        )).then((outcome): WaveSettlement =>
+          outcome.error !== undefined && contribution.readDependencyWithdrawn
+            ? { error: { ...outcome.error, readDependencyWithdrawn: true } }
+            : outcome
         ),
       );
       return result;
@@ -1988,6 +2003,9 @@ export class WaveAccumulator
               requeued.add(idx);
             }
           } else {
+            if (readWithdrawn && contribution.context.kind === "derivation") {
+              contribution.readDependencyWithdrawn = true;
+            }
             droppedWhole.add(idx);
             outcome.dependencyDroppedWrites += this.#homeOpCount(
               contribution,
@@ -3056,9 +3074,12 @@ export class WaveAccumulator
             "emitter write this wave withdrew, so no entry exists behind " +
             "this run and nothing re-emits it (events.md §4 — one " +
             "durable entry, one completed run; stage C build W3, (α3))"
-          : "pure derivation dropped: derived from a withdrawn " +
-            "contribution; its own reads re-run it when fresh state " +
-            "lands (serving-loop.md §3d)";
+          : contribution.readDependencyWithdrawn
+          ? "pure derivation dropped: a read depended on a withdrawn " +
+            "contribution; the current scheduled instance re-arms after " +
+            "rollback (serving-loop.md §3d)"
+          : "contribution dropped from the wave commit " +
+            "(serving-loop.md §3d)";
         this.#warnDropped(contribution, message);
         this.#withdraw(contribution, message, "contribution-dropped");
         continue;

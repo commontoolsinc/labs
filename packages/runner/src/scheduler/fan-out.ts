@@ -49,6 +49,9 @@ export interface FanOutInstance {
 }
 
 interface InstanceRecord {
+  /** The latest sealed publication; write-free reruns retain its obligation. */
+  pendingWaveRun?: object;
+
   identity: ScopeKeyIdentity;
   log?: ReactivityLog;
 }

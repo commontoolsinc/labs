@@ -2784,6 +2784,20 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   they are not automatically migrated based on pointer shape. The caller-driven
   rematerialization path and this compatibility boundary are specified in
   [scoped cell instances](../scoped-cell-instances.md).
+  `scheduler-wave-withdrawal.test.ts` covers a pure leaf reader whose result is
+  withdrawn even though rollback preserves its input value, plus accepted,
+  canceled, superseded-run, equal-value no-op, partial no-op, write-free local
+  acceptance, abandoned-wave, and direct output/precondition/foreign-failure
+  controls. Held bodies and seals cannot transfer retry obligations to a new
+  registration; departed or replacement scoped instances cannot be revived.
+  A shared-space trigger control retries only the withdrawn user instance while
+  preserving its CFC trigger metadata and the accepted sibling.
+  `storage-write-elision-provenance.test.ts` covers raw value, deletion, and batch
+  elision over pending state, internal read classification, confirmed-only and
+  own-unsealed-only controls, conservative replacement over an older pending
+  document, and the UI-blind and foreign read-only boundaries. The serving fan-out
+  storm case retains its original initial-convergence and bounded-wave
+  assertions while session-slot initialization races authored writes.
 
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
