@@ -134,6 +134,29 @@ export const FILL_DENSITY_SHARE = 0.25;
 /** The share spent on items the value ordering did not pick. */
 export const FILL_EXPLORATION_SHARE = 0.15;
 
+/**
+ * The most a suite's fitted slope may come to.
+ *
+ * The slope says what one more second of test time costs a batch in wall
+ * time. A batch that takes several times the sum of its tests' own
+ * durations is one whose cost is fixed rather than marginal — process
+ * startup and module load — and the intercept is what carries that. A
+ * slope far above this is the fit mis-attributing fixed cost, which
+ * charges every identity of the suite for it and prices the suite out of
+ * every lane.
+ */
+export const MAX_SUITE_CORRECTION = 4;
+
+/**
+ * Observations a suite needs before its slope is fitted at all.
+ *
+ * Two points fit a line exactly, and a line through two points a second
+ * apart says nothing about the second after them. Below this the slope
+ * is one and the intercept carries the whole difference, which is the
+ * reading that cannot be wrong in the direction that matters.
+ */
+export const MIN_CORRECTION_SAMPLES = 8;
+
 /** The flake rate above which an item leaves the selectable set. */
 export const FLAKE_EXCLUSION_RATE = 0.005;
 
@@ -631,6 +654,24 @@ export const DIALS: readonly Dial[] = [
     why: "Add a suite whose failures are never noise, so that a flake rate " +
       "cannot excuse one; remove one whose failures a change's author " +
       "cannot act on.",
+  },
+  {
+    name: "MAX_SUITE_CORRECTION",
+    value: MAX_SUITE_CORRECTION,
+    unit: "multiple of a suite's own test time",
+    setBy: "chosen",
+    why: "Up when a suite really does take several times its tests' own time " +
+      "per second of them; down when a fitted slope is pricing a suite out " +
+      "of every lane.",
+  },
+  {
+    name: "MIN_CORRECTION_SAMPLES",
+    value: MIN_CORRECTION_SAMPLES,
+    unit: "batches",
+    setBy: "chosen",
+    why:
+      "Up when a slope is being fitted from too little and swinging about; " +
+      "down when a suite's real slope takes too long to be believed.",
   },
   {
     name: "FLAKE_EXCLUSION_RATE",

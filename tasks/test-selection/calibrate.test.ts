@@ -15,6 +15,7 @@ import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
 } from "../lane-measurement.ts";
+import { MAX_SUITE_CORRECTION, MIN_CORRECTION_SAMPLES } from "./policy.ts";
 
 /** One measurement, as a lane spools it. */
 function measured(name: string, seconds: number): TestRecord {
@@ -164,13 +165,48 @@ describe("what a lane costs beyond the tests it runs", () => {
       });
     });
 
-    it("finds the slope two disagreeing observations carry", () => {
-      const fitted = fitSuite([
-        { suite: "s", planned: 10, spent: 30 },
-        { suite: "s", planned: 20, spent: 50 },
-      ]);
+    it("finds the slope enough disagreeing observations carry", () => {
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          planned: 10 + i,
+          spent: 10 + 2 * (10 + i),
+        })),
+      );
       expect(fitted.correction).toBeCloseTo(2, 6);
       expect(fitted.overhead).toBeCloseTo(10, 6);
+    });
+
+    it("fits no slope from too few observations", () => {
+      // Two points fit a line exactly, and a line through two points a
+      // second apart says nothing about the second after them.
+      const fitted = fitSuite([
+        { suite: "s", planned: 0.0, spent: 12.2 },
+        { suite: "s", planned: 0.7, spent: 16.6 },
+      ]);
+      expect(fitted.correction).toBe(1);
+      expect(fitted.overhead).toBeCloseTo(15.9, 6);
+    });
+
+    it("never lets a slope price a suite out of every lane", () => {
+      // A slope far above one is the fit reading a fixed cost as a
+      // marginal one, and it is charged against every identity of the
+      // suite rather than once per lane.
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          planned: 0.1 * i,
+          spent: 20 + 50 * (0.1 * i),
+        })),
+      );
+      expect(fitted.correction).toBe(MAX_SUITE_CORRECTION);
+      // What the cap moved off the slope is on the intercept, so no
+      // observation is under-predicted.
+      for (let i = 0; i < MIN_CORRECTION_SAMPLES; i++) {
+        const planned = 0.1 * i;
+        expect(fitted.overhead + fitted.correction * planned)
+          .toBeGreaterThanOrEqual(20 + 50 * planned - 1e-9);
+      }
     });
 
     it("never predicts a batch costing less than one was seen to", () => {
@@ -178,8 +214,11 @@ describe("what a lane costs beyond the tests it runs", () => {
       // which for this quantity is half the lanes running past the
       // budget they were packed against.
       const seen: BatchObservation[] = [
-        { suite: "s", planned: 10, spent: 30 },
-        { suite: "s", planned: 20, spent: 50 },
+        ...Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          planned: 10 + i,
+          spent: 10 + 2 * (10 + i),
+        })),
         { suite: "s", planned: 15, spent: 90 },
       ];
       const fitted = fitSuite(seen);
@@ -190,10 +229,13 @@ describe("what a lane costs beyond the tests it runs", () => {
     });
 
     it("refuses a slope saying a batch runs faster than its tests", () => {
-      const fitted = fitSuite([
-        { suite: "s", planned: 10, spent: 60 },
-        { suite: "s", planned: 50, spent: 62 },
-      ]);
+      const fitted = fitSuite(
+        Array.from({ length: MIN_CORRECTION_SAMPLES }, (_, i) => ({
+          suite: "s",
+          planned: 10 + 10 * i,
+          spent: 60 + 0.05 * (10 + 10 * i),
+        })),
+      );
       expect(fitted.correction).toBe(1);
     });
 

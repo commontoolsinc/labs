@@ -32,7 +32,11 @@ import {
   isLaneMeasurement,
   setupMeasurement,
 } from "../lane-measurement.ts";
-import { LANE_PROLOGUE_SECONDS } from "./policy.ts";
+import {
+  LANE_PROLOGUE_SECONDS,
+  MAX_SUITE_CORRECTION,
+  MIN_CORRECTION_SAMPLES,
+} from "./policy.ts";
 
 /** One thing a lane measured about itself, and the day it measured it. */
 export type LaneObservation =
@@ -185,12 +189,13 @@ export function percentile(values: readonly number[], share: number): number {
  * What the share of a batch that is not its tests comes to, as an
  * intercept and a slope.
  *
- * Two observations that disagree about how long the same planned work
- * took give a slope; anything less gives none, and the whole difference
- * goes into the intercept. That is the conservative reading and the
- * honest one: with one sample there is nothing to say about how the cost
- * grows, and an intercept that carries the whole of it charges a lane
- * for what a lane was seen to spend.
+ * A slope is fitted only from `MIN_CORRECTION_SAMPLES` observations that
+ * disagree about how long the same planned work took, and is bounded
+ * below by one and above by `MAX_SUITE_CORRECTION`. Anything less gives
+ * no slope, and the whole difference goes into the intercept. That is
+ * the conservative reading and the honest one: two points fit a line
+ * exactly, and a line through two points a second apart says nothing
+ * about the second after them.
  *
  * The intercept is then raised until no observation is under-predicted,
  * whatever the slope came to. A least-squares line sits in the middle of
@@ -203,7 +208,9 @@ export function fitSuite(
   if (observations.length === 0) return { overhead: 0, correction: 1 };
   const distinct = new Set(observations.map((o) => o.planned));
   let correction = 1;
-  if (distinct.size > 1) {
+  if (
+    distinct.size > 1 && observations.length >= MIN_CORRECTION_SAMPLES
+  ) {
     const n = observations.length;
     const meanX = observations.reduce((t, o) => t + o.planned, 0) / n;
     const meanY = observations.reduce((t, o) => t + o.spent, 0) / n;
@@ -213,10 +220,18 @@ export function fitSuite(
       top += (o.planned - meanX) * (o.spent - meanY);
       bottom += (o.planned - meanX) ** 2;
     }
-    // A slope below one would say a batch runs faster than the tests in
-    // it, which is not a thing that happens and is what a set of
-    // observations dominated by their intercept fits to.
-    if (bottom > 0) correction = Math.max(1, top / bottom);
+    // Below one would say a batch runs faster than the tests in it, and
+    // far above one is the fit reading a fixed cost as a marginal one:
+    // both are what a set of observations dominated by its intercept
+    // fits to. The intercept is raised to cover every observation
+    // afterwards, so bounding the slope moves cost between the two terms
+    // rather than losing any of it.
+    if (bottom > 0) {
+      correction = Math.min(
+        MAX_SUITE_CORRECTION,
+        Math.max(1, top / bottom),
+      );
+    }
   }
   const overhead = observations.reduce(
     (most, o) => Math.max(most, o.spent - correction * o.planned),
