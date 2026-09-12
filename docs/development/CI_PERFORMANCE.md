@@ -1,30 +1,35 @@
 # CI Performance Policy
 
-This repo tracks GitHub Actions wall time so CI optimization work is driven by
-trend data, not one-off slow runs. Use this policy when deciding whether to
-split, rebalance, or otherwise optimize CI jobs.
+This repository tracks GitHub Actions wall time so that work on it is driven
+by trend data rather than by one-off slow runs. Use this policy when deciding
+whether a run is slow enough to act on, and what to do about it.
 
 ## Current Posture
 
+A pull request runs five jobs and a push to `main` runs one lane per share of
+the whole corpus, and neither number is written in the workflow. The five come
+from `LANES` in `tasks/test-selection/policy.ts`; the push count comes from
+`deno run -A tasks/ci-lane.ts --full --lane-count`, which reads the working
+tree against the manifest. `docs/development/test-selection.md` is the
+operating guide for both.
+
 GitHub's Team plan allows the organization
 [60 parallel hosted runners](https://docs.github.com/en/actions/reference/limits#job-concurrency-limits-for-github-hosted-runners).
-That capacity is shared by every workflow and repository in the organization.
-Keep the first dependency-free wave of this workflow below half the limit so
-two overlapping runs do not queue behind one another and later jobs can start
-as soon as their dependencies finish. Prefer combining short jobs when their
-combined work stays below the existing critical path.
+That capacity is shared by every workflow and repository in the organization,
+and the full run is what can fill it. A pull request takes five runners.
 
-Stop active CI-splitting work when the required test jobs are already in the
-same rough band. As a default, stop when:
+Each pull-request lane is packed to finish inside `LANE_BOUND_SECONDS`, and a
+lane of the full run inside `FULL_LANE_BOUND_SECONDS`. Those are the numbers to
+move when a lane runs long, and the workflow's `lane-work-timeout` and
+`full-lane-work-timeout` anchors are the same numbers in minutes. Moving one
+without the other leaves a lane packed against a budget its job will not allow
+it, or a job waiting past the budget it was packed against.
 
-- The top required test jobs are within about 20-30% of each other.
-- The slowest required test job is around 2 minutes.
-- The expected critical-path win is under about 30 seconds.
-- The proposed split adds comparable maintenance cost: more matrix entries,
-  ports, artifacts, or sharding rules.
-
-At that point, keep the timing instrumentation and wait for a concrete trigger
-instead of continuing to split jobs proactively.
+Rebalancing is not something anybody does here any more. What a test costs is
+measured on every run and published in the manifest, and the packer distributes
+items by that cost. A lane that runs long is a cost model that has drifted or a
+test that got slower, and both are visible in the lane's own job summary, which
+prints what it planned against what it spent.
 
 ## Required Pull Request Checks
 
@@ -32,9 +37,15 @@ Configure merge protection to require `Status`. The GitHub web interface shows
 that check as `CI / Status`, joining the workflow's name to the job's name, but
 merge protection stores and matches the job's name on its own.
 
-`Status` runs after every pull request validation job in `deno.yml`. It runs
-after failed and skipped dependencies. It fails unless every dependency
-succeeded. Add each new pull request validation job to its `needs` list.
+`Status` needs `pr-tests` and `full-tests`, and exactly one of them runs: the
+five selected lanes, or the full run the `ci: full` label asks for. Its rule has
+two clauses. Every dependency is `success` or `skipped`, so the path that did
+not run does not fail it. And at least one of the two is `success`, so a pull
+request on which both were skipped — mislabelled, or excluded by an `if:`
+somebody got wrong — fails rather than reporting green over no tests at all.
+
+A new test surface adds no job and changes nothing here. It is a suite under
+`tasks/test-topology/`, and the lanes pick it up.
 
 Keep pull request path filters out of workflows that provide required checks.
 GitHub leaves a required check pending when a path filter prevents its workflow
@@ -45,55 +56,52 @@ depend on a check produced by another app.
 
 ## Revisit Triggers
 
-Revisit CI wall-time optimization when at least one of these holds across
-normal runs:
+Revisit CI wall time when at least one of these holds across normal runs:
 
-- A required non-deploy job is over 3 minutes.
-- One required non-deploy job is more than 50% slower than comparable jobs and
-  at least 30 seconds slower in absolute terms.
-- Required non-deploy checks take more than 8 minutes from first start to last
-  completion.
-- New tests clearly cluster in one shard or suite and make it consistently
-  heavier.
+- A lane finishes past the budget it was packed against, and its summary shows
+  the overrun is the plan rather than one slow test.
+- The five pull-request lanes finish at visibly different times, which says the
+  cost model behind the packing has drifted.
+- A test is named in a lane's summary as unschedulable, meaning it costs more
+  than a lane can hold and so runs nowhere on a pull request.
+- The full run's lane count climbs without the corpus having grown.
 
 ## How To Respond
 
-1. Start from the latest completed `main` run and its Coverage Check log.
-2. Prefer timing artifacts and repeated runs over a single outlier.
-3. First look for a low-maintenance rebalance, such as moving a heavy test file
-   between existing shards.
-4. Split a job only when the boundary is already clear and the split preserves
-   local developer workflows.
+1. Read the lane's job summary. It prints the manifest it resolved, which
+   batches it ran, what each was expected to cost, and what it spent.
+2. A projection resting on stand-in costs says so in that summary. Such a lane
+   is not evidence about the cost model; it is a lane whose tests the store has
+   not measured yet.
+3. For one test that got slower, fix the test. For a whole suite that did, look
+   at the fitted `suiteOverhead` and `correction` the manifest carries for it.
+4. Move a dial only from a measurement. Every dial is in
+   `tasks/test-selection/policy.ts`, and `deno task test-selection dials`
+   prints each one with the reason to move it.
 
-Good CI optimization PRs should reduce critical-path wall time without making
-the workflow harder to reason about.
+Splitting or rebalancing a job is not a response any more. The packer decides
+what goes where, and `deno task test-selection plan --dry-run` says what it
+would decide before anything runs.
 
-For the pattern-integration job specifically, the time is dominated by
-per-pattern CFC compile, not by storage or sync — see
-[the profiling snapshot](../history/development/performance/pattern-integration-compile-bound.md)
-before optimizing there.
+## Pattern Integration Sharding
 
-### Pattern Integration Sharding
+`packages/patterns` shards its own integration task, and that is the one place
+sharding survives. A lane asks the suite for a set of files, so the shard
+variable is not what CI uses; what remains is the contract a file inside that
+package follows.
 
-Pattern Integration runs as a job matrix. Most integration test files run in
-exactly one job. Tests that sweep a pattern list run in every job and divide
-their own cases with `PATTERN_INTEGRATION_SHARD`. An unset variable selects
+Most integration test files are one file. Tests that sweep a pattern list divide
+their own cases with `PATTERN_INTEGRATION_SHARD`, and an unset variable selects
 every case, so the ordinary local command remains unsharded.
 
 `INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES` in
-`tasks/select-pattern-integration-files.ts` is the list of files that run in
-every job. Those files select their cases through
+`tasks/select-pattern-integration-files.ts` is the list of files that divide
+their cases that way. Those files select their cases through
 `packages/patterns/integration/pattern-integration-shard.ts`. The selector tests
 verify that every real integration file follows one of these two contracts.
-Measured starting loads and file weights for the current matrix live
-in `tasks/select-pattern-integration-files.ts`. Files added after the latest
-timing profile receive the default weight until a later profile measures them.
 
 Use internal sharding for a single file with many independent, expensive cases.
-Moving that file intact between jobs moves the delay without dividing it. Keep
-independent end-to-end files in the measured weight table when their run times
-are large enough that default-weight placement cannot balance them. Add
-persistent outliers in the compile-all-patterns sweep to
+Add persistent outliers in the compile-all-patterns sweep to
 `COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS`. This moves the named case without
 changing the default positions of the other cases.
 
@@ -260,95 +268,59 @@ environment variables are how a workflow declares a value an anchor can name;
 nothing reads them, and merge keys (`<<:`) remain unsupported, so an anchor
 cannot carry a block that a job then overrides.
 
-The CLI integration suites take a second set of anchors, `cli-work-timeout` at
-ten minutes, `cli-fuse-work-timeout` at fifteen, and `cli-job-timeout` at
-twenty-five. The combined suite's observed runtime remains comfortably inside
-that outer bound, while the individual work bounds identify an isolated wedged
-suite before the outer bound in normal runs. A job needing its own bound adds a
-pair of anchors alongside these rather than a number next to the step.
+The lanes take two further pairs. `lane-work-timeout` at five minutes and
+`lane-job-timeout` at fifteen bound a pull-request lane; `full-lane-work-timeout`
+at ten and `full-lane-job-timeout` at twenty bound a lane of the full run. Each
+work bound is the budget the packer packed that lane against, written in
+minutes, so the two move together. A job needing its own bound adds a pair of
+anchors alongside these rather than a number next to the step.
 
 The deploy jobs carry no bound at all. A deploy hands the work to a script that
 lives outside this repository, and a bound here would cancel a deploy this
 workflow has no way to size. `tasks/ci-workflow.test.ts` names those jobs and
 asks nothing of them.
 
-For every other job, that test fails the `Check` job when a work step has no
+For every other job, that test fails when a work step has no
 bound, when a job has none, when a bound is written as anything but an alias to
 an anchor, or when fewer than ten minutes separate the step's anchor from its
 job's.
 
-## Root Test Job Shape
+## The Lane Shape
 
-The `Test` matrix jobs in `.github/workflows/deno.yml` run the root
-`deno task test` on standard runners, sharded with `TEST_SHARD` and with
-`TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded CI job,
-so the root jobs skip it. Each shard collects workspace coverage for its
-packages with `DENO_COVERAGE_DIR` and uploads it as
-`coverage-profile-workspace-<shard>`.
+Both lane jobs run the same script and differ in two values: whether selection
+is on, and which lane of how many this one is.
 
-The runner jobs use `tasks/select-runner-test-files.ts` to discover `.test.ts`
-and `.test.tsx` files recursively under `packages/runner/test`, matching the
-package's test task. Each file is assigned to one weighted shard. Timing keys
-are relative to that directory; shard output prefixes those paths with
-`./test/`.
+    deno run -A tasks/ci-lane.ts --lane 3 --of 5 --base origin/main
+    deno run -A tasks/ci-lane.ts --full --lane 1 --of 58
 
-The root task is `tasks/test.ts`. It reads the workspace list from
-`deno.jsonc`, assigns package test units to shards by observed test cost
-(`selectShardMembers`), and runs `deno task test` in every selected package.
-Unknown packages receive a default weight, so adding a workspace member cannot
-make it fall out of CI. The test runner uses half the available cores for
-package workers. This is two package workers on the standard four-core CI
-runner.
-`TEST_CONCURRENCY` can override that default for a diagnostic run. Each shard's
-test time follows the longest chain of package tasks assigned to one worker,
-plus initialization inside the root task. Fixed workflow setup and coverage
-reporting sit outside that test step. When a package fails, the runner prints
-that package's captured output immediately and stops starting new package
-tests. Package tests that are already running finish before the summary is
-printed.
+Their steps are fixed and do not vary with what the lane runs: check out at
+full depth, set up Deno, install, restore `.ci-cache`, set the kernel core
+pattern, run the lane, upload what a failing lane left behind, upload the
+coverage reports, ship test records. Everything conditional happens inside the
+lane runner, which is what makes the workflow independent of the topology.
 
-When a shard becomes the long pole, start with the `Package timings:` block
-printed by `tasks/test.ts`. Update `WORKSPACE_TEST_WEIGHTS` in
-`tasks/test-timing-weights.ts` when package costs have drifted enough to affect
-the critical path. Changing the shard count in the workflow matrix recomputes
-the weighted assignment. A shard-count change must also update the
-`coverage-profile-workspace-*` entries in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in
-`tasks/coverage-check.ts`, which the Coverage Check gate uses to require every
-shard's coverage artifact.
+The cache step covers one directory under one exact key. A capability that
+finds a binary under `.ci-cache` uses it without asking what it was built
+from, so the key hashes the sources a binary is built from and carries no
+restore-key prefix. The key also carries the lane number: the packing is
+stable, so lane N tends to want the same binaries run after run, and five lanes
+saving one key would keep only whichever finished first.
 
-A package too heavy for any single shard can be split internally. The CLI,
-piece, and tasks packages run as multiple units via their package-specific
-shard variables (see
-`INTERNALLY_SHARDED_PACKAGES` in `tasks/workspace-tests.ts` and
-`packages/cli/test/run-tests.ts` or `tasks/run-sharded-test-files.ts`), so their
-slices spread across workspace shards. Slices of one package occupy distinct
-workspace shards whenever the matrix has enough shards. A package that
-dominates a shard can be given the same treatment. A slow package may also be
-running many independent test modules serially. Deno's `--parallel` mode can
-reduce that package's wall time, but only after checking for tests that share
-process-wide state.
+A lane that failed keeps its own working directory, under the job's temporary
+directory, and the upload step carries it out. A server's log is written there,
+and a lane that failed is when somebody wants to read one. A lane that passed
+removes it.
 
-The CLI's commit-message tests are split across numbered
-`view-commitmsg-*.test.ts` files. Some of these tests change process environment
-while installing Git shims, so every file in the family stays in the serial
-group. Their numbered filenames are consecutive in the sorted test inventory,
-so ordinary file assignment places one in each CLI slice. An unsharded local
-CLI test run executes every file.
+The root `deno task test` is `tasks/test.ts`, which is what somebody runs
+locally. It reads the workspace list from `deno.jsonc` and runs `deno task
+test` in every member, using half the available cores for package workers —
+two on a four-core machine. `TEST_CONCURRENCY` overrides that for a diagnostic
+run. When a package fails it prints that package's captured output immediately
+and stops starting new package tests. CI does not run it: a lane invokes each
+member's test task directly, one file at a time where the member's task is a
+single `deno test`.
 
-### Runner Test Sharding
-
-Runner test modules are assigned across the job matrix by observed per-file
-cost.
-`RUNNER_TEST_WEIGHTS` in `tasks/test-timing-weights.ts` records only files whose
-cost materially affects placement; every other file receives a unit weight.
-The longest-processing-time assignment in `tasks/weighted-shards.ts` places
-expensive files first and uses the filename to break ties, so the result is
-stable across machines. Selector tests require every real runner test file to
-appear exactly once and keep the modeled shard loads close.
-
-Refresh the weights from timestamped `running ... from ./test/...` boundaries
-in successful CI logs. Deno's JUnit output attributes runner cases to the
-preloaded clock module, so it does not carry usable per-file runner timings.
+### Tests That Cannot Run Beside Another
 
 Deno runs each parallel test file on its own thread of a single process, so
 "process-wide state" means state every file shares: environment variables,

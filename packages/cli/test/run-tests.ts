@@ -62,7 +62,7 @@ const ALL_ACCESS_TESTS = [
 
 // Tests that need a live toolshed named by API_URL. This runner excludes
 // them: its --allow-net=127.0.0.1 grant cannot reach an arbitrary API_URL.
-// The CI cli-integration-test job runs them against its toolshed; each
+// The `cli-deno` suite runs them against the toolshed its lane opened; each
 // file's header documents the direct local invocation.
 const INTEGRATION_TESTS = [
   "test/piece-integration.test.ts",

@@ -1411,9 +1411,10 @@ reason. Narrowing past the circle with a projection beside the predicate —
 cwd-independent, with no Deno startup noise and roughly half the per-invocation
 cost. (`--cli-only` is a legacy alias for the same thing.)
 
-It exists for CI, which downloads it in `cli-integration-test` (on
-`$GITHUB_PATH`) and `pattern-unit-test` (as `CF_BINARY`). A CI run never edits
-the source the binary was built from, so it cannot go stale mid-run.
+It exists for CI, where the `cf` capability puts the command line on
+`$GITHUB_PATH` for the CLI suites and the pattern unit suite takes it as
+`CF_BINARY`. A CI run never edits the source the binary was built from, so it
+cannot go stale mid-run.
 
 That does not hold for a working tree you are editing, and there is no
 invalidation story to catch it — see "Why not `dist/cf`" under Installing `cf`
@@ -1725,9 +1726,10 @@ the compile-cache version module _after_ the binary is written, so `dist/cf` is
 older than its own inputs the moment the build finishes.
 
 CI is a different case and legitimately uses the binary — a workflow run never
-mutates the source it was built from. `cli-integration-test` puts it on
-`$GITHUB_PATH` and `pattern-unit-test` passes it as `CF_BINARY`. That reasoning
-does not transfer to a working tree you are actively editing.
+mutates the source it was built from. The `cf` capability puts it on
+`$GITHUB_PATH` for the CLI suites, and the pattern unit suite passes it as
+`CF_BINARY`. That reasoning does not transfer to a working tree you are actively
+editing.
 
 ## Shell completion
 

@@ -197,8 +197,13 @@ record on their own. Three consequences worth knowing while writing one:
   hand-written test beside it can land on one of them.
 - Every test must finish within sixty seconds in CI, not counting setup.
 
-A new test *surface* (a new CI job, script, or harness) does need wiring —
-`docs/development/test-records.md` under "Covering a new test surface".
+A new test *surface* (a new script or harness) does need wiring, and it is a
+suite under `tasks/test-topology/` rather than a job: the lanes read the
+topology, so nothing in `.github/workflows/` changes. `deno task
+check-test-topology` fails on a test file no suite accounts for, which is what
+makes registering it a step nobody can skip.
+`docs/development/test-records.md` under "Covering a new test surface" and
+`docs/development/test-selection.md` cover the wiring.
 
 Your own runs are recorded too, and are marked as an agent's: with
 `CF_TEST_AGENT` unset, the run context carries the name of the harness

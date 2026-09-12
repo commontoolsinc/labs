@@ -32,6 +32,24 @@ counts for nothing.
 
 `packages/utils/deno.jsonc` is a correct minimal example.
 
+## A package that needs a browser names its Deno-only half `deno-test`
+
+A member whose tests are all ordinary Deno tests needs nothing here: `test` is
+what everything reads. A member that mixes Deno-only tests with tests needing a
+browser names the Deno-only half `deno-test` and the browser half
+`browser-test`, and joins them in `test` through `"dependencies"`.
+`packages/static/deno.jsonc` is the example to copy.
+
+Two things follow from the split beyond tidiness. The coverage gate measures
+`deno-test` where a member defines one and `test` otherwise, so a member that
+writes its two halves as one string loses the gate over its Deno-only half.
+And `tasks/test-topology/` enumerates a member one file at a time only when the
+half it runs is a single `deno test`, so a member that splits gets its files
+scheduled individually instead of running whole.
+
+Adding a browser test to a member that already splits is an edit to
+`browser-test` and nothing else.
+
 ## A new package is three edits
 
 Adding the directory is not enough. The package path also goes into the

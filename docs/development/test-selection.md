@@ -193,11 +193,11 @@ setting to fix.
 | Dial | Default | Units | Set by | Why you would move it, and which way |
 | --- | --- | --- | --- | --- |
 | `LANES` | 5 | lanes | chosen | Up when pull-request feedback is too thin and runner capacity allows more; down when the wave crowds other workflows off the shared runners. |
-| `LANE_BOUND_SECONDS` | 300 | seconds | chosen | Up when more should fit in a lane; down when five minutes is longer than anybody will wait for a first answer. The lane jobs that this bounds do not exist yet; when they do, their work-step and job timeouts in `deno.yml` have to move with it, and nothing checks that until they are written. |
+| `LANE_BOUND_SECONDS` | 300 | seconds | chosen | Up when more should fit in a lane; down when five minutes is longer than anybody will wait for a first answer. The `lane-work-timeout` anchor in `deno.yml` is the same number in minutes, and `lane-job-timeout` is ten above it; both move with this one, and nothing checks that. |
 | `LANE_PROLOGUE_SECONDS` | 40 | seconds | measured | Never. The publisher overwrites it from the lanes' own timing records, and the checked-in figure is only what the first lane uses before any lane has reported one. |
 | `LANE_SAFETY_SECONDS` | 30 | seconds | chosen | Up when lanes overrun their bound on slow runners; down when they finish early every time and the headroom is buying nothing. |
 | `LANE_BUDGET_SECONDS` | 230 | seconds | derived | Nothing edits this. It is the bound less the prologue and the safety margin, so a budget that does not fit inside its own bound cannot be written down. |
-| `FULL_LANE_BOUND_SECONDS` | 600 | seconds | chosen | Up when the run on `main` uses more jobs than it needs; down when `main` takes too long to say something broke. |
+| `FULL_LANE_BOUND_SECONDS` | 600 | seconds | chosen | Up when the run on `main` uses more jobs than it needs; down when `main` takes too long to say something broke. The `full-lane-work-timeout` anchor in `deno.yml` is the same number in minutes, and `full-lane-job-timeout` is ten above it. |
 | `FULL_LANE_BUDGET_SECONDS` | 530 | seconds | derived | Nothing edits this. It is the full run's bound less the same prologue and safety margin a pull request's lane pays, since a lane of either run is the same job doing the same setup on the same runner. |
 | `FULL_RUN_LABEL` | ci: full | a label | chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
 | `UNMEASURED_COST_SECONDS` | 1 | seconds | chosen | Up when a lane holding new tests runs long; down when it finishes early. It is reached for only by a suite with no measured test at all, since a suite that has any charges an unmeasured one what its middle test costs. |

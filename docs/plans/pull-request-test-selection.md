@@ -4073,7 +4073,7 @@ exercised on the branch on its own.
       reports, and `tasks/coverage-report.ts` is what reads them.
 - [x] `tasks/ci-workflow.test.ts` updated for the new anchors and shapes,
       including that the shared lane ship step carries no job-wide variant.
-- [ ] Documentation, in the same pull request rather than after it:
+- [x] Documentation, in the same pull request rather than after it:
       `docs/specs/test-selection.md` for the contract,
       `docs/development/test-selection.md` for the operating guide, the
       trust-boundary amendment and new dataset area in

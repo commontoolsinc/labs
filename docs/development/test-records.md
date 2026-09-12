@@ -223,8 +223,8 @@ if it fails. Every opted-in run also sweeps the spool root and ships any
 spool whose owner's lock is free. Object names are deterministic, so
 shipping twice collides on create and duplicates never come into being.
 
-In CI, jobs hold no credentials: each test job ends with a credential-free
-step that gathers the spool and the job's JUnit files into a
+In CI, jobs hold no credentials: each lane ends with a credential-free
+step that gathers the spool and the lane's JUnit files into a
 `test-records-*` artifact, and the Test Records Relay workflow — the only
 CI principal that can write to the store — composes each artifact's context
 from the trusted event payload and creates one object per artifact.
@@ -237,10 +237,12 @@ dispatching it with a run id, re-ships idempotently.
 
 The shared `test-records-ship` action accepts an optional `variant` input and
 also reads the CI-only `CF_TEST_RECORDS_VARIANT` fallback. An explicit input
-wins. This lets a workflow resolve a stable role to a variant once at job scope
-without duplicating that expression at every shipping step. The action applies
-the resolved value to every spooled and JUnit-derived record in that job; leave
-both surfaces unset for the default configuration.
+wins, and the action applies the resolved value to every spooled and
+JUnit-derived record in the job. Neither lane uses it: a lane may hold default
+and non-default batches at once, so a job-wide variant could not represent one,
+and the lane runner applies each suite's own variant as it gathers that batch.
+A workflow outside `deno.yml` that resolves a stable role once at job scope is
+what the input is for.
 
 The relay runs its parser from the default branch. Land parser, relay, reader,
 and action support for a new optional record field before any test workflow
@@ -296,8 +298,11 @@ is the record of who minted what for whom.
 
 ## Covering a new test surface
 
-A runner that already emits JUnit needs nothing but a `--junit`
-specification on its job's ship step, and a `--preload` naming
+A new surface is a suite under `tasks/test-topology/`, and the suite is
+what says where its runner writes JUnit: the invocation it builds carries
+the `--junit` specification the lane runner gathers, so nothing in
+`.github/workflows/` changes. A runner that already emits JUnit needs
+nothing but that specification, and a `--preload` naming
 `packages/test-support/src/records/preload.ts` where the surface is
 `deno test`. `preloadArgument()` from `@commonfabric/test-support/records`
 spells that flag; Deno resolves `--preload` as a path rather than through
@@ -385,12 +390,13 @@ Anything else wraps its command:
 deno task run-recorded <kind> <scope> <name> -- <command...>
 ```
 
-A wrapped command in a workflow step also has its identity registered in
-the test topology. A lane runs what a suite enumerates, so the topology
-is what keeps the command running once a lane takes over the job. `deno
-task check-test-topology` reads every such step and fails on one no suite
-claims, which settles it on the pull request that adds the step. A
-command with no suite to register it under is one to leave unwrapped:
+A workflow step does not wrap a command this way any more. A lane runs
+what a suite enumerates and records it through that suite, so a recording
+step in a workflow is either a test no suite knows about or a second run
+of one a lane already carries. `deno task check-test-topology` reads every
+such step under `.github/` and fails on it, which settles it on the pull
+request that adds the step. A command with no suite to register it under
+is one to leave unwrapped:
 ["Recording" in the specification](../specs/test-records.md#recording)
 says that a check no lane can be asked to run is not recorded.
 
