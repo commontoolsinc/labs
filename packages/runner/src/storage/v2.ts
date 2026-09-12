@@ -69,7 +69,10 @@ import {
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+import {
+  verifySchemaDocument,
+  walkSchemaDocumentClosure,
+} from "@commonfabric/data-model-schema/schema-closure";
 import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
   classifySchemaMeta,
@@ -7079,14 +7082,9 @@ export class SpaceReplica
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
-        if (
-          isSubschema(value) &&
-          internSchemaAsTaggedHashString(value as JSONSchema) === hash
-        ) {
-          registered.push([
-            id,
-            registerSchemaDocument(hash, value as JSONSchema),
-          ]);
+        const schema = verifySchemaDocument(hash, value);
+        if (schema !== undefined) {
+          registered.push([id, registerSchemaDocument(hash, schema)]);
           // A schema document's own refs are collected below from its
           // registered form; schema keywords such as `default` may carry
           // link-shaped DATA, so it is not link-scanned.
@@ -7203,8 +7201,7 @@ export class SpaceReplica
       this.getDocument(`cid:${hash}` as URI);
     if (!isObjectNotArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    return verifySchemaDocument(hash, value) !== undefined;
   }
 
   /**
@@ -8464,13 +8461,20 @@ export class SpaceReplica
   ): SessionSyncUpsert[] {
     const frame = [...upserts];
     const inFrame = new Set(frame.map((upsert) => upsert.id));
-    for (let index = 0; index < frame.length; index++) {
-      const upsert = frame[index]!;
-      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
+    // The hashes a document in the frame obliges it to hold: the
+    // document's `schema` metadata member and, for a schema document, its
+    // own refs, or otherwise its link positions. Verification is the
+    // validator's, not this chase's: a schema-shaped document's refs are
+    // followed whether or not it is the document its id names, as its
+    // arrival will be judged.
+    const obligationsOf = (upsert: SessionSyncUpsert): Set<string> => {
+      const hashes = new Set<string>();
+      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) {
+        return hashes;
+      }
       const metadata = classifySchemaMeta(upsert.doc);
-      // Leave malformed metadata in the frame for per-document quarantine.
-      if (metadata.kind === "malformed") continue;
-      const hashes = new Set(schemaMetaRefHashes(metadata));
+      if (metadata.kind === "malformed") return hashes;
+      for (const hash of schemaMetaRefHashes(metadata)) hashes.add(hash);
       if (upsert.id.startsWith("cid:")) {
         const value = (upsert.doc as { value?: unknown }).value;
         if (isSubschema(value)) {
@@ -8488,16 +8492,27 @@ export class SpaceReplica
           return schema;
         });
       }
-      for (const hash of hashes) {
+      return hashes;
+    };
+    const roots = new Set<string>();
+    for (const upsert of upserts) {
+      for (const hash of obligationsOf(upsert)) roots.add(hash);
+    }
+    walkSchemaDocumentClosure({
+      roots,
+      load: (hash, walk) => {
         const id = `cid:${hash}` as URI;
         if (inFrame.has(id) || this.isContentAddressedDocPersisted(hash)) {
-          continue;
+          return { kind: "settled" };
         }
         inFrame.add(id);
         const dependency = read({ id, scopeKey: "space" as ScopeKey });
-        if (dependency !== undefined) frame.push(dependency);
-      }
-    }
+        if (dependency === undefined) return undefined;
+        frame.push(dependency);
+        for (const next of obligationsOf(dependency)) walk.follow(next);
+        return { kind: "settled" };
+      },
+    });
     return frame;
   }
 
