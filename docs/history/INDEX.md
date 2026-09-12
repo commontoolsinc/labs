@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Representative lunch-poll copy rehearsal](development/performance/2026-09-12-representative-lunch-poll-rehearsal.md) — two isolated migration passes, authored-data preservation, matched browser/headless read counts, graph and timing tradeoffs, bounded clock churn, and the Q9 fast-follow decision.
+
 - [Index maintenance phase counts](development/performance/2026-09-11-index-maintenance-phases.md) — completed action-body counts for both index types across membership edits, key edits and lookup retargeting at three sizes.
 
 - [Demand-driven index enumeration](development/performance/2026-09-11-demanded-index-enumeration.md) — 2026-09-11: 512-row lookup and enumeration measurements, skewed-bucket costs, and the unresolved mixed-key representation boundary.
@@ -78,6 +80,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Executed plans and work orders
 
+- [Pattern computation cost implementation](plans/pattern-computation-cost-implementation.md) — executed #7155 sequence, copy-based acceptance, explicit B3a deferral, and D1/D2 handoff.
+
 - [server-pattern-verbs-seed.md](plans/server-pattern-verbs-seed.md) — the seed that recorded the ruled 2026-08-24 direction for the pattern lifecycle verbs as server calls, executed September 2026 for `upload` and `instantiate`, which run on the space's serving runtime under `EXPERIMENTAL_SERVER_EXECUTION` with `cf` requesting them, while `setsrc` stays client-side because a source update's module authority needs a transaction that commits to storage itself; the live contract is `docs/features/server-pattern-lifecycle.md`.
 - [read-cost-budgets.md](plans/read-cost-budgets.md) — completed A3 plan for opt-in pattern-test read budgets, transaction-attempt coverage, failure diagnostics, and executable pass/fail demonstrations; shipped in #7257, September 2026.
 
@@ -122,6 +126,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [topics-board-migration-2026-08-28.md](topics-board-migration-2026-08-28.md) — the Stage B migration of the Estuary Topics board and its 125 topics: why the board moved FIRST and the children-first rule inverts when the parent's demand is what changed, that reversal through the source log is refused in both directions so recovery means restoring content, and the failures only the live run produced — every laptop run dying 4-6 minutes in on a different entity, per-row cost rising and never recovering after each transport error, and a partial apply reporting success.
 
 ## Shipped or superseded designs and decision records
+
+- [Pattern computation cost design](plans/pattern-computation-cost.md) — original #7155 proposal, executed scope and separately tracked remaining lazy-materialization work.
 
 - [Collection indexes and keyed lookup](plans/collection-index-contract.md) — 2026-09-10: executed B1/B2 semantics and acceptance contract for grouping, unique-key lookup, tagged enumeration, left joins, and maintenance measurements.
 

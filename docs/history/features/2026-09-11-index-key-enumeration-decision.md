@@ -8,7 +8,7 @@ reason: "Accepted Q7 API decision; records context, consequences, and alternativ
 # Mixed index key enumeration decision
 
 Mike approved explicit tagged enumeration on September 11, 2026, resolving Q7
-of the [computation-cost implementation plan](../../plans/pattern-computation-cost-implementation.md).
+of the [computation-cost implementation plan](../plans/pattern-computation-cost-implementation.md).
 This records an accepted design decision, not completed implementation or test
 acceptance. The [archived contract](../plans/collection-index-contract.md) tracks
 implementation requirements.
