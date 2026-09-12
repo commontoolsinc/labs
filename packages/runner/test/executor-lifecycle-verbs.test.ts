@@ -388,9 +388,64 @@ describe("ExecutorHost.runLifecycleVerb", () => {
       );
     });
 
+    const PATTERN = [
+      "import { computed, pattern } from 'commonfabric';",
+      "export default pattern<{ n: number }, { total: number }>(",
+      "  ({ n }) => ({ total: computed(() => n * 3) }),",
+      ");",
+    ].join("\n");
+
+    /** Stage a piece of `pattern` with a direct commit, in one verb. */
+    const stageDirectly = (
+      runtime: Runtime,
+      pattern: Awaited<
+        ReturnType<Runtime["patternManager"]["compilePattern"]>
+      >,
+      cause: string,
+    ) => {
+      const piece = runtime.getCell<{ total: number }>(
+        space,
+        cause,
+        pattern.resultSchema,
+      );
+      return runtime.editWithRetry((tx) => {
+        runtime.stampServerRun(tx, {
+          actionId: `test-verb/${cause}`,
+          kind: "bookkeeping",
+          directCommit: true,
+        });
+        void runtime.setup(tx, pattern, { n: 5 }, piece, {
+          initializePieceSourceHistory: true,
+        });
+      }).then((outcome) => ({ outcome, piece }));
+    };
+
+    it("is refused when it read state a verb of the same cycle sealed into the wave", async () => {
+      // The compile's write-back of the closure seals into the cycle's
+      // wave, and the setup reads that closure: pending state, which the
+      // wave could still withdraw.
+      host = newHost();
+      const outcome = await host.runLifecycleVerb(space, {
+        name: "compile-and-stage",
+        run: async (runtime) => {
+          const pattern = await runtime.patternManager.compilePattern({
+            main: "/main.tsx",
+            files: [{ name: "/main.tsx", contents: PATTERN }],
+          }, { space });
+          return (await stageDirectly(runtime, pattern, "staged-too-early"))
+            .outcome;
+        },
+      });
+      expect(outcome.error?.message).toContain(
+        "read state the wave has not committed",
+      );
+    });
+
     it("lets a piece it stages derive in the same cycle, the derivation written over the documents the commit moved", async () => {
-      // No root ensure, so nothing but the verb's own work reaches the
-      // cycle's wave: the piece's first derivation, which the demand pass
+      // No root ensure, so nothing but the verbs' own work reaches a
+      // cycle's wave. The closure is compiled in a verb of its own, durable
+      // at that cycle's wave commit; the next cycle's verb stages the piece
+      // directly, and the piece's first derivation, which the demand pass
       // runs once the verb has committed, seals into a wave opened ahead
       // of the commit.
       host = new ExecutorHost({
@@ -400,34 +455,30 @@ describe("ExecutorHost.runLifecycleVerb", () => {
         policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
         ensureSpaceRoots: false,
       });
-      const PATTERN = [
-        "import { computed, pattern } from 'commonfabric';",
-        "export default pattern<{ n: number }, { total: number }>(",
-        "  ({ n }) => ({ total: computed(() => n * 3) }),",
-        ");",
-      ].join("\n");
+      const compiled = await host.runLifecycleVerb(space, {
+        name: "compile",
+        run: async (runtime) =>
+          runtime.patternManager.getArtifactEntryRef(
+            await runtime.patternManager.compilePattern({
+              main: "/main.tsx",
+              files: [{ name: "/main.tsx", contents: PATTERN }],
+            }, { space }),
+          )!,
+      });
       const receipt = await host.runLifecycleVerb(space, {
         name: "instantiate-directly",
         run: async (runtime) => {
-          const pattern = await runtime.patternManager.compilePattern({
-            main: "/main.tsx",
-            files: [{ name: "/main.tsx", contents: PATTERN }],
-          }, { space });
-          const piece = runtime.getCell<{ total: number }>(
+          const pattern = (await runtime.patternManager.loadPatternByIdentity(
+            compiled.identity,
+            compiled.symbol,
             space,
+            { repairCache: false },
+          ))!;
+          const { outcome, piece } = await stageDirectly(
+            runtime,
+            pattern,
             "directly-staged-piece",
-            pattern.resultSchema,
           );
-          const outcome = await runtime.editWithRetry((tx) => {
-            runtime.stampServerRun(tx, {
-              actionId: "test-verb/instantiate-directly",
-              kind: "bookkeeping",
-              directCommit: true,
-            });
-            void runtime.setup(tx, pattern, { n: 5 }, piece, {
-              initializePieceSourceHistory: true,
-            });
-          });
           expect(outcome.error).toBeUndefined();
           return {
             rootId: piece.getAsNormalizedFullLink().id,

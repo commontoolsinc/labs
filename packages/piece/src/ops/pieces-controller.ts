@@ -203,7 +203,7 @@ const FRAMED_MIGRATION_REASON =
  * at its setup-commit boundary (`runner.ts`), keeping producer and consumer in
  * lockstep across that boundary and across packages.
  */
-const isCfcMigrationRejection = (error: unknown): boolean =>
+export const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("CFC enforcement rejected commit") &&
   error.message.includes(FRAMED_MIGRATION_REASON);

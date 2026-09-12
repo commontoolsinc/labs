@@ -84,7 +84,10 @@ import {
   readPieceOrigin,
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
-import type { PiecesController } from "./pieces-controller.ts";
+import {
+  isCfcMigrationRejection,
+  type PiecesController,
+} from "./pieces-controller.ts";
 import { compileProgram } from "./utils.ts";
 
 const pieceUpdateLogger = getLogger("piece.update", {
@@ -5295,13 +5298,15 @@ function pieceSourceCompatibilityMessage(
 /**
  * Whether `error` is an update refused for the candidate's fit over the
  * piece — its schemas against the current pattern's, the links its argument
- * schema retains, or the stored argument — rather than for a reason of
- * setup's own.
+ * schema retains, the stored argument, or the stored CFC envelope the
+ * candidate's schema cannot migrate — rather than for a reason of setup's
+ * own.
  */
 export function isPieceSourceCompatibilityRefusal(error: unknown): boolean {
   return error instanceof Error && (
     error.message.startsWith(PATTERN_SCHEMAS_INCOMPATIBLE) ||
-    isOverridableArgumentCompatibilityError(error)
+    isOverridableArgumentCompatibilityError(error) ||
+    isCfcMigrationRejection(error)
   );
 }
 

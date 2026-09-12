@@ -2601,12 +2601,12 @@ export class SpaceServer implements TransactionSealDestination {
    * moved at a read path since refusing the whole transaction — and holds
    * every document the transaction writes to the store seq the transaction
    * was stamped at. A commit the store took but this replica has not yet
-   * applied is therefore a conflict, not a blind overwrite. A
-   * read of state sealed into the open wave names the durable basis beneath
-   * it: a caller whose commit must not build on uncommitted state stages
-   * that state in an earlier cycle. The replica takes the writes only once
-   * the store has accepted them, so no run reads them as pending state that
-   * a refusal could roll back.
+   * applied is therefore a conflict, not a blind overwrite. A transaction
+   * that read state sealed into the open wave is refused: the wave can
+   * still withdraw that state, and a commit made durable over it could not
+   * be withdrawn with it. A caller stages such state in an earlier cycle.
+   * The replica takes the writes only once the store has accepted them, so
+   * no run reads them as pending state that a refusal could roll back.
    */
   async #commitDirect(
     tx: IExtendedStorageTransaction,
@@ -2693,18 +2693,13 @@ export class SpaceServer implements TransactionSealDestination {
       );
     }
     const { operations, preconditions, reads } = store;
-    // A pending read saw layers the store has not taken; what the store
-    // can check is the durable basis beneath them.
-    const confirmedReads: ConfirmedRead[] = [
-      ...reads.confirmed,
-      ...reads.pending.map(({ id, scope, path, basisSeq, nonRecursive }) => ({
-        id,
-        ...(scope === undefined ? {} : { scope }),
-        path,
-        seq: basisSeq ?? 0,
-        ...(nonRecursive === undefined ? {} : { nonRecursive }),
-      })),
-    ];
+    if (reads.pending.length > 0) {
+      return refuse(
+        `direct commit of ${direct.actionId} read state the wave has not ` +
+          "committed; stage that state in an earlier cycle",
+      );
+    }
+    const confirmedReads: ConfirmedRead[] = [...reads.confirmed];
     const annotations: WaveWriteAnnotation[] = [];
     const written: Array<{ id: string; scopeKey: ScopeKey }> = [];
     for (const [opIndex, operation] of operations.entries()) {
