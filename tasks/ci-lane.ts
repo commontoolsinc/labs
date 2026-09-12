@@ -914,6 +914,15 @@ export async function fullLanes(
   });
 }
 
+/**
+ * The directory the continuous-integration job keeps its own temporary
+ * files in, where the lane is running inside one.
+ */
+function runnerTemp(): string | undefined {
+  const at = Deno.env.get("RUNNER_TEMP");
+  return at === undefined || at.length === 0 ? undefined : at;
+}
+
 /** Runs one lane, and says whether everything in it passed. */
 export async function runLane(
   options: LaneOptions,
@@ -969,7 +978,14 @@ export async function runLane(
   describeWithheld(laid.withheld, seen.mandatory);
   if (options.dryRun) return true;
 
-  const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
+  const workDir = await Deno.makeTempDir({
+    prefix: "ci-lane-",
+    // Under the job's own temporary directory where there is one, so that
+    // a workflow step can upload what a failing lane left behind. A
+    // server's log is written here, and a lane that failed is exactly
+    // when somebody wants to read one.
+    ...(runnerTemp() === undefined ? {} : { dir: runnerTemp() }),
+  });
   const spool = (deps.spool ?? recordsDir)();
   // The directory belongs to the lane from the moment it exists, and a
   // capability that refuses to open is one of the ways the lane ends.
@@ -1019,9 +1035,11 @@ export async function runLane(
     }
   } finally {
     await opened.close();
-    // The lane owns this directory and nothing outside the lane reads
-    // it, so it goes whether the batches passed, failed, or never ran.
-    await Deno.remove(workDir, { recursive: true }).catch(() => {});
+    // A lane that passed leaves nothing behind. A lane that failed keeps
+    // what its capabilities wrote, because a server's log is what says
+    // why a suite could not reach it, and the directory is under the
+    // job's own temporary directory so the workflow can upload it.
+    if (ok) await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
   describeConflicts(conflicts);
   // After the capabilities are closed, because a conversion is the lane's

@@ -1261,14 +1261,25 @@ The lane job's steps are fixed and do not vary with what the lane runs:
 2. Set up Deno.
 3. Verify the lock file and install dependencies.
 4. Restore the binary cache.
-5. Run `deno run -A tasks/ci-lane.ts --lane N --of 5`.
-6. Ship test records.
+5. Set the kernel's core pattern, so a native crash leaves a dump.
+6. Run `deno run -A tasks/ci-lane.ts --lane N --of 5`.
+7. Upload what a failing lane left behind.
+8. Upload the coverage reports the lane converted.
+9. Ship test records.
 
-Everything conditional happens inside step 5. That is what makes the
-workflow independent of the topology. The one cost is that a capability
-which genuinely needs a GitHub Action — and today only the binary cache
-does — has to be represented by a fixed step that runs unconditionally and
-cheaply.
+Everything conditional happens inside step 6. That is what makes the
+workflow independent of the topology. The cost is that anything which
+genuinely needs a GitHub Action has to be represented by a fixed step that
+runs unconditionally and cheaply. Three things do: the binary cache,
+because the cache service is only reachable through the action, and the
+two uploads, because an artifact is what carries a file out of a job.
+
+Steps 5 and 7 are what a lane leaves behind for somebody to read. A lane
+that failed keeps its own working directory, where a server's log is, and
+that directory sits under the job's temporary directory so the upload can
+reach it; a lane that passed removes it. `deno lint` has crashed natively
+here before, and a stack from the dump is what said where, so the pattern
+is set for whatever the lane turns out to run rather than for one suite.
 
 ## What the store gives us and what it is missing
 
@@ -2870,20 +2881,26 @@ and `full-tests`, with the two-clause rule above.
 Repository-wide coverage measurement moves to the full run and stops
 gating; the gate that stays on pull requests is over [measured
 sets](#the-measured-set), and it runs inside a lane rather than in a job
-of its own. Concretely: the
-`Coverage Check` job becomes push-only and reports rather than fails,
-which takes a job off every pull request. The barrier it sat behind does
-not go away, because `Status` is a barrier by construction, but what
-happens at that barrier shrinks from a 12-artifact download and a
-repository-wide metric to five small reports and an addition. The
-compile-cache state recording that feeds it moves with it. The full run
-converts each measured set's coverage directory separately, so the
-baselines come out of it. And `coverage-comment.yml` is
-generalized into the reporter described in [Telling a pull request what
-`main` found](#telling-a-pull-request-what-main-found) rather than deleted
-— it already does the hard part, which is posting to a pull request from a
-trusted context with a write token. It carries both comments now, and is
-named `pull-request-comments.yml` for it.
+of its own. Concretely: the `Coverage Check` job becomes the push-only
+`Coverage Report`, which measures and fails nothing, and that takes a job
+off every pull request. The barrier it sat behind does not go away,
+because `Status` is a barrier by construction, but what happens at that
+barrier shrinks from a 12-artifact download and a repository-wide metric
+to five small reports and an addition. The full run converts each
+measured set's coverage directory separately, so the baselines come out
+of it.
+
+What a pull request is told about coverage changes shape with it. The
+old gate wrote a comment naming the files whose lines it had scored, and
+that comment was built around source groups and a repository-wide
+comparison, neither of which a selected run makes. So it goes, and two
+things carry what it carried: a measured set that rose fails `Status`,
+which says in its summary which set rose and by how much, and a rise the
+gate could not catch reaches the change through the run report after it
+lands. `coverage-comment.yml` is generalized into that reporter rather
+than deleted — it already does the hard part, which is posting to a pull
+request from a trusted context with a write token — and is named
+`pull-request-comments.yml` for it.
 
 ## Coverage
 
@@ -3901,7 +3918,7 @@ exercised on the branch on its own.
       JUnit paths, gathers it before any repeat, and combines all records
       into the unmarked lane spool. It also includes `--full`, `--dry-run`,
       and repeats.
-- [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
+- [x] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
 - [ ] The full run's treatment of a test too flaky for pull requests.
       The count is placed already: `tasks/test-selection/plan.ts` gives
@@ -3928,7 +3945,7 @@ exercised on the branch on its own.
       gate already reports a run with a failing test.
 - [ ] `explain <identity>` gains the runs it is given and whether it is
       withheld, replacing the three-way answer that no longer partitions.
-- [ ] Repository-wide coverage measurement moves to the full run and stops
+- [x] Repository-wide coverage measurement moves to the full run and stops
       failing anything.
 - [x] Each suite writes its coverage profiles into a directory of its
       own, one level per suite and one per member below it, and the lane
@@ -3944,7 +3961,7 @@ exercised on the branch on its own.
       matrix. `tasks/weighted-shards.ts` stays and the lane packer calls
       it. Nothing may be balanced by a transcribed number afterwards, and
       `check-test-topology` is what proves the items are all still there.
-- [ ] `packages/ui` and `packages/iframe-sandbox` split their one-string
+- [x] `packages/ui` and `packages/iframe-sandbox` split their one-string
       test tasks the way `packages/static` already writes the same split,
       so each keeps a measured set over its Deno-only half. The topology
       already reads `deno-test` where a member defines one, so this is an
@@ -3984,10 +4001,10 @@ exercised on the branch on its own.
 
 ### Part three — the pull-request path
 
-- [ ] `deno.yml`: five `pr-tests` lanes replace every pull-request job;
+- [x] `deno.yml`: five `pr-tests` lanes replace every pull-request job;
       `Status` depends on `pr-tests` and `full-tests`, with `skipped`
       counting as success for the latter.
-- [ ] The `ci: full` label.
+- [x] The `ci: full` label.
 - [x] `coverage-comment.yml` generalized into the reporter, with the
       first-failure attribution, the selected-or-not line, the coverage
       note, the measured-set rise note naming which of the three routes
@@ -4032,7 +4049,7 @@ exercised on the branch on its own.
       run with a failing test is reported rather than gated, and a change
       over the cap forces no set, with a line saying so, and still
       scores any set some run measured anyway.
-- [ ] The gate's workflow half, which only the lanes can carry. Each
+- [x] The gate's workflow half, which only the lanes can carry. Each
       `pr-tests` lane uploads what is under its coverage directory as an
       artifact, `Status` downloads all five into one directory, and
       `Status` runs `deno run -A tasks/coverage-gate.ts --base <merge
@@ -4044,14 +4061,13 @@ exercised on the branch on its own.
       baselines name, because it asks git whether the branch contains
       one; a checkout too shallow to answer reports every set as having
       no baseline, which turns the gate off without failing anything.
-- [ ] The full run's half of the same, which only the lanes can carry.
+- [x] The full run's half of the same, which only the lanes can carry.
       Each `full-tests` lane uploads its coverage the same way, and the
       job that publishes `perf-metrics` merges every report for the
       repository-wide figure and reads each set's report for the figure
       `measuredSetCoverageMetric` names. Both come out of the same
-      reports; the merge is what the present `Coverage Check` job already
-      does over the present matrix's artifacts.
-- [ ] `tasks/ci-workflow.test.ts` updated for the new anchors and shapes,
+      reports, and `tasks/coverage-report.ts` is what reads them.
+- [x] `tasks/ci-workflow.test.ts` updated for the new anchors and shapes,
       including that the shared lane ship step carries no job-wide variant.
 - [ ] Documentation, in the same pull request rather than after it:
       `docs/specs/test-selection.md` for the contract,
@@ -4067,7 +4083,7 @@ exercised on the branch on its own.
       convention: a package that mixes Deno-only tests with tests needing
       a browser names the Deno-only half `deno-test`, and that half is
       what its measured set holds.
-- [ ] The workflow half turned around, once the lanes carry the gates.
+- [x] The workflow half turned around, once the lanes carry the gates.
       It asks today whether every recording step's identity is in the
       topology, which is the right question while the workflows and the
       topology both name gates. When a lane runs them, the question
