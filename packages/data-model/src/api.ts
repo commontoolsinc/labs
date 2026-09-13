@@ -163,7 +163,7 @@ export declare const FabricSpecialObject:
   & (abstract new (...args: any) => FabricSpecialObject);
 
 /**
- * Abstract base class for non-primitive-like instances that participate in the
+ * Abstract base class for primitive-like instances that participate in the
  * fabric protocol. Instances of this class are treated by the `data-model` the
  * same as built-in JavaScript primitive values (e.g. `string`s and `number`s),
  * to the extent possible. Notably, instances of this class are _forbidden_ (by
