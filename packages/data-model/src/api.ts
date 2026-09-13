@@ -216,19 +216,22 @@ export declare const FabricInstance:
 //
 
 /**
- * Temporal type representing nanoseconds from the POSIX Epoch.
- * Wraps a `bigint` value.
+ * An immutable, frozen sequence of bytes. Read the bytes with `slice()`,
+ * `sliceBuffer()`, or `copyInto()`.
  */
-export interface FabricEpochNsec extends FabricPrimitive {
-  readonly value: bigint;
+export interface FabricBytes extends FabricPrimitive {
+  readonly length: number;
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
+  sliceBuffer(start?: number, end?: number): ArrayBuffer;
+  copyInto(target: Uint8Array, offset?: number, length?: number): number;
 }
 
-export interface FabricEpochNsecConstructor {
-  new (value: bigint): FabricEpochNsec;
-  prototype: FabricEpochNsec;
+export interface FabricBytesConstructor {
+  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
+  prototype: FabricBytes;
 }
 
-export declare const FabricEpochNsec: FabricEpochNsecConstructor;
+export declare const FabricBytes: FabricBytesConstructor;
 
 /**
  * Temporal type representing a particular day, as a count of days from the
@@ -244,6 +247,21 @@ export interface FabricEpochDayConstructor {
 }
 
 export declare const FabricEpochDay: FabricEpochDayConstructor;
+
+/**
+ * Temporal type representing nanoseconds from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface FabricEpochNsec extends FabricPrimitive {
+  readonly value: bigint;
+}
+
+export interface FabricEpochNsecConstructor {
+  new (value: bigint): FabricEpochNsec;
+  prototype: FabricEpochNsec;
+}
+
+export declare const FabricEpochNsec: FabricEpochNsecConstructor;
 
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -266,52 +284,6 @@ export interface FabricHashConstructor {
 }
 
 export declare const FabricHash: FabricHashConstructor;
-
-/**
- * An immutable, frozen sequence of bytes. Read the bytes with `slice()`,
- * `sliceBuffer()`, or `copyInto()`.
- */
-export interface FabricBytes extends FabricPrimitive {
-  readonly length: number;
-  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
-  sliceBuffer(start?: number, end?: number): ArrayBuffer;
-  copyInto(target: Uint8Array, offset?: number, length?: number): number;
-}
-
-export interface FabricBytesConstructor {
-  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
-  prototype: FabricBytes;
-}
-
-export declare const FabricBytes: FabricBytesConstructor;
-
-/**
- * An immutable regular expression.
- *
- * The pattern is held as a flavor / source / flags triple rather than as a
- * native `RegExp`, so that flavors with no native representation can still be
- * carried. `value` reconstitutes a native `RegExp` where one exists.
- */
-export interface FabricRegExp extends FabricPrimitive {
-  readonly source: string;
-  readonly flags: string;
-  readonly flavor: string;
-
-  /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
-   * call so the internal instance is never aliased out. Throws for a flavor
-   * with no native `RegExp` representation.
-   */
-  readonly value: RegExp;
-}
-
-export interface FabricRegExpConstructor {
-  new (regex: RegExp): FabricRegExp;
-  new (flavor: string, source: string, flags: string): FabricRegExp;
-  prototype: FabricRegExp;
-}
-
-export declare const FabricRegExp: FabricRegExpConstructor;
 
 /**
  * An immutable asymmetric key pair.
@@ -358,28 +330,37 @@ export interface FabricKeyPairConstructor {
 
 export declare const FabricKeyPair: FabricKeyPairConstructor;
 
+/**
+ * An immutable regular expression.
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
 //
 // Concrete `FabricInstance` classes
 //
-
-/**
- * The modern, object-shaped form of a link reference, wrapping the link's
- * addressing payload (a `FabricPlainObject`: its addressing fields plus an
- * optional `schema`). Extends `FabricInstance` because the payload is an
- * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
- * link is a small object graph, not a leaf.
- */
-export interface FabricLink extends FabricInstance {
-  readonly payload: FabricPlainObject;
-}
-
-export interface FabricLinkConstructor {
-  new (payload: FabricPlainObject): FabricLink;
-  prototype: FabricLink;
-}
-
-export declare const FabricLink: FabricLinkConstructor;
-
 
 /**
  * Structured state for constructing a `FabricError`. The fixed-schema slots
@@ -454,6 +435,25 @@ export interface FabricErrorConstructor {
 }
 
 export declare const FabricError: FabricErrorConstructor;
+
+/**
+ * The modern, object-shaped form of a link reference, wrapping the link's
+ * addressing payload (a `FabricPlainObject`: its addressing fields plus an
+ * optional `schema`). Extends `FabricInstance` because the payload is an
+ * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
+ * link is a small object graph, not a leaf.
+ */
+export interface FabricLink extends FabricInstance {
+  readonly payload: FabricPlainObject;
+}
+
+export interface FabricLinkConstructor {
+  new (payload: FabricPlainObject): FabricLink;
+  prototype: FabricLink;
+}
+
+export declare const FabricLink: FabricLinkConstructor;
+
 
 // TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
 // declarations above. Both need substantial rework before they are useful, and
