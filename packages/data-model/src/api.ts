@@ -73,7 +73,7 @@
  *
  * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
  *   above, plain objects are only considered valid if they have the prototype
- *   `Object` or `null`.
+ *   `Object`.
  *
  * * extensions to JS primitive types, type `FabricPrimitive` -- This is one of
  *   two non-builtin `object` types that can be considered valid. They are meant
