@@ -156,10 +156,10 @@ must not accidentally inherit it.
       off-posture result and the integration-suite gap.
 - [ ] Obtain the retirement decision from the flag's owner with a concrete
       rollback route. No live data mutation is implied by this plan; coordinate
-      any live deployment separately. The flag's owner, recorded in the
-      registry's [summary
-      table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), holds the
-      decision; the F3 record's [What a retirement decision needs to
+      any live deployment separately. Bernhard Seefeld, whom the registry's
+      [summary table](../development/EXPERIMENTAL_OPTIONS.md#summary-table)
+      records as the flag's author, holds the decision as its owner; the F3
+      record's [What a retirement decision needs to
       name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
       lists what the decision has to settle.
 - [ ] Make the accepted lift behavior unconditional and remove the flag's
@@ -178,10 +178,10 @@ The fix, on the branch the design plan's [Stage 5](lazy-cell-materialization.md)
 names, writes the undefined result the design specifies for a refusal the body
 raises (one raised during the argument read keeps the current disposition on
 that branch too), and with it the Pattern Update State and Baseline Integrity
-gate fails, clearing a persisted derived value the defect had preserved, as that
-record's lift-path section says. It waits on a ruling from that gate's owner on
-how the vintage expectation moves. Until it lands, the design plan's Stage 5
-records which arms hold.
+gate fails, because the fix clears a persisted derived value the defect had
+preserved, as that record's lift-path section says. It waits on a ruling from
+that gate's owner on how the vintage expectation moves. Until it lands, the
+design plan's Stage 5 records which arms hold.
 
 ### F5 — Measure and close
 

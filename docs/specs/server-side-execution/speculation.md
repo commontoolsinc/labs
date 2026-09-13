@@ -132,8 +132,8 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   > being retriggered when any of the reads so far change (just like a
   > regular call), and the output being `undefined`.
 
-  — owner (Berni), 2026-08-21. Two clauses, both RULED; clause 1
-  built, clause 2 built except as noted below:
+  — owner (Berni), 2026-08-21. Two clauses, both RULED and built, each
+  except as its text notes:
 
   1. **The unresolved read refuses.** Link resolution marks a dead-end
      behind a followed hop (`pendingHopDoc`); the lazy read path
