@@ -168,7 +168,6 @@ export declare const FabricSpecialObject:
  * same as built-in JavaScript primitive values (e.g. `string`s and `number`s),
  * to the extent possible. Notably, instances of this class are _forbidden_ (by
  * contract) from referring to arbitrary externally-visible `FabricValue`s.
- *
  */
 export interface FabricPrimitive extends FabricSpecialObject {}
 
@@ -453,7 +452,6 @@ export interface FabricLinkConstructor {
 }
 
 export declare const FabricLink: FabricLinkConstructor;
-
 
 // TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
 // declarations above. Both need substantial rework before they are useful, and
