@@ -331,7 +331,7 @@ notes, and it retires the reopen-verification strategy the earlier probe used.
 
 Whether the lag itself is a defect is a separate question this pass did not
 answer. It needs one measurement it did not take: whether the chips and the
-list are published in one wave or two. Until then it is a known behaviour, not
+list are published in one wave or two. Until then it is a known behavior, not
 a filed bug.
 
 ## Stage 6 — A rule, and a benchmark
@@ -424,12 +424,12 @@ link, so a result cell carrying a schema already gets a schema-guided pull and
 already skips undeclared properties. **The hazard is therefore latent on this
 path rather than introduced by the reverted change** — which widened it to
 every such pull, and is why it went back out. Whether the link's schema should
-be stripped there is the same decision, asked of behaviour that is already
+be stripped there is the same decision, asked of behavior that is already
 shipping: it is unmeasured, it would make every result pull a deep walk, and it
 belongs to whoever owns what a start pull should demand rather than to a
 performance change.
 
-Review turned up one more fact that sharpens it: the behaviour is **not uniform
+Review turned up one more fact that sharpens it: the behavior is **not uniform
 across output scopes**. A non-space scope builds its result cell through
 `getCell(space, _resultFor, undefined, tx)`, so a scoped result pulls
 schemaless and takes the deep walk — paying the cost but demanding everything —
