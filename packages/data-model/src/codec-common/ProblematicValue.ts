@@ -131,7 +131,8 @@ export class ProblematicValue extends BaseFabricInstance {
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     subFreeze(this.state);
-    return Object.freeze(this);
+    Object.freeze(this);
+    return this;
   }
 
   /**

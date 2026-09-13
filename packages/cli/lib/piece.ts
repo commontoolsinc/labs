@@ -5,8 +5,8 @@ import { ValidationError } from "@cliffy/command";
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
   FabricPrimitive,
-  FabricSpecialObject,
   hashStringOf,
+  isFabricSpecialObject,
 } from "@commonfabric/data-model";
 import {
   codecOf,
@@ -1268,7 +1268,7 @@ async function searchTextMatches(
       continue;
     }
 
-    if (current instanceof FabricSpecialObject) {
+    if (isFabricSpecialObject(current)) {
       // These representations exist to be searched as TEXT, and what a codec
       // produces is largely not that: a `FabricEpochNsec` encodes to a
       // base64url string, which matches nothing anyone would type. Nor are a

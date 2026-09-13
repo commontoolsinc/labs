@@ -39,9 +39,11 @@ declare const layerRecord: Exclude<
 
 /** Carrier for the `FabricConvertibleValue` checks. */
 function fabricConvertibleValueTypeChecks() {
-  // The alias and the written-out recursion name the same set, in both
-  // directions.
+  // The alias admits the written-out recursion. The reverse is refused by the
+  // one arm the written-out recursion lacks: a `FabricInstancePlus` at
+  // `FabricNativeObject`, an instance whose contents may hold a native.
   const fromWrittenOut: FabricConvertibleValue = writtenOut;
+  // @ts-expect-error a `FabricInstancePlus<FabricNativeObject>` is admitted only by the alias
   const toWrittenOut: WrittenOutConvertible = convertible;
 
   return { fromWrittenOut, toWrittenOut };
@@ -69,7 +71,7 @@ describe("interface", () => {
   // decides it, and at run time only the carrier is observable.
 
   describe("FabricConvertibleValue", () => {
-    it("is the written-out recursion over `FabricValue` and `FabricNativeObject`, in both directions", () => {
+    it("admits the written-out recursion over `FabricValue` and `FabricNativeObject`, and is wider by the plus-instance arm", () => {
       expect(typeof fabricConvertibleValueTypeChecks).toBe("function");
     });
   });
