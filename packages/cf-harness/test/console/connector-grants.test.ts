@@ -20,6 +20,7 @@ const PIECES_PATH = "/loom/instances/loom/pieces.json";
 const OWNER = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const MAIL_REF = `/of:fid1:${"A".repeat(43)}`;
 const BANK_REF = `/of:fid1:${"B".repeat(43)}`;
+const OTHER_REF = `/of:fid1:${"C".repeat(43)}`;
 
 /** One column's declared `ifc`, in the shape loom's daemon seeds. */
 const labeledColumn = (cfcClass: string) => ({
@@ -321,6 +322,174 @@ describe("connector-grants", () => {
       const byRef = (r: typeof forward) =>
         Object.fromEntries(r.grants.map((g) => [g.ref, g.name]));
       expect(byRef(forward)).toEqual(byRef(reversed));
+    });
+
+    it("grants neither handle when a composed name is another handle's class", () => {
+      // `email` is shared, so the two mailboxes compose `email-gmail-work` and
+      // `email-gmail-sim` — and the third handle's contract declares the
+      // literal class `email-gmail-sim`. Seeding refuses a name twice and
+      // takes every session on the console with it, so the name that would
+      // stand for two handles grants neither of them.
+
+      const sim = {
+        name: "cf-gmail-messages--gmail-sim",
+        sqlite_sources: [
+          source("gmail-sim", { subject: labeledColumn("email") }),
+        ],
+      };
+      const archive = {
+        name: "cf-mailbag--archive",
+        sqlite_sources: [
+          source("archive", { subject: labeledColumn("email-gmail-sim") }),
+        ],
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle("cf-gmail-messages--gmail-work", "gmail-work", MAIL_REF),
+          handle("cf-gmail-messages--gmail-sim", "gmail-sim", BANK_REF),
+          handle("cf-mailbag--archive", "archive", OTHER_REF),
+        ]),
+        piecesJson: piecesJson([MAIL_PIECE, sim, archive]),
+      }));
+
+      expect(result.grants.map((grant) => grant.name)).toEqual([
+        "email-gmail-work",
+      ]);
+      expect(result.unnamed.map((held) => held.connection)).toEqual([
+        "gmail-sim",
+        "archive",
+      ]);
+      expect(result.unnamed[0]?.reason).toBe(
+        "`email-gmail-sim`, the name its shared class `email` composes with " +
+          "its connection is also what connection `archive` on piece " +
+          "`cf-mailbag--archive` would be called, and one grant name cannot " +
+          "stand for two handles",
+      );
+      expect(result.unnamed[1]?.reason).toBe(
+        "its declared CFC class `email-gmail-sim` is also what connection " +
+          "`gmail-sim` on piece `cf-gmail-messages--gmail-sim` would be " +
+          "called, and one grant name cannot stand for two handles",
+      );
+    });
+
+    it("grants neither of two pieces on one connection that declare one class", () => {
+      // The connection is what disambiguates a shared class, so two handles
+      // sharing both compose the same name and the composition has nothing
+      // left to tell them apart with.
+
+      const threads = {
+        name: "cf-gmail-threads--gmail-work",
+        sqlite_sources: [
+          source("gmail-work", { subject: labeledColumn("email") }),
+        ],
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle("cf-gmail-messages--gmail-work", "gmail-work", MAIL_REF),
+          handle("cf-gmail-threads--gmail-work", "gmail-work", BANK_REF),
+        ]),
+        piecesJson: piecesJson([MAIL_PIECE, threads]),
+      }));
+
+      expect(result.grants).toEqual([]);
+      expect(result.unnamed.map((held) => held.piece)).toEqual([
+        "cf-gmail-messages--gmail-work",
+        "cf-gmail-threads--gmail-work",
+      ]);
+      for (const held of result.unnamed) {
+        expect(held.reason).toContain(
+          "one grant name cannot stand for two handles",
+        );
+      }
+    });
+
+    it("reports a composed name that is not a name a model may be handed", () => {
+      // Both classes are `email`, which is a fine name on its own. The dot
+      // arrives from the connection id, so this is a rule the composed name
+      // can fail where the declared class could not.
+
+      const apple = {
+        name: "cf-mail--apple.mail",
+        sqlite_sources: [
+          source("apple.mail", { subject: labeledColumn("email") }),
+        ],
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle("cf-gmail-messages--gmail-work", "gmail-work", MAIL_REF),
+          handle("cf-mail--apple.mail", "apple.mail", BANK_REF),
+        ]),
+        piecesJson: piecesJson([MAIL_PIECE, apple]),
+      }));
+
+      expect(result.grants.map((grant) => grant.name)).toEqual([
+        "email-gmail-work",
+      ]);
+      expect(result.unnamed).toEqual([{
+        connection: "apple.mail",
+        piece: "cf-mail--apple.mail",
+        reason:
+          "`email-apple.mail`, the name its shared class `email` composes " +
+          "with its connection is not a name a model may be handed",
+      }]);
+    });
+
+    it("reports a composed name that is a name the harness already grants", () => {
+      // `piece` is not reserved and `registry` is an ordinary connection id;
+      // only their composition is `piece-registry`, which the harness mints
+      // for every run. The rule is on the name granted, not on the class.
+
+      const registry = {
+        name: "cf-pieces--registry",
+        sqlite_sources: [source("registry", { id: labeledColumn("piece") })],
+      };
+      const shelf = {
+        name: "cf-pieces--shelf",
+        sqlite_sources: [source("shelf", { id: labeledColumn("piece") })],
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle("cf-pieces--registry", "registry", MAIL_REF),
+          handle("cf-pieces--shelf", "shelf", BANK_REF),
+        ]),
+        piecesJson: piecesJson([registry, shelf]),
+      }));
+
+      expect(result.grants.map((grant) => grant.name)).toEqual(["piece-shelf"]);
+      expect(result.unnamed).toEqual([{
+        connection: "registry",
+        piece: "cf-pieces--registry",
+        reason:
+          "`piece-registry`, the name its shared class `piece` composes with " +
+          "its connection is a name the harness already grants",
+      }]);
+    });
+
+    it("reports every unnamed handle in the order the receipt lists them", () => {
+      // Naming runs after every handle has been read, so a handle rejected
+      // while being named is decided later than one rejected while being
+      // read. The report is printed beside `loom connector handles`, which
+      // lists them in receipt order.
+
+      const apple = {
+        name: "cf-mail--apple.mail",
+        sqlite_sources: [
+          source("apple.mail", { subject: labeledColumn("email") }),
+        ],
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle("cf-mail--apple.mail", "apple.mail", MAIL_REF),
+          handle("cf-nothing--missing", "missing", OTHER_REF),
+          handle("cf-gmail-messages--gmail-work", "gmail-work", BANK_REF),
+        ]),
+        piecesJson: piecesJson([apple, MAIL_PIECE]),
+      }));
+
+      expect(result.unnamed.map((held) => held.connection)).toEqual([
+        "apple.mail",
+        "missing",
+      ]);
     });
 
     it("reports a handle whose reference does not name an entity", () => {

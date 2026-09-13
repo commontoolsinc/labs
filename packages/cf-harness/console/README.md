@@ -812,15 +812,20 @@ trusted-side, `describe_handle` answers shape from the cell, and reading
 anything behind the token means running a pattern over it, where CFC rules as it
 does for every other flow.
 
-Three cases the launch printout states rather than resolving silently:
+Four cases the launch printout states rather than resolving silently:
 
 - A handle whose declared contract carries no CFC class, or more than one, is
   printed as `grant <connection>  (none: <reason>)` and is not granted. A name
   guessed at is a name a session would be told means something it does not.
-- A composed `<class>-<connection>` name that is not a name a model may be
-  handed, or that collides with a fixed grant, is printed the same way. Both
-  checks run again on the composed name, because a name that did not exist
-  before it was composed can fail either.
+- A name that is not one a model may be handed, or that collides with a fixed
+  grant, is printed the same way. Both rules are applied to the name actually
+  granted rather than to the class, so a `<class>-<connection>` that did not
+  exist before it was composed is held to them too.
+- A name two handles would share grants neither of them, and both are printed
+  with the other named. Composing a name can land on one another handle holds —
+  a third source whose own class reads `email-gmail-sim`, or two pieces on one
+  connection declaring one class — and the seeding refuses a name twice, which
+  would take down every session on the console rather than one handle.
 - A receipt that does not parse refuses the launch. A console that came up
   holding no grants while its report claimed two is the silent misconfiguration
   this launch path exists to rule out; an absent receipt, by contrast, is simply

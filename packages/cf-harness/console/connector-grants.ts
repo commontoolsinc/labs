@@ -60,6 +60,32 @@ export interface UnnamedConnectorHandle {
   reason: string;
 }
 
+/**
+ * A handle whose declared class has been read, held until every other handle
+ * has been, because what it is called depends on whether any of them declares
+ * that class too.
+ */
+interface ConnectorGrantCandidate {
+  cfcClass: string;
+  ref: string;
+  receiptIndex: number;
+  source: HarnessConnectorGrantSource;
+}
+
+/**
+ * What to call a candidate name in the reason a handle went unnamed: the class
+ * the contract declares when that is the name, and the composition when a
+ * shared class made it a name the contract never wrote down.
+ */
+const describeCandidateName = (
+  entry: ConnectorGrantCandidate,
+  name: string,
+): string =>
+  name === entry.cfcClass
+    ? `its declared CFC class \`${name}\``
+    : `\`${name}\`, the name its shared class \`${entry.cfcClass}\` composes ` +
+      `with its connection`;
+
 /** What the records yielded: the grants to seed, and what they left out. */
 export interface ResolvedConnectorGrants {
   grants: HarnessConnectorGrantSpec[];
@@ -203,19 +229,21 @@ export const resolveConnectorGrants = (
   const receiptSpace = asNonEmptyString(document.space);
   const sources = sourcesByHandle(records.piecesJson, records.piecesJsonPath);
   const grants: HarnessConnectorGrantSpec[] = [];
-  const unnamed: UnnamedConnectorHandle[] = [];
+  // Carries the position the receipt listed the handle at, because naming
+  // runs in a second pass and the report is printed in receipt order — an
+  // operator reads it beside `loom connector handles`, which lists them that
+  // way.
+  const unnamed: Array<UnnamedConnectorHandle & { receiptIndex: number }> = [];
   // Named in a second pass: what a handle is called depends on whether any
   // OTHER handle declares the same class, which is not known until every one
   // has been read. Collected here in receipt order.
-  const named: Array<
-    { cfcClass: string; ref: string; source: HarnessConnectorGrantSource }
-  > = [];
-  for (const entry of handles) {
+  const named: ConnectorGrantCandidate[] = [];
+  for (const [receiptIndex, entry] of handles.entries()) {
     const handle = asRecord(entry);
     const connection = asNonEmptyString(handle?.connection_id) ?? "(unnamed)";
     const piece = asNonEmptyString(handle?.piece) ?? "(unnamed)";
     const skip = (reason: string): void => {
-      unnamed.push({ connection, piece, reason });
+      unnamed.push({ connection, piece, reason, receiptIndex });
     };
     const ref = asNonEmptyString(handle?.handle_ref);
     if (ref === undefined) {
@@ -271,20 +299,12 @@ export const resolveConnectorGrants = (
       );
       continue;
     }
-    const name = classes[0]!;
-    if (RESERVED_GRANT_NAMES.has(name)) {
-      skip(
-        `its declared CFC class \`${name}\` is a name the harness already grants`,
-      );
-      continue;
-    }
-    if (!HANDLE_NAME_PATTERN.test(name)) {
-      skip(
-        `its declared CFC class \`${name}\` is not a name a model may be handed`,
-      );
-      continue;
-    }
-    named.push({ cfcClass: name, ref, source: { connection, piece } });
+    named.push({
+      cfcClass: classes[0]!,
+      ref,
+      receiptIndex,
+      source: { connection, piece },
+    });
   }
   // A class shared by two handles names neither on its own: `email` would say
   // which data it is and not which of two mailboxes. Both take the longer form
@@ -294,32 +314,80 @@ export const resolveConnectorGrants = (
   for (const entry of named) {
     perClass.set(entry.cfcClass, (perClass.get(entry.cfcClass) ?? 0) + 1);
   }
+  // Every candidate name is settled before any of them is granted, because
+  // composing one can land on a name another handle already holds — a handle
+  // whose own declared class reads `email-gmail-sim` beside the two mailboxes
+  // that compose it, or two pieces on one connection declaring one class. The
+  // seeding refuses a name twice and takes the whole console down with it, so
+  // a name that would stand for two handles grants neither.
+  const byName = new Map<string, ConnectorGrantCandidate[]>();
   for (const entry of named) {
-    const shared = (perClass.get(entry.cfcClass) ?? 0) > 1;
-    const name = shared
+    const name = (perClass.get(entry.cfcClass) ?? 0) > 1
       ? `${entry.cfcClass}-${entry.source.connection}`
       : entry.cfcClass;
+    const holders = byName.get(name);
+    if (holders === undefined) byName.set(name, [entry]);
+    else holders.push(entry);
+  }
+  for (const [name, holders] of byName) {
+    // The two rules a short name is held to are applied to the name actually
+    // granted, which is the one a session reads and the one the seeding would
+    // refuse. Every holder of a name agrees on both, so a failure reports all
+    // of them.
+    const report = (
+      reason: (entry: ConnectorGrantCandidate) => string,
+    ): void => {
+      for (const entry of holders) {
+        unnamed.push({
+          connection: entry.source.connection,
+          piece: entry.source.piece,
+          reason: reason(entry),
+          receiptIndex: entry.receiptIndex,
+        });
+      }
+    };
     if (!HANDLE_NAME_PATTERN.test(name)) {
-      unnamed.push({
-        connection: entry.source.connection,
-        piece: entry.source.piece,
-        reason:
-          `its declared CFC class \`${entry.cfcClass}\` is shared, and the ` +
-          `disambiguated name \`${name}\` is not a name a model may be handed`,
-      });
+      report((entry) =>
+        `${
+          describeCandidateName(entry, name)
+        } is not a name a model may be handed`
+      );
       continue;
     }
     if (RESERVED_GRANT_NAMES.has(name)) {
-      unnamed.push({
-        connection: entry.source.connection,
-        piece: entry.source.piece,
-        reason: `its name \`${name}\` is a name the harness already grants`,
-      });
+      report((entry) =>
+        `${
+          describeCandidateName(entry, name)
+        } is a name the harness already grants`
+      );
       continue;
     }
+    if (holders.length > 1) {
+      report((entry) =>
+        `${describeCandidateName(entry, name)} is also what ${
+          holders
+            .filter((held) => held !== entry)
+            .map((held) =>
+              `connection \`${held.source.connection}\` on piece ` +
+              `\`${held.source.piece}\``
+            )
+            .join(" and ")
+        } would be called, and one grant name cannot stand for two handles`
+      );
+      continue;
+    }
+    const entry = holders[0]!;
     grants.push({ name, ref: entry.ref, source: entry.source });
   }
-  return { grants, unnamed };
+  unnamed.sort((left, right) => left.receiptIndex - right.receiptIndex);
+  return {
+    grants,
+    unnamed: unnamed.map(({ connection, piece, reason }) => ({
+      connection,
+      piece,
+      reason,
+    })),
+  };
 };
 
 /**
