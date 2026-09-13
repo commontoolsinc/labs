@@ -1091,6 +1091,74 @@ Deno.test("Claude driver starts an unscoped source's session in the directory th
   assertEquals(outcome.result?.cwd, resolve("relative/checkout"));
 });
 
+Deno.test("Claude driver refuses a start it cannot begin: a stopped driver, a failed lookup, a cancellation during the lookup", async () => {
+  const source = {
+    id: "claude-code:labs",
+    driver: "claude-agent-sdk" as const,
+    enabled: true,
+    cwd: "/work/labs",
+  };
+
+  // A stopped driver refuses before touching the SDK.
+  const stoppedCalls: Array<{ method: string; args: unknown[] }> = [];
+  const stopped = new ClaudeAgentSdkDriver(
+    source,
+    sdkWithoutSessions(stoppedCalls),
+  );
+  await stopped.stop();
+  assertEquals(
+    (await stopped.startSession(NEW_SESSION_ID, { text: "Hi" })).error?.code,
+    "claude-driver-stopped",
+  );
+  assertEquals(stoppedCalls, []);
+
+  // A lookup the SDK cannot answer fails the start, retryably.
+  const unanswered = new ClaudeAgentSdkDriver(source, {
+    ...sdkWithoutSessions([]),
+    getSessionInfo: () => Promise.reject(new Error("metadata unavailable")),
+  });
+  const lookupFailed = await unanswered.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+  });
+  assertEquals(lookupFailed.error?.code, "claude-session-lookup-failed");
+  assertEquals(lookupFailed.error?.retryable, true);
+
+  // A cancellation admitted during the lookup wins over the lookup's
+  // answer, whether it resolves or rejects.
+  for (const lookupRejects of [false, true]) {
+    let releaseLookup!: () => void;
+    const lookupBlocked = new Promise<void>((resolve) =>
+      releaseLookup = resolve
+    );
+    let markLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) =>
+      markLookupStarted = resolve
+    );
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const driver = new ClaudeAgentSdkDriver(source, {
+      ...sdkWithoutSessions(calls),
+      getSessionInfo: async () => {
+        markLookupStarted();
+        await lookupBlocked;
+        if (lookupRejects) throw new Error("metadata unavailable");
+        return undefined;
+      },
+    });
+    try {
+      const start = driver.startSession(NEW_SESSION_ID, { text: "Hi" });
+      await lookupStarted;
+      assertEquals((await driver.cancel(NEW_SESSION_ID)).status, "succeeded");
+      releaseLookup();
+      const outcome = await start;
+      assertEquals(outcome.status, "failed", String(lookupRejects));
+      assertEquals(outcome.error?.code, "cancelled", String(lookupRejects));
+      assertEquals(calls.some((call) => call.method === "query"), false);
+    } finally {
+      releaseLookup();
+    }
+  }
+});
+
 Deno.test("Claude driver refuses to start a session that already exists", async () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const sdk = {
@@ -1261,9 +1329,14 @@ Deno.test("Claude driver applies a start's mode to the first turn, drops it when
       },
     },
   );
+  // A mode set before the start is what a failed start restores.
+  assertEquals(
+    (await brittle.setMode(NEW_SESSION_ID, "plan")).status,
+    "succeeded",
+  );
   const thrown = await brittle.startSession(NEW_SESSION_ID, {
     text: "Hi",
-    mode: "plan",
+    mode: "acceptEdits",
   });
   assertEquals(thrown.status, "failed");
   assertEquals(thrown.error?.code, "claude-query-failed");
@@ -1273,5 +1346,5 @@ Deno.test("Claude driver applies a start's mode to the first turn, drops it when
   );
   const afterThrow = throwing.filter((call) => call.method === "query").at(-1)
     ?.args[0] as { options: Record<string, unknown> };
-  assertEquals(afterThrow.options.permissionMode, undefined);
+  assertEquals(afterThrow.options.permissionMode, "plan");
 });
