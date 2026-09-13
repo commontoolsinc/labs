@@ -93,33 +93,30 @@ export type FabricValue =
   | FabricPlainObject
   | FabricSpecialObject;
 
-/**
- * The container types that are part of `FabricValue`. Note that
- * `FabricSpecialObject` is a combination of a container type (`FabricInstance`)
- * and a non-container type (`FabricPrimitive`), and the latter is _not_ part of
- * this type.
- */
-export type FabricContainerValue =
-  | FabricArray
-  | FabricInstance
-  | FabricPlainObject;
-
 /** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
  * Read-only object/record of `FabricValue`s.
  *
- * The names `__proto__` and `constructor` are refused at the boundaries where
- * values enter or leave storage, so no `FabricPlainObject` carries one. The
- * type cannot say as much -- a string index signature admits every string --
- * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
- * loops are unguarded and rely on it: they rebuild records by assignment,
- * which for `__proto__` would repoint the copy's prototype rather than
- * creating a property.
+ * **Note:** The names `__proto__` and `constructor` are refused at the
+ * boundaries where values enter or leave storage, so `FabricPlainObject` is
+ * contractually forbidden from defining one, even though there is no way to say
+ * that requirement in TypeScript.
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
+
+/**
+  * The container types that are part of `FabricValue`. Note that
+  * `FabricSpecialObject` is a combination of a container type
+  * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
+  * latter is _not_ part of this type.
+  */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance
+  | FabricPlainObject;
 
 /** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
