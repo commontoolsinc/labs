@@ -99,13 +99,13 @@ wrapper classes (Section 1.4).
 > `packages/data-model/src/api.ts` (the `interface` + `declare const` pattern),
 > which `packages/api/index.ts` re-exports as part of the `commonfabric`
 > surface. They must agree with the implementations they mirror, and the
-> agreement is asserted at compile time: `interface.ts` asserts that each of
-> the three base classes and its declaration are mutually assignable, and each
-> concrete class asserts beside its own definition that it satisfies its
-> declaration. The second kind of check runs one way only -- a public member an
-> implementation gains without a declaration is unreachable from a pattern, and
-> no gate reports it. `packages/runner/` wires concrete implementations into
-> builder exports.
+> agreement is asserted at compile time: `api-agreement.ts`, a module nothing
+> imports, asserts that each of the three base classes and its declaration are
+> mutually assignable, and each concrete class asserts beside its own
+> definition that it satisfies its declaration. The second kind of check runs
+> one way only -- a public member an implementation gains without a declaration
+> is unreachable from a pattern, and no gate reports it. `packages/runner/`
+> wires concrete implementations into builder exports.
 
 ```typescript
 // Shown at module scope.
@@ -898,8 +898,8 @@ The brand is a well-known string key rather than a `unique symbol` because
 `interface.ts` is deliberately free of runtime imports, and a `unique symbol`
 would have to be imported as a *value*. `packages/data-model/src/api.ts` declares
 the identical member; the two must agree exactly, since a value branded by one
-would otherwise not satisfy the other, and the assertions at the end of
-`interface.ts` stop compiling when they stop agreeing.
+would otherwise not satisfy the other, and `api-agreement.ts` stops compiling
+when they stop agreeing.
 
 ```typescript
 // file: packages/data-model/src/interface.ts
@@ -3319,7 +3319,8 @@ The implementation is split across several files for separation of concerns:
 |------|---------|
 | `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), the tag vocabulary (from `value-tags.ts`), and `valueEqual()` (from `valueEqual.ts`) |
 | `api.ts` | The pattern-visible declarations: the `FabricValue` union and the types beside it, the three base classes and every concrete class as an `interface` plus a `declare const`, and the debug-rendering option types. It has no imports, so that the type module the sandbox is served can inline it; it is also the `./api` export subpath, which `@commonfabric/api` re-exports. |
-| `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricNativeObject`, `FabricConvertibleValue`); re-exports every type `api.ts` declares, and asserts that each base class and its `api.ts` declaration are mutually assignable. Free of runtime imports, so that any module can import it. |
+| `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricNativeObject`, `FabricConvertibleValue`); re-exports every type `api.ts` declares. Free of runtime imports, so that any module can import it. |
+| `api-agreement.ts` | Asserts that each of the three base classes and its `api.ts` declaration are mutually assignable. Nothing imports it; it exists to be type-checked, and everything in it erases at compile time. |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |

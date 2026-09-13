@@ -13,8 +13,8 @@
  * so a declaration that no implementation meets stops the build. That check
  * runs one way only: a public member an implementation gains without a
  * declaration here is simply unreachable from a pattern, and no gate reports
- * it. `interface.ts` asserts both directions for the three base classes, whose
- * protocol carries no symbol-keyed members to hold apart.
+ * it. `api-agreement.ts` asserts both directions for the three base classes,
+ * whose protocol carries no symbol-keyed members to hold apart.
  *
  * Every concrete `FabricPrimitive` subclass needs an instanceof-capable
  * declaration here, that being an interface, a constructor interface, and a

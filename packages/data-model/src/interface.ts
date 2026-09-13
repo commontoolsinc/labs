@@ -7,19 +7,12 @@
  * circular dependency.
  *
  * The classes here and the declarations in `api.ts` describe the same shapes,
- * and the assertions at the end of this file stop compiling when they drift.
- * The concrete classes under `fabric-primitives/` and `fabric-instances/`
- * carry the same kind of guard, each beside its own definition.
+ * and `api-agreement.ts` stops compiling when they drift. The concrete classes
+ * under `fabric-primitives/` and `fabric-instances/` carry the same kind of
+ * guard, each beside its own definition.
  */
 
-import type {
-  FabricArray,
-  FabricInstance as ApiFabricInstance,
-  FabricPlainObject,
-  FabricPrimitive as ApiFabricPrimitive,
-  FabricSpecialObject as ApiFabricSpecialObject,
-  FabricValue,
-} from "./api.ts";
+import type { FabricArray, FabricPlainObject, FabricValue } from "./api.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
 // available internally to `data-model` without having to `import ... from
@@ -146,9 +139,8 @@ export type FabricConvertibleValue =
  * It is a well-known string key rather than a `unique symbol` because that
  * would require importing a symbol *value*, and this file is deliberately free
  * of runtime imports (see the file header). `api.ts` declares the identical
- * member, and the assertions at the end of this file stop compiling if the two
- * stop agreeing; a value branded by one would otherwise not satisfy the
- * other.
+ * member, and `api-agreement.ts` stops compiling if the two stop agreeing; a
+ * value branded by one would otherwise not satisfy the other.
  */
 export abstract class FabricSpecialObject {
   declare readonly "@commonfabric/FabricSpecialObject": true;
@@ -232,29 +224,3 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
     super();
   }
 }
-
-//
-// Agreement with the pattern-visible declarations
-//
-
-/** Whether `A` and `B` are mutually assignable. */
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-/** Compiles only when its argument is `true`. */
-type MustBeTrue<T extends true> = T;
-
-// Compile-time checks that the abstract base classes above and the
-// declarations in `api.ts` -- which is what a pattern compiles against --
-// describe the same shape.
-//
-// Mutual assignability, not `satisfies`. A one-way check passes when the class
-// carries a member the declaration omits, since the extra member only makes
-// the class more assignable; that is the direction a pattern feels, because
-// the member it cannot reach is the one missing from the declaration. Both
-// directions have to be asserted for a member added on either side alone to
-// fail here.
-type _SpecialObjectAgrees = MustBeTrue<
-  Same<FabricSpecialObject, ApiFabricSpecialObject>
->;
-type _InstanceAgrees = MustBeTrue<Same<FabricInstance, ApiFabricInstance>>;
-type _PrimitiveAgrees = MustBeTrue<Same<FabricPrimitive, ApiFabricPrimitive>>;
