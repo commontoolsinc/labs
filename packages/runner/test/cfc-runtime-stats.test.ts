@@ -20,7 +20,7 @@ describe("CFC runtime stats", () => {
     storageManager = undefined;
   });
 
-  it("counts dereference traces and the largest set one transaction held", async () => {
+  it("counts dereference traces and the largest set one transaction held", () => {
     // The size of that set is what `probeBelongsToDereference` scans per read
     // activity at commit preparation, so the maximum is the figure a reader
     // wants — not the running total, which spans every transaction.
