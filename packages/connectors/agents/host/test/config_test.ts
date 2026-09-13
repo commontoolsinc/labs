@@ -428,4 +428,16 @@ Deno.test("parseAgentsHostConfig accepts normalized command producers and reject
     Error,
     "configuration has duplicate command producer id: workbench",
   );
+  assertThrows(
+    () =>
+      parseAgentsHostConfig({
+        ...base,
+        commandProducers: [
+          { id: "workbench", piece: "fid1:one" },
+          { id: "dashboard", piece: "fid1:one" },
+        ],
+      }),
+    Error,
+    "configuration has duplicate command producer piece: fid1:one",
+  );
 });

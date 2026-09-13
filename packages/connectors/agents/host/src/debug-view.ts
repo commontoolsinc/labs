@@ -20,7 +20,10 @@ import {
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import type { AgentsHostTargetDescription } from "./host.ts";
-import { commandWriterAuthorization } from "./command-authorization.ts";
+import {
+  commandWriterAuthorization,
+  recordValue,
+} from "./command-authorization.ts";
 import type { BoundCommandProducer } from "./command-producers.ts";
 
 const AGENT_SESSIONS_DEBUG_CAUSE_PREFIX = "agent-sessions-debug";
@@ -33,12 +36,6 @@ const SHALLOW_DEBUG_PIECE_SCHEMA = internSchema({
   type: "object",
   properties: {},
 });
-
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
 
 async function protectOwnerDebugCells(
   manager: PiecesController,

@@ -283,6 +283,7 @@ export function parseAgentsHostConfig(value: unknown): AgentsHostConfig {
     }
     commandProducers = config.commandProducers.map(parseCommandProducer);
     const producerIds = new Set<string>();
+    const producerPieces = new Set<string>();
     for (const producer of commandProducers) {
       if (producerIds.has(producer.id)) {
         throw new Error(
@@ -290,6 +291,14 @@ export function parseAgentsHostConfig(value: unknown): AgentsHostConfig {
         );
       }
       producerIds.add(producer.id);
+      // Two producers naming one piece would each link a queue into the same
+      // `commands` input, and the later link would replace the earlier.
+      if (producerPieces.has(producer.piece)) {
+        throw new Error(
+          `configuration has duplicate command producer piece: ${producer.piece}`,
+        );
+      }
+      producerPieces.add(producer.piece);
     }
   }
   return {
