@@ -13,12 +13,12 @@
  * child, and a `"*"` segment follows every child. The two are held together by
  * a test that compares them across a generated corpus.
  *
- * A `"*"` in the QUERY follows every child at that depth, which makes the
- * frontier as wide as the set and costs far more than the scan it replaces —
+ * A `"*"` in the QUERY would follow every child at that depth, making the
+ * frontier as wide as the set and costing far more than the scan it replaces —
  * measured at 730x on a 256-source set whose queries are all wildcard at the
- * branching segment. So a query carrying one takes the scan instead, and the
- * trie serves the concrete queries it is good at, where the frontier is at most
- * two nodes: the literal child and the `"*"` child. Both shapes are benched.
+ * branching segment. So a query carrying one takes the scan instead, which is
+ * also what keeps the walk's own frontier at two nodes: the literal child and
+ * the `"*"` child of a SOURCE. Both shapes are benched.
  */
 
 /**
@@ -88,10 +88,9 @@ export class PathPrefixIndex {
     for (const segment of path) {
       const next = new Set<PathPrefixNode>();
       for (const node of frontier) {
-        if (segment === "*") {
-          for (const child of node.children.values()) next.add(child);
-          continue;
-        }
+        // Only a SOURCE wildcard is followed here. A query wildcard took the
+        // scan above, so `segment` is always a literal by this point, and the
+        // frontier is at most two nodes wide.
         const literal = node.children.get(segment);
         if (literal !== undefined) next.add(literal);
         const wildcard = node.children.get("*");
