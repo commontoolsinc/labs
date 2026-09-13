@@ -37,17 +37,7 @@
  * on its /bench page.
  */
 
-import { PathPrefixIndex } from "../src/cfc/path-prefix-index.ts";
-
-/** The predicate the index replaces, kept here to bench the two side by side. */
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
+import { isPrefix, PathPrefixIndex } from "../src/cfc/path-prefix-index.ts";
 
 /**
  * Trace sources shaped like the ones a rendered list produces: a common root,

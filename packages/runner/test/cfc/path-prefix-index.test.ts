@@ -1,21 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { PathPrefixIndex } from "../../src/cfc/path-prefix-index.ts";
-
-/**
- * The predicate the index replaces, copied from `prepare.ts` so the two can be
- * compared directly. A divergence between them is the whole risk of the
- * change: the index is only correct if it admits exactly what this admits.
- */
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
+import { isPrefix, PathPrefixIndex } from "../../src/cfc/path-prefix-index.ts";
 
 function scan(sources: readonly string[][], path: readonly string[]): boolean {
   return sources.some((source) => isPrefix(source, path));
@@ -68,6 +54,28 @@ describe("path-prefix-index", () => {
     // wildcard would miss it.
     expect(indexOf([["*", "q"], ["b", "c"]]).hasPrefixOf(["b", "c"]))
       .toBe(true);
+  });
+
+  it("adds a repeated path once, so a wildcard query does not rescan it", () => {
+    // `add` is documented as a no-op for a repeat, and the scanned copy the
+    // wildcard fallback reads has to honour that too.
+    const index = new PathPrefixIndex();
+    index.add(["a", "b"]);
+    index.add(["a", "b"]);
+    expect(index.accessForTestingOnly.scannedPaths).toEqual([["a", "b"]]);
+    expect(index.hasPrefixOf(["a", "*"])).toBe(true);
+  });
+
+  it("copies the path, so a caller reusing its array cannot change the set", () => {
+    const mutable = ["a", "b"];
+    const index = new PathPrefixIndex();
+    index.add(mutable);
+    mutable[1] = "zzz";
+    // The trie kept the original segments; the scanned copy must agree, which
+    // the wildcard query is what reaches.
+    expect(index.hasPrefixOf(["a", "b"])).toBe(true);
+    expect(index.hasPrefixOf(["a", "*"])).toBe(true);
+    expect(index.hasPrefixOf(["a", "zzz"])).toBe(false);
   });
 
   it("agrees with a linear scan across a generated corpus", () => {

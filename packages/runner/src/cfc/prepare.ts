@@ -110,7 +110,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
-import { PathPrefixIndex } from "./path-prefix-index.ts";
+import { isPrefix, PathPrefixIndex } from "./path-prefix-index.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type CfcRefusalDetail,
@@ -179,15 +179,6 @@ const INTERNAL_VERIFIER_META = {
 const LINK_SOURCE_SCHEMA_META = {
   ...internalVerifierRead,
 };
-
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
