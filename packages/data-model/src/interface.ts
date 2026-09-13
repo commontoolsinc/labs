@@ -26,6 +26,102 @@ import type {
   NonNullableFabricValue,
 } from "./api.ts";
 
+// We re-`export` all the _types_ from `./api.ts`, so that they're consistently
+// available internally to `data-model` without having to `import ... from
+// "./api.ts"`.
+export type * from "./api.ts";
+
+//
+// "Layer" types
+//
+// These are the types which proved a looser `FabricValue`-like definition which
+// only covers a single layer of containers. For example, an array typed to be
+// `FabricValue` is defined as deeply only containing `FabricValue`s, an array
+// typed to be `FabricValueLayer` does not nail down the types of its contents,
+// while still semantically carrying the other `FabricValue` restrictions on
+// arrays (e.g., no synthetic keys, no named properties other than `length`).
+//
+
+/**
+ * Single "layer" of fabric conversion -- the result of shallow conversion
+ * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
+ * shape but their contents may still contain values requiring further
+ * conversion (e.g., `Error` instances in a `.cause` chain).
+ */
+export type FabricValueLayer =
+  | FabricValue
+  | unknown[]
+  | Record<string, unknown>;
+
+/** A mutable array root whose elements remain `FabricValue`s. */
+export type MutableFabricArrayLayer = FabricValue[];
+
+/** A mutable record root whose values remain `FabricValue`s. */
+export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+
+/**
+ * A `FabricContainerValue` with a mutable root. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw. A `FabricInstance` arm passes through
+ * unchanged: an instance's mutability is its own frozen state to report, not
+ * something a type can layer over it.
+ */
+export type MutableFabricContainerValueLayer =
+  | FabricInstance
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
+
+/**
+ * A `FabricValue` with a mutable root container. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw.
+ */
+export type MutableFabricValueLayer =
+  | Exclude<FabricValue, FabricArray | FabricPlainObject>
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
+
+//
+// Types for dealing with native (non-fabric a/k/a "wild west" values)
+//
+
+/**
+  * Union of raw native JS **object** types that the fabric type system can
+  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
+  * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
+  * accepts `unknown`, so callers can hand it `FabricValue`s or raw native JS
+  * objects alike, and whatever it cannot represent is rejected there rather
+  * than excluded by the signature. The conversion produces `FabricInstance`
+  * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
+  *
+  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
+  * and belongs directly in `FabricValue` without wrapping.
+  */
+export type FabricNativeObject =
+  | Error
+  | Map<unknown, unknown>
+  | Set<unknown>
+  | Date
+  | RegExp
+  | Uint8Array;
+
+/**
+  * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+  * that convert to and from fabric form. This is the precondition of
+  * `fabricFromNativeValue()` (which fails on anything else), the result of
+  * `nativeFromFabricValue()`, and what `isValidFabricConvertibleValue()` tests
+  * for.
+  *
+  * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+  * Converting a `FabricError` yields an `Error`, so an array of them is an array
+  * of natives, which has no `FabricValue` name.
+  */
+export type FabricConvertibleValue =
+  | FabricValue
+  | FabricNativeObject
+  | readonly FabricConvertibleValue[]
+  | { readonly [key: string]: FabricConvertibleValue };
+
 //
 // `FabricSpecialObject`
 //
@@ -137,105 +233,6 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
     super();
   }
 }
-
-//
-// Type definitions
-//
-
-/**
- * The pattern-visible fabric value types, and the option types of the debug
- * renderers over them, declared in `api.ts` and re-exported here so that this
- * module carries the whole `FabricValue` vocabulary. `api.ts` is where they
- * have to be declared: it reaches patterns by being inlined into the type
- * module the pattern compiler serves, and so must not import anything, which
- * makes it the leaf of this pair.
- */
-export type {
-  CompactDebugStringOptions,
-  DebugValueOptions,
-  FabricArray,
-  FabricContainerValue,
-  FabricPlainObject,
-  FabricValue,
-  FromNativeErrorOptions,
-  NonNullableFabricValue,
-};
-
-/**
- * Single "layer" of fabric conversion -- the result of shallow conversion
- * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
- * shape but their contents may still contain values requiring further
- * conversion (e.g., `Error` instances in a `.cause` chain).
- */
-export type FabricValueLayer =
-  | FabricValue
-  | unknown[]
-  | Record<string, unknown>;
-
-/** A mutable array root whose elements remain `FabricValue`s. */
-export type MutableFabricArrayLayer = FabricValue[];
-
-/** A mutable record root whose values remain `FabricValue`s. */
-export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
-
-/**
- * A `FabricContainerValue` with a mutable root. Nested containers remain
- * ordinary (readonly) `FabricValue`s, so this models a single construction
- * layer rather than a deep thaw. A `FabricInstance` arm passes through
- * unchanged: an instance's mutability is its own frozen state to report, not
- * something a type can layer over it.
- */
-export type MutableFabricContainerValueLayer =
-  | FabricInstance
-  | MutableFabricArrayLayer
-  | MutableFabricPlainObjectLayer;
-
-/**
- * A `FabricValue` with a mutable root container. Nested containers remain
- * ordinary (readonly) `FabricValue`s, so this models a single construction
- * layer rather than a deep thaw.
- */
-export type MutableFabricValueLayer =
-  | Exclude<FabricValue, FabricArray | FabricPlainObject>
-  | MutableFabricArrayLayer
-  | MutableFabricPlainObjectLayer;
-
-/**
- * Union of raw native JS **object** types that the fabric type system can
- * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
- * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
- * accepts `unknown`, so callers can hand it `FabricValue`s or raw native JS
- * objects alike, and whatever it cannot represent is rejected there rather
- * than excluded by the signature. The conversion produces `FabricInstance`
- * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
- *
- * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
- * and belongs directly in `FabricValue` without wrapping.
- */
-export type FabricNativeObject =
-  | Error
-  | Map<unknown, unknown>
-  | Set<unknown>
-  | Date
-  | RegExp
-  | Uint8Array;
-
-/**
- * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
- * that convert to and from fabric form. This is the precondition of
- * `fabricFromNativeValue()` (which fails on anything else), the result of
- * `nativeFromFabricValue()`, and what `isValidFabricConvertibleValue()` tests
- * for.
- *
- * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
- * Converting a `FabricError` yields an `Error`, so an array of them is an array
- * of natives, which has no `FabricValue` name.
- */
-export type FabricConvertibleValue =
-  | FabricValue
-  | FabricNativeObject
-  | readonly FabricConvertibleValue[]
-  | { readonly [key: string]: FabricConvertibleValue };
 
 //
 // Agreement with the pattern-visible declarations
