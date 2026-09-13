@@ -1,9 +1,11 @@
-// A reactive lift() callback may return a pattern instantiation — a fixed
-// one, a conditionally chosen one, or one that recursively instantiates the
-// same pattern (tail-call pagination). These cases pin that such a run
-// completes with the expected result, that the callback runs a bounded number
-// of times, and that a returned structure identical to the last one does not
-// re-run the sub-pattern.
+/**
+ * A reactive lift() callback may return a pattern instantiation — a fixed
+ * one, a conditionally chosen one, or one that recursively instantiates the
+ * same pattern (tail-call pagination). These cases pin that such a run
+ * completes with the expected result, that the callback runs a bounded number
+ * of times, and that a returned structure identical to the last one does not
+ * re-run the sub-pattern.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
