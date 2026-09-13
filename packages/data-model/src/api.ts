@@ -118,16 +118,16 @@ export type FabricValue =
   | FabricPrimitive
   | FabricContainerValue;
 
-  /**
-   * The container types that are part of `FabricValue`. Note that
-   * `FabricSpecialObject` is a combination of a container type
-   * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
-   * latter is _not_ part of this type.
-   */
-  export type FabricContainerValue =
-    | FabricArray
-    | FabricInstance
-    | FabricPlainObject;
+/**
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of a container type
+ * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
+ * latter is _not_ part of this type.
+ */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance
+  | FabricPlainObject;
 
 /** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
