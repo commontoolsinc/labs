@@ -91,8 +91,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * `FabricValue` is a union consisting of all JS primitive types, plus a handful
  * of object shapes; it does _not_ include the JS `function` type. Some parts of
  * the union impose contractual restrictions that are not enforceable via the
- * TypeScript type system, but which _are_ enforced by runtime validity checks.
- * Notable details:
+ * TypeScript type system, some (but not all) of which are enforced by runtime
+ * validity checks. Notable details:
  *
  * * `number` -- All numbers are considered members of `FabricValue`, including
  *   `-0` and the non-finite numbers. Furthermore, from the perspective of the
@@ -110,9 +110,10 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  *     `__proto__`.
  *
  * * arrays, type `FabricArray` -- In addition to the restrictions above, arrays
- *   are only considered valid if they have the named property `length` along
- *   with only properties that are valid array indices whose numeric values are
- *   less than `length`. Arrays with holes _are_ valid.
+ *   are only considered valid if they are direct instances of `Array`, and have
+ *   the named property `length` along with only properties that are valid array
+ *   indices whose numeric values are less than `length`. Arrays with holes
+ *   _are_ valid.
  *
  * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
  *   above, plain objects are only considered valid if they have the prototype
