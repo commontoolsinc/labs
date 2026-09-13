@@ -8,15 +8,14 @@ import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
-// SCOPE (CT-1754): this guards the verified-binding regression only — an
-// inSpace child's owner-protected list, written by a NON-exported mode-bound
-// handler from a fresh session, must retain its binding authority through the
-// warm/cached reload. Both sessions here share ONE compiled PROGRAM, so they
-// share one `moduleIdentity` and this does NOT reproduce the separate
-// two-compile-context moduleIdentity *merge-conflict* ("writeAuthorizedBy must
-// remain stable") that still blocks card-add in the real profile-create →
-// piece-view flow (CT-1740). That divergence needs a faithful two-context
-// harness.
+// SCOPE: this guards the verified-binding contract only — an inSpace child's
+// owner-protected list, written by a NON-exported mode-bound handler from a
+// fresh session, must retain its binding authority through the warm/cached
+// reload. Both sessions here share ONE compiled PROGRAM, so they share one
+// `moduleIdentity` and this does NOT reproduce the separate two-compile-context
+// moduleIdentity *merge-conflict* ("writeAuthorizedBy must remain stable") that
+// the real profile-create → piece-view flow can reach. That divergence needs a
+// faithful two-context harness.
 const signer = await Identity.fromPassphrase("inspace-child-owner-write");
 const spaceA = signer.did(); // "home" — runs the parent, creates the child
 const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
@@ -25,10 +24,10 @@ const spaceB = (await Identity.fromPassphrase("owner write child B")).did();
 // has its OWN per-space replicas, loopback-connected to one shared in-process
 // memory server — the real browser/CLI session split. A single emulate
 // manager's shared replicas would mask the warm/cached re-load on the reader
-// (where this CFC verified-binding regression lives).
+// (where the warm-load writer identity is decided).
 
 // The profile-create flow in miniature, exercising the OWNER-PROTECTED WRITE
-// path (CT-1754). The child pattern owns an `elements` list that is written
+// path. The child pattern owns an `elements` list that is written
 // ONLY by `mutate` — a NON-exported, mode-bound handler (mirrors
 // profile-home.tsx's `mutateElements`: a single handler instance per mode,
 // never exported). The list is exposed for mutation only through the exported
@@ -213,10 +212,9 @@ describe("inSpace child owner-protected write (profile elements)", () => {
       expect(started).toBe(true);
       await rt2.idle();
 
-      // Send the owner-protected WRITE (the regression site). Before the fix the
-      // commit was rejected with "writeAuthorizedBy requires a trusted verified
-      // binding identity at /" because the warm-load writer identity downgraded
-      // to `unsupported`.
+      // Send the owner-protected WRITE. A warm-load writer identity downgraded
+      // to `unsupported` would have the commit rejected with "writeAuthorizedBy
+      // requires a trusted verified binding identity at /".
       const writeTx = rt2.edit();
       childCell.withTx(writeTx).key("add").send({ item: "second" });
       // A manual test tx prepares the way the runtime's own commit paths do:

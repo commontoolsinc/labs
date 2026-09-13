@@ -1,14 +1,9 @@
-// CT-1316: a reactive lift() callback crashes with message:null when returning
-// a recursive pattern instantiation (tail-call). (Originally surfaced via the
-// now-removed derive() builder, which delegated to lift; the runtime behavior
-// under test is identical.)
-//
-// When a lift() callback returns a pattern instantiation that recursively
-// calls itself, the runtime crashes with {type: callback:error, message: null}.
-// In the builder path, this manifests as a non-settling scheduler warning
-// because the lift action is re-triggered repeatedly, even
-// though the actual callback only runs a handful of times (the rest are
-// invalid-argument no-ops).
+// A reactive lift() callback may return a pattern instantiation, including one
+// that recursively instantiates the same pattern (tail-call). The runtime must
+// run such a callback without a `callback:error` crash, and the scheduler must
+// not report the lift action as non-settling: the callback itself runs only a
+// handful of times, and a sub-pattern creation must not re-dirty the parent
+// action into repeated invalid-argument re-triggers.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -23,7 +18,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
+describe("Pattern Runner - Derive returning pattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -82,16 +77,13 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
   });
 
   it("should handle derive returning a recursive pattern instantiation (tail-call)", async () => {
-    // CT-1316: A pattern that conditionally calls itself via derive,
-    // simulating tail-call pagination (like FetchContactsPage in
-    // google-contacts-importer.tsx).
-    //
-    // BUG: Even with depth=1, the scheduler reports the derive action as
-    // non-settling. The callback only runs ~7 times (3 recursive levels + base
-    // cases + a few reactive re-evaluations), but the action wrapper is
-    // re-triggered repeatedly with invalid arguments. This
-    // indicates a reactive cycle where each sub-pattern creation dirties
-    // the parent action.
+    // A pattern that conditionally calls itself via derive, simulating
+    // tail-call pagination (like FetchContactsPage in
+    // google-contacts-importer.tsx). The callback runs only a handful of
+    // times (the recursive levels, the base cases, and a few reactive
+    // re-evaluations), and the scheduler must settle: a sub-pattern creation
+    // that dirtied the parent action would re-trigger the action wrapper
+    // repeatedly with invalid arguments.
 
     let deriveCallCount = 0;
 

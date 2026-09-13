@@ -297,8 +297,9 @@ class ScriptedServerModel {
       // (the doc's top-of-stack below the reader). Scanning lower layers
       // would false-conflict with the session's own later stacked writes —
       // the exact hazard the max-basis rule exists to avoid. (This double
-      // keeps the LEGACY basis; the true-basis path — `basisSeq` with
-      // own-session exclusion — is exercised against the real engine in
+      // ignores a read's `basisSeq` and applies that max-dependency basis to
+      // every reader; the true-basis path — `basisSeq` with own-session
+      // exclusion — is exercised against the real engine in
       // packages/memory/test/v2-pending-read-basis-overadvance.test.ts.)
       const layers = Array.isArray(read.localSeq)
         ? read.localSeq
@@ -1967,7 +1968,7 @@ describe("memory-v2-stacked-commit", () => {
 
         await expectResultOk(c1.promise);
         await expectResultOk(c2.promise);
-        // ACCEPTED — this is the regression guard for the max-basis rule.
+        // ACCEPTED — the max-basis rule is what admits it.
         await expectResultOk(c3.promise);
         expectVisible(harness, { A: valueFor("c3") });
 
@@ -2008,8 +2009,10 @@ describe("memory-v2-stacked-commit", () => {
 
         // The wire read names its dependency layer AND the confirmed basis the
         // view sat on — the seq c1's acceptance advanced the doc to. The basis
-        // travels even with layers present, so the server's staleness scan is
-        // anchored there rather than at the dependency's resolution.
+        // travels even with layers present, so a server honoring `basisSeq`
+        // anchors its staleness scan there rather than at the dependency's
+        // resolution. This double ignores `basisSeq`, so what is pinned here
+        // is the wire shape alone.
         const sent = harness.model.applied.get(c3.localSeq);
         expect(sent).toBeDefined();
         const confirmedBasis =
@@ -2325,7 +2328,7 @@ describe("memory-v2-stacked-commit", () => {
         expect(hasPendingOverlay(harness, DOCS.A)).toBe(true);
         expectVisible(harness, { A: valueFor("own") });
 
-        // The OWN ECHO first (CT-1927's mixed-provenance frame): an upsert
+        // The OWN ECHO first (a mixed-provenance frame): an upsert
         // whose seq IS the parked accept's ack seq is the durable copy of
         // the own write, not foreign novelty — it must NOT set the floor
         // (shadowing it would clamp W on every wave of a quiet serving
@@ -2607,8 +2610,8 @@ describe("memory-v2-stacked-commit", () => {
 
         // TWO foreign updates integrate under it: seq 3 then seq 5. Every
         // derivation of the next wave read the view from BEFORE seq 3, so
-        // the floor must stay 3 — the pre-fix per-doc max recorded 5 and
-        // let W advance to 4, a derivedThrough claim over an input nothing
+        // the floor must stay 3 — a per-doc max would record 5 and let W
+        // advance to 4, a derivedThrough claim over an input nothing
         // derived over.
         harness.pushSync({
           upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign-3") }],
@@ -2631,8 +2634,8 @@ describe("memory-v2-stacked-commit", () => {
         expect(shadowFloorOf(harness)).toBeUndefined();
 
         // The sentinel half: a shadowed REMOVE (sentinel 1) followed by a
-        // foreign upsert. Pre-fix the max buried the sentinel under the
-        // upsert's seq; the floor must stay 1 until the shadow clears.
+        // foreign upsert. A max would bury the sentinel under the upsert's
+        // seq; the floor must stay 1 until the shadow clears.
         harness.model.setOutcome(3, { kind: "accept" });
         const own2 = beginSet(harness, DOCS.A, valueFor("own-2"));
         await expectResultOk(own2.promise);
@@ -2780,9 +2783,10 @@ describe("memory-v2-stacked-commit", () => {
         expect(result.error).toMatchObject({ name: "ConflictError" });
 
         // The drop emptied the shadowed doc's pending set: the foreign
-        // value is visible, the floor lifts — and the WAKE fired (pre-fix
-        // only confirmPending fired it; a rejection-driven lift left the
-        // clamped serving loop asleep until the input-wait timeout).
+        // value is visible, the floor lifts — and the WAKE fired. A
+        // rejection-driven lift wakes the serving loop just as confirmPending
+        // does; otherwise the clamped loop would sleep until the input-wait
+        // timeout.
         expectVisible(harness, { A: valueFor("winner") });
         expect(shadowFloorOf(harness)).toBeUndefined();
         expect(
@@ -4560,7 +4564,11 @@ describe("memory-v2-stacked-commit", () => {
 
   describe("pending visibility", () => {
     // What a pending overlay shows a reader before it is confirmed, and the
-    // patches it declines to apply over a branch their ops cannot reach.
+    // patches it declines to apply over a branch their ops cannot reach. Such
+    // a patch descends through a base that cannot hold it, so the layer
+    // renders SKIPPED and the base shows through: a combined value would
+    // fabricate a state the server never produces, and could resurrect
+    // dropped sibling data.
 
     it("preserves `FabricValue`s in the pending view", async () => {
       const harness = await createHarness();
@@ -4729,10 +4737,6 @@ describe("memory-v2-stacked-commit", () => {
           },
         );
 
-        // Ops-replay: the patch descends through a base that cannot hold it,
-        // so the layer renders SKIPPED and the base shows through. A combined
-        // value here would fabricate a state the server never produces, and
-        // could resurrect dropped sibling data.
         expectVisible(harness, {
           A: null,
         });
@@ -4772,10 +4776,6 @@ describe("memory-v2-stacked-commit", () => {
           },
         );
 
-        // Ops-replay: the patch descends through a base that cannot hold it,
-        // so the layer renders SKIPPED and the base shows through. A combined
-        // value here would fabricate a state the server never produces, and
-        // could resurrect dropped sibling data.
         expectVisible(harness, {
           A: {
             choice: 1,
@@ -4817,10 +4817,6 @@ describe("memory-v2-stacked-commit", () => {
           },
         );
 
-        // Ops-replay: the patch descends through a base that cannot hold it,
-        // so the layer renders SKIPPED and the base shows through. A combined
-        // value here would fabricate a state the server never produces, and
-        // could resurrect dropped sibling data.
         expectVisible(harness, {
           A: [],
         });
@@ -5133,8 +5129,8 @@ describe("memory-v2-stacked-commit", () => {
 
         // Even before any drop, the child's replace-under-an-element cannot
         // apply to its parent's base (items[0] is a scalar): the layer renders
-        // skipped from the start — the old value-combining fabricated the
-        // { items: [{ name: "b" }] } view here.
+        // skipped from the start, rather than a fabricated
+        // { items: [{ name: "b" }] } view.
         const beforeDrop = harness.provider.get(DOCS.A);
         expect(beforeDrop).toBeDefined();
         expect(beforeDrop!.value).toEqual({ items: ["a"] });
@@ -5219,8 +5215,8 @@ describe("memory-v2-stacked-commit", () => {
         // until server truth arrives.
         expectVisible(harness, { A: { items: null } });
 
-        // Server truth arrives on a frame (post-CT-1965, the accept's own
-        // echo): the winner's container with the survivor's write merged in.
+        // Server truth arrives on a frame (the accept's own echo): the
+        // winner's container with the survivor's write merged in.
         // The view converges to it — the survivor's write lands via delivery,
         // never via client-side fabrication, and "seeded" never existed.
         harness.pushSync({

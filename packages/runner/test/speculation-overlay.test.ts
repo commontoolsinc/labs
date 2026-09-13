@@ -637,11 +637,11 @@ describe("Phase 2 speculation overlay", () => {
   });
 
   it("the overlay REFUSES an event-handler seal lacking an eventId (review 2026-08-11 m5): silent loss surfaces as a loud commit error", async () => {
-    // Pre-fix, llm-dialog's updateArgument (kind event-handler, no
-    // eventId — OW16's classification) diverted on a flag-ON client
-    // into an overlay entry with NO intent to retire against: the tool
-    // reported ok, nothing landed, no server run reproduced it. The
-    // overlay now refuses the seal loudly instead.
+    // An event-handler seal carrying no eventId (llm-dialog's
+    // updateArgument is one) has NO intent to retire against. Diverted
+    // on a flag-ON client into an overlay entry, it would report ok
+    // while nothing landed and no server run reproduced it, so the
+    // overlay refuses the seal loudly instead.
     const runtime = {
       storageManager: { open: () => ({ replica: {} }) },
     } as unknown as Runtime;
@@ -689,12 +689,12 @@ describe("Phase 2 speculation overlay", () => {
   });
 
   it("an authored tx that read a speculative echo is refused LOUDLY at the client, terminal, with no wire export (speculation.md §6; leg-C RULED 2026-08-13)", async () => {
-    // Pre-fix: the commit exported the echo's overlay-only localSeq as
-    // a wire pending-read dependency; the server — which cannot
-    // distinguish never-coming from not-yet-arrived — rejected it
-    // `pending dependency not resolved: <seq>` (observed here before
-    // the fix), and the scheduler's convergence loop spun its whole
-    // retry window against the same live echo.
+    // A commit exporting the echo's overlay-only localSeq as a wire
+    // pending-read dependency would be rejected by the server — which
+    // cannot distinguish never-coming from not-yet-arrived — with
+    // `pending dependency not resolved: <seq>`, and the scheduler's
+    // convergence loop would spin its whole retry window against the
+    // same live echo.
     clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -1043,8 +1043,8 @@ describe("Phase 2 speculation overlay", () => {
     expect(outcome.error).toBeUndefined();
     await clientRuntime.storageManager.synced();
 
-    // Exactly ONE new engine commit: the fix re-issues nothing, so it
-    // cannot double-apply (the which-direction hazard both ways).
+    // Exactly ONE new engine commit: nothing is re-issued, so nothing
+    // can double-apply (the which-direction hazard both ways).
     const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
     expect(after.length).toBe(commitsBefore + 1);
 
@@ -1132,7 +1132,7 @@ describe("Phase 2 speculation overlay", () => {
     } as const;
     const stagedHash = internSchemaAsTaggedHashString(stagedSchema);
     // The covering install, FIRST: a commit either carries its closure or
-    // stands on the space already holding it (CT-2063; the memory boundary
+    // stands on the space already holding it (the memory boundary
     // refuses metadata naming a document it cannot see). The store-proven
     // live shape had the server holding the doc while the client's views
     // lagged — this writer session is that covering install.
@@ -1316,7 +1316,7 @@ describe("Phase 2 speculation overlay", () => {
     );
     registerSchemaDocument(registryOnlyHash, registryOnlySchema);
     // The covering install, FIRST: a commit either carries its closure or
-    // stands on the space already holding it (CT-2063; the memory boundary
+    // stands on the space already holding it (the memory boundary
     // refuses metadata naming a document it cannot see). The store-proven
     // live shape had the server holding the doc while the client's views
     // lagged — this writer session is that covering install.
@@ -1441,20 +1441,20 @@ describe("Phase 2 speculation overlay", () => {
   });
 
   it("a blind fill resolving its stored schema from the registry while the ENGINE already holds the cid: doc still EXPORTS — content-addressed reads carry no confirmed-seq precondition (the review's probe-1)", async () => {
-    // The seq half of content-addressed layer-indifference: the
-    // registry- (or overlay-) resolved schema read left the replica's
-    // confirmed basis for the cid: doc at 0, and the commit exported
-    // `confirmed {seq: 0}` for it — while the doc's FIRST INSTALL is a
-    // real revision row, and the engine's staleness scan has no
-    // content-addressed carve-out. In the delivery-gap window with the
-    // doc already server-installed by ANOTHER session, the fill died
-    // `ConflictError: stale confirmed read: cid:… at seq 0 conflicted
-    // with seq N`, silently (the discarded commit promise). The
-    // resolution-gap pins never saw it because they left the engine
-    // EMPTY at the hash: a seq-0 confirmed read of an absent doc is
-    // satisfiable. The fix drops cid: reads from the commit conflict
-    // set entirely (`buildReads`): content under a content-addressed
-    // id can never change — the engine's own rule — so there is no
+    // The seq half of content-addressed layer-indifference: a registry-
+    // (or overlay-) resolved schema read leaves the replica's confirmed
+    // basis for the cid: doc at 0, while the doc's FIRST INSTALL is a
+    // real revision row and the engine's staleness scan has no
+    // content-addressed carve-out. Were the commit to export
+    // `confirmed {seq: 0}` for it, then in the delivery-gap window with
+    // the doc already server-installed by ANOTHER session the fill would
+    // die `ConflictError: stale confirmed read: cid:… at seq 0
+    // conflicted with seq N`, silently (the discarded commit promise);
+    // the resolution-gap pins cannot see that, because they leave the
+    // engine EMPTY at the hash, and a seq-0 confirmed read of an absent
+    // doc is satisfiable. So `buildReads` leaves cid: reads out of the
+    // commit conflict set entirely: content under a content-addressed id
+    // can never change — the engine's own rule — so there is no
     // staleness for the scan to find; server-side closure validation
     // owns presence.
     clientManager = EmulatedStorageManager.connectTo(server, {
@@ -1490,14 +1490,12 @@ describe("Phase 2 speculation overlay", () => {
     registerSchemaDocument(installedHash, installedSchema);
     // A SECOND session installs the schema document in the ENGINE,
     // FIRST — the doc's first revision row, in place before any commit
-    // references it (CT-2063: a commit either carries its closure or
-    // stands on the space already holding it). NOTE what the contract
-    // retires here: with the install preceding the reference, this
-    // harness's frames attach the installed doc, so the client replica
-    // may hold it and the original seq-0 registry-resolution premise is
-    // no longer constructible through commits — this pin is now an
-    // end-to-end net over the fill (the seq-half discriminator is
-    // CT-2063's conversation).
+    // references it (a commit either carries its closure or stands on
+    // the space already holding it). With the install preceding the
+    // reference, this harness's frames attach the installed doc, so the
+    // client replica may hold it and a seq-0 registry-resolution premise
+    // is not constructible through commits — this pin is an end-to-end
+    // net over the fill.
     {
       const writerManager = EmulatedStorageManager.connectTo(server, {
         as: aliceSigner,
@@ -1618,16 +1616,17 @@ describe("Phase 2 speculation overlay", () => {
     }
   });
 
-  it("a frame's schema reference resolves end to end — kick, pull, install (the empty-pull re-arm's committable remainder; CT-2063)", async () => {
-    // The dedupe's contract half: `#kickedCfcSchemaPulls` was cleared on
-    // a pull ERROR only, so a pull that SUCCEEDS without delivering — the
-    // document not yet installed server-side, a legal state — retained
-    // its entry forever, later frames skipped the re-kick, and the
-    // delivery-gap window became PERMANENT for the session. The re-arm
-    // makes the hook's "retried on a later frame" contract true: an
-    // empty completion clears the entry, and the next arriving frame
-    // whose metadata references the hash kicks again — by then the
-    // stamper's install has landed and the pull delivers.
+  it("resolves a frame's schema reference end to end through kick, pull, and install", async () => {
+    // The dedupe's contract half: `#kickedCfcSchemaPulls` clears its
+    // entry on an empty completion, not on a pull ERROR alone. A pull
+    // that SUCCEEDS without delivering — the document not yet installed
+    // server-side, a legal state — would otherwise retain its entry
+    // forever, later frames would skip the re-kick, and the delivery-gap
+    // window would become PERMANENT for the session. The re-arm is what
+    // makes the hook's "retried on a later frame" contract true: the
+    // next arriving frame whose metadata references the hash kicks
+    // again — by then the stamper's install has landed and the pull
+    // delivers.
     //
     // HONESTY NOTE on what this pin can discriminate: in the emulated
     // loopback, a frame that arrives AFTER the install can carry the
@@ -1636,8 +1635,7 @@ describe("Phase 2 speculation overlay", () => {
     // reference-arrives → document-resolves flow (frames, hook,
     // ordering barrier), not a dedupe discriminator. The dedupe's
     // discriminating bench is the live ON gate's kick-before-install
-    // ordering (the #6192 review's probe), where watch frames do NOT
-    // attach the refs.
+    // ordering, where watch frames do NOT attach the refs.
     clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -1671,13 +1669,12 @@ describe("Phase 2 speculation overlay", () => {
     const replica = clientManager.open(space).replica;
 
     // FRAME 1 (a second session): /cfc references the hash, and the
-    // cid: doc rides the SAME commit (CT-2063: a commit carries its
-    // closure — the reference-before-install ordering this pin
-    // originally seeded is no longer constructible through commits).
-    // With the install landing alongside, this pin is an end-to-end
-    // net over reference-arrives → document-resolves; the empty-pull
-    // re-arm's remaining constructible arms are covered below, and
-    // its discriminating bench stays the live ON gate (CT-2063).
+    // cid: doc rides the SAME commit (a commit carries its closure, so
+    // a reference-before-install ordering is not constructible through
+    // commits). With the install landing alongside, this pin is an
+    // end-to-end net over reference-arrives → document-resolves; the
+    // empty-pull re-arm's remaining constructible arms are covered
+    // below, and its discriminating bench stays the live ON gate.
     {
       const writerManager = EmulatedStorageManager.connectTo(server, {
         as: aliceSigner,
@@ -1800,13 +1797,13 @@ describe("Phase 2 speculation overlay", () => {
     // behavioral observables here):
     //
     //  - the PAIR frame: ONE writer commit stamping TWO watched docs'
-    //    metadata with the SAME hash. The dedupe-hit construction this
-    //    originally pinned needed the hash UNINSTALLED — a commit shape
-    //    CT-2063's contract retires (the reference must ride with its
-    //    document or find it already stored), and a delivered hash is
+    //    metadata with the SAME hash. A dedupe-hit construction would
+    //    need the hash UNINSTALLED — a commit shape the closure contract
+    //    rules out (the reference must ride with its document or find
+    //    it already stored) — and a delivered hash is
     //    resolvable-guarded, never dedupe-hit. The dedupe-hit skip's
     //    line joins the doc-shape guard below as enumerated coverage
-    //    debt pending that conversation;
+    //    debt;
     //  - the string-shape guard: metadata WITHOUT a schemaHash, on
     //    its own frame.
     const writeDocFrame = async (
@@ -2566,9 +2563,7 @@ describe("Phase 2 speculation overlay", () => {
   });
 
   it("a handler that read a speculative echo runs ONCE — no convergence-retry loop against a dependency that is never coming (leg-C 1b; events-down diverts the write)", async () => {
-    // Pre-fix: 17+ re-runs in a 5s window (observed), each re-reading
-    // the live echo, until CommitConvergenceError after the full 30s
-    // retry window. Post-fix the loop is structurally absent, by TWO
+    // A convergence-retry loop here is structurally absent, by TWO
     // layered mechanisms: leg-C's terminal refusal classifies any
     // authored export naming a speculative layer `terminal` (1a pins
     // it), and Phase 3's events-down DIVERTS the client handler write
@@ -2653,8 +2648,8 @@ describe("Phase 2 speculation overlay", () => {
     handlerRuns = 0;
     clientResult.key("copy").send({});
     await clientRuntime.idle();
-    // Observation window: the handler runs exactly once; the pre-fix
-    // backoff loop re-ran it 10+ times here.
+    // Observation window: the handler runs exactly once; a backoff loop
+    // would re-run it many times here.
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     await clientRuntime.idle();
     expect(handlerRuns).toBe(1);
@@ -2769,10 +2764,10 @@ describe("Phase 2 speculation overlay", () => {
 
   it("an entry whose origin's accept verdict lands AFTER the covering watermark still retires — the ack wake re-sweeps; no further watermark event needed (leg-C 1c)", async () => {
     // Destination-level pin with a scripted replica: deterministic
-    // control over the verdict-vs-watermark race. Pre-fix: the sweep at
-    // W ran while the origin was unacked (blocked), the verdict landed
-    // after, and nothing re-swept — the entry stayed pending forever on
-    // the then-quiet space.
+    // control over the verdict-vs-watermark race. The sweep at W runs
+    // while the origin is unacked (blocked) and the verdict lands after;
+    // without a re-sweep the entry would stay pending forever on the
+    // then-quiet space.
     const doc = "of:verdict-race" as never;
     let ackedSeq: number | undefined = undefined;
     const pendingLocalSeqs = [10, 30];
@@ -2869,10 +2864,10 @@ describe("Phase 2 speculation overlay", () => {
 
   it("a close() racing the seal neither resurrects entries nor enacts navigateTo; a REJECTED sealInto withdraws collected entries (threads r3739139501, r3739139536)", async () => {
     // Destination-level, scripted: hold sealInto mid-flight, close()
-    // the overlay, then let the seal complete. Pre-fix the continuation
-    // registered the entry after close() had swept (a resurrected entry
-    // nothing would ever withdraw) and deferSealedEffects still flushed
-    // the allowlisted navigateTo of the never-accepted commit.
+    // the overlay, then let the seal complete. The continuation must not
+    // register the entry after close() has swept (a resurrected entry
+    // nothing would ever withdraw), and deferSealedEffects must not
+    // flush the allowlisted navigateTo of the never-accepted commit.
     const verdicts: unknown[] = [];
     const replica = {
       sealNative: (

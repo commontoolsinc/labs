@@ -25,31 +25,31 @@ import {
 } from "../src/builder/pattern-metadata.ts";
 
 /**
- * L3(a), RULED 2026-08-27 (owner): session-synthetic `keyless:` identities
- * must NEVER land in durable state — pattern-manager.ts's own contract
- * ("such refs must never be written into durable state"). The keyless
- * population is runtime-built pattern VALUES whose producing code is
- * module-addressed (the transformer hoists all source-authored
- * lift()/handler() code to cf:module — CT-1644/CT-1655), so nothing keyless
+ * Session-synthetic `keyless:` identities must NEVER land in durable state —
+ * pattern-manager.ts's own contract ("such refs must never be written into
+ * durable state"). The keyless population is runtime-built pattern VALUES
+ * whose producing code is module-addressed (the transformer hoists all
+ * source-authored lift()/handler() code to cf:module), so nothing keyless
  * should ever need loading: reactive producers re-derive on demand.
  *
- * The 2026-08-27 diagnosis (docs/history/plans/server-execution-v2/optimize/
- * keyless-diagnosis-2026-08-27.md) found the contract violated by every
- * writer that touches a minted pattern:
+ * Three writers touch a minted pattern, and each has to hold the contract
+ * (docs/history/plans/server-execution-v2/optimize/
+ * keyless-diagnosis-2026-08-27.md analyzes them):
  *   1. `Runner.setup()`'s durable `patternIdentity`/`patternSetupIdentity`
- *      stamps (`if (entryRef)` filters nothing — `entryRefForPattern`
- *      always mints);
+ *      stamps (`entryRefForPattern` always mints, so an `if (entryRef)`
+ *      filters nothing);
  *   2. `Runner.#substituteOpPatternRefs`' `$patternRef` sentinel for keyless
  *      map/filter/flatMap ops (written into the node's durable inputs doc);
  *   3. the storage-boundary serializer itself (`patternToEncodableForm`):
- *      the mint sets the pattern's forward entry ref, so the designed
- *      "no entry ref -> full graph" fallback stops firing and every later
- *      boundary write of the VALUE emits the keyless ref.
+ *      the mint sets the pattern's forward entry ref, which would otherwise
+ *      stop the designed "no entry ref -> full graph" fallback from firing
+ *      and make every later boundary write of the VALUE emit the keyless
+ *      ref.
  *
  * The first test is the blanket pin: a run exercising all three writers must
  * leave NO `keyless:` byte sequence anywhere in the raw sqlite store. The
- * second pins the CT-1923 roll-forward extension: with the running ref
- * keyless, the repair converges the durable pointer to the running pattern's
+ * second pins the roll-forward's keyless case: with the running ref keyless,
+ * the repair converges the durable pointer to the running pattern's
  * module-addressed PRODUCER (the first real entry ref up the derivation
  * chain / late-indexed identity) instead of refusing.
  */
@@ -64,7 +64,7 @@ type PointerKey = Parameters<
 
 // A minimal map-over-pattern program. Bare-evaluated (non-registering), its
 // op pattern carries no content-addressed entry ref, so node instantiation
-// mints the op's `keyless:` session identity (the CT-1812 keyless-op path).
+// mints the op's `keyless:` session identity.
 const MAP_PROGRAM_SOURCE = `
 import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
@@ -292,10 +292,9 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     // piece; its module is indexed AFTERWARDS (the production shape where a
     // bundle registers after build-time copies/uses). With the durable
     // pointer then repointed to a definitively unloadable identity, the
-    // CT-1923 roll-forward used to REFUSE (running ref keyless -> nothing
-    // durable to write). Ruled 2026-08-27: converge to the producer — the
-    // first module-addressed (non-keyless) entry ref reachable from the
-    // running pattern value.
+    // roll-forward converges to the producer — the first module-addressed
+    // (non-keyless) entry ref reachable from the running pattern value —
+    // rather than refusing for want of anything durable to write.
     storageManager = EmulatedStorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -668,9 +667,9 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     // The other half of the same transactional semantics: a real pattern's
     // setup deletes the session pointer because its durable stamps
     // supersede it — but the stamps are staged IN the transaction, so the
-    // delete must land with the commit, not at staging. A failed real
-    // re-setup used to drop the pointer while its stamps rolled back,
-    // leaving the keyless piece with neither.
+    // delete must land with the commit, not at staging, or a failed real
+    // re-setup drops the pointer while its stamps roll back, leaving the
+    // keyless piece with neither.
     storageManager = EmulatedStorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),

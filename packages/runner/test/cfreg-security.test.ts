@@ -1,6 +1,6 @@
 /**
  * Security invariants for the `__cfReg` content-addressed registration
- * mechanism (CT-1623). The compiled module body is treated as UNTRUSTED, and
+ * mechanism. The compiled module body is treated as UNTRUSTED, and
  * the defenses live in four layers: the verifier, the registrar capability,
  * the per-value trust gate, and content addressing.
  *
@@ -126,8 +126,8 @@ describe("HoistRegistrationSink stays untouched on a rejected registration", () 
 });
 
 describe("transformer __cfReg emit round-trips through the verifier", () => {
-  // CT-1623 follow-up: lock the CONTRACT between the transformer's emitted
-  // `__cfReg({ … })` shape and the verifier's static approval check. The
+  // The CONTRACT between the transformer's emitted `__cfReg({ … })` shape
+  // and the verifier's static approval check. The
   // transformer and the verifier hold two independent definitions of "a valid
   // registration call"; if they drift, a real registration silently routes to
   // the rejecting registrar (fail-closed, but a confusing breakage). These
@@ -187,8 +187,8 @@ __cfReg({ __cfLift_1 });`;
 
 describe("re-registration under the same identity commits the fresh staged set", () => {
   it("a later commit replaces the sink entry for that identity", () => {
-    // CT-1623 follow-up: pin the outdated-overwrite contract at the public sink
-    // layer. `indexArtifact` overwrites the reverse mapping on re-eval so
+    // The outdated-overwrite contract at the public sink layer.
+    // `indexArtifact` overwrites the reverse mapping on re-eval so
     // by-identity LOOKUP is always fresh; the same freshness must hold one
     // layer down, where a module that re-evaluates (same identity, fresh
     // artifact instance) re-stages and commits. A second commit under the same

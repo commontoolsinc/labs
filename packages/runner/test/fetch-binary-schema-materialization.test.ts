@@ -7,30 +7,26 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 /**
- * Regression for CT-1836: a lift consuming a `fetchBinary` result was
- * permanently gated because schema-query materialization DROPPED the
- * `FabricBytes`-bearing `result` field.
+ * A lift consuming a `fetchBinary` result materializes and runs: schema-query
+ * materialization carries the `FabricBytes`-bearing `result` field through,
+ * because `SchemaObjectTraverser` treats `FabricSpecialObject` values as
+ * opaque leaves (the fabric type system's documented contract: frozen, pass
+ * through conversion unchanged).
  *
- * Mechanism: `SchemaObjectTraverser`'s value dispatch had no
- * `FabricSpecialObject` arm, so a `FabricBytes` fell into the record branch
- * and was decomposed by `Object.entries` over its (empty) own props. That
- * failed the schema-generator's structural object schema for
- * `FetchBinaryResult.bytes`, the traversal dropped the containing `result`
- * field entirely (`required` unmet), the consumer's argument stayed invalid,
- * and its body never ran — freezing every downstream consumer, at any
- * nesting depth. (`fetchJson` consumers were unaffected: plain JSON values.)
- * The collateral: the consumers' crippled read logs also never registered
- * the forward dependents edges the post-writeback wake relies on.
- *
- * The fix treats `FabricSpecialObject` values as opaque leaves (the fabric
- * type system's documented contract: frozen, pass through conversion
- * unchanged).
+ * The hazard that guards against: a `FabricBytes` falling into the record
+ * branch would be decomposed by `Object.entries` over its (empty) own props,
+ * fail the schema-generator's structural object schema for
+ * `FetchBinaryResult.bytes`, and drop the containing `result` field entirely
+ * (`required` unmet), so the consumer's argument would stay invalid and its
+ * body would never run — freezing every downstream consumer, at any nesting
+ * depth. (`fetchJson` consumers carry plain JSON values and are unaffected.)
+ * The collateral: the consumers' crippled read logs would also never
+ * register the forward dependents edges the post-writeback wake relies on.
  *
  * This test runs the WHOLE chain — mocked binary fetch (via the injectable
- * `RuntimeOptions.fetch`, CT-1768) → `FabricBytes` result → consumer lifts
- * reading `result.mediaType` and re-encoding `result.bytes` — and asserts
- * the consumers actually materialize. Fails without the traverse fix (both
- * outputs stay empty forever); passes with it.
+ * `RuntimeOptions.fetch`) → `FabricBytes` result → consumer lifts reading
+ * `result.mediaType` and re-encoding `result.bytes` — and asserts the
+ * consumers actually materialize.
  */
 
 const signer = await Identity.fromPassphrase("fetch-binary-materialization");
@@ -72,7 +68,7 @@ const PROGRAM: RuntimeProgram = {
   ],
 };
 
-describe("fetchBinary consumer materialization (CT-1836)", () => {
+describe("fetchBinary consumer materialization", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

@@ -1,12 +1,8 @@
 /**
- * Cell.set() Performance Benchmarks
- *
- * Related to CT-1123: Performance degradation when setting complex nested structures
- * with many fields, especially after navigateTo() creates patterns.
- *
- * Key finding from CT-1123:
- * - 226 writes took 15,441ms (avg 68.33ms per write)
- * - Problem is per-write overhead in tx.writeValueOrThrow()
+ * Benchmarks for `Cell.set()` over complex nested structures with many
+ * fields — the shape `navigateTo()` writes when it creates patterns, where
+ * the cost is per-write overhead in `tx.writeValueOrThrow()` rather than the
+ * size of any one value.
  *
  * These benchmarks test Cell.set() with:
  * - Different data sizes (small, medium, large)
@@ -92,7 +88,7 @@ Deno.bench({
 
     for (let i = 0; i < 100; i++) {
       cell.set({
-        // Similar to CT-1123 person schema
+        // A person-shaped record
         firstName: `First${i}`,
         lastName: `Last${i}`,
         email: `user${i}@example.com`,
@@ -422,12 +418,13 @@ Deno.bench({
 });
 
 //
-// CT-1123 REPRODUCTION BENCHMARKS
+// PERSON-SHAPED WRITE BENCHMARKS
 //
-// Specifically test scenarios similar to the issue
+// Scenarios shaped like a Person pattern's writes: a 14-field record with
+// nested arrays, set once, set repeatedly, and set across many cells.
 //
 
-// Schema similar to the Person pattern in CT-1123
+// Schema shaped like the Person pattern
 const personSchema = {
   type: "object",
   properties: {
@@ -471,8 +468,8 @@ function createPersonData(i: number) {
 }
 
 Deno.bench({
-  name: "CT-1123 repro: Person-like schema (14 fields) - schemaless",
-  group: "ct1123",
+  name: "Person-like schema (14 fields) - schemaless",
+  group: "person",
   baseline: true,
   async fn() {
     const { runtime, storageManager, tx } = setup();
@@ -493,8 +490,8 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "CT-1123 repro: Person-like schema (14 fields) - with schema",
-  group: "ct1123",
+  name: "Person-like schema (14 fields) - with schema",
+  group: "person",
   async fn() {
     const { runtime, storageManager, tx } = setup();
 
@@ -514,9 +511,8 @@ Deno.bench({
 });
 
 Deno.bench({
-  name:
-    "CT-1123 repro: Multiple cells with Person data (simulating navigateTo)",
-  group: "ct1123",
+  name: "Multiple cells with Person data (simulating navigateTo)",
+  group: "person",
   async fn() {
     const { runtime, storageManager, tx } = setup();
 
@@ -536,8 +532,8 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "CT-1123 repro: Set then update same cell repeatedly",
-  group: "ct1123",
+  name: "Set then update same cell repeatedly",
+  group: "person",
   async fn() {
     const { runtime, storageManager, tx } = setup();
 
@@ -563,7 +559,8 @@ Deno.bench({
 //
 // ARRAY SIZE BENCHMARKS
 //
-// Test how array sizes affect performance (relevant to CT-1123 interests/skills arrays)
+// Test how array sizes affect performance (the shape of a Person pattern's
+// interests/skills arrays)
 //
 
 Deno.bench({
@@ -622,7 +619,7 @@ Deno.bench({
 //
 // ARRAY STRUCTURE BENCHMARKS
 //
-// Test path-level array structural edits that were previously missing coverage
+// Test path-level array structural edits
 //
 
 Deno.bench({
@@ -683,7 +680,7 @@ Deno.bench({
 //
 // WRITE COUNT BENCHMARKS
 //
-// Test the specific scenario of ~226 writes (like CT-1123)
+// Test bursts of many writes into one cell (~50 to ~500 leaf values)
 //
 
 Deno.bench({
