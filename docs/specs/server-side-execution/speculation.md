@@ -135,32 +135,34 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   — owner (Berni), 2026-08-21. Two clauses, both RULED; clause 1
   built, clause 2 built except as noted below:
 
-  1. **The unresolved read refuses.** Link resolution marks a
-     dead-end behind a followed hop (`pendingHopDoc`); the lazy read
-     path throws `UnresolvedInputError` (a `SchemaMismatchError`
-     subclass, so the action-run boundary's existing "argument did
-     not resolve" disposal treats it identically — §4's reconciliation
-     is unchanged). This applies ONLY when the reader's schema
-     declares NO default: a declared default is the stated absent
-     value and still flows (the `get() ?? fallback` idiom, and a
-     computed that has not produced yet, are unchanged). A dead-end at
-     the reader's OWN root doc is likewise not this shape — a
-     locally-minted cell's doc does not exist until its first write.
-     Nor is a dead-end at a USER- or SESSION-scoped instance row
-     (RULED 2026-08-21, the option-3 build): a principal's row exists
-     only once that principal writes it, so its absence is knowledge —
-     the scoped first-write idiom — and the fan-out run supply
-     materializes instances by running derivations over exactly such
-     absent rows. Only a missing SPACE-scoped doc behind a hop is an
-     unresolved input; composition does not change the verdict (a
-     per-user cell relayed through a nested pattern's arg doc reads
-     its absent row as `undefined` exactly as the flat form does).
-     One window sits outside this protection, matching main: a scoped
-     row already written elsewhere (another device; a cold or lagging
-     serving replica) is transit, not knowledge — such a mid-arrival
-     read takes main's interim-undefined-then-heal. No shipped
-     pattern routes link chains through user-scoped docs (the #6179
-     review's population audit).
+  1. **The unresolved read refuses.** Link resolution marks a dead-end
+     behind a followed hop (`pendingHopDoc`); the lazy read path
+     throws `UnresolvedInputError` (a `SchemaMismatchError` subclass,
+     so the action-run boundary's existing "argument did not resolve"
+     disposal treats it identically, except that a refusal a
+     synchronous body throws leaves the previous result standing until
+     the fix named in clause 2 lands — §4's reconciliation is
+     unchanged). This applies ONLY when the reader's schema declares
+     NO default: a declared default is the stated absent value and
+     still flows (the `get() ?? fallback` idiom, and a computed that
+     has not produced yet, are unchanged). A dead-end at the reader's
+     OWN root doc is likewise not this shape — a locally-minted cell's
+     doc does not exist until its first write. Nor is a dead-end at a
+     USER- or SESSION-scoped instance row (RULED 2026-08-21, the
+     option-3 build): a principal's row exists only once that
+     principal writes it, so its absence is knowledge — the scoped
+     first-write idiom — and the fan-out run supply materializes
+     instances by running derivations over exactly such absent rows.
+     Only a missing SPACE-scoped doc behind a hop is an unresolved
+     input; composition does not change the verdict (a per-user cell
+     relayed through a nested pattern's arg doc reads its absent row
+     as `undefined` exactly as the flat form does). One window sits
+     outside this protection, matching main: a scoped row already
+     written elsewhere (another device; a cold or lagging serving
+     replica) is transit, not knowledge — such a mid-arrival read
+     takes main's interim-undefined-then-heal. No shipped pattern
+     routes link chains through user-scoped docs (the #6179 review's
+     population audit).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
      it) and the run's transaction aborts with it as the reason — the

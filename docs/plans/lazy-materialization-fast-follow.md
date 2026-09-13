@@ -28,7 +28,8 @@ independent PRs and acceptance evidence. Keep handler semantics separate from
 removing the lift-path rollout switch: either can expose a correctness issue the
 other does not address. The flag's owner and removal condition remain recorded
 in the registry's [summary
-table](../development/EXPERIMENTAL_OPTIONS.md#summary-table).
+table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), which names
+Bernhard Seefeld as the flag's author.
 
 ## Execution tracker
 
@@ -169,7 +170,7 @@ must not accidentally inherit it.
       change, repository type/format/lint checks, and applicable independent
       gates. Require clean antagonistic and Cubic reviews before merging.
 
-Held beside this stage: at the F0 record's pinned revision the lift path drops a
+Held beside F3/F4: at the F0 record's pinned revision the lift path drops a
 refusal its body throws synchronously, and the previous result stands ([The lift
 path](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md#the-lift-path)).
 The fix, on the branch `codex/lift-refusal-disposition`, writes the undefined
