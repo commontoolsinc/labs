@@ -1,4 +1,12 @@
 export {
+  deepFreeze,
+  isDeepFrozen,
+  isValidDeepFrozenFabricValue,
+} from "./deep-freeze.ts";
+
+export { fabricAwareEqual } from "./fabricAwareEqual.ts";
+
+export {
   type CompactDebugStringOptions,
   type DebugValueOptions,
   type FabricArray,
@@ -20,17 +28,16 @@ export {
 } from "./interface.ts";
 
 export {
-  cloneForMutation,
-  CloneForMutationError,
-  type CloneForMutationErrorKind,
-  type CloneForMutationOptions,
-  type CloneForMutationResult,
-  cloneIfNecessary,
-  type CloneOptions,
-  cloneWithoutValueAtPath,
-  cloneWithValueAtPath,
-  shallowMutableClone,
-} from "./value-clone.ts";
+  fabricFromNativeValue,
+  isValidFabricConvertibleValue,
+  nativeFromFabricValue,
+  shallowCleanArray,
+  shallowCleanPlainObject,
+  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromNativeValue,
+} from "./native-conversion.ts";
+
+export { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 export {
   isFabricArray,
@@ -53,26 +60,17 @@ export {
 } from "./validity-check.ts";
 
 export {
-  fabricFromNativeValue,
-  isValidFabricConvertibleValue,
-  nativeFromFabricValue,
-  shallowCleanArray,
-  shallowCleanPlainObject,
-  shallowFabricFromNativeObjectElseUndefined,
-  shallowFabricFromNativeValue,
-} from "./native-conversion.ts";
-
-export { fabricAwareEqual } from "./fabricAwareEqual.ts";
-
-export { refuseFabricInstance } from "./refuseFabricInstance.ts";
-
-export { valueEqual } from "./valueEqual.ts";
-
-export {
-  deepFreeze,
-  isDeepFrozen,
-  isValidDeepFrozenFabricValue,
-} from "./deep-freeze.ts";
+  cloneForMutation,
+  CloneForMutationError,
+  type CloneForMutationErrorKind,
+  type CloneForMutationOptions,
+  type CloneForMutationResult,
+  cloneIfNecessary,
+  type CloneOptions,
+  cloneWithoutValueAtPath,
+  cloneWithValueAtPath,
+  shallowMutableClone,
+} from "./value-clone.ts";
 
 export {
   toCompactDebugString,
@@ -101,3 +99,5 @@ export {
   VALUE_TAGS,
   type ValueTag,
 } from "./value-tags.ts";
+
+export { valueEqual } from "./valueEqual.ts";
