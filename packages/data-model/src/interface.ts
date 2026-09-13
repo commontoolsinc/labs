@@ -13,17 +13,12 @@
  */
 
 import type {
-  CompactDebugStringOptions,
-  DebugValueOptions,
   FabricArray,
-  FabricContainerValue,
   FabricInstance as ApiFabricInstance,
   FabricPlainObject,
   FabricPrimitive as ApiFabricPrimitive,
   FabricSpecialObject as ApiFabricSpecialObject,
   FabricValue,
-  FromNativeErrorOptions,
-  NonNullableFabricValue,
 } from "./api.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
