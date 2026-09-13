@@ -2164,14 +2164,14 @@ export class PiecesController<T = unknown> {
       // running the setup phase: this method's own roll-forward heal when
       // the materialize after its identity swap fails, and the runner's
       // pattern watcher rolling an unloadable pointer back to the running
-      // pattern. Runner.start() of a not-running piece instantiates the
-      // stored identity directly — also without setup. A root whose identity
-      // moved while it was not running therefore boots over a doc that never
-      // materialized the pattern's internal cells — handler
-      // `{ "$stream": true }` markers included — and dies at instantiation
-      // ("Handler used as lift"). This also covers docs ALREADY left in that
-      // state by an earlier session: their identity compares current, so no
-      // further swap will ever fire.
+      // pattern or its producer. Runner.start() of a not-running piece
+      // instantiates the stored identity directly — also without setup. A
+      // root whose identity moved while it was not running therefore boots
+      // over a doc that never materialized the pattern's internal cells —
+      // handler `{ "$stream": true }` markers included — and dies at
+      // instantiation ("Handler used as lift"). This also covers docs ALREADY
+      // left in that state by an earlier session: their identity compares
+      // current, so no further swap will ever fire.
       //
       // run() (setup + start) is the sanctioned repair. With an unchanged
       // pattern pointer the setup phase is near-idempotent: it materializes
