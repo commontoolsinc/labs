@@ -158,16 +158,20 @@ pair, main's fastest single click was 1139 ms against the branch's slowest
 against 798 ms.
 
 What the five-people table is for is the branch's own column rather than the
-ratio: 284 ms at one person against 422 ms at five. Main's medians there are
-the noisier of the two — 794-1460 ms across rounds, against the branch's
-346-422 — so the ratio moves more than the branch does.
+ratio: 284 ms at one person against 422 ms at five. That is the finding that
+started this, and it is what has gone. Cost used to track how many rows the
+queries returned rather than how many were rendered — one person with 38 rows
+on screen beat five people with 6 — and selecting five people now costs about
+half as much again rather than an order of magnitude. Main's medians at five
+people are the noisier of the two — 794-1460 ms across rounds, against the
+branch's 346-422 — so the ratio moves more than the branch does.
 
-The last two rows are the finding that started this, and it is gone. Cost used
-to track how many rows the queries returned rather than how many were rendered —
-one person with 38 rows on screen beat five people with 6 — and the ladder is
-now flat across a threefold difference in returned rows. The cross-session
-comparison is loose (the live stores moved from 40 threads to 37 between the
-two), but not by anything like the margin.
+These are not the investigation's own starting figures, which put five people
+at 10.7-19.5 s. The live connector stores have drifted since — fewer threads,
+and at both sizes the pane now renders 32 rows — so the two are not comparable
+and main was re-measured here rather than quoted from the record. What the
+record holds is the shape of the finding; what this table holds is the current
+rig.
 
 What is left is one measurement and four design questions. The measurement is
 stage 8: a session that settles at ~800 ms after roughly twenty clicks, which
