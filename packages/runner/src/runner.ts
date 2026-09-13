@@ -9693,15 +9693,25 @@ export class Runner {
   /**
    * Pull the result cell once, after this transaction commits successfully.
    *
-   * The pull is schemaless on purpose, which makes `Cell.pull()` deep-traverse
-   * the whole result. That walk is what demands lazy producers under
-   * properties a declared result schema does not name — an eager node such as
-   * `navigateTo`, `generateText` or a `fetch*` can sit under one and still be
-   * valid by structural typing, and a schema-guided traversal descends only
-   * declared `properties` (`preparePlainSchemaPlan`), so its operation would
-   * never run. Narrowing this is measurable — about a quarter off a thread
-   * open on the unified inbox — and was tried and reverted for exactly that
-   * reason; see stage 7 of docs/plans/person-inbox-interaction-cost.md.
+   * The cell is rebuilt from the result's own normalized link, so it carries
+   * whatever schema that link carries — `getCellFromLink` falls back to
+   * `link.schema` when no explicit one is passed. Which of two things the pull
+   * then does depends on that:
+   *
+   * - With no schema, `Cell.pull()` deep-traverses the whole value, and that
+   *   walk is what demands lazy producers under properties nothing declared.
+   * - With one, it descends only declared `properties`
+   *   (`preparePlainSchemaPlan`), so an eager node — `navigateTo`,
+   *   `generateText`, a `fetch*` — sitting under an undeclared property is not
+   *   demanded and its operation may never run. That hazard is latent here
+   *   rather than introduced: it follows from the link's own schema, is
+   *   unmeasured, and wants a decision about what a start pull should demand.
+   *
+   * What is settled is that narrowing this FURTHER, by passing the pattern's
+   * result schema explicitly, is not the way: it measured about a quarter off a
+   * thread open on the unified inbox and was reverted for exactly the hazard
+   * above, widened to every such pull. See stage 7 of
+   * docs/plans/person-inbox-interaction-cost.md.
    */
   #pullCellOnceAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,

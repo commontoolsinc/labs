@@ -404,6 +404,18 @@ the reason in a comment so the next attempt starts from it.
 A fix that keeps the win has to demand the eager nodes some other way — a
 schema covering the whole artifact is the walk again, so it is not that.
 
+Review also found that the reverted state is not the schemaless one it was
+described as. `getCellFromLink` falls back to `link.schema` when no explicit
+schema is passed, and the cell is rebuilt from the result's own normalized
+link, so a result cell carrying a schema already gets a schema-guided pull and
+already skips undeclared properties. **The hazard is therefore latent on this
+path rather than introduced by the reverted change** — which widened it to
+every such pull, and is why it went back out. Whether the link's schema should
+be stripped there is the same decision, asked of behaviour that is already
+shipping: it is unmeasured, it would make every result pull a deep walk, and it
+belongs to whoever owns what a start pull should demand rather than to a
+performance change.
+
 **What is left, and two corrections that go with it.**
 
 *First correction.* An earlier draft called "stop the second traversal" the most
