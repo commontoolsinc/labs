@@ -2819,16 +2819,7 @@ export class CellBridge {
    * while one it started is running, this one is held back and scheduled when
    * it finishes. The counters in `.status` record the coalescing.
    */
-  #schedulePropRebuild(args: {
-    cell: Cell<unknown>;
-    newValue: unknown;
-    pieceId: string;
-    pieceIno: bigint;
-    pieceName: string;
-    propName: "input" | "result";
-    resolveLink: ResolveLink;
-    spaceName: string;
-  }): void {
+  #schedulePropRebuild(args: PropRebuildJob): void {
     const key = this.#propRebuildKey(args.pieceIno, args.propName);
     const pending = this.#pendingPropRebuilds.get(key);
     if (pending) {
@@ -3045,16 +3036,7 @@ export class CellBridge {
    * Rebuilds the mounted subtree of one piece prop from a new cell value, in
    * place.
    */
-  async #rebuildPieceProp(args: {
-    cell: Cell<unknown>;
-    newValue: unknown;
-    pieceId: string;
-    pieceIno: bigint;
-    pieceName: string;
-    propName: "input" | "result";
-    resolveLink: ResolveLink;
-    spaceName: string;
-  }): Promise<void> {
+  async #rebuildPieceProp(args: PropRebuildJob): Promise<void> {
     const startedAt = Date.now();
     if (this.#tree.getNode(args.pieceIno)?.kind !== "dir") {
       return;
@@ -4534,7 +4516,7 @@ export class CellBridge {
     callables: Array<
       { key: string; callableKind: CallableKind; schema?: JSONSchema }
     >,
-    resolveLink: (value: unknown, depth: number) => string | null,
+    resolveLink: ResolveLink,
     skipEntry: (value: unknown) => boolean,
     classifyEntry: (key: string, value: unknown) => CallableKind | null,
     annotator?: CfcProjectionAnnotator,
@@ -4960,7 +4942,7 @@ export class CellBridge {
    * directories using the standard `buildJsonTree()` path.
    */
   #makeFsSubtreeBuilder(
-    resolveLink: (v: unknown, depth: number) => string | null,
+    resolveLink: ResolveLink,
     skipEntry: (v: unknown) => boolean,
     classifyEntry: (k: string, v: unknown) => CallableKind | null,
     annotator?: CfcProjectionAnnotator,
@@ -5351,9 +5333,7 @@ export class CellBridge {
    *
    * A value that is not a sigil link, or is a handler cell, yields `null`.
    */
-  #makeLinkResolver(
-    spaceName: string,
-  ): (value: unknown, depth: number) => string | null {
+  #makeLinkResolver(spaceName: string): ResolveLink {
     return (value: unknown, depth: number): string | null => {
       if (!isSigilLink(value)) return null;
 

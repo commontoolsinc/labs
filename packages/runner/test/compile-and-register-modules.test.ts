@@ -11,14 +11,13 @@ import type { ModuleByteCache } from "../src/runtime.ts";
 import type { CompiledModuleArtifact } from "../src/harness/types.ts";
 
 /**
- * Conformance guard for CT-1811.
- *
  * The pattern-load seam `PatternManager.compileAndRegisterModules` must INDEX
  * the evaluated artifacts (so a pattern/op gets a content-addressed entry ref and
  * resolves via its canonical `$patternRef` artifact), while the bare
  * `Engine.compileAndEvaluateModules` primitive must NOT. This pins the contract
  * that lets harness callers get the full evaluated namespace without silently
- * skipping registration — the divergence that caused CT-1811.
+ * skipping registration — a divergence that would leave map/filter/flatMap
+ * ops falling back to their embedded graphs.
  */
 describe("PatternManager.compileAndRegisterModules", () => {
   let runtime: Runtime;
@@ -61,8 +60,8 @@ describe("PatternManager.compileAndRegisterModules", () => {
     const result = await engine.compileAndEvaluateModules(program);
     const entry = result.main!["default"] as object;
     // No registration → no content-addressed entry ref → map/filter/flatMap ops
-    // would fall back to the embedded graph (this is the CT-1811 hazard the seam
-    // exists to remove).
+    // would fall back to the embedded graph (the hazard the seam exists to
+    // remove).
     expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeUndefined();
   });
 

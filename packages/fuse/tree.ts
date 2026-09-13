@@ -6,8 +6,9 @@
  * for how a cell change rebuilds a subtree and invalidates kernel caches, and
  * the cache timeouts that bound how long a client can hold a stale entry;
  * `10-cfc-filesystem-api-semantics.md` for the errno decision table.
- * `RELIABILITY_DESIGN.md` says which module owns which state, and `README.md`
- * covers mount options and client-side cache tuning.
+ * `packages/fuse/RELIABILITY_DESIGN.md` says which module owns which state,
+ * and `packages/fuse/README.md` covers mount options and client-side cache
+ * tuning.
  */
 
 import type { CallableKind } from "./callables.ts";
