@@ -58,7 +58,7 @@ describe("verifyCompiledModuleBody", () => {
   });
 
   it("accepts a named re-export (`export { x } from` — var require preamble)", () => {
-    // CT-1661: TypeScript's CommonJS emit declares the module reference for a
+    // TypeScript's CommonJS emit declares the module reference for a
     // named re-export with `var` (hoisted ahead of the live getter), unlike the
     // `const` of a plain import. The import-preamble fast-path must accept the
     // `var` form so the re-export verifies instead of failing SES at runtime.
@@ -83,12 +83,12 @@ describe("verifyCompiledModuleBody", () => {
   });
 
   it("rejects a `var` require of a trusted runtime module", () => {
-    // CT-1661 follow-up (Codex P1): the `var` relaxation must not extend to
-    // trusted runtime bindings. A `var` binding is mutable at runtime (only a
-    // `const` throws on reassignment), and the verifier does not inspect trusted
-    // builder-callback bodies — so a `var cf = require("commonfabric")` could be
-    // reassigned to attacker code from inside a callback yet still pass
-    // trusted-builder classification. Runtime imports must stay `const`.
+    // The `var` relaxation must not extend to trusted runtime bindings. A
+    // `var` binding is mutable at runtime (only a `const` throws on
+    // reassignment), and the verifier does not inspect trusted builder-callback
+    // bodies — so a `var cf = require("commonfabric")` could be reassigned to
+    // attacker code from inside a callback yet still pass trusted-builder
+    // classification. Runtime imports must stay `const`.
     const body = `var cf = require("commonfabric");\n` +
       `const v = (0, cf.pattern)((s) => { cf = globalThis; return s; });\n` +
       `exports.v = v;`;
@@ -162,10 +162,10 @@ describe("verifyCompiledModuleBody", () => {
     expect(() => verifyCompiledModuleBody(body, "/regexes.ts")).not.toThrow();
   });
 
-  it("still classifies real division after the whitespace fix", () => {
-    // The companion regression: making whitespace transparent must not turn a
-    // genuine division operator into a regex. A module that only divides should
-    // verify (the `/` is an operator, never a literal).
+  it("classifies real division as an operator with whitespace transparent", () => {
+    // Making whitespace transparent must not turn a genuine division operator
+    // into a regex. A module that only divides should verify (the `/` is an
+    // operator, never a literal).
     const body = compiledBody({
       "/division.ts":
         `export function ratio(x: number, y: number): number {\n` +

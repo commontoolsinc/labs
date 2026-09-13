@@ -1,8 +1,7 @@
 /**
- * Tests for CT-1240: query result proxy ownKeys / enumeration
- *
- * Verifies that Object.keys(), spread, Object.entries(), and
- * JSON.stringify work correctly on query result proxies.
+ * Query result proxy ownKeys / enumeration: `Object.keys()`, spread,
+ * `Object.entries()`, and `JSON.stringify()` work correctly on query result
+ * proxies.
  */
 
 import { expect } from "@std/expect";
@@ -18,7 +17,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("CT-1240: query result proxy enumeration", () => {
+describe("query result proxy enumeration", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -279,13 +278,13 @@ describe("CT-1240: query result proxy enumeration", () => {
 
   it("getOwnPropertyDescriptor does not report inherited names as own", () => {
     // A trap that answers about OWN properties must not consult the prototype
-    // chain. It used to use `in`, so every member of `Object.prototype` came
+    // chain. Were it to use `in`, every member of `Object.prototype` would come
     // back as an own property of the proxy while `ownKeys` listed none of them
-    // -- two traps describing the same value, disagreeing. Downstream that made
-    // a read-back record unwritable: `unsafeObjectKeyIn()` refuses a
+    // -- two traps describing the same value, disagreeing. Downstream that
+    // makes a read-back record unwritable: `unsafeObjectKeyIn()` refuses a
     // `FabricValue` with own `__proto__`/`constructor` and asks with
-    // `Object.hasOwn()`, so writing a record back to a cell was rejected over
-    // keys it never had (loom CT-1949).
+    // `Object.hasOwn()`, so writing a record back to a cell would be rejected
+    // over keys it never had.
 
     const cell = runtime.getCell<{ a: number }>(
       space,
@@ -322,11 +321,11 @@ describe("CT-1240: query result proxy enumeration", () => {
     }
 
     // A name that is genuinely absent stays absent, and a real own key is
-    // still reported -- so the fix narrowed the answer without emptying it.
+    // still reported -- the answer is narrowed, not emptied.
     expect(Object.hasOwn(proxy, "definitelyNotAKeyAnywhere")).toBe(false);
     expect(Object.hasOwn(proxy, "a")).toBe(true);
 
-    // The two traps now agree, which is the property that was violated.
+    // The two traps agree.
     for (const key of Reflect.ownKeys(proxy)) {
       expect(Object.hasOwn(proxy, key as string)).toBe(true);
     }
