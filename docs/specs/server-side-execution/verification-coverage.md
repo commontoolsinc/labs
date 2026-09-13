@@ -9069,7 +9069,7 @@ supply; OW29/OW32/OW34 closed):
     pattern-facing-export question, still with the owner. Server
     matches client by construction (`servingPosture` gates nothing on
     this path). Pinned:
-    `packages/runner/test/ unresolved-input-lift.test.ts` (the
+    `packages/runner/test/unresolved-input-lift.test.ts` (the
     hop-target dead-end disposes and re-triggers on arrival; the
     stated-null control still flows), the full schema-view suite
     green; serving-runtime match witnessed by

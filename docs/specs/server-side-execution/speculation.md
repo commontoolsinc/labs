@@ -132,7 +132,8 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   > being retriggered when any of the reads so far change (just like a
   > regular call), and the output being `undefined`.
 
-  — owner (Berni), 2026-08-21. Two clauses, both RULED and built:
+  — owner (Berni), 2026-08-21. Two clauses, both RULED; clause 1
+  built, clause 2 built except as noted below:
 
   1. **The unresolved read refuses.** Link resolution marks a
      dead-end behind a followed hop (`pendingHopDoc`); the lazy read
@@ -166,7 +167,7 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      same non-event disposal, re-triggering on the reads so far. Today
      that holds for an asynchronous body's rejection; a refusal a
      synchronous body throws reaches the runner's catch before its
-     post-run is assigned, so the previous result stands, and the fix
+     `postRun` is assigned, so the previous result stands, and the fix
      is on the branch `codex/lift-refusal-disposition`. A pattern body
      cannot yet MINT the error itself (it is runner-internal; a
      pattern-facing refusal export is a flagged API question with the
