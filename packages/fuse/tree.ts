@@ -19,7 +19,10 @@ import {
 } from "./annotations.ts";
 import type { FsNode, JsonType } from "./types.ts";
 
+/** Inode of the root directory. */
 const ROOT_INO = 1n;
+
+/** Encoder for content given as a string. */
 const encoder = new TextEncoder();
 
 /**
@@ -34,10 +37,14 @@ const encoder = new TextEncoder();
  * both, which is what lets the caller leave unchanged entries cached.
  */
 export interface TransplantChanges {
+  /** Inodes whose cached data and attributes are stale. */
   changedInodes: Set<bigint>;
+
+  /** Per directory inode, the child names whose cached entry is stale. */
   entryChanges: Map<bigint, Set<string>>;
 }
 
+/** Returns whether `a` and `b` hold the same bytes. */
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -47,9 +54,9 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * Run a generated file's renderer and return bytes the tree owns. A string is
- * encoded, which already yields a fresh array; a `Uint8Array` is copied, so a
- * renderer reusing its buffer cannot mutate the published content.
+ * Runs a generated file's renderer and returns bytes the tree owns. A string
+ * is encoded, which already yields a fresh array; a `Uint8Array` is copied, so
+ * a renderer reusing its buffer cannot mutate the published content.
  */
 function ownedRender(render: () => Uint8Array | string): Uint8Array {
   const rendered = render();
@@ -58,28 +65,59 @@ function ownedRender(render: () => Uint8Array | string): Uint8Array {
     : new Uint8Array(rendered);
 }
 
+/**
+ * In-memory filesystem tree: nodes by inode, each directory's children by
+ * name, and parent, path, and name indexes kept in step with them. Inode 1 is
+ * the root directory, and every other inode is allocated once and never
+ * reused. A node is a directory, a file, a symlink, or a callable, as `FsNode`
+ * says; a file may be generated, re-rendered by `refreshGenerated()` whenever
+ * its size is asked for. A directory may carry a CFC annotation whose entry
+ * list is indexed by name and sorted lazily, when it is next read.
+ * `transplantSubtree()` reconciles a freshly built replacement onto a live
+ * subtree so that surviving paths keep their inodes, and reports which kernel
+ * caches went stale.
+ */
 export class FsTree {
+  /** Nodes by inode. */
   #inodes: Map<bigint, FsNode> = new Map();
+
+  /** Parent inode by child inode. */
   #parents: Map<bigint, bigint> = new Map();
+
+  /** Inode by absolute path. */
   #paths: Map<string, bigint> = new Map();
 
-  /** Reverse map: inode → path string (O(1) lookup). */
+  /** Absolute path by inode; the inverse of `#paths`. */
   #inoPaths: Map<bigint, string> = new Map();
 
-  /**
-   * Reverse map from inode to registered child name for constant-time lookup.
-   */
+  /** Name of each inode's entry in its parent. */
   #inoNames: Map<bigint, string> = new Map();
 
-  /** Renderers for inodes added by `addGeneratedFile`. */
+  /** Renderers of the files added by `addGeneratedFile()`, by inode. */
   #generated: Map<bigint, () => Uint8Array | string> = new Map();
 
+  /**
+   * Position of each name in an annotated directory's entry list, by directory
+   * inode.
+   */
   #cfcEntryIndexes = new Map<bigint, Map<string, number>>();
 
+  /**
+   * Annotated directories whose entry list has changed since it was last
+   * sorted.
+   */
   #unsortedCfcEntryDirectories = new Set<bigint>();
+
+  /** The inode the next allocation returns. */
   #nextIno = 2n;
+
+  /** Clock that mtimes are read from, in milliseconds. */
   #now: () => number;
 
+  /**
+   * Constructs an instance holding only the root directory, with mtimes read
+   * from `now`.
+   */
   constructor(now: () => number = () => Date.now()) {
     this.#now = now;
     // Create root directory (inode 1)
@@ -91,6 +129,10 @@ export class FsTree {
     this.#paths.set("/", ROOT_INO);
     this.#inoPaths.set(ROOT_INO, "/");
   }
+
+  //
+  // Instance members
+  //
 
   /**
    * The lookup indexes this tree keeps, one per annotated directory, which a
@@ -129,44 +171,19 @@ export class FsTree {
     return this.#nextIno++;
   }
 
-  /** The path an entry named `name` under `parentIno` has, or would have. */
+  /** Returns the path an entry named `name` under `parentIno` would have. */
   childPath(parentIno: bigint, name: string): string {
     const parentPath = this.getPath(parentIno);
     return parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
   }
 
-  #trackPath(ino: bigint, parentIno: bigint, name: string): void {
-    const path = this.childPath(parentIno, name);
-    this.#paths.set(path, ino);
-    this.#inoPaths.set(ino, path);
-    this.#inoNames.set(ino, name);
-  }
-
-  #untrackPath(ino: bigint): void {
-    const path = this.#inoPaths.get(ino);
-    if (path !== undefined) {
-      if (this.#paths.get(path) === ino) {
-        this.#paths.delete(path);
-      }
-      this.#inoPaths.delete(ino);
-      this.#inoNames.delete(ino);
-    }
-  }
-
-  #unlinkFromParent(ino: bigint): void {
-    const parentIno = this.#parents.get(ino);
-    if (parentIno === undefined) return;
-    const parent = this.#inodes.get(parentIno);
-    if (!parent || parent.kind !== "dir") return;
-    for (const [name, childIno] of parent.children) {
-      if (childIno === ino) {
-        parent.children.delete(name);
-        this.#removeCfcEntryAnnotation(parentIno, name);
-        break;
-      }
-    }
-  }
-
+  /**
+   * Adds a directory named `name` under `parentIno`, with `jsonType` saying
+   * which JSON container it projects when it projects one, and returns its
+   * inode.
+   *
+   * @throws If `parentIno` is not a directory.
+   */
   addDir(
     parentIno: bigint,
     name: string,
@@ -192,6 +209,13 @@ export class FsTree {
     return ino;
   }
 
+  /**
+   * Adds a file named `name` under `parentIno` holding `content` — a string
+   * is encoded as UTF-8 — and projecting a JSON value of `jsonType`, and
+   * returns its inode.
+   *
+   * @throws If `parentIno` is not a directory.
+   */
   addFile(
     parentIno: bigint,
     name: string,
@@ -222,11 +246,11 @@ export class FsTree {
   }
 
   /**
-   * Add a file whose bytes are produced by `render` rather than written.
+   * Adds a file whose bytes are produced by `render` rather than written.
    *
-   * The node's content is whatever `refreshGenerated` last published, and reads
-   * serve that. A client stops a read at the size it last learned, so the size
-   * a caller reports and the bytes it later serves have to come from one
+   * The node's content is whatever `refreshGenerated()` last published, and
+   * reads serve that. A client stops a read at the size it last learned, so the
+   * size a caller reports and the bytes it later serves have to come from one
    * render: publish where the size is reported. A render returning a
    * `Uint8Array` is copied, so a renderer reusing its buffer cannot change the
    * published content out from under a reader.
@@ -243,9 +267,9 @@ export class FsTree {
   }
 
   /**
-   * Re-render a generated file and publish the result as its content.
+   * Re-renders a generated file and publishes the result as its content.
    *
-   * Returns the published bytes, or undefined when `ino` is not a generated
+   * Returns the published bytes, or `undefined` when `ino` is not a generated
    * file. Call this where the file's size is about to be reported, so that the
    * size a client caches and the bytes a following read serves are one render.
    *
@@ -264,11 +288,18 @@ export class FsTree {
     return node.content;
   }
 
-  /** True when `ino` was added by `addGeneratedFile`. */
+  /** Returns whether `ino` was added by `addGeneratedFile()`. */
   isGenerated(ino: bigint): boolean {
     return this.#generated.has(ino);
   }
 
+  /**
+   * Adds a callable file named `name` under `parentIno` — a `callableKind` on
+   * `cellKey` of the piece's `cellProp` cell, run by `script` — and returns
+   * its inode.
+   *
+   * @throws If `parentIno` is not a directory.
+   */
   addCallable(
     parentIno: bigint,
     name: string,
@@ -299,6 +330,12 @@ export class FsTree {
     return ino;
   }
 
+  /**
+   * Adds a symlink named `name` under `parentIno` pointing at `target`, and
+   * returns its inode.
+   *
+   * @throws If `parentIno` is not a directory.
+   */
   addSymlink(parentIno: bigint, name: string, target: string): bigint {
     const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {
@@ -315,27 +352,37 @@ export class FsTree {
     return ino;
   }
 
+  /**
+   * Returns the inode of `name` under `parentIno`, or `undefined` when
+   * `parentIno` is not a directory or has no such entry.
+   */
   lookup(parentIno: bigint, name: string): bigint | undefined {
     const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") return undefined;
     return parent.children.get(name);
   }
 
+  /** Returns the node at `ino`, or `undefined` when there is none. */
   getNode(ino: bigint): FsNode | undefined {
     return this.#inodes.get(ino);
   }
 
   /**
-   * Advance a node's mtime because its directory entries changed through a path
-   * other than a transplant — a piece appearing under a space, or a piece
-   * directory gaining or losing a top-level entry. Content changes and
-   * transplant-reconciled entry changes advance mtime on their own.
+   * Advances a node's mtime, for an entry-set change that no transplant
+   * reports. Content changes and transplant-reconciled entry changes advance
+   * mtime on their own. Does nothing for an inode with no node.
    */
   touch(ino: bigint): void {
     const node = this.#inodes.get(ino);
     if (node) this.#bumpMtime(node);
   }
 
+  /**
+   * Sets `ino`'s CFC annotation, replacing any it had, and rebuilds the name
+   * index over its entries.
+   *
+   * @throws If `ino` does not exist.
+   */
   setCfcAnnotation(ino: bigint, annotation: CfcNodeAnnotation): void {
     const node = this.#inodes.get(ino);
     if (!node) {
@@ -345,49 +392,21 @@ export class FsTree {
     this.#rebuildCfcEntryIndex(ino, annotation);
   }
 
+  /**
+   * Returns `ino`'s CFC annotation, its entries sorted by name digest, or
+   * `undefined` when it has none.
+   */
   getCfcAnnotation(ino: bigint): CfcNodeAnnotation | undefined {
     this.#sortCfcEntries(ino);
     return this.#inodes.get(ino)?.cfc;
   }
 
-  #rebuildCfcEntryIndex(
-    ino: bigint,
-    annotation: CfcNodeAnnotation | undefined,
-  ): void {
-    this.#unsortedCfcEntryDirectories.delete(ino);
-    const entries = annotation?.entries?.entries;
-    if (!entries) {
-      this.#cfcEntryIndexes.delete(ino);
-      return;
-    }
-    this.#cfcEntryIndexes.set(
-      ino,
-      new Map(entries.map((entry, index) => [entry.name, index])),
-    );
-  }
-
-  #cfcEntryIndex(
-    ino: bigint,
-    entries: readonly CfcDirectoryEntryAnnotation[],
-  ): Map<string, number> {
-    let index = this.#cfcEntryIndexes.get(ino);
-    if (!index) {
-      index = new Map(entries.map((entry, offset) => [entry.name, offset]));
-      this.#cfcEntryIndexes.set(ino, index);
-    }
-    return index;
-  }
-
-  #sortCfcEntries(ino: bigint): void {
-    if (!this.#unsortedCfcEntryDirectories.delete(ino)) return;
-    const node = this.#inodes.get(ino);
-    if (!node || node.kind !== "dir" || !node.cfc?.entries) return;
-    node.cfc.entries.entries.sort((left, right) =>
-      left.nameDigest.localeCompare(right.nameDigest)
-    );
-    this.#rebuildCfcEntryIndex(ino, node.cfc);
-  }
-
+  /**
+   * Sets the annotation of the entry `name` in the annotated directory
+   * `parentIno`, appending or replacing, and leaves the entry list to be sorted
+   * on the next read. Does nothing for a directory carrying no entry
+   * annotations.
+   */
   setCfcEntryAnnotation(
     parentIno: bigint,
     name: string,
@@ -407,53 +426,31 @@ export class FsTree {
     this.#unsortedCfcEntryDirectories.add(parentIno);
   }
 
-  #removeCfcEntryAnnotation(parentIno: bigint, name: string): void {
-    const parent = this.#inodes.get(parentIno);
-    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
-    const entries = parent.cfc.entries.entries;
-    const index = this.#cfcEntryIndex(parentIno, entries);
-    const removedIndex = index.get(name);
-    if (removedIndex === undefined) return;
-    const lastIndex = entries.length - 1;
-    const last = entries[lastIndex];
-    entries.pop();
-    index.delete(name);
-    if (removedIndex !== lastIndex) {
-      entries[removedIndex] = last;
-      index.set(last.name, removedIndex);
-    }
-    this.#unsortedCfcEntryDirectories.add(parentIno);
-  }
-
-  #getCfcEntryAnnotation(
-    parentIno: bigint,
-    name: string,
-  ): CfcDirectoryEntryAnnotation | undefined {
-    const parent = this.#inodes.get(parentIno);
-    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) {
-      return undefined;
-    }
-    const entries = parent.cfc.entries.entries;
-    const index = this.#cfcEntryIndex(parentIno, entries).get(name);
-    return index === undefined ? undefined : entries[index];
-  }
-
+  /**
+   * Returns the entries of the directory `ino` as name and inode pairs, in
+   * insertion order; empty when `ino` is not a directory.
+   */
   getChildren(ino: bigint): [string, bigint][] {
     const node = this.#inodes.get(ino);
     if (!node || node.kind !== "dir") return [];
     return [...node.children.entries()];
   }
 
+  /**
+   * Returns the absolute path of `ino`, or `/` for an inode with no tracked
+   * path.
+   */
   getPath(ino: bigint): string {
     return this.#inoPaths.get(ino) ?? "/";
   }
 
   /**
-   * Update a file node's content and optionally its jsonType.
+   * Updates a file node's content and, when given, its `jsonType`, advancing
+   * its mtime only when the bytes change.
    *
-   * Throws if `ino` is not a file, or is a generated file — a generated file's
-   * content comes from its renderer through `refreshGenerated`, so writing it
-   * directly would be overwritten and is rejected.
+   * @throws If `ino` is not a file, or is a generated file — a generated
+   *   file's content comes from its renderer through `refreshGenerated()`, so
+   *   writing it directly would be overwritten and is rejected.
    */
   updateFile(
     ino: bigint,
@@ -479,7 +476,11 @@ export class FsTree {
     }
   }
 
-  /** Remove a child entry from parent's children map and clear the subtree. */
+  /**
+   * Removes the entry `name` from the directory `parentIno` and clears its
+   * subtree, and returns the inode removed, or `undefined` when there was no
+   * such entry.
+   */
   removeChild(parentIno: bigint, name: string): bigint | undefined {
     const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") return undefined;
@@ -493,11 +494,13 @@ export class FsTree {
   }
 
   /**
-   * Remove a directory entry while retaining its inode subtree.
+   * Removes the entry `name` from the directory `parentIno` while retaining its
+   * inode subtree, and returns the inode detached, or `undefined` when there
+   * was no such entry.
    *
    * FUSE can keep an inode alive after its final directory entry disappears.
-   * The caller clears the detached subtree after the kernel releases its
-   * lookup and open references.
+   * The caller clears the detached subtree after the kernel releases its lookup
+   * and open references.
    */
   detachChild(parentIno: bigint, name: string): bigint | undefined {
     const parent = this.#inodes.get(parentIno);
@@ -509,24 +512,14 @@ export class FsTree {
     return childIno;
   }
 
-  /** Recursively remove an inode and all its descendants from tracking maps. */
-  #clearSubtree(ino: bigint): void {
-    const node = this.#inodes.get(ino);
-    if (!node) return;
-    if (node.kind === "dir") {
-      for (const [, childIno] of node.children) {
-        this.#clearSubtree(childIno);
-      }
-    }
-    this.#inodes.delete(ino);
-    this.#parents.delete(ino);
-    this.#generated.delete(ino);
-    this.#cfcEntryIndexes.delete(ino);
-    this.#unsortedCfcEntryDirectories.delete(ino);
-    this.#untrackPath(ino);
-  }
-
-  /** Move a node between parents (or rename within same parent). */
+  /**
+   * Moves the entry `oldName` under `oldParentIno` to `newName` under
+   * `newParentIno`, replacing any entry already there, and carries its CFC
+   * entry annotation and path tracking along.
+   *
+   * @throws If either parent is not a directory, or `oldName` is not an entry
+   *   of `oldParentIno`.
+   */
   rename(
     oldParentIno: bigint,
     oldName: string,
@@ -578,29 +571,16 @@ export class FsTree {
     this.#retrackSubtree(childIno, newParentIno, newName);
   }
 
-  /** Recursively update path tracking for an inode and all its descendants. */
-  #retrackSubtree(
-    ino: bigint,
-    parentIno: bigint,
-    name: string,
-  ): void {
-    this.#untrackPath(ino);
-    this.#trackPath(ino, parentIno, name);
-    const node = this.#inodes.get(ino);
-    if (node?.kind === "dir") {
-      for (const [childName, childIno] of node.children) {
-        this.#retrackSubtree(childIno, ino, childName);
-      }
-    }
-  }
-
-  /** Get the registered child name for an inode. */
+  /**
+   * Returns the name of `ino`'s entry in its parent, or `undefined` for an
+   * inode with none.
+   */
   getNameForIno(ino: bigint): string | undefined {
     return this.#inoNames.get(ino);
   }
 
   /**
-   * Adopt an existing subtree's inodes into a freshly built replacement.
+   * Adopts an existing subtree's inodes into a freshly built replacement.
    *
    * `oldIno` roots the live subtree; `newIno` roots a replacement built with
    * fresh inodes under a staging name. The two roots must have the same node
@@ -617,6 +597,8 @@ export class FsTree {
    * staging name, then call this to swap it in atomically.
    *
    * Returns the kernel caches that went stale; see {@link TransplantChanges}.
+   *
+   * @throws If either root does not exist, or the two differ in kind.
    */
   transplantSubtree(oldIno: bigint, newIno: bigint): TransplantChanges {
     const oldNode = this.#inodes.get(oldIno);
@@ -639,9 +621,195 @@ export class FsTree {
   }
 
   /**
-   * Reconcile one replacement node onto its live counterpart, recursing into
-   * directory children. Assumes the two nodes share a kind. Leaves `newIno`'s
-   * node in place for the caller to discard once its content has been adopted.
+   * Removes the subtree rooted at `ino`, the node itself and its entry in its
+   * parent included. Does nothing for an inode with no node.
+   */
+  clear(ino: bigint): void {
+    const node = this.#inodes.get(ino);
+    if (!node) return;
+
+    this.#unlinkFromParent(ino);
+    this.#clearSubtree(ino);
+  }
+
+  /**
+   * Records `ino` as the entry `name` under `parentIno` in the path and name
+   * indexes.
+   */
+  #trackPath(ino: bigint, parentIno: bigint, name: string): void {
+    const path = this.childPath(parentIno, name);
+    this.#paths.set(path, ino);
+    this.#inoPaths.set(ino, path);
+    this.#inoNames.set(ino, name);
+  }
+
+  /**
+   * Removes `ino` from the path and name indexes, leaving a path that has come
+   * to name another inode alone.
+   */
+  #untrackPath(ino: bigint): void {
+    const path = this.#inoPaths.get(ino);
+    if (path !== undefined) {
+      if (this.#paths.get(path) === ino) {
+        this.#paths.delete(path);
+      }
+      this.#inoPaths.delete(ino);
+      this.#inoNames.delete(ino);
+    }
+  }
+
+  /**
+   * Removes `ino`'s entry, and its CFC entry annotation, from its parent's
+   * children. Does nothing for an inode with no parent.
+   */
+  #unlinkFromParent(ino: bigint): void {
+    const parentIno = this.#parents.get(ino);
+    if (parentIno === undefined) return;
+    const parent = this.#inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir") return;
+    for (const [name, childIno] of parent.children) {
+      if (childIno === ino) {
+        parent.children.delete(name);
+        this.#removeCfcEntryAnnotation(parentIno, name);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Rebuilds the name index over `annotation`'s entries for `ino`, dropping the
+   * index when the annotation has no entries, and marks the entries sorted.
+   */
+  #rebuildCfcEntryIndex(
+    ino: bigint,
+    annotation: CfcNodeAnnotation | undefined,
+  ): void {
+    this.#unsortedCfcEntryDirectories.delete(ino);
+    const entries = annotation?.entries?.entries;
+    if (!entries) {
+      this.#cfcEntryIndexes.delete(ino);
+      return;
+    }
+    this.#cfcEntryIndexes.set(
+      ino,
+      new Map(entries.map((entry, index) => [entry.name, index])),
+    );
+  }
+
+  /**
+   * Returns the name index over `entries` for the directory `ino`, building it
+   * on first use.
+   */
+  #cfcEntryIndex(
+    ino: bigint,
+    entries: readonly CfcDirectoryEntryAnnotation[],
+  ): Map<string, number> {
+    let index = this.#cfcEntryIndexes.get(ino);
+    if (!index) {
+      index = new Map(entries.map((entry, offset) => [entry.name, offset]));
+      this.#cfcEntryIndexes.set(ino, index);
+    }
+    return index;
+  }
+
+  /**
+   * Sorts the directory `ino`'s CFC entries by name digest and rebuilds its
+   * index, if the entries have changed since the last sort.
+   */
+  #sortCfcEntries(ino: bigint): void {
+    if (!this.#unsortedCfcEntryDirectories.delete(ino)) return;
+    const node = this.#inodes.get(ino);
+    if (!node || node.kind !== "dir" || !node.cfc?.entries) return;
+    node.cfc.entries.entries.sort((left, right) =>
+      left.nameDigest.localeCompare(right.nameDigest)
+    );
+    this.#rebuildCfcEntryIndex(ino, node.cfc);
+  }
+
+  /**
+   * Removes the annotation of the entry `name` from the annotated directory
+   * `parentIno`, moving the last entry into its slot, and leaves the list to be
+   * sorted on the next read.
+   */
+  #removeCfcEntryAnnotation(parentIno: bigint, name: string): void {
+    const parent = this.#inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
+    const entries = parent.cfc.entries.entries;
+    const index = this.#cfcEntryIndex(parentIno, entries);
+    const removedIndex = index.get(name);
+    if (removedIndex === undefined) return;
+    const lastIndex = entries.length - 1;
+    const last = entries[lastIndex];
+    entries.pop();
+    index.delete(name);
+    if (removedIndex !== lastIndex) {
+      entries[removedIndex] = last;
+      index.set(last.name, removedIndex);
+    }
+    this.#unsortedCfcEntryDirectories.add(parentIno);
+  }
+
+  /**
+   * Returns the annotation of the entry `name` in the annotated directory
+   * `parentIno`, or `undefined` when there is none.
+   */
+  #getCfcEntryAnnotation(
+    parentIno: bigint,
+    name: string,
+  ): CfcDirectoryEntryAnnotation | undefined {
+    const parent = this.#inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) {
+      return undefined;
+    }
+    const entries = parent.cfc.entries.entries;
+    const index = this.#cfcEntryIndex(parentIno, entries).get(name);
+    return index === undefined ? undefined : entries[index];
+  }
+
+  /**
+   * Removes `ino` and all of its descendants from every index, leaving `ino`'s
+   * entry in its parent to the caller.
+   */
+  #clearSubtree(ino: bigint): void {
+    const node = this.#inodes.get(ino);
+    if (!node) return;
+    if (node.kind === "dir") {
+      for (const [, childIno] of node.children) {
+        this.#clearSubtree(childIno);
+      }
+    }
+    this.#inodes.delete(ino);
+    this.#parents.delete(ino);
+    this.#generated.delete(ino);
+    this.#cfcEntryIndexes.delete(ino);
+    this.#unsortedCfcEntryDirectories.delete(ino);
+    this.#untrackPath(ino);
+  }
+
+  /**
+   * Re-records the paths of `ino`, as `name` under `parentIno`, and of all of
+   * its descendants.
+   */
+  #retrackSubtree(
+    ino: bigint,
+    parentIno: bigint,
+    name: string,
+  ): void {
+    this.#untrackPath(ino);
+    this.#trackPath(ino, parentIno, name);
+    const node = this.#inodes.get(ino);
+    if (node?.kind === "dir") {
+      for (const [childName, childIno] of node.children) {
+        this.#retrackSubtree(childIno, ino, childName);
+      }
+    }
+  }
+
+  /**
+   * Helper for `transplantSubtree()`, which reconciles one replacement node
+   * onto its live counterpart, recursing into directory children. Assumes the
+   * two nodes share a kind. Leaves `newIno`'s node in place for the caller to
+   * discard once its content has been adopted.
    */
   #transplantNode(
     oldIno: bigint,
@@ -716,21 +884,22 @@ export class FsTree {
   }
 
   /**
-   * Advance a node's mtime on a content change. Clamps to strictly greater than
-   * the node's previous mtime so two changes that land in the same wall-clock
-   * millisecond still produce distinct times — a client revalidating by
-   * attribute always sees a newer mtime after a content change, even on a
-   * backend that ignores the inode-invalidation notifications.
+   * Advances a node's mtime on a content change. Clamps to strictly greater
+   * than the node's previous mtime so two changes that land in the same
+   * wall-clock millisecond still produce distinct times — a client
+   * revalidating by attribute always sees a newer mtime after a content
+   * change, even on a backend that ignores the inode-invalidation
+   * notifications.
    */
   #bumpMtime(node: FsNode): void {
     node.mtime = Math.max(this.#now(), node.mtime + 1);
   }
 
   /**
-   * Copy a replacement node's content onto its surviving counterpart. Returns
-   * true if the file data, symlink target or callable script changed, so the
-   * caller can invalidate the inode's cached data. A directory returns false —
-   * its listing changes are reported through `entryChanges` instead.
+   * Copies a replacement node's content onto its surviving counterpart.
+   * Returns true if the file data, symlink target or callable script changed,
+   * so the caller can invalidate the inode's cached data. A directory returns
+   * false — its listing changes are reported through `entryChanges` instead.
    */
   #adoptContent(oldNode: FsNode, newNode: FsNode): boolean {
     if (oldNode.kind === "dir" && newNode.kind === "dir") {
@@ -763,6 +932,7 @@ export class FsTree {
     return false;
   }
 
+  /** Records in `changes` that the entry `name` under `parentIno` changed. */
   #recordEntryChange(
     changes: TransplantChanges,
     parentIno: bigint,
@@ -777,9 +947,10 @@ export class FsTree {
   }
 
   /**
-   * Remove a single node from tracking without touching its children. Used to
-   * drop a replacement node once its content has been adopted; its children
-   * have already been adopted or moved, so recursing would wrongly clear them.
+   * Removes a single node from tracking without touching its children, which is
+   * how a replacement node is dropped once its content has been adopted: its
+   * children have already been adopted or moved, so recursing would wrongly
+   * clear them.
    */
   #discardNodeShallow(ino: bigint): void {
     this.#unlinkFromParent(ino);
@@ -789,14 +960,5 @@ export class FsTree {
     this.#cfcEntryIndexes.delete(ino);
     this.#unsortedCfcEntryDirectories.delete(ino);
     this.#untrackPath(ino);
-  }
-
-  /** Remove a subtree rooted at `ino`, including the node itself. */
-  clear(ino: bigint): void {
-    const node = this.#inodes.get(ino);
-    if (!node) return;
-
-    this.#unlinkFromParent(ino);
-    this.#clearSubtree(ino);
   }
 }
