@@ -135,15 +135,28 @@ span says by how much".
 
 Measured on the same rig throughout — the unmodified pattern, live connector
 stores linked read-only, `serverExecution` off at both ends, a machine at load
-7-11 and never idle.
+6-12 and never idle. The figures below are a paired alternating A/B against
+`origin/main`: each arm rewrites the changed source files, restarts, relinks the
+stores and re-measures, three rounds at each size with the arms alternated, so
+the two columns differ only in this branch's own code.
 
-| | at the start | now |
+| one person's data | `origin/main` | this branch |
 | --- | ---: | ---: |
-| paced click, median | 1482 ms | 213-255 ms |
-| during eager clicking | 1711 ms | 413-563 ms |
+| paced click, median | 1220 ms | 284 ms |
+| during eager clicking | 6781 ms | 1565 ms |
+| paced after an eager burst | 1454 ms | 367 ms |
 | after ~20 clicks | — | ~800 ms, half of it the worker idle; see stage 8 |
-| 1 person's data (52 messages) | 187-524 ms | 327-358 ms |
-| 5 people's data (150 messages) | 10.7-19.5 s | 309-368 ms |
+
+| five people's data | `origin/main` | this branch |
+| --- | ---: | ---: |
+| paced click, median | 1239 ms | 422 ms |
+| during eager clicking | 6847 ms | 1463 ms |
+
+Separation at one person is complete — main's fastest paced click in any round
+was 1109 ms and the branch's slowest 376 ms. What the second table is for is the
+branch's own column rather than the ratio: 284 ms at one person against 422 ms
+at five. Main's column is the noisier of the two (794-1460 ms across rounds
+against the branch's 346-422), so the ratio moves more than the branch does.
 
 The last two rows are the finding that started this, and it is gone. Cost used
 to track how many rows the queries returned rather than how many were rendered —
