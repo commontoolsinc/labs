@@ -67,9 +67,10 @@
  *     `__proto__`.
  *
  * * arrays, type `FabricArray` -- In addition to the restrictions above, arrays
- *   are only considered valid if they have the named property `length` along
- *   with only properties that are valid array indices whose numeric values are
- *   less than `length`. Arrays with holes _are_ valid.
+ *   are only considered valid if they are direct instances of `Array`, and have
+ *   the named property `length` along with only properties that are valid array
+ *   indices whose numeric values are less than `length`. Arrays with holes
+ *   _are_ valid.
  *
  * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
  *   above, plain objects are only considered valid if they have the prototype
