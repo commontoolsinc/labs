@@ -1,8 +1,9 @@
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
-remains is removing the flag and the eager path for lift arguments; handler
-materialization is settled under Stage 5.
+remains is removing the flag and the eager path for lift arguments, and landing
+the synchronous refusal arm of Stage 5; handler materialization is settled
+there.
 
 The remaining execution sequence and acceptance gates are owned by the separate
 [lazy materialization fast-follow](lazy-materialization-fast-follow.md). This
@@ -431,13 +432,19 @@ chain so a wrapper and the transaction it wraps answer alike.
 
 ### Stage 5 — Runner integration
 
-**Done.** The runner marks the action's transaction around argument
-materialization and the body, and unmarks it before the result is written, so
-diffing and the scheduler's own reads keep eager semantics.
+**Done, except the synchronous refusal arm of its first item.** The runner
+marks the action's transaction around argument materialization and the body,
+and unmarks it before the result is written, so diffing and the scheduler's own
+reads keep eager semantics.
 
-- [x] A refusal — thrown out of the body, or caught inside it and found on the
+- [ ] A refusal — thrown out of the body, or caught inside it and found on the
       transaction afterwards — writes an undefined result through the ordinary
       path. Logged at info level as a non-run, not reported as an action error.
+      Verified for an asynchronous body's rejection and for a caught refusal; a
+      synchronous throw reaches the catch before the post-run is assigned, so
+      the previous result stands. The fix is on the branch
+      `codex/lift-refusal-disposition`, held for the pattern vintage gate's
+      owner.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The
