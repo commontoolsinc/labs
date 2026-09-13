@@ -15,6 +15,7 @@ import { createHarnessPolicyEvent } from "./contracts/policy.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
+  HarnessAcquiredSkills,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceReads,
@@ -151,6 +152,25 @@ export interface HarnessArtifactStore {
   persistSkillScriptExecutions?(
     executions: HarnessSkillScriptExecutions,
   ): Promise<string>;
+
+  /**
+   * Records which skills this run acquired scripts for, and where their bytes
+   * sit. A store that cannot write it omits it, and the run acquires no
+   * script rather than acquiring one it cannot say the location of.
+   */
+  persistAcquiredSkills?(
+    skills: HarnessAcquiredSkills,
+  ): Promise<string>;
+
+  /**
+   * Writes one acquired script into {@link acquiredSkillsDir} under
+   * `relativeDir`, and returns the host path it landed at.
+   */
+  writeAcquiredSkillScript?(
+    relativeDir: string,
+    path: string,
+    text: string,
+  ): Promise<string>;
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -256,6 +276,31 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     const path = join(this.runRoot, "cell-labels.json");
     await writeJsonFile(path, labels);
     return path;
+  }
+
+  async persistAcquiredSkills(
+    skills: HarnessAcquiredSkills,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "acquired-skills.json");
+    await writeJsonFile(path, skills);
+    return path;
+  }
+
+  async writeAcquiredSkillScript(
+    relativeDir: string,
+    scriptPath: string,
+    text: string,
+  ): Promise<string> {
+    const target = join(this.acquiredSkillsDir, relativeDir, scriptPath);
+    if (!isPathWithinRoot(resolve(target), resolve(this.acquiredSkillsDir))) {
+      throw new Error(
+        `acquired script path escapes the acquired-skills directory: ${scriptPath}`,
+      );
+    }
+    await ensureDir(dirname(target));
+    await Deno.writeTextFile(target, text);
+    return target;
   }
 
   async persistRunReport(

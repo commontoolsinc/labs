@@ -29,6 +29,7 @@ import type {
 } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type {
+  HarnessAcquiredSkills,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceReads,
@@ -175,6 +176,15 @@ export interface HarnessRunState {
   skillResourceReadsPath?: string;
   skillScriptExecutions?: HarnessSkillScriptExecutions;
   skillScriptExecutionsPath?: string;
+
+  /**
+   * The skills this run acquired scripts for, by pin, with where each script's
+   * bytes sit and the digest taken at acquisition. A run that acquired none
+   * has no record rather than an empty one.
+   */
+  acquiredSkills?: HarnessAcquiredSkills;
+
+  acquiredSkillsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -246,6 +256,15 @@ export interface CreateHarnessRunStateOptions {
   skillResourceReadsPath?: string;
   skillScriptExecutions?: HarnessSkillScriptExecutions;
   skillScriptExecutionsPath?: string;
+
+  /**
+   * The skills this run acquired scripts for, by pin, with where each script's
+   * bytes sit and the digest taken at acquisition. A run that acquired none
+   * has no record rather than an empty one.
+   */
+  acquiredSkills?: HarnessAcquiredSkills;
+
+  acquiredSkillsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -340,6 +359,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.skillScriptExecutionsPath !== undefined
       ? { skillScriptExecutionsPath: options.skillScriptExecutionsPath }
+      : {}),
+    ...(options.acquiredSkills !== undefined
+      ? { acquiredSkills: structuredClone(options.acquiredSkills) }
+      : {}),
+    ...(options.acquiredSkillsPath !== undefined
+      ? { acquiredSkillsPath: options.acquiredSkillsPath }
       : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }

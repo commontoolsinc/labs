@@ -61,7 +61,11 @@ import {
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
+import { HARNESS_ACQUIRED_SKILLS_TYPE } from "./contracts/skill.ts";
 import type {
+  HarnessAcquiredSkill,
+  HarnessAcquiredSkills,
+  HarnessAcquiredSkillScript,
   HarnessSkillAcquisition,
   HarnessSkillActivations,
   HarnessSkillRegistry,
@@ -496,6 +500,16 @@ const isSandboxPathWithinRoot = (root: string, path: string): boolean => {
   return normalizedPath === normalizedRoot ||
     normalizedPath.startsWith(`${normalizedRoot}/`);
 };
+
+/**
+ * Where a run that holds a skill's handle sees that skill's acquired scripts.
+ *
+ * One path rather than one per pin: a delegation carries a single
+ * `skillHandle`, so a child has one acquired skill and needs one mount, and a
+ * fixed path is what the recorded `sandboxPath` can be written against at
+ * acquisition — before any child exists to be told where its mount landed.
+ */
+const ACQUIRED_SKILL_MOUNT_PATH = "/acquired-skill";
 
 type HostSandboxMount = {
   kind: string;
@@ -1622,6 +1636,103 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return skillScriptExecutionsPath;
+  }
+
+  /**
+   * Writes one acquired skill's scripts where a run that holds its handle can
+   * execute them, and records where they went.
+   *
+   * The directory is a sibling of the run root rather than a child of it, and
+   * the check here is what makes that mean something: `acquire_skill` runs in
+   * the PARENT, so a script the parent's sandbox can reach is a script the
+   * planner can read — the one property the hostile-skill receipt rests on.
+   * Every mount is asked, the workspace and each `--host-mount` alike, because
+   * an operator mount over the artifact tree is the same hole as an artifact
+   * root inside the workspace. A covering mount refuses, named.
+   *
+   * The digest recorded here is the one taken at acquisition, over the bytes
+   * the pinned commit served, and it is what an execution re-checks the file
+   * against — the pin a registry script gets from the run-start snapshot.
+   *
+   * @throws Error when the run can write nowhere, or when a mount of this
+   * run's sandbox covers the directory.
+   */
+  async materializeAcquiredSkill(
+    options: {
+      registryId: string;
+      commitSha: string;
+      scripts: readonly {
+        path: string;
+        text: string;
+        valueDigest: string;
+      }[];
+    },
+  ): Promise<HarnessAcquiredSkill> {
+    const store = this.artifactStore;
+    if (
+      store?.acquiredSkillsDir === undefined ||
+      store.writeAcquiredSkillScript === undefined
+    ) {
+      throw new Error(
+        "acquiring a skill's scripts requires a run that can write artifacts",
+      );
+    }
+    const covering = this.#hostMountCovering(store.acquiredSkillsDir);
+    if (covering !== undefined) {
+      throw new Error(
+        `the acquired-skills directory is inside this run's ${
+          covering.name ?? covering.kind
+        } mount (${covering.hostPath} at ${covering.sandboxPath}), so a script written there would be readable by the run that acquires it`,
+      );
+    }
+    const slug = options.registryId.split("/").at(-1) ?? options.registryId;
+    // Keyed by the commit first: one commit is one tree, and the slug beneath
+    // it separates two skills acquired from the same one.
+    const relativeDir = `${options.commitSha}/${slug}`;
+    const scripts: HarnessAcquiredSkillScript[] = [];
+    for (const script of options.scripts) {
+      const hostPath = await store.writeAcquiredSkillScript(
+        relativeDir,
+        script.path,
+        script.text,
+      );
+      scripts.push({
+        path: script.path,
+        hostPath,
+        sandboxPath: `${ACQUIRED_SKILL_MOUNT_PATH}/${script.path}`,
+        valueDigest: script.valueDigest,
+        sizeBytes: new TextEncoder().encode(script.text).byteLength,
+      });
+    }
+    const acquired: HarnessAcquiredSkill = {
+      registryId: options.registryId,
+      commitSha: options.commitSha,
+      pin: `${options.registryId}@${options.commitSha}`,
+      hostRoot: joinHostPath(store.acquiredSkillsDir, relativeDir),
+      sandboxRoot: ACQUIRED_SKILL_MOUNT_PATH,
+      scripts,
+    };
+    const generatedAt = this.#now();
+    const acquiredSkills: HarnessAcquiredSkills = {
+      type: HARNESS_ACQUIRED_SKILLS_TYPE,
+      version: 1,
+      generatedAt,
+      skills: [
+        ...(this.#runState.acquiredSkills?.skills ?? []).filter((skill) =>
+          skill.pin !== acquired.pin
+        ),
+        acquired,
+      ],
+    };
+    const acquiredSkillsPath = await this.artifactStore
+      ?.persistAcquiredSkills?.(acquiredSkills);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { acquiredSkills, acquiredSkillsPath },
+      generatedAt,
+    );
+    await this.persistRunState();
+    return acquired;
   }
 
   nextToolOutputId(toolId: string): ToolOutputId {
