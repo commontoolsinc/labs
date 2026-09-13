@@ -723,9 +723,8 @@ Rules the shape carries, binding:
   history.
 - **Interim retention is UNBOUNDED, and that is accepted** (S8).
   Rows at `space` and `user:<p>` keys are touched by no session
-  retirement; the 32-per-action execution-context cap the observation
-  machinery carried is gone with the dropped tables, and
-  `scheduler_basis` specifies no replacement bound. The
+  retirement, and no execution-context bound exists —
+  `scheduler_basis` specifies none. The
   narrowing rule above removes the one case that would grow without
   a run to overwrite it; everything else is bounded in practice by
   overwrite-in-place per (action, instance). A real bound is the
@@ -764,14 +763,11 @@ index is the ONLY persisted scheduler state besides W and
 `eventWatermark`.
 
 **WARNING — the drop list is SEVEN tables, and an enumeration of the
-observation tables yields SIX** (D6). `scheduler_observation`,
-`scheduler_action_snapshot`, `scheduler_observation_replay`,
-`scheduler_read_index`, `scheduler_write_index` and
-`scheduler_action_state` hung off one spine; `scheduler_context_floor`
-had its own create and drop statements and is the one such an
-enumeration misses. A migration driven off the six-table enumeration
-leaves the floor table behind and fails the plan's stage-C criterion
-for a reason that reads like a mystery.
+observation tables yields SIX** (D6). `scheduler_context_floor` is
+the one such an enumeration misses: it hangs off no observation
+spine. A migration driven off the six-table enumeration leaves the
+floor table behind and fails the plan's stage-C criterion for a
+reason that reads like a mystery.
 `migrateSchedulerObservationTablesToBasis` in
 `packages/memory/v2/engine.ts` drives the drop from the seven-table
 list above; anything that re-derives that list must too.
@@ -787,13 +783,11 @@ migration that reads old rows would have to reinterpret
 `process_generation` history as overwrite-in-place state, which is
 the reshaping this section already rejected.
 
-**Old client / new server compat is already answered** (D11): the
-`persistentSchedulerState` capability was negotiated at hello, and a
-client whose server did not advertise it treated the state as absent
-and ran fresh. A migrated server advertises nothing to negotiate, so
-a client from before the migration takes that same fresh path; the
-negotiation itself is gone with the flag (D7 below), and no version
-handshake replaces it.
+**Old client / new server compat is already answered** (D11): a
+migrated server advertises no `persistentSchedulerState` capability
+at hello, and a client from before the migration reads that as absent
+state and runs fresh — the same path it takes against any server that
+does not advertise it. No version handshake is needed.
 
 **Protocol-layer deletions ride the same migration** (D7). With the
 persisted form gone the flag gates nothing, so the following delete
@@ -833,9 +827,9 @@ hand edit: ~110 fixture files under
 `packages/ts-transformers/test/fixtures/` embed the emitted marker,
 so the GOLDEN-REGENERATION procedure is a required step of the
 change, not a follow-up. Plan Phase 1 stage C sizes the full
-surface. (The OFF-arm observation-adoption path and its one
-certificate consumer, `observationMinimumContextRank` in `facade.ts`,
-are gone with the observation machinery — runtime-mapping.md N62.)
+surface. (The OFF-arm observation-adoption path, the one certificate
+consumer outside the transformer, is gone with the observation
+machinery — runtime-mapping.md N62.)
 
 ## 3c. CFC: the enforcement boundary is the action run
 

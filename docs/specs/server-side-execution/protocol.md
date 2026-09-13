@@ -510,9 +510,12 @@ recompute rule, RULED 2026-08-05).
 The storage layer already enforces the load-bearing rule: **one
 transaction writes one space — by DEFAULT, with one explicit opt-in.**
 A transaction FAILS if a writer for a different space was already
-opened on it (anchor: `packages/runner/src/storage/interface.ts`
-`writer(space)`) unless it opted in through `enableMultiSpaceWrites`
-(`interface.ts`), reachable only via the `.inSpace()` chain below —
+opened on it (`V2StorageTransaction.#claimWriteSpace()` in
+`packages/runner/src/storage/v2-transaction.ts` returns the
+`StorageTransactionWriteIsolationError` that
+`packages/runner/src/storage/interface.ts` declares) unless it opted
+in through `enableMultiSpaceWrites` (`interface.ts`), reachable only
+via the `.inSpace()` chain below —
 which is what makes an UNMARKED crossing always a bug. Reads cross
 freely (serving-loop.md §3b; cross-space label metadata flows with
 them). v2 keeps that invariant and adds the class discipline:

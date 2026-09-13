@@ -14,9 +14,7 @@ MUST/NEVER language is binding on implementers.
 
 Today's scope machinery. Paths are relative to `packages/runner/src/`
 unless another package is named; runtime-mapping.md rows 49/56/57/60
-remain the mapping rows. Where §7 documents an assumption that came
-from machinery the observation reduction deleted, it names that
-machinery as deleted.
+remain the mapping rows.
 
 - **Lattice and enum**: `CELL_SCOPES` in `scope.ts`; `narrowestScope`
   picks the narrowest by rank.
@@ -235,8 +233,7 @@ redirects — today's write path already preserves them (the
 `data-updating.ts`) — and the narrowing branch fires only
 strictly-narrower, so a later broader-scoped run writes THROUGH the
 sticky redirect into the narrow instance instead of un-narrowing the
-slot; the deleted server-side context floor (§7) narrowed the same
-way, and nothing replaced it. Per-scope
+slot. Per-scope
 result cells (`byScope`, §Anchors) let a node's output LINKS point
 broader again, but the slot redirect stays. No un-narrowing code
 exists anywhere on main, and v2 keeps it that way: the widen-back
@@ -392,19 +389,16 @@ instance run is charged against.
 Five load-bearing assumptions in the client-era scope machinery. All
 five hold for a client that computes ONLY ITS OWN instance and break
 for a SpaceServer deriving EVERY instance (§1). Each names live code,
-or the deleted machinery an assumption came from, not spec debt;
-Phases 1–5 meet them wherever scoped state appears. Where the
-machinery is gone — deleted with the observation reduction — the
-entry says so, because the assumption it documents still governs.
+not spec debt; Phases 1–5 meet them wherever scoped state appears.
 
 - **M1 — Scope is discovered by running AS (principal, session).**
   Discovery is ambient per-transaction state (the
   `#narrowestReadScope` ratchet in
   `storage/extended-storage-transaction.ts`): a run's scope is
-  learned by BEING the principal+session whose reads ratchet it, and
-  the deleted context floor assumed monotone evidence per fingerprint
-  (dropped by `migrateSchedulerObservationTablesToBasis` in
-  `packages/memory/v2/engine.ts`).
+  learned by BEING the principal+session whose reads ratchet it; no
+  server-side floor stands beside it
+  (`migrateSchedulerObservationTablesToBasis` in
+  `packages/memory/v2/engine.ts` drops `scheduler_context_floor`).
   → v2: the server must
   evaluate per-instance just to DISCOVER per-instance scope — N
   runs under N identities, with N time-varying (§2).
@@ -444,11 +438,8 @@ entry says so, because the assumption it documents still governs.
   is fed from the authenticated session at admission
   (`#decideTransaction()` in `packages/memory/v2/server.ts` threads
   principal + sessionId into `Engine.applyCommit`, whose
-  `applyCommitTransaction` constructs the key), and the deleted
-  observation mirrors (`upsertMirroredSchedulerObservation`, gone
-  with the observation reduction) refused to re-derive scope context:
-  a scoped write requires that instance's principal. → v2, RESOLVED
-  (R-Q6b,
+  `applyCommitTransaction` constructs the key): a scoped write
+  requires that instance's principal. → v2, RESOLVED (R-Q6b,
   2026-08-02): derived commits carry an explicit `scope_key` on
   every scoped write WITHIN the commit (protocol.md §1, §7), so
   `resolveScopeKey`'s session binding narrows to AUTHORED commits
@@ -457,8 +448,7 @@ entry says so, because the assumption it documents still governs.
   extension to scoped derived writes.
 - **M4 — Wake/sync dirtied by scope NAME — RESOLVED (stage F,
   landed dark).** Storage-side reader matching is exact-scope_key
-  (the deleted `findSchedulerReadersForWrite` was, and the query/watch
-  tracking that replaced it is scope_key-keyed, M2), and the wake/sync
+  (the query/watch tracking is scope_key-keyed, M2), and the wake/sync
   path now keys dirtiness
   AND delivery by scope INSTANCE (`toDirtyKey` =
   `${scope_key}\0${id}`, `packages/memory/v2/query.ts`; the session
@@ -471,10 +461,9 @@ entry says so, because the assumption it documents still governs.
   applicable set falls out structurally, since a session's graph
   evaluates under its own identity).
 - **M5 — Retention assumes instances are cheap to re-derive per
-  owner.** Session EXECUTION CONTEXTS were capped at 32 per action
-  (`MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION`, deleted with
-  the machinery it bounded); session DATA rows are never GC'd —
-  nothing retires session data today. → v2: §3's
+  owner.** No bound exists on the execution contexts an action
+  accumulates (`scheduler_basis` specifies none), and session DATA
+  rows are never GC'd — nothing retires session data today. → v2: §3's
   durable-with-retirement needs an actual GC design (§8 item 2),
   and a server owning ALL instances cannot have its working set
   silently evicted.
@@ -516,8 +505,7 @@ citations use it):
    ONE retirement rule needs it designed, not assumed. It MUST also
    cover NON-SESSION keys (S8): narrowing strands basis rows at
    `space` and `user:<p>` keys that no session retirement ever
-   touches, and the 32-per-action execution-context cap is gone with
-   the dropped tables while `scheduler_basis` specifies no bound of
+   touches, and `scheduler_basis` specifies no per-action bound of
    its own. The
    deletion rule in serving-loop.md §3b keeps the stranding from
    growing without bound in the narrowing case; a retirement design

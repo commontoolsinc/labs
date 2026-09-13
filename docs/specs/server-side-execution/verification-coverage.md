@@ -6696,10 +6696,9 @@ supply; OW29/OW32/OW34 closed):
     divergence (protocol.md §5 nonce convergence covers only
     intent-arrives); (L3) two code paths durably write `keyless:` refs
     (setup's stamp; `substituteOpPatternRefs`' sentinel, the latter
-    test-pinned as sanctioned) against `pattern-manager.ts`'s
-    never-durable contract (the `keyless:` tripwire in
-    `ensureKeylessPatternIdentity`) — whether a durable piece tree may
-    carry
+    test-pinned as sanctioned) against the never-durable contract
+    stated on `Runner.#sessionPatternPointers` in `runner.ts` —
+    whether a durable piece tree may carry
     a pointer only one session can load is the unstated
     identity-assignment semantic. Fixing L3 alone would NOT green the
     step (the verdict is L1+L2); fixing L1/L2 alone leaves durable
