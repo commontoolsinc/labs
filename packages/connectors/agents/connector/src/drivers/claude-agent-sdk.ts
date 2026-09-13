@@ -551,35 +551,40 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
     // #withSourceEnvironment here: its module-global queue is only for short
     // SDK methods that lack an env option, and holding it across a full turn
     // would block every Claude source behind one in-flight prompt.
-    const query = this.#sdk.query({
-      prompt,
-      options: {
-        ...sessionOptions,
-        ...(this.#sessionModes.has(nativeSessionId)
-          ? { permissionMode: this.#sessionModes.get(nativeSessionId) }
-          : {}),
-        ...(this.#sessionModels.has(nativeSessionId)
-          ? { model: this.#sessionModels.get(nativeSessionId) }
-          : {}),
-        ...(this.#sessionModes.get(nativeSessionId) === "bypassPermissions"
-          ? { allowDangerouslySkipPermissions: true }
-          : {}),
-        env: {
-          ...this.#queryBaseEnvironment,
-          ...this.#config.env,
-          ...(this.#config.configDir
-            ? { CLAUDE_CONFIG_DIR: this.#config.configDir }
-            : {}),
-        },
-      },
-    });
-    this.#activeQueries.set(nativeSessionId, query);
-    if (this.#pendingPrompts.get(nativeSessionId) === pending) {
-      this.#pendingPrompts.delete(nativeSessionId);
-    }
+    //
+    // The query is constructed inside the failure path: an SDK that throws
+    // while constructing one has failed the query as surely as one that
+    // throws while running it, and the caller sees one outcome for both.
+    let query: ReturnType<ClaudeSdkAdapter["query"]> | undefined;
     let lastMessage: unknown;
     let activated = false;
     try {
+      query = this.#sdk.query({
+        prompt,
+        options: {
+          ...sessionOptions,
+          ...(this.#sessionModes.has(nativeSessionId)
+            ? { permissionMode: this.#sessionModes.get(nativeSessionId) }
+            : {}),
+          ...(this.#sessionModels.has(nativeSessionId)
+            ? { model: this.#sessionModels.get(nativeSessionId) }
+            : {}),
+          ...(this.#sessionModes.get(nativeSessionId) === "bypassPermissions"
+            ? { allowDangerouslySkipPermissions: true }
+            : {}),
+          env: {
+            ...this.#queryBaseEnvironment,
+            ...this.#config.env,
+            ...(this.#config.configDir
+              ? { CLAUDE_CONFIG_DIR: this.#config.configDir }
+              : {}),
+          },
+        },
+      });
+      this.#activeQueries.set(nativeSessionId, query);
+      if (this.#pendingPrompts.get(nativeSessionId) === pending) {
+        this.#pendingPrompts.delete(nativeSessionId);
+      }
       if (!activateAfterFirstMessage) {
         activated = true;
         await options.onSessionActive?.();
@@ -602,10 +607,15 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
         },
       };
     } finally {
-      if (this.#activeQueries.get(nativeSessionId) === query) {
-        this.#activeQueries.delete(nativeSessionId);
+      if (query !== undefined) {
+        if (this.#activeQueries.get(nativeSessionId) === query) {
+          this.#activeQueries.delete(nativeSessionId);
+        }
+        query.close();
       }
-      query.close();
+      if (this.#pendingPrompts.get(nativeSessionId) === pending) {
+        this.#pendingPrompts.delete(nativeSessionId);
+      }
     }
   }
 

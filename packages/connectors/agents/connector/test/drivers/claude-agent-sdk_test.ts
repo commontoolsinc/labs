@@ -1234,4 +1234,44 @@ Deno.test("Claude driver applies a start's mode to the first turn, drops it when
   const retried = retries.filter((call) => call.method === "query").at(-1)
     ?.args[0] as { options: Record<string, unknown> };
   assertEquals(retried.options.permissionMode, undefined);
+
+  // An SDK that throws while constructing the query fails the start the
+  // same way, and the mode is dropped the same way.
+  const throwing: Array<{ method: string; args: unknown[] }> = [];
+  let constructions = 0;
+  const brittle = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    {
+      ...sdkWithoutSessions(throwing),
+      query: (
+        params: { prompt: string; options?: Record<string, unknown> },
+      ) => {
+        throwing.push({ method: "query", args: [params] });
+        constructions++;
+        if (constructions === 1) throw new Error("no claude binary");
+        return fakeQuery([
+          { type: "system", subtype: "init", session_id: NEW_SESSION_ID },
+          { type: "result", subtype: "success" },
+        ]);
+      },
+    },
+  );
+  const thrown = await brittle.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    mode: "plan",
+  });
+  assertEquals(thrown.status, "failed");
+  assertEquals(thrown.error?.code, "claude-query-failed");
+  assertEquals(
+    (await brittle.startSession(NEW_SESSION_ID, { text: "Hi" })).status,
+    "succeeded",
+  );
+  const afterThrow = throwing.filter((call) => call.method === "query").at(-1)
+    ?.args[0] as { options: Record<string, unknown> };
+  assertEquals(afterThrow.options.permissionMode, undefined);
 });

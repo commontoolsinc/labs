@@ -1490,7 +1490,8 @@ const DebugView = pattern<DebugInput, DebugOutput>(
         nativeSessionId: fields.nativeSessionId.trim(),
         type: fields.type,
         payload: commandPayload(fields),
-        ...(fields.type === "prompt" && commandForce.get() === true
+        ...((fields.type === "prompt" || fields.type === "start") &&
+            commandForce.get() === true
           ? { force: true }
           : {}),
       };
