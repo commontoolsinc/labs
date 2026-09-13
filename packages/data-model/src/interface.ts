@@ -29,12 +29,12 @@ export type * from "./api.ts";
 //
 // "Layer" types
 //
-// These are the types which proved a looser `FabricValue`-like definition which
-// only covers a single layer of containers. For example, an array typed to be
-// `FabricValue` is defined as deeply only containing `FabricValue`s, an array
-// typed to be `FabricValueLayer` does not nail down the types of its contents,
-// while still semantically carrying the other `FabricValue` restrictions on
-// arrays (e.g., no synthetic keys, no named properties other than `length`).
+// A layer type is a `FabricValue`-like type whose claim stops at the root
+// container. `FabricValueLayer` leaves what the root holds untyped, and the
+// `Mutable*Layer` types keep what it holds as ordinary `FabricValue`s but
+// leave the root itself writable. In each case the root still carries the
+// other `FabricValue` restrictions on its kind of container (e.g., for an
+// array, no synthetic keys and no named properties other than `length`).
 //
 
 /**
@@ -77,7 +77,7 @@ export type MutableFabricValueLayer =
   | MutableFabricPlainObjectLayer;
 
 //
-// Types for dealing with native (non-fabric a/k/a "wild west" values)
+// Types for dealing with native (non-fabric, a/k/a "wild west") values
 //
 
 /**
@@ -118,16 +118,23 @@ export type FabricConvertibleValue =
   | { readonly [key: string]: FabricConvertibleValue };
 
 //
-// `FabricSpecialObject`
+// Abstract base classes
+//
+// The _class_ definitions corresponding to the _interface_ definitions in
+// `api.ts` of `FabricSpecialObject` and its only two direct subclasses.
 //
 
 /**
- * Abstract base class for all fabric-system value types. This is the common
- * superclass of `FabricInstance` (object-like protocol types) and
- * `FabricPrimitive` (immutable special primitives). It enables a single
- * `instanceof FabricSpecialObject` check wherever code needs to recognize any
- * fabric-system value without caring which branch of the hierarchy it
- * belongs to.
+ * Common base class for `FabricInstance` and `FabricPrimitive`, which are the
+ * only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
+ * differ along one axis: whether the data model treats an instance as a
+ * primitive. A `FabricPrimitive` is treated the way a built-in `string` or
+ * `number` is; a `FabricInstance` is treated the way an `object` is. What
+ * follows from that, and what a caller sees of it, is that a `FabricInstance`
+ * may hold and expose arbitrary outgoing `FabricValue` references, and a
+ * `FabricPrimitive` may not. Enables a single `instanceof FabricSpecialObject`
+ * check wherever code needs to recognize any fabric-system value without
+ * caring which branch of the hierarchy it belongs to.
  *
  * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
  * exists only in the type system: `declare` emits no runtime member, and
@@ -147,17 +154,12 @@ export abstract class FabricSpecialObject {
   declare readonly "@commonfabric/FabricSpecialObject": true;
 }
 
-//
-// `FabricValue` abstract base class hierarchy
-//
-// These are the _class_ definitions which correspond to the _interface_
-// definitions of the only two direct subtypes/subclasses of
-// `FabricSpecialObject`.
-//
-
 /**
- * Abstract base class for values that participate in the fabric protocol.
- * See Section 2.3 of the formal spec.
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as non-primitives. An instance may hold and expose arbitrary
+ * outgoing `FabricValue` references, and is mutable until frozen.
+ * `FabricSpecialObject` says how this differs from `FabricPrimitive`. See
+ * Section 2.3 of the formal spec.
  *
  * This is the pure abstract protocol -- the `instanceof`-able contract that
  * external code is written against. Concrete `FabricInstance` classes in the
@@ -166,8 +168,8 @@ export abstract class FabricSpecialObject {
  * template-method scaffolding (such as `shallowClone()`) lives.
  *
  * An instance holds all of its state privately and makes it reachable only
- * through members, so it has no own properties at all. A structural view of
- * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
+ * through members, so it has no enumerable own properties. A structural view
+ * of one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
  * Mutable state is exposed as an accessor pair over a private field, whose
  * setter is responsible for honoring the instance's frozen state:
  * `Object.freeze()` bears only on own properties and so cannot enforce that
@@ -207,18 +209,20 @@ export abstract class FabricInstance extends FabricSpecialObject {
 }
 
 /**
- * Abstract base class for "special primitive" fabric types -- values that
- * behave like primitives in the fabric type system but are represented as
- * class instances for type safety and dispatch. Covers temporal types,
- * content IDs, byte sequences, and similar.
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as primitives: values that behave like primitives in the fabric
+ * type system but are represented as class instances for type safety and
+ * dispatch. Covers temporal types, content IDs, byte sequences, and similar.
+ * `FabricSpecialObject` says how this differs from `FabricInstance`.
  *
  * This class enables a single `instanceof` check where code needs to handle
  * any `FabricPrimitive` uniformly.
  *
- * Instances are always frozen (like true primitives, they are immutable).
- * Each leaf subclass must call `Object.freeze(this)` at the end of its
- * constructor, after all fields are initialized. (Freezing in the base
- * constructor would prevent subclass field assignment.)
+ * Instances are always frozen (like true primitives, they are immutable), pass
+ * through the native conversions unchanged, and hold no arbitrary outgoing
+ * `FabricValue` reference. `BaseFabricPrimitive` freezes each instance at
+ * construction; a subclass keeps its state in private fields, which the freeze
+ * does not reach.
  *
  * See Section 1.4.6 of the formal spec.
  */

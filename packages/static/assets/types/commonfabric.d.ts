@@ -77,7 +77,7 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  */
 
 //
-// Top-level `FabricValue` definition
+// `FabricValue` and the types defined directly from it
 //
 
 /**
@@ -168,7 +168,7 @@ export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
 
 //
-// `FabricValue`-specific base class details
+// `FabricSpecialObject` and its two direct subclasses
 //
 
 /**
@@ -181,12 +181,21 @@ export interface FabricPlainObject
 export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 
 /**
- * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
- * single `instanceof` check for any fabric-system value type. As part of the
- * overall `FabricValue` contract, no concrete instance of this class exposes
- * any own-properties; all interaction with an instance is via its concrete
- * class's instance members, and in particular an object-spread (`{ ...instance
- * }`) on an instance will always yield an empty objectg (`{}`).
+ * Common base class for `FabricInstance` and `FabricPrimitive`, which are the
+ * only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
+ * differ along one axis: whether the data model treats an instance as a
+ * primitive. A `FabricPrimitive` is treated the way a built-in `string` or
+ * `number` is; a `FabricInstance` is treated the way an `object` is. What
+ * follows from that, and what a caller sees of it, is that a `FabricInstance`
+ * may hold and expose arbitrary outgoing `FabricValue` references, and a
+ * `FabricPrimitive` may not. Enables a single `instanceof` check for any
+ * value known to be a `FabricValue`.
+ *
+ * As part of the overall `FabricValue` contract, no concrete instance of this
+ * class exposes any enumerable own property; all interaction with an instance
+ * is via its concrete class's instance members, and in particular an
+ * object-spread (`{ ...instance }`) on an instance always yields an empty
+ * object (`{}`).
  *
  * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
  * runtime existence — see the canonical declaration in
@@ -206,11 +215,11 @@ export declare const FabricSpecialObject:
   & (abstract new (...args: any) => FabricSpecialObject);
 
 /**
- * Abstract base class for non-primitive-like instances that participate in the
- * fabric protocol. Instances of this class are treated by the `data-model` the
- * same as built-in JavaScript primitive values (e.g. `string`s and `number`s),
- * to the extent possible. Notably, instances of this class are _forbidden_ (by
- * contract) from referring to arbitrary externally-visible `FabricValue`s.
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as primitives. An instance is always frozen, passes through the
+ * native conversions unchanged, and holds no arbitrary outgoing `FabricValue`
+ * reference. `FabricSpecialObject` says how this differs from
+ * `FabricInstance`.
  */
 export interface FabricPrimitive extends FabricSpecialObject {}
 
@@ -223,12 +232,10 @@ export declare const FabricPrimitive:
   & (abstract new (...args: any) => FabricPrimitive);
 
 /**
- * Abstract base class for non-primitive-like instances that participate in the
- * fabric protocol. The primary distinction between this class and
- * `FabricPrimitive` is akin to primitive types (e.g. `string` and `number`) vs.
- * non-primitive types (e.g. `object`) in JavaScript in general. Most notably,
- * instances of this class _are_ allowed to have arbitrary externally-visible
- * `FabricValue` references.
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as non-primitives. An instance may hold and expose arbitrary
+ * outgoing `FabricValue` references, and is mutable until frozen.
+ * `FabricSpecialObject` says how this differs from `FabricPrimitive`.
  */
 export interface FabricInstance extends FabricSpecialObject {
   /**
@@ -502,7 +509,7 @@ export declare const FabricLink: FabricLinkConstructor;
 // absence is a decision, not an oversight; revisit once that rework lands.
 
 //
-// Debug-stringification types
+// Debug-rendering option types
 //
 
 /**
