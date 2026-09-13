@@ -174,6 +174,14 @@ export abstract class FabricSpecialObject {
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
+   * `never` here since an instance of this class holds only `FabricValue`s.
+   * Declared the way the `FabricSpecialObject` brand is, and for the same
+   * reasons; `api.ts` declares the identical member.
+   */
+  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+
+  /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
    * true`, produces a frozen instance with maximal structural sharing,

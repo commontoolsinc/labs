@@ -45,8 +45,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * Pattern-visible declarations for the fabric value type system, and for the
  * options of the debug renderers over it, in the form that `@commonfabric/api`
  * re-exports to patterns. Everything here is an interface, a type, or a
- * `declare const`, except for the one brand-key constant, so the module's only
- * runtime footprint is that constant.
+ * `declare const`, except for the two brand-key constants, so the module's only
+ * runtime footprint is those constants.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -263,6 +263,16 @@ export declare const FabricPrimitive:
  */
 export interface FabricInstance extends FabricSpecialObject {
   /**
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`. It
+   * exists only in the type system, as the `FabricSpecialObject` brand does,
+   * and is `never` here: an instance of this type holds only `FabricValue`s,
+   * which is what makes it a `FabricInstancePlus<never>`, and what keeps a
+   * `FabricInstancePlus` of any other `PlusType` from being taken for one.
+   * `FABRIC_INSTANCE_PLUS_BRAND` is the key.
+   */
+  readonly "@commonfabric/FabricInstancePlus"?: never;
+
+  /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
    * true`, produces a frozen instance with maximal structural sharing,
@@ -289,10 +299,18 @@ export declare const FabricInstance:
 //
 
 /**
+ * The nominal brand key declared on `FabricInstance` and `FabricInstancePlus`,
+ * whose type in a declaration is the `PlusType` the instance may hold. As with
+ * `FABRIC_SPECIAL_OBJECT_BRAND`, a runtime instance never carries the key, so
+ * a schema derived from either type leaves it out.
+ */
+export const FABRIC_INSTANCE_PLUS_BRAND = "@commonfabric/FabricInstancePlus";
+
+/**
  * Type which is equivalent to `FabricValue`, except that it is compatible with
  * one additional type, the `PlusType`: This type is a union of `FabricValue`,
- * `PlusType`, and both arrays and plain objects which recursively include this
- * type as possible elements.
+ * `PlusType`, and the containers -- arrays, plain objects, and instances --
+ * whose contents may recursively include this type.
  *
  * **Note:** `FabricValuePlus<never>` is the same type as `FabricValue` itself.
  */
@@ -318,20 +336,22 @@ export interface FabricPlainObjectPlus<PlusType>
   extends Readonly<Record<string, FabricValuePlus<PlusType>>> {}
 
 /**
- * `FabricValuePlus` variant of `FabricInstance`.
- *
- * **Note:** From the typesystem perspective this is treated as an extension of
- * `FabricInstance`, though depending on perspective this could be considered a
- * type lie.
+ * Like `FabricInstance`, except that the instance may hold `PlusType` values
+ * where a `FabricInstance` holds only `FabricValue`s. A `FabricInstance` is a
+ * `FabricInstancePlus<never>`, and is assignable to this type at any
+ * `PlusType`; the reverse holds only at `never`.
  */
-export interface FabricInstancePlus<PlusType> extends FabricInstance {
-  // TODO(danfuzz): Figure out a better way to use TypeScript to define this
-  // type. See the "note" above for a brief bit about the problem.
+export interface FabricInstancePlus<PlusType> extends FabricSpecialObject {
+  /**
+   * The nominal brand that carries `PlusType`. It exists only in the type
+   * system; the same-named member of `FabricInstance` says how.
+   */
+  readonly "@commonfabric/FabricInstancePlus"?: PlusType;
 
-  /** @inheritDoc */
+  /** Like `FabricInstance.deepClone()`, but returning this type. */
   deepClone(frozen: boolean): FabricInstancePlus<PlusType>;
 
-  /** @inheritDoc */
+  /** Like `FabricInstance.shallowClone()`, but returning this type. */
   shallowClone(frozen: boolean): FabricInstancePlus<PlusType>;
 }
 
