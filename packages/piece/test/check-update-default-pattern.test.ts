@@ -1926,7 +1926,8 @@ describe("opening a space root", () => {
     });
     expect(pinError).toBeUndefined();
     // The pinned OLD pattern really is loadable — "loadable but unrunnable" is
-    // the precise state the pattern-updater's loadability gate leaves pinned.
+    // the precise state the cold-start repair's load check passes on to the
+    // setup repair, whose failure is what reaches this heal.
     await expect(
       runtime.patternManager.loadPatternByIdentity(
         oldRef.identity,
