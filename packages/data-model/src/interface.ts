@@ -36,8 +36,11 @@ export type * from "./api.ts";
 //
 
 /**
- * Single "layer" of fabric validity. Arrays and objects have the right shape
- * but their contents may not. Deep-immutability is maintained as a requirement.
+ * Single "layer" of fabric validity: a `FabricValue`, or an array or plain
+ * object root whose contents are untyped. Arrays and objects have the right
+ * shape but their contents may not. As with `FabricValue`, the type system
+ * requires deep immutability -- the type is deeply `readonly` -- while actual
+ * deep-freezing happens only tactically.
  */
 export type FabricValueLayer = FabricValuePlus<
   Readonly<unknown[] | Record<string, unknown>>

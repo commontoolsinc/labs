@@ -117,7 +117,7 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  *
  * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
  *   above, plain objects are only considered valid if they have the prototype
- *   `Object`.
+ *   `Object.prototype` and no non-enumerable own properties.
  *
  * * extensions to JS primitive types, type `FabricPrimitive` -- This is one of
  *   two non-builtin `object` types that can be considered valid. They are meant
@@ -295,7 +295,7 @@ export declare const FabricInstance:
   & (abstract new (...args: any) => FabricInstance);
 
 //
-// `FabricValuePlus` and related types.
+// `FabricValuePlus` and related types
 //
 
 /**
