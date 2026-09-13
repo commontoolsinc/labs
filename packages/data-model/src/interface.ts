@@ -153,7 +153,11 @@ export abstract class FabricSpecialObject {
 }
 
 //
-// `FabricInstance` protocol
+// `FabricValue` abstract base class hierarchy
+//
+// These are the _class_ definitions which correspond to the _interface_
+// definitions of the only two direct subtypes/subclasses of
+// `FabricSpecialObject`.
 //
 
 /**
@@ -206,10 +210,6 @@ export abstract class FabricInstance extends FabricSpecialObject {
    */
   abstract shallowClone(frozen: boolean): FabricInstance;
 }
-
-//
-// `FabricPrimitive` base class
-//
 
 /**
  * Abstract base class for "special primitive" fabric types -- values that
