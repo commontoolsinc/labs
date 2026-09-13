@@ -2488,6 +2488,18 @@ export class CfHarnessEngine {
       ) => {
         await this.recordSkillScriptExecution(execution);
       },
+      ...(this.artifactStore?.writeAcquiredSkillScript !== undefined
+        ? {
+          materializeAcquiredSkill: (
+            options: Parameters<
+              CfHarnessEngine["materializeAcquiredSkill"]
+            >[0],
+          ) => this.materializeAcquiredSkill(options),
+        }
+        : {}),
+      ...(this.#runState.acquiredSkills !== undefined
+        ? { acquiredSkills: this.#runState.acquiredSkills.skills }
+        : {}),
       createCfcInvocationContext: (options: {
         toolId: string;
         toolOutputId?: ToolOutputId;

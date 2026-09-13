@@ -250,6 +250,40 @@ export const acquireSkillTool: HarnessToolDefinition<
         );
       }
       await runtime.idle();
+      // The scripts are written before the handle is minted, so a refusal
+      // here — a mount of this run's sandbox covering the directory they
+      // would land in — leaves no handle to a skill whose scripts the
+      // acquiring run could read. That is a different boundary from the one
+      // CT-2302 forces a sidestep on: this is who may READ the bytes, which
+      // is the property the hostile-skill receipt rests on.
+      //
+      // `loadedPaths` already names them, so what the model is told it holds
+      // does not change shape: the handle still carries the instructions, and
+      // the scripts are something the operator's allowlist decides about.
+      if (acquired.scripts.length > 0) {
+        if (context.materializeAcquiredSkill === undefined) {
+          return errorOutput(
+            "acquire_skill cannot hold this skill's scripts: the run writes no artifacts",
+          );
+        }
+        try {
+          await context.materializeAcquiredSkill({
+            registryId: resolvedPin.id,
+            commitSha: resolvedPin.commitSha,
+            scripts: acquired.scripts.map((script) => ({
+              path: script.path,
+              text: script.text,
+              valueDigest: script.valueDigest,
+            })),
+          });
+        } catch (error) {
+          return errorOutput(
+            `acquire_skill could not hold this skill's scripts: ${
+              safeErrorMessage(error)
+            }`,
+          );
+        }
+      }
       // The same host-observed facts the mark on the write carries, kept on
       // the handle entry as well: the mark travels with the cell and the
       // entry travels with the token, and it is the token a later delegation
