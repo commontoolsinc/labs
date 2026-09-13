@@ -4,8 +4,8 @@ Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
 deferral needed, with three bullets carried forward; F3's evidence assembled,
 with the integration-suite gap recorded; F3's decision, F4, and F5 pending, the
 decision with the flag's owner and the rest behind it; the lift's synchronous
-refusal fix held on the branch `codex/lift-refusal-disposition`. This plan is
-the separate follow-up to the
+refusal fix held, as the design plan's Stage 5 records. This plan is the
+separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
 record](../history/plans/pattern-computation-cost-implementation.md) transferred
@@ -26,10 +26,10 @@ integration problem.
 Complete the outstanding work in this plan after the computation-cost arc, with
 independent PRs and acceptance evidence. Keep handler semantics separate from
 removing the lift-path rollout switch: either can expose a correctness issue the
-other does not address. The flag's owner and removal condition remain recorded
-in the registry's [summary
+other does not address. The removal condition and the flag's author remain
+recorded in the registry's [summary
 table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), which names
-Bernhard Seefeld as the flag's author.
+Bernhard Seefeld.
 
 ## Execution tracker
 
@@ -170,18 +170,18 @@ must not accidentally inherit it.
       change, repository type/format/lint checks, and applicable independent
       gates. Require clean antagonistic and Cubic reviews before merging.
 
-Held beside F3/F4: at the F0 record's pinned revision the lift path drops a
-refusal its body throws synchronously, and the previous result stands ([The lift
+Held beside F3/F4: the lift path drops a refusal its body throws synchronously,
+and the previous result stands (measured at the F0 record's pinned revision,
+[The lift
 path](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md#the-lift-path)).
-The fix, on the branch `codex/lift-refusal-disposition`, writes the undefined
-result the design specifies for a refusal the body raises (one raised during the
-argument read keeps the current disposition on that branch too), and with it the
-Pattern Update State and Baseline Integrity gate fails on the lunch poll's
-2026-07-30 vintage, where the derivation now refuses and stale state had stood.
-It waits on a ruling from that gate's owner on how the vintage expectation
-moves. Until it lands, the design plan's first Stage 5 item holds for an
-asynchronous body's rejection and for a caught refusal, but not for a refusal a
-synchronous body throws.
+The fix, on the branch the design plan's [Stage 5](lazy-cell-materialization.md)
+names, writes the undefined result the design specifies for a refusal the body
+raises (one raised during the argument read keeps the current disposition on
+that branch too), and with it the Pattern Update State and Baseline Integrity
+gate fails, clearing a persisted derived value the defect had preserved, as that
+record's lift-path section says. It waits on a ruling from that gate's owner on
+how the vintage expectation moves. Until it lands, the design plan's Stage 5
+records which arms hold.
 
 ### F5 — Measure and close
 

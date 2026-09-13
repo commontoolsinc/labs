@@ -122,7 +122,8 @@ path, **not** an action error and not logged as one. A run that could not
 proceed on the data available is a non-event. The reads it took stay registered,
 including the one that failed, so it runs again when the data changes and may
 then find it valid. A refusal a synchronous body throws is not disposed of this
-way today; the previous result stands.
+way today; the previous result stands, and the [design plan's Stage
+5](../plans/lazy-cell-materialization.md) names the fix.
 
 The view withdraws the record for a refusal it catches itself — the optional
 property above, whose answer is absence rather than a refusal. It clears only

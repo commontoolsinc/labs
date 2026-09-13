@@ -86,8 +86,8 @@ Schemas influence runtime behavior:
   access. The runner disposes of one as an argument that did not resolve — an
   undefined result, not a fault — which is what an eager read's `undefined`
   produces anyway. A refusal a synchronous lift body throws is not disposed of
-  this way today: the previous result stands until the fix on the branch
-  `codex/lift-refusal-disposition` lands.
+  this way today: the previous result stands until the fix the [design plan's
+  Stage 5](../../plans/lazy-cell-materialization.md) names lands.
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 

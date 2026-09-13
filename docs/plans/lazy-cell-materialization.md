@@ -472,8 +472,8 @@ eager semantics.
       eager read never evaluates, an optional property refused where an eager
       read drops it, and three reads that were answered without being
       registered. None of them was the "argument refused for a missing field"
-      story the earlier note here guessed at — that disposition worked from the
-      start.
+      story the earlier note here guessed at; that disposition was not among
+      them, though it carries the synchronous-throw gap Stage 5 names.
 - [x] Read `.length` off a string. `.length` on a string output lowers to a link
       ending in that segment, and a string's `length` is not a stored path, so
       the store cannot serve the address the link resolves to. Eager traversal

@@ -141,7 +141,7 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      so the action-run boundary's existing "argument did not resolve"
      disposal treats it identically, except that a refusal a
      synchronous body throws leaves the previous result standing until
-     the fix named in clause 2 lands — §4's reconciliation is
+     the fix clause 2 points at lands — §4's reconciliation is
      unchanged). This applies ONLY when the reader's schema declares
      NO default: a declared default is the stated absent value and
      still flows (the `get() ?? fallback` idiom, and a computed that
@@ -170,8 +170,9 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      that holds for an asynchronous body's rejection; a refusal a
      synchronous body throws reaches the runner's catch before its
      `postRun` is assigned, so the previous result stands, and the fix
-     is on the branch `codex/lift-refusal-disposition`. A pattern body
-     cannot yet MINT the error itself (it is runner-internal; a
+     is the one the [design plan's Stage
+     5](../../plans/lazy-cell-materialization.md) names. A pattern
+     body cannot yet MINT the error itself (it is runner-internal; a
      pattern-facing refusal export is a flagged API question with the
      owner), so the built coverage is the read-propagation path — the
      OW51 shape — with the deliberate body-throw awaiting that export.

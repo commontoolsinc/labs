@@ -528,8 +528,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   nothing else; a reader that touches data the schema no longer describes
   refuses, and the run is disposed of as an argument that did not resolve,
   except that a refusal a synchronous lift body throws leaves the previous
-  result standing until the fix on the branch `codex/lift-refusal-disposition`
-  lands. Unmarked transactions read exactly as they did before.
+  result standing until the fix the [design plan's Stage
+  5](../plans/lazy-cell-materialization.md) names lands. Unmarked transactions
+  read exactly as they did before.
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
