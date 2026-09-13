@@ -702,24 +702,21 @@ export interface CompactDebugStringOptions extends DebugValueOptions {
  * A value that can appear in an in-memory fabric execution graph.
  *
  * Unlike a {@link FabricValue}, a `FabricExecValue` may contain functions and
- * therefore is not necessarily durable or serializable. Its arrays and plain
- * objects recursively contain only other execution values.
+ * therefore is not necessarily durable or serializable: it is
+ * `FabricValuePlus` at {@link FabricExecFunction}, so a function may sit at
+ * the top or inside any container.
  */
-export type FabricExecValue =
-  | FabricValue
-  | FabricExecFunction
-  | FabricExecArray
-  | FabricExecPlainObject;
+export type FabricExecValue = FabricValuePlus<FabricExecFunction>;
 
 /** A callable leaf in a {@link FabricExecValue} graph. */
 export type FabricExecFunction = (...args: any[]) => any;
 
 /** Read-only array of fabric execution values. */
-export interface FabricExecArray extends ReadonlyArray<FabricExecValue> {}
+export interface FabricExecArray extends FabricArrayPlus<FabricExecFunction> {}
 
 /** Read-only plain object whose string-keyed values are execution values. */
 export interface FabricExecPlainObject
-  extends Readonly<Record<string, FabricExecValue>> {}
+  extends FabricPlainObjectPlus<FabricExecFunction> {}
 
 //
 // Runtime Constants

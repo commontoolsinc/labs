@@ -6,25 +6,12 @@ export {
 
 export { fabricAwareEqual } from "./fabricAwareEqual.ts";
 
+export type * from "./interface.ts";
+
 export {
-  type CompactDebugStringOptions,
-  type DebugValueOptions,
-  type FabricArray,
-  type FabricContainerValue,
-  type FabricConvertibleValue,
   FabricInstance,
-  type FabricNativeObject,
-  type FabricPlainObject,
   FabricPrimitive,
   FabricSpecialObject,
-  type FabricValue,
-  type FabricValueLayer,
-  type FromNativeErrorOptions,
-  type MutableFabricArrayLayer,
-  type MutableFabricContainerValueLayer,
-  type MutableFabricPlainObjectLayer,
-  type MutableFabricValueLayer,
-  type NonNullableFabricValue,
 } from "./interface.ts";
 
 export {
