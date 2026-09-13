@@ -9063,9 +9063,11 @@ supply; OW29/OW32/OW34 closed):
     declares a default (the stated absent value still flows — the
     `get() ?? fallback` idiom and a not-yet-produced computed are
     unchanged). A dead-end at the handle's OWN root doc is likewise
-    not this shape. The (ii) lift-throw clause holds by inheritance:
-    the refusal propagating out of a lift body takes the same
-    disposal; a pattern body MINTING the error is the FLAGGED
+    not this shape. The (ii) lift-throw clause holds by inheritance
+    for an asynchronous body's rejection: the refusal propagating out
+    of the body takes the same disposal, while a synchronous body's
+    throw leaves the previous result standing until the fix named
+    above lands; a pattern body MINTING the error is the FLAGGED
     pattern-facing-export question, still with the owner. Server
     matches client by construction (`servingPosture` gates nothing on
     this path). Pinned:
