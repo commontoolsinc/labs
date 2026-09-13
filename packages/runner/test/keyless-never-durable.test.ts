@@ -41,10 +41,9 @@ import {
  *   2. `Runner.#substituteOpPatternRefs`' `$patternRef` sentinel for keyless
  *      map/filter/flatMap ops (written into the node's durable inputs doc);
  *   3. the storage-boundary serializer itself (`patternToEncodableForm`):
- *      the mint sets the pattern's forward entry ref, which would otherwise
- *      stop the designed "no entry ref -> full graph" fallback from firing
- *      and make every later boundary write of the VALUE emit the keyless
- *      ref.
+ *      the mint sets the pattern's forward entry ref, so the designed
+ *      "no entry ref -> full graph" fallback stops firing and every later
+ *      boundary write of the VALUE emits the keyless ref.
  *
  * The first test is the blanket pin: a run exercising all three writers must
  * leave NO `keyless:` byte sequence anywhere in the raw sqlite store. The

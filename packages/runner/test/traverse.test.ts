@@ -4568,8 +4568,8 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
     // least-visited targets are the ones the cap dropped. (These links
     // are unscoped, so the coverage memo deliberately does not skip
     // their re-walks — the neutrality guard in isLinkedDocumentCovered
-    // holds unscoped links to that, and this assertion doubles as its
-    // pin.)
+    // keeps unscoped links being re-walked, and this assertion pins that
+    // behavior.)
     const counts = listed.map((entry) => Number(entry.split("=")[1]));
     expect(counts).toEqual([...counts].sort((a, b) => b - a));
     expect(counts).not.toContain(1);

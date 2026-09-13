@@ -79,11 +79,10 @@ describe("Pattern Runner - Derive returning pattern", () => {
   it("should handle derive returning a recursive pattern instantiation (tail-call)", async () => {
     // A pattern that conditionally calls itself via derive, simulating
     // tail-call pagination (like FetchContactsPage in
-    // google-contacts-importer.tsx). The callback runs only a handful of
-    // times (the recursive levels, the base cases, and a few reactive
-    // re-evaluations), and the scheduler must settle: a sub-pattern creation
-    // that dirtied the parent action would re-trigger the action wrapper
-    // repeatedly with invalid arguments.
+    // google-contacts-importer.tsx). Pinned: the recursion completes with
+    // every page's items in order, and the callback runs a bounded number of
+    // times (the recursive levels, the base case, and a few reactive
+    // re-evaluations).
 
     let deriveCallCount = 0;
 
@@ -144,11 +143,10 @@ describe("Pattern Runner - Derive returning pattern", () => {
     expect(value.done).toBe(true);
     expect(value.items).toEqual([1, 2, 3, 4, 5, 6]);
 
-    // The callback should run a reasonable number of times.
-    // 3 recursive levels + base case + a few reactive re-evaluations = ~7.
-    // This assertion passes, but the scheduler reports non-convergence because
-    // the action WRAPPER (not the callback) runs repeatedly — most runs have
-    // invalid arguments that skip the callback.
+    // The callback runs a bounded number of times: 3 recursive levels + the
+    // base case + a few reactive re-evaluations = ~7. The bound is on the
+    // callback alone, not on how often the scheduler re-runs the action
+    // around it.
     expect(deriveCallCount).toBeLessThan(20);
   });
 
