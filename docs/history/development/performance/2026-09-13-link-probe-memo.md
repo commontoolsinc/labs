@@ -58,12 +58,16 @@ The counts under it, for one cycle:
 | whole-resolution memo hits, over six cycles | 12 of 10,536 |
 | sigil probes issued, over six cycles | 12,220 |
 | distinct (document, position) pairs among them, per transaction | 6,898 |
+| probes the memo answers, over six cycles | 3,509 (156 of them at a document root) |
 
 Sixteen journaled reads per note, most of them link resolution's sigil
 probes; a whole-resolution memo that never hits, because each property read
 of an element resolves a distinct address; and 44% of the probes repeating a
 position the same transaction had already probed — the element's own slot,
-once per property read through it, and the root of the document it links to.
+once per property read through it, almost never a document root. The memo
+answers 29% of all probes: the repeats made in transactions that hold a memo.
+The rest are made where the memo is withheld, reads through the sink's
+`TransactionWrapper` among them, which forwards no memo.
 
 ## What landed, and what it measured
 
@@ -83,8 +87,9 @@ about what the profile's arithmetic predicts: removing a fifth of the journaled
 reads from a per-read tier that was a sixth of the cycle. A sequential pass
 taken earlier the same day read main at 63 ms and this change at 45 ms; that
 swing was the machine's, not the code's, and is the reason the series above
-was alternated. What does not move with load is the count: the probes issued
-per transaction fell by the 44% that were repeats.
+was alternated. What does not move with load is the count: the memo answers
+29% of the probes a cycle issues, and each one answered is a read the
+transaction no longer journals.
 
 **The probe memo carries the change.** `resolveLinkTracingDereferences`
 memoizes each sigil probe's outcome on the transaction's snapshot memo — the
@@ -123,7 +128,7 @@ nothing — is a hypothesis for a quiet machine.
 does.** The two are keyed differently: a resolution is keyed on the full
 address and its variant, which a property read never repeats, and a probe is
 keyed on a position, which every property read through a slot repeats. The
-counts settle that one: 12 resolution hits against 5,322 probe hits.
+counts settle that one: 12 resolution hits against 3,509 probe hits.
 
 ## What is left
 

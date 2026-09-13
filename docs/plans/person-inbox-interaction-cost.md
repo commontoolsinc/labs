@@ -494,8 +494,9 @@ grouping between registrations. On the note-create bench that stands in for a
 wide read, alternated against main on a machine at load 8, the cycle is six
 to seven percent shorter at 32 and at 128 notes — about what removing a fifth
 of the journaled reads from a per-read tier that was a sixth of the cycle
-predicts — and the probes issued per transaction fall by the 44% that were
-repeats, a count no load moves. The record with the profile, the counts and
+predicts — and the memo answers 29% of the probes a cycle issues, a count no
+load moves; the remaining repeats are made in transactions the memo is
+withheld from, the sink's wrapper among them. The record with the profile, the counts and
 the A/B is
 [the link-probe memo record](../history/development/performance/2026-09-13-link-probe-memo.md);
 it also records a variant left out as unmeasured rather than disproved,

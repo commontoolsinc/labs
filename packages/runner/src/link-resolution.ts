@@ -336,7 +336,7 @@ const addressKeyAt = (
  *
  * Walks through one container probe the same positions over and over: reading
  * three properties of an element probes the element's own slot three times,
- * and the root of the document it links to three times more. The answer
+ * once per property read that passes through it. The answer
  * cannot differ between those probes — the memo is dropped on every write —
  * and the first probe journaled the read, so a repeat would add an identical
  * entry to a set. The record stands in for the probe read and for the read of
@@ -456,10 +456,10 @@ const resolutionMemoVariant = (
  *
  * The same memo holds each sigil probe on its own (`ProbeRecord`), so a walk
  * that misses as a whole still skips the probes an earlier walk through the
- * same container made: the element slot every property read passes, and the
- * root of the document the slot links to. That is most of what a wide read
- * probes, and each probe skipped is one read fewer for the commit, the
- * scheduler and the flow-label pass to process.
+ * same container made: the element slot every property read passes. That is
+ * most of what a wide read probes more than once, and each probe skipped is
+ * one read fewer for the commit, the scheduler and the flow-label pass to
+ * process.
  *
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
