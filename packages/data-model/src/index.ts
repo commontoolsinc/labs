@@ -32,6 +32,7 @@ export {
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isFabricSpecialObject,
   isKeyableObjectNotArray,
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,

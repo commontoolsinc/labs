@@ -461,6 +461,7 @@ export function __cf_data<T>(value: T): T {
 export {
   CFC_CANONICAL_ALIAS_NAMES,
   FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
   FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,

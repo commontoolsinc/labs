@@ -19,6 +19,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
+  isFabricSpecialObject,
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -2885,8 +2886,7 @@ export class CellImpl<T extends FabricValue>
       return true;
     }
 
-    return ref instanceof FabricSpecialObject &&
-      element instanceof FabricSpecialObject &&
+    return isFabricSpecialObject(ref) && isFabricSpecialObject(element) &&
       valueEqual(element, ref);
   }
 

@@ -111,6 +111,7 @@ import {
 import {
   CFC_CANONICAL_ALIAS_NAMES,
   FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
   FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
@@ -324,6 +325,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     isFabricPrimitiveSchemaType,
     FABRIC_SPECIAL_OBJECT_BRAND,
     FABRIC_INSTANCE_PLUS_BRAND,
+    FABRIC_PRIMITIVE_BRAND,
     MERGEABLE_OP_METHODS,
     CFC_CANONICAL_ALIAS_NAMES,
 

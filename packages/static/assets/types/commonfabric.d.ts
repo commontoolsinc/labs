@@ -45,8 +45,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * Pattern-visible declarations for the fabric value type system, and for the
  * options of the debug renderers over it, in the form that `@commonfabric/api`
  * re-exports to patterns. Everything here is an interface, a type, or a
- * `declare const`, except for the two brand-key constants, so the module's only
- * runtime footprint is those constants.
+ * `declare const`, except for the three brand-key constants, so the module's
+ * only runtime footprint is those constants.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -239,13 +239,30 @@ export declare const FabricSpecialObject:
   & (abstract new (...args: any) => FabricSpecialObject);
 
 /**
+ * The nominal brand key declared on `FabricPrimitive`. As with
+ * `FABRIC_SPECIAL_OBJECT_BRAND`, a runtime instance never carries the key, so
+ * a schema derived from the type leaves it out.
+ */
+export const FABRIC_PRIMITIVE_BRAND = "@commonfabric/FabricPrimitive";
+
+/**
  * Abstract base class for the `FabricValue`s that participate in the fabric
  * protocol as primitives. An instance is always frozen, passes through the
  * native conversions unchanged, and holds no arbitrary outgoing `FabricValue`
  * reference. `FabricSpecialObject` says how this differs from
  * `FabricInstance`.
  */
-export interface FabricPrimitive extends FabricSpecialObject {}
+export interface FabricPrimitive extends FabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
+   * in the type system. The `FabricSpecialObject` brand alone leaves this
+   * type structurally empty, which would make every `FabricInstance` a
+   * `FabricPrimitive` as well; this member is what refuses that. It exists
+   * only in the type system, as that brand does. `FABRIC_PRIMITIVE_BRAND` is
+   * the key.
+   */
+  readonly "@commonfabric/FabricPrimitive": true;
+}
 
 export interface FabricPrimitiveConstructor {
   prototype: FabricPrimitive;

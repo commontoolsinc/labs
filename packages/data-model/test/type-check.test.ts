@@ -7,6 +7,7 @@ import {
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isFabricSpecialObject,
   isKeyableObjectNotArray,
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
@@ -26,6 +27,36 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 describe("type-check", () => {
+  describe("isFabricSpecialObject()", () => {
+    it("returns `true` for a `FabricPrimitive` and for a `FabricInstance`", () => {
+      expect(isFabricSpecialObject(new FabricBytes(new Uint8Array([1])))).toBe(
+        true,
+      );
+      expect(isFabricSpecialObject(FabricError.fromNativeError(new Error("x"))))
+        .toBe(true);
+    });
+
+    it("returns `false` for a plain object, an array, `null`, and a function", () => {
+      expect(isFabricSpecialObject({})).toBe(false);
+      expect(isFabricSpecialObject([])).toBe(false);
+      expect(isFabricSpecialObject(null)).toBe(false);
+      expect(isFabricSpecialObject(() => 1)).toBe(false);
+    });
+
+    it("narrows an `unknown` to a `FabricValue`", () => {
+      // What this pins is the narrowed type: a value that passes is typed as
+      // one of the two subclasses, which is a `FabricValue`, where the class
+      // itself narrows only to the abstract base.
+      const value: unknown = new FabricBytes(new Uint8Array([1]));
+      if (isFabricSpecialObject(value)) {
+        const asValue: FabricValue = value;
+        expect(asValue).toBe(value);
+      } else {
+        throw new Error("Expected a special object.");
+      }
+    });
+  });
+
   describe("isFabricContainerValue()", () => {
     describe("given a container arm of `FabricValue`", () => {
       it("returns `true` for a plain object", () => {
