@@ -288,7 +288,10 @@ export interface CellBridgeOptions {
   /** Extra fields for `.status` to report. */
   statusProvider?: () => Record<string, unknown>;
 
-  /** Called after each projection rebuild. */
+  /**
+   * Called after each rebuild of a piece prop and each build of a source
+   * tree; not after a manifest or index file is rewritten.
+   */
   onCfcProjectionRebuilt?: () => void;
 
   /** Loader reconnection probes open spaces with; `loadPieces` by default. */
@@ -366,7 +369,10 @@ export interface SourceWritePath {
   /** Controller of the piece. */
   piece: PieceController;
 
-  /** Inode of the `.src/` directory, for `error.log` lookups. */
+  /**
+   * Inode of the `.src/` directory, from which the mount walks `relPath` to
+   * reach the written file's inode.
+   */
   srcIno: bigint;
 }
 
@@ -377,8 +383,8 @@ export interface SourceWritePath {
 export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
 
 /**
- * Callback that drops the kernel's cached attributes and data for an inode,
- * which forces a directory listing to refresh.
+ * Callback that drops the kernel's cached attributes and data for an inode:
+ * a file's content, or a directory's listing.
  */
 export type InvalidateInodeCallback = (ino: bigint) => void;
 
@@ -839,7 +845,8 @@ export class CellBridge {
   #statusProvider: (() => Record<string, unknown>) | undefined;
 
   /**
-   * Called after each projection rebuild, when the options supplied a callback.
+   * Called after each rebuild of a piece prop and each build of a source
+   * tree, when the options supplied a callback.
    */
   #onCfcProjectionRebuilt: (() => void) | undefined;
 
@@ -915,9 +922,20 @@ export class CellBridge {
   //
 
   /**
-   * The synchronization and hydration tables, the entity-projection tables,
-   * the disconnection state, and the tree-building and failed-connection
-   * cleanup steps this bridge keeps to itself, which a test drives directly.
+   * What this bridge keeps to itself and a test drives directly. The tables:
+   * `pieceSyncs`, `syncAgain`, and `pendingPieceHydrations` for piece-list
+   * work; `unhydratedEntityRoots`, `pendingEntityHydrations`,
+   * `entityProjectionLru`, `entityProjectionEvictionCandidates`,
+   * `entityProjectionUseOrder`, `entityProjectionLookupRefs`,
+   * `entityProjectionLookupOwners`, `pendingEntityRemovals`, and
+   * `entitySubscriptions` for entity projections; and the `disconnected` flag
+   * with its `reconnectTimer`. The steps: `attemptReconnect`,
+   * `removeFailedSpaceTree`, and `buildSpaceTree` for a space's connection;
+   * `enqueuePiecePropRebuild`, `rebuildPieceProp`, and `hydratePieceProp` for
+   * a prop's rebuild; `addPieceToSpace`, `syncPieceListOnce`,
+   * `updatePiecesJson`, `updateIndexJson`, `subscribePiece`,
+   * `makeLinkResolver`, `loadPieceTree`, `refreshPiecePatternMetadata`, and
+   * `buildSourceTree` for a piece's projection.
    */
   get accessForTestingOnly(): {
     readonly pieceSyncs: Map<string, Promise<void>>;
@@ -1215,9 +1233,10 @@ export class CellBridge {
 
   /**
    * Releases `count` of the lookup references `ino` holds, never more than it
-   * holds. When the projection's last reference goes, finishes a removal
-   * waiting on it or makes it an eviction candidate, and trims the cache. Does
-   * nothing for an inode holding none, or for a non-positive `count`.
+   * holds, then trims the cache, which may evict other candidates. When the
+   * projection's last reference goes, this also finishes a removal waiting on
+   * it or makes it an eviction candidate. Does nothing for an inode holding
+   * none, or for a non-positive `count`.
    */
   releaseEntityProjectionLookup(ino: bigint, count = 1n): void {
     if (count <= 0n) return;
@@ -1278,9 +1297,10 @@ export class CellBridge {
   }
 
   /**
-   * Releases one of the open handles `ino` holds. When the projection's last
-   * reference goes, finishes a removal waiting on it or makes it an eviction
-   * candidate, and trims the cache. Does nothing for an inode holding none.
+   * Releases one of the open handles `ino` holds, then trims the cache, which
+   * may evict other candidates. When the projection's last reference goes,
+   * this also finishes a removal waiting on it or makes it an eviction
+   * candidate. Does nothing for an inode holding none.
    */
   releaseEntityProjectionOpen(ino: bigint): void {
     const owner = this.#entityProjectionOpenOwners.get(ino);
@@ -1356,9 +1376,10 @@ export class CellBridge {
    * space's piece list, the entity's projection, or the piece prop the name
    * belongs to — and returns whether the name should resolve. Under a piece
    * root, `input`, `result`, their `.json` files, `index.md`, `index.json`,
-   * and `.handlers` resolve once their prop is hydrated, and any other name
-   * resolves if the tree holds it. Returns false for a parent this bridge
-   * does not prepare, and for an entity root whose hydration fails.
+   * and `.handlers` resolve true once their prop's hydration has been
+   * attempted, whether or not it succeeded, and any other name resolves if
+   * the tree holds it. Returns false for a parent this bridge does not
+   * prepare, and for an entity root whose hydration fails.
    */
   async prepareLookup(parentIno: bigint, name: string): Promise<boolean> {
     const pieces = this.#stateForPiecesDir(parentIno);
@@ -4724,10 +4745,13 @@ export class CellBridge {
 
   /**
    * Returns the value to project for `rootCell`: `value` itself when it is a
-   * primitive or an array, or when the cell's schema names no properties;
-   * otherwise `value` widened with every schema property the cell resolves —
-   * a sigil link kept raw so it projects as a symlink, and a callable kept
-   * even without a value — or `value` itself when that yields nothing.
+   * non-null primitive or an array, or when the cell's schema names no
+   * properties; otherwise `value` widened with every schema property the cell
+   * resolves — a sigil link kept raw so it projects as a symlink, and a
+   * callable kept even without a value — or `value` itself when that yields
+   * nothing. A `null` or `undefined` value takes that same path, and so
+   * becomes an object of the properties the cell resolves, or stays as it is
+   * when none do.
    */
   #materializeTreeValue(
     rootCell: Cell<unknown>,

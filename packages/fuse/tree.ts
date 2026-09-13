@@ -171,7 +171,7 @@ export class FsTree {
     return this.#nextIno++;
   }
 
-  /** The path an entry named `name` under `parentIno` has, or would have. */
+  /** Returns the path an entry named `name` under `parentIno` would have. */
   childPath(parentIno: bigint, name: string): string {
     const parentPath = this.getPath(parentIno);
     return parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
@@ -368,10 +368,9 @@ export class FsTree {
   }
 
   /**
-   * Advances a node's mtime because its directory entries changed through a
-   * path other than a transplant — a piece appearing under a space, or a
-   * piece directory gaining or losing a top-level entry. Content changes and
-   * transplant-reconciled entry changes advance mtime on their own.
+   * Advances a node's mtime, for an entry-set change that no transplant
+   * reports. Content changes and transplant-reconciled entry changes advance
+   * mtime on their own. Does nothing for an inode with no node.
    */
   touch(ino: bigint): void {
     const node = this.#inodes.get(ino);
