@@ -72,13 +72,13 @@ describe("XSchedulerGraph", () => {
       });
 
       describe("given no schemed entity segment", () => {
-        it("takes the first segment longer than 20 characters as the entity", () => {
+        it("returns the last four characters of the first segment longer than 20 characters, then the segments after it", () => {
           expect(truncateLabel("space/abcdefghijklmnopqrstuvwx/count")).toBe(
             "...uvwx/count",
           );
         });
 
-        it("takes the first segment as the entity when none is longer than 20 characters", () => {
+        it("returns the last four characters of the first segment when none is longer than 20 characters", () => {
           expect(truncateLabel("space/entity/some/longer/path")).toBe(
             "...pace/entity/so...",
           );
@@ -91,14 +91,14 @@ describe("XSchedulerGraph", () => {
         });
       });
 
-      describe("given no `/` after the prefix", () => {
+      describe("given fewer than two non-empty segments", () => {
         it("cuts the label from the end", () => {
           expect(truncateLabel("aVeryLongActionIdentifierName")).toBe(
             "aVeryLongActionId...",
           );
         });
 
-        it("counts the prefix toward the cut", () => {
+        it("returns the prefix as part of the cut label", () => {
           expect(truncateLabel("handler:someVeryLongHandlerName")).toBe(
             "handler:someVeryL...",
           );
@@ -106,6 +106,12 @@ describe("XSchedulerGraph", () => {
 
         it("cuts to a given `maxLen`", () => {
           expect(truncateLabel("abcdefghijk", 10)).toBe("abcdefg...");
+        });
+
+        it("cuts a lone segment followed by `/` the same way", () => {
+          expect(truncateLabel("abcdefghijklmnopqrstuvwxyz/")).toBe(
+            "abcdefghijklmnopq...",
+          );
         });
       });
     });
