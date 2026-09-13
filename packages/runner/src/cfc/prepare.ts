@@ -6244,7 +6244,7 @@ export const prepareBoundaryCommit = (
     // The schema write-policy requirement quantifies over the paths a
     // schema could describe. A raw meta-seam write is not one, so demanding
     // a policy input for it rejects every meta write on a labeled document —
-    // slug assignment, the pattern updater's identity swap, setup over an
+    // slug assignment, a pointer repair's identity swap, setup over an
     // existing piece, and the source-lifecycle transitions. These paths stay
     // flow-label targets: the write above still carries the transaction's
     // join onto the document, so nothing is laundered by skipping them here.

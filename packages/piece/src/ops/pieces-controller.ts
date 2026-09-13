@@ -2160,17 +2160,18 @@ export class PiecesController<T = unknown> {
         () => this.startPiece(rootToStart),
       );
     } catch (startError) {
-      // Cold-start setup repair. A source transition moves patternIdentity
-      // WITHOUT running the setup phase,
-      // and Runner.start() of a not-running piece instantiates the stored
-      // identity directly — also without setup. A root whose identity moved
-      // while it was not running (the bricked-space heal: no watcher existed
-      // to swap it in place) therefore boots over a doc that never
+      // Cold-start setup repair. Two paths move patternIdentity WITHOUT
+      // running the setup phase: this method's own roll-forward heal when
+      // the materialize after its identity swap fails, and the runner's
+      // pattern watcher rolling an unloadable pointer back to the running
+      // pattern. Runner.start() of a not-running piece instantiates the
+      // stored identity directly — also without setup. A root whose identity
+      // moved while it was not running therefore boots over a doc that never
       // materialized the pattern's internal cells — handler
       // `{ "$stream": true }` markers included — and dies at instantiation
-      // ("Handler used as lift", the 2026-07-22 estuary failure). This also
-      // covers docs ALREADY left in that state by an earlier session: their
-      // identity compares current, so no further swap will ever fire.
+      // ("Handler used as lift"). This also covers docs ALREADY left in that
+      // state by an earlier session: their identity compares current, so no
+      // further swap will ever fire.
       //
       // run() (setup + start) is the sanctioned repair. With an unchanged
       // pattern pointer the setup phase is near-idempotent: it materializes
@@ -2521,8 +2522,8 @@ export class PiecesController<T = unknown> {
     // Precondition guard (fail-closed): re-read the root's identity INSIDE the
     // transaction and proceed only if it still equals the pinned ref we
     // diagnosed. `editWithRetry` reruns this callback against fresh state on
-    // conflict, so without the guard a concurrent heal (another boot, the
-    // pattern updater) that already repointed the root would be blindly
+    // conflict, so without the guard a concurrent repoint (another boot's
+    // heal, a source transition) that already moved the root would be blindly
     // clobbered by our stale `officialRef`. Returning `false` before anything
     // is staged commits a transaction with no writes; `result.ok === false`
     // (no error) then means "superseded".

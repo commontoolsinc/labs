@@ -1488,8 +1488,8 @@ export async function materializeOver(
  * an invalid one having checked the wrong artifact.
  *
  * `options.space` is the space to COMPILE in, which production takes from the
- * piece being updated (`SourceReconciler` and `PieceController.changeSource`
- * both compile a candidate in the piece's own space).
+ * piece being updated (`SourceReconciler` compiles a candidate in the piece's
+ * own space).
  * It is not cosmetic: it selects the space a `cf:` fabric import resolves
  * against and the space the compiled/source closure is persisted into
  * (`compileViaCellCache`), so compiling a cross-space root's candidate in the
@@ -1537,10 +1537,11 @@ export async function materializeOnCell(
     // `__cfPattern_2`. A root recorded as `__cfPattern_1` then resolves here to a
     // DIFFERENT nested pattern and this branch never fires. The schema merge
     // catches it only when the two bodies differ in shape. That is a property of
-    // the compiler's positional hoist names, shared by every lookup of a stored
-    // `{identity, symbol}`, not something this gate can fix; selecting the
-    // recorded symbol is still strictly better than applying the module's entry
-    // export to every nested root.
+    // the compiler's positional hoist names, inherited by any path that
+    // resolves a recorded hoist symbol against a newer version of its module,
+    // as this one does; not something this gate can fix. Selecting the
+    // recorded symbol is still strictly better than applying the module's
+    // entry export to every nested root.
     return {
       error:
         `today's ${program.main} defines no "${symbol}"; the stored root ` +
