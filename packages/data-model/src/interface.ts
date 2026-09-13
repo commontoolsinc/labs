@@ -12,7 +12,12 @@
  * guard, each beside its own definition.
  */
 
-import type { FabricArray, FabricPlainObject, FabricValue } from "./api.ts";
+import type {
+  FabricArray,
+  FabricPlainObject,
+  FabricValue,
+  FabricValuePlus,
+} from "./api.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
 // available internally to `data-model` without having to `import ... from
@@ -36,10 +41,9 @@ export type * from "./api.ts";
  * shape but their contents may still contain values requiring further
  * conversion (e.g., `Error` instances in a `.cause` chain).
  */
-export type FabricValueLayer =
-  | FabricValue
-  | unknown[]
-  | Record<string, unknown>;
+export type FabricValueLayer = FabricValuePlus<
+  unknown[] | Record<string, unknown>
+>;
 
 /** A mutable array root whose elements remain `FabricValue`s. */
 export type MutableFabricArrayLayer = FabricValue[];
@@ -104,11 +108,7 @@ export type FabricNativeObject =
  * Converting a `FabricError` yields an `Error`, so an array of them is an array
  * of natives, which has no `FabricValue` name.
  */
-export type FabricConvertibleValue =
-  | FabricValue
-  | FabricNativeObject
-  | readonly FabricConvertibleValue[]
-  | { readonly [key: string]: FabricConvertibleValue };
+export type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
 
 //
 // Abstract base classes
