@@ -104,9 +104,6 @@ export type FabricContainerValue =
   | FabricInstance
   | FabricPlainObject;
 
-/** A `FabricValue` other than `null` or `undefined`. */
-export type NonNullableFabricValue = NonNullable<FabricValue>;
-
 /** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
@@ -123,6 +120,9 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
+
+/** A `FabricValue` other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
 
 //
 // `FabricSpecialObject` and its two direct subclasses
