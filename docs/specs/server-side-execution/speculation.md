@@ -57,7 +57,8 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   so its first run diverts even at instantiation. *(AMENDED 2026-09-09:
   a `cf` client sends its instantiation verb to the serving runtime
   instead of committing it itself — protocol.md §1's lifecycle-verb
-  amendment; nothing about that speculates.)*
+  amendment; nothing about that speculates. AMENDED 2026-09-11: its
+  source-update verb likewise.)*
 - Pure structural nodes: freely.
 - Handlers: run locally on fire, writes go to the overlay (events.md §2);
   the committed artifact is the event only.
