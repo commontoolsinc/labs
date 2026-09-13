@@ -12,7 +12,9 @@
  * the class more assignable; that is the direction a pattern feels, because
  * the member it cannot reach is the one missing from the declaration. Both
  * directions have to be asserted for a member added on either side alone to
- * fail here.
+ * fail here. Each class is checked on its instance side and on its
+ * constructor side, so a static member or a construct signature that one side
+ * gains alone fails here as well.
  */
 
 import type {
@@ -45,4 +47,19 @@ export type InstanceAgrees = MustBeTrue<
 /** Whether `FabricPrimitive` agrees with its declaration. */
 export type PrimitiveAgrees = MustBeTrue<
   Same<FabricPrimitive, ApiFabricPrimitive>
+>;
+
+/** Whether the `FabricSpecialObject` constructor agrees with its declaration. */
+export type SpecialObjectConstructorAgrees = MustBeTrue<
+  Same<typeof FabricSpecialObject, typeof ApiFabricSpecialObject>
+>;
+
+/** Whether the `FabricInstance` constructor agrees with its declaration. */
+export type InstanceConstructorAgrees = MustBeTrue<
+  Same<typeof FabricInstance, typeof ApiFabricInstance>
+>;
+
+/** Whether the `FabricPrimitive` constructor agrees with its declaration. */
+export type PrimitiveConstructorAgrees = MustBeTrue<
+  Same<typeof FabricPrimitive, typeof ApiFabricPrimitive>
 >;
