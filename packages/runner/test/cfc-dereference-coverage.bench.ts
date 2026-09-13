@@ -21,10 +21,12 @@
  * handful of reads is the shape that would not benefit. The `build` group keeps
  * that end of the trade visible.
  *
- * The wildcard group is what the index declines. A `"*"` on either side turns
+ * The wildcard groups are what the index declines. A `"*"` on either side turns
  * the walk into a search, so a wildcard query, or a set holding one wildcard
- * source, takes the scan; this group is both at once and guards that declining
- * costs no more than never having indexed.
+ * source, takes the scan. They are benched separately because either rule alone
+ * routes to the scan, so one group carrying both would keep passing with one
+ * rule removed — and re-admitting a wildcard QUERY to the walk is the 730x
+ * case.
  *
  * The `benchmarks.yml` workflow runs this file on main and publishes the
  * results in its `bench-results` artifact, which the team ops dashboard charts
@@ -127,9 +129,16 @@ for (const count of [16, 64, 256]) {
 // Wildcard queries
 //
 // A `"*"` on either side turns the walk into a search, so the index declines
-// both: a wildcard query, and a set holding a wildcard source. This group is
-// both at once — the shape the index is worst suited to — and what it guards is
-// that declining costs no more than never having indexed at all.
+// both. They need a group each, because either rule alone routes to the scan:
+// a group carrying both would keep passing if one rule were removed, and the
+// query rule is the one worth 730x.
+//
+//   `wildcard query` — concrete sources, so only `path.includes("*")` can
+//   route it. Re-admitting a wildcard query to the walk shows here as the
+//   index leaving the scan's line.
+//   `wildcard source` — concrete queries, so only `#wildcardSource` can.
+//
+// What both guard is that declining costs no more than never having indexed.
 // ────────────────────────────────────────────────────────────────────────
 
 const WILD_QUERIES = Array.from(
@@ -137,27 +146,31 @@ const WILD_QUERIES = Array.from(
   (_, i) => ["value", "threads", "*", "msgs", String(i % 7)],
 );
 
-for (const count of [256]) {
-  const set = wildcardSources(count);
+for (
+  const [label, set, queries] of [
+    ["wildcard query", sources(256), WILD_QUERIES],
+    ["wildcard source", wildcardSources(256), QUERIES],
+  ] as const
+) {
   const index = indexOf(set);
 
   Deno.bench({
-    name: `index, wildcard query, sources=${count}`,
-    group: `dereference coverage wildcard sources=${count}`,
+    name: `index, ${label}, sources=256`,
+    group: `dereference coverage ${label}`,
     baseline: true,
     fn: () => {
       let hits = 0;
-      for (const path of WILD_QUERIES) if (index.hasPrefixOf(path)) hits++;
+      for (const path of queries) if (index.hasPrefixOf(path)) hits++;
       if (hits < 0) throw new Error("unreachable");
     },
   });
 
   Deno.bench({
-    name: `linear scan, wildcard query, sources=${count}`,
-    group: `dereference coverage wildcard sources=${count}`,
+    name: `linear scan, ${label}, sources=256`,
+    group: `dereference coverage ${label}`,
     fn: () => {
       let hits = 0;
-      for (const path of WILD_QUERIES) {
+      for (const path of queries) {
         if (set.some((source) => isPrefix(source, path))) hits++;
       }
       if (hits < 0) throw new Error("unreachable");
