@@ -2645,7 +2645,7 @@ describe("runtime-processor", () => {
       >;
     }
 
-    it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
+    it('fails closed on the raw `meta: "cfc"` seam', () => {
       const ref: CellRef = {
         id: "of:cfc-raw-meta-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -2795,7 +2795,7 @@ describe("runtime-processor", () => {
       expect("source" in atom).toBe(false);
     });
 
-    it("redacts Caveat.source in the label views carried by cells inside handleCellGet values", async () => {
+    it("redacts `Caveat.source` in the label views carried by cells inside `handleCellGet()` values", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({
         apiUrl: new URL("https://toolshed.test"),
@@ -2836,7 +2836,7 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("returns the read cell's schema-bearing ref when includeRef is set", () => {
+    it("returns the read cell's schema-bearing ref when `includeRef` is set", () => {
       const ref: CellRef = {
         id: "of:include-ref-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -2975,7 +2975,7 @@ describe("runtime-processor", () => {
       expect(atom.source).toBe("did:key:alice");
     });
 
-    it("redacts Caveat.source in the label views carried by cells inside subscription updates", async () => {
+    it("redacts `Caveat.source` in the label views carried by cells inside subscription updates", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({
         apiUrl: new URL("https://toolshed.test"),
@@ -3037,7 +3037,7 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("redacts Caveat.source in label views on response cell refs", () => {
+    it("redacts `Caveat.source` in label views on response cell refs", () => {
       const sourceRef: CellRef = {
         id: "of:cfc-ref-view-source" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3350,7 +3350,7 @@ describe("runtime-processor", () => {
       expect(synced).toBe(false);
     });
 
-    it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {
+    it("ignores schema-bearing `anyOf` refs when reading nested stored labels", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
         const pieceSchema = {
