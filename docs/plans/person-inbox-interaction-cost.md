@@ -152,11 +152,15 @@ the two columns differ only in this branch's own code.
 | paced click, median | 1239 ms | 422 ms |
 | during eager clicking | 6847 ms | 1463 ms |
 
-Separation at one person is complete — main's fastest paced click in any round
-was 1109 ms and the branch's slowest 376 ms. What the second table is for is the
-branch's own column rather than the ratio: 284 ms at one person against 422 ms
-at five. Main's column is the noisier of the two (794-1460 ms across rounds
-against the branch's 346-422), so the ratio moves more than the branch does.
+Separation at one person is complete. Across the first paced round of each
+pair, main's fastest single click was 1139 ms against the branch's slowest
+376 ms; counting the paced rounds that follow an eager burst as well, 904 ms
+against 798 ms.
+
+What the five-people table is for is the branch's own column rather than the
+ratio: 284 ms at one person against 422 ms at five. Main's medians there are
+the noisier of the two — 794-1460 ms across rounds, against the branch's
+346-422 — so the ratio moves more than the branch does.
 
 The last two rows are the finding that started this, and it is gone. Cost used
 to track how many rows the queries returned rather than how many were rendered —
