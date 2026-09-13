@@ -2451,7 +2451,7 @@ export class PiecesController<T = unknown> {
         { cause },
       );
 
-    // Fetch + compile the official source, mirroring pattern-updater's #check.
+    // Fetch + compile the official source.
     // Force ETag revalidation (`cache: "no-cache"`): the roll-forward exists to
     // ESCAPE a stale pinned pattern, so compiling a stale HTTP-cached source
     // would defeat the heal — it could "roll forward" to the same aged bytes.
@@ -2461,9 +2461,7 @@ export class PiecesController<T = unknown> {
     // Resolve against the host that actually SERVES this space, not the global
     // apiUrl. A mapped space is served by its own host (`mappedHostFor`); the
     // system pattern must be fetched and compiled from there, or a mapped space
-    // could roll forward onto the WRONG host's system pattern. `hostForSpace`
-    // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
-    // uses for its own roll-forward.
+    // could roll forward onto the WRONG host's system pattern.
     const officialUrl = patternSourceUrl(
       officialUrlPath,
       runtime.hostForSpace(space),
@@ -2499,7 +2497,7 @@ export class PiecesController<T = unknown> {
     // artifact under an obsolete/other symbol (e.g. a persisted export that is
     // no longer `default`) is NOT already-official — rolling it forward to the
     // official `default` entry is exactly the recovery, so it must not
-    // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
+    // short-circuit here.
     const alreadyOfficial = officialRef.identity === pinnedRef.identity &&
       officialRef.symbol === pinnedRef.symbol;
     if (alreadyOfficial && reason === "unrunnable") {
@@ -2525,9 +2523,9 @@ export class PiecesController<T = unknown> {
     // diagnosed. `editWithRetry` reruns this callback against fresh state on
     // conflict, so without the guard a concurrent heal (another boot, the
     // pattern updater) that already repointed the root would be blindly
-    // clobbered by our stale `officialRef`. Returning `false` aborts the write
-    // without committing — precedent: pattern-updater's `stillMatches`/
-    // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    // clobbered by our stale `officialRef`. Returning `false` before anything
+    // is staged commits a transaction with no writes; `result.ok === false`
+    // (no error) then means "superseded".
     if (alreadyOfficial) {
       // Nothing to swap: the root already names the entry the official source
       // compiles to, and that source has just been compiled into this space.
