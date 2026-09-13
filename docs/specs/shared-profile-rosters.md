@@ -205,7 +205,11 @@ const EMPTY_VIEWER: ViewerState = {};
 type RosterCell = Writable<Roster | Default<typeof DEFAULT_ROSTER>>;
 type ViewerCell = Writable<ViewerState | Default<typeof EMPTY_VIEWER>>;
 
-export type JoinEvent = Record<PropertyKey, never>;
+// `void`: the handler reads nothing from its event, and the button delivers the
+// serialized DOM click (`type`, `provenance`, target scalars). An empty CLOSED
+// object here (`Record<PropertyKey, never>`) is refused by the runner's
+// closed-world gate before the handler runs.
+export type JoinEvent = void;
 
 // ---------------------------------------------------------------------------
 // Join handler: contribute the current viewer's profile snapshot

@@ -1,8 +1,12 @@
-// cell-bridge.ts — Bridge PiecesController → FsTree
-//
-// Populates the filesystem tree with piece data from Common Fabric spaces.
-// Supports multiple spaces with on-demand connection.
-// Subscribes to cell changes and rebuilds subtrees on updates.
+/**
+ * Projection of Common Fabric spaces into the filesystem tree the FUSE mount
+ * serves. `CellBridge` does the projecting. Around it sit the shapes it
+ * exchanges with the mount — the per-space state it keeps, the write paths
+ * and handler targets it resolves an inode to, and the callbacks through
+ * which it has the mount drop kernel caches — and the helpers that turn a
+ * piece's name into a directory name, a callable's schema into the type its
+ * shim displays, and an `index.md` back into frontmatter and body.
+ */
 
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
@@ -62,10 +66,12 @@ import {
 import { FsTree, type TransplantChanges } from "./tree.ts";
 
 /**
- * A schema stored as a content-addressed reference, reconstructed for the
- * shim this mount bakes it into: `cf exec` runs later with no registry to
- * resolve against, so the expansion has to happen here, where the mount's
- * session holds the documents. An unresolvable reference stays as it is.
+ * Expands a schema stored as a content-addressed reference into the schema it
+ * names, keeping any sibling keys, for the shim this mount bakes it into:
+ * `cf exec` runs later with no registry to resolve against, so the expansion
+ * has to happen here, where the mount's session holds the documents. A schema
+ * that is not such a reference, or one that cannot be resolved, is returned as
+ * it is.
  */
 function expandSchemaReference(
   schema: JSONSchema | undefined,
@@ -88,7 +94,11 @@ function expandSchemaReference(
   }
 }
 
-/** Strip asCell markers from a schema for display as input schema. */
+/**
+ * Strips the `asCell` marker from `schema`, after expanding a reference, for
+ * display as a callable's input schema. Returns `undefined` for a schema that
+ * is not an object, or one with nothing left once the marker is gone.
+ */
 function getInputSchema(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
@@ -103,6 +113,11 @@ function getInputSchema(
   return Object.keys(rest).length > 0 ? rest as JSONSchema : undefined;
 }
 
+/**
+ * Returns the type a callable's shim displays for its input: `void` when there
+ * is no schema, noting for a handler that it is invoked with no arguments, and
+ * otherwise the schema rendered as a type string to a depth of three.
+ */
 function displayCallableInputType(
   callableKind: CallableKind,
   schema: JSONSchema | undefined,
@@ -125,8 +140,11 @@ function displayCallableInputType(
 }
 
 /**
- * Parse YAML frontmatter from a markdown string.
- * Expects the format: ---\nkey: value\n---\n\nbody...
+ * Parses the frontmatter of a Markdown document: `key: value` lines between an
+ * opening `---` line and the next one. A value that parses as a JSON string,
+ * number, boolean, or `null` is taken as such, and any other is kept as text.
+ * Returns the fields and the body after the closing line, with one blank
+ * separator line dropped; text with no frontmatter is all body.
  */
 function parseFrontmatter(
   text: string,
@@ -165,6 +183,12 @@ function parseFrontmatter(
   return { frontmatter: fm, body };
 }
 
+/**
+ * Normalizes a piece name into a directory name: strips accents and emoji,
+ * replaces every other run of characters outside ASCII letters and digits
+ * with one hyphen, and trims hyphens from both ends. Yields `piece` when
+ * nothing remains.
+ */
 function normalizeProjectedPieceName(name: string): string {
   const normalized = name
     .normalize("NFKD")
@@ -177,6 +201,11 @@ function normalizeProjectedPieceName(name: string): string {
   return normalized || "piece";
 }
 
+/**
+ * Returns the directory name for a piece named `rawName`: its normalization,
+ * unless that comes out as `piece` — which is what an empty name normalizes
+ * to — in which case the normalization of `pieceId`.
+ */
 function resolveProjectedPieceName(
   rawName: string | undefined,
   pieceId: string,
@@ -188,22 +217,41 @@ function resolveProjectedPieceName(
   return fallback || "piece";
 }
 
+/** Encodes a space name as the name of its directory under the mount root. */
 function encodeSpaceDirectoryName(spaceName: string): string {
   return encodeFuseComponent(spaceName);
 }
 
+/** Decodes a space's directory name back into the space name. */
 function decodeSpaceDirectoryName(spaceName: string): string {
   return decodeFuseComponent(spaceName);
 }
 
+/** Cancels a subscription. */
 type Cancel = () => void;
 
+/**
+ * Resolves a value found `depth` levels below a piece's `input` or `result`
+ * directory to the relative symlink target it projects as, or `null` when it
+ * does not project as a symlink.
+ */
 type ResolveLink = (value: unknown, depth: number) => string | null;
 
+/** Opens a space's pieces controller. */
 type PiecesLoader = (config: {
+  /** API URL to open the space against. */
   apiUrl: string;
+
+  /** Name of the space. */
   space: string;
+
+  /**
+   * Identity to open it as; the default loader reads this as the path of a
+   * PKCS#8 key file.
+   */
   identity: string;
+
+  /** Whether the controller defers syncing the space cell. */
   deferSpaceCellSync?: boolean;
 }) => Promise<PiecesController>;
 
@@ -220,107 +268,225 @@ const openSpacePieces: PiecesLoader = async (config) =>
     deferSpaceCellSync: config.deferSpaceCellSync,
   });
 
+/** Options for constructing a `CellBridge`. */
 export interface CellBridgeOptions {
+  /** Whether nodes get CFC annotations; off by default. */
   cfcAnnotations?: boolean;
+
+  /**
+   * How many entity projections to keep before evicting;
+   * `DEFAULT_MAX_ENTITY_PROJECTIONS` by default.
+   */
   maxEntityProjections?: number;
+
+  /**
+   * Generation to stamp every CFC annotation with, instead of deriving one per
+   * projection.
+   */
   projectionGeneration?: string;
+
+  /** Extra fields for `.status` to report. */
   statusProvider?: () => Record<string, unknown>;
+
+  /**
+   * Called after each rebuild of a piece prop and each build of a source
+   * tree; not after a manifest or index file is rewritten.
+   */
   onCfcProjectionRebuilt?: () => void;
+
+  /** Loader reconnection probes open spaces with; `loadPieces` by default. */
   reconnectPiecesLoader?: PiecesLoader;
+
+  /**
+   * Loader spaces are opened with; by default, one that authenticates with
+   * the PKCS#8 identity file `init()` was given.
+   */
   loadPieces?: PiecesLoader;
 }
 
-/** Result of resolving an inode to a writable cell path. */
+/**
+ * The cell path a write to an inode lands on; see
+ * `CellBridge.resolveWritePath()`.
+ */
 export interface WritePath {
+  /** Name of the space. */
   spaceName: string;
+
+  /** Projected name of the piece. */
   pieceName: string;
+
+  /** Which cell of the piece. */
   cell: "input" | "result";
+
+  /**
+   * Path within the cell's value, with array indexes as numbers; empty for
+   * the whole cell.
+   */
   jsonPath: (string | number)[];
+
+  /**
+   * Whether the inode is a `.json` file, rather than a directory or a leaf
+   * value file.
+   */
   isJsonFile: boolean;
+
+  /** Controller of the piece. */
   piece: PieceController;
 
   /** Set when the file is an [FS] projection index file. */
   fsProjection?: "markdown" | "json";
 }
 
+/**
+ * The handler cell a callable file stands for; see
+ * `CellBridge.resolveHandlerTarget()`.
+ */
 export interface HandlerTarget {
+  /** Controller of the piece. */
   piece: PieceController;
+
+  /** Which cell of the piece holds the handler. */
   cellProp: "input" | "result";
+
+  /** Key of the handler within that cell. */
   cellKey: string;
 }
 
-/** Result of resolving an inode to a writable source file path. */
+/**
+ * The source file a write to an inode lands on; see
+ * `CellBridge.resolveSourceWritePath()`.
+ */
 export interface SourceWritePath {
+  /** Name of the space. */
   spaceName: string;
+
+  /** Projected name of the piece. */
   pieceName: string;
 
-  /** Relative path within .src/, e.g. "main.tsx" or "utils/helper.tsx". */
+  /** Path within `.src/`, such as `main.tsx` or `utils/helper.tsx`. */
   relPath: string;
 
+  /** Controller of the piece. */
   piece: PieceController;
 
-  /** Inode of the .src/ directory (for error.log lookups). */
+  /**
+   * Inode of the `.src/` directory, from which the mount walks `relPath` to
+   * reach the written file's inode.
+   */
   srcIno: bigint;
 }
 
-/** Callback to invalidate kernel cache entries (by name under a parent). */
+/**
+ * Callback that drops the kernel's cached entries for `names` under the
+ * directory `parentIno`.
+ */
 export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
 
 /**
- * Callback to invalidate cached attrs and data for an inode, which forces a
- * readdir refresh.
+ * Callback that drops the kernel's cached attributes and data for an inode:
+ * a file's content, or a directory's listing.
  */
 export type InvalidateInodeCallback = (ino: bigint) => void;
 
-/** Per-space state after connection. */
+/** State of one connected space. */
 export interface SpaceState {
+  /** Controller of the space's pieces. */
   pieces: PiecesController;
+
+  /** Inode of the space's directory. */
   spaceIno: bigint;
+
+  /** Inode of its `pieces/` directory. */
   piecesIno: bigint;
+
+  /** Inode of its `entities/` directory. */
   entitiesIno: bigint;
-  pieceMap: Map<string, string>; // name → entity ID
-  pieceInos: Map<string, bigint>; // name → root inode
-  pieceControllers: Map<string, PieceController>; // name → controller
-  entityControllers: Map<string, PieceController>; // entity ID → controller
+
+  /** Entity id of each piece, by projected name. */
+  pieceMap: Map<string, string>;
+
+  /** Root inode of each piece, by projected name. */
+  pieceInos: Map<string, bigint>;
+
+  /** Controller of each piece, by projected name. */
+  pieceControllers: Map<string, PieceController>;
+
+  /** Controller of each entity projected under `entities/`, by entity id. */
+  entityControllers: Map<string, PieceController>;
+
+  /** Ids of every registered piece, as of the last piece-list sync. */
   allPieceIds: Set<string>;
-  entityIds: Set<string>; // entity IDs with cached exact projections
+
+  /** Entity ids with a projection under `entities/`. */
+  entityIds: Set<string>;
+
+  /** Whether `pieces/` has been materialized. */
   piecesHydrated: boolean;
+
+  /** Whether `pieces/` is being materialized. */
   piecesMaterializing: boolean;
+
+  /** Whether the piece registry is subscribed to. */
   pieceListSubscribed: boolean;
+
+  /**
+   * Summary and pattern reference of each piece, by entity id, which
+   * `pieces.json` lists.
+   */
   pieceManifest: Map<
     string,
     { summary: string; patternRef?: PiecePatternRef }
   >;
 
-  /** Per-piece subscription cancellers, keyed by piece name. */
+  /** Cancel functions of each piece's subscriptions, by projected name. */
   pieceSubs: Map<string, Cancel[]>;
 
+  /** DID of the space. */
   did: string;
+
+  /** Cancel functions of the space-level subscriptions. */
   unsubscribes: Cancel[];
 
-  /** Used names set for collision resolution. */
+  /** Projected names in use, for collision resolution. */
   usedNames: Set<string>;
 
-  /** Map from piece name to the inode of its .src/ directory. */
+  /** Inode of each piece's `.src/` directory, by projected name. */
   srcInos: Map<string, bigint>;
 
   /**
-   * Map from piece name to the inode of the synthetic `error.log` file in
-   * `.src/`.
+   * Inode of the synthetic `error.log` file in each piece's `.src/`, by
+   * projected name.
    */
   srcErrorLogInos: Map<string, bigint>;
 }
 
+/** What a piece root directory projects. */
 interface PieceRootInfo {
+  /** Name of the space. */
   spaceName: string;
+
+  /** Whether the root sits under `pieces/` or `entities/`. */
   rootKind: "pieces" | "entities";
+
+  /**
+   * Directory name of the root: the projected piece name, or the encoded
+   * entity id.
+   */
   rootName: string;
+
+  /** Entity id of the piece. */
   pieceId: string;
+
+  /** Controller of the piece. */
   piece: PieceController;
 }
 
+/** Which piece prop an `input` or `result` directory projects. */
 interface PiecePropRootInfo {
+  /** Inode of the piece root. */
   pieceIno: bigint;
+
+  /** Which prop. */
   propName: "input" | "result";
 }
 
@@ -345,63 +511,177 @@ export interface EntityProjectionLookupOwner {
   count: bigint;
 }
 
+/**
+ * The root an entity-projection open handle belongs to, and its handle count.
+ */
 interface EntityProjectionOpenOwner {
+  /** Inode of the projection root the handle holds. */
   rootIno: bigint;
+
+  /** How many handles the root holds through this owner. */
   count: number;
 }
 
+/** How many entity ids one page of the server's listing asks for. */
 const ENTITY_ID_PAGE_SIZE = 1_000;
+
+/**
+ * How many entity projections a bridge keeps before evicting, absent a
+ * `maxEntityProjections` option.
+ */
 export const DEFAULT_MAX_ENTITY_PROJECTIONS = 128;
 
+/** A prop rebuild scheduled but not yet started. */
 interface ScheduledPropRebuild {
+  /** The cell being projected. */
   cell: Cell<unknown>;
+
+  /**
+   * The value the rebuild will project, replaced by any change arriving
+   * before it starts.
+   */
   latestValue: unknown;
+
+  /** Entity id of the piece. */
   pieceId: string;
+
+  /** Inode of the piece root. */
   pieceIno: bigint;
+
+  /** Projected name of the piece. */
   pieceName: string;
+
+  /** Which prop. */
   propName: "input" | "result";
+
+  /** Link resolver for the piece's space. */
   resolveLink: ResolveLink;
+
+  /** Name of the space. */
   spaceName: string;
+
+  /** The timer that starts the rebuild. */
   timer: ReturnType<typeof setTimeout>;
 }
 
+/** One prop rebuild, as queued. */
 interface PropRebuildJob {
+  /** The cell being projected. */
   cell: Cell<unknown>;
+
+  /** The value to project. */
   newValue: unknown;
+
+  /** Entity id of the piece. */
   pieceId: string;
+
+  /** Inode of the piece root. */
   pieceIno: bigint;
+
+  /** Projected name of the piece. */
   pieceName: string;
+
+  /** Which prop. */
   propName: "input" | "result";
+
+  /** Link resolver for the piece's space. */
   resolveLink: ResolveLink;
+
+  /** Name of the space. */
   spaceName: string;
 }
 
+/**
+ * Bridge from Common Fabric spaces to an `FsTree`. A space is connected the
+ * first time it is asked for, and gets a directory holding `pieces/`, keyed by
+ * projected piece name, and `entities/`, keyed by entity id. Under both, a
+ * piece's `input` and `result` are hydrated on demand: each is created as a
+ * stub and filled when a lookup or listing reaches it. The bridge subscribes
+ * to the cells of every piece it has loaded, and a change rebuilds the
+ * affected subtree in place, one rebuild at a time per prop, reusing inodes
+ * where a path survives, and then names exactly the kernel caches the rebuild
+ * made stale through `onInvalidate` and `onInvalidateInode`. Entity
+ * projections are bounded by a least-recently-used cache that evicts only
+ * roots the kernel holds no lookup or open reference on. A write that fails
+ * with a transport error marks the bridge disconnected, which the mount reads
+ * as read-only, and reconnection is probed with an increasing backoff.
+ */
 export class CellBridge {
+  /** The tree this bridge projects into. */
   #tree: FsTree;
+
+  /** Connected spaces by name. */
   #spaces: Map<string, SpaceState> = new Map();
+
+  /**
+   * DID of every space that has connected, by name; the contents of
+   * `.spaces.json`.
+   */
   #knownSpaces: Map<string, string> = new Map();
+
+  /**
+   * Callback for dropping a directory's cached entries by name, or `null` when
+   * the mount has not set one.
+   */
   #onInvalidate: InvalidateCallback | null = null;
+
+  /**
+   * Callback for dropping an inode's cached attributes and data, or `null` when
+   * the mount has not set one.
+   */
   #onInvalidateInode: InvalidateInodeCallback | null = null;
+
+  /**
+   * Identity handed to the pieces loader, which for the default loader is the
+   * path of a PKCS#8 key file; empty until `init()`.
+   */
   #identity: string = "";
+
+  /** API URL spaces are opened against; empty until `init()`. */
   #apiUrl: string = "";
+
+  /**
+   * In-flight connections by space name, so concurrent `connectSpace()` calls
+   * share one attempt.
+   */
   #connecting = new Map<string, Promise<SpaceState>>();
 
-  /** In-flight piece-list synchronization keyed by space name. */
+  /** In-flight piece-list synchronization, by space name. */
   #pieceSyncs = new Map<string, Promise<void>>();
 
-  /** Flag: re-run sync after current pass completes. */
+  /**
+   * Spaces whose piece-list sync must run once more after the pass in flight
+   * completes.
+   */
   #syncAgain: Set<string> = new Set();
 
+  /**
+   * In-flight materialization of a space's `pieces/` directory, by space name.
+   */
   #pendingPieceHydrations = new Map<string, Promise<void>>();
 
-  /** Coalesced subtree rebuilds keyed by piece inode + prop name. */
+  /**
+   * Rebuilds scheduled but not yet started, by the key `#propRebuildKey()`
+   * gives; a change arriving meanwhile replaces the value the rebuild will use.
+   */
   #pendingPropRebuilds = new Map<
     string,
     ScheduledPropRebuild
   >();
+
+  /** Keys of the rebuilds `#schedulePropRebuild()` has running. */
   #activePropRebuilds = new Set<string>();
+
+  /**
+   * The one rebuild held back per key while a scheduled rebuild for that key
+   * runs, scheduled in turn when it finishes.
+   */
   #deferredPropRebuilds = new Map<string, PropRebuildJob>();
+
+  /** Whether `#debugLog()` writes to the console. */
   #debug = false;
+
+  /** Counters about prop rebuilds, which `.status` reports. */
   #rebuildStats = {
     scheduled: 0,
     coalesced: 0,
@@ -410,88 +690,214 @@ export class CellBridge {
     maxPending: 0,
     lastDurationMs: 0,
   };
+
+  /** Command the shim in a callable file invokes. */
   #execCli: string;
+
+  /**
+   * What each piece root directory projects, by inode: every root under
+   * `pieces/`, and every hydrated root under `entities/`.
+   */
   #pieceRoots = new Map<bigint, PieceRootInfo>();
 
+  /**
+   * Entity roots that exist as directories but hold no piece tree yet, by
+   * inode.
+   */
   #unhydratedEntityRoots = new Map<
     bigint,
     UnhydratedEntityRootInfo
   >();
 
+  /**
+   * In-flight entity-root hydrations by inode, each resolving to whether the
+   * root is hydrated.
+   */
   #pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
+
+  /**
+   * In-flight `entities/` listings by space, so concurrent readers share one
+   * walk of the server's pages.
+   */
   #pendingEntityDirectorySnapshots = new Map<
     SpaceState,
     Promise<readonly DirectorySnapshotEntry[]>
   >();
 
+  /** Every live entity projection by root inode, least recently used first. */
   #entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
 
+  /**
+   * The subset of `#entityProjectionLru` that may be evicted: roots with no
+   * hydration in flight and no kernel reference held on them.
+   */
   #entityProjectionEvictionCandidates = new Map<
     bigint,
     UnhydratedEntityRootInfo
   >();
 
+  /**
+   * Sequence number of each entity projection's latest use, which eviction
+   * compares to find the oldest candidate.
+   */
   #entityProjectionUseOrder = new Map<bigint, number>();
+
+  /** Sequence number most recently issued to an entity-projection use. */
   #nextEntityProjectionUseOrder = 0;
 
+  /**
+   * Kernel lookup references held on each entity projection, by root inode,
+   * summed over the inodes under it.
+   */
   #entityProjectionLookupRefs = new Map<bigint, bigint>();
 
+  /**
+   * For each inode under an entity projection holding lookup references, the
+   * root it belongs to and how many it holds.
+   */
   #entityProjectionLookupOwners = new Map<
     bigint,
     EntityProjectionLookupOwner
   >();
+
+  /**
+   * Inodes holding lookup references, by the projection root they belong to;
+   * the inverse of `#entityProjectionLookupOwners`.
+   */
   #entityProjectionLookupOwnerInodes = new Map<bigint, Set<bigint>>();
+
+  /**
+   * Open handles held on each entity projection, by root inode, summed over the
+   * inodes under it.
+   */
   #entityProjectionOpenRefs = new Map<bigint, number>();
+
+  /**
+   * For each inode under an entity projection holding open handles, the root it
+   * belongs to and how many it holds.
+   */
   #entityProjectionOpenOwners = new Map<
     bigint,
     EntityProjectionOpenOwner
   >();
+
+  /**
+   * Inodes holding open handles, by the projection root they belong to; the
+   * inverse of `#entityProjectionOpenOwners`.
+   */
   #entityProjectionOpenOwnerInodes = new Map<bigint, Set<bigint>>();
 
+  /**
+   * Entity projections detached from `entities/` whose subtree waits for the
+   * kernel to release its references before it is cleared, by root inode.
+   */
   #pendingEntityRemovals = new Map<bigint, UnhydratedEntityRootInfo>();
 
+  /**
+   * Cancel functions of each hydrated entity root's cell subscriptions, by
+   * inode.
+   */
   #entitySubscriptions = new Map<bigint, Cancel[]>();
+
+  /**
+   * Which piece and prop each `input` or `result` directory belongs to, by the
+   * directory's inode.
+   */
   #piecePropRoots = new Map<bigint, PiecePropRootInfo>();
+
+  /** The props of each piece root whose subtree is hydrated. */
   #hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
 
-  /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
+  /**
+   * In-flight prop hydrations, keyed by piece inode and prop name as
+   * `${pieceIno}-${propName}`.
+   */
   #pendingHydrations = new Map<string, Promise<boolean>>();
 
+  /**
+   * Tail of the rebuild queue for each piece prop, which the next rebuild of
+   * that prop chains after.
+   */
   #pendingPropRebuildQueues = new Map<string, Promise<void>>();
 
-  /** Monotonic invalidation epoch per hydration key. */
+  /**
+   * Invalidation epoch per hydration key, advanced whenever the prop's value is
+   * superseded so that a hydration in flight re-reads.
+   */
   #hydrationEpochs = new Map<string, number>();
 
   /**
-   * Tracks root-level entries created by [FS] projections so they can be
-   * cleared when the result switches back to the default result/ tree.
+   * Names an [FS] projection put at each piece root, by piece inode, so they
+   * can be removed when the result stops projecting one.
    */
   #fsProjectionEntries: Map<bigint, Set<string>> = new Map();
 
+  /** Whether nodes get CFC annotations. */
   #cfcAnnotationsEnabled = false;
+
+  /**
+   * Generation to stamp every CFC annotation with, when the options supplied
+   * one; otherwise one is derived per projection.
+   */
   #explicitCfcProjectionGeneration: string | undefined;
+
+  /** Extra fields `.status` reports, when the options supplied a provider. */
   #statusProvider: (() => Record<string, unknown>) | undefined;
+
+  /**
+   * Called after each rebuild of a piece prop and each build of a source
+   * tree, when the options supplied a callback.
+   */
   #onCfcProjectionRebuilt: (() => void) | undefined;
+
+  /**
+   * Loader reconnection probes open spaces with; falls back to `#piecesLoader`.
+   */
   #reconnectPiecesLoader: CellBridgeOptions["reconnectPiecesLoader"];
+
+  /**
+   * Loader spaces are opened with; `openSpacePieces()` when none was supplied.
+   */
   #piecesLoader: CellBridgeOptions["loadPieces"];
+
+  /** How many entity projections the cache keeps before evicting. */
   #maxEntityProjections: number;
 
+  /**
+   * When this bridge was constructed, as the ISO 8601 timestamp `.status`
+   * reports.
+   */
   #startedAt = new Date().toISOString();
 
   /**
-   * Set to true when a write fails due to a transport/connection error.
-   * Once disconnected, all files appear read-only (EACCES on write)
-   * so agents get immediate feedback rather than silent data loss.
-   * Reconnection is attempted automatically with exponential backoff.
+   * Whether a write failed with a transport error and no reconnection probe has
+   * succeeded since. While set, the mount presents every file read-only, so a
+   * writer learns of the loss at once instead of losing data silently;
+   * `#attemptReconnect()` clears it.
    */
   #disconnected = false;
 
+  /**
+   * How many disconnections and failed reconnection probes have occurred since
+   * the last successful probe; the exponent of the reconnection backoff.
+   */
   #disconnectCount = 0;
+
+  /**
+   * Reason the most recent `markDisconnected()` gave, or `null` if none has
+   * happened.
+   */
   #lastDisconnectReason: string | null = null;
 
+  /** The scheduled reconnection attempt, or `null` when none is pending. */
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Constructs an instance projecting spaces into `tree`. */
+  /**
+   * Constructs an instance projecting spaces into `tree`, whose callable files
+   * run `execCli`.
+   *
+   * @throws If `options.maxEntityProjections` is not a positive integer.
+   */
   constructor(tree: FsTree, execCli = "", options: CellBridgeOptions = {}) {
     this.#tree = tree;
     this.#execCli = execCli;
@@ -511,10 +917,25 @@ export class CellBridge {
     }
   }
 
+  //
+  // Instance members
+  //
+
   /**
-   * The synchronization and hydration tables, the entity-projection tables,
-   * the disconnection state, and the tree-building and failed-connection
-   * cleanup steps this bridge keeps to itself, which a test drives directly.
+   * What this bridge keeps to itself and a test drives directly. The tables:
+   * `pieceSyncs`, `syncAgain`, and `pendingPieceHydrations` for piece-list
+   * work; `unhydratedEntityRoots`, `pendingEntityHydrations`,
+   * `entityProjectionLru`, `entityProjectionEvictionCandidates`,
+   * `entityProjectionUseOrder`, `entityProjectionLookupRefs`,
+   * `entityProjectionLookupOwners`, `pendingEntityRemovals`, and
+   * `entitySubscriptions` for entity projections; and the `disconnected` flag
+   * with its `reconnectTimer`. The steps: `attemptReconnect`,
+   * `removeFailedSpaceTree`, and `buildSpaceTree` for a space's connection;
+   * `enqueuePiecePropRebuild`, `rebuildPieceProp`, and `hydratePieceProp` for
+   * a prop's rebuild; `addPieceToSpace`, `syncPieceListOnce`,
+   * `updatePiecesJson`, `updateIndexJson`, `subscribePiece`,
+   * `makeLinkResolver`, `loadPieceTree`, `refreshPiecePatternMetadata`, and
+   * `buildSourceTree` for a piece's projection.
    */
   get accessForTestingOnly(): {
     readonly pieceSyncs: Map<string, Promise<void>>;
@@ -675,7 +1096,10 @@ export class CellBridge {
     return this.#knownSpaces;
   }
 
-  /** Callback for kernel cache invalidation, which the mount sets. */
+  /**
+   * Callback for dropping a directory's cached entries by name, which the mount
+   * sets; `null` until then.
+   */
   get onInvalidate(): InvalidateCallback | null {
     return this.#onInvalidate;
   }
@@ -684,7 +1108,10 @@ export class CellBridge {
     this.#onInvalidate = value;
   }
 
-  /** Callback for kernel inode invalidation, which the mount sets. */
+  /**
+   * Callback for dropping an inode's cached attributes and data, which the
+   * mount sets; `null` until then.
+   */
   get onInvalidateInode(): InvalidateInodeCallback | null {
     return this.#onInvalidateInode;
   }
@@ -693,11 +1120,18 @@ export class CellBridge {
     this.#onInvalidateInode = value;
   }
 
+  /**
+   * Whether the backend connection is lost, which the mount reads as read-only;
+   * see `markDisconnected()`.
+   */
   get disconnected(): boolean {
     return this.#disconnected;
   }
 
-  /** Marks the bridge as disconnected and schedules reconnection. */
+  /**
+   * Marks the bridge disconnected for `reason`, logs it, and schedules the
+   * first reconnection attempt. Does nothing when already disconnected.
+   */
   markDisconnected(reason: string): void {
     if (this.#disconnected) return;
     this.#disconnected = true;
@@ -710,83 +1144,7 @@ export class CellBridge {
     this.#scheduleReconnect();
   }
 
-  #reconnectDelayMs(): number {
-    // Exponential backoff: 2s, 4s, 8s, 16s, cap at 30s
-    return Math.min(2000 * Math.pow(2, this.#disconnectCount - 1), 30_000);
-  }
-
-  #scheduleReconnect(): void {
-    if (this.#reconnectTimer !== null) clearTimeout(this.#reconnectTimer);
-    const timerId = setTimeout(() => {
-      this.#reconnectTimer = null;
-      this.#attemptReconnect();
-    }, this.#reconnectDelayMs());
-    // Don't prevent Deno process from exiting while waiting to reconnect
-    Deno.unrefTimer(timerId);
-    this.#reconnectTimer = timerId;
-  }
-
-  /**
-   * Probes every connected space's backend, and clears the disconnected
-   * state when there is at least one and all of them answer; otherwise
-   * schedules the next attempt.
-   */
-  async #attemptReconnect(): Promise<void> {
-    const spaces = [...this.#spaces];
-    let allSpacesRestored = spaces.length > 0;
-    for (const [spaceName, state] of spaces) {
-      try {
-        const loadPieces = this.#reconnectPiecesLoader ??
-          this.#piecesLoader ?? openSpacePieces;
-        const probe = await loadPieces({
-          apiUrl: this.#apiUrl,
-          space: spaceName,
-          identity: this.#identity,
-          deferSpaceCellSync: true,
-        });
-        try {
-          await this.#verifyPiecesConnection(probe);
-          if (state.piecesHydrated) {
-            await state.pieces.getRegisteredPieces();
-          }
-          // The session probe and existing pieces view verify this space.
-          // probe.synced() alone can succeed from local state while the
-          // backend is still unavailable.
-        } finally {
-          await probe.runtime.dispose().catch((e) => {
-            console.warn(
-              `[FUSE] Reconnect probe cleanup failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
-            );
-          });
-        }
-      } catch (e) {
-        console.error(
-          `[FUSE] Reconnect probe to ${spaceName} failed: ${
-            e instanceof Error ? e.message : String(e)
-          }`,
-        );
-        allSpacesRestored = false;
-      }
-    }
-    if (allSpacesRestored) {
-      this.#disconnected = false;
-      this.#disconnectCount = 0;
-      console.error(
-        `[FUSE] Backend connection restored — write access resumed.`,
-      );
-      return;
-    }
-
-    // At least one probe failed — retry with increasing backoff
-    this.#disconnectCount++;
-    console.error(
-      `[FUSE] Reconnect failed, retrying in ${this.#reconnectDelayMs()}ms`,
-    );
-    this.#scheduleReconnect();
-  }
-
+  /** Sets the API URL and identity that spaces are opened with. */
   init(config: {
     apiUrl: string;
     identity: string;
@@ -795,116 +1153,16 @@ export class CellBridge {
     this.#identity = config.identity;
   }
 
-  async #verifyPiecesConnection(
-    pieces: PiecesController,
-  ): Promise<void> {
-    await pieces.ensureSpaceSession?.();
-    await pieces.synced?.();
-    if (typeof pieces.getSpace !== "function") return;
-    const authorizationError = pieces.runtime?.storageManager
-      ?.authorizationError?.(pieces.getSpace());
-    if (authorizationError) throw authorizationError;
-  }
-
-  async #createSpacePieces(
-    spaceName: string,
-  ): Promise<PiecesController> {
-    const loadPieces = this.#piecesLoader ?? openSpacePieces;
-    return await loadPieces({
-      apiUrl: this.#apiUrl,
-      space: spaceName,
-      identity: this.#identity,
-      deferSpaceCellSync: true,
-    });
-  }
-
+  /** Turns debug logging on or off. */
   setDebug(debug: boolean): void {
     this.#debug = debug;
   }
 
-  #debugLog(message: string): void {
-    if (this.#debug) {
-      console.log(message);
-    }
-  }
-
-  #cfcSpaceDid(spaceName: string): string {
-    return this.#spaces.get(spaceName)?.did ??
-      this.#knownSpaces.get(spaceName) ??
-      spaceName;
-  }
-
-  #spaceNameForState(state: SpaceState): string | undefined {
-    for (const [name, candidate] of this.#spaces) {
-      if (candidate === state) return name;
-    }
-    for (const [name, did] of this.#knownSpaces) {
-      if (did === state.did) return name;
-    }
-    return undefined;
-  }
-
-  #cfcLabelViewForCell(cell: Cell<unknown>): CfcLabelView | undefined {
-    if (!this.#cfcAnnotationsEnabled) return undefined;
-    try {
-      return cfcLabelViewForCell(cell) as CfcLabelView | undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  #makeCfcAnnotator(options: {
-    spaceName: string;
-    spaceDid?: string;
-    pieceId?: string;
-    rootKind?: "pieces" | "entities";
-    cell?: "input" | "result";
-    labelView?: CfcLabelView;
-    value?: unknown;
-  }): CfcProjectionAnnotator | undefined {
-    if (!this.#cfcAnnotationsEnabled) return undefined;
-    const space = options.spaceDid ?? this.#cfcSpaceDid(options.spaceName);
-    const generation = this.#explicitCfcProjectionGeneration ??
-      deriveCfcProjectionGeneration({
-        space,
-        entity: options.pieceId,
-        rootKind: options.rootKind,
-        cell: options.cell,
-        value: options.value,
-        labelView: options.labelView,
-      });
-    return new CfcProjectionAnnotator(this.#tree, {
-      space,
-      entity: options.pieceId,
-      rootKind: options.rootKind,
-      cell: options.cell,
-      generation,
-      labelView: options.labelView,
-    });
-  }
-
-  #annotateSyntheticNode(
-    annotator: CfcProjectionAnnotator | undefined,
-    ino: bigint,
-    projection: CfcProjectionKind,
-    path: readonly (string | number)[],
-    parent?: { ino: bigint; name: string },
-    contentLabel?: CfcLabel,
-  ): void {
-    if (!annotator) return;
-    annotator.annotateSynthetic(ino, { projection, path, contentLabel });
-    if (parent) {
-      annotator.annotateEntry(parent.ino, parent.name, ino, {
-        labelPath: path,
-      });
-    }
-  }
-
   /**
-   * Create the .status file at the mount root. Call once after init.
+   * Creates the `.status` file at the mount root.
    *
-   * The file is generated: `getStatusJson` runs when a reader asks the tree for
-   * the file's size, and no caller has to announce that a counter moved.
+   * The file is generated: `#getStatusJson()` runs when a reader asks the tree
+   * for the file's size, and no caller has to announce that a counter moved.
    */
   initStatus(): void {
     this.#tree.addGeneratedFile(
@@ -915,188 +1173,14 @@ export class CellBridge {
     );
   }
 
-  /** Generate current status as JSON. */
-  #getStatusJson(): string {
-    const spaces: Record<
-      string,
-      { did: string; pieces: number; piecesLoaded: boolean }
-    > = {};
-    for (const [name, state] of this.#spaces) {
-      spaces[name] = {
-        did: state.did,
-        pieces: state.pieceMap.size,
-        piecesLoaded: state.piecesHydrated,
-      };
-    }
-    const extra = this.#statusProvider?.() ?? {};
-    return JSON.stringify(
-      {
-        apiUrl: this.#apiUrl,
-        debug: this.#debug,
-        rebuilds: {
-          pending: this.#pendingPropRebuilds.size +
-            this.#activePropRebuilds.size +
-            this.#deferredPropRebuilds.size,
-          scheduled: this.#rebuildStats.scheduled,
-          coalesced: this.#rebuildStats.coalesced,
-          completed: this.#rebuildStats.completed,
-          errors: this.#rebuildStats.errors,
-          maxPending: this.#rebuildStats.maxPending,
-          lastDurationMs: this.#rebuildStats.lastDurationMs,
-        },
-        startedAt: this.#startedAt,
-        spaces,
-        connection: {
-          disconnected: this.#disconnected,
-          disconnectCount: this.#disconnectCount,
-          lastDisconnectReason: this.#lastDisconnectReason,
-        },
-        ...extra,
-      },
-      null,
-      2,
-    );
-  }
-
-  #noteCfcProjectionRebuilt(): void {
-    try {
-      this.#onCfcProjectionRebuilt?.();
-    } catch (e) {
-      console.warn(`[fuse] CFC writeback reconciliation error: ${e}`);
-    }
-  }
-
-  #extractSummary(value: unknown): string {
-    if (
-      typeof value !== "object" || value === null || Array.isArray(value)
-    ) {
-      return "";
-    }
-    return typeof (value as Record<string, unknown>).summary === "string"
-      ? (value as Record<string, unknown>).summary as string
-      : "";
-  }
-
-  async #refreshPieceManifest(
-    state: SpaceState,
-    piece: PieceController,
-  ): Promise<void> {
-    let summary = "";
-    let patternRef: PiecePatternRef | undefined;
-
-    try {
-      const result = await piece.result.get();
-      summary = this.#extractSummary(result);
-    } catch {
-      // Summary is best-effort only.
-    }
-
-    try {
-      patternRef = await piece.getPatternRef();
-    } catch {
-      // Pattern source is best-effort; identity-less pieces remain listable.
-    }
-
-    this.#updatePieceManifest(state, piece.id, { summary, patternRef });
-  }
-
   /**
-   * Refreshes synthetic pattern metadata after an in-place pattern swap.
+   * Connects to `spaceName` and builds its directory tree, or returns the state
+   * of a space already connected. Concurrent calls for one space share a single
+   * attempt.
+   *
+   * @throws If the space cannot be opened or its connection cannot be verified;
+   *   whatever was built for it is removed first.
    */
-  async #refreshPiecePatternMetadata(
-    state: SpaceState,
-    piece: PieceController,
-    pieceIno: bigint,
-  ): Promise<void> {
-    let patternRef: PiecePatternRef | undefined;
-    try {
-      patternRef = await piece.getPatternRef();
-    } catch {
-      return;
-    }
-    if (patternRef === undefined) return;
-
-    const manifestChanged = this.#updatePieceManifest(state, piece.id, {
-      patternRef,
-    });
-    this.#updatePieceMetaPatternRef(pieceIno, patternRef);
-
-    const entityIno = this.#tree.lookup(
-      state.entitiesIno,
-      encodeFuseComponent(piece.id),
-    );
-    if (entityIno !== undefined) {
-      this.#updatePieceMetaPatternRef(entityIno, patternRef);
-    }
-
-    if (manifestChanged) {
-      this.#updatePiecesJson(state);
-    }
-    if (this.#onInvalidate) {
-      this.#onInvalidate(pieceIno, ["meta.json"]);
-      if (entityIno !== undefined) {
-        this.#onInvalidate(entityIno, ["meta.json"]);
-      }
-      if (manifestChanged) {
-        this.#onInvalidate(state.piecesIno, ["pieces.json"]);
-      }
-    }
-  }
-
-  #updatePieceManifest(
-    state: SpaceState,
-    pieceId: string,
-    updates: Partial<{ summary: string; patternRef: PiecePatternRef }>,
-  ): boolean {
-    const current = state.pieceManifest.get(pieceId) ?? { summary: "" };
-    const next = {
-      summary: updates.summary ?? current.summary,
-      patternRef: updates.patternRef ?? current.patternRef,
-    };
-    const changed = next.summary !== current.summary ||
-      next.patternRef?.identity !== current.patternRef?.identity ||
-      next.patternRef?.symbol !== current.patternRef?.symbol ||
-      next.patternRef?.source.ref !== current.patternRef?.source.ref ||
-      next.patternRef?.source.repository !==
-        current.patternRef?.source.repository ||
-      next.patternRef?.source.entry !== current.patternRef?.source.entry ||
-      next.patternRef?.source.origin !== current.patternRef?.source.origin;
-    state.pieceManifest.set(pieceId, next);
-    return changed;
-  }
-
-  #buildPiecesManifestEntries(state: SpaceState): Array<{
-    id: string;
-    name: string;
-    summary: string;
-    entityPath: string;
-    patternRef?: PiecePatternRef;
-  }> {
-    const entries: Array<{
-      id: string;
-      name: string;
-      summary: string;
-      entityPath: string;
-      patternRef?: PiecePatternRef;
-    }> = [];
-
-    for (const [name, id] of state.pieceMap) {
-      const manifest = state.pieceManifest.get(id) ?? { summary: "" };
-      entries.push({
-        id,
-        name,
-        summary: manifest.summary,
-        entityPath: `entities/${encodeFuseComponent(id)}`,
-        ...(manifest.patternRef === undefined
-          ? {}
-          : { patternRef: manifest.patternRef }),
-      });
-    }
-
-    return entries;
-  }
-
-  /** Connect to a space and populate its tree. */
   async connectSpace(spaceName: string): Promise<SpaceState> {
     const existing = this.#spaces.get(spaceName);
     if (existing) return existing;
@@ -1113,176 +1197,17 @@ export class CellBridge {
     return await connection;
   }
 
-  async #connectSpaceOnce(spaceName: string): Promise<SpaceState> {
-    let pieces: PiecesController | undefined;
-    let state: SpaceState | undefined;
-    try {
-      pieces = await this.#createSpacePieces(spaceName);
-      await this.#verifyPiecesConnection(pieces);
-      state = this.#buildSpaceTree(spaceName, pieces);
-
-      this.#updateIndexJson(state);
-      this.#updatePiecesJson(state);
-      this.#spaces.set(spaceName, state);
-      this.#knownSpaces.set(spaceName, state.did);
-      this.#updateSpacesJson();
-      return state;
-    } catch (error) {
-      if (state) {
-        this.#removeFailedSpaceTree(spaceName, state);
-      } else {
-        this.#tree.removeChild(
-          this.#tree.rootIno,
-          encodeSpaceDirectoryName(spaceName),
-        );
-      }
-      this.#spaces.delete(spaceName);
-      this.#knownSpaces.delete(spaceName);
-      if (pieces) {
-        await pieces.runtime.dispose().catch((disposeError) => {
-          console.warn(
-            `[FUSE] Failed space cleanup for ${spaceName}: ${
-              disposeError instanceof Error
-                ? disposeError.message
-                : String(disposeError)
-            }`,
-          );
-        });
-      }
-      throw error;
-    }
-  }
-
-  #removeFailedSpaceTree(spaceName: string, state: SpaceState): void {
-    for (const cancel of state.unsubscribes) cancel();
-    for (const subscriptions of state.pieceSubs.values()) {
-      for (const cancel of subscriptions) cancel();
-    }
-    for (const [, ino] of this.#tree.getChildren(state.piecesIno)) {
-      this.#unregisterPieceRoot(ino);
-    }
-    for (const [, ino] of this.#tree.getChildren(state.entitiesIno)) {
-      this.#cancelEntitySubscriptions(ino);
-      this.#unhydratedEntityRoots.delete(ino);
-      this.#pendingEntityHydrations.delete(ino);
-      this.#entityProjectionLru.delete(ino);
-      this.#entityProjectionEvictionCandidates.delete(ino);
-      this.#entityProjectionUseOrder.delete(ino);
-      this.#clearEntityProjectionReferences(ino);
-      this.#pendingEntityRemovals.delete(ino);
-      this.#unregisterPieceRoot(ino);
-    }
-    this.#pendingPieceHydrations.delete(spaceName);
-    this.#pendingEntityDirectorySnapshots.delete(state);
-    this.#pieceSyncs.delete(spaceName);
-    this.#syncAgain.delete(spaceName);
-    this.#tree.removeChild(
-      this.#tree.rootIno,
-      encodeSpaceDirectoryName(spaceName),
-    );
-  }
-
+  /** Returns whether a connection to `spaceName` is in flight. */
   isConnecting(spaceName: string): boolean {
     return this.#connecting.has(spaceName);
   }
 
-  #registerPieceRoot(
-    pieceIno: bigint,
-    info: PieceRootInfo,
-  ): void {
-    this.#pieceRoots.set(pieceIno, info);
-    if (!this.#hydratedPieceProps.has(pieceIno)) {
-      this.#hydratedPieceProps.set(pieceIno, new Set());
-    }
-  }
-
-  #ensurePiecePropStub(
-    pieceIno: bigint,
-    propName: "input" | "result",
-    annotator?: CfcProjectionAnnotator,
-  ): bigint | undefined {
-    if (this.#tree.getNode(pieceIno)?.kind !== "dir") return undefined;
-    let propIno = this.#tree.lookup(pieceIno, propName);
-    if (propIno === undefined) {
-      propIno = this.#tree.addDir(pieceIno, propName);
-    }
-    annotator?.annotateJsonDirectory(propIno, [], {});
-    annotator?.annotateEntry(pieceIno, propName, propIno);
-    this.#piecePropRoots.set(propIno, { pieceIno, propName });
-    // Also ensure a stub JSON file so lookups for result.json / input.json
-    // can reply immediately from tree while hydration runs in the background.
-    const jsonName = `${propName}.json`;
-    if (this.#tree.lookup(pieceIno, jsonName) === undefined) {
-      const jsonIno = this.#tree.addFile(pieceIno, jsonName, "{}", "object");
-      annotator?.annotateJsonAggregate(jsonIno, [], {});
-      annotator?.annotateEntry(pieceIno, jsonName, jsonIno);
-    }
-    return propIno;
-  }
-
-  #unregisterPieceRoot(pieceIno: bigint): void {
-    for (const propName of ["input", "result"] as const) {
-      const propIno = this.#tree.lookup(pieceIno, propName);
-      if (propIno !== undefined) this.#piecePropRoots.delete(propIno);
-      const key = `${pieceIno}-${propName}`;
-      this.#pendingHydrations.delete(key);
-      this.#hydrationEpochs.delete(key);
-    }
-    this.#hydratedPieceProps.delete(pieceIno);
-    this.#pieceRoots.delete(pieceIno);
-  }
-
-  #markPiecePropHydrated(
-    pieceIno: bigint,
-    propName: "input" | "result",
-  ): void {
-    let hydrated = this.#hydratedPieceProps.get(pieceIno);
-    if (!hydrated) {
-      hydrated = new Set();
-      this.#hydratedPieceProps.set(pieceIno, hydrated);
-    }
-    hydrated.add(propName);
-
-    const propIno = this.#tree.lookup(pieceIno, propName);
-    if (propIno !== undefined) {
-      this.#piecePropRoots.set(propIno, { pieceIno, propName });
-    }
-  }
-
-  #markPiecePropCleared(
-    pieceIno: bigint,
-    propName: "input" | "result",
-  ): void {
-    const propIno = this.#tree.lookup(pieceIno, propName);
-    if (propIno !== undefined) {
-      this.#piecePropRoots.delete(propIno);
-    }
-    this.#hydratedPieceProps.get(pieceIno)?.delete(propName);
-  }
-
-  #getPieceInfo(
-    pieceIno: bigint,
-  ): (PieceRootInfo & { state?: SpaceState }) | null {
-    const info = this.#pieceRoots.get(pieceIno);
-    if (!info) return null;
-    return { ...info, state: this.#spaces.get(info.spaceName) };
-  }
-
-  #isEntityProjectionRoot(ino: bigint): boolean {
-    return this.#unhydratedEntityRoots.has(ino) ||
-      this.#pendingEntityRemovals.has(ino) ||
-      this.#pieceRoots.get(ino)?.rootKind === "entities";
-  }
-
-  #entityProjectionRootForInode(ino: bigint): bigint | undefined {
-    let current: bigint | undefined = ino;
-    while (current !== undefined) {
-      if (this.#isEntityProjectionRoot(current)) return current;
-      current = this.#tree.parents.get(current);
-    }
-    return undefined;
-  }
-
+  /**
+   * Records `count` kernel lookup references on `ino` for the entity projection
+   * it sits under, which keeps that projection from being evicted. Does nothing
+   * for an inode outside every entity projection, or for a non-positive
+   * `count`.
+   */
   retainEntityProjectionLookup(ino: bigint, count = 1n): void {
     if (count <= 0n) return;
     const owner = this.#entityProjectionLookupOwners.get(ino);
@@ -1306,6 +1231,13 @@ export class CellBridge {
     this.#entityProjectionEvictionCandidates.delete(rootIno);
   }
 
+  /**
+   * Releases `count` of the lookup references `ino` holds, never more than it
+   * holds, then trims the cache, which may evict other candidates. When the
+   * projection's last reference goes, this also finishes a removal waiting on
+   * it or makes it an eviction candidate. Does nothing for an inode holding
+   * none, or for a non-positive `count`.
+   */
   releaseEntityProjectionLookup(ino: bigint, count = 1n): void {
     if (count <= 0n) return;
     const owner = this.#entityProjectionLookupOwners.get(ino);
@@ -1337,6 +1269,11 @@ export class CellBridge {
     this.#trimEntityProjectionCache();
   }
 
+  /**
+   * Records one open handle on `ino` for the entity projection it sits under,
+   * which keeps that projection from being evicted. Does nothing for an inode
+   * outside every entity projection.
+   */
   retainEntityProjectionOpen(ino: bigint): void {
     const owner = this.#entityProjectionOpenOwners.get(ino);
     const rootIno = owner?.rootIno ?? this.#entityProjectionRootForInode(ino);
@@ -1359,6 +1296,12 @@ export class CellBridge {
     this.#entityProjectionEvictionCandidates.delete(rootIno);
   }
 
+  /**
+   * Releases one of the open handles `ino` holds, then trims the cache, which
+   * may evict other candidates. When the projection's last reference goes,
+   * this also finishes a removal waiting on it or makes it an eviction
+   * candidate. Does nothing for an inode holding none.
+   */
   releaseEntityProjectionOpen(ino: bigint): void {
     const owner = this.#entityProjectionOpenOwners.get(ino);
     if (owner === undefined) return;
@@ -1387,54 +1330,13 @@ export class CellBridge {
     this.#trimEntityProjectionCache();
   }
 
-  #indexEntityProjectionOwner(
-    index: Map<bigint, Set<bigint>>,
-    rootIno: bigint,
-    ino: bigint,
-  ): void {
-    let inodes = index.get(rootIno);
-    if (inodes === undefined) {
-      inodes = new Set();
-      index.set(rootIno, inodes);
-    }
-    inodes.add(ino);
-  }
-
-  #unindexEntityProjectionOwner(
-    index: Map<bigint, Set<bigint>>,
-    rootIno: bigint,
-    ino: bigint,
-  ): void {
-    const inodes = index.get(rootIno);
-    if (inodes === undefined) return;
-    inodes.delete(ino);
-    if (inodes.size === 0) index.delete(rootIno);
-  }
-
-  #clearEntityProjectionReferences(rootIno: bigint): void {
-    this.#entityProjectionLookupRefs.delete(rootIno);
-    this.#entityProjectionOpenRefs.delete(rootIno);
-    for (
-      const ino of this.#entityProjectionLookupOwnerInodes.get(rootIno) ??
-        []
-    ) {
-      this.#entityProjectionLookupOwners.delete(ino);
-    }
-    this.#entityProjectionLookupOwnerInodes.delete(rootIno);
-    for (
-      const ino of this.#entityProjectionOpenOwnerInodes.get(rootIno) ?? []
-    ) {
-      this.#entityProjectionOpenOwners.delete(ino);
-    }
-    this.#entityProjectionOpenOwnerInodes.delete(rootIno);
-  }
-
-  #isEntityProjectionDirectory(ino: bigint): boolean {
-    if (this.#isEntityProjectionRoot(ino)) return true;
-    const prop = this.#piecePropRoots.get(ino);
-    return prop !== undefined && this.#isEntityProjectionRoot(prop.pieceIno);
-  }
-
+  /**
+   * Returns whether a lookup of `name` under `parentIno` may need this bridge
+   * to hydrate something first: the parent is a `pieces/` directory, an
+   * `entities/` directory, an unhydrated entity root, a piece root, or a prop
+   * directory. Except under `pieces/`, a dot-prefixed name other than
+   * `.handlers` needs nothing.
+   */
   shouldPrepareLookup(parentIno: bigint, name: string): boolean {
     if (this.#stateForPiecesDir(parentIno)) return true;
     if (name.startsWith(".") && name !== ".handlers") return false;
@@ -1445,12 +1347,23 @@ export class CellBridge {
     return false;
   }
 
+  /**
+   * Returns whether listing `ino` may need this bridge to hydrate something
+   * first: it is a `pieces/` or `entities/` directory, an unhydrated entity
+   * root, a piece root, or a prop directory.
+   */
   shouldPrepareDirectory(ino: bigint): boolean {
     return this.#stateForPiecesDir(ino) !== undefined ||
       this.isEntitiesDir(ino) || this.#unhydratedEntityRoots.has(ino) ||
       this.#pieceRoots.has(ino) || this.#piecePropRoots.has(ino);
   }
 
+  /**
+   * Returns whether a lookup under `parentIno` must wait for `prepareLookup()`
+   * before it replies, rather than replying from the tree and hydrating in the
+   * background: true under `pieces/`, `entities/`, any directory of an entity
+   * projection, and any prop directory.
+   */
   shouldSynchronizeLookup(parentIno: bigint): boolean {
     return this.#stateForPiecesDir(parentIno) !== undefined ||
       this.isEntitiesDir(parentIno) ||
@@ -1458,6 +1371,16 @@ export class CellBridge {
       this.#piecePropRoots.has(parentIno);
   }
 
+  /**
+   * Hydrates whatever a lookup of `name` under `parentIno` needs — the
+   * space's piece list, the entity's projection, or the piece prop the name
+   * belongs to — and returns whether the name should resolve. Under a piece
+   * root, `input`, `result`, their `.json` files, `index.md`, `index.json`,
+   * and `.handlers` resolve true once their prop's hydration has been
+   * attempted, whether or not it succeeded, and any other name resolves if
+   * the tree holds it. Returns false for a parent this bridge does not
+   * prepare, and for an entity root whose hydration fails.
+   */
   async prepareLookup(parentIno: bigint, name: string): Promise<boolean> {
     const pieces = this.#stateForPiecesDir(parentIno);
     if (pieces) {
@@ -1498,7 +1421,11 @@ export class CellBridge {
     return false;
   }
 
-  /** Prepare an inode and reserve the lookup reference carried by its reply. */
+  /**
+   * Prepares a lookup of `name` under `parentIno` as `prepareLookup()` does,
+   * and returns the inode the reply names with one lookup reference retained on
+   * it, or `undefined` when the name does not resolve.
+   */
   async prepareLookupForReply(
     parentIno: bigint,
     name: string,
@@ -1517,6 +1444,13 @@ export class CellBridge {
     return ino;
   }
 
+  /**
+   * Hydrates whatever listing `ino` needs — the space's piece list, both
+   * props of a piece root, or the one prop of a prop directory — and returns
+   * whether `ino` is a directory this bridge prepares. An `entities/`
+   * directory and any directory of an entity projection need no work here and
+   * return true.
+   */
   async prepareDirectory(ino: bigint): Promise<boolean> {
     const pieces = this.#stateForPiecesDir(ino);
     if (pieces) {
@@ -1549,6 +1483,15 @@ export class CellBridge {
     return false;
   }
 
+  /**
+   * Returns the entries a listing of `ino` shows when this bridge decides them
+   * rather than the tree: for an `entities/` directory, the live entity ids
+   * fetched from the server, after pruning the projections of ids not among
+   * them; for a directory of an entity projection, `.` and `..` alone, so its
+   * entries are reached by name. For any other directory, prepares it as
+   * `prepareDirectory()` does and returns `undefined`, so the caller lists the
+   * tree.
+   */
   async prepareDirectorySnapshot(
     ino: bigint,
   ): Promise<readonly DirectorySnapshotEntry[] | undefined> {
@@ -1566,14 +1509,14 @@ export class CellBridge {
   }
 
   /**
-   * Resolve an inode to a writable cell path.
-   *
-   * Walks up from inode to root, collecting path segments.
-   * Returns null if the inode is read-only (meta.json, space.json, etc.).
-   *
-   * Path structure:
-   *   /<space>/pieces/<piece>/<cell>[/<json>/<path>]
-   *   /<space>/pieces/<piece>/<cell>.json
+   * Resolves `ino` to the cell path a write to it lands on: the space, piece,
+   * and cell it sits under, and the path within the cell's value, with a
+   * non-negative integer segment as an array index. `index.md` and `index.json`
+   * resolve to the result cell as an [FS] projection write, and a `.json` file
+   * to the value at its path. Returns `null` for an inode outside
+   * `/<space>/pieces/<piece>/`, for `meta.json` and `.handlers`, for a space
+   * not connected or a piece not tracked, and for any other name at the cell
+   * level, `.src` among them.
    */
   resolveWritePath(ino: bigint): WritePath | null {
     // Walk up to root collecting segments
@@ -1672,11 +1615,12 @@ export class CellBridge {
   }
 
   /**
-   * Resolve an inode to a writable source file path under a .src/ directory.
-   *
-   * Returns null if the inode is read-only (error.log) or not a .src/ file.
-   *
-   * Path structure: /<space>/pieces/<piece>/.src/<relPath...>
+   * Resolves `ino` to the source file a write to it lands on, under a piece's
+   * `.src/` directory. Returns `null` for an inode outside
+   * `/<space>/pieces/<piece>/.src/`, for a space not connected or a piece not
+   * tracked, for a piece with no source tree, and for the synthetic
+   * `error.log`, which is told apart by inode so that an authored file of that
+   * name stays writable.
    */
   resolveSourceWritePath(ino: bigint): SourceWritePath | null {
     // Walk up to root collecting segments
@@ -1715,7 +1659,12 @@ export class CellBridge {
     return { spaceName, pieceName, relPath, piece, srcIno };
   }
 
-  /** Send a value to a handler (stream) cell. */
+  /**
+   * Sends `value` to the handler cell the callable file `ino` stands for, and
+   * returns once the runtime is idle and the space is synced.
+   *
+   * @throws If `ino` does not resolve to a handler.
+   */
   async sendToHandler(ino: bigint, value: unknown): Promise<void> {
     const target = this.resolveHandlerTarget(ino);
     if (!target) {
@@ -1724,6 +1673,11 @@ export class CellBridge {
     await this.sendToHandlerTarget(target, value);
   }
 
+  /**
+   * Resolves the callable file `ino` to the handler cell it stands for, or
+   * `null` when `ino` is not a handler file, its path does not parse as one, or
+   * its space or piece is not tracked.
+   */
   resolveHandlerTarget(ino: bigint): HandlerTarget | null {
     const node = this.#tree.getNode(ino);
     if (
@@ -1750,6 +1704,10 @@ export class CellBridge {
     };
   }
 
+  /**
+   * Sends `value` to `target`'s handler cell, and returns once the runtime is
+   * idle and the space is synced.
+   */
   async sendToHandlerTarget(
     target: HandlerTarget,
     value: unknown,
@@ -1763,6 +1721,1064 @@ export class CellBridge {
     await target.piece.pieces().synced();
   }
 
+  /**
+   * Drops the hydrated `input` or `result` `writePath` names, in every root
+   * projecting its piece under `pieces/` and `entities/` across the connected
+   * spaces, back to a stub, and invalidates the kernel caches that covered it,
+   * so the next lookup or listing re-reads the cell.
+   */
+  invalidateWritePath(writePath: WritePath): void {
+    this.#invalidatePieceIdPropCache(writePath.piece.id, writePath.cell);
+  }
+
+  /**
+   * Rebuilds the prop `writePath` wrote to from the cell's current value,
+   * queued after any rebuild in flight for it. A piece absent from its space's
+   * tree gets `invalidateWritePath()` instead.
+   */
+  async finalizeWritePath(writePath: WritePath): Promise<void> {
+    const state = this.#spaces.get(writePath.spaceName);
+    const pieceIno = state?.pieceInos.get(writePath.pieceName);
+    if (pieceIno === undefined) {
+      this.invalidateWritePath(writePath);
+      return;
+    }
+    const cell = await writePath.piece[writePath.cell].getCell();
+    const newValue = await writePath.piece[writePath.cell].get();
+    await this.#enqueuePiecePropRebuild({
+      cell,
+      newValue,
+      pieceId: writePath.piece.id,
+      pieceIno,
+      pieceName: writePath.pieceName,
+      propName: writePath.cell,
+      resolveLink: this.#makeLinkResolver(writePath.spaceName),
+      spaceName: writePath.spaceName,
+    });
+  }
+
+  /**
+   * Rebuilds a piece's source tree and pattern metadata after a write.
+   *
+   * `receipt` is the source update the write committed, when it made one. Its
+   * refresh outcome is reported here rather than by the caller because the
+   * rebuild below replaces `.src` and the synthetic `error.log` inside it: a
+   * report written before this call is discarded along with the inode it went
+   * to, so the only place a report survives is after the rebuild, which is
+   * inside this method.
+   */
+  async finalizeSourceWritePath(
+    writePath: SourceWritePath,
+    receipt?: PatternUpdateReceipt,
+  ): Promise<void> {
+    try {
+      const state = this.#spaces.get(writePath.spaceName);
+      const pieceIno = state?.pieceInos.get(writePath.pieceName);
+      if (state && pieceIno !== undefined) {
+        await this.#buildSourceTree(
+          pieceIno,
+          writePath.piece,
+          state,
+          writePath.pieceName,
+        );
+        await this.#refreshPiecePatternMetadata(
+          state,
+          writePath.piece,
+          pieceIno,
+        );
+      }
+    } finally {
+      // Reported whether or not the rebuild survived: "the source saved and
+      // the piece is not running it" is exactly the message a projection
+      // failure must not eat, and it is the receipt's, not the rebuild's.
+      // On a failed rebuild the console line still fires and the file half
+      // lands wherever a synthetic log is standing. The caller then retains
+      // it when the rebuild's own warning becomes the complete persistent
+      // diagnostic.
+      this.reportSourceRefreshWarning(
+        writePath,
+        sourceRefreshWarning(receipt),
+      );
+    }
+  }
+
+  /**
+   * Reports that a source write committed and then failed to refresh the
+   * running piece, into `.src/error.log` as that directory stands now.
+   * `undefined` is the refresh having succeeded, and reports nothing.
+   *
+   * The directory a caller was handed is not the one to write into after a
+   * finalize: `#buildSourceTree()` replaces `.src` wholesale and mints a fresh
+   * empty `error.log` inside it, so both the text written before that and the
+   * inode it was written to are gone. Resolving the directory here, from the
+   * state the rebuild updated, is what lets a report outlive the rebuild that a
+   * successful write performs.
+   *
+   * A piece with no synthetic `error.log` has nowhere to keep the report: a
+   * system piece or one the rebuild skipped has no source tree at all, and a
+   * piece whose own source contains a file called `error.log` keeps that file
+   * instead — the synthetic one is only minted when the name is free. The
+   * console line stands in for the file in both cases, which is why the inode
+   * is read from `srcErrorLogInos` rather than looked up by name: resolving by
+   * name would find the authored file and overwrite committed source with this
+   * report.
+   */
+  reportSourceRefreshWarning(
+    writePath: SourceWritePath,
+    warning: string | undefined,
+  ): void {
+    if (warning === undefined) return;
+    console.error(`[source] ${warning}`);
+    this.writeSourceErrorLog(writePath, warning);
+  }
+
+  /**
+   * Writes the synthetic `.src/error.log`, and only ever that file.
+   *
+   * Every mutation of the log goes through here — the clear a clean write
+   * performs, the diagnostic a failed one leaves, and the refresh warning
+   * above — because the file is identified by the inode `#buildSourceTree()`
+   * recorded when it minted it, never by name. A pattern is free to author a
+   * source file called `error.log`, and resolving by name would find that file
+   * and overwrite the mounted copy of committed source with a diagnostic,
+   * which the mount would then be able to save back.
+   *
+   * A piece with no synthetic log gets no file write and no error: the console
+   * lines its callers already emit are the report such a piece gets.
+   */
+  writeSourceErrorLog(writePath: SourceWritePath, text: string): void {
+    const state = this.#spaces.get(writePath.spaceName);
+    const errorLogIno = state?.srcErrorLogInos.get(writePath.pieceName);
+    if (errorLogIno === undefined) return;
+    // The map is dropped whenever `.src` is rebuilt, so a tracked inode names
+    // a live file. Checked anyway: a write through a stale one throws, which
+    // would turn a committed source update into a failed one at the mount.
+    const node = this.#tree.getNode(errorLogIno);
+    if (node?.kind !== "file") return;
+    this.#tree.updateFile(errorLogIno, text);
+  }
+
+  /**
+   * Drops the hydrated prop holding `target`'s handler cell, in every root
+   * projecting its piece, the way `invalidateWritePath()` does.
+   */
+  invalidateHandlerTarget(target: HandlerTarget): void {
+    this.#invalidatePieceIdPropCache(target.piece.id, target.cellProp);
+  }
+
+  /**
+   * Parses a symlink target path, relative to `parentIno`, into the sigil-link
+   * components it stands for. A target under some space's `entities/` yields
+   * the entity's `id`, its `path` when there is one, and its `space` when that
+   * is not the parent's own — as the space's DID when known, else its name. A
+   * target under the same piece with no `entities/` segment yields only `path`.
+   * Returns `null` if the target escapes the mount root or matches neither
+   * shape.
+   */
+  parseSymlinkTarget(
+    parentIno: bigint,
+    target: string,
+  ): { id?: string; path?: string[]; space?: string } | null {
+    // Get parent's absolute path segments from mount root
+    const parentSegments: string[] = [];
+    let current = parentIno;
+    while (current !== this.#tree.rootIno) {
+      const name = this.#tree.getNameForIno(current);
+      if (name === undefined) return null;
+      parentSegments.unshift(name);
+      const parent = this.#tree.parents.get(current);
+      if (parent === undefined) return null;
+      current = parent;
+    }
+
+    // Resolve target relative to parent path
+    const resolved = [...parentSegments];
+    for (const part of target.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part === "..") {
+        if (resolved.length === 0) return null; // escapes mount root
+        resolved.pop();
+      } else {
+        resolved.push(part);
+      }
+    }
+
+    // Determine current space from parent's path
+    const currentSpace = parentSegments.length > 0
+      ? decodeSpaceDirectoryName(parentSegments[0])
+      : undefined;
+
+    // Match: /<space>/entities/<hash>[/<path...>]
+    if (resolved.length >= 3 && resolved[1] === "entities") {
+      const targetSpace = resolved[0];
+      const decodedTargetSpace = decodeFuseComponent(targetSpace);
+      const hash = decodeFuseComponent(resolved[2]);
+      const pathParts = decodeFusePathSegments(resolved.slice(3));
+
+      const result: { id?: string; path?: string[]; space?: string } = {
+        id: hash,
+      };
+
+      if (pathParts.length > 0) {
+        result.path = pathParts;
+      }
+
+      // Omit space if same as current
+      if (decodedTargetSpace !== currentSpace) {
+        const did = this.#knownSpaces.get(decodedTargetSpace);
+        result.space = did || decodedTargetSpace;
+      }
+
+      return result;
+    }
+
+    // Self-reference: target within same piece, no entities/ segment
+    // Resolved path: [space, "pieces", pieceName, cell, ...subpath]
+    if (resolved.length >= 4 && resolved[1] === "pieces") {
+      const subpath = decodeFusePathSegments(resolved.slice(4));
+      if (subpath.length > 0) {
+        return { path: subpath };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Writes `value` through the piece controller to `writePath`'s cell, at its
+   * path within the value when it has one.
+   */
+  async writeValue(writePath: WritePath, value: unknown): Promise<void> {
+    await writePath.piece[writePath.cell].set(
+      value,
+      writePath.jsonPath.length > 0 ? writePath.jsonPath : undefined,
+    );
+  }
+
+  /**
+   * Writes `text` back through the [FS] projection index file `writePath`
+   * names. For `index.md`, each frontmatter key becomes a field under
+   * `$FS.frontmatter`, keys absent from the new frontmatter are cleared, and
+   * the body becomes `$FS.content`. For `index.json`, each key becomes a field
+   * under `$FS.content` — or directly under `$FS` when the result uses the
+   * plain-object shorthand — and absent keys are cleared. `entityId` is never
+   * written. Returns whether the write happened: false for a `writePath` with
+   * no projection, or JSON that does not parse to an object.
+   */
+  async writeFsFile(writePath: WritePath, text: string): Promise<boolean> {
+    if (writePath.fsProjection === "markdown") {
+      const { frontmatter, body } = parseFrontmatter(text);
+      let existingFrontmatter: Record<string, unknown> | null = null;
+      try {
+        const current = await writePath.piece.result.get([
+          "$FS",
+          "frontmatter",
+        ]);
+        if (
+          typeof current === "object" && current !== null &&
+          !Array.isArray(current)
+        ) {
+          existingFrontmatter = current as Record<string, unknown>;
+        }
+      } catch {
+        // Missing frontmatter is fine.
+      }
+      for (const [key, val] of Object.entries(frontmatter)) {
+        if (key === "entityId") continue;
+        await writePath.piece.result.set(val, ["$FS", "frontmatter", key]);
+      }
+      if (existingFrontmatter) {
+        for (const key of Object.keys(existingFrontmatter)) {
+          if (key === "entityId" || key in frontmatter) continue;
+          await writePath.piece.result.set(undefined, [
+            "$FS",
+            "frontmatter",
+            key,
+          ]);
+        }
+      }
+      await writePath.piece.result.set(body, ["$FS", "content"]);
+      return true;
+    } else if (writePath.fsProjection === "json") {
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(text);
+      } catch {
+        return false;
+      }
+      if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
+        return false;
+      }
+      // Plain-object shorthand stores keys directly under $FS instead of
+      // nesting them under $FS.content.
+      let isPlainObjectShorthand = false;
+      let existingContent: Record<string, unknown> | null = null;
+      try {
+        const fsRaw = await writePath.piece.result.get(["$FS"]);
+        isPlainObjectShorthand = typeof fsRaw === "object" && fsRaw !== null &&
+          !("type" in (fsRaw as Record<string, unknown>));
+        const contentRaw = isPlainObjectShorthand
+          ? fsRaw
+          : await writePath.piece.result.get(["$FS", "content"]);
+        if (
+          contentRaw && typeof contentRaw === "object" &&
+          !Array.isArray(contentRaw)
+        ) {
+          existingContent = contentRaw as Record<string, unknown>;
+        }
+      } catch {
+        // If we can't read current state, default to the explicit content form.
+      }
+      const basePath = isPlainObjectShorthand ? ["$FS"] : ["$FS", "content"];
+
+      const existingKeys = new Set<string>(
+        existingContent ? Object.keys(existingContent) : [],
+      );
+      for (const [key, val] of Object.entries(obj)) {
+        if (key === "entityId") continue;
+        await writePath.piece.result.set(val, [...basePath, key]);
+        existingKeys.delete(key);
+      }
+      for (const key of existingKeys) {
+        if (key === "entityId") continue;
+        await writePath.piece.result.set(undefined, [...basePath, key]);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Resolves `entityId`, as its directory is named, under the `entities/`
+   * directory `entitiesIno`, creating or refreshing its projection, and returns
+   * whether it resolved. Liveness is asked of the server by point lookup when
+   * it supports one, without loading the entity's value; otherwise an existing
+   * projection, or a piece known under that id, resolves.
+   */
+  async resolveEntity(
+    entitiesIno: bigint,
+    entityId: string,
+  ): Promise<boolean> {
+    return await this.#resolveEntityInode(entitiesIno, entityId) !== undefined;
+  }
+
+  /**
+   * Returns whether `ino` is the `entities/` directory of a connected space.
+   */
+  isEntitiesDir(ino: bigint): boolean {
+    return this.#stateForEntitiesDir(ino) !== undefined;
+  }
+
+  /**
+   * Helper for reconnection scheduling, which returns the delay before the next
+   * attempt: two seconds, doubling with each failure, capped at thirty.
+   */
+  #reconnectDelayMs(): number {
+    // Exponential backoff: 2s, 4s, 8s, 16s, cap at 30s
+    return Math.min(2000 * Math.pow(2, this.#disconnectCount - 1), 30_000);
+  }
+
+  /**
+   * Schedules `#attemptReconnect()` after the current backoff delay, replacing
+   * any attempt already scheduled. The timer does not keep the process alive.
+   */
+  #scheduleReconnect(): void {
+    if (this.#reconnectTimer !== null) clearTimeout(this.#reconnectTimer);
+    const timerId = setTimeout(() => {
+      this.#reconnectTimer = null;
+      this.#attemptReconnect();
+    }, this.#reconnectDelayMs());
+    // Don't prevent Deno process from exiting while waiting to reconnect
+    Deno.unrefTimer(timerId);
+    this.#reconnectTimer = timerId;
+  }
+
+  /**
+   * Probes every connected space's backend, and clears the disconnected
+   * state when there is at least one and all of them answer; otherwise
+   * schedules the next attempt.
+   */
+  async #attemptReconnect(): Promise<void> {
+    const spaces = [...this.#spaces];
+    let allSpacesRestored = spaces.length > 0;
+    for (const [spaceName, state] of spaces) {
+      try {
+        const loadPieces = this.#reconnectPiecesLoader ??
+          this.#piecesLoader ?? openSpacePieces;
+        const probe = await loadPieces({
+          apiUrl: this.#apiUrl,
+          space: spaceName,
+          identity: this.#identity,
+          deferSpaceCellSync: true,
+        });
+        try {
+          await this.#verifyPiecesConnection(probe);
+          if (state.piecesHydrated) {
+            await state.pieces.getRegisteredPieces();
+          }
+          // The session probe and existing pieces view verify this space.
+          // probe.synced() alone can succeed from local state while the
+          // backend is still unavailable.
+        } finally {
+          await probe.runtime.dispose().catch((e) => {
+            console.warn(
+              `[FUSE] Reconnect probe cleanup failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
+          });
+        }
+      } catch (e) {
+        console.error(
+          `[FUSE] Reconnect probe to ${spaceName} failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+        allSpacesRestored = false;
+      }
+    }
+    if (allSpacesRestored) {
+      this.#disconnected = false;
+      this.#disconnectCount = 0;
+      console.error(
+        `[FUSE] Backend connection restored — write access resumed.`,
+      );
+      return;
+    }
+
+    // At least one probe failed — retry with increasing backoff
+    this.#disconnectCount++;
+    console.error(
+      `[FUSE] Reconnect failed, retrying in ${this.#reconnectDelayMs()}ms`,
+    );
+    this.#scheduleReconnect();
+  }
+
+  /**
+   * Verifies that `pieces` reaches its backend: establishes the space session
+   * and waits for it to sync.
+   *
+   * @throws If the storage manager holds an authorization error for the space.
+   */
+  async #verifyPiecesConnection(
+    pieces: PiecesController,
+  ): Promise<void> {
+    await pieces.ensureSpaceSession?.();
+    await pieces.synced?.();
+    if (typeof pieces.getSpace !== "function") return;
+    const authorizationError = pieces.runtime?.storageManager
+      ?.authorizationError?.(pieces.getSpace());
+    if (authorizationError) throw authorizationError;
+  }
+
+  /**
+   * Opens `spaceName` through the configured loader, with space-cell sync
+   * deferred.
+   */
+  async #createSpacePieces(
+    spaceName: string,
+  ): Promise<PiecesController> {
+    const loadPieces = this.#piecesLoader ?? openSpacePieces;
+    return await loadPieces({
+      apiUrl: this.#apiUrl,
+      space: spaceName,
+      identity: this.#identity,
+      deferSpaceCellSync: true,
+    });
+  }
+
+  /** Writes `message` to the console when debug logging is on. */
+  #debugLog(message: string): void {
+    if (this.#debug) {
+      console.log(message);
+    }
+  }
+
+  /**
+   * Returns the DID to label `spaceName`'s CFC annotations with: the connected
+   * space's, else the one recorded for the name, else the name itself.
+   */
+  #cfcSpaceDid(spaceName: string): string {
+    return this.#spaces.get(spaceName)?.did ??
+      this.#knownSpaces.get(spaceName) ??
+      spaceName;
+  }
+
+  /**
+   * Returns the name `state`'s space is connected under, or the name recorded
+   * for its DID, or `undefined` for a state this bridge does not know.
+   */
+  #spaceNameForState(state: SpaceState): string | undefined {
+    for (const [name, candidate] of this.#spaces) {
+      if (candidate === state) return name;
+    }
+    for (const [name, did] of this.#knownSpaces) {
+      if (did === state.did) return name;
+    }
+    return undefined;
+  }
+
+  /**
+   * Returns the CFC label view of `cell`, or `undefined` when annotations are
+   * off or the view cannot be read.
+   */
+  #cfcLabelViewForCell(cell: Cell<unknown>): CfcLabelView | undefined {
+    if (!this.#cfcAnnotationsEnabled) return undefined;
+    try {
+      return cfcLabelViewForCell(cell) as CfcLabelView | undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Returns an annotator for the projection `options` describes, or `undefined`
+   * when annotations are off. The generation it stamps on annotations is the
+   * configured one, else one derived from the projection's identity, value, and
+   * label view.
+   */
+  #makeCfcAnnotator(options: {
+    spaceName: string;
+    spaceDid?: string;
+    pieceId?: string;
+    rootKind?: "pieces" | "entities";
+    cell?: "input" | "result";
+    labelView?: CfcLabelView;
+    value?: unknown;
+  }): CfcProjectionAnnotator | undefined {
+    if (!this.#cfcAnnotationsEnabled) return undefined;
+    const space = options.spaceDid ?? this.#cfcSpaceDid(options.spaceName);
+    const generation = this.#explicitCfcProjectionGeneration ??
+      deriveCfcProjectionGeneration({
+        space,
+        entity: options.pieceId,
+        rootKind: options.rootKind,
+        cell: options.cell,
+        value: options.value,
+        labelView: options.labelView,
+      });
+    return new CfcProjectionAnnotator(this.#tree, {
+      space,
+      entity: options.pieceId,
+      rootKind: options.rootKind,
+      cell: options.cell,
+      generation,
+      labelView: options.labelView,
+    });
+  }
+
+  /**
+   * Annotates the synthetic node `ino` as a `projection` at `path`, and its
+   * entry under `parent` when given. Does nothing without an `annotator`.
+   */
+  #annotateSyntheticNode(
+    annotator: CfcProjectionAnnotator | undefined,
+    ino: bigint,
+    projection: CfcProjectionKind,
+    path: readonly (string | number)[],
+    parent?: { ino: bigint; name: string },
+    contentLabel?: CfcLabel,
+  ): void {
+    if (!annotator) return;
+    annotator.annotateSynthetic(ino, { projection, path, contentLabel });
+    if (parent) {
+      annotator.annotateEntry(parent.ino, parent.name, ino, {
+        labelPath: path,
+      });
+    }
+  }
+
+  /**
+   * Helper for `initStatus()`, which renders the current status as JSON: the
+   * API URL, the debug flag, the rebuild counters, the start time, the
+   * connected spaces, the connection state, and whatever the status provider
+   * adds.
+   */
+  #getStatusJson(): string {
+    const spaces: Record<
+      string,
+      { did: string; pieces: number; piecesLoaded: boolean }
+    > = {};
+    for (const [name, state] of this.#spaces) {
+      spaces[name] = {
+        did: state.did,
+        pieces: state.pieceMap.size,
+        piecesLoaded: state.piecesHydrated,
+      };
+    }
+    const extra = this.#statusProvider?.() ?? {};
+    return JSON.stringify(
+      {
+        apiUrl: this.#apiUrl,
+        debug: this.#debug,
+        rebuilds: {
+          pending: this.#pendingPropRebuilds.size +
+            this.#activePropRebuilds.size +
+            this.#deferredPropRebuilds.size,
+          scheduled: this.#rebuildStats.scheduled,
+          coalesced: this.#rebuildStats.coalesced,
+          completed: this.#rebuildStats.completed,
+          errors: this.#rebuildStats.errors,
+          maxPending: this.#rebuildStats.maxPending,
+          lastDurationMs: this.#rebuildStats.lastDurationMs,
+        },
+        startedAt: this.#startedAt,
+        spaces,
+        connection: {
+          disconnected: this.#disconnected,
+          disconnectCount: this.#disconnectCount,
+          lastDisconnectReason: this.#lastDisconnectReason,
+        },
+        ...extra,
+      },
+      null,
+      2,
+    );
+  }
+
+  /**
+   * Runs the projection-rebuilt callback, if any, logging rather than
+   * propagating what it throws.
+   */
+  #noteCfcProjectionRebuilt(): void {
+    try {
+      this.#onCfcProjectionRebuilt?.();
+    } catch (e) {
+      console.warn(`[fuse] CFC writeback reconciliation error: ${e}`);
+    }
+  }
+
+  /**
+   * Returns the `summary` of `value` when `value` is an object carrying a
+   * string one, else the empty string.
+   */
+  #extractSummary(value: unknown): string {
+    if (
+      typeof value !== "object" || value === null || Array.isArray(value)
+    ) {
+      return "";
+    }
+    return typeof (value as Record<string, unknown>).summary === "string"
+      ? (value as Record<string, unknown>).summary as string
+      : "";
+  }
+
+  /**
+   * Refreshes `piece`'s manifest entry in `state` from its current result and
+   * pattern reference. A summary that cannot be read becomes empty; a pattern
+   * reference that cannot be read leaves the recorded one as it is.
+   */
+  async #refreshPieceManifest(
+    state: SpaceState,
+    piece: PieceController,
+  ): Promise<void> {
+    let summary = "";
+    let patternRef: PiecePatternRef | undefined;
+
+    try {
+      const result = await piece.result.get();
+      summary = this.#extractSummary(result);
+    } catch {
+      // Summary is best-effort only.
+    }
+
+    try {
+      patternRef = await piece.getPatternRef();
+    } catch {
+      // Pattern source is best-effort; identity-less pieces remain listable.
+    }
+
+    this.#updatePieceManifest(state, piece.id, { summary, patternRef });
+  }
+
+  /**
+   * Refreshes the pattern reference in `piece`'s `meta.json` — at `pieceIno`
+   * and under `entities/` when projected there — and in `pieces.json` when it
+   * changed, invalidating the kernel entry of each file rewritten. A reference
+   * that cannot be read, or is absent, leaves everything as it is.
+   */
+  async #refreshPiecePatternMetadata(
+    state: SpaceState,
+    piece: PieceController,
+    pieceIno: bigint,
+  ): Promise<void> {
+    let patternRef: PiecePatternRef | undefined;
+    try {
+      patternRef = await piece.getPatternRef();
+    } catch {
+      return;
+    }
+    if (patternRef === undefined) return;
+
+    const manifestChanged = this.#updatePieceManifest(state, piece.id, {
+      patternRef,
+    });
+    this.#updatePieceMetaPatternRef(pieceIno, patternRef);
+
+    const entityIno = this.#tree.lookup(
+      state.entitiesIno,
+      encodeFuseComponent(piece.id),
+    );
+    if (entityIno !== undefined) {
+      this.#updatePieceMetaPatternRef(entityIno, patternRef);
+    }
+
+    if (manifestChanged) {
+      this.#updatePiecesJson(state);
+    }
+    if (this.#onInvalidate) {
+      this.#onInvalidate(pieceIno, ["meta.json"]);
+      if (entityIno !== undefined) {
+        this.#onInvalidate(entityIno, ["meta.json"]);
+      }
+      if (manifestChanged) {
+        this.#onInvalidate(state.piecesIno, ["pieces.json"]);
+      }
+    }
+  }
+
+  /**
+   * Merges `updates` into `pieceId`'s manifest entry in `state`, and returns
+   * whether the summary or any part of the pattern reference changed.
+   */
+  #updatePieceManifest(
+    state: SpaceState,
+    pieceId: string,
+    updates: Partial<{ summary: string; patternRef: PiecePatternRef }>,
+  ): boolean {
+    const current = state.pieceManifest.get(pieceId) ?? { summary: "" };
+    const next = {
+      summary: updates.summary ?? current.summary,
+      patternRef: updates.patternRef ?? current.patternRef,
+    };
+    const changed = next.summary !== current.summary ||
+      next.patternRef?.identity !== current.patternRef?.identity ||
+      next.patternRef?.symbol !== current.patternRef?.symbol ||
+      next.patternRef?.source.ref !== current.patternRef?.source.ref ||
+      next.patternRef?.source.repository !==
+        current.patternRef?.source.repository ||
+      next.patternRef?.source.entry !== current.patternRef?.source.entry ||
+      next.patternRef?.source.origin !== current.patternRef?.source.origin;
+    state.pieceManifest.set(pieceId, next);
+    return changed;
+  }
+
+  /**
+   * Helper for `#updatePiecesJson()`, which lists each piece of `state` by name
+   * with its id, summary, `entities/` path, and pattern reference when known.
+   */
+  #buildPiecesManifestEntries(state: SpaceState): Array<{
+    id: string;
+    name: string;
+    summary: string;
+    entityPath: string;
+    patternRef?: PiecePatternRef;
+  }> {
+    const entries: Array<{
+      id: string;
+      name: string;
+      summary: string;
+      entityPath: string;
+      patternRef?: PiecePatternRef;
+    }> = [];
+
+    for (const [name, id] of state.pieceMap) {
+      const manifest = state.pieceManifest.get(id) ?? { summary: "" };
+      entries.push({
+        id,
+        name,
+        summary: manifest.summary,
+        entityPath: `entities/${encodeFuseComponent(id)}`,
+        ...(manifest.patternRef === undefined
+          ? {}
+          : { patternRef: manifest.patternRef }),
+      });
+    }
+
+    return entries;
+  }
+
+  /**
+   * Helper for `connectSpace()`, which opens the space, verifies the
+   * connection, builds its tree with its index files, and registers it. On
+   * failure it removes what it built, forgets the space, disposes the runtime
+   * it opened, and rethrows.
+   */
+  async #connectSpaceOnce(spaceName: string): Promise<SpaceState> {
+    let pieces: PiecesController | undefined;
+    let state: SpaceState | undefined;
+    try {
+      pieces = await this.#createSpacePieces(spaceName);
+      await this.#verifyPiecesConnection(pieces);
+      state = this.#buildSpaceTree(spaceName, pieces);
+
+      this.#updateIndexJson(state);
+      this.#updatePiecesJson(state);
+      this.#spaces.set(spaceName, state);
+      this.#knownSpaces.set(spaceName, state.did);
+      this.#updateSpacesJson();
+      return state;
+    } catch (error) {
+      if (state) {
+        this.#removeFailedSpaceTree(spaceName, state);
+      } else {
+        this.#tree.removeChild(
+          this.#tree.rootIno,
+          encodeSpaceDirectoryName(spaceName),
+        );
+      }
+      this.#spaces.delete(spaceName);
+      this.#knownSpaces.delete(spaceName);
+      if (pieces) {
+        await pieces.runtime.dispose().catch((disposeError) => {
+          console.warn(
+            `[FUSE] Failed space cleanup for ${spaceName}: ${
+              disposeError instanceof Error
+                ? disposeError.message
+                : String(disposeError)
+            }`,
+          );
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Tears down `state`'s tree and bookkeeping after a failed connection:
+   * cancels its subscriptions, unregisters its piece and entity roots, drops
+   * its in-flight work, and removes its directory.
+   */
+  #removeFailedSpaceTree(spaceName: string, state: SpaceState): void {
+    for (const cancel of state.unsubscribes) cancel();
+    for (const subscriptions of state.pieceSubs.values()) {
+      for (const cancel of subscriptions) cancel();
+    }
+    for (const [, ino] of this.#tree.getChildren(state.piecesIno)) {
+      this.#unregisterPieceRoot(ino);
+    }
+    for (const [, ino] of this.#tree.getChildren(state.entitiesIno)) {
+      this.#cancelEntitySubscriptions(ino);
+      this.#unhydratedEntityRoots.delete(ino);
+      this.#pendingEntityHydrations.delete(ino);
+      this.#entityProjectionLru.delete(ino);
+      this.#entityProjectionEvictionCandidates.delete(ino);
+      this.#entityProjectionUseOrder.delete(ino);
+      this.#clearEntityProjectionReferences(ino);
+      this.#pendingEntityRemovals.delete(ino);
+      this.#unregisterPieceRoot(ino);
+    }
+    this.#pendingPieceHydrations.delete(spaceName);
+    this.#pendingEntityDirectorySnapshots.delete(state);
+    this.#pieceSyncs.delete(spaceName);
+    this.#syncAgain.delete(spaceName);
+    this.#tree.removeChild(
+      this.#tree.rootIno,
+      encodeSpaceDirectoryName(spaceName),
+    );
+  }
+
+  /**
+   * Records `pieceIno` as the root projecting `info`, with no props hydrated
+   * unless some already are.
+   */
+  #registerPieceRoot(
+    pieceIno: bigint,
+    info: PieceRootInfo,
+  ): void {
+    this.#pieceRoots.set(pieceIno, info);
+    if (!this.#hydratedPieceProps.has(pieceIno)) {
+      this.#hydratedPieceProps.set(pieceIno, new Set());
+    }
+  }
+
+  /**
+   * Ensures piece root `pieceIno` has a `propName` directory and a
+   * `propName.json` file holding `{}`, so that a lookup of either replies from
+   * the tree while hydration runs, and registers the directory as a prop root.
+   * Returns the directory's inode, or `undefined` when `pieceIno` is not a
+   * directory.
+   */
+  #ensurePiecePropStub(
+    pieceIno: bigint,
+    propName: "input" | "result",
+    annotator?: CfcProjectionAnnotator,
+  ): bigint | undefined {
+    if (this.#tree.getNode(pieceIno)?.kind !== "dir") return undefined;
+    let propIno = this.#tree.lookup(pieceIno, propName);
+    if (propIno === undefined) {
+      propIno = this.#tree.addDir(pieceIno, propName);
+    }
+    annotator?.annotateJsonDirectory(propIno, [], {});
+    annotator?.annotateEntry(pieceIno, propName, propIno);
+    this.#piecePropRoots.set(propIno, { pieceIno, propName });
+    // Also ensure a stub JSON file so lookups for result.json / input.json
+    // can reply immediately from tree while hydration runs in the background.
+    const jsonName = `${propName}.json`;
+    if (this.#tree.lookup(pieceIno, jsonName) === undefined) {
+      const jsonIno = this.#tree.addFile(pieceIno, jsonName, "{}", "object");
+      annotator?.annotateJsonAggregate(jsonIno, [], {});
+      annotator?.annotateEntry(pieceIno, jsonName, jsonIno);
+    }
+    return propIno;
+  }
+
+  /**
+   * Forgets `pieceIno` as a piece root, along with its prop roots, hydration
+   * state, and epochs.
+   */
+  #unregisterPieceRoot(pieceIno: bigint): void {
+    for (const propName of ["input", "result"] as const) {
+      const propIno = this.#tree.lookup(pieceIno, propName);
+      if (propIno !== undefined) this.#piecePropRoots.delete(propIno);
+      const key = `${pieceIno}-${propName}`;
+      this.#pendingHydrations.delete(key);
+      this.#hydrationEpochs.delete(key);
+    }
+    this.#hydratedPieceProps.delete(pieceIno);
+    this.#pieceRoots.delete(pieceIno);
+  }
+
+  /**
+   * Records `propName` of `pieceIno` as hydrated, registering its directory as
+   * a prop root.
+   */
+  #markPiecePropHydrated(
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ): void {
+    let hydrated = this.#hydratedPieceProps.get(pieceIno);
+    if (!hydrated) {
+      hydrated = new Set();
+      this.#hydratedPieceProps.set(pieceIno, hydrated);
+    }
+    hydrated.add(propName);
+
+    const propIno = this.#tree.lookup(pieceIno, propName);
+    if (propIno !== undefined) {
+      this.#piecePropRoots.set(propIno, { pieceIno, propName });
+    }
+  }
+
+  /**
+   * Records `propName` of `pieceIno` as not hydrated, unregistering its
+   * directory as a prop root.
+   */
+  #markPiecePropCleared(
+    pieceIno: bigint,
+    propName: "input" | "result",
+  ): void {
+    const propIno = this.#tree.lookup(pieceIno, propName);
+    if (propIno !== undefined) {
+      this.#piecePropRoots.delete(propIno);
+    }
+    this.#hydratedPieceProps.get(pieceIno)?.delete(propName);
+  }
+
+  /**
+   * Returns what `pieceIno` projects along with its space's state, or `null`
+   * for an inode that is not a piece root.
+   */
+  #getPieceInfo(
+    pieceIno: bigint,
+  ): (PieceRootInfo & { state?: SpaceState }) | null {
+    const info = this.#pieceRoots.get(pieceIno);
+    if (!info) return null;
+    return { ...info, state: this.#spaces.get(info.spaceName) };
+  }
+
+  /**
+   * Returns whether `ino` is the root of an entity projection: unhydrated,
+   * awaiting removal, or hydrated under `entities/`.
+   */
+  #isEntityProjectionRoot(ino: bigint): boolean {
+    return this.#unhydratedEntityRoots.has(ino) ||
+      this.#pendingEntityRemovals.has(ino) ||
+      this.#pieceRoots.get(ino)?.rootKind === "entities";
+  }
+
+  /**
+   * Returns the entity projection root `ino` sits under, itself included, or
+   * `undefined` when it sits under none.
+   */
+  #entityProjectionRootForInode(ino: bigint): bigint | undefined {
+    let current: bigint | undefined = ino;
+    while (current !== undefined) {
+      if (this.#isEntityProjectionRoot(current)) return current;
+      current = this.#tree.parents.get(current);
+    }
+    return undefined;
+  }
+
+  /**
+   * Helper for the retain methods, which adds `ino` to the set `index` keeps
+   * for `rootIno`.
+   */
+  #indexEntityProjectionOwner(
+    index: Map<bigint, Set<bigint>>,
+    rootIno: bigint,
+    ino: bigint,
+  ): void {
+    let inodes = index.get(rootIno);
+    if (inodes === undefined) {
+      inodes = new Set();
+      index.set(rootIno, inodes);
+    }
+    inodes.add(ino);
+  }
+
+  /**
+   * Helper for the release methods, which removes `ino` from the set `index`
+   * keeps for `rootIno`, dropping the set when it empties.
+   */
+  #unindexEntityProjectionOwner(
+    index: Map<bigint, Set<bigint>>,
+    rootIno: bigint,
+    ino: bigint,
+  ): void {
+    const inodes = index.get(rootIno);
+    if (inodes === undefined) return;
+    inodes.delete(ino);
+    if (inodes.size === 0) index.delete(rootIno);
+  }
+
+  /**
+   * Forgets every lookup and open reference held on the entity projection
+   * `rootIno`, and the inodes holding them.
+   */
+  #clearEntityProjectionReferences(rootIno: bigint): void {
+    this.#entityProjectionLookupRefs.delete(rootIno);
+    this.#entityProjectionOpenRefs.delete(rootIno);
+    for (
+      const ino of this.#entityProjectionLookupOwnerInodes.get(rootIno) ??
+        []
+    ) {
+      this.#entityProjectionLookupOwners.delete(ino);
+    }
+    this.#entityProjectionLookupOwnerInodes.delete(rootIno);
+    for (
+      const ino of this.#entityProjectionOpenOwnerInodes.get(rootIno) ?? []
+    ) {
+      this.#entityProjectionOpenOwners.delete(ino);
+    }
+    this.#entityProjectionOpenOwnerInodes.delete(rootIno);
+  }
+
+  /**
+   * Returns whether `ino` is an entity projection root or a prop directory of
+   * one.
+   */
+  #isEntityProjectionDirectory(ino: bigint): boolean {
+    if (this.#isEntityProjectionRoot(ino)) return true;
+    const prop = this.#piecePropRoots.get(ino);
+    return prop !== undefined && this.#isEntityProjectionRoot(prop.pieceIno);
+  }
+
+  /**
+   * Returns the controller for the piece `parsed` names: by name under
+   * `pieces/`, or under `entities/` by entity id, with or without the `of:`
+   * prefix, from the entity controllers or else from the pieces list.
+   */
   #resolvePieceController(
     space: SpaceState,
     parsed: ReturnType<typeof parseMountedCallablePath>,
@@ -1789,6 +2805,7 @@ export class CellBridge {
     return undefined;
   }
 
+  /** Returns the key the rebuild tables use for `propName` of `pieceIno`. */
   #propRebuildKey(
     pieceIno: bigint,
     propName: "input" | "result",
@@ -1796,6 +2813,12 @@ export class CellBridge {
     return `${pieceIno}:${propName}`;
   }
 
+  /**
+   * Schedules a rebuild of one piece prop from `args.newValue` on the next
+   * tick. A rebuild already scheduled for the prop takes the new value instead;
+   * while one it started is running, this one is held back and scheduled when
+   * it finishes. The counters in `.status` record the coalescing.
+   */
   #schedulePropRebuild(args: {
     cell: Cell<unknown>;
     newValue: unknown;
@@ -1883,15 +2906,15 @@ export class CellBridge {
   }
 
   /**
-   * Swap a freshly built staging node into its live position.
+   * Swaps a freshly built staging node into its live position.
    *
    * When the live node and the staging node share a kind, their subtrees are
-   * reconciled in place so the live inode survives (see
-   * {@link FsTree.transplantSubtree}); the inodes whose content changed are
-   * appended to `changedInodes` so the caller can drop their kernel data
-   * cache. When the kinds differ, or when there is no live node, the staging
-   * node takes the live name with its freshly allocated inode. When the
-   * replacement produced no staging node, the live node is removed.
+   * reconciled in place so the live inode survives (see {@link
+   * FsTree.transplantSubtree}); the inodes whose content changed are appended
+   * to `changedInodes` so the caller can drop their kernel data cache. When the
+   * kinds differ, or when there is no live node, the staging node takes the
+   * live name with its freshly allocated inode. When the replacement produced
+   * no staging node, the live node is removed.
    *
    * This runs synchronously, so no filesystem request observes a half-swapped
    * tree.
@@ -1937,6 +2960,7 @@ export class CellBridge {
     }
   }
 
+  /** Records in `changes` that the entry `name` under `parentIno` changed. */
   #recordEntryChange(
     changes: TransplantChanges,
     parentIno: bigint,
@@ -1950,6 +2974,7 @@ export class CellBridge {
     names.add(name);
   }
 
+  /** Merges the changes in `from` into `into`. */
   #mergeTransplantChanges(
     into: TransplantChanges,
     from: TransplantChanges,
@@ -1965,10 +2990,10 @@ export class CellBridge {
   }
 
   /**
-   * Drop exactly the kernel caches a rebuild made stale: the changed inodes'
+   * Drops exactly the kernel caches a rebuild made stale: the changed inodes'
    * data, and the changed directory entries. Entries and inodes the rebuild
-   * left untouched stay cached, so a client that walked into the piece does
-   * not have its cached dentries invalidated by an unrelated rebuild.
+   * left untouched stay cached, so a client that walked into the piece does not
+   * have its cached dentries invalidated by an unrelated rebuild.
    */
   #emitInvalidations(changes: TransplantChanges): void {
     if (this.#onInvalidateInode) {
@@ -1984,7 +3009,7 @@ export class CellBridge {
   }
 
   /**
-   * Advance the piece directory's mtime if its top-level entry set changed
+   * Advances the piece directory's mtime if its top-level entry set changed
    * since `namesBefore`. Compares names, not inodes, so a rebuilt `.handlers`
    * (same name, new inode) does not count while a prop appearing or an
    * `index.md` replacing the result tree does.
@@ -2003,7 +3028,7 @@ export class CellBridge {
   }
 
   /**
-   * Advance the hydration epoch for a prop so an in-flight hydration that read
+   * Advances the hydration epoch for a prop so an in-flight hydration that read
    * a now-superseded value re-reads and rebuilds. Used when a cell change
    * arrives: the mounted tree is rebuilt in place rather than torn down, so
    * this is all the reactive path needs to stay consistent.
@@ -2375,7 +3400,7 @@ export class CellBridge {
     return handle.promise;
   }
 
-  /** Collect all inode IDs in a subtree (including the root). */
+  /** Collects every inode in the subtree at `ino`, itself included. */
   #collectDescendantInos(ino: bigint): bigint[] {
     const result: bigint[] = [ino];
     const node = this.#tree.getNode(ino);
@@ -2387,6 +3412,13 @@ export class CellBridge {
     return result;
   }
 
+  /**
+   * Drops `propName` of the root `rootIno` back to a stub: advances its
+   * hydration epoch, clears its directory and `.json` file — and, for
+   * `result`, the [FS] projection entries and `.handlers` too — then
+   * invalidates the kernel entries and every inode that held. Returns false,
+   * doing nothing, when `rootIno` is not a directory.
+   */
   #invalidateRootPropCache(
     rootIno: bigint,
     propName: "input" | "result",
@@ -2447,6 +3479,11 @@ export class CellBridge {
     return true;
   }
 
+  /**
+   * Drops `propName` of every root projecting `pieceId` — under `pieces/` and
+   * `entities/` in every connected space — as `#invalidateRootPropCache()`
+   * does.
+   */
   #invalidatePieceIdPropCache(
     pieceId: string,
     propName: "input" | "result",
@@ -2470,309 +3507,10 @@ export class CellBridge {
     }
   }
 
-  invalidateWritePath(writePath: WritePath): void {
-    this.#invalidatePieceIdPropCache(writePath.piece.id, writePath.cell);
-  }
-
-  async finalizeWritePath(writePath: WritePath): Promise<void> {
-    const state = this.#spaces.get(writePath.spaceName);
-    const pieceIno = state?.pieceInos.get(writePath.pieceName);
-    if (pieceIno === undefined) {
-      this.invalidateWritePath(writePath);
-      return;
-    }
-    const cell = await writePath.piece[writePath.cell].getCell();
-    const newValue = await writePath.piece[writePath.cell].get();
-    await this.#enqueuePiecePropRebuild({
-      cell,
-      newValue,
-      pieceId: writePath.piece.id,
-      pieceIno,
-      pieceName: writePath.pieceName,
-      propName: writePath.cell,
-      resolveLink: this.#makeLinkResolver(writePath.spaceName),
-      spaceName: writePath.spaceName,
-    });
-  }
-
   /**
-   * Rebuild a piece's source tree and pattern metadata after a write.
-   *
-   * `receipt` is the source update the write committed, when it made one. Its
-   * refresh outcome is reported here rather than by the caller because the
-   * rebuild below replaces `.src` and the synthetic `error.log` inside it:
-   * a report written before this call is discarded along with the inode it
-   * went to, so the only place a report survives is after the rebuild, which
-   * is inside this method.
+   * Rewrites the root `.spaces.json` from the known spaces, annotated as space
+   * metadata.
    */
-  async finalizeSourceWritePath(
-    writePath: SourceWritePath,
-    receipt?: PatternUpdateReceipt,
-  ): Promise<void> {
-    try {
-      const state = this.#spaces.get(writePath.spaceName);
-      const pieceIno = state?.pieceInos.get(writePath.pieceName);
-      if (state && pieceIno !== undefined) {
-        await this.#buildSourceTree(
-          pieceIno,
-          writePath.piece,
-          state,
-          writePath.pieceName,
-        );
-        await this.#refreshPiecePatternMetadata(
-          state,
-          writePath.piece,
-          pieceIno,
-        );
-      }
-    } finally {
-      // Reported whether or not the rebuild survived: "the source saved and
-      // the piece is not running it" is exactly the message a projection
-      // failure must not eat, and it is the receipt's, not the rebuild's.
-      // On a failed rebuild the console line still fires and the file half
-      // lands wherever a synthetic log is standing. The caller then retains
-      // it when the rebuild's own warning becomes the complete persistent
-      // diagnostic.
-      this.reportSourceRefreshWarning(
-        writePath,
-        sourceRefreshWarning(receipt),
-      );
-    }
-  }
-
-  /**
-   * Report that a source write committed and then failed to refresh the
-   * running piece, into `.src/error.log` as that directory stands now.
-   * `undefined` is the refresh having succeeded, and reports nothing.
-   *
-   * The directory a caller was handed is not the one to write into after a
-   * finalize: `#buildSourceTree()` replaces `.src` wholesale and mints a fresh
-   * empty `error.log` inside it, so both the text written before that and the
-   * inode it was written to are gone. Resolving the directory here, from the
-   * state the rebuild updated, is what lets a report outlive the rebuild that
-   * a successful write performs.
-   *
-   * A piece with no synthetic `error.log` has nowhere to keep the report: a
-   * system piece or one the rebuild skipped has no source tree at all, and a
-   * piece whose own source contains a file called `error.log` keeps that file
-   * instead — the synthetic one is only minted when the name is free. The
-   * console line stands in for the file in both cases, which is why the
-   * inode is read from `srcErrorLogInos` rather than looked up by name:
-   * resolving by name would find the authored file and overwrite committed
-   * source with this report.
-   */
-  reportSourceRefreshWarning(
-    writePath: SourceWritePath,
-    warning: string | undefined,
-  ): void {
-    if (warning === undefined) return;
-    console.error(`[source] ${warning}`);
-    this.writeSourceErrorLog(writePath, warning);
-  }
-
-  /**
-   * Write the synthetic `.src/error.log`, and only ever that file.
-   *
-   * Every mutation of the log goes through here — the clear a clean write
-   * performs, the diagnostic a failed one leaves, and the refresh warning
-   * above — because the file is identified by the inode `#buildSourceTree()`
-   * recorded when it minted it, never by name. A pattern is free to author a
-   * source file called `error.log`, and resolving by name would find that
-   * file and overwrite the mounted copy of committed source with a
-   * diagnostic, which the mount would then be able to save back.
-   *
-   * A piece with no synthetic log gets no file write and no error: the
-   * console lines its callers already emit are the report such a piece gets.
-   */
-  writeSourceErrorLog(writePath: SourceWritePath, text: string): void {
-    const state = this.#spaces.get(writePath.spaceName);
-    const errorLogIno = state?.srcErrorLogInos.get(writePath.pieceName);
-    if (errorLogIno === undefined) return;
-    // The map is dropped whenever `.src` is rebuilt, so a tracked inode names
-    // a live file. Checked anyway: a write through a stale one throws, which
-    // would turn a committed source update into a failed one at the mount.
-    const node = this.#tree.getNode(errorLogIno);
-    if (node?.kind !== "file") return;
-    this.#tree.updateFile(errorLogIno, text);
-  }
-
-  invalidateHandlerTarget(target: HandlerTarget): void {
-    this.#invalidatePieceIdPropCache(target.piece.id, target.cellProp);
-  }
-
-  /**
-   * Parse a symlink target path relative to parentIno and extract
-   * sigil link components (id, path, space).
-   *
-   * Returns null if the target escapes the mount root or can't be
-   * mapped to a sigil link.
-   */
-  parseSymlinkTarget(
-    parentIno: bigint,
-    target: string,
-  ): { id?: string; path?: string[]; space?: string } | null {
-    // Get parent's absolute path segments from mount root
-    const parentSegments: string[] = [];
-    let current = parentIno;
-    while (current !== this.#tree.rootIno) {
-      const name = this.#tree.getNameForIno(current);
-      if (name === undefined) return null;
-      parentSegments.unshift(name);
-      const parent = this.#tree.parents.get(current);
-      if (parent === undefined) return null;
-      current = parent;
-    }
-
-    // Resolve target relative to parent path
-    const resolved = [...parentSegments];
-    for (const part of target.split("/")) {
-      if (part === "" || part === ".") continue;
-      if (part === "..") {
-        if (resolved.length === 0) return null; // escapes mount root
-        resolved.pop();
-      } else {
-        resolved.push(part);
-      }
-    }
-
-    // Determine current space from parent's path
-    const currentSpace = parentSegments.length > 0
-      ? decodeSpaceDirectoryName(parentSegments[0])
-      : undefined;
-
-    // Match: /<space>/entities/<hash>[/<path...>]
-    if (resolved.length >= 3 && resolved[1] === "entities") {
-      const targetSpace = resolved[0];
-      const decodedTargetSpace = decodeFuseComponent(targetSpace);
-      const hash = decodeFuseComponent(resolved[2]);
-      const pathParts = decodeFusePathSegments(resolved.slice(3));
-
-      const result: { id?: string; path?: string[]; space?: string } = {
-        id: hash,
-      };
-
-      if (pathParts.length > 0) {
-        result.path = pathParts;
-      }
-
-      // Omit space if same as current
-      if (decodedTargetSpace !== currentSpace) {
-        const did = this.#knownSpaces.get(decodedTargetSpace);
-        result.space = did || decodedTargetSpace;
-      }
-
-      return result;
-    }
-
-    // Self-reference: target within same piece, no entities/ segment
-    // Resolved path: [space, "pieces", pieceName, cell, ...subpath]
-    if (resolved.length >= 4 && resolved[1] === "pieces") {
-      const subpath = decodeFusePathSegments(resolved.slice(4));
-      if (subpath.length > 0) {
-        return { path: subpath };
-      }
-    }
-
-    return null;
-  }
-
-  /** Write a value via the piece controller. */
-  async writeValue(writePath: WritePath, value: unknown): Promise<void> {
-    await writePath.piece[writePath.cell].set(
-      value,
-      writePath.jsonPath.length > 0 ? writePath.jsonPath : undefined,
-    );
-  }
-
-  /**
-   * Write back an [FS] projection index file (index.md or index.json).
-   * Parses the content and writes each field to its corresponding cell path.
-   * entityId is always skipped (read-only).
-   */
-  async writeFsFile(writePath: WritePath, text: string): Promise<boolean> {
-    if (writePath.fsProjection === "markdown") {
-      const { frontmatter, body } = parseFrontmatter(text);
-      let existingFrontmatter: Record<string, unknown> | null = null;
-      try {
-        const current = await writePath.piece.result.get([
-          "$FS",
-          "frontmatter",
-        ]);
-        if (
-          typeof current === "object" && current !== null &&
-          !Array.isArray(current)
-        ) {
-          existingFrontmatter = current as Record<string, unknown>;
-        }
-      } catch {
-        // Missing frontmatter is fine.
-      }
-      for (const [key, val] of Object.entries(frontmatter)) {
-        if (key === "entityId") continue;
-        await writePath.piece.result.set(val, ["$FS", "frontmatter", key]);
-      }
-      if (existingFrontmatter) {
-        for (const key of Object.keys(existingFrontmatter)) {
-          if (key === "entityId" || key in frontmatter) continue;
-          await writePath.piece.result.set(undefined, [
-            "$FS",
-            "frontmatter",
-            key,
-          ]);
-        }
-      }
-      await writePath.piece.result.set(body, ["$FS", "content"]);
-      return true;
-    } else if (writePath.fsProjection === "json") {
-      let obj: Record<string, unknown>;
-      try {
-        obj = JSON.parse(text);
-      } catch {
-        return false;
-      }
-      if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
-        return false;
-      }
-      // Plain-object shorthand stores keys directly under $FS instead of
-      // nesting them under $FS.content.
-      let isPlainObjectShorthand = false;
-      let existingContent: Record<string, unknown> | null = null;
-      try {
-        const fsRaw = await writePath.piece.result.get(["$FS"]);
-        isPlainObjectShorthand = typeof fsRaw === "object" && fsRaw !== null &&
-          !("type" in (fsRaw as Record<string, unknown>));
-        const contentRaw = isPlainObjectShorthand
-          ? fsRaw
-          : await writePath.piece.result.get(["$FS", "content"]);
-        if (
-          contentRaw && typeof contentRaw === "object" &&
-          !Array.isArray(contentRaw)
-        ) {
-          existingContent = contentRaw as Record<string, unknown>;
-        }
-      } catch {
-        // If we can't read current state, default to the explicit content form.
-      }
-      const basePath = isPlainObjectShorthand ? ["$FS"] : ["$FS", "content"];
-
-      const existingKeys = new Set<string>(
-        existingContent ? Object.keys(existingContent) : [],
-      );
-      for (const [key, val] of Object.entries(obj)) {
-        if (key === "entityId") continue;
-        await writePath.piece.result.set(val, [...basePath, key]);
-        existingKeys.delete(key);
-      }
-      for (const key of existingKeys) {
-        if (key === "entityId") continue;
-        await writePath.piece.result.set(undefined, [...basePath, key]);
-      }
-      return true;
-    }
-    return false;
-  }
-
-  /** Update the root .spaces.json file. */
   #updateSpacesJson(): void {
     const obj: Record<string, string> = {};
     for (const [name, did] of this.#knownSpaces) {
@@ -2803,7 +3541,11 @@ export class CellBridge {
     );
   }
 
-  /** Creates a space's directory structure and the state that tracks it. */
+  /**
+   * Creates `spaceName`'s directory with `pieces/`, `entities/`, and
+   * `space.json`, annotated when annotations are on, and returns the state that
+   * tracks it, with nothing hydrated.
+   */
   #buildSpaceTree(
     spaceName: string,
     pieces: PiecesController,
@@ -2882,6 +3624,10 @@ export class CellBridge {
     return state;
   }
 
+  /**
+   * Returns the connected space whose `entities/` directory is `ino`, with its
+   * name, or `undefined`.
+   */
   #stateForEntitiesDir(
     ino: bigint,
   ): { state: SpaceState; spaceName: string } | undefined {
@@ -2891,6 +3637,10 @@ export class CellBridge {
     return undefined;
   }
 
+  /**
+   * Returns the connected space whose `pieces/` directory is `ino`, with its
+   * name, or `undefined`.
+   */
   #stateForPiecesDir(
     ino: bigint,
   ): { state: SpaceState; spaceName: string } | undefined {
@@ -2900,6 +3650,11 @@ export class CellBridge {
     return undefined;
   }
 
+  /**
+   * Fills a space's `pieces/` directory: subscribes to the piece list and syncs
+   * it once, sharing the work with concurrent callers. Resolves at once for a
+   * space already materialized.
+   */
   #materializePieces(
     state: SpaceState,
     spaceName: string,
@@ -2926,6 +3681,10 @@ export class CellBridge {
     return pending;
   }
 
+  /**
+   * Subscribes to `state`'s piece registry so that a change re-syncs the piece
+   * list on the next tick. Does nothing when already subscribed.
+   */
   async #subscribePieceList(
     state: SpaceState,
     spaceName: string,
@@ -2944,6 +3703,11 @@ export class CellBridge {
     state.pieceListSubscribed = true;
   }
 
+  /**
+   * Ensures `entityId` has a directory under `state`'s `entities/`, registering
+   * it as an unhydrated root unless it is already a hydrated piece root, marks
+   * it used, and returns its inode.
+   */
   #ensureEntityProjection(
     state: SpaceState,
     spaceName: string,
@@ -2977,6 +3741,10 @@ export class CellBridge {
     return entityIno;
   }
 
+  /**
+   * Marks the entity projection `ino` most recently used, refreshes whether it
+   * may be evicted, and trims the cache with `ino` protected.
+   */
   #touchEntityProjection(
     ino: bigint,
     info: UnhydratedEntityRootInfo,
@@ -2991,6 +3759,11 @@ export class CellBridge {
     this.#trimEntityProjectionCache(ino);
   }
 
+  /**
+   * Recomputes whether the entity projection `ino` may be evicted: it is in the
+   * cache, no hydration of it is in flight, and no kernel reference is held on
+   * it.
+   */
   #refreshEntityProjectionEvictionCandidate(ino: bigint): void {
     this.#entityProjectionEvictionCandidates.delete(ino);
     const info = this.#entityProjectionLru.get(ino);
@@ -3003,6 +3776,11 @@ export class CellBridge {
     this.#entityProjectionEvictionCandidates.set(ino, info);
   }
 
+  /**
+   * Evicts the least recently used eviction candidates, other than
+   * `protectedIno`, until the cache is within its bound or no candidate
+   * remains.
+   */
   #trimEntityProjectionCache(protectedIno?: bigint): void {
     while (this.#entityProjectionLru.size > this.#maxEntityProjections) {
       let oldestIno: bigint | undefined;
@@ -3022,11 +3800,19 @@ export class CellBridge {
     }
   }
 
+  /**
+   * Returns whether the kernel holds any lookup or open reference on the entity
+   * projection `ino`.
+   */
   #entityProjectionHasReferences(ino: bigint): boolean {
     return (this.#entityProjectionLookupRefs.get(ino) ?? 0n) > 0n ||
       (this.#entityProjectionOpenRefs.get(ino) ?? 0) > 0;
   }
 
+  /**
+   * Cancels and forgets the cell subscriptions of the hydrated entity root
+   * `ino`.
+   */
   #cancelEntitySubscriptions(ino: bigint): void {
     const subscriptions = this.#entitySubscriptions.get(ino);
     if (!subscriptions) return;
@@ -3034,6 +3820,12 @@ export class CellBridge {
     for (const cancel of subscriptions) cancel();
   }
 
+  /**
+   * Completes the removal of the detached entity projection `ino` once no
+   * hydration of it is in flight and no kernel reference remains: forgets it
+   * everywhere, clears its subtree, and drops its entity controller unless a
+   * new projection has taken its name. Does nothing otherwise.
+   */
   #finishPendingEntityRemoval(ino: bigint): void {
     const info = this.#pendingEntityRemovals.get(ino);
     if (
@@ -3063,6 +3855,13 @@ export class CellBridge {
     }
   }
 
+  /**
+   * Detaches `entityId`'s projection from `state`'s `entities/`, cancels its
+   * subscriptions, and queues its subtree for removal once the kernel releases
+   * it; with `invalidate`, also touches the directory and invalidates its
+   * kernel entry. Returns the directory name detached, or `undefined` when the
+   * entity had no directory.
+   */
   #removeEntityProjection(
     state: SpaceState,
     entityId: string,
@@ -3098,6 +3897,11 @@ export class CellBridge {
     return entityName;
   }
 
+  /**
+   * Removes every projection of `state` whose entity id is absent from
+   * `sortedLiveIds`, then invalidates the `entities/` listing if any was
+   * removed.
+   */
   #pruneEntityProjections(
     state: SpaceState,
     sortedLiveIds: readonly string[],
@@ -3115,6 +3919,10 @@ export class CellBridge {
     }
   }
 
+  /**
+   * Helper for `#pruneEntityProjections()`, which returns whether `target` is
+   * in the sorted `sortedIds`, by binary search.
+   */
   #sortedEntityIdsInclude(
     sortedIds: readonly string[],
     target: string,
@@ -3131,6 +3939,10 @@ export class CellBridge {
     return false;
   }
 
+  /**
+   * Returns the entries `state`'s `entities/` lists, sharing one walk of the
+   * server's pages among concurrent callers.
+   */
   #entityDirectorySnapshot(
     state: SpaceState,
   ): Promise<readonly DirectorySnapshotEntry[]> {
@@ -3145,6 +3957,10 @@ export class CellBridge {
     return pending;
   }
 
+  /**
+   * Helper for `#entityDirectorySnapshot()`, which lists the live entity ids,
+   * prunes the projections of ids not among them, and returns the listing.
+   */
   async #loadEntityDirectorySnapshot(
     state: SpaceState,
   ): Promise<readonly DirectorySnapshotEntry[]> {
@@ -3157,6 +3973,13 @@ export class CellBridge {
     );
   }
 
+  /**
+   * Helper for `#loadEntityDirectorySnapshot()`, which walks the server's
+   * entity-id pages into one sorted list.
+   *
+   * @throws If the server does not page entity ids, or the pages come from
+   *   different server sequences, are not strictly sorted, or fail to advance.
+   */
   async #listEntityIdsForSnapshot(state: SpaceState): Promise<string[]> {
     if (typeof state.pieces.listEntityIdPage !== "function") {
       throw new Error(
@@ -3204,6 +4027,13 @@ export class CellBridge {
     }
   }
 
+  /**
+   * Hydrates the unhydrated entity root `entityIno`: loads its piece, builds
+   * its tree in place, and subscribes to it, sharing the work with concurrent
+   * callers. Resolves to whether the root is hydrated: false when it is not an
+   * entity root or was removed meanwhile, and true at once for a root already
+   * hydrated, which is marked used.
+   */
   #hydrateEntityRoot(entityIno: bigint): Promise<boolean> {
     if (this.#pieceRoots.has(entityIno)) {
       const info = this.#entityProjectionLru.get(entityIno);
@@ -3258,18 +4088,13 @@ export class CellBridge {
   }
 
   /**
-   * Resolve an entity ID under a space's entities/ directory on demand.
-   * Point lookup checks identifier liveness without loading entity values.
-   * Servers without point lookup use an existing projection or known piece.
-   * Returns true if resolved successfully.
+   * Helper for `resolveEntity()` and `prepareLookupForReply()`, which resolves
+   * `entityId` under `entitiesIno` to its projection's inode, retaining one
+   * lookup reference on it when `retainForReply`. Returns `undefined` for a
+   * name that is not a canonically encoded id, a directory that is not an
+   * `entities/`, an entity the server says does not exist — whose projection
+   * is removed — or one nothing here knows.
    */
-  async resolveEntity(
-    entitiesIno: bigint,
-    entityId: string,
-  ): Promise<boolean> {
-    return await this.#resolveEntityInode(entitiesIno, entityId) !== undefined;
-  }
-
   async #resolveEntityInode(
     entitiesIno: bigint,
     entityId: string,
@@ -3332,13 +4157,8 @@ export class CellBridge {
     return ino;
   }
 
-  /** Check whether an inode is any space's entities/ directory. */
-  isEntitiesDir(ino: bigint): boolean {
-    return this.#stateForEntitiesDir(ino) !== undefined;
-  }
-
   /**
-   * Best-effort load of a piece's NAME doc through the same schema path that
+   * Loads a piece's NAME doc, best-effort, through the same schema path that
    * `piece.name()` reads synchronously. The piece list deliberately doesn't
    * load linked piece docs (its items are `asCell`), so on a cold runtime
    * `piece.name()` races the doc load and would fall back to the opaque
@@ -3355,7 +4175,8 @@ export class CellBridge {
   }
 
   /**
-   * Adds a single piece to a space's tree, and returns the assigned display
+   * Adds a single piece to a space's tree — its directory, source tree,
+   * manifest entry, and subscriptions — and returns the assigned display
    * name.
    */
   async #addPieceToSpace(
@@ -3415,7 +4236,8 @@ export class CellBridge {
   }
 
   /**
-   * Remove a piece from a space's tree and clean up subscriptions.
+   * Removes `name`'s piece from `state`'s tree and bookkeeping, canceling its
+   * subscriptions.
    */
   #removePieceFromSpace(state: SpaceState, name: string): void {
     const pieceId = state.pieceMap.get(name);
@@ -3449,12 +4271,12 @@ export class CellBridge {
   }
 
   /**
-   * Sync the piece list: diff current tree against the live pieces cell,
-   * adding new pieces and removing deleted ones.
+   * Synchronizes the piece list: diffs the current tree against the live pieces
+   * cell, adding new pieces and removing deleted ones.
    *
    * Guarded per-space: if a sync is already running, we flag a re-run so the
-   * in-flight sync will loop once more after completing (coalescing rapid
-   * sink events). This prevents concurrent async interleaving from producing
+   * in-flight sync will loop once more after completing (coalescing rapid sink
+   * events). This prevents concurrent async interleaving from producing
    * duplicate tree entries or double-removal errors.
    */
   #syncPieceList(
@@ -3476,6 +4298,10 @@ export class CellBridge {
     return pending;
   }
 
+  /**
+   * Helper for `#syncPieceList()`, which runs passes until no re-run is
+   * flagged.
+   */
   async #runPieceListSync(
     state: SpaceState,
     spaceName: string,
@@ -3486,7 +4312,11 @@ export class CellBridge {
     } while (this.#syncAgain.has(spaceName));
   }
 
-  /** Runs one pass of piece-list sync; `syncPieceList()` guards the calls. */
+  /**
+   * Runs one pass of piece-list sync; `#syncPieceList()` guards the calls.
+   * Until `pieces/` is materialized or materializing, a pass only records the
+   * registered ids.
+   */
   async #syncPieceListOnce(
     state: SpaceState,
     spaceName: string,
@@ -3550,7 +4380,7 @@ export class CellBridge {
     }
   }
 
-  /** Updates the `pieces/pieces.json` manifest for a space. */
+  /** Rewrites the `pieces/pieces.json` manifest for a space. */
   #updatePiecesJson(state: SpaceState): void {
     const entries = this.#buildPiecesManifestEntries(state);
     const existingIno = this.#tree.lookup(state.piecesIno, "pieces.json");
@@ -3578,9 +4408,7 @@ export class CellBridge {
     );
   }
 
-  /**
-   * Updates the `pieces/.index.json` file for a space.
-   */
+  /** Rewrites the `pieces/.index.json` file for a space. */
   #updateIndexJson(state: SpaceState): void {
     const existingIno = this.#tree.lookup(state.piecesIno, ".index.json");
     if (existingIno !== undefined) {
@@ -3611,10 +4439,12 @@ export class CellBridge {
     );
   }
 
+  /** Sets the `name` field of the `meta.json` under `parentIno`. */
   #updatePieceMetaName(parentIno: bigint, name: string): void {
     this.#updatePieceMeta(parentIno, { name });
   }
 
+  /** Sets the `patternRef` field of the `meta.json` under `parentIno`. */
   #updatePieceMetaPatternRef(
     parentIno: bigint,
     patternRef: PiecePatternRef,
@@ -3622,6 +4452,10 @@ export class CellBridge {
     this.#updatePieceMeta(parentIno, { patternRef });
   }
 
+  /**
+   * Merges `updates` into the `meta.json` under `parentIno`, leaving a missing
+   * or malformed file as it is.
+   */
   #updatePieceMeta(
     parentIno: bigint,
     updates: Record<string, unknown>,
@@ -3650,13 +4484,13 @@ export class CellBridge {
   }
 
   /**
-   * Removes a piece's [FS] projection entries from the tree. When `changes`
-   * is supplied, each removed entry is recorded so its cached directory entry
-   * is invalidated: a projection leaving the piece root (the result becomes
-   * null or switches back to the normal result tree) must drop the client's
-   * cached `index.md` and sibling dentries, or they resolve to freed inodes.
-   * The `.fs.pending` staging container is internal and never has a cached
-   * entry, so it is cleared but not recorded.
+   * Removes a piece's [FS] projection entries from the tree. When `changes` is
+   * supplied, each removed entry is recorded so its cached directory entry is
+   * invalidated: a projection leaving the piece root (the result becomes null
+   * or switches back to the normal result tree) must drop the client's cached
+   * `index.md` and sibling dentries, or they resolve to freed inodes. The
+   * `.fs.pending` staging container is internal and never has a cached entry,
+   * so it is cleared but not recorded.
    */
   #clearFsProjectionEntries(
     pieceIno: bigint,
@@ -3686,7 +4520,7 @@ export class CellBridge {
   }
 
   /**
-   * Build a piece's [FS] projection under `parentIno`, which is a staging
+   * Builds a piece's [FS] projection under `parentIno`, which is a staging
    * container so the finished projection can be reconciled onto the piece
    * directory without churning inodes. Returns the index file name and the set
    * of entry names produced, so the caller can swap them into place and record
@@ -3808,6 +4642,13 @@ export class CellBridge {
     return newNames;
   }
 
+  /**
+   * Finds the callable entries of a cell — handlers and tools, told by value
+   * or by schema, and pattern-shaped children carrying `extraParams` — and
+   * returns them with their input schemas, along with the predicates the tree
+   * builder takes: one that skips a callable's or a VNode's value, and one
+   * that classifies an entry by key.
+   */
   #discoverCallableEntries(
     rootCell: Cell<unknown>,
     value: unknown,
@@ -3902,6 +4743,16 @@ export class CellBridge {
     };
   }
 
+  /**
+   * Returns the value to project for `rootCell`: `value` itself when it is a
+   * non-null primitive or an array, or when the cell's schema names no
+   * properties; otherwise `value` widened with every schema property the cell
+   * resolves — a sigil link kept raw so it projects as a symlink, and a
+   * callable kept even without a value — or `value` itself when that yields
+   * nothing. A `null` or `undefined` value takes that same path, and so
+   * becomes an object of the properties the cell resolves, or stays as it is
+   * when none do.
+   */
   #materializeTreeValue(
     rootCell: Cell<unknown>,
     value: unknown,
@@ -3964,6 +4815,11 @@ export class CellBridge {
     return Object.keys(materialized).length > 0 ? materialized : value;
   }
 
+  /**
+   * Adds a callable file under `propIno` for each of `callables`, holding the
+   * shim script for its kind and input type, annotated when an `annotator` is
+   * given.
+   */
   #addCallableFiles(
     propIno: bigint,
     callables: Array<
@@ -4000,11 +4856,10 @@ export class CellBridge {
   }
 
   /**
-   * For each VNode-typed property in `value`, add a `<key>.json` file under
-   * `parentIno`. This replaces the recursive directory explosion that
-   * buildJsonTree would otherwise produce for UI trees.
-   * Also removes any previously-projected `<key>.json` files for VNode
-   * properties that no longer exist in the current value.
+   * Adds a `<key>.json` file under `parentIno` for each VNode-typed property of
+   * `value`, in place of the directory tree the JSON builder would otherwise
+   * produce for a UI tree, and removes the `$`-prefixed `.json` files of VNode
+   * properties absent from `value`.
    */
   #addVNodeJsonFiles(
     parentIno: bigint,
@@ -4061,9 +4916,10 @@ export class CellBridge {
   }
 
   /**
-   * Generate a .handlers summary file at the piece root.
-   * One line per callable: "<name>.<handler|tool>  <input-schema-json>"
-   * Dot-prefixed so it's hidden from plain `ls` but readable with `cat`.
+   * Generates the `.handlers` summary file at the piece root, one line per
+   * callable: `<name>.<handler|tool>  <input-type>`. Dot-prefixed so it is
+   * hidden from a plain `ls` but readable with `cat`. A piece with no callables
+   * gets no file, and any existing one is removed.
    */
   #buildHandlersFile(
     pieceIno: bigint,
@@ -4099,9 +4955,9 @@ export class CellBridge {
   }
 
   /**
-   * Build a subtree callback for `buildFsProjection`.
-   * Complex frontmatter fields (arrays of entities, nested objects) are
-   * rendered as sibling directories using the standard `buildJsonTree` path.
+   * Builds a subtree callback for `buildFsProjection()`. Complex frontmatter
+   * fields (arrays of entities, nested objects) are rendered as sibling
+   * directories using the standard `buildJsonTree()` path.
    */
   #makeFsSubtreeBuilder(
     resolveLink: (v: unknown, depth: number) => string | null,
@@ -4127,8 +4983,10 @@ export class CellBridge {
   }
 
   /**
-   * Read [FS] projection values from a result cell.
-   * Returns null if the result does not declare [FS].
+   * Reads the [FS] projection value from a result cell: Markdown with its
+   * frontmatter, or JSON content, with a `$FS` object carrying no `type` taken
+   * whole as JSON content. Returns `null` if the result does not declare `$FS`,
+   * declares an unknown type, or cannot be read.
    */
   #readFsValue(
     resultCell: Cell<unknown>,
@@ -4190,8 +5048,10 @@ export class CellBridge {
   }
 
   /**
-   * Subscribes to cell changes for hydration-cache invalidation and
-   * projected name changes for a piece.
+   * Subscribes to `piece`'s input and result cells, so that a change rebuilds
+   * the prop after a debounce; to its pattern identity and repository, so that
+   * a hot swap refreshes the pattern metadata; and to its result's `$NAME`, so
+   * that a rename moves the piece's directory. Returns the cancel functions.
    */
   async #subscribePiece(
     piece: PieceController,
@@ -4478,16 +5338,18 @@ export class CellBridge {
   }
 
   /**
-   * Create a link resolver closure for a piece.
+   * Creates a link resolver closure for a piece.
    *
-   * Given a sigil link value and the current depth from the piece root,
-   * returns a relative symlink target path:
+   * Given a sigil link value and the current depth from the piece root, returns
+   * a relative symlink target path:
    *
    * - Same-space with id: `"../".repeat(depth + 2)` then
    *   `entities/<hash>[/<path>]`.
    * - Cross-space: `"../".repeat(depth + 3)` then
    *   `<spaceName>/entities/<hash>[/<path>]`.
    * - Self-reference with no id: a relative path within the same piece.
+   *
+   * A value that is not a sigil link, or is a handler cell, yields `null`.
    */
   #makeLinkResolver(
     spaceName: string,
@@ -4554,9 +5416,9 @@ export class CellBridge {
   }
 
   /**
-   * Creates a piece's directory under `parentIno`, or fills in `existingIno`
-   * as that directory, with its metadata file and unhydrated `input` and
-   * `result` stubs, and returns its inode.
+   * Creates a piece's directory under `parentIno`, or fills in `existingIno` as
+   * that directory, with its metadata file and unhydrated `input` and `result`
+   * stubs, and returns its inode.
    */
   async #loadPieceTree(
     piece: PieceController,
@@ -4641,9 +5503,10 @@ export class CellBridge {
   }
 
   /**
-   * Build the .src/ subtree for a piece, containing all of the pattern's
+   * Builds the `.src/` subtree for a piece, containing all of the pattern's
    * authored source files (recovered from the content-addressed
-   * `pattern:<identity>` source-doc closure). Skips system pieces that have no
+   * `pattern:<identity>` source-doc closure), plus a synthetic `error.log` when
+   * no authored file claims that name. Skips system pieces that have no
    * recoverable source.
    */
   async #buildSourceTree(
@@ -4751,5 +5614,9 @@ export class CellBridge {
   // Static members
   //
 
+  /**
+   * How many times `#hydratePieceProp()` retries a hydration superseded
+   * mid-flight.
+   */
   static readonly #MAX_HYDRATION_RETRIES = 3;
 }

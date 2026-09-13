@@ -10,6 +10,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Interaction cost in the unified inbox](person-inbox-interaction-cost.md)
+  records the runtime work behind a thread open that cost 1482 ms paced and
+  10.7-19.5 s against five people's data: the per-read prefix scan over a
+  document's dereference-trace sources, the schemaless result pull a child
+  instantiation registers, and the authoring rule that a display cap bounds the
+  render and not the transaction. It carries what was disproved with what
+  landed, and the one item still open — a session that settles at ~800 ms after
+  roughly twenty clicks, which is waiting rather than compute.
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement
   through lint and new-source admission.

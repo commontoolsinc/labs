@@ -1,14 +1,11 @@
-// CT-1316: a reactive lift() callback crashes with message:null when returning
-// a recursive pattern instantiation (tail-call). (Originally surfaced via the
-// now-removed derive() builder, which delegated to lift; the runtime behavior
-// under test is identical.)
-//
-// When a lift() callback returns a pattern instantiation that recursively
-// calls itself, the runtime crashes with {type: callback:error, message: null}.
-// In the builder path, this manifests as a non-settling scheduler warning
-// because the lift action is re-triggered repeatedly, even
-// though the actual callback only runs a handful of times (the rest are
-// invalid-argument no-ops).
+/**
+ * A reactive lift() callback may return a pattern instantiation — a fixed
+ * one, a conditionally chosen one, or one that recursively instantiates the
+ * same pattern (tail-call pagination). These cases pin that such a run
+ * completes with the expected result, that the callback runs a bounded number
+ * of times, and that a returned structure identical to the last one does not
+ * re-run the sub-pattern.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -23,7 +20,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
+describe("Pattern Runner - Derive returning pattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -82,16 +79,12 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
   });
 
   it("should handle derive returning a recursive pattern instantiation (tail-call)", async () => {
-    // CT-1316: A pattern that conditionally calls itself via derive,
-    // simulating tail-call pagination (like FetchContactsPage in
-    // google-contacts-importer.tsx).
-    //
-    // BUG: Even with depth=1, the scheduler reports the derive action as
-    // non-settling. The callback only runs ~7 times (3 recursive levels + base
-    // cases + a few reactive re-evaluations), but the action wrapper is
-    // re-triggered repeatedly with invalid arguments. This
-    // indicates a reactive cycle where each sub-pattern creation dirties
-    // the parent action.
+    // A pattern that conditionally calls itself via derive, simulating
+    // tail-call pagination (like FetchContactsPage in
+    // google-contacts-importer.tsx). Pinned: the recursion completes with
+    // every page's items in order, and the callback runs a bounded number of
+    // times (the recursive levels, the base case, and a few reactive
+    // re-evaluations).
 
     let deriveCallCount = 0;
 
@@ -152,11 +145,10 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     expect(value.done).toBe(true);
     expect(value.items).toEqual([1, 2, 3, 4, 5, 6]);
 
-    // The callback should run a reasonable number of times.
-    // 3 recursive levels + base case + a few reactive re-evaluations = ~7.
-    // This assertion passes, but the scheduler reports non-convergence because
-    // the action WRAPPER (not the callback) runs repeatedly — most runs have
-    // invalid arguments that skip the callback.
+    // The callback runs a bounded number of times: 3 recursive levels + the
+    // base case + a few reactive re-evaluations = ~7. The bound is on the
+    // callback alone, not on how often the scheduler re-runs the action
+    // around it.
     expect(deriveCallCount).toBeLessThan(20);
   });
 
