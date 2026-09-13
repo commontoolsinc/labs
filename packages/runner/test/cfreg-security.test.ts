@@ -127,11 +127,11 @@ describe("HoistRegistrationSink stays untouched on a rejected registration", () 
 
 describe("transformer __cfReg emit round-trips through the verifier", () => {
   // The CONTRACT between the transformer's emitted `__cfReg({ … })` shape
-  // and the verifier's static approval check. The
-  // transformer and the verifier hold two independent definitions of "a valid
-  // registration call"; if they drift, a real registration silently routes to
-  // the rejecting registrar (fail-closed, but a confusing breakage). These
-  // pin the exact shapes the transformer emits (builder-call-hoisting.ts: a
+  // and the verifier's static approval check. The transformer and the
+  // verifier hold two independent definitions of "a valid registration
+  // call"; if they drift, a real registration silently routes to the
+  // rejecting registrar (fail-closed, but a confusing breakage). These pin
+  // the exact shapes the transformer emits (builder-call-hoisting.ts: a
   // trailing call whose argument is a multiline shorthand object of
   // previously-declared top-level bindings) as APPROVED, and assert the
   // tamper shapes the verifier is meant to refuse are not.
@@ -188,10 +188,10 @@ __cfReg({ __cfLift_1 });`;
 describe("re-registration under the same identity commits the fresh staged set", () => {
   it("a later commit replaces the sink entry for that identity", () => {
     // The outdated-overwrite contract at the public sink layer.
-    // `indexArtifact` overwrites the reverse mapping on re-eval so
-    // by-identity LOOKUP is always fresh; the same freshness must hold one
-    // layer down, where a module that re-evaluates (same identity, fresh
-    // artifact instance) re-stages and commits. A second commit under the same
+    // `indexArtifact` overwrites the reverse mapping on re-eval so by-identity
+    // LOOKUP is always fresh; the same freshness must hold one layer down,
+    // where a module that re-evaluates (same identity, fresh artifact
+    // instance) re-stages and commits. A second commit under the same
     // identity must REPLACE the prior staged map, not merge a stale instance
     // into it.
 

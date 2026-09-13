@@ -12,10 +12,9 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 // owner-protected list, written by a NON-exported mode-bound handler from a
 // fresh session, must retain its binding authority through the warm/cached
 // reload. Both sessions here share ONE compiled PROGRAM, so they share one
-// `moduleIdentity` and this does NOT reproduce the separate two-compile-context
-// moduleIdentity *merge-conflict* ("writeAuthorizedBy must remain stable") that
-// the real profile-create → piece-view flow can reach. That divergence needs a
-// faithful two-context harness.
+// `moduleIdentity`, so this does NOT reproduce a two-compile-context
+// moduleIdentity *merge-conflict* ("writeAuthorizedBy must remain stable"),
+// which needs a faithful two-context harness.
 const signer = await Identity.fromPassphrase("inspace-child-owner-write");
 const spaceA = signer.did(); // "home" — runs the parent, creates the child
 const spaceB = (await Identity.fromPassphrase("owner write child B")).did();

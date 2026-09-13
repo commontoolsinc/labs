@@ -3179,9 +3179,9 @@ describe("memory-v2-stacked-commit", () => {
       });
       const g1 = Promise.withResolvers<void>();
       try {
-        // The reviewer's split-brain shape: lower layer rejects, blind top
-        // layer accepts, and the dependant WOULD be accepted by the old server
-        // (its scalar wire read names only the accepted top). The hold must
+        // The split-brain shape: lower layer rejects, blind top layer accepts,
+        // and a server seeing the dependant would accept it (its scalar wire
+        // read names only the accepted top). The hold must
         // keep the dependant off the wire until c1 settles, so the server never
         // gets the chance to accept what the client cascade-rejects.
         const c1 = beginSet(harness, DOCS.A, valueFor("c1"));

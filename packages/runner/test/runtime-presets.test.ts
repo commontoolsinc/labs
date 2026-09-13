@@ -729,8 +729,8 @@ describe("runtimePresets conformance", () => {
       });
 
       it("an adopted server-OFF posture rides the deployed-topology presets explicitly, immune to the first-party default", async () => {
-        // The separately-installed-host shape (the #6535 Codex P1 on the
-        // GitHub host): nothing declared in the environment, talking to a
+        // The separately-installed-host shape: nothing declared in the
+        // environment, talking to a
         // server held on the explicit-OFF rollback posture. Adoption hands
         // the preset an EXPLICIT `false`, and the presets' `??` fill then
         // never consults `SERVER_EXECUTION_DEFAULT_ENABLED` — which is why

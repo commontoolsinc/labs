@@ -1336,7 +1336,7 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(true);
   });
 
-  it("fails closed on differing tuple arities (PR #4969 review)", () => {
+  it("fails closed on differing tuple arities", () => {
     // With differing arities, the candidate's `items` claims positions the
     // stored side covers with slots — the shared items branch cannot
     // compare those, so coverage must fail closed and merge.
@@ -1354,9 +1354,8 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
   });
 
   it("does not judge a candidate additionalProperties claim covered via properties alone", () => {
-    // PR #4969 review: the properties branch early-returned without
-    // comparing rest claims, so a candidate map-value claim was dropped
-    // instead of merged.
+    // The properties branch must compare rest claims rather than return
+    // early, or a candidate map-value claim is dropped instead of merged.
     const stored = {
       type: "object",
       properties: { a: { type: "string" } },
@@ -1406,11 +1405,10 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
   });
 
   it("stored-only named properties must cover the candidate rest claim", () => {
-    // PR #4969 review round 2: the candidate rest claim governs every key
-    // absent from the CANDIDATE's properties — including stored-NAMED keys.
-    // An unlabeled stored `b` does not cover a confidential rest claim, so
-    // coverage must fail closed and merge (the earlier version of this test
-    // pinned the fail-open behavior).
+    // The candidate rest claim governs every key absent from the
+    // CANDIDATE's properties — including stored-NAMED keys. An unlabeled
+    // stored `b` does not cover a confidential rest claim, so coverage must
+    // fail closed and merge.
     const stored = {
       type: "object",
       properties: { a: { type: "string" }, b: { type: "number" } },

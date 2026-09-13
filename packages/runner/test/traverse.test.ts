@@ -585,7 +585,7 @@ describe("SchemaObjectTraverser array traversal", () => {
     expect(error).toBeDefined();
   });
 
-  it("accepts empty array when items is false (B3 baseline)", () => {
+  it("accepts empty array when items is false", () => {
     // `items: false` without `prefixItems` means "this array allows no items at
     // all, only `[]` matches."
 

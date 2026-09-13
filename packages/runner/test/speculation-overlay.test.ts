@@ -871,9 +871,9 @@ describe("Phase 2 speculation overlay", () => {
     expect(outcome.error).toBeUndefined();
     await clientRuntime.storageManager.synced();
 
-    // Exactly ONE new engine commit: the write landed once — the fix
-    // re-issues nothing, so it cannot double-apply (the which-direction
-    // hazard both ways: no loss, no duplicate).
+    // Exactly ONE new engine commit: the write landed once — nothing is
+    // re-issued, so nothing can double-apply (the which-direction hazard
+    // both ways: no loss, no duplicate).
     const after = Engine.selectCommitsSince(engine, { fromSeq: 0 });
     expect(after.length).toBe(commitsBefore + 1);
 

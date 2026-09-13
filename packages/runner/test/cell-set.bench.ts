@@ -1,8 +1,8 @@
 /**
  * Benchmarks for `Cell.set()` over complex nested structures with many
- * fields — the shape `navigateTo()` writes when it creates patterns, where
- * the cost is per-write overhead in `tx.writeValueOrThrow()` rather than the
- * size of any one value.
+ * fields — the shape `navigateTo()` writes when it creates patterns. They
+ * separate the number of writes from the size of any one value, so per-write
+ * overhead in `tx.writeValueOrThrow()` shows up on its own.
  *
  * These benchmarks test Cell.set() with:
  * - Different data sizes (small, medium, large)
