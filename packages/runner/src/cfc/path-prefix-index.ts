@@ -7,11 +7,9 @@
  * read activity at commit preparation. A trie costs the query path's length
  * instead, which is small and does not grow with the set.
  *
- * `isPrefix` in `prepare.ts` treats `"*"` as matching any segment, on EITHER
- * side, and this reproduces that: the walk carries a frontier rather than a
- * single node, so a literal segment follows both its own child and the `"*"`
- * child, and a `"*"` segment follows every child. The two are held together by
- * a test that compares them across a generated corpus.
+ * The predicate is `isPrefix` below, which treats `"*"` as matching any segment
+ * on EITHER side. The index answers that question rather than restating it, and
+ * a test holds the two together across a generated corpus.
  *
  * The trie serves the wholly concrete case and declines everything else, which
  * is what makes its bound unconditional. A `"*"` on either side turns a walk
