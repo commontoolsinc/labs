@@ -67,15 +67,18 @@ describe("path-prefix-index", () => {
   });
 
   it("copies the path, so a caller reusing its array cannot change the set", () => {
+    // The mutation has to be one the assertion can see. Mutating a LATER
+    // segment is invisible: the trie captured every segment as a Map key at
+    // add time, and a wildcard query matches the mutated segment anyway. So
+    // mutate the FIRST segment and ask a wildcard query, which reads the
+    // retained copy and cannot match a source whose head has changed.
     const mutable = ["a", "b"];
     const index = new PathPrefixIndex();
     index.add(mutable);
-    mutable[1] = "zzz";
-    // The trie kept the original segments; the scanned copy must agree, which
-    // the wildcard query is what reaches.
-    expect(index.hasPrefixOf(["a", "b"])).toBe(true);
+    mutable[0] = "zzz";
+
     expect(index.hasPrefixOf(["a", "*"])).toBe(true);
-    expect(index.hasPrefixOf(["a", "zzz"])).toBe(false);
+    expect(index.accessForTestingOnly.scannedPaths).toEqual([["a", "b"]]);
   });
 
   it("agrees with a linear scan across a generated corpus", () => {

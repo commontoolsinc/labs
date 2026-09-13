@@ -15,22 +15,16 @@
  * per-source pass would show as `sources=256` drifting toward the scan's line
  * while `sources=16` stayed put.
  *
- * The crossover is real and worth keeping in view: at small source counts the
- * index is SLOWER, because building it is a fixed cost the scan does not pay.
- * Where that crossover sits moves with the machine — on a quiet one it is
- * under 64 sources, on a loaded one it has been seen above it — so these
- * benchmarks are read as two lines whose slopes differ, not as absolute
- * figures. The index pays for itself by the transaction's read count rather
- * than by its trace count, since it is built once per
- * `forEachFlowObservation` call and consulted once per read, so a transaction
- * with many traces and only a handful of reads is the shape that would not
- * benefit. The `build` group keeps that end of the trade visible.
+ * The index pays for itself by the transaction's read count rather than by its
+ * trace count — it is built once per `forEachFlowObservation` call and
+ * consulted once per read — so a transaction with many traces and only a
+ * handful of reads is the shape that would not benefit. The `build` group keeps
+ * that end of the trade visible.
  *
- * The wildcard group is the index's worst case and the reason it declines it.
- * A `"*"` in the QUERY follows every child at that depth, which made the
- * frontier as wide as the set and measured 730x slower than the scan before
- * `hasPrefixOf` learned to hand those queries to the scan instead. This group
- * is what keeps that fallback honest: the two lines should stay level.
+ * The wildcard group is what the index declines. A `"*"` on either side turns
+ * the walk into a search, so a wildcard query, or a set holding one wildcard
+ * source, takes the scan; this group is both at once and guards that declining
+ * costs no more than never having indexed.
  *
  * The `benchmarks.yml` workflow runs this file on main and publishes the
  * results in its `bench-results` artifact, which the team ops dashboard charts
@@ -41,21 +35,25 @@ import { isPrefix, PathPrefixIndex } from "../src/cfc/path-prefix-index.ts";
 
 /**
  * Trace sources shaped like the ones a rendered list produces: a common root,
- * a per-element branch, and a leaf under it. The last few carry a `"*"`, which
- * is the segment both sides have to treat as matching anything.
+ * a per-element branch, and a leaf under it.
+ *
+ * Concrete, because that is what a dereference trace records — its source is a
+ * real link's address (`cfcAddressFromLink`). The `"*"` segment belongs to
+ * label-map ENTRY paths, which is why `isPrefix` handles it and why the
+ * wildcard groups below construct it deliberately rather than finding it here.
  */
 function sources(count: number): string[][] {
   const out: string[][] = [];
   for (let i = 0; i < count; i++) {
-    const wild = i % 32 === 31;
-    out.push([
-      "value",
-      "threads",
-      String(i),
-      wild ? "*" : "msgs",
-      String(i % 7),
-    ]);
+    out.push(["value", "threads", String(i), "msgs", String(i % 7)]);
   }
+  return out;
+}
+
+/** The same set with a wildcard source, which the index declines outright. */
+function wildcardSources(count: number): string[][] {
+  const out = sources(count);
+  out[out.length - 1] = ["value", "threads", "*", "msgs", "0"];
   return out;
 }
 
@@ -128,11 +126,10 @@ for (const count of [16, 64, 256]) {
 // ────────────────────────────────────────────────────────────────────────
 // Wildcard queries
 //
-// A `"*"` in the QUERY follows every child at that depth, which is the one
-// shape that can widen the index's frontier toward the source count. These
-// queries are all wildcard at the branching segment — the worst case, not a
-// representative one — so the pair says whether the index still holds its
-// advantage where it is least suited.
+// A `"*"` on either side turns the walk into a search, so the index declines
+// both: a wildcard query, and a set holding a wildcard source. This group is
+// both at once — the shape the index is worst suited to — and what it guards is
+// that declining costs no more than never having indexed at all.
 // ────────────────────────────────────────────────────────────────────────
 
 const WILD_QUERIES = Array.from(
@@ -141,7 +138,7 @@ const WILD_QUERIES = Array.from(
 );
 
 for (const count of [256]) {
-  const set = sources(count);
+  const set = wildcardSources(count);
   const index = indexOf(set);
 
   Deno.bench({

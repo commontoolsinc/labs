@@ -152,7 +152,7 @@ now flat across a threefold difference in returned rows. The cross-session
 comparison is loose (the live stores moved from 40 threads to 37 between the
 two), but not by anything like the margin.
 
-What is left is one measurement and three design questions. The measurement is
+What is left is one measurement and four design questions. The measurement is
 stage 8: a session that settles at ~800 ms after roughly twenty clicks, which
 is waiting rather than compute, and which every instrument used here is blind
 to. The design questions are what a child piece's identity should depend on

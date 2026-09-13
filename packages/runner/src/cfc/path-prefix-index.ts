@@ -13,12 +13,13 @@
  * child, and a `"*"` segment follows every child. The two are held together by
  * a test that compares them across a generated corpus.
  *
- * A `"*"` in the QUERY would follow every child at that depth, making the
- * frontier as wide as the set and costing far more than the scan it replaces —
- * measured at 730x on a 256-source set whose queries are all wildcard at the
- * branching segment. So a query carrying one takes the scan instead, which is
- * also what keeps the walk's own frontier at two nodes: the literal child and
- * the `"*"` child of a SOURCE. Both shapes are benched.
+ * The trie serves the wholly concrete case and declines everything else, which
+ * is what makes its bound unconditional. A `"*"` on either side turns a walk
+ * into a search: in the QUERY it would follow every child at that depth, which
+ * measured **730x slower** than the scan on a 256-source set; among the SOURCES
+ * it would double the frontier at every level that carries one, so the walk
+ * grows with the set rather than with the path. Either one takes the scan
+ * instead, leaving the walk a single node per segment. Both shapes are benched.
  */
 
 /**
@@ -48,8 +49,11 @@ type PathPrefixNode = {
 export class PathPrefixIndex {
   #root: PathPrefixNode = { children: new Map(), terminal: false };
 
-  /** The same paths, for the wildcard queries the trie is bad at. */
+  /** The same paths, for the queries the trie declines. */
   #paths: (readonly string[])[] = [];
+
+  /** Whether any source carries a `"*"`, which sends every query to the scan. */
+  #wildcardSource = false;
 
   /**
    * Add a path to the set. Adding the same path twice is a no-op, for the
@@ -59,6 +63,7 @@ export class PathPrefixIndex {
    * representations disagree.
    */
   add(path: readonly string[]): void {
+    if (path.includes("*")) this.#wildcardSource = true;
     let node = this.#root;
     for (const segment of path) {
       let next = node.children.get(segment);
@@ -81,24 +86,17 @@ export class PathPrefixIndex {
   /** Whether any added path is a prefix of `path`, by `isPrefix`'s rules. */
   hasPrefixOf(path: readonly string[]): boolean {
     if (this.#root.terminal) return true;
-    if (path.includes("*")) {
+    if (this.#wildcardSource || path.includes("*")) {
       return this.#paths.some((source) => isPrefix(source, path));
     }
-    let frontier: Iterable<PathPrefixNode> = [this.#root];
+    // Both sides are concrete here, so the walk follows one child per segment
+    // and costs the query path's length whatever the set holds.
+    let node = this.#root;
     for (const segment of path) {
-      const next = new Set<PathPrefixNode>();
-      for (const node of frontier) {
-        // Only a SOURCE wildcard is followed here. A query wildcard took the
-        // scan above, so `segment` is always a literal by this point, and the
-        // frontier is at most two nodes wide.
-        const literal = node.children.get(segment);
-        if (literal !== undefined) next.add(literal);
-        const wildcard = node.children.get("*");
-        if (wildcard !== undefined) next.add(wildcard);
-      }
-      if (next.size === 0) return false;
-      for (const node of next) if (node.terminal) return true;
-      frontier = next;
+      const next = node.children.get(segment);
+      if (next === undefined) return false;
+      if (next.terminal) return true;
+      node = next;
     }
     return false;
   }
