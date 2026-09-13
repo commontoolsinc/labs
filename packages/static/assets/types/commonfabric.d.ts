@@ -729,11 +729,14 @@ export type FabricExecValue = FabricValuePlus<FabricExecFunction>;
 export type FabricExecFunction = (...args: any[]) => any;
 
 /** Read-only array of fabric execution values. */
-export interface FabricExecArray extends FabricArrayPlus<FabricExecFunction> {}
+export type FabricExecArray = FabricArrayPlus<FabricExecFunction>;
 
-/** Read-only plain object whose string-keyed values are execution values. */
-export interface FabricExecPlainObject
-  extends FabricPlainObjectPlus<FabricExecFunction> {}
+/**
+ * Read-only plain object whose string-keyed values are execution values.
+ * `Pattern` and `Module` extend it, and the schema generator recognizes that
+ * base by this name.
+ */
+export type FabricExecPlainObject = FabricPlainObjectPlus<FabricExecFunction>;
 
 //
 // Runtime Constants
