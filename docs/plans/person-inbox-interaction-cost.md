@@ -446,18 +446,26 @@ claims are now disproved, by two measurements taken on one build:
   click**, about 3%.
 
 So the re-instantiation mattered only because it dragged a schemaless pull
-behind it. With the pull carrying its schema, the root is no longer a
-performance item. It may still be worth understanding — a click should probably
-not re-instantiate anything — but that is a correctness and cleanliness
-question, not this plan's.
+behind it — and with candidate 2 reverted, that pull is schemaless again and
+walks the whole result on every click. At HEAD that walk is also cheap:
+`deepTraverse` is 2.0% of busy worker CPU. Which is why taking the schema back
+out cost nothing measurable, and is the clearest evidence that candidate 2 was
+never carrying the improvement this branch reports. The index was.
 
-**There is no next lever on this path.** Profiled at HEAD over four paced
-clicks, no frame exceeds 5.6% of busy worker CPU and the largest is the garbage
-collector; `traverseWithSchema`, the schema-guided walk that replaced the blind
-one, is 5.4%. What remains is spread across schema traversal, freezing,
-encoding and equality — the ordinary cost of committing a change against a
-large result. A further win would come from making the result smaller, which is
-the authoring rule stage 6 wrote down, rather than from another leaf.
+**There is a next lever, and not where this plan first looked for one.**
+Profiled at HEAD over four paced clicks in phase A, 3% idle, the two largest
+frames are `sortAndCompactPaths` at 8.5% of busy worker CPU and
+`resolveLinkTracingDereferences` at 7.9%. The garbage collector is 3.3%, and
+`forEachFlowObservation` — 31% before the index — is 1.8%. Adding
+`addressesToPathByEntity` at 4.0% and `comparePaths` at 3.0%, roughly a sixth
+of busy CPU is the scheduler sorting, compacting and indexing the read log's
+paths once per action: `reactive-dependencies.ts`, under
+`scheduler/dependency-updates.ts` and `scheduler/trigger-index.ts`.
+
+That is the shape the index fixed one layer down — a transaction journals many
+reads, and per-read work over them is what a click costs. This branch has not
+pulled that lever and does not measure it. It is named here so the next pass
+starts from a profile of the code that shipped.
 
 **One lead ruled out.** The render root looked like the same fault:
 `cf-render` renders the `full` kind with a bare cast rather than
