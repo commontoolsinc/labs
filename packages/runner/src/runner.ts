@@ -1467,9 +1467,9 @@ type SchedulerRehydrationSubscriptionOptions = {
   };
 };
 
-// Whether resumed nodes should hold their initial run until the space syncs,
-// from either the rehydration path or the flag-off await-sync path. Used to
-// propagate the intent to cross-space child runs and container-minting builtins.
+// Whether resumed nodes should hold their initial run until the space syncs.
+// Used to propagate the intent to cross-space child runs and container-minting
+// builtins.
 function defersInitialRunUntilSynced(
   options: SchedulerRehydrationSubscriptionOptions,
 ): boolean {
@@ -1688,12 +1688,12 @@ interface SetupStateReuse {
  * that collapses them writes state describing a version that may not be there.
  *
  * `patternIdentity` alone cannot answer this, because an update can move the
- * pointer before any setup runs. `PiecesController`'s roll-forward materialize
- * commits the candidate's identity and then calls `runSynced`, and
- * `PatternUpdater`'s instantiated mode moves the pointer with no setup at all —
- * leaving a root that boots through `PiecesController`'s cold-start setup
- * repair. Either way the pointer already names the pattern being set up, so
- * comparing pointers reports "same pattern" for what is in fact an update. A
+ * pointer before any setup runs. `PiecesController`'s roll-forward heal
+ * commits the candidate's identity and then calls `runSynced`, and when that
+ * second commit fails the root is left with its pointer moved and no setup at
+ * all — to boot through `PiecesController`'s cold-start setup repair. Either
+ * way the pointer already names the pattern being set up, so comparing
+ * pointers reports "same pattern" for what is in fact an update. A
  * caller that hands setup a pattern the pointer does not name yet — `cf piece
  * setsrc`, which positively asserts the pointer has NOT moved, or the ordinary
  * default-root apply — is already recognized as a change without this.
@@ -1790,8 +1790,9 @@ export class Runner {
 
   /**
    * In-flight unloadable-pointer roll-forward commits. Deliberately outside the
-   * scheduler, like `PatternUpdater`'s checks — `dispose()` settles them before
-   * the storage sessions they write through close. Bounded local commits only.
+   * scheduler, like `SourceReconciler`'s passes — `Runtime.dispose()` settles
+   * both before the storage sessions they write through close. Bounded local
+   * commits only.
    */
   #pendingPointerCommits = new Set<Promise<unknown>>();
 
@@ -4744,8 +4745,7 @@ export class Runner {
                     ],
                   );
                 });
-                // Track so dispose() can settle it before storage teardown
-                // (same contract as PatternUpdater's pending checks).
+                // Track so dispose() can settle it before storage teardown.
                 this.#pendingPointerCommits.add(rollForward);
                 rollForward.finally(() =>
                   this.#pendingPointerCommits.delete(rollForward)
@@ -9690,6 +9690,37 @@ export class Runner {
     });
   }
 
+  /**
+   * Pull the result cell once, after this transaction commits successfully.
+   *
+   * The cell is rebuilt from the result's own normalized link, so it carries
+   * whatever schema that link carries — `getCellFromLink` falls back to
+   * `link.schema` when no explicit one is passed. Which of two things the pull
+   * then does depends on that:
+   *
+   * - With no schema, `Cell.pull()` deep-traverses the whole value, and that
+   *   walk is what demands lazy producers under properties nothing declared.
+   * - With one, it descends only declared `properties`
+   *   (`preparePlainSchemaPlan`), so an eager node — `navigateTo`,
+   *   `generateText`, a `fetch*` — sitting under an undeclared property is not
+   *   demanded and its operation may never run. That hazard is latent here
+   *   rather than introduced: it follows from the link's own schema, is
+   *   unmeasured, and wants a decision about what a start pull should demand.
+   *
+   * Which of the two a given result gets is therefore decided by whether its
+   * link carries a schema, and that is not uniform: a non-space output scope
+   * builds its cell through `getCell(space, _resultFor, undefined, tx)`, so a
+   * scoped result pulls schemaless and walks, while a space-scoped one may not.
+   * The same interaction can be safe under one scope and not the other, which
+   * is the strongest argument for settling this deliberately rather than by
+   * whichever direction a caller happens to be patched in.
+   *
+   * What is settled is that narrowing this FURTHER, by passing the pattern's
+   * result schema explicitly, is not the way: it measured about a quarter off a
+   * thread open on the unified inbox and was reverted for exactly the hazard
+   * above, widened to every such pull. See stage 7 of
+   * docs/plans/person-inbox-interaction-cost.md.
+   */
   #pullCellOnceAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
@@ -11089,7 +11120,7 @@ export class Runner {
         resolvedOutputSpot,
       );
     } finally {
-      popFrame(builtinFrame);
+      if (builtinFrame) popFrame(builtinFrame);
     }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats

@@ -84,7 +84,7 @@ import {
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
-import { compileProgram } from "./utils.ts";
+import { commitFailure, compileProgram } from "./utils.ts";
 
 const pieceUpdateLogger = getLogger("piece.update", {
   enabled: true,
@@ -174,12 +174,7 @@ async function snapshotCloneData(
     piece.runtime.prepareTxForCommit(tx);
     commitStarted = true;
     const { error } = await tx.commit();
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
     return { input, internals };
   } catch (error) {
     if (!commitStarted) tx.abort(error);
@@ -211,12 +206,7 @@ async function restoreCloneInternals(
     piece.runtime.prepareTxForCommit(tx);
     commitStarted = true;
     const { error } = await tx.commit();
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
   } catch (error) {
     if (!commitStarted) tx.abort(error);
     throw error;
@@ -3659,12 +3649,7 @@ class PiecePropIo implements PieceCellIo {
       }
       return { wrote: true };
     });
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
     // A committed decision not to write leaves nothing to pull.
     if (ok !== undefined && !ok.wrote) return { wrote: false };
 

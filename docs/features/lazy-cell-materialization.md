@@ -121,7 +121,9 @@ argument that did not resolve: an undefined result through the ordinary result
 path, **not** an action error and not logged as one. A run that could not
 proceed on the data available is a non-event. The reads it took stay registered,
 including the one that failed, so it runs again when the data changes and may
-then find it valid.
+then find it valid. A refusal a synchronous body throws is not disposed of this
+way today; the previous result stands, and the [design plan's Stage
+5](../plans/lazy-cell-materialization.md) names the fix.
 
 The view withdraws the record for a refusal it catches itself — the optional
 property above, whose answer is absence rather than a refusal. It clears only
@@ -166,7 +168,14 @@ reads skip the machinery outright on that check.
 
 ## Where a view is not used
 
-- **Handlers.** They stay eager.
+- **Handlers.** They stay eager. A handler's read log is what its commit's read
+  set is built from, so the set of paths it reads is also the set of concurrent
+  writes its commit refuses. A view would narrow that set to the paths the body
+  touched: an append to a list the body read, or a change to a field it read,
+  would still conflict, but a change to a field of a row it never touched would
+  not, and a handler relying on that conflict would lose the guard without any
+  change to its code. A handler's reads through a handle are ordinary eager
+  reads for the same reason.
 - **An absent or `true` schema.** That is the schema-less query-result proxy's
   job, and `validateAndTransform` dispatches to it before a view is considered.
 

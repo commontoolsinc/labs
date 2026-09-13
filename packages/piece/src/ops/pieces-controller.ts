@@ -2160,17 +2160,18 @@ export class PiecesController<T = unknown> {
         () => this.startPiece(rootToStart),
       );
     } catch (startError) {
-      // Cold-start setup repair. A source transition moves patternIdentity
-      // WITHOUT running the setup phase,
-      // and Runner.start() of a not-running piece instantiates the stored
-      // identity directly — also without setup. A root whose identity moved
-      // while it was not running (the bricked-space heal: no watcher existed
-      // to swap it in place) therefore boots over a doc that never
-      // materialized the pattern's internal cells — handler
-      // `{ "$stream": true }` markers included — and dies at instantiation
-      // ("Handler used as lift", the 2026-07-22 estuary failure). This also
-      // covers docs ALREADY left in that state by an earlier session: their
-      // identity compares current, so no further swap will ever fire.
+      // Cold-start setup repair. Two paths move patternIdentity WITHOUT
+      // running the setup phase: this method's own roll-forward heal when
+      // the materialize after its identity swap fails, and the runner's
+      // pattern watcher rolling an unloadable pointer back to the running
+      // pattern or its producer. Runner.start() of a not-running piece
+      // instantiates the stored identity directly — also without setup. A
+      // root whose identity moved while it was not running therefore boots
+      // over a doc that never materialized the pattern's internal cells —
+      // handler `{ "$stream": true }` markers included — and dies at
+      // instantiation ("Handler used as lift"). This also covers docs ALREADY
+      // left in that state by an earlier session: their identity compares
+      // current, so no further swap will ever fire.
       //
       // run() (setup + start) is the sanctioned repair. With an unchanged
       // pattern pointer the setup phase is near-idempotent: it materializes
@@ -2451,7 +2452,7 @@ export class PiecesController<T = unknown> {
         { cause },
       );
 
-    // Fetch + compile the official source, mirroring pattern-updater's #check.
+    // Fetch + compile the official source.
     // Force ETag revalidation (`cache: "no-cache"`): the roll-forward exists to
     // ESCAPE a stale pinned pattern, so compiling a stale HTTP-cached source
     // would defeat the heal — it could "roll forward" to the same aged bytes.
@@ -2461,9 +2462,7 @@ export class PiecesController<T = unknown> {
     // Resolve against the host that actually SERVES this space, not the global
     // apiUrl. A mapped space is served by its own host (`mappedHostFor`); the
     // system pattern must be fetched and compiled from there, or a mapped space
-    // could roll forward onto the WRONG host's system pattern. `hostForSpace`
-    // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
-    // uses for its own roll-forward.
+    // could roll forward onto the WRONG host's system pattern.
     const officialUrl = patternSourceUrl(
       officialUrlPath,
       runtime.hostForSpace(space),
@@ -2499,7 +2498,7 @@ export class PiecesController<T = unknown> {
     // artifact under an obsolete/other symbol (e.g. a persisted export that is
     // no longer `default`) is NOT already-official — rolling it forward to the
     // official `default` entry is exactly the recovery, so it must not
-    // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
+    // short-circuit here.
     const alreadyOfficial = officialRef.identity === pinnedRef.identity &&
       officialRef.symbol === pinnedRef.symbol;
     if (alreadyOfficial && reason === "unrunnable") {
@@ -2523,11 +2522,11 @@ export class PiecesController<T = unknown> {
     // Precondition guard (fail-closed): re-read the root's identity INSIDE the
     // transaction and proceed only if it still equals the pinned ref we
     // diagnosed. `editWithRetry` reruns this callback against fresh state on
-    // conflict, so without the guard a concurrent heal (another boot, the
-    // pattern updater) that already repointed the root would be blindly
-    // clobbered by our stale `officialRef`. Returning `false` aborts the write
-    // without committing — precedent: pattern-updater's `stillMatches`/
-    // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    // conflict, so without the guard a concurrent repoint (another boot's
+    // heal, a source transition) that already moved the root would be blindly
+    // clobbered by our stale `officialRef`. Returning `false` before anything
+    // is staged commits a transaction with no writes; `result.ok === false`
+    // (no error) then means "superseded".
     if (alreadyOfficial) {
       // Nothing to swap: the root already names the entry the official source
       // compiles to, and that source has just been compiled into this space.
