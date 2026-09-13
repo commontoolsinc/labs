@@ -57,7 +57,7 @@
  *   policy informs how such values interact with sets and maps.)
  *
  * * `symbol` -- Only **registry-interned** symbols are considered valid
- *   `FabricValues`, that is, only symbols for which `Symbol.keyFor()` returns
+ *   `FabricValue`s, that is, only symbols for which `Symbol.keyFor()` returns
  *   a string.
  *
  * * Non-null `object`s in general -- Objects are only valid if:
@@ -245,7 +245,7 @@ export declare const FabricInstance:
 
 /**
  * Type which is equivalent to `FabricValue`, except that it is compatible with
- * one additional type, the `PlusType`: This type is a union of `FabricValue,
+ * one additional type, the `PlusType`: This type is a union of `FabricValue`,
  * `PlusType`, and both arrays and plain objects which recursively include this
  * type as possible elements.
  *
