@@ -2652,10 +2652,9 @@ describe("runtime-processor", () => {
         scope: "space",
         path: [],
       };
-      // The raw envelope behind the cell, with `Caveat.source` and the other
-      // principal identities unredacted. A handler that reached `getMetaRaw()`
-      // for `cfc` would hand this back verbatim, which is what the assertion
-      // below rules out.
+      // The raw envelope behind the cell, with its `Caveat.source` unredacted.
+      // A handler that reached `getMetaRaw()` for `cfc` would hand this back
+      // verbatim, which is what the assertion below rules out.
       const rawEnvelope = {
         version: 1,
         schemaHash: "test-schema",
