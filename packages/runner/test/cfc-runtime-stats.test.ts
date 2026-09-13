@@ -20,6 +20,51 @@ describe("CFC runtime stats", () => {
     storageManager = undefined;
   });
 
+  it("counts dereference traces and the largest set one transaction held", () => {
+    // The size of that set is what `probeBelongsToDereference` scans per read
+    // activity at commit preparation, so the maximum is the figure a reader
+    // wants — not the running total, which spans every transaction.
+
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    const trace = (path: string[]) => ({
+      source: {
+        space,
+        id: "of:cfc-stats-source" as const,
+        scope: "space" as const,
+        path,
+      },
+      target: {
+        space,
+        id: "of:cfc-stats-target" as const,
+        scope: "space" as const,
+        path: [] as string[],
+      },
+      kind: "value" as const,
+    });
+
+    const first = runtime.edit();
+    first.recordCfcDereferenceTrace(trace(["a"]));
+    first.recordCfcDereferenceTrace(trace(["b"]));
+    first.recordCfcDereferenceTrace(trace(["c"]));
+    first.abort("counted");
+
+    expect(runtime.getCfcStats().dereferenceTracesRecorded).toBe(3);
+    expect(runtime.getCfcStats().dereferenceTracesMax).toBe(3);
+
+    // A shorter transaction adds to the total and leaves the maximum alone.
+    const second = runtime.edit();
+    second.recordCfcDereferenceTrace(trace(["d"]));
+    second.abort("counted");
+
+    expect(runtime.getCfcStats().dereferenceTracesRecorded).toBe(4);
+    expect(runtime.getCfcStats().dereferenceTracesMax).toBe(3);
+  });
+
   it("tracks relevant, prepared, reject, invalidation, outbox, and sink dedupe counters", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
@@ -33,6 +78,8 @@ describe("CFC runtime stats", () => {
       cfcRelevantTx: 0,
       flowLabelProbesComputed: 0,
       flowLabelProbeMemoHits: 0,
+      dereferenceTracesRecorded: 0,
+      dereferenceTracesMax: 0,
       cfcPreparedTx: 0,
       cfcPrepareRejects: 0,
       cfcDigestInvalidations: 0,
@@ -171,6 +218,8 @@ describe("CFC runtime stats", () => {
       // probe's own counters are exercised in cfc-flow-probe-memo.test.ts.
       flowLabelProbesComputed: 0,
       flowLabelProbeMemoHits: 0,
+      dereferenceTracesRecorded: 0,
+      dereferenceTracesMax: 0,
       cfcPreparedTx: 3,
       cfcPrepareRejects: 1,
       cfcDigestInvalidations: 1,

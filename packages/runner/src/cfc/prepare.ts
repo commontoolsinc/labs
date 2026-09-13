@@ -110,6 +110,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { isPrefix, PathPrefixIndex } from "./path-prefix-index.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type CfcRefusalDetail,
@@ -178,15 +179,6 @@ const INTERNAL_VERIFIER_META = {
 const LINK_SOURCE_SCHEMA_META = {
   ...internalVerifierRead,
 };
-
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
@@ -2150,7 +2142,7 @@ const forEachFlowObservation = (
   // read arrives via the ordinary reads of the target document. Recognize
   // them by the recorded trace sources: a probe at-or-below a followed
   // slot's path in the same document belongs to that dereference.
-  let traceSourcesByDoc: Map<string, (readonly string[])[]> | undefined;
+  let traceSourcesByDoc: Map<string, PathPrefixIndex> | undefined;
   const probeBelongsToDereference = (
     space: MemorySpace,
     id: URI,
@@ -2167,15 +2159,14 @@ const forEachFlowObservation = (
         });
         let sources = traceSourcesByDoc.get(key);
         if (sources === undefined) {
-          sources = [];
+          sources = new PathPrefixIndex();
           traceSourcesByDoc.set(key, sources);
         }
-        sources.push(canonicalizeLogicalPath(trace.source.path));
+        sources.add(canonicalizeLogicalPath(trace.source.path));
       }
     }
     const sources = traceSourcesByDoc.get(targetKey({ space, id, scope }));
-    return sources !== undefined &&
-      sources.some((source) => isPrefix(source, logicalPath));
+    return sources !== undefined && sources.hasPrefixOf(logicalPath);
   };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) {
@@ -2207,15 +2198,22 @@ const forEachFlowObservation = (
     const space = read.space;
     const id = read.id as URI;
     const scope = normalizeCellScope(read.scope);
-    const coveredByTrace = probeBelongsToDereference(
-      space,
-      id,
-      scope,
-      logicalPath,
-    );
+    // Computed on demand rather than for every read: `flowLabelWorkExists`
+    // consumes observations without ever reading `coveredByTrace`, and it is
+    // the caller that runs on every reactive action commit. Only a
+    // link-resolution probe needs the answer here, and only `deriveFlowJoin`
+    // asks for it afterwards. Memoized so the two cannot disagree.
+    let coveredByTraceMemo: boolean | undefined;
+    const coveredByTrace = (): boolean =>
+      coveredByTraceMemo ??= probeBelongsToDereference(
+        space,
+        id,
+        scope,
+        logicalPath,
+      );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (coveredByTrace) {
+      if (coveredByTrace()) {
         continue;
       }
       shape = "followRef";
@@ -2241,7 +2239,9 @@ const forEachFlowObservation = (
         {
           shape,
           nonRecursive: read.nonRecursive,
-          coveredByTrace,
+          get coveredByTrace() {
+            return coveredByTrace();
+          },
           machinery: isMachineryRead(read.meta),
         },
       )

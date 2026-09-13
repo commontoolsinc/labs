@@ -4514,7 +4514,16 @@ describe("runtime-processor", () => {
 
   describe("RuntimeProcessor.getLoggerCounts", () => {
     // The handler reads process-global logger state, so each case raises its own
-    // flag and clears it again rather than leaving one for the next.
+    // flag and clears it again rather than leaving one for the next. It also
+    // reads the runtime's CFC counters, which travel in the same response so a
+    // client comparing them against the timings has both from one moment —
+    // hence the stand-in below, the only runtime member this handler touches.
+
+    const cfcStats = { cfcRelevantTx: 7 };
+
+    function processorWithStats() {
+      return buildProcessor({ runtime: { getCfcStats: () => cfcStats } });
+    }
 
     function withFlag(
       metadata: Record<string, unknown>,
@@ -4530,7 +4539,7 @@ describe("runtime-processor", () => {
     }
 
     it("carries a raised flag's metadata through to the response", () => {
-      const processor = buildProcessor();
+      const processor = processorWithStats();
 
       withFlag({ a: 1 }, () => {
         const response = processor.getLoggerCounts({
@@ -4538,6 +4547,7 @@ describe("runtime-processor", () => {
         });
 
         expect(Object.keys(response).sort()).toEqual([
+          "cfc",
           "counts",
           "flags",
           "metadata",
@@ -4546,6 +4556,7 @@ describe("runtime-processor", () => {
         expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
           a: 1,
         });
+        expect(response.cfc).toEqual(cfcStats);
       });
     });
 
@@ -4553,7 +4564,7 @@ describe("runtime-processor", () => {
       // The assertion is wired into the handler, not merely available beside it:
       // a `Date` raised anywhere in the process stops this read.
 
-      const processor = buildProcessor();
+      const processor = processorWithStats();
 
       withFlag({ when: new Date(0) }, () => {
         expect(() =>
