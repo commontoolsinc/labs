@@ -84,12 +84,14 @@ snapshot — as a step of a wave cycle
 The scheduler tell is unchanged: the verb's writes are still commits made
 outside the scheduler, made now by the serving side on the requester's
 behalf, the registry entry and the slug in the same transaction as the
-piece. A source replacement stays the client's authored act: it publishes
-module update authority, which module-loading.md requires from an owned
-setup transaction that commits to storage, and a wave's withdrawable
-acceptance cannot supply that. Every other client of the piece controller —
-the shell, the background piece service — keeps the client-side shape
-until its own migration.)*
+piece. A source replacement (AMENDED 2026-09-11) is a served verb too:
+it publishes module update authority, which module-loading.md requires
+from an owned setup transaction that commits to storage, and since a
+wave's withdrawable acceptance cannot supply that, its setup transaction
+commits directly to the store as the serving loop's own derived-class
+commit, outside the wave (serving-loop.md §3e). Every other client of
+the piece controller — the shell, the background piece service — keeps
+the client-side shape until its own migration.)*
 
 **The `system` class is PRODUCER-defined, its contents exemplary
 (RULED 2026-08-05).** The stamp rides the memory server's generic

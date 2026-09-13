@@ -65,7 +65,6 @@ import type {
   CfcReadOnExceed,
   CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
-import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import {
   type NameSchema,
@@ -89,6 +88,7 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
+import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import {
   assertSuppliedLinkSchemasCompatible,
   assertWritablePiecePath,
@@ -166,47 +166,6 @@ function filterOutCell(
     !piece.resolveAsCell().equals(resolvedTarget)
   );
 }
-
-/**
- * The migration token in its FRAMED reason position — `: <token>: ` — the
- * exact shape the CFC prepare catch emits (`${token}: ${message}` recorded as
- * a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
- * `includes(token)` would also match the token appearing incidentally inside
- * an UNRELATED, user-influenced error — e.g. an ordinary incompatible-type
- * merge failure at a property path literally named
- * `/cfc-schema-migration-incompatible` — and wrongly authorize a root
- * replacement for a non-additive incompatibility. The `: … : ` framing cannot
- * be produced by a path or value that merely contains the token string.
- */
-const FRAMED_MIGRATION_REASON =
-  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
-
-/**
- * Reports whether a cold-start setup repair failed specifically because the
- * CFC SCHEMA MIGRATION rejected the commit — the pinned pattern loads but
- * cannot migrate preserved input or unclassified document data onto a
- * now-required field that carries no default. Generated result fields are not
- * in this class: pattern setup materializes them. This is ONE of the two
- * repair-failure classes the runnability backstop
- * (`PiecesController.#healDefaultRootByRollForward`) acts on — the other is a
- * refused stored argument ({@link isStoredArgumentSchemaRefusal}); every other
- * failure stays fail-closed.
- *
- * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
- * runner emits it for prepared-digest races, unprepared transactions, and
- * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
- * which are repaired by repointing the root's pattern identity. So the check
- * requires the machine-stable migration token the CFC prepare tags onto this
- * class (`migration-reason.ts`), and only in its framed position
- * ({@link FRAMED_MIGRATION_REASON}). Matching a token in the message — not the
- * error class — is what survives the plain-`Error` re-wrap the runner applies
- * at its setup-commit boundary (`runner.ts`), keeping producer and consumer in
- * lockstep across that boundary and across packages.
- */
-const isCfcMigrationRejection = (error: unknown): boolean =>
-  error instanceof Error &&
-  error.message.startsWith("CFC enforcement rejected commit") &&
-  error.message.includes(FRAMED_MIGRATION_REASON);
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -1507,6 +1466,15 @@ export class PiecesController<T = unknown> {
       repository?: string;
       /** Fresh source lifecycle revision written atomically with setup. */
       sourceTransition: PieceSourceTransition;
+      /**
+       * The update as a serving runtime performs it on `actingUser`'s
+       * behalf: the transaction carries that principal's trust snapshot
+       * and commits directly to the store rather than sealing into the
+       * wave, the piece is not started, and the post-commit refresh is
+       * left to the serving loop, so the returned cell view is the one the
+       * commit itself reconciled.
+       */
+      served?: { actingUser: string };
     },
   ): Promise<{
     /** Cell view reconciled to the pattern current after post-commit work. */
@@ -1528,8 +1496,16 @@ export class PiecesController<T = unknown> {
         pieceSourceTransition: options.sourceTransition,
         validateCurrentArgument: options.validateCurrentArgument,
         validateArgumentLinks: options.validateArgumentLinks,
+        ...(options.served === undefined ? {} : {
+          directCommit: true,
+          start: false,
+          cfcTrustSnapshot: this.runtime.trustSnapshotForPrincipal(
+            options.served.actingUser,
+          ),
+        }),
       },
     );
+    if (options.served !== undefined) return result;
     try {
       await this.syncPattern(result.cell);
       await this.getResult(result.cell).pull();
