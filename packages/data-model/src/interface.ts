@@ -12,7 +12,12 @@
  * guard, each beside its own definition.
  */
 
-import type { FabricArray, FabricPlainObject, FabricValue } from "./api.ts";
+import type {
+  FabricArray,
+  FabricPlainObject,
+  FabricValue,
+  FabricValuePlus,
+} from "./api.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
 // available internally to `data-model` without having to `import ... from
@@ -31,15 +36,15 @@ export type * from "./api.ts";
 //
 
 /**
- * Single "layer" of fabric conversion -- the result of shallow conversion
- * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
- * shape but their contents may still contain values requiring further
- * conversion (e.g., `Error` instances in a `.cause` chain).
+ * Single "layer" of fabric validity: a `FabricValue`, or an array or plain
+ * object root whose contents are untyped. Arrays and objects have the right
+ * shape but their contents may not. As with `FabricValue`, the type system
+ * requires deep immutability -- the type is deeply `readonly` -- while actual
+ * deep-freezing happens only tactically.
  */
-export type FabricValueLayer =
-  | FabricValue
-  | unknown[]
-  | Record<string, unknown>;
+export type FabricValueLayer = FabricValuePlus<
+  Readonly<unknown[] | Record<string, unknown>>
+>;
 
 /** A mutable array root whose elements remain `FabricValue`s. */
 export type MutableFabricArrayLayer = FabricValue[];
@@ -104,11 +109,7 @@ export type FabricNativeObject =
  * Converting a `FabricError` yields an `Error`, so an array of them is an array
  * of natives, which has no `FabricValue` name.
  */
-export type FabricConvertibleValue =
-  | FabricValue
-  | FabricNativeObject
-  | readonly FabricConvertibleValue[]
-  | { readonly [key: string]: FabricConvertibleValue };
+export type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
 
 //
 // Abstract base classes
@@ -175,6 +176,14 @@ export abstract class FabricSpecialObject {
  * and are kept off this pure-protocol class.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
+  /**
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
+   * `never` here since an instance of this class holds only `FabricValue`s.
+   * Declared the way the `FabricSpecialObject` brand is, and for the same
+   * reasons; `api.ts` declares the identical member.
+   */
+  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===

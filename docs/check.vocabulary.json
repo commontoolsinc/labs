@@ -166,6 +166,7 @@
     "FabricRef",
     "FabricRegExp",
     "FabricValueLayer",
+    "FabricValuePlus",
     "Fact",
     "FactSelection",
     "FactSet",

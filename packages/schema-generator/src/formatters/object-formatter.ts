@@ -1,4 +1,5 @@
 import {
+  FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_SPECIAL_OBJECT_BRAND,
   type MutableJSONSchema,
   type MutableJSONSchemaObj,
@@ -196,10 +197,13 @@ function shouldSkipInternalProperty(
     return true;
   }
 
-  // The FabricSpecialObject nominal brand exists only in the type system —
-  // no runtime value carries the key, so it must never appear in a schema's
-  // `properties` or `required`.
-  if (propName === FABRIC_SPECIAL_OBJECT_BRAND) {
+  // The `FabricSpecialObject` and `FabricInstancePlus` nominal brands exist
+  // only in the type system -- no runtime value carries either key, so
+  // neither may appear in a schema's `properties` or `required`.
+  if (
+    (propName === FABRIC_SPECIAL_OBJECT_BRAND) ||
+    (propName === FABRIC_INSTANCE_PLUS_BRAND)
+  ) {
     return true;
   }
 

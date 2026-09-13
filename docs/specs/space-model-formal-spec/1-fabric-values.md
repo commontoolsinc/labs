@@ -148,23 +148,23 @@ type FabricValue =
   | { readonly [key: string]: FabricValue };
 ```
 
-Arms (b) and (c) are a deliberate expansion, not a divergence. The
-implementation writes a single `FabricSpecialObject` arm; `FabricPrimitive` and
-`FabricInstance` are its only two subclasses, so naming them separately — and
-naming the `FabricPrimitive` subclasses individually — describes exactly the
-same set while saying more about it. Read the split as this document's
-elaboration of one implementation arm.
+Arm (b) is a deliberate expansion, not a divergence. The implementation writes
+a single `FabricPrimitive` arm, and every concrete `FabricPrimitive` class is
+defined by the data model, so naming those classes individually describes
+exactly the same set while saying more about it. Read the split as this
+document's elaboration of one implementation arm.
 
 Arms (c) and (d) are the **containers** — the values that expose other
 `FabricValue`s for a walk to descend into. The implementation names that set
-`FabricContainerValue`. What divides the two arms is where the contents live,
-not whether there are any: a plain container's contents are its own indices and
-keys, while a `FabricInstance` holds its contents privately and exposes them
-through the protocol of Section 2.3. Arms (a) and (b) are the non-containers. A
-`FabricPrimitive` may hold `FabricValue`s of its own — a `FabricRegExp` its
-source and flags, a `FabricKeyPair` holding material two `FabricBytes` — but
-holds them privately and self-freezes at construction, so it exposes none of
-them and a walk stops there (Section 8.6).
+`FabricContainerValue` and writes it as the union's other arm, so the two arms
+here are that one written out. What divides the two arms is where the contents
+live, not whether there are any: a plain container's contents are its own
+indices and keys, while a `FabricInstance` holds its contents privately and
+exposes them through the protocol of Section 2.3. Arms (a) and (b) are the
+non-containers. A `FabricPrimitive` may hold `FabricValue`s of its own — a
+`FabricRegExp` its source and flags, a `FabricKeyPair` holding material two
+`FabricBytes` — but holds them privately and self-freezes at construction, so it
+exposes none of them and a walk stops there (Section 8.6).
 
 > **Fabric values are deeply read-only, with one intentional hole.** The plain
 > container arms are read-only, and because their element and property types are
@@ -263,16 +263,17 @@ type FabricNativeObject =
   | Uint8Array;
 
 /**
- * A `FabricValue`, a `FabricNativeObject`, or a deep tree of either — the
- * values that convert to and from fabric form. This is the precondition of
- * `fabricFromNativeValue()`, the result of `nativeFromFabricValue()`, and
- * what `isValidFabricConvertibleValue()` tests for (Section 8).
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+ * that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()` (which fails on anything else), the result of
+ * `nativeFromFabricValue()`, and what `isValidFabricConvertibleValue()` tests
+ * for.
+ *
+ * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+ * Converting a `FabricError` yields an `Error`, so an array of them is an array
+ * of natives, which has no `FabricValue` name.
  */
-type FabricConvertibleValue =
-  | FabricValue
-  | FabricNativeObject
-  | readonly FabricConvertibleValue[]
-  | { readonly [key: string]: FabricConvertibleValue };
+type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
 ```
 
 `Map` and `Set` are named with unconstrained type arguments: their contents are
@@ -294,6 +295,17 @@ and what `isValidFabricConvertibleValue()` tests (Sections 8.3 and 8.4). It is a
 precondition rather than a parameter type: the conversion functions that accept
 arbitrary input declare `unknown` and reject what they cannot convert (Section
 8.2).
+
+`FabricValuePlus<PlusType>` is the general form of that recursion, declared in
+`api.ts`: `FabricValue` with one additional type admitted at the top and inside
+every container, so that `FabricValuePlus<never>` is `FabricValue` itself.
+`FabricConvertibleValue` is `FabricValuePlus<FabricNativeObject>`, and
+`FabricValueLayer` is the same mechanism at a different `PlusType`. The array
+and plain-object arms carry `PlusType` structurally, in their element and value
+types. The instance arm, `FabricInstancePlus<PlusType>`, carries it as a
+type-only brand -- the `@commonfabric/FabricInstancePlus` member, which
+`FabricInstance` declares at `never` -- because an instance holds its contents
+privately and nothing structural on it can witness what they may include.
 
 Every arm names a specific native class. There is no duck-typed arm: a value
 becomes fabric-representable by being one of these, by implementing the fabric
@@ -1731,6 +1743,14 @@ class-side `[CODEC]` (Section 2.4).
  * and are kept off this pure-protocol class.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
+  /**
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
+   * `never` here since an instance of this class holds only `FabricValue`s.
+   * Declared the way the `FabricSpecialObject` brand is, and for the same
+   * reasons; `api.ts` declares the identical member.
+   */
+  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
