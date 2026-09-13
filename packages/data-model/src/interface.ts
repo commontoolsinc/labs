@@ -228,6 +228,14 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * See Section 1.4.6 of the formal spec.
  */
 export abstract class FabricPrimitive extends FabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
+   * in the type system; without it this class is structurally the
+   * `FabricSpecialObject` brand alone. Declared the way that brand is, and for
+   * the same reasons; `api.ts` declares the identical member.
+   */
+  declare readonly "@commonfabric/FabricPrimitive": true;
+
   /** Constructs an instance. */
   constructor() {
     super();

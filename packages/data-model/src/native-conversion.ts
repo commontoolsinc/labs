@@ -41,6 +41,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { isFabricSpecialObject } from "./type-check.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
@@ -395,7 +396,7 @@ function fabricFromNativeValueInternal(
   // `FabricSpecialObject` (primitives and protocol types) -- pass through
   // as-is. Primitives are always frozen; protocol types are managed by the
   // caller.
-  if (value instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(value)) {
     if (isOriginalRecord) {
       converted.set(original, value);
     }
