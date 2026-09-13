@@ -313,15 +313,59 @@ const identityTag = (value: object): number => {
  * even where a part contains the separator itself. The space is a DID, which
  * holds no NUL, and the scope is one of a few fixed words.
  */
-const linkAddressKey = (link: NormalizedFullLink): string => {
+const linkAddressKey = (link: NormalizedFullLink): string =>
+  addressKeyAt(link, link.path);
+
+/** Helper for `linkAddressKey()`, which keys `position` in `link`'s document. */
+const addressKeyAt = (
+  link: NormalizedFullLink,
+  position: readonly string[],
+): string => {
   let key = `${link.space}\0${link.id.length}\0${link.id}\0` +
-    `${link.scope ?? ""}\0${link.path.length}`;
-  for (const component of link.path) {
+    `${link.scope ?? ""}\0${position.length}`;
+  for (const component of position) {
     const segment = String(component);
     key += `\0${segment.length}\0${segment}`;
   }
   return key;
 };
+
+/**
+ * What a sigil probe found at one position of one document, memoized on the
+ * transaction's snapshot memo under `probeMemoKey()`.
+ *
+ * Walks through one container probe the same positions over and over: reading
+ * three properties of an element probes the element's own slot three times,
+ * and the root of the document it links to three times more. The answer
+ * cannot differ between those probes — the memo is dropped on every write —
+ * and the first probe journaled the read, so a repeat would add an identical
+ * entry to a set. The record stands in for the probe read and for the read of
+ * the stored link behind it; it does not stand in for the dereference trace,
+ * which every walk records for itself.
+ */
+type ProbeRecord = {
+  /** The link payload at the position, or `undefined` where it holds none. */
+  readonly payload: ReturnType<typeof linkPayloadAtProbe>;
+
+  /**
+   * Where the position does not exist, the `NotFoundError` path: the longest
+   * prefix that could be addressed, `[]` when the document itself is missing.
+   */
+  readonly notFound: readonly string[] | undefined;
+
+  /**
+   * The stored link parsed from the position, filled in by the first walk to
+   * follow it. Every later walk shares this object, and none mutates it: a
+   * walk copies a link before it changes one.
+   */
+  hop?: NormalizedFullLink;
+};
+
+/** The snapshot-memo key of the probe at `position` in `link`'s document. */
+const probeMemoKey = (
+  link: NormalizedFullLink,
+  position: readonly string[],
+): string => `probe:${addressKeyAt(link, position)}`;
 
 /**
  * What distinguishes two resolutions of the same address. `schema` and
@@ -409,6 +453,13 @@ const resolutionMemoVariant = (
  * reads, which the first resolution already journaled on this transaction —
  * the reactivity log is a set of addresses, and the second walk adds nothing
  * to it.
+ *
+ * The same memo holds each sigil probe on its own (`ProbeRecord`), so a walk
+ * that misses as a whole still skips the probes an earlier walk through the
+ * same container made: the element slot every property read passes, and the
+ * root of the document the slot links to. That is most of what a wide read
+ * probes, and each probe skipped is one read fewer for the commit, the
+ * scheduler and the flow-label pass to process.
  *
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
@@ -510,6 +561,62 @@ export function resolveLinkTracingDereferences(
     };
   }
 
+  // The sigil probe at `position` in `link`'s document, from the memo where
+  // it holds one and from a read where it does not. Probe reads are shape
+  // observations of link topology — flow labels must not treat them as
+  // content reads (reactivity still does, so the link appearing later
+  // re-resolves). A read that fails other than by `NotFoundError` reads as a
+  // position holding no link, and is not memoized.
+  const probeAt = (
+    link: NormalizedFullLink,
+    position: readonly string[],
+  ): ProbeRecord => {
+    const key = memo === undefined ? undefined : probeMemoKey(link, position);
+    if (memo !== undefined && key !== undefined) {
+      const memoized = memo.get(key) as ProbeRecord | undefined;
+      if (memoized !== undefined) return memoized;
+    }
+    const probe = tx.read(
+      toMemorySpaceAddress({
+        ...link,
+        path: [...position, ...linkProbeSubPath()],
+      }),
+      { meta: linkResolutionProbe },
+    );
+    let record: ProbeRecord;
+    if (probe.ok) {
+      record = {
+        payload: linkPayloadAtProbe(probe.ok.value),
+        notFound: undefined,
+      };
+    } else if (probe.error?.name === "NotFoundError") {
+      record = {
+        payload: undefined,
+        notFound: (probe.error as INotFoundError).path,
+      };
+    } else {
+      return { payload: undefined, notFound: undefined };
+    }
+    if (memo !== undefined && key !== undefined) memo.set(key, record);
+    return record;
+  };
+
+  // The stored link at `position`, which `record` says holds one. The first
+  // walk to follow it reads the whole value there — the walk depends on the
+  // siblings that could replace the link, not on the probe alone — and parses
+  // it; every later walk takes the parsed link from the record.
+  const hopAt = (
+    link: NormalizedFullLink,
+    position: readonly string[],
+    record: ProbeRecord,
+  ): NormalizedFullLink => {
+    if (record.hop === undefined) {
+      const base = { ...link, path: position };
+      record.hop = parseLink(tx.readValueOrThrow(base) as CellLink, base);
+    }
+    return record.hop;
+  };
+
   const seen = new Set<string>();
   const traces: CfcDereferenceTrace[] = [];
   const schemaHops: {
@@ -567,37 +674,22 @@ export function resolveLinkTracingDereferences(
     // If not a sigil link, use that error's path to check the parent once.
     let nextHop: LinkHop | undefined;
 
-    // Sigil probe at full path. Probe reads are shape observations of link
-    // topology — flow labels must not treat them as content reads
-    // (reactivity still does, so the link appearing later re-resolves).
-    const sigilProbe = tx.read(
-      toMemorySpaceAddress({
-        ...link,
-        path: [...link.path, ...linkProbeSubPath()],
-      }),
-      { meta: linkResolutionProbe },
-    );
-    const probePayload = sigilProbe.ok
-      ? linkPayloadAtProbe(sigilProbe.ok.value)
-      : undefined;
+    const probe = probeAt(link, link.path);
     if (
-      probePayload !== undefined &&
+      probe.payload !== undefined &&
       lastNode !== "top" &&
       (lastNode !== "writeRedirect" ||
-        (probePayload as CellLinkRefPayload).overwrite === "redirect")
+        (probe.payload as CellLinkRefPayload).overwrite === "redirect")
     ) {
-      // Read the full value at this path to ensure correct reactivity logging
-      // (we need to be reactive to siblings that could invalidate the link)
-      const whole = tx.readValueOrThrow({ ...link, path: link.path });
-      const nextLink = parseLink(whole as CellLink, link);
+      const nextLink = hopAt(link, link.path, probe);
       nextHop = {
         link: nextLink,
         source: { ...link, path: [...link.path] },
         kind: hopKindForLink(nextLink),
         depth: link.path.length,
       };
-    } else if (sigilProbe.error?.name === "NotFoundError") {
-      const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
+    } else if (probe.notFound !== undefined) {
+      const lastValid = probe.notFound.slice(); // [] => doc missing
       if (lastValid.length === 0) deadEndDocMissing = true;
 
       if (lastValid.length > 0) {
@@ -612,24 +704,9 @@ export function resolveLinkTracingDereferences(
         // A full-path candidate needs no further check: the sigil probe above
         // already covered it, and `$alias` records in data are not links.
         if (lastValid.length < link.path.length) {
-          // Check sigil at this parent
-          const parentSigil = tx.read(
-            toMemorySpaceAddress({
-              ...link,
-              path: [...lastValid, ...linkProbeSubPath()],
-            }),
-            { meta: linkResolutionProbe },
-          );
-          if (
-            parentSigil.ok &&
-            linkPayloadAtProbe(parentSigil.ok.value) !== undefined
-          ) {
-            // Read the full value at the parent to ensure proper reactivity
-            const whole = tx.readValueOrThrow({ ...link, path: lastValid });
-            const nextLink = parseLink(whole as CellLink, {
-              ...link,
-              path: lastValid,
-            });
+          const parent = probeAt(link, lastValid);
+          if (parent.payload !== undefined) {
+            const nextLink = hopAt(link, lastValid, parent);
             nextHop = {
               link: nextLink,
               source: { ...link, path: [...lastValid] },

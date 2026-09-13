@@ -89,7 +89,6 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
@@ -815,10 +814,55 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
 const localSeqKey = (localSeq: number | number[]): string =>
   Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
+/**
+ * Orders paths segment by segment, a shorter path ahead of one it prefixes.
+ * That puts an ancestor directly ahead of every path below it, which is what
+ * lets `compactRecursiveReads()` drop the descendants in one pass.
+ */
+const compareSegments = (
+  left: readonly string[],
+  right: readonly string[],
+): number => {
+  const limit = Math.min(left.length, right.length);
+  for (let index = 0; index < limit; index++) {
+    if (left[index] !== right[index]) {
+      return left[index] < right[index] ? -1 : 1;
+    }
+  }
+  return left.length - right.length;
+};
+
+const isPathPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * Helper for `compactCommitReads()`, which keeps the reads of one dependency
+ * group that no other read of the group covers. A recursive read at a path
+ * covers every path below it, so a read under another is dropped. Sorts
+ * `reads` in place and returns the survivors in that order.
+ */
+const compactRecursiveReads = <Read extends { path: readonly string[] }>(
+  reads: Read[],
+): Read[] => {
+  if (reads.length < 2) return reads;
+  reads.sort((left, right) => compareSegments(left.path, right.path));
+  const kept: Read[] = [];
+  let covering: readonly string[] | undefined;
+  for (const read of reads) {
+    if (covering !== undefined && isPathPrefix(covering, read.path)) continue;
+    kept.push(read);
+    covering = read.path;
+  }
+  return kept;
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
-  space: MemorySpace,
   reads: Read[],
 ): Read[] => {
   const dependencyKeys = new Map<number | number[], string>();
@@ -830,41 +874,16 @@ const compactCommitReads = <
     }
     return key;
   };
-  const sorted = [...reads].sort((left, right) => {
-    const leftScope = normalizeCellScope(left.scope);
-    const rightScope = normalizeCellScope(right.scope);
-    if (leftScope !== rightScope) {
-      return leftScope < rightScope ? -1 : 1;
-    }
 
-    if (left.id !== right.id) {
-      return left.id < right.id ? -1 : 1;
-    }
-
-    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
-      return left.seq - right.seq;
-    }
-
-    if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = dependencyKeyFor(left.localSeq);
-      const rightKey = dependencyKeyFor(right.localSeq);
-      if (leftKey !== rightKey) {
-        return leftKey < rightKey ? -1 : 1;
-      }
-    }
-
-    if (left.nonRecursive !== right.nonRecursive) {
-      return left.nonRecursive === true ? 1 : -1;
-    }
-
-    return comparePath(left.path, right.path);
-  });
-
+  // Grouping reads the input in whatever order it arrives: a recursive read
+  // displaces a shallow one at its path whichever comes first, and two reads
+  // equal in every grouped field are interchangeable, so the order the groups
+  // settle in decides nothing. The sort at the end is the one that orders.
   const grouped = new Map<string, {
     recursiveByPath: Map<string, Read>;
     nonRecursiveByPath: Map<string, Read>;
   }>();
-  for (const candidate of sorted) {
+  for (const candidate of reads) {
     // The dependency key carries every admission-relevant field — seq for
     // confirmed reads, the layer set AND basisSeq for pending reads — so
     // reads with divergent bases never merge: ancestor-path compaction
@@ -899,22 +918,10 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const compactedRecursive = sortAndCompactPaths(
-      [...group.recursiveByPath.values()].map((read) => ({
-        space,
-        id: read.id,
-        scope: read.scope,
-        type: DOCUMENT_MIME,
-        path: read.path,
-      })),
+    compacted.push(
+      ...compactRecursiveReads([...group.recursiveByPath.values()]),
+      ...group.nonRecursiveByPath.values(),
     );
-    for (const address of compactedRecursive) {
-      const read = group.recursiveByPath.get(address.path.join("\0"));
-      if (read) {
-        compacted.push(read);
-      }
-    }
-    compacted.push(...group.nonRecursiveByPath.values());
   }
 
   return compacted.toSorted((left, right) => {
@@ -6957,8 +6964,8 @@ export class SpaceReplica
     // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
     // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(this.#space, confirmed),
-      pending: compactCommitReads(this.#space, pending),
+      confirmed: compactCommitReads(confirmed),
+      pending: compactCommitReads(pending),
     };
   }
 

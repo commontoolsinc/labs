@@ -1,7 +1,10 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import {
+  linkProbeSubPath,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -12,9 +15,14 @@ import {
   areNormalizedLinksSame,
   isSigilLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
+import { isLinkResolutionProbe } from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1409,6 +1417,119 @@ describe("link-resolution", () => {
 
       expect(link1.id).not.toMatch(/^data:/);
       expect(link2.id).not.toMatch(/^data:/);
+    });
+  });
+
+  describe("sigil probe memo", () => {
+    // Every case reads through the link stored at `items/0` of a home
+    // document and counts what the transaction journaled at that slot: the
+    // probe that finds the link, and the read of the stored link behind it.
+    // The counts are what separate a memoized probe from a repeated one.
+
+    type Note = { title: string; content: string };
+
+    const seedLinkedNote = async (suffix: string) => {
+      const note = runtime.getCell<Note>(
+        space,
+        `probe-memo-note-${suffix}`,
+        undefined,
+        tx,
+      );
+      note.set({ title: "t", content: "c" });
+      const home = runtime.getCell<{ items: Note[] }>(
+        space,
+        `probe-memo-home-${suffix}`,
+        undefined,
+        tx,
+      );
+      home.set({ items: [note] });
+      await tx.commit();
+      tx = runtime.edit();
+      return { home, note, base: home.getAsNormalizedFullLink() };
+    };
+
+    const journaledAt = (
+      address: IMemorySpaceAddress,
+      probe: boolean,
+    ): number =>
+      [...(tx.getReadActivities?.() ?? [])].filter((read) =>
+        read.id === address.id &&
+        read.path.join("/") === address.path.join("/") &&
+        isLinkResolutionProbe(read.meta) === probe
+      ).length;
+
+    it("journals the slot's probe and stored link once for reads of two sibling properties", async () => {
+      const { base, note } = await seedLinkedNote("siblings");
+      const title = resolveLink(runtime, tx, {
+        ...base,
+        path: ["items", "0", "title"],
+      });
+      const content = resolveLink(runtime, tx, {
+        ...base,
+        path: ["items", "0", "content"],
+      });
+      expect(title.id).toBe(note.getAsNormalizedFullLink().id);
+      expect(title.path).toEqual(["title"]);
+      expect(content.id).toBe(title.id);
+      expect(content.path).toEqual(["content"]);
+
+      const slot = toMemorySpaceAddress({ ...base, path: ["items", "0"] });
+      const probe = toMemorySpaceAddress({
+        ...base,
+        path: ["items", "0", ...linkProbeSubPath()],
+      });
+      expect(journaledAt(probe, true)).toBe(1);
+      expect(journaledAt(slot, false)).toBe(1);
+    });
+
+    it("follows a slot on a `value` resolution after a `top` resolution probed it", async () => {
+      const { base, note } = await seedLinkedNote("top-then-value");
+      const top = resolveLink(runtime, tx, {
+        ...base,
+        path: ["items", "0"],
+      }, "top");
+      expect(top.id).toBe(base.id);
+      expect(top.path).toEqual(["items", "0"]);
+
+      const value = resolveLink(runtime, tx, { ...base, path: ["items", "0"] });
+      expect(value.id).toBe(note.getAsNormalizedFullLink().id);
+      expect(value.path).toEqual([]);
+
+      const probe = toMemorySpaceAddress({
+        ...base,
+        path: ["items", "0", ...linkProbeSubPath()],
+      });
+      expect(journaledAt(probe, true)).toBe(1);
+    });
+
+    it("probes the slot again once the transaction has written", async () => {
+      const { base, home, note } = await seedLinkedNote("rewrite");
+      const other = runtime.getCell<Note>(
+        space,
+        "probe-memo-note-other",
+        undefined,
+        tx,
+      );
+      other.set({ title: "o", content: "o" });
+
+      const before = resolveLink(runtime, tx, {
+        ...base,
+        path: ["items", "0", "title"],
+      });
+      expect(before.id).toBe(note.getAsNormalizedFullLink().id);
+
+      home.withTx(tx).set({ items: [other] });
+      const after = resolveLink(runtime, tx, {
+        ...base,
+        path: ["items", "0", "title"],
+      });
+      expect(after.id).toBe(other.getAsNormalizedFullLink().id);
+
+      const probe = toMemorySpaceAddress({
+        ...base,
+        path: ["items", "0", ...linkProbeSubPath()],
+      });
+      expect(journaledAt(probe, true)).toBe(2);
     });
   });
 });

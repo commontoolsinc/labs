@@ -473,20 +473,36 @@ walks the whole result on every click. At HEAD that walk is also cheap:
 out cost nothing measurable, and is the clearest evidence that candidate 2 was
 never carrying the improvement this branch reports. The index was.
 
-**There is a next lever, and not where this plan first looked for one.**
-Profiled at HEAD over four paced clicks in phase A, 3% idle, the two largest
-frames are `sortAndCompactPaths` at 8.5% of busy worker CPU and
-`resolveLinkTracingDereferences` at 7.9%. The garbage collector is 3.3%, and
-`forEachFlowObservation` — 31% before the index — is 1.8%. Adding
-`addressesToPathByEntity` at 4.0% and `comparePaths` at 3.0%, roughly a sixth
-of busy CPU is the scheduler sorting, compacting and indexing the read log's
-paths once per action: `reactive-dependencies.ts`, under
-`scheduler/dependency-updates.ts` and `scheduler/trigger-index.ts`.
-
-That is the shape the index fixed one layer down — a transaction journals many
-reads, and per-read work over them is what a click costs. This branch has not
-pulled that lever and does not measure it. It is named here so the next pass
-starts from a profile of the code that shipped.
+**The next lever was the read log's size, and it is pulled at its source.**
+Profiled at the index over four paced clicks in phase A, 3% idle, the two
+largest frames were `sortAndCompactPaths` at 8.5% of busy worker CPU and
+`resolveLinkTracingDereferences` at 7.9%; with `addressesToPathByEntity` and
+`comparePaths`, roughly a sixth of busy CPU was the scheduler sorting,
+compacting and indexing the read log's paths once per action. That is the
+shape the index fixed one layer down — a transaction journals many reads, and
+per-read work over them is what a click costs — and profiling it in-process
+found what feeds it. A lift over 128 linked documents journals about sixteen
+reads per document, most of them link resolution's sigil probes, and 44% of
+those probes repeat a position the same transaction already probed: the
+element's own slot, once per property read through it. The whole-resolution
+memo cannot catch that (12 hits in 10,536 resolutions, since each property
+read resolves a distinct address); a memo of probe outcomes one level down
+does, riding on the same snapshot memo every write drops. With it, the storage
+commit's read compaction no longer sorts before it groups, and the scheduler
+groups the read log by document before sorting and keeps an action's entity
+grouping between registrations. On the note-create bench that stands in for a
+wide read, alternated against main on a machine at load 8, the cycle is six
+to seven percent shorter at 32 and at 128 notes — about what removing a fifth
+of the journaled reads from a per-read tier that was a sixth of the cycle
+predicts — and the probes issued per transaction fall by the 44% that were
+repeats, a count no load moves. The record with the profile, the counts and
+the A/B is
+[the link-probe memo record](../history/development/performance/2026-09-13-link-probe-memo.md);
+it also records a variant left out as unmeasured rather than disproved,
+forwarding the snapshot memo to the wrapper `sink()` reads through. The click
+itself was not re-measured on the inbox rig, which this worktree does not
+hold; what a click pays is the same per-read machinery over the same shape of
+read log, with more documents per read than this bench has.
 
 **One lead ruled out.** The render root looked like the same fault:
 `cf-render` renders the `full` kind with a bare cast rather than
@@ -522,11 +538,13 @@ nothing. The traversal is in the pull, not the sink and not the render.
     server's queue time against handle time, and the browser summary's IPC
     rows.
 
-After stage 2 the profile has no hotspot left. The next tier, by share of a
-degraded round, is `sortAndCompactPaths` (13.7%), `#findNode` (9.7%),
-`createViewProxy` (7.2%) and `resolveLinkTracingDereferences` (7.1%) — all path
-and link machinery, none of them dominant. Expect the next win to be structural
-(stage 3's "do not run the pass") rather than another leaf.
+After stage 2 the profile has no hotspot left, and the next tier — path and
+link machinery, `sortAndCompactPaths`, `#findNode`, `createViewProxy`,
+`resolveLinkTracingDereferences`, none of them dominant — is what stage 7's
+probe memo shrinks by feeding it a smaller read log rather than by speeding
+any one frame. Expect the next win of that kind to be in the number of probes
+a walk issues at all, and the next structural one to be stage 3's "do not run
+the pass".
 
 Stages 1, 2 and 3 are labs runtime changes and belong in their own tasks, so a
 pattern change cannot quietly grow a runtime refactor. Nothing in this plan
