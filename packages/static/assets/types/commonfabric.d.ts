@@ -100,7 +100,7 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  *   policy informs how such values interact with sets and maps.)
  *
  * * `symbol` -- Only **registry-interned** symbols are considered valid
- *   `FabricValues`, that is, only symbols for which `Symbol.keyFor()` returns
+ *   `FabricValue`s, that is, only symbols for which `Symbol.keyFor()` returns
  *   a string.
  *
  * * Non-null `object`s in general -- Objects are only valid if:
@@ -116,7 +116,7 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  *
  * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
  *   above, plain objects are only considered valid if they have the prototype
- *   `Object` or `null`.
+ *   `Object`.
  *
  * * extensions to JS primitive types, type `FabricPrimitive` -- This is one of
  *   two non-builtin `object` types that can be considered valid. They are meant
@@ -161,16 +161,16 @@ export type FabricValue =
   | FabricPrimitive
   | FabricContainerValue;
 
-  /**
-   * The container types that are part of `FabricValue`. Note that
-   * `FabricSpecialObject` is a combination of a container type
-   * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
-   * latter is _not_ part of this type.
-   */
-  export type FabricContainerValue =
-    | FabricArray
-    | FabricInstance
-    | FabricPlainObject;
+/**
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of a container type
+ * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
+ * latter is _not_ part of this type.
+ */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance
+  | FabricPlainObject;
 
 /** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
@@ -288,7 +288,7 @@ export declare const FabricInstance:
 
 /**
  * Type which is equivalent to `FabricValue`, except that it is compatible with
- * one additional type, the `PlusType`: This type is a union of `FabricValue,
+ * one additional type, the `PlusType`: This type is a union of `FabricValue`,
  * `PlusType`, and both arrays and plain objects which recursively include this
  * type as possible elements.
  *
