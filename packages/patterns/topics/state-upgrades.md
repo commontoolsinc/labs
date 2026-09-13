@@ -15,10 +15,12 @@ version when creating a Topic.
 
 The list contains stable string identifiers. Its order defines the sequence;
 append steps and retain the existing positions. A switch dispatches identifiers
-to their implementations, with an exhaustive check when adding a step. This
-keeps module-scope data serializable in the pattern sandbox. A single version
-represents progress through a prefix of the sequence, which makes prerequisites
-explicit without independent completion flags or arbitrary flag combinations.
+to their implementations. Its explicit boolean return type requires every
+identifier to return a completion result, so an unhandled new step fails to
+compile. This keeps module-scope data serializable in the pattern sandbox. A
+single version represents progress through a prefix of the sequence, which makes
+prerequisites explicit without independent completion flags or arbitrary flag
+combinations.
 
 The shared runner validates the stored version as a nonnegative safe integer. A
 current version is a no-op. An older version runs its remaining steps in order.

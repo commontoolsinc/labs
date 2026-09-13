@@ -1163,6 +1163,18 @@ const TOPIC_STATE_UPGRADES = ["legacy-authors"] as const;
 /** State version stamped by every current Topics board creation path. */
 export const TOPIC_STATE_VERSION = TOPIC_STATE_UPGRADES.length;
 
+/** Dispatches each known step; the return type requires exhaustive handling. */
+const runTopicUpgrade = (
+  step: (typeof TOPIC_STATE_UPGRADES)[number],
+  state: TopicUpgradeState,
+  fromHandler: boolean,
+): boolean => {
+  switch (step) {
+    case "legacy-authors":
+      return upgradeLegacyAuthors(state, fromHandler);
+  }
+};
+
 /**
  * Runs pending upgrades in order, recording each version after its step's writes.
  * With a verb, refuses unsupported versions before a durable mutation; without
@@ -1181,17 +1193,9 @@ const upgradeTopicState = (state: TopicUpgradeState, verb?: string): void => {
   }
   for (let index = version; index < TOPIC_STATE_VERSION; index++) {
     const step = TOPIC_STATE_UPGRADES[index];
-    switch (step) {
-      case "legacy-authors":
-        // Author fields are additive: content handlers can still edit version
-        // zero while its migration waits for complete reads.
-        if (!upgradeLegacyAuthors(state, verb !== undefined)) return;
-        break;
-      default: {
-        const unhandled: never = step;
-        throw new Error(`Unsupported Topic upgrade step ${unhandled}`);
-      }
-    }
+    // Author fields are additive: content handlers can still edit version
+    // zero while its migration waits for complete reads.
+    if (!runTopicUpgrade(step, state, verb !== undefined)) return;
     state.topicStateVersion.set(index + 1);
   }
 };
