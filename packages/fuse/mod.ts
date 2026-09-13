@@ -781,8 +781,9 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
   ) {
     return buildNodeStat(node, ino, {
-      // When the backend transport is dead, report all files as read-only
-      // so writes fail with EROFS instead of silently succeeding.
+      // When the backend transport is dead, report all files as read-only,
+      // and refuse any write that still reaches us with EROFS, instead of
+      // silently succeeding.
       isWritable: !bridge?.disconnected && Boolean(
         cfcWritebackXattrs ||
           bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
