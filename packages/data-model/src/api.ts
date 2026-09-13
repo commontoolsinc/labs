@@ -38,29 +38,55 @@
 //
 
 /**
- * The full set of values that the fabric storage layer can represent. This is
- * the strongly-typed "middle layer" of the three-layer architecture:
+ * The full set of values that the fabric data layer can represent. This is the
+ * strongly-typed "middle layer" of the three-layer architecture:
  *
  *     JavaScript "wild west" (`unknown`)
  *       <-> `FabricValue`
- *       <-> serialized (`Uint8Array`)
+ *       <-> serialized (various forms)
  *
- * Most native JS object types enter the fabric layer via wrapper classes that
- * extend `FabricInstance`; other special values extend `FabricPrimitive`. Both
- * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
- * The non-object values (`bigint` and the other scalars) are direct members of
- * the union instead, not routed through that arm. Some native types are
- * converted to `FabricPrimitive`s during conversion.
+ * `FabricValue` is a union consisting of all JS primitive types, plus a handful
+ * of object shapes; it does _not_ include the JS `function` type. Some parts of
+ * the union impose contractual restrictions that are not enforceable via the
+ * TypeScript type system, but which _are_ enforced by runtime validity checks.
+ * Notable details:
  *
- * `undefined` is preserved.
+ * * `number` -- All numbers are considered members of `FabricValue`, including
+ *   `-0` and the non-finite numbers. Furthermore, from the perspective of the
+ *   data model, `0` and `-0` are distinct, and `NaN` is equal to itself. (This
+ *   policy informs how such values interact with sets and maps.)
  *
- * `symbol` values are restricted at runtime to **registry-interned** symbols --
- * those for which `Symbol.keyFor(s)` returns a string. These are portable
- * across realms and processes via their registry key. Unique symbols
- * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
- * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
- * runtime one, and it is the same gate at every point a symbol is admitted or
- * refused: `Symbol.keyFor(value) !== undefined`.
+ * * `symbol` -- Only **registry-interned** symbols are considered valid
+ *   `FabricValues`, that is, only symbols for which `Symbol.keyFor()` returns
+ *   a string.
+ *
+ * * Non-null `object`s in general -- Objects are only valid if:
+ *   * They have no synthetic properties (getters, setters).
+ *   * They have no own-symbol properties.
+ *   * They do not have the "forbidden" own-string properties `constructor` or
+ *     `__proto__`.
+ *
+ * * arrays, type `FabricArray` -- In addition to the restrictions above, arrays
+ *   are only considered valid if they have the named property `length` along
+ *   with only properties that are valid array indices whose numeric values are
+ *   less than `length`. Arrays with holes _are_ valid.
+ *
+ * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
+ *   above, plain objects are only considered valid if they have the prototype
+ *   `Object` or `null`.
+ *
+ * * extensions to JS primitive types, type `FabricPrimitive` -- This is one of
+ *   two non-builtin `object` types that can be considered valid. They are meant
+ *   to be as equivalent as can be made to a built-in JS primitive type. All
+ *   valid `FabricPrimitive` classes are defined directly by the data model.
+ *   (That is, it is a closed set.)
+ *
+ * * extensions to JS container types, type `FabricInstance` -- This is the
+ *   other non-builtin `object` type that can be considered valid. It represents
+ *   a family of container types, to complement plain objects and arrays with
+ *   other possible shapes. The intention is that code outside the data model be
+ *   able to define new concrete `FabricInstance` classes, but as of this
+ *   writing that facility does not _yet_ exist.
  *
  * From a typesystem perspective, all `FabricValue`s are immutable (deeply
  * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
@@ -89,9 +115,19 @@ export type FabricValue =
   | string
   | symbol
   | undefined
-  | FabricArray
-  | FabricPlainObject
-  | FabricSpecialObject;
+  | FabricPrimitive
+  | FabricContainerValue;
+
+  /**
+   * The container types that are part of `FabricValue`. Note that
+   * `FabricSpecialObject` is a combination of a container type
+   * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
+   * latter is _not_ part of this type.
+   */
+  export type FabricContainerValue =
+    | FabricArray
+    | FabricInstance
+    | FabricPlainObject;
 
 /** Read-only array of `FabricValue`s. */
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
@@ -106,17 +142,6 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
-
-/**
- * The container types that are part of `FabricValue`. Note that
- * `FabricSpecialObject` is a combination of a container type
- * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
- * latter is _not_ part of this type.
- */
-export type FabricContainerValue =
-  | FabricArray
-  | FabricInstance
-  | FabricPlainObject;
 
 /** A `FabricValue` other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
