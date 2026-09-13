@@ -184,7 +184,7 @@ class FakeTarget implements AgentsHostTarget {
   observationSequences: number[] = [];
   checkoutDirectories: string[][] = [];
   receipts: AgentSessionCommandReceipt[] = [];
-  commandCallback?: (commands: unknown[]) => void;
+  commandCallback?: (commands: unknown[], producer?: string) => void;
   subscriptionCancelled = false;
   failSubscriptionCancel = false;
   failRefresh = false;
@@ -257,7 +257,7 @@ class FakeTarget implements AgentsHostTarget {
   }
 
   async subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<() => void> {
     this.commandCallback = callback;
     const gate = this.subscriptionGate;
@@ -275,11 +275,12 @@ class FakeTarget implements AgentsHostTarget {
 
   readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined> {
     return Promise.resolve(
       structuredClone(
         [...this.receipts].reverse().find((receipt) =>
-          receipt.commandId === commandId
+          receipt.commandId === commandId && receipt.producer === producer
         ),
       ),
     );

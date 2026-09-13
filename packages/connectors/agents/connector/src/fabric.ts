@@ -28,6 +28,7 @@ import {
 } from "./reconcile.ts";
 import {
   type AgentSessionCommandReceipt,
+  commandIdentity,
   type CommandTarget,
   parseCommandReceipt,
 } from "./commands.ts";
@@ -356,7 +357,7 @@ function validatedReceiptIndexRows(
     throw new Error("command receipt index exceeds 200 rows");
   }
 
-  const commandIds = new Set<string>();
+  const identities = new Set<string>();
   return value.receipts.map((item, index) => {
     if (!isRecord(item) || typeof item.commandId !== "string") {
       throw new Error(
@@ -372,6 +373,7 @@ function validatedReceiptIndexRows(
         commandId,
         sourceId: item.sourceId,
         nativeSessionId: item.nativeSessionId,
+        ...(item.producer === undefined ? {} : { producer: item.producer }),
         status: item.status,
         ...(item.error === undefined ? {} : { error: item.error }),
       },
@@ -390,7 +392,12 @@ function validatedReceiptIndexRows(
     const expectedLink = fullLink(
       conn.runtime.getCell(
         conn.spaceDid,
-        commandReceiptCause(conn.spaceDid, conn.ownerDid, commandId),
+        commandReceiptCause(
+          conn.spaceDid,
+          conn.ownerDid,
+          commandId,
+          receipt.producer,
+        ),
         agentOwnerSchema(conn.ownerDid),
       ),
     );
@@ -399,17 +406,19 @@ function validatedReceiptIndexRows(
         `command receipt index row receipt link is invalid: ${index}`,
       );
     }
-    if (commandIds.has(commandId)) {
+    const identity = commandIdentity(commandId, receipt.producer);
+    if (identities.has(identity)) {
       throw new Error(
         `command receipt index contains a duplicate command: ${commandId}`,
       );
     }
-    commandIds.add(commandId);
+    identities.add(identity);
     return {
       commandId,
       ownerDid: receipt.ownerDid,
       sourceId: receipt.sourceId,
       nativeSessionId: receipt.nativeSessionId,
+      ...(receipt.producer === undefined ? {} : { producer: receipt.producer }),
       status: receipt.status,
       updatedAt: item.updatedAt,
       ...(receipt.error ? { error: receipt.error } : {}),
@@ -821,6 +830,9 @@ export class AgentFabricTarget implements CommandTarget {
   #nextObservationSequence = 1;
   #commandCellBound = false;
   readonly #producerQueues = new Map<string, Cell<unknown>>();
+  // A subscription covers the queues bound when it began, so binding is
+  // refused while one is live.
+  #commandsSubscribed = false;
   #storageClaimed: boolean;
 
   private constructor(
@@ -1335,6 +1347,9 @@ export class AgentFabricTarget implements CommandTarget {
       ),
       agentOwnerSchema(this.conn.ownerDid, false),
     );
+    if (this.#producerQueues.has(producerId)) {
+      throw new Error(`command producer is already bound: ${producerId}`);
+    }
     await cell.sync();
     await this.conn.runtime.storageManager.synced();
     await this.#bindQueue(cell, writerAuthorization, `producer ${producerId}`);
@@ -1347,26 +1362,20 @@ export class AgentFabricTarget implements CommandTarget {
     return this.#commandCellBound || this.#producerQueues.size > 0;
   }
 
-  /** The bound producer queues' cell IDs, keyed by producer ID. */
-  producerCommandCellIds(): Record<string, string> {
-    this.#assertStorageClaimed();
-    return Object.fromEntries(
-      [...this.#producerQueues].map((
-        [producerId, cell],
-      ) => [producerId, stableCellId(cell.resolveAsCell())]),
-    );
-  }
-
-  #boundQueues(): Cell<unknown>[] {
+  /** Every bound queue with the producer it belongs to; the owner's has none. */
+  #boundQueues(): Array<{ producer?: string; cell: Cell<unknown> }> {
     return [
-      ...(this.#commandCellBound ? [this.cells.commands] : []),
-      ...this.#producerQueues.values(),
+      ...(this.#commandCellBound ? [{ cell: this.cells.commands }] : []),
+      ...[...this.#producerQueues].map(([producer, cell]) => ({
+        producer,
+        cell,
+      })),
     ];
   }
 
   #assertCommandCellBound(): void {
     if (!this.#commandCellBound && this.#producerQueues.size === 0) {
-      throw new Error("owner command cell has not been bound");
+      throw new Error("no command queue has been bound");
     }
   }
 
@@ -1375,6 +1384,11 @@ export class AgentFabricTarget implements CommandTarget {
     writerAuthorization: unknown,
     label: string,
   ): Promise<void> {
+    if (this.#commandsSubscribed) {
+      throw new Error(
+        `${label} queue cannot be bound while commands are subscribed`,
+      );
+    }
     const authorization = isRecord(writerAuthorization) &&
         isRecord(writerAuthorization.__ctWriterIdentityOf)
       ? writerAuthorization.__ctWriterIdentityOf
@@ -1431,11 +1445,17 @@ export class AgentFabricTarget implements CommandTarget {
 
   async readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined> {
     this.#assertStorageClaimed();
     const cell = this.conn.runtime.getCell(
       this.conn.spaceDid,
-      commandReceiptCause(this.conn.spaceDid, this.conn.ownerDid, commandId),
+      commandReceiptCause(
+        this.conn.spaceDid,
+        this.conn.ownerDid,
+        commandId,
+        producer,
+      ),
       agentOwnerSchema(this.conn.ownerDid),
     );
     await cell.sync();
@@ -1486,31 +1506,49 @@ export class AgentFabricTarget implements CommandTarget {
     return receipt;
   }
 
+  /**
+   * Subscribes to every bound queue. The callback receives one queue's
+   * commands at a time with that queue's producer, `undefined` for the
+   * owner's queue, which is what qualifies each command's identity.
+   */
   async subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<Cancel> {
     this.#assertStorageClaimed();
     this.#assertCommandCellBound();
     const cancels: Cancel[] = [];
     try {
-      for (const queue of this.#boundQueues()) {
-        cancels.push(await subscribeStableActions(this.conn, queue, callback));
+      for (const { producer, cell } of this.#boundQueues()) {
+        cancels.push(
+          await subscribeStableActions(
+            this.conn,
+            cell,
+            (commands) => callback(commands, producer),
+          ),
+        );
       }
     } catch (error) {
       for (const cancel of cancels) cancel();
       throw error;
     }
+    this.#commandsSubscribed = true;
     return () => {
+      this.#commandsSubscribed = false;
       for (const cancel of cancels) cancel();
     };
   }
 
+  /**
+   * Every bound queue's pending commands, in binding order and without their
+   * queues: a diagnostic read. The worker learns each command's queue from the
+   * subscription.
+   */
   async pollCommands(): Promise<unknown[]> {
     this.#assertStorageClaimed();
     this.#assertCommandCellBound();
     const values: unknown[] = [];
-    for (const queue of this.#boundQueues()) {
-      values.push(...await readStableActions(this.conn, queue));
+    for (const { cell } of this.#boundQueues()) {
+      values.push(...await readStableActions(this.conn, cell));
     }
     return values;
   }
@@ -1540,6 +1578,7 @@ export class AgentFabricTarget implements CommandTarget {
         this.conn.spaceDid,
         this.conn.ownerDid,
         receipt.commandId,
+        receipt.producer,
       ),
       agentOwnerSchema(this.conn.ownerDid),
     );
@@ -1547,6 +1586,9 @@ export class AgentFabricTarget implements CommandTarget {
       receipt,
       childScope(this.conn.spaceDid, this.conn.ownerDid, "command-receipt", {
         commandId: receipt.commandId,
+        ...(receipt.producer === undefined
+          ? {}
+          : { producer: receipt.producer }),
       }),
     );
     await pushStableCellGraph(
@@ -1561,16 +1603,21 @@ export class AgentFabricTarget implements CommandTarget {
     if (prior !== undefined && prior !== null) {
       priorReceipts = validatedReceiptIndexRows(this.conn, prior);
     }
+    const identity = commandIdentity(receipt.commandId, receipt.producer);
     const receipts = priorReceipts
       .filter((item) =>
         item && typeof item === "object" &&
-        (item as Record<string, unknown>).commandId !== receipt.commandId
+        commandIdentity(
+            String((item as Record<string, unknown>).commandId),
+            (item as Record<string, unknown>).producer as string | undefined,
+          ) !== identity
       );
     receipts.push({
       commandId: receipt.commandId,
       ownerDid: receipt.ownerDid,
       sourceId: receipt.sourceId,
       nativeSessionId: receipt.nativeSessionId,
+      ...(receipt.producer === undefined ? {} : { producer: receipt.producer }),
       status: receipt.status,
       updatedAt: receipt.completedAt ?? receipt.claimedAt ??
         new Date().toISOString(),

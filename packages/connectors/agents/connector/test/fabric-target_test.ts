@@ -38,6 +38,7 @@ import {
   planStableArrayCells,
 } from "../src/array-cell-identity.ts";
 import { AGENT_CONNECTOR_SCHEMAS } from "../src/protocol.ts";
+import type { AgentSessionCommandReceipt } from "../src/commands.ts";
 import type {
   AgentDriver,
   NativeSessionSnapshot,
@@ -1440,12 +1441,12 @@ Deno.test("Fabric target binds only an empty owner command queue", async () => {
       await assertRejects(
         () => second.pollCommands(),
         Error,
-        "owner command cell has not been bound",
+        "no command queue has been bound",
       );
       await assertRejects(
         () => second.subscribeCommands(() => {}),
         Error,
-        "owner command cell has not been bound",
+        "no command queue has been bound",
       );
       const commandValueBefore = second.cells.commands.getRaw();
       const commandProtectionBefore = cellHasOwnerProtection(
@@ -2298,41 +2299,141 @@ Deno.test("Fabric target binds producer queues and reads commands from every bou
       workbenchAuthorization,
     );
     assertEquals(target.commandsAreBound(), true);
-    assertEquals(
-      target.producerCommandCellIds(),
-      { workbench: stableCellId(workbenchQueue.resolveAsCell()) },
-    );
     assertNotEquals(
-      target.producerCommandCellIds().workbench,
+      stableCellId(workbenchQueue.resolveAsCell()),
       target.commandCellId(),
     );
     assertEquals(
       cellHasOwnerProtection(runtime.readTx(), workbenchQueue, owner.did()),
       true,
     );
+    // A producer ID names one queue.
+    await assertRejects(
+      () => target.bindProducerCommandCell("workbench", workbenchAuthorization),
+      Error,
+      "command producer is already bound: workbench",
+    );
+    const ownerAuthorization = writerAuthorizationFor("debug-view");
+    await target.bindCommandCell(target.cells.commands, ownerAuthorization);
     assertEquals(await target.pollCommands(), []);
 
-    const received: unknown[][] = [];
-    const cancel = await target.subscribeCommands((commands) => {
-      received.push(commands);
+    // Every queue bound before the subscription is read, and each delivery
+    // names its queue's producer; the owner's queue names none. The
+    // deliveries arrive through the cells' sinks, so the test waits for the
+    // two it pushes rather than reading the list at a moment of its choosing.
+    const received: Array<{ producer?: string; commands: unknown[] }> = [];
+    const bothDelivered = Promise.withResolvers<void>();
+    const cancel = await target.subscribeCommands((commands, producer) => {
+      received.push({ producer, commands });
+      const fromWorkbench = received.some((delivery) =>
+        delivery.producer === "workbench" &&
+        delivery.commands.includes("from-workbench")
+      );
+      const fromOwner = received.some((delivery) =>
+        delivery.producer === undefined &&
+        delivery.commands.includes("from-owner")
+      );
+      if (fromWorkbench && fromOwner) bothDelivered.resolve();
     });
     try {
+      // A subscription covers the queues bound when it began, so binding
+      // another while it is live is refused rather than silently unread.
+      await assertRejects(
+        () =>
+          target.bindProducerCommandCell(
+            "late",
+            writerAuthorizationFor("late"),
+          ),
+        Error,
+        "producer late queue cannot be bound while commands are subscribed",
+      );
       await pushAs(workbenchQueue, workbenchAuthorization, "from-workbench");
-      await runtime.storageManager.synced();
-      assertEquals(await target.pollCommands(), ["from-workbench"]);
-
-      const ownerAuthorization = writerAuthorizationFor("debug-view");
-      await target.bindCommandCell(target.cells.commands, ownerAuthorization);
       await pushAs(target.cells.commands, ownerAuthorization, "from-owner");
       await runtime.storageManager.synced();
       assertEquals(
         (await target.pollCommands()).toSorted(),
         ["from-owner", "from-workbench"],
       );
-      assertEquals(received.flat().includes("from-workbench"), true);
+      await bothDelivered.promise;
     } finally {
       cancel();
     }
+    // Once the subscription is cancelled, a queue can be bound again.
+    await target.bindProducerCommandCell(
+      "late",
+      writerAuthorizationFor("late"),
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("receipts from different queues share a command ID without colliding", async () => {
+  const owner = await Identity.fromPassphrase(
+    "producer receipt identity owner",
+  );
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = owner.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  const receipt = (
+    overrides: Partial<AgentSessionCommandReceipt>,
+  ): AgentSessionCommandReceipt => ({
+    schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+    ownerDid: space,
+    commandId: "one",
+    sourceId: "claude-code:test",
+    nativeSessionId: "session-1",
+    status: "succeeded",
+    claimedAt: "2026-09-13T10:00:00.000Z",
+    completedAt: "2026-09-13T10:00:01.000Z",
+    ...overrides,
+  });
+  try {
+    const target = await AgentFabricTarget.open(connection);
+    await target.publishReceipt(receipt({}));
+    await target.publishReceipt(receipt({
+      producer: "workbench",
+      status: "failed",
+      error: { code: "refused", message: "no", retryable: false },
+    }));
+    // The owner's and the producer's receipts are distinct cells and rows.
+    assertEquals((await target.readReceipt("one"))?.status, "succeeded");
+    assertEquals((await target.readReceipt("one"))?.producer, undefined);
+    assertEquals(
+      (await target.readReceipt("one", "workbench"))?.status,
+      "failed",
+    );
+    assertEquals(
+      (await target.readReceipt("one", "workbench"))?.producer,
+      "workbench",
+    );
+    assertEquals(await target.readReceipt("one", "dashboard"), undefined);
+    const index = await readStableCellGraphValue(
+      connection,
+      target.cells.receipts,
+    ) as { receipts: Array<Record<string, unknown>> };
+    assertEquals(
+      index.receipts.map((row) => [row.commandId, row.producer, row.status]),
+      [["one", undefined, "succeeded"], ["one", "workbench", "failed"]],
+    );
+    // A later receipt for the producer's command replaces its own row only.
+    await target.publishReceipt(receipt({
+      producer: "workbench",
+      status: "succeeded",
+    }));
+    const updated = await readStableCellGraphValue(
+      connection,
+      target.cells.receipts,
+    ) as { receipts: Array<Record<string, unknown>> };
+    assertEquals(
+      updated.receipts.map((row) => [row.commandId, row.producer, row.status]),
+      [["one", undefined, "succeeded"], ["one", "workbench", "succeeded"]],
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();

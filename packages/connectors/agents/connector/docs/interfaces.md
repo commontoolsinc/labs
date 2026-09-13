@@ -164,13 +164,12 @@ The target exposes these orchestration methods:
 | `beginSessionObservation()`                 | Allocates the ordering value that a caller records before it begins a full provider collection.                                                     |
 | `publish(collected, options?)`              | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions.                                             |
 | `publishHealth(value)`                      | Publishes a host-defined health record under the connector-owned health schema.                                                                     |
-| `subscribeCommands(callback)`               | Subscribes to every bound queue once at least one has been bound to its owner and verified writer.                                                  |
-| `pollCommands()`                            | Pulls commands from every bound queue once at least one has been bound to its owner and verified writer.                                            |
+| `subscribeCommands(callback)`               | Subscribes to every bound queue once at least one has been bound to its owner and verified writer; each delivery carries its queue's producer.      |
+| `pollCommands()`                            | Pulls every bound queue's pending commands without their queues, once at least one has been bound; a diagnostic read.                               |
 | `bindCommandCell(cell, writer)`             | Verifies the exact owner-scoped command queue and applies its owner and verified-writer policy.                                                     |
 | `bindProducerCommandCell(producer, writer)` | Creates the deterministic queue for one producer pattern, applies the same policy with that producer's handler as the writer, and returns the cell. |
-| `producerCommandCellIds()`                  | Returns each bound producer queue's cell ID, keyed by producer ID.                                                                                  |
 | `publishReceipt(receipt)`                   | Publishes one durable receipt cell and updates the bounded receipt index.                                                                           |
-| `readReceipt(commandId)`                    | Reads the deterministic individual receipt cell used as the shared command claim.                                                                   |
+| `readReceipt(commandId, producer?)`         | Reads the deterministic individual receipt cell used as the shared command claim, the producer's when one is named.                                 |
 | `refreshSession(driver, nativeSessionId)`   | Reads and publishes one session without changing untouched session statuses.                                                                        |
 | `commandCellId()`                           | Returns the command cell ID without the `of:` link prefix.                                                                                          |
 | `receiptCellId()`                           | Returns the receipt-index cell ID without the `of:` link prefix.                                                                                    |
@@ -823,8 +822,9 @@ currently do not change their behavior based on it. `requestedBy` is retained on
 the parsed command but is not copied to receipts.
 
 The worker rejects a command whose `ownerDid` differs from its configured owner.
-Invalid values are logged and skipped. A command ID already present in the
-ledger or already scheduled in the process is skipped.
+Invalid values are logged and skipped. A command already present in the ledger
+or already scheduled in the process, under its queue-qualified identity, is
+skipped.
 
 Before command processing starts, the host binds the compiled debug handler to
 the deterministic owner-scoped command cell. Binding rejects another cell and
@@ -835,12 +835,18 @@ cell as an input; the host never selects a queue from pattern output.
 A queue's write policy names exactly one verified handler, so a second pattern
 that sends commands gets a queue of its own: the host binds a producer queue
 under the producer's own cause with that pattern's declared handler as its
-writer, and the worker reads every bound queue. Command IDs stay unique across
-queues; a command already claimed under one ID is skipped wherever it appears.
+writer, and the worker reads every bound queue, learning each command's queue
+from the subscription. A command's identity is its ID qualified by the queue it
+arrived on, so an ID repeated on another queue names another command with a
+receipt of its own, and a receipt records its `producer`. Within one queue an ID
+names one command: a repeat is the same command delivered again and does not run
+twice, so a producer mints IDs it never reuses. Queues are bound before commands
+are subscribed; binding one while a subscription is live is an error.
 
 ### Receipt
 
-An `AgentSessionCommandReceipt` records command identity, session identity,
+An `AgentSessionCommandReceipt` records command identity, the producer whose
+queue delivered the command (absent for the owner's queue), session identity,
 status, claim and completion times, optional provider operation ID, optional
 error, and optional provider result.
 

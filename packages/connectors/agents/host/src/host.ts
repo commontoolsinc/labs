@@ -114,10 +114,11 @@ export interface AgentsHostTarget extends CommandTarget {
   ): Promise<boolean>;
   publishHealth(value: Record<string, unknown>): Promise<void>;
   subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<() => void>;
   readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined>;
 }
 
@@ -325,9 +326,11 @@ export class AgentsHost {
       this.#acceptingCommands = true;
       try {
         this.#subscriptionTask = this.#target.subscribeCommands(
-          (commands) => {
+          (commands, producer) => {
             if (!this.#acceptingCommands) return;
-            void this.#commandWorker?.handle(commands).catch((error) => {
+            void this.#commandWorker?.handle(commands, producer).catch((
+              error,
+            ) => {
               this.#logger.error(
                 `command admission failed: ${errorMessage(error)}`,
               );
@@ -869,6 +872,9 @@ export class AgentsHost {
         "Command receipt publication failed",
         {
           commandId: receipt.commandId,
+          ...(receipt.producer === undefined
+            ? {}
+            : { producer: receipt.producer }),
           nativeSessionId: receipt.nativeSessionId,
           status: receipt.status,
           error: message,
@@ -893,6 +899,9 @@ export class AgentsHost {
       `Command receipt is ${receipt.status}`,
       {
         commandId: receipt.commandId,
+        ...(receipt.producer === undefined
+          ? {}
+          : { producer: receipt.producer }),
         nativeSessionId: receipt.nativeSessionId,
         status: receipt.status,
         ...(receipt.error ? { error: receipt.error } : {}),
@@ -920,6 +929,9 @@ export class AgentsHost {
       "Command processing failed",
       {
         commandId: failure.commandId,
+        ...(failure.producer === undefined
+          ? {}
+          : { producer: failure.producer }),
         nativeSessionId: failure.nativeSessionId,
         error: message,
       },

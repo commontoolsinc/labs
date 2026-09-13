@@ -147,7 +147,9 @@ that declaration from the deployed piece, creates the producer's own
 deterministic queue protected for the owner with that handler as its only
 writer, links the queue into the piece's `commands` input, and reads commands
 from it beside the debug view's queue. A producer whose pattern declares no
-authorization fails startup. Producer IDs must be unique.
+authorization fails startup. Producer IDs must be unique. A producer's queue is
+bound before commands are subscribed. Removing a producer from the configuration
+leaves its queue and the piece's link in place; the queue is no longer read.
 
 The source fields are the connector's `AgentSourceConfig` contract:
 
@@ -270,7 +272,8 @@ object or a JSON string containing that object. The debug pattern writes JSON
 strings so each append remains one inline action value. `CommandWorker` decodes
 either representation before it validates the command schema and fields.
 
-The host's receipt callback records command ID, source ID, native session ID,
+The host's receipt callback records command ID, the producer whose queue
+delivered the command when it was not the owner's, source ID, native session ID,
 status, and structured error details in the activity history. Post-command
 refresh success or failure is also recorded. A failed refresh degrades the
 source until a later complete collection succeeds. Health does not copy prompt
