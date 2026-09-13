@@ -537,12 +537,17 @@ nothing. The traversal is in the pull, not the sink and not the render.
     starts with a measurement rather than a design: the memory frame log, the
     server's queue time against handle time, and the browser summary's IPC
     rows.
+11. ~~**The read log's per-read tier**~~ — landed as the link-probe memo,
+    described at the end of stage 7: link resolution memoizes each sigil
+    probe per transaction, which removes the repeated probes that were a fifth
+    of the journaled reads, and the commit and scheduler passes over the log
+    run over a smaller one.
 
 After stage 2 the profile has no hotspot left, and the next tier — path and
 link machinery, `sortAndCompactPaths`, `#findNode`, `createViewProxy`,
-`resolveLinkTracingDereferences`, none of them dominant — is what stage 7's
-probe memo shrinks by feeding it a smaller read log rather than by speeding
-any one frame. Expect the next win of that kind to be in the number of probes
+`resolveLinkTracingDereferences`, none of them dominant — is what the
+link-probe memo (item 11 above, described under stage 7) shrinks by feeding it
+a smaller read log rather than by speeding any one frame. Expect the next win of that kind to be in the number of probes
 a walk issues at all, and the next structural one to be stage 3's "do not run
 the pass".
 
