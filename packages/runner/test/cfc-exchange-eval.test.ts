@@ -23,8 +23,7 @@ import {
 import { buildCfcTrustConfig, createTrustResolver } from "../src/cfc/trust.ts";
 
 // Exchange-rule evaluation: the guarded rewrite + fueled fixpoint (spec
-// §4.4.5). Property tests (i)-(vi), plus the worked examples the calculus
-// exists for.
+// §4.4.5). Property cases, plus the worked examples the calculus exists for.
 
 const ALICE = "did:key:alice";
 const BOB = "did:key:bob";

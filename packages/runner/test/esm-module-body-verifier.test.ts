@@ -162,7 +162,7 @@ describe("verifyCompiledModuleBody", () => {
     expect(() => verifyCompiledModuleBody(body, "/regexes.ts")).not.toThrow();
   });
 
-  it("still classifies real division with whitespace transparent", () => {
+  it("classifies real division as an operator with whitespace transparent", () => {
     // Making whitespace transparent must not turn a genuine division operator
     // into a regex. A module that only divides should verify (the `/` is an
     // operator, never a literal).

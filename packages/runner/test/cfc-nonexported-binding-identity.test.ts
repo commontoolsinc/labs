@@ -7,17 +7,17 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
-// An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
-// compiles to a verified-binding `writeAuthorizedBy` claim. At commit the CFC
-// verifier resolves the authoring handler's identity — sourceFile/bindingPath
-// — from the function's content-addressed provenance (`bindingIdentity`,
-// recorded by Engine.#recordModuleProvenance from the transformer's
+// An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>` compiles
+// to a verified-binding `writeAuthorizedBy` claim. At commit the CFC verifier
+// resolves the authoring handler's identity — sourceFile/bindingPath — from the
+// function's content-addressed provenance (`bindingIdentity`, recorded by
+// Engine.#recordModuleProvenance from the transformer's
 // `__cfBindVerifiedBinding` annotation on the FACTORY object). A handler
 // declared as a NON-exported module-scope const (the shape used throughout
 // system/profile-home.tsx) surfaces through the `__cfReg` registration sink,
-// and that sink registration must carry the binding identity, without which
-// the write is rejected with
-// "writeAuthorizedBy requires a trusted verified binding identity".
+// and that sink registration must carry the binding identity, without which the
+// write is rejected with "writeAuthorizedBy requires a trusted verified binding
+// identity".
 //
 // Scope: these tests assert the writer identity is REGISTERED (provenance
 // carries the bindingIdentity) and RESOLVES onto transactions while handlers

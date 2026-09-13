@@ -1,5 +1,5 @@
-// Server-execution events-down, end to end against
-// a real memory server, a live ExecutorHost, and flag-ON clients.
+// Server-execution events-down, end to end against a real memory server, a
+// live ExecutorHost, and flag-ON clients.
 //
 // - the FULL loop: a client fire commits ONLY the event; the
 //   SpaceServer drains it, runs the handler AUTHORITATIVELY, and
@@ -8,11 +8,10 @@
 //   per-stream `eventWatermark` advanced in the SAME transaction
 //   (events.md §2, §4); the client's echo retires on the consequence
 //   signal and the authoritative value renders;
-// - exactly-once across restart: an
-//   append committed with NO serving host is drained once at
-//   activation (serving-loop.md §6 step 4); a second activation
-//   re-runs nothing (the consequenced mark + the watermark exclude
-//   it);
+// - exactly-once across restart: an append committed with NO serving host
+//   is drained once at activation (serving-loop.md §6 step 4); a second
+//   activation re-runs nothing (the consequenced mark + the watermark
+//   exclude it);
 // - the ERROR arm: a throwing handler's error IS the consequence
 //   (events.md §5) — the entry carries it, the stream does not wedge;
 // - the DROP arm: an event whose piece can NEVER start defers for the
@@ -125,9 +124,9 @@ class GatedStorageManager extends EmulatedStorageManager {
    * arms events.md §2's arrival order must survive (the other, the
    * index-addressed view-lag check, is the same barrier contract at the
    * same seam; its live shape is asynchronous frame delivery under
-   * load). STATIC on purpose: the host may rotate
-   * runtime tenures (each with a fresh manager), and the seam must hold
-   * across every tenure of the pass under test. */
+   * load). STATIC on purpose: the host may rotate runtime tenures (each
+   * with a fresh manager), and the seam must hold across every tenure of
+   * the pass under test. */
   static syncThrowWhen: ((id: string) => boolean) | undefined;
 
   /** How many syncs the throw seam refused — each drain pass that
@@ -137,9 +136,9 @@ class GatedStorageManager extends EmulatedStorageManager {
   /** The FOURTH seam, the HEAD-EVENT LOAD-PARK FAILURE arm: a served
    * event's dispatch preflight parks on an in-flight replica load its
    * closure reads, and that load FAILS. In production the failure is a
-   * serving session revoked
-   * by the genesis ACL landing after activation — transient, healing
-   * on the next mount, and NOT events.md §5's "no runnable handler".
+   * serving session revoked by the genesis ACL landing after activation —
+   * transient, healing on the next mount, and NOT events.md §5's "no
+   * runnable handler".
    * While armed, the named doc reads as an in-flight load (so a head
    * event whose closure reads it parks) and the park's settle REJECTS
    * with that error's text. STATIC for the same reason as the sync
@@ -295,10 +294,9 @@ const THROW_PATTERN = [
  * serving-side receipt/result-write pins (events.md §4 "Result carriage").
  * `probe` returns a plain value derived from the event payload; `quiet`
  * returns nothing (the `{}` existence witness). Both bind `{}` — no context
- * cells — so the handlings'
- * cause-derived receipt addresses depend on nothing but the pattern and
- * the invocation id, and their only durable consequence is the receipt
- * itself. */
+ * cells — so the handlings' cause-derived receipt addresses depend on
+ * nothing but the pattern and the invocation id, and their only durable
+ * consequence is the receipt itself. */
 const DECLARED_RESULT_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const probe = handler<{ n?: number }, Record<string, never>>(",
@@ -395,18 +393,16 @@ const GATED_ORDERED_LOG_PATTERN = [
   ">(({ log, gate }) => ({ log, a: pushA({ log, gate }), b: pushB({ log }) }));",
 ].join("\n");
 
-// The refused-commit class (verification-coverage.md §3): a stored
-// envelope whose `result.anyOf` carries TWO ifc branches is genuinely
-// ambiguous — the class the narrowing in cfc/schema-merge.ts refuses. The
-// FIRST writer's commit lands (nothing is stored yet, so no merge runs),
-// poisoning the stored envelope; every later merging writer's commit-prep
-// records the refusal and the
-// commit is rejected PRE-STORAGE with the "CFC enforcement rejected
-// commit" message class (extended-storage-transaction.ts). The
-// fixtures mirror cfc-prepare-crash-surfacing.test.ts, which pins the
-// mechanism at the transaction level; here the same refusal lands on a
-// SERVED event's commit, where it classifies as a give-up disposition
-// (scheduler/events.ts).
+// The refused-commit class (verification-coverage.md §3): a stored envelope
+// whose `result.anyOf` carries TWO ifc branches is genuinely ambiguous — the
+// class the narrowing in cfc/schema-merge.ts refuses. The FIRST writer's commit
+// lands (nothing is stored yet, so no merge runs), poisoning the stored
+// envelope; every later merging writer's commit-prep records the refusal and
+// the commit is rejected PRE-STORAGE with the "CFC enforcement rejected commit"
+// message class (extended-storage-transaction.ts). The fixtures mirror
+// cfc-prepare-crash-surfacing.test.ts, which pins the mechanism at the
+// transaction level; here the same refusal lands on a SERVED event's commit,
+// where it classifies as a give-up disposition (scheduler/events.ts).
 const profileViewSchema: JSONSchema = {
   type: "object",
   properties: {
@@ -2390,10 +2386,10 @@ describe("Phase 3 events-down (serving side)", () => {
 
   /** The serving-side receipt/result write (events.md §4 "Result
    * carriage"): fire a result-declaring verb, then a `send` helper the
-   * three pins below share. The commit callback is
-   * the durable-ack coupling's — it settles only after the handling
-   * CONSEQUENCED — and hands back the echo's transaction, whose
-   * `handlingReceiptLink` is the cause-derived receipt address. */
+   * three pins below share. The commit callback is the durable-ack
+   * coupling's — it settles only after the handling CONSEQUENCED — and
+   * hands back the echo's transaction, whose `handlingReceiptLink` is the
+   * cause-derived receipt address. */
   const fireVerb = (
     result: Cell<Record<string, unknown>>,
     verb: string,
@@ -2508,7 +2504,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("writes a receipt for a served handler that returns undefined (result carriage, value-less arm): the `{}` existence witness, one derived commit, atomic with the mark", async () => {
+  it("writes a receipt for a served handler that returns `undefined` (result carriage, value-less arm): the `{}` existence witness, one derived commit, atomic with the mark", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
@@ -3000,16 +2996,16 @@ describe("Phase 3 events-down (serving side)", () => {
   });
 
   it("folds a raced parent's same-wave cascade child on requeue through the PRODUCTION cascade path (C8d): no orphan consequence, exactly-once on retry", async () => {
-    // The C8d fold must key on what production actually stamps — the LT1
-    // same-space emission queues its cascade with only
-    // {eventId, served:{firedAt}}. Without a fold that fires on that
-    // stamp, when a drained parent P's consequence races into REQUEUE,
-    // its same-wave cascade child C COMMITS (the orphan), and P's retry
-    // re-emits the cascade under a FRESH id — C's consequence applied
-    // TWICE. This test drives the WHOLE production chain (cell.ts's
-    // emission carriage → the dispatch stamp → the SpaceServer's #stampRun →
-    // the wave fold), deterministically: the settle gate holds the sealed
-    // wave open while a rival authored commit races P's consequence.
+    // The LT1 same-space emission stamps the emitter's eventId as the
+    // cascade's `parentEventId` (cell.ts), and the C8d fold keys on that
+    // thread (wave.ts). Without it, when a drained parent P's consequence
+    // races into REQUEUE, its same-wave cascade child C COMMITS (the
+    // orphan), and P's retry re-emits the cascade under a FRESH id — C's
+    // consequence applied TWICE. This test drives the WHOLE production
+    // chain (cell.ts's emission carriage → the dispatch stamp → the
+    // SpaceServer's #stampRun → the wave fold), deterministically: the
+    // settle gate holds the sealed wave open while a rival authored commit
+    // races P's consequence.
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -3463,15 +3459,14 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
       expect(host!.stats().events.lt1LateSealsRefused).toBe(0);
 
-      // The purge's DISCRIMINATOR: keep the gate
-      // held across several more flush deadlines with the drain's
-      // `streamEntry`-bearing copies c1'/c2' sitting QUEUED behind the
-      // parked c1 — every cut cycle runs the purge over that queue, and
-      // the purge must never reach a drain copy (`served.streamEntry !==
-      // undefined`). An over-reaching predicate (`served !== undefined`
+      // The purge's DISCRIMINATOR: keep the gate held across several more flush
+      // deadlines with the drain's `streamEntry`-bearing copies c1'/c2' sitting
+      // QUEUED behind the parked c1 — every cut cycle runs the purge over that
+      // queue, and the purge must never reach a drain copy (`served.streamEntry
+      // !== undefined`). An over-reaching predicate (`served !== undefined`
       // alone) purges them here: the count climbs past 1 and the drop
-      // chokepoint writes a `dropped` notice onto the durable entries —
-      // a LOST delivery the α pins' original timing could not see.
+      // chokepoint writes a `dropped` notice onto the durable entries — a LOST
+      // delivery the α pins' original timing could not see.
       await new Promise((resolve) => setTimeout(resolve, 450));
       expect(host!.stats().wavesBudgetExhausted).toBeGreaterThan(1);
       expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
@@ -3915,16 +3910,16 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(stats.events.orphanDeliveriesRefused).toBe(0);
       expect(stats.events.processed).toBe(2);
       expect(stats.events.appended).toBe(1);
-      // The store-side per-event commit count reads TWO here — the
-      // sibling's contribution named the event in the appending wave's
-      // commit, the drain's completed run names it one wave later: the
-      // event's contributions SPLIT across two waves (the appending wave
-      // "could not process" the entry, events.md §2 — it commits as
-      // durable input and reprocesses; the sibling's early landing is
-      // idempotent on the re-run by navigateTo's nonce dedupe). Recorded
-      // as what it is: this count over-counts a split delivery exactly as
-      // it under-counts a same-wave double — the handler's
-      // effect is the run-count witness, never this number.
+      // The store-side per-event commit count reads TWO here — the sibling's
+      // contribution named the event in the appending wave's commit, the
+      // drain's completed run names it one wave later: the event's
+      // contributions SPLIT across two waves (the appending wave "could not
+      // process" the entry, events.md §2 — it commits as durable input and
+      // reprocesses; the sibling's early landing is idempotent on the re-run by
+      // navigateTo's nonce dedupe). Recorded as what it is: this count
+      // over-counts a split delivery exactly as it under-counts a same-wave
+      // double — the handler's effect is the run-count witness, never this
+      // number.
       expect(w.consequenceCommitsOf(childEntry.eventId)).toBe(2);
       expect(childEntry.consequenced).toBe(true);
       expect(childEntry.status).toBeUndefined();
@@ -4416,12 +4411,11 @@ describe("Phase 3 events-down (serving side)", () => {
       // PIN 4 — exactly-once ((α)) AND arrival order: one consequence per
       // event, A2 before B1. A re-delivery would read ["A","A","A","B"].
       expect(storedLog()).toEqual(["A", "A", "B"]);
-      // No-residual-re-delivery, proved CAUSALLY rather than by waiting
-      // out a fixed delay (a re-delivery slower
-      // than the timer would pass undetected, and the timer taxes every
-      // green run). Once every entry is consequenced AND the watermark
-      // has advanced past the last of them, the drain's pending-entry
-      // scan can no longer select any of them — a re-delivery is
+      // No-residual-re-delivery, proved CAUSALLY rather than by waiting out a
+      // fixed delay (a re-delivery slower than the timer would pass undetected,
+      // and the timer taxes every green run). Once every entry is consequenced
+      // AND the watermark has advanced past the last of them, the drain's
+      // pending-entry scan can no longer select any of them — a re-delivery is
       // excluded by construction, not by having failed to show up yet.
       const lastSeq = Math.max(...allEntries().map((entry) => entry.seq ?? 0));
       await waitUntil(

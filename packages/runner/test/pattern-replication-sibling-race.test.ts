@@ -1,15 +1,14 @@
 // The runner's cross-space CHILD replication
-// (`replicate(parentSpace -> childSpace)`, issued by the handler run that
-// creates the child) can race the SIBLING replication that is still
-// supplying the parent space itself — `compileOrGetPattern`'s content-cache
-// hit fires `replicate(cached.space -> parentSpace)` fire-and-forget, and
-// the child replication follows within the same handler run. A bare
-// one-shot origin read at that point finds the parent empty, throws
-// "source closure unavailable in origin space", and nothing re-issues it
-// (the documented retry is "the next child creation" — a user creates
-// their profile once): the child space never receives its program closure,
-// its demanded roots defer `pattern-unloadable` forever, and the profile
-// never renders.
+// (`replicate(parentSpace -> childSpace)`, issued by the run that creates the
+// child) can race the SIBLING replication that is still supplying the parent
+// space itself — `compileOrGetPattern`'s content-cache hit fires
+// `replicate(cached.space -> parentSpace)` fire-and-forget, and the child
+// replication follows within the same handler run. A bare one-shot origin
+// read at that point finds the parent empty, throws "source closure
+// unavailable in origin space", and nothing re-issues it (the documented
+// retry is "the next child creation" — a user creates their profile once):
+// the child space never receives its program closure, its demanded roots
+// defer `pattern-unloadable` forever, and the profile never renders.
 //
 // The race is deterministic-by-construction here: the child replication is
 // issued synchronously after the sibling, and its origin read is strictly
@@ -591,13 +590,13 @@ describe("closure replication: the in-flight sibling supplier race", () => {
           "source closure unavailable in origin space",
         );
 
-        // THE NO-STORM CONTROL for the park: genuine absence
-        // parks LOUDLY (the park line is the wedge trace gaining an
-        // ending, never losing its beginning) and then does NOTHING —
-        // no re-issue, no heal, no second failure line, ever. The park
-        // is woken only by a matching persist record, and this manager
-        // never records one; a mutation that lets the park self-clock
-        // (retry without a record event) fires extra lines here.
+        // THE NO-STORM CONTROL for the park: genuine absence parks LOUDLY (the
+        // park line is the wedge trace gaining an ending, never losing its
+        // beginning) and then does NOTHING — no re-issue, no heal, no second
+        // failure line, ever. The park is woken only by a matching persist
+        // record, and this manager never records one; a mutation that lets the
+        // park self-clock (retry without a record event) fires extra lines
+        // here.
         const parked = lines.filter((line) =>
           line.key === "closure-replication-parked"
         );
@@ -1019,11 +1018,11 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       "is the importer, not the module: an entry-matched wake would " +
       "sleep through exactly this record)",
     async () => {
-      // R1 compiles the importer program into A (durable); rt2 warm-loads
-      // the LIB pattern by its own module identity from A — the load path
-      // persists NOTHING and records NOTHING (the index-served supplier
-      // hole), so rt2's map stays dry while its
-      // in-memory index can serve the lib pattern object.
+      // R1 compiles the importer program into A (durable); rt2 warm-loads the
+      // LIB pattern by its own module identity from A — the load path persists
+      // NOTHING and records NOTHING (the index-served supplier hole), so rt2's
+      // map stays dry while its in-memory index can serve the lib pattern
+      // object.
       const importer = await runtime.patternManager.compileOrGetPattern(
         PROGRAM_WITH_LIB,
         spaceA,

@@ -690,11 +690,10 @@ describe("legacy-envelope tolerance on cold load", () => {
     ],
   };
 
-  // Simulate the legacy writer: stored source =
-  // the INJECTED bytes, identities computed over the injected bytes, no
-  // compiled set. The authored compile below is used only to learn the
-  // module structure/import graph; its (authored-byte) identities are
-  // remapped to the legacy (injected-byte) ones.
+  // Simulate the legacy writer: stored source = the INJECTED bytes, identities
+  // computed over the injected bytes, no compiled set. The authored compile
+  // below is used only to learn the module structure/import graph; its
+  // (authored-byte) identities are remapped to the legacy (injected-byte) ones.
   const buildLegacyClosure = async (
     engine: Engine,
     program: RuntimeProgram,

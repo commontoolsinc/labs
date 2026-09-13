@@ -363,7 +363,7 @@ describe("LLM schema alignment", () => {
       expect(Array.isArray(value.messages)).toBe(true);
     });
 
-    it("preserves a multimodal prompt in generateObject through schema application", () => {
+    it("preserves a multimodal prompt in `generateObject` through schema application", () => {
       const params: BuiltInGenerateObjectParams = {
         prompt: [
           { type: "image", image: "data:image/png;base64,abc" },
