@@ -33,327 +33,9 @@
  * from `interface.ts`.
  */
 
-/**
- * The nominal brand key declared on `FabricSpecialObject`. It exists only in
- * the type system — a runtime instance never carries the key; `instanceof
- * FabricSpecialObject` is its runtime form. Schema `required` presence
- * checks must therefore treat this key as satisfied by any
- * `FabricSpecialObject` rather than probing for it with `in`.
- */
-export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
-
-/**
- * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
- * single `instanceof` check for any fabric-system value type.
- *
- * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
- * runtime existence — see the canonical declaration in
- * `data-model/src/interface.ts` for why it is a well-known string key and not
- * a `unique symbol`. The two declarations must agree exactly.
- */
-export interface FabricSpecialObject {
-  readonly "@commonfabric/FabricSpecialObject": true;
-}
-
-export interface FabricSpecialObjectConstructor {
-  prototype: FabricSpecialObject;
-}
-
-export declare const FabricSpecialObject:
-  & FabricSpecialObjectConstructor
-  & (abstract new (...args: any) => FabricSpecialObject);
-
-/**
- * Abstract base class for values that participate in the fabric protocol.
- *
- * An instance holds all of its state privately and makes it reachable only
- * through members, so it has no own properties at all. A structural view of
- * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
- */
-export interface FabricInstance extends FabricSpecialObject {
-  /**
-   * Returns a new deep clone of this instance with equivalent data but no
-   * shared structure for any unfrozen data in the original. When `frozen ===
-   * true`, produces a frozen instance with maximal structural sharing,
-   * including returning `this` if it is already deep-frozen. When `frozen ===
-   * false`, produces a deeply-mutable instance with no visible shared
-   * reference structure with the original.
-   */
-  deepClone(frozen: boolean): FabricInstance;
-
-  /** Returns a shallow clone of this instance with the requested frozenness. */
-  shallowClone(frozen: boolean): FabricInstance;
-}
-
-export interface FabricInstanceConstructor {
-  prototype: FabricInstance;
-}
-
-export declare const FabricInstance:
-  & FabricInstanceConstructor
-  & (abstract new (...args: any) => FabricInstance);
-
-/** Abstract base class for `FabricPrimitive` types. */
-export interface FabricPrimitive extends FabricSpecialObject {}
-
-export interface FabricPrimitiveConstructor {
-  prototype: FabricPrimitive;
-}
-
-export declare const FabricPrimitive:
-  & FabricPrimitiveConstructor
-  & (abstract new (...args: any) => FabricPrimitive);
-
-/**
- * Temporal type representing nanoseconds from the POSIX Epoch.
- * Wraps a `bigint` value.
- */
-export interface FabricEpochNsec extends FabricPrimitive {
-  readonly value: bigint;
-}
-
-export interface FabricEpochNsecConstructor {
-  new (value: bigint): FabricEpochNsec;
-  prototype: FabricEpochNsec;
-}
-
-export declare const FabricEpochNsec: FabricEpochNsecConstructor;
-
-/**
- * Temporal type representing a particular day, as a count of days from the
- * POSIX Epoch. Wraps a `bigint` value.
- */
-export interface FabricEpochDay extends FabricPrimitive {
-  readonly value: bigint;
-}
-
-export interface FabricEpochDayConstructor {
-  new (value: bigint): FabricEpochDay;
-  prototype: FabricEpochDay;
-}
-
-export declare const FabricEpochDay: FabricEpochDayConstructor;
-
-/**
- * A content-addressed identifier: a hash digest paired with an algorithm tag.
- * Extends `FabricPrimitive` -- treated like a primitive in the fabric type
- * system (always frozen, passes through conversion unchanged).
- */
-export interface FabricHash extends FabricPrimitive {
-  readonly tag: string;
-  readonly bytes: Uint8Array;
-  readonly length: number;
-  readonly hashString: string;
-  toString(): string;
-}
-
-export interface FabricHashConstructor {
-  new (
-    hash: Uint8Array | ArrayBufferLike,
-    tag: string,
-    transfer?: boolean,
-  ): FabricHash;
-  prototype: FabricHash;
-}
-
-export declare const FabricHash: FabricHashConstructor;
-
-/**
- * The modern, object-shaped form of a link reference, wrapping the link's
- * addressing payload (a `FabricPlainObject`: its addressing fields plus an optional
- * `schema`). Extends `FabricInstance` (not `FabricPrimitive`): the payload is an
- * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
- * link is a small object graph, not a leaf.
- */
-export interface FabricLink extends FabricInstance {
-  readonly payload: FabricPlainObject;
-}
-
-export interface FabricLinkConstructor {
-  new (payload: FabricPlainObject): FabricLink;
-  prototype: FabricLink;
-}
-
-export declare const FabricLink: FabricLinkConstructor;
-
-/**
- * An immutable, frozen sequence of bytes. Extends `FabricPrimitive` --
- * treated like a primitive in the fabric type system (always frozen, passes
- * through conversion unchanged). Read the bytes with `slice()`,
- * `sliceBuffer()`, or `copyInto()`.
- */
-export interface FabricBytes extends FabricPrimitive {
-  readonly length: number;
-  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
-  sliceBuffer(start?: number, end?: number): ArrayBuffer;
-  copyInto(target: Uint8Array, offset?: number, length?: number): number;
-}
-
-export interface FabricBytesConstructor {
-  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
-  prototype: FabricBytes;
-}
-
-export declare const FabricBytes: FabricBytesConstructor;
-
-/**
- * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
- * primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
- *
- * The pattern is held as a flavor / source / flags triple rather than as a
- * native `RegExp`, so that flavors with no native representation can still be
- * carried. `value` reconstitutes a native `RegExp` where one exists.
- */
-export interface FabricRegExp extends FabricPrimitive {
-  readonly source: string;
-  readonly flags: string;
-  readonly flavor: string;
-
-  /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
-   * call so the internal instance is never aliased out. Throws for a flavor
-   * with no native `RegExp` representation.
-   */
-  readonly value: RegExp;
-}
-
-export interface FabricRegExpConstructor {
-  new (regex: RegExp): FabricRegExp;
-  new (flavor: string, source: string, flags: string): FabricRegExp;
-  prototype: FabricRegExp;
-}
-
-export declare const FabricRegExp: FabricRegExpConstructor;
-
-/**
- * An immutable asymmetric key pair. Extends `FabricPrimitive` -- treated like
- * a primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
- *
- * An instance either holds handles -- two `CryptoKey`s, whose material this
- * realm may have no way to reach -- or holds material, the two keys as bytes.
- * `hasMaterial` says which, and every accessor belonging to the other arm
- * throws.
- */
-export interface FabricKeyPair extends FabricPrimitive {
-  readonly algorithm: string;
-  readonly hasMaterial: boolean;
-
-  /**
-   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
-   * object on each call, so a caller may do as it likes with it; the two
-   * `CryptoKey`s within it are this instance's own, and are the same two
-   * objects on every call. Throws when this instance holds material.
-   */
-  readonly cryptoKeyPair: CryptoKeyPair;
-
-  /** The public key's handle. Throws when this instance holds material. */
-  readonly publicCryptoKey: CryptoKey;
-
-  /** The private key's handle. Throws when this instance holds material. */
-  readonly privateCryptoKey: CryptoKey;
-
-  /** The public key's bytes. Throws when this instance holds handles. */
-  readonly publicKeyBytes: FabricBytes;
-
-  /** The private key's bytes. Throws when this instance holds handles. */
-  readonly privateKeyBytes: FabricBytes;
-}
-
-export interface FabricKeyPairConstructor {
-  new (pair: CryptoKeyPair): FabricKeyPair;
-  new (
-    algorithm: string,
-    publicKey: FabricBytes | Uint8Array,
-    privateKey: FabricBytes | Uint8Array,
-  ): FabricKeyPair;
-  prototype: FabricKeyPair;
-}
-
-export declare const FabricKeyPair: FabricKeyPairConstructor;
-
-/**
- * Structured state for constructing a `FabricError`. The fixed-schema slots
- * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
- * whose keys must not collide with the slot names.
- */
-export type FabricErrorState = {
-  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
-  readonly type: string;
-
-  /** The `.name` property. Omit to mean "same as `type`". */
-  readonly name?: string | null | undefined;
-
-  /** The `.message` property. */
-  readonly message: string;
-
-  /** The `.stack` property, or `undefined`. */
-  readonly stack: string | undefined;
-
-  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
-  readonly cause: FabricValue | undefined;
-
-  /** Custom enumerable own properties, in `FabricValue` form. */
-  readonly extras?:
-    | Iterable<readonly [string, FabricValue]>
-    | Readonly<Record<string, FabricValue>>
-    | undefined;
-};
-
-/**
- * An error carried as a `FabricValue`. Extends `FabricInstance` (not
- * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
- * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
- * rather than a leaf.
- *
- * Like every `FabricInstance` it is mutable until frozen, and every mutator --
- * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
- * the instance is frozen.
- */
-export interface FabricError extends FabricInstance {
-  type: string;
-  name: string;
-  message: string;
-  stack: string | undefined;
-  cause: FabricValue | undefined;
-
-  getExtra(key: string): FabricValue | undefined;
-  hasExtra(key: string): boolean;
-  setExtra(key: string, value: FabricValue): void;
-  deleteExtra(key: string): boolean;
-  readonly extraSize: number;
-  extraKeys(): IterableIterator<string>;
-  extraEntries(): IterableIterator<[string, FabricValue]>;
-}
-
-/** Options accepted by `FabricError.fromNativeError()`. */
-export interface FromNativeErrorOptions {
-  /**
-   * Converter applied to the error's `cause` and to each of its custom
-   * enumerable properties, whose result is what the instance holds. When
-   * absent, a value that is already a valid `FabricValue` is held as it
-   * stands, and anything else is converted the way `fabricFromNativeValue()`
-   * converts it, without freezing.
-   */
-  readonly convert?: (value: unknown) => FabricValue;
-}
-
-export interface FabricErrorConstructor {
-  new (state: FabricErrorState): FabricError;
-  fromNativeError(
-    error: Error,
-    options?: FromNativeErrorOptions,
-  ): FabricError;
-  prototype: FabricError;
-}
-
-export declare const FabricError: FabricErrorConstructor;
-
-// TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
-// declarations above. Both need substantial rework before they are useful, and
-// declaring them here would imply a utility they do not yet have. Their
-// absence is a decision, not an oversight; revisit once that rework lands.
+//
+// Top-level `FabricValue` definition
+//
 
 /**
  * The full set of values that the fabric storage layer can represent. This is
@@ -413,11 +95,13 @@ export type FabricValue =
 
 /**
  * The container types that are part of `FabricValue`. Note that
- * `FabricSpecialObject` is a combination of container and non-container.
+ * `FabricSpecialObject` is a combination of a container type (`FabricInstance`)
+ * and a non-container type (`FabricPrimitive`), and the latter is _not_ part of
+ * this type.
  */
 export type FabricContainerValue =
   | FabricArray
-  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
+  | FabricInstance
   | FabricPlainObject;
 
 /** A `FabricValue` other than `null` or `undefined`. */
@@ -439,6 +123,346 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
+
+//
+// `FabricValue`-specific base class details
+//
+
+/**
+ * The nominal brand key declared on `FabricSpecialObject`. It exists only in
+ * the type system — a runtime instance never carries the key; `instanceof
+ * FabricSpecialObject` is its runtime form. Schema `required` presence
+ * checks must therefore treat this key as satisfied by any
+ * `FabricSpecialObject` rather than probing for it with `in`.
+ */
+export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
+
+/**
+ * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
+ * single `instanceof` check for any fabric-system value type. As part of the
+ * overall `FabricValue` contract, no concrete instance of this class exposes
+ * any own-properties; all interaction with an instance is via its concrete
+ * class's instance members, and in particular an object-spread (`{ ...instance
+ * }`) on an instance will always yield an empty objectg (`{}`).
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
+ * runtime existence — see the canonical declaration in
+ * `data-model/src/interface.ts` for why it is a well-known string key and not
+ * a `unique symbol`. The two declarations must agree exactly.
+ */
+export interface FabricSpecialObject {
+  readonly "@commonfabric/FabricSpecialObject": true;
+}
+
+export interface FabricSpecialObjectConstructor {
+  prototype: FabricSpecialObject;
+}
+
+export declare const FabricSpecialObject:
+  & FabricSpecialObjectConstructor
+  & (abstract new (...args: any) => FabricSpecialObject);
+
+/**
+ * Abstract base class for non-primitive-like instances that participate in the
+ * fabric protocol. Instances of this class are treated by the `data-model` the
+ * same as built-in JavaScript primitive values (e.g. `string`s and `number`s),
+ * to the extent possible. Notably, instances of this class are _forbidden_ (by
+ * contract) from referring to arbitrary externally-visible `FabricValue`s.
+ *
+ */
+export interface FabricPrimitive extends FabricSpecialObject {}
+
+export interface FabricPrimitiveConstructor {
+  prototype: FabricPrimitive;
+}
+
+export declare const FabricPrimitive:
+  & FabricPrimitiveConstructor
+  & (abstract new (...args: any) => FabricPrimitive);
+
+/**
+ * Abstract base class for non-primitive-like instances that participate in the
+ * fabric protocol. The primary distinction between this class and
+ * `FabricPrimitive` is akin to primitive types (e.g. `string` and `number`) vs.
+ * non-primitive types (e.g. `object`) in JavaScript in general. Most notably,
+ * instances of this class _are_ allowed to have arbitrary externally-visible
+ * `FabricValue` references.
+ */
+export interface FabricInstance extends FabricSpecialObject {
+  /**
+   * Returns a new deep clone of this instance with equivalent data but no
+   * shared structure for any unfrozen data in the original. When `frozen ===
+   * true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen ===
+   * false`, produces a deeply-mutable instance with no visible shared
+   * reference structure with the original.
+   */
+  deepClone(frozen: boolean): FabricInstance;
+
+  /** Returns a shallow clone of this instance with the requested frozenness. */
+  shallowClone(frozen: boolean): FabricInstance;
+}
+
+export interface FabricInstanceConstructor {
+  prototype: FabricInstance;
+}
+
+export declare const FabricInstance:
+  & FabricInstanceConstructor
+  & (abstract new (...args: any) => FabricInstance);
+
+//
+// Concrete `FabricPrimitive` classes
+//
+
+/**
+ * Temporal type representing nanoseconds from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface FabricEpochNsec extends FabricPrimitive {
+  readonly value: bigint;
+}
+
+export interface FabricEpochNsecConstructor {
+  new (value: bigint): FabricEpochNsec;
+  prototype: FabricEpochNsec;
+}
+
+export declare const FabricEpochNsec: FabricEpochNsecConstructor;
+
+/**
+ * Temporal type representing a particular day, as a count of days from the
+ * POSIX Epoch. Wraps a `bigint` value.
+ */
+export interface FabricEpochDay extends FabricPrimitive {
+  readonly value: bigint;
+}
+
+export interface FabricEpochDayConstructor {
+  new (value: bigint): FabricEpochDay;
+  prototype: FabricEpochDay;
+}
+
+export declare const FabricEpochDay: FabricEpochDayConstructor;
+
+/**
+ * A content-addressed identifier: a hash digest paired with an algorithm tag.
+ */
+export interface FabricHash extends FabricPrimitive {
+  readonly tag: string;
+  readonly bytes: Uint8Array;
+  readonly length: number;
+  readonly hashString: string;
+  toString(): string;
+}
+
+export interface FabricHashConstructor {
+  new (
+    hash: Uint8Array | ArrayBufferLike,
+    tag: string,
+    transfer?: boolean,
+  ): FabricHash;
+  prototype: FabricHash;
+}
+
+export declare const FabricHash: FabricHashConstructor;
+
+/**
+ * An immutable, frozen sequence of bytes. Read the bytes with `slice()`,
+ * `sliceBuffer()`, or `copyInto()`.
+ */
+export interface FabricBytes extends FabricPrimitive {
+  readonly length: number;
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
+  sliceBuffer(start?: number, end?: number): ArrayBuffer;
+  copyInto(target: Uint8Array, offset?: number, length?: number): number;
+}
+
+export interface FabricBytesConstructor {
+  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
+  prototype: FabricBytes;
+}
+
+export declare const FabricBytes: FabricBytesConstructor;
+
+/**
+ * An immutable regular expression.
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
+/**
+ * An immutable asymmetric key pair.
+ *
+ * An instance either holds handles -- two `CryptoKey`s, whose material this
+ * realm may have no way to reach -- or holds material, the two keys as bytes.
+ * `hasMaterial` says which, and every accessor belonging to the other arm
+ * throws.
+ */
+export interface FabricKeyPair extends FabricPrimitive {
+  readonly algorithm: string;
+  readonly hasMaterial: boolean;
+
+  /**
+   * A `CryptoKeyPair` holding this instance's two keys. The record is a new
+   * object on each call, so a caller may do as it likes with it; the two
+   * `CryptoKey`s within it are this instance's own, and are the same two
+   * objects on every call. Throws when this instance holds material.
+   */
+  readonly cryptoKeyPair: CryptoKeyPair;
+
+  /** The public key's handle. Throws when this instance holds material. */
+  readonly publicCryptoKey: CryptoKey;
+
+  /** The private key's handle. Throws when this instance holds material. */
+  readonly privateCryptoKey: CryptoKey;
+
+  /** The public key's bytes. Throws when this instance holds handles. */
+  readonly publicKeyBytes: FabricBytes;
+
+  /** The private key's bytes. Throws when this instance holds handles. */
+  readonly privateKeyBytes: FabricBytes;
+}
+
+export interface FabricKeyPairConstructor {
+  new (pair: CryptoKeyPair): FabricKeyPair;
+  new (
+    algorithm: string,
+    publicKey: FabricBytes | Uint8Array,
+    privateKey: FabricBytes | Uint8Array,
+  ): FabricKeyPair;
+  prototype: FabricKeyPair;
+}
+
+export declare const FabricKeyPair: FabricKeyPairConstructor;
+
+//
+// Concrete `FabricInstance` classes
+//
+
+/**
+ * The modern, object-shaped form of a link reference, wrapping the link's
+ * addressing payload (a `FabricPlainObject`: its addressing fields plus an
+ * optional `schema`). Extends `FabricInstance` because the payload is an
+ * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
+ * link is a small object graph, not a leaf.
+ */
+export interface FabricLink extends FabricInstance {
+  readonly payload: FabricPlainObject;
+}
+
+export interface FabricLinkConstructor {
+  new (payload: FabricPlainObject): FabricLink;
+  prototype: FabricLink;
+}
+
+export declare const FabricLink: FabricLinkConstructor;
+
+
+/**
+ * Structured state for constructing a `FabricError`. The fixed-schema slots
+ * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
+ * whose keys must not collide with the slot names.
+ */
+export type FabricErrorState = {
+  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  readonly type: string;
+
+  /** The `.name` property. Omit to mean "same as `type`". */
+  readonly name?: string | null | undefined;
+
+  /** The `.message` property. */
+  readonly message: string;
+
+  /** The `.stack` property, or `undefined`. */
+  readonly stack: string | undefined;
+
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  readonly cause: FabricValue | undefined;
+
+  /** Custom enumerable own properties, in `FabricValue` form. */
+  readonly extras?:
+    | Iterable<readonly [string, FabricValue]>
+    | Readonly<Record<string, FabricValue>>
+    | undefined;
+};
+
+/**
+ * An error carried as a `FabricValue`.
+ *
+ * Like every `FabricInstance` it is mutable until frozen, and every mutator --
+ * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
+ * the instance is frozen.
+ */
+export interface FabricError extends FabricInstance {
+  type: string;
+  name: string;
+  message: string;
+  stack: string | undefined;
+  cause: FabricValue | undefined;
+
+  getExtra(key: string): FabricValue | undefined;
+  hasExtra(key: string): boolean;
+  setExtra(key: string, value: FabricValue): void;
+  deleteExtra(key: string): boolean;
+  readonly extraSize: number;
+  extraKeys(): IterableIterator<string>;
+  extraEntries(): IterableIterator<[string, FabricValue]>;
+}
+
+/** Options accepted by `FabricError.fromNativeError()`. */
+export interface FromNativeErrorOptions {
+  /**
+   * Converter applied to the error's `cause` and to each of its custom
+   * enumerable properties, whose result is what the instance holds. When
+   * absent, a value that is already a valid `FabricValue` is held as it
+   * stands, and anything else is converted the way `fabricFromNativeValue()`
+   * converts it, without freezing.
+   */
+  readonly convert?: (value: unknown) => FabricValue;
+}
+
+export interface FabricErrorConstructor {
+  new (state: FabricErrorState): FabricError;
+  fromNativeError(
+    error: Error,
+    options?: FromNativeErrorOptions,
+  ): FabricError;
+  prototype: FabricError;
+}
+
+export declare const FabricError: FabricErrorConstructor;
+
+// TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
+// declarations above. Both need substantial rework before they are useful, and
+// declaring them here would imply a utility they do not yet have. Their
+// absence is a decision, not an oversight; revisit once that rework lands.
+
+//
+// Debug-stringification types
+//
 
 /**
  * Options accepted by `toStructuredDebugValue()`, and by the debug-string
