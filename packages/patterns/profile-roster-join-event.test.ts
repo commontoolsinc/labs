@@ -48,8 +48,16 @@ async function compiledSchema(path: string): Promise<Record<string, any>> {
 function resolved(schema: Record<string, any>, node: Record<string, any>) {
   const ref = typeof node.$ref === "string" ? node.$ref : undefined;
   if (!ref) return node;
+  // A `$ref` that resolves to nothing must fail here, not pass below: an
+  // unresolved reference would read as "no additionalProperties" and turn
+  // this guard off silently.
   const key = ref.replace(/^#\/\$defs\//, "");
-  return { ...(schema.$defs?.[key] ?? {}), ...node, $ref: undefined };
+  const target = schema.$defs?.[key];
+  assert(
+    target && typeof target === "object",
+    `the Join stream's ${ref} does not resolve in $defs`,
+  );
+  return { ...target, ...node, $ref: undefined };
 }
 
 for (const path of ROSTERS) {
