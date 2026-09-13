@@ -128,9 +128,10 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * * extensions to JS container types, type `FabricInstance` -- This is the
  *   other non-builtin `object` type that can be considered valid. It represents
  *   a family of container types, to complement plain objects and arrays with
- *   other possible shapes. The intention is that code outside the data model be
- *   able to define new concrete `FabricInstance` classes, but as of this
- *   writing that facility does not _yet_ exist.
+ *   other possible shapes. The type and associated classes are designed so that
+ *   it will eventually be possible for code outside the data model to define
+ *   new concrete `FabricInstance` classes, but as of this writing it is not a
+ *   fully-implemented facility.
  *
  * From a typesystem perspective, all `FabricValue`s are immutable (deeply
  * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
