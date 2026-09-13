@@ -432,7 +432,7 @@ chain so a wrapper and the transaction it wraps answer alike.
 
 ### Stage 5 — Runner integration
 
-**Done, except the synchronous refusal arm of its first item.** The runner
+**Done, except a refusal a synchronous body throws.** The runner
 marks the action's transaction around argument materialization and the body,
 and unmarks it before the result is written, so diffing and the scheduler's own
 reads keep eager semantics.
@@ -441,11 +441,14 @@ reads keep eager semantics.
       or rejected out of an asynchronous body, writes an undefined result
       through the ordinary path. Logged at info level as a non-run, not reported
       as an action error. Verified by reading the path; no test in the tree
-      asserts the result.
-- [ ] A refusal a synchronous body throws writes the same undefined result. It
-      reaches the catch before the post-run is assigned, so the previous result
-      stands. The fix is on the branch `codex/lift-refusal-disposition`, held
-      for the Pattern Update State and Baseline Integrity gate owner's ruling.
+      asserts the result for these two arms.
+- [ ] Not landed: a refusal a synchronous body throws writes the same undefined
+      result. Today it reaches the catch before `postRun` is assigned, so the
+      previous result stands;
+      `packages/runner/test/unresolved-input-lift.test.ts` pins this arm and
+      passes only because its case has no previous result to stand. The fix is
+      on the branch `codex/lift-refusal-disposition`, held for the Pattern
+      Update State and Baseline Integrity gate owner's ruling.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The

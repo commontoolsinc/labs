@@ -39,7 +39,7 @@ in the same PR as behavior changes.
 | F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                 |
 | F1   | F0                          | Handler materialization contract and measured prototype               | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)        |
 | F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md) |
-| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag owner                 |
+| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag's owner               |
 | F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                                                                                |
 | F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
 
@@ -85,10 +85,12 @@ which a view would narrow.
       invalidity; do not consume an event that never ran or commit partial
       handler writes as a successful handling. Defined for all four; the touched
       required-field, optional-mismatch, and caught-refusal arms are pinned for
-      client and served dispatches, and a cold linked document parked on its
-      load is defined but not pinned; a client dispatch under server execution
-      with no served carriage seals its skip rather than withdrawing it, and a
-      refusal after a write on that arm is left open.
+      client dispatches by the deferred prototype's tests, which are not in the
+      tree, and for served dispatches only as far as the existing not-run tests
+      reach, and a cold linked document parked on its load is defined but not
+      pinned; a client dispatch under server execution with no served carriage
+      seals its skip rather than withdrawing it, and a refusal after a write on
+      that arm is left open.
 - [ ] Pin receipt identity, duplicate delivery, retry, and effect behavior in
       both client and server execution. Test that a refusal after a write does
       not publish that write or an external effect. Retry, the receipt on the
@@ -149,10 +151,10 @@ must not accidentally inherit it.
       production-like client/server behavior on isolated data. The runner
       suite has been run at both postures; the F3 record holds the
       off-posture result and the integration-suite gap.
-- [ ] Obtain the flag owner's retirement decision with a concrete rollback
+- [ ] Obtain the flag's owner's retirement decision with a concrete rollback
       route. No live data mutation is implied by this plan; coordinate any live
-      deployment separately. The flag's owner, recorded in [Experimental
-      options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization),
+      deployment separately. The flag's owner, recorded in the registry's
+      [summary table](../development/EXPERIMENTAL_OPTIONS.md#summary-table),
       holds the decision; the F3 record's [What a retirement decision needs to
       name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
       lists what the decision has to settle.
@@ -187,9 +189,6 @@ throws.
 - [ ] Publish the evidence and any remaining limitation, update author/runtime
       guidance, and archive this plan and the completed design tracker under the
       [documentation lifecycle](../README.md).
-- [ ] Qualify the F1 bullet on refusal dispositions the way its neighbors are:
-      the client-arm pins are the deferred prototype's tests, not in the tree,
-      and the served arm rests on the existing not-run tests.
 
 ## Out of scope
 
