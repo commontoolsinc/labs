@@ -1688,12 +1688,12 @@ interface SetupStateReuse {
  * that collapses them writes state describing a version that may not be there.
  *
  * `patternIdentity` alone cannot answer this, because an update can move the
- * pointer before any setup runs. `PiecesController`'s roll-forward materialize
- * commits the candidate's identity and then calls `runSynced`, and
- * `PatternUpdater`'s instantiated mode moves the pointer with no setup at all —
- * leaving a root that boots through `PiecesController`'s cold-start setup
- * repair. Either way the pointer already names the pattern being set up, so
- * comparing pointers reports "same pattern" for what is in fact an update. A
+ * pointer before any setup runs. `PiecesController`'s roll-forward heal
+ * commits the candidate's identity and then calls `runSynced`, and when that
+ * second commit fails the root is left with its pointer moved and no setup at
+ * all — to boot through `PiecesController`'s cold-start setup repair. Either
+ * way the pointer already names the pattern being set up, so comparing
+ * pointers reports "same pattern" for what is in fact an update. A
  * caller that hands setup a pattern the pointer does not name yet — `cf piece
  * setsrc`, which positively asserts the pointer has NOT moved, or the ordinary
  * default-root apply — is already recognized as a change without this.
@@ -1790,8 +1790,9 @@ export class Runner {
 
   /**
    * In-flight unloadable-pointer roll-forward commits. Deliberately outside the
-   * scheduler, like `PatternUpdater`'s checks — `dispose()` settles them before
-   * the storage sessions they write through close. Bounded local commits only.
+   * scheduler, like `SourceReconciler`'s passes — `Runtime.dispose()` settles
+   * both before the storage sessions they write through close. Bounded local
+   * commits only.
    */
   #pendingPointerCommits = new Set<Promise<unknown>>();
 
@@ -4744,8 +4745,7 @@ export class Runner {
                     ],
                   );
                 });
-                // Track so dispose() can settle it before storage teardown
-                // (same contract as PatternUpdater's pending checks).
+                // Track so dispose() can settle it before storage teardown.
                 this.#pendingPointerCommits.add(rollForward);
                 rollForward.finally(() =>
                   this.#pendingPointerCommits.delete(rollForward)
