@@ -108,11 +108,11 @@ export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
 
 /**
-  * The container types that are part of `FabricValue`. Note that
-  * `FabricSpecialObject` is a combination of a container type
-  * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
-  * latter is _not_ part of this type.
-  */
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of a container type
+ * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
+ * latter is _not_ part of this type.
+ */
 export type FabricContainerValue =
   | FabricArray
   | FabricInstance
@@ -213,6 +213,57 @@ export interface FabricInstanceConstructor {
 export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
+
+//
+// `FabricValuePlus` and related types.
+//
+
+/**
+ * Type which is equivalent to `FabricValue`, except that it is compatible with
+ * one additional type, the `PlusType`: This type is a union of `FabricValue,
+ * `PlusType`, and both arrays and plain objects which recursively include this
+ * type as possible elements.
+ *
+ * **Note:** `FabricValuePlus<never>` is the same type as `FabricValue` itself.
+ */
+export type FabricValuePlus<PlusType> =
+  | FabricValue
+  | PlusType
+  | FabricContainerValuePlus<PlusType>;
+
+/**
+ * The container types that are part of `FabricValuePlus`.
+ */
+export type FabricContainerValuePlus<PlusType> =
+  | FabricArrayPlus<PlusType>
+  | FabricInstancePlus<PlusType>
+  | FabricPlainObjectPlus<PlusType>;
+
+/** Read-only array of `FabricValuePlus`es. */
+export interface FabricArrayPlus<PlusType>
+  extends ReadonlyArray<FabricValuePlus<PlusType>> {}
+
+/** Read-only object/record of `FabricValuePlus`es. */
+export interface FabricPlainObjectPlus<PlusType>
+  extends Readonly<Record<string, FabricValuePlus<PlusType>>> {}
+
+/**
+ * `FabricValuePlus` variant of `FabricInstance`.
+ *
+ * **Note:** From the typesystem perspective this is treated as an extension of
+ * `FabricInstance`, though depending on perspective this could be considered a
+ * type lie.
+ */
+export interface FabricInstancePlus<PlusType> extends FabricInstance {
+  // TODO(danfuzz): Figure out a better way to use TypeScript to define this
+  // type. See the "note" above for a brief bit about the problem.
+
+  /** @inheritDoc */
+  deepClone(frozen: boolean): FabricInstancePlus<PlusType>;
+
+  /** @inheritDoc */
+  shallowClone(frozen: boolean): FabricInstancePlus<PlusType>;
+}
 
 //
 // Concrete `FabricPrimitive` classes
