@@ -9054,9 +9054,12 @@ supply; OW29/OW32/OW34 closed):
     `viaLinkHop`); the LAZY read path (action bodies; eager reads
     unchanged) refuses with `UnresolvedInputError` (a
     `SchemaMismatchError` subclass, so the action-run boundary's
-    existing "argument did not resolve" disposal treats it
-    identically — output `undefined`, no action failure, re-triggered
-    when any registered read changes), UNLESS the reader's schema
+    existing "argument did not resolve" disposal treats it identically
+    — output `undefined`, no action failure, re-triggered when any
+    registered read changes; for a synchronous lift body the previous
+    result stands today, the pinning test's case has no previous
+    result, and the fix is on the branch
+    `codex/lift-refusal-disposition`), UNLESS the reader's schema
     declares a default (the stated absent value still flows — the
     `get() ?? fallback` idiom and a not-yet-produced computed are
     unchanged). A dead-end at the handle's OWN root doc is likewise
@@ -9065,11 +9068,12 @@ supply; OW29/OW32/OW34 closed):
     disposal; a pattern body MINTING the error is the FLAGGED
     pattern-facing-export question, still with the owner. Server
     matches client by construction (`servingPosture` gates nothing on
-    this path). Pinned: `packages/runner/test/
-    unresolved-input-lift.test.ts` (the hop-target dead-end disposes
-    and re-triggers on arrival; the stated-null control still flows),
-    the full schema-view suite green; serving-runtime match witnessed
-    by `integration/default-app.test.ts` ON 10/10 with ZERO
+    this path). Pinned:
+    `packages/runner/test/ unresolved-input-lift.test.ts` (the
+    hop-target dead-end disposes and re-triggers on arrival; the
+    stated-null control still flows), the full schema-view suite
+    green; serving-runtime match witnessed by
+    `integration/default-app.test.ts` ON 10/10 with ZERO
     `splitDefinitions` occurrences (the pre-fix crash surface). Spec:
     speculation.md §2's RULED unresolved-lift-input paragraph.
     Evidence: docs/history/plans/server-execution-v2/optimize/

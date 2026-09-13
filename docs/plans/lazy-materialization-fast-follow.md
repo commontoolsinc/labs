@@ -1,9 +1,11 @@
 # Lazy materialization fast-follow
 
-Status: F0, F2, and F3's evidence complete, F2 as an explicit deferral; F1 done
-as far as the deferral needed, with three bullets carried forward; F3's
-decision, F4, and F5 pending, the decision with the flag's owner and the rest
-behind it. This plan is the separate follow-up to the
+Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
+deferral needed, with three bullets carried forward; F3's evidence assembled,
+with the integration-suite gap recorded; F3's decision, F4, and F5 pending, the
+decision with the flag's owner and the rest behind it; the lift's synchronous
+refusal fix held on the branch `codex/lift-refusal-disposition`. This plan is
+the separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
 record](../history/plans/pattern-computation-cost-implementation.md) transferred
@@ -151,11 +153,12 @@ must not accidentally inherit it.
       production-like client/server behavior on isolated data. The runner
       suite has been run at both postures; the F3 record holds the
       off-posture result and the integration-suite gap.
-- [ ] Obtain the flag's owner's retirement decision with a concrete rollback
-      route. No live data mutation is implied by this plan; coordinate any live
-      deployment separately. The flag's owner, recorded in the registry's
-      [summary table](../development/EXPERIMENTAL_OPTIONS.md#summary-table),
-      holds the decision; the F3 record's [What a retirement decision needs to
+- [ ] Obtain the retirement decision from the flag's owner with a concrete
+      rollback route. No live data mutation is implied by this plan; coordinate
+      any live deployment separately. The flag's owner, recorded in the
+      registry's [summary
+      table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), holds the
+      decision; the F3 record's [What a retirement decision needs to
       name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
       lists what the decision has to settle.
 - [ ] Make the accepted lift behavior unconditional and remove the flag's
@@ -174,10 +177,10 @@ result the design specifies for a refusal the body raises (one raised during the
 argument read keeps the current disposition on that branch too), and with it the
 Pattern Update State and Baseline Integrity gate fails on the lunch poll's
 2026-07-30 vintage, where the derivation now refuses and stale state had stood.
-It waits on that gate's owner ruling on how the vintage expectation moves. Until
-it lands, the design plan's first Stage 5 item holds for an asynchronous body's
-rejection and for a caught refusal, but not for a refusal a synchronous body
-throws.
+It waits on a ruling from that gate's owner on how the vintage expectation
+moves. Until it lands, the design plan's first Stage 5 item holds for an
+asynchronous body's rejection and for a caught refusal, but not for a refusal a
+synchronous body throws.
 
 ### F5 — Measure and close
 

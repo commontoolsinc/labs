@@ -162,13 +162,16 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
      review's population audit).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
-     it) and the run's transaction aborts with it as the reason —
-     the same non-event disposal, re-triggering on the reads so far.
-     A pattern body cannot yet MINT the error itself (it is
-     runner-internal; a pattern-facing refusal export is a flagged
-     API question with the owner), so the built coverage is the
-     read-propagation path — the OW51 shape — with the deliberate
-     body-throw awaiting that export.
+     it) and the run's transaction aborts with it as the reason — the
+     same non-event disposal, re-triggering on the reads so far. Today
+     that holds for an asynchronous body's rejection; a refusal a
+     synchronous body throws reaches the runner's catch before its
+     post-run is assigned, so the previous result stands, and the fix
+     is on the branch `codex/lift-refusal-disposition`. A pattern body
+     cannot yet MINT the error itself (it is runner-internal; a
+     pattern-facing refusal export is a flagged API question with the
+     owner), so the built coverage is the read-propagation path — the
+     OW51 shape — with the deliberate body-throw awaiting that export.
 
   **The serving-side re-trigger, explicit (RULED 2026-08-21 — the
   option-3 ruling on the demand-closure fork):**
@@ -195,9 +198,10 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   (`UnresolvedInputError`); pinned in
   `packages/runner/test/unresolved-input-lift.test.ts` (the hop-target
   dead-end disposes and re-triggers on arrival; the stated-null
-  control still flows), with the serving-runtime match witnessed by
-  `integration/default-app.test.ts` greening ON (the surface whose
-  serving-runtime crash first recorded the bug —
+  control still flows; its case has no previous result, so it does not
+  pin that one is overwritten), with the serving-runtime match
+  witnessed by `integration/default-app.test.ts` greening ON (the
+  surface whose serving-runtime crash first recorded the bug —
   verification-coverage.md OW51).
 
 ## 3. Rendering

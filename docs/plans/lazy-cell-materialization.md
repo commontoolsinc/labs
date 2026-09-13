@@ -19,8 +19,8 @@ This plan makes that materialization lazy. A reader gets a proxy that resolves
 each path when it is touched, narrowing the schema as it descends and refusing
 the read when the data no longer matches. A transaction can be flipped into a
 mode where every cell read hands back such a proxy; the runner flips it for the
-transaction that runs a lift, and treats a schema refusal exactly as it treats
-an argument that did not resolve.
+transaction that runs a lift, and treats a schema refusal as it treats an
+argument that did not resolve, with the exception the status line names.
 
 ## Status convention
 
@@ -432,10 +432,10 @@ chain so a wrapper and the transaction it wraps answer alike.
 
 ### Stage 5 — Runner integration
 
-**Done, except a refusal a synchronous body throws.** The runner
-marks the action's transaction around argument materialization and the body,
-and unmarks it before the result is written, so diffing and the scheduler's own
-reads keep eager semantics.
+**Done, except a refusal a synchronous body throws.** The runner marks the
+action's transaction around argument materialization and the body, and unmarks
+it before the result is written, so diffing and the scheduler's own reads keep
+eager semantics.
 
 - [x] A refusal caught inside the body and found on the transaction afterwards,
       or rejected out of an asynchronous body, writes an undefined result
@@ -447,8 +447,8 @@ reads keep eager semantics.
       previous result stands;
       `packages/runner/test/unresolved-input-lift.test.ts` pins this arm and
       passes only because its case has no previous result to stand. The fix is
-      on the branch `codex/lift-refusal-disposition`, held for the Pattern
-      Update State and Baseline Integrity gate owner's ruling.
+      on the branch `codex/lift-refusal-disposition`, held for a ruling from the
+      Pattern Update State and Baseline Integrity gate's owner.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The
