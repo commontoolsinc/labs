@@ -437,14 +437,15 @@ marks the action's transaction around argument materialization and the body,
 and unmarks it before the result is written, so diffing and the scheduler's own
 reads keep eager semantics.
 
-- [ ] A refusal — thrown out of the body, or caught inside it and found on the
-      transaction afterwards — writes an undefined result through the ordinary
-      path. Logged at info level as a non-run, not reported as an action error.
-      Verified for an asynchronous body's rejection and for a caught refusal; a
-      synchronous throw reaches the catch before the post-run is assigned, so
-      the previous result stands. The fix is on the branch
-      `codex/lift-refusal-disposition`, held for the pattern vintage gate's
-      owner.
+- [x] A refusal caught inside the body and found on the transaction afterwards,
+      or rejected out of an asynchronous body, writes an undefined result
+      through the ordinary path. Logged at info level as a non-run, not reported
+      as an action error. Verified by reading the path; no test in the tree
+      asserts the result.
+- [ ] A refusal a synchronous body throws writes the same undefined result. It
+      reaches the catch before the post-run is assigned, so the previous result
+      stands. The fix is on the branch `codex/lift-refusal-disposition`, held
+      for the Pattern Update State and Baseline Integrity gate owner's ruling.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The

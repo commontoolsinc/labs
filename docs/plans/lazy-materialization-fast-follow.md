@@ -2,8 +2,8 @@
 
 Status: F0, F2, and F3's evidence complete, F2 as an explicit deferral; F1 done
 as far as the deferral needed, with three bullets carried forward; F3's
-decision, F4, and F5 pending, the first two with the flag's owner. This plan is
-the separate follow-up to the
+decision, F4, and F5 pending, the decision with the flag's owner and the rest
+behind it. This plan is the separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
 record](../history/plans/pattern-computation-cost-implementation.md) transferred
@@ -128,9 +128,11 @@ the prototype is worth taking up again. Three bullets above stay open because
 the deferred prototype was not verified against everything they name; the record
 lists what its tests pinned and what they did not, and whoever takes the
 prototype up finishes them. One design question is open for the handler path's
-owner, and a yes would reopen the deferral: whether touched-path conflict sets
-are the intended handler contract, or whether a handler should be able to
-declare a conflict set independently of what it materializes.
+owner: whether touched-path conflict sets are the intended handler contract, or
+whether a handler should be able to declare a conflict set independently of what
+it materializes. An owner ruling that they are the contract reopens the
+deferral; ruling the other way leaves it closed until a handler can declare that
+set.
 
 Use the existing transaction mark, schema-refusal state, snapshot view and
 event-finalization paths. Keep the mark's lifetime bounded to the argument/body
@@ -149,8 +151,9 @@ must not accidentally inherit it.
       off-posture result and the integration-suite gap.
 - [ ] Obtain the flag owner's retirement decision with a concrete rollback
       route. No live data mutation is implied by this plan; coordinate any live
-      deployment separately. The flag's owner is Bernhard Seefeld; the F3
-      record's [What a retirement decision needs to
+      deployment separately. The flag's owner, recorded in [Experimental
+      options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization),
+      holds the decision; the F3 record's [What a retirement decision needs to
       name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
       lists what the decision has to settle.
 - [ ] Make the accepted lift behavior unconditional and remove the flag's
@@ -165,11 +168,14 @@ Held beside this stage: at the F0 record's pinned revision the lift path drops a
 refusal its body throws synchronously, and the previous result stands ([The lift
 path](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md#the-lift-path)).
 The fix, on the branch `codex/lift-refusal-disposition`, writes the undefined
-result the design specifies, and with it the Pattern Update State and Baseline
-Integrity gate fails on the lunch poll's 2026-07-30 vintage, where the
-derivation now refuses and stale state had stood. It waits on that gate's owner
-ruling on how the vintage expectation moves. Until it lands, the design plan's
-first Stage 5 bullet holds for an asynchronous body only.
+result the design specifies for a refusal the body raises (one raised during the
+argument read keeps the current disposition on that branch too), and with it the
+Pattern Update State and Baseline Integrity gate fails on the lunch poll's
+2026-07-30 vintage, where the derivation now refuses and stale state had stood.
+It waits on that gate's owner ruling on how the vintage expectation moves. Until
+it lands, the design plan's first Stage 5 item holds for an asynchronous body's
+rejection and for a caught refusal, but not for a refusal a synchronous body
+throws.
 
 ### F5 — Measure and close
 
@@ -178,7 +184,9 @@ first Stage 5 bullet holds for an asynchronous body only.
       in per-access cost, handler cost, initialization and maintenance.
 - [ ] Repeat mounted headless/browser and same-/cross-space comparisons; keep
       instrumentation disabled for timing and retain correctness assertions.
-- [ ] Publish the evidence and any remaining limitation, update author/runtime guidance, and archive this plan and the completed design tracker under the [documentation lifecycle](../README.md).
+- [ ] Publish the evidence and any remaining limitation, update author/runtime
+      guidance, and archive this plan and the completed design tracker under the
+      [documentation lifecycle](../README.md).
 - [ ] Qualify the F1 bullet on refusal dispositions the way its neighbors are:
       the client-arm pins are the deferred prototype's tests, not in the tree,
       and the served arm rests on the existing not-run tests.

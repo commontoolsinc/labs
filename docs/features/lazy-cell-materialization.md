@@ -118,10 +118,11 @@ any `await` in an async one.
 
 The runner checks after the body returns and treats a recorded refusal as an
 argument that did not resolve: an undefined result through the ordinary result
-path, **not** an action error and not logged as one. A run that could not
-proceed on the data available is a non-event. The reads it took stay registered,
-including the one that failed, so it runs again when the data changes and may
-then find it valid.
+path, **not** an action error and not logged as one. A refusal a synchronous
+body throws is not disposed of this way today; the previous result stands. A run
+that could not proceed on the data available is a non-event. The reads it took
+stay registered, including the one that failed, so it runs again when the data
+changes and may then find it valid.
 
 The view withdraws the record for a refusal it catches itself — the optional
 property above, whose answer is absence rather than a refusal. It clears only
