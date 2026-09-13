@@ -36,13 +36,11 @@ export type * from "./api.ts";
 //
 
 /**
- * Single "layer" of fabric conversion -- the result of shallow conversion
- * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
- * shape but their contents may still contain values requiring further
- * conversion (e.g., `Error` instances in a `.cause` chain).
+ * Single "layer" of fabric validity. Arrays and objects have the right shape
+ * but their contents may not. Deep-immutability is maintained as a requirement.
  */
 export type FabricValueLayer = FabricValuePlus<
-  unknown[] | Record<string, unknown>
+  Readonly<unknown[] | Record<string, unknown>>
 >;
 
 /** A mutable array root whose elements remain `FabricValue`s. */
