@@ -171,15 +171,14 @@ describe("load by module identity (warm + version-bump recovery)", () => {
   });
 
   it("reconstructs a stored pattern an authoring gate now refuses", async () => {
-    // The 2026-08-25 estuary outage, pinned at its seam. This source's
-    // result declares a reserved key opaque — the shape every pre-`VNode`
-    // pattern stored, and the shape the opaque-reserved-key authoring gate
-    // now refuses. Admission stays refused (the first assertion). But the
+    // This source's result declares a reserved key opaque — a shape older
+    // stored patterns hold, and the shape the opaque-reserved-key authoring
+    // gate refuses. Admission stays refused (the first assertion). But the
     // cold-recovery path reloads durable stored bytes nobody can re-author,
     // under an identity pin that admits nothing new — a piece pinned to
     // such a pattern must keep loading, or a new authoring rule bricks
     // every deployed piece of an older shape at the next runtime-version
-    // bump: profiles fleet-wide, in the incident.
+    // bump.
     const legacy: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -630,19 +629,19 @@ describe("load by module identity (warm + version-bump recovery)", () => {
   });
 });
 
-describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
-  // CT-1838: pre-#4158 pipelines stored the helper-INJECTED pretransform form
-  // as the source-of-record. The current guard rejects the reserved
-  // `__cfHelpers` symbol, so without tolerance every pre-#4158 stored pattern
-  // bricks on cold load — and, via the default pattern, all piece creation in
-  // aged spaces. These tests pin the tolerance: exact-envelope stored docs
-  // self-heal on load (T1/T2), the authoring guard is untouched (T3), the
-  // tolerance is exact-envelope-only (T4), mixed and replicated closures work
-  // (T5/T6/T9), and a new pattern can fabric-import a legacy one (T10).
-  // Fixture shape is byte-calibrated against a REAL poisoned doc dumped
-  // from the production space (see packages/ts-transformers/test/core/
-  // legacy-envelope.test.ts): stored bytes = [HELPERS_STMT, source,
-  // usedStmt].join("\n"), identities computed over the INJECTED bytes.
+describe("legacy-envelope tolerance on cold load", () => {
+  // A stored pattern may hold the helper-INJECTED pretransform form as its
+  // source-of-record. The authoring guard rejects the reserved `__cfHelpers`
+  // symbol, so without tolerance every such stored pattern bricks on cold
+  // load — and, via the default pattern, all piece creation in aged spaces.
+  // These tests pin the tolerance: exact-envelope stored docs self-heal on
+  // load (T1/T2), the authoring guard is untouched (T3), the tolerance is
+  // exact-envelope-only (T4), mixed and replicated closures work (T5/T6/T9),
+  // and a new pattern can fabric-import a legacy one (T10). The fixture
+  // shape is byte-calibrated against a poisoned doc as a real space stores
+  // it (see packages/ts-transformers/test/core/legacy-envelope.test.ts):
+  // stored bytes = [HELPERS_STMT, source, usedStmt].join("\n"), identities
+  // computed over the INJECTED bytes.
 
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const runtimes: Runtime[] = [];
@@ -691,7 +690,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     ],
   };
 
-  // Simulate the PRE-FIX writer (appendix fixture recipe): stored source =
+  // Simulate the legacy writer: stored source =
   // the INJECTED bytes, identities computed over the injected bytes, no
   // compiled set. The authored compile below is used only to learn the
   // module structure/import graph; its (authored-byte) identities are
@@ -801,7 +800,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   it("T1: heals a legacy-envelope closure on cold load, preserving identity", async () => {
     const rt1 = newRuntime();
     const legacy = await buildLegacyClosure(rt1.harness as Engine, PROGRAM);
-    // The fixture really is envelope-form (both files: pre-fix injected ALL).
+    // The fixture really is envelope-form, both files.
     for (const m of legacy.modules) {
       expect(isLegacyInjectedEnvelope(m.source)).toBe(true);
     }
@@ -873,7 +872,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
 
     // Third runtime: warm by-identity load — NO cold recompile. No cold
     // compile also means no write-back, i.e. no source-doc writes on the
-    // second load (appendix L1-5).
+    // second load.
     const rt3 = newRuntime();
     const engine3 = rt3.harness as Engine;
     let coldCompiles = 0;
@@ -945,8 +944,8 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   });
 
   it("T4-pin: interior __cfHelpers INSIDE a valid envelope heals (chosen behavior)", async () => {
-    // Appendix L1-7/T4: the predicate is prefix+suffix only, so interior
-    // reserved-identifier use within a valid envelope is tolerated. Chosen:
+    // The predicate is prefix+suffix only, so interior reserved-identifier
+    // use within a valid envelope is tolerated. Chosen:
     // `__cfHelpers` grants nothing beyond what injection gives every
     // pattern, and this path only ever sees Merkle-verified stored input.
     // (injectCfHelpers itself refuses such source, so build it by hand —
@@ -987,7 +986,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
       "});",
     ].join("\n");
 
-    // (a) LEGACY entry importing an AUTHORED-form (post-fix) module.
+    // (a) LEGACY entry importing an AUTHORED-form module.
     const rtA = newRuntime();
     const mixedA = await storedModules("/main.tsx", [
       { name: "/util.ts", contents: utilAuthored },
@@ -1179,11 +1178,10 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   });
 
   it("T8c: a partial closure verify failure is never memoized", async () => {
-    // This is the regression that invalidated the original memo design. When
-    // a linked child has not arrived yet, loadSourceClosure omits that edge;
-    // verification reports a root hash mismatch rather than `missing`. The
-    // classification must therefore stay retryable regardless of the exact
-    // verification detail.
+    // When a linked child has not arrived yet, loadSourceClosure omits that
+    // edge; verification reports a root hash mismatch rather than `missing`.
+    // The classification must therefore stay retryable regardless of the
+    // exact verification detail.
     const rt = newRuntime();
     const rt2 = newRuntime();
     const fixture = await storedModules("/main.tsx", [
@@ -1433,11 +1431,11 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
   });
 
   it("T10: authoring-path compile of a NEW pattern fabric-importing the legacy fixture succeeds", async () => {
-    // Appendix L1-1: the warm/authoring path (`compileToRecordGraph`) has its
-    // own `injectMountSources` call feeding storage-fetched mounts into the
-    // transformer. Without tolerance INSIDE injectMountSources, a new pattern
-    // fabric-importing a legacy (envelope-form) pattern stays bricked even
-    // after the cold path is fixed.
+    // The warm/authoring path (`compileToRecordGraph`) has its own
+    // `injectMountSources` call feeding storage-fetched mounts into the
+    // transformer, so the tolerance must live INSIDE injectMountSources too:
+    // without it, a new pattern fabric-importing a legacy (envelope-form)
+    // pattern is bricked whatever the cold path does.
     const rt = newRuntime();
     const legacyDep = await buildLegacyClosure(rt.harness as Engine, {
       main: "/main.tsx",

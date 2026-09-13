@@ -1,52 +1,52 @@
-// OW45's lunch forever-park (CI run 33138358110, ON shard 7, the last
-// ON-skip entry): the runner's cross-space CHILD replication
-// (`replicate(parentSpace -> childSpace)`, runner.ts's CT-1687 call) can
-// race the SIBLING replication that is still supplying the parent space
-// itself — `compileOrGetPattern`'s content-cache hit fires
-// `replicate(cached.space -> parentSpace)` fire-and-forget, and the child
-// replication follows within the same handler run. The child's one-shot
-// origin read then found the parent empty, threw "source closure
-// unavailable in origin space", and nothing ever re-issued it (the
-// documented retry is "the next child creation" — a user creates their
-// profile once): the child space never received its program closure, its
-// 40 demanded roots deferred `pattern-unloadable` forever (the OW46
-// detector's 80-warn signature), the profile name never resolved, and the
-// host's `#lp-join-button` never rendered.
+// The runner's cross-space CHILD replication
+// (`replicate(parentSpace -> childSpace)`, issued by the handler run that
+// creates the child) can race the SIBLING replication that is still
+// supplying the parent space itself — `compileOrGetPattern`'s content-cache
+// hit fires `replicate(cached.space -> parentSpace)` fire-and-forget, and
+// the child replication follows within the same handler run. A bare
+// one-shot origin read at that point finds the parent empty, throws
+// "source closure unavailable in origin space", and nothing re-issues it
+// (the documented retry is "the next child creation" — a user creates
+// their profile once): the child space never receives its program closure,
+// its demanded roots defer `pattern-unloadable` forever, and the profile
+// never renders.
 //
 // The race is deterministic-by-construction here: the child replication is
 // issued synchronously after the sibling, and its origin read is strictly
-// less work than the sibling's read-plus-write, so unfixed it ALWAYS reads
-// the parent space before the sibling writes it. Three fixes cover the
-// three supplier geometries the arc's direct-CI probes mapped, and this
-// file pins all three:
+// less work than the sibling's read-plus-write, so a bare read ALWAYS sees
+// the parent space before the sibling writes it. Three mechanisms cover
+// the three geometries in which the supplier is at least under way, a
+// fourth covers the supplier that has not started, and this file pins all
+// four:
 //
 // - the SIBLING AWAIT: a replication awaits the earlier-registered
 //   replications INTO its origin space before reading
 //   (registration-ordered tickets — acyclic, event-driven, no timers);
-// - the FALLBACK ORIGIN (the direct-CI probe 2 geometry, run 33160430927:
-//   the parent space never receives the closure AT ALL, because
-//   `loadPatternByIdentity` serves the pattern from the in-memory
-//   artifact index with no per-space persist when another space's compile
-//   warmed it first): on a dry origin the replication retries its read
-//   against the spaces this manager durably persisted the entry into —
-//   content-addressed, so the copy is byte-identical and the verified
-//   read stays fail-closed;
-// - the IN-FLIGHT-COMPILE AWAIT (the direct-CI probe 4 geometry, run
-//   33165960083: the supplier compile itself is still mid-flight at
-//   consult time, so no persist exists anywhere and the fallback map is
-//   CORRECTLY dry): on a dry origin AND dry map, the replication awaits a
-//   snapshot of the in-flight compile registries once (cold compiles +
-//   by-identity loads; never `compileCacheWrites`, its own set), then
-//   re-consults; genuine absence still throws the same loud one-shot
-//   failure.
+// - the FALLBACK ORIGIN (the parent space never receives the closure AT
+//   ALL, because `loadPatternByIdentity` serves the pattern from the
+//   in-memory artifact index with no per-space persist when another
+//   space's compile warmed it first): on a dry origin the replication
+//   retries its read against the spaces this manager durably persisted the
+//   entry into — content-addressed, so the copy is byte-identical and the
+//   verified read stays fail-closed;
+// - the IN-FLIGHT-COMPILE AWAIT (the supplier compile itself is still
+//   mid-flight at consult time, so no persist exists anywhere and the
+//   fallback map is CORRECTLY dry): on a dry origin AND dry map, the
+//   replication awaits a snapshot of the in-flight compile registries once
+//   (cold compiles + by-identity loads; never `compileCacheWrites`, its
+//   own set), then re-consults; genuine absence still throws the same loud
+//   one-shot failure;
+// - the PARK (the supplier compile has not STARTED at consult time, so no
+//   await can see it): the failure is logged loudly once and the
+//   replication parks under the wanted identity, and a later persist
+//   record of that identity re-issues it.
 //
 // Layered-view note (why the race needs a missing SUPPLIER and not a
 // wave): a same-runtime compile's E4-awaited write-back into a wave's own
 // space is readable through the ordinary read path even before the wave
-// commits (executor-wave.ts's layered view) — verified while diagnosing
-// this — so only a supplier that never issued its writes can leave the
-// origin empty. The in-flight sibling and the never-persisting
-// index-served flow are exactly those suppliers.
+// commits (executor-wave.ts's layered view), so only a supplier that never
+// issued its writes can leave the origin empty. The in-flight sibling and
+// the never-persisting index-served flow are exactly those suppliers.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -72,7 +72,7 @@ const spaceB = (await Identity.fromPassphrase(
 )).did() as MemorySpace; // the parent space, supplied by the sibling
 const spaceC = (await Identity.fromPassphrase(
   "replication sibling race child space",
-)).did() as MemorySpace; // the child space (the lunch red's profile space)
+)).did() as MemorySpace; // the child space
 const spaceD = (await Identity.fromPassphrase(
   "replication sibling race empty origin",
 )).did() as MemorySpace; // an origin nothing ever supplies
@@ -104,8 +104,8 @@ const PROGRAM: RuntimeProgram = {
 
 // A LIBRARY module and an importer: compiled together, the persist's ENTRY
 // is the importer while the lib's pattern carries the LIB module's own
-// content identity — the CI probe shape, where the replicated entry is a
-// MODULE of the closure some other space's persist wrote.
+// content identity — the index-served shape, where the replicated entry is
+// a MODULE of the closure some other space's persist wrote.
 const LIB_SOURCE = [
   "import { pattern } from 'commonfabric';",
   "export const libPattern = pattern(() => ({ label: 'library child' }));",
@@ -321,9 +321,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   };
 
   it(
-    "a child replication issued while the sibling supplying its origin is " +
-      "still in flight materializes the child space anyway (OW45 lunch " +
-      "park: A -> B in flight, B -> C must wait for it, not one-shot-die)",
+    "materializes the child space for a child replication issued while " +
+      "the sibling supplying its origin is still in flight (A -> B in " +
+      "flight, B -> C waits for it instead of one-shot-dying)",
     async () => {
       // The compile's closure lands in A (E4-awaited).
       const pattern = await runtime.patternManager.compileOrGetPattern(
@@ -359,11 +359,11 @@ describe("closure replication: the in-flight sibling supplier race", () => {
             spaceB,
             spaceA,
           );
-          // The CHILD replication, issued synchronously after — the runner's
-          // CT-1687 call inside the same handler run. Its origin is B, whose
-          // supplier is still mid-read: unfixed, its one read of B finds
-          // nothing and the replication dies; C never becomes loadable — the
-          // lunch red's `pattern-unloadable` forever-park.
+          // The CHILD replication, issued synchronously after, inside the same
+          // handler run. Its origin is B, whose supplier is still mid-read:
+          // without the sibling await, its one read of B finds nothing and
+          // the replication dies; C never becomes loadable — the
+          // `pattern-unloadable` forever-park.
           supplier.patternManager.replicatePatternToSpace(
             pattern,
             spaceC,
@@ -377,7 +377,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         // The sibling-await's contract is FIRST-TRY determinism: the
         // child replication never fails at all. This line assertion —
         // not the end-state below — is what keeps the ticket-await
-        // mutation kill alive now that the 3b heal exists: with the
+        // mutation kill alive alongside the park/re-issue heal: with the
         // await deleted, the child's one-shot death is later HEALED by
         // the sibling's own persist record (the park/re-issue machinery
         // working as designed), so the end-state assertions go green —
@@ -419,11 +419,10 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "a DRY heuristic origin falls back to a recorded persist target — the " +
-      "CI probe-2 geometry: the parent space never received the closure " +
-      "(the in-memory index served the pattern with no per-space persist), " +
-      "and the child space must still materialize from a space the manager " +
-      "durably persisted into",
+    "falls back from a DRY heuristic origin to a recorded persist target: " +
+      "the parent space never received the closure (the in-memory index " +
+      "served the pattern with no per-space persist), and the child space " +
+      "still materializes from a space the manager durably persisted into",
     async () => {
       // The compile persists the closure into A — the manager records A as
       // a durable persist target for this entry.
@@ -436,8 +435,8 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       await runtime.patternManager.flushCompileCacheWrites();
 
       // Origin D is DRY: nothing ever persisted into it and nothing is in
-      // flight toward it — the exact CI shape (the parent ran the pattern
-      // from the in-memory index; its space holds no closure). Unfixed, the
+      // flight toward it (the parent ran the pattern from the in-memory
+      // index; its space holds no closure). Without the fallback, the
       // one-shot read of D dies and E parks pattern-unloadable forever.
       runtime.patternManager.replicatePatternToSpace(pattern, spaceE, spaceD);
       await runtime.patternManager.flushCompileCacheWrites();
@@ -466,10 +465,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "the fallback keys by MODULE identity, not just the persist entry — " +
+    "keys the fallback by MODULE identity, not just the persist entry: " +
       "a pattern served from the in-memory index carries its own module's " +
-      "identity while the space was supplied by its IMPORTER's persist " +
-      "(the direct-CI probe-3 geometry)",
+      "identity while the space was supplied by its IMPORTER's persist",
     async () => {
       // The main runtime compiles the IMPORTER program into A: the
       // persist's entry is the importer, and the lib rides the closure as
@@ -507,9 +505,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       if (libIdentity === undefined) throw new Error("no lib identity");
       expect(libIdentity).not.toBe(importerEntry.identity);
 
-      // The lib pattern arrives the CI way: served from the in-memory
-      // artifact index by its own module identity — no per-space persist
-      // happens on this path, so the named space (dry D) stays dry.
+      // The lib pattern is served from the in-memory artifact index by its
+      // own module identity — no per-space persist happens on this path, so
+      // the named space (dry D) stays dry.
       const libPattern = await runtime.patternManager.loadPatternByIdentity(
         libIdentity,
         "libPattern",
@@ -576,10 +574,10 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         // LOUD is half the contract, and the half a settle-and-empty
         // assertion cannot see: turning the failing throw into a silent
         // return also leaves the target empty. `closure-replication-failed`
-        // is the discriminating event every CI probe classification in this
-        // arc hung on — losing it blinds the next forensics pass with no
-        // lane going red. Exactly one line, because the replication is
-        // one-shot: no retry loop may hide behind the same log key.
+        // is the discriminating event a log forensics pass classifies by —
+        // losing it blinds that pass with no lane going red. Exactly one
+        // line, because the replication is one-shot: no retry loop may hide
+        // behind the same log key.
         const failures = lines.filter((line) =>
           line.key === "closure-replication-failed"
         );
@@ -587,13 +585,13 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         expect(failures[0].line).toContain(`entry=${entry.identity}`);
         expect(failures[0].line).toContain(`from=${spaceD}`);
         expect(failures[0].line).toContain(`to=${spaceF}`);
-        // The legacy reason string, preserved verbatim so the forensics
-        // greps written against the CI artifacts keep matching.
+        // The reason string is part of the contract: log forensics match
+        // on it verbatim.
         expect(failures[0].line).toContain(
           "source closure unavailable in origin space",
         );
 
-        // THE NO-STORM CONTROL for the ruled 3b close: genuine absence
+        // THE NO-STORM CONTROL for the park: genuine absence
         // parks LOUDLY (the park line is the wedge trace gaining an
         // ending, never losing its beginning) and then does NOTHING —
         // no re-issue, no heal, no second failure line, ever. The park
@@ -623,19 +621,19 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "the supplier compile is still MID-FLIGHT at consult time — the " +
-      "direct-CI probe-4 geometry (run 33165960083): no persist has " +
-      "completed anywhere, the module-keyed fallback map is CORRECTLY " +
-      "dry, and the replication must await the in-flight compile " +
-      "registries once and re-consult instead of one-shot-dying",
+    "awaits the in-flight compile registries once and re-consults when " +
+      "the supplier compile is still MID-FLIGHT at consult time: no " +
+      "persist has completed anywhere and the module-keyed fallback map " +
+      "is CORRECTLY dry, so the replication awaits instead of " +
+      "one-shot-dying",
     async () => {
       // R1's compile supplies only the pattern OBJECT (the entry ref rides
       // the module-level side table). Everything else runs on a SECOND
       // manager whose fallback map is empty and whose origin has no
-      // replications into it, ever — the F1 lesson: neither a pre-populated
-      // map nor an older-sibling await may be able to rescue the child, so
-      // the once-await is load-bearing alone and a refactor that drops it
-      // reds this step.
+      // replications into it, ever: neither a pre-populated map nor an
+      // older-sibling await may be able to rescue the child, so the
+      // once-await is load-bearing alone and a refactor that drops it reds
+      // this step.
       const pattern = await runtime.patternManager.compileOrGetPattern(
         PROGRAM,
         spaceA,
@@ -659,12 +657,11 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         // compile is then provably IN FLIGHT (it registered in
         // `inProgressCompilations` synchronously at `compileOrGetPattern`)
         // and provably PRE-PERSIST (its E4 persist sits far behind the
-        // gate), which is exactly probe 4's timeline: compile waves
-        // running, zero persists anywhere, the fallback map genuinely
-        // empty. No sleeps anywhere — the gate releases on the
-        // replication's own announcement (below), and the fix's
-        // allSettled-then-re-consult is what makes the record visible
-        // before the re-read, deterministically.
+        // gate) — this geometry's timeline: compile waves running, zero
+        // persists anywhere, the fallback map genuinely empty. No sleeps
+        // anywhere — the gate releases on the replication's own announcement
+        // (below), and the allSettled-then-re-consult is what makes the
+        // record visible before the re-read, deterministically.
         const compileStarted = Promise.withResolvers<void>();
         const compileReleased = Promise.withResolvers<void>();
         const realCompile = harnessSpy.compileToRecordGraph;
@@ -703,9 +700,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         const lines = await captureManagerLines(
           async () => {
             // The child replication from a forever-dry origin, issued while
-            // the supplier compile is mid-flight. Unfixed, its consult finds
-            // origin AND map dry and it one-shot-dies; C parks
-            // pattern-unloadable forever (the lunch red).
+            // the supplier compile is mid-flight. Without the in-flight await,
+            // its consult finds origin AND map dry and it one-shot-dies; C
+            // parks pattern-unloadable forever.
             rt2.patternManager.replicatePatternToSpace(
               pattern,
               spaceC,
@@ -716,11 +713,11 @@ describe("closure replication: the in-flight sibling supplier race", () => {
           },
           (entry) => {
             // Release the gate the moment the dry consult announces itself:
-            // post-fix via the once-await's own warn (the compile then
-            // completes, records G into the fallback map, and the
-            // re-consult finds it); pre-fix / await-neutralized via the
-            // one-shot failure line, so the step finishes fast and red
-            // instead of hanging on the gate.
+            // via the once-await's own warn (the compile then completes,
+            // records G into the fallback map, and the re-consult finds
+            // it), or — with the await neutralized — via the one-shot
+            // failure line, so the step finishes fast and red instead of
+            // hanging on the gate.
             if (
               entry.key === "closure-replication-await-inflight" ||
               entry.key === "closure-replication-failed"
@@ -756,10 +753,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         }
 
         // The once-await announced itself exactly once, with the in-flight
-        // census that discriminates geometry 3 from the register's
-        // pre-declared 3b residue (a red with `compilations=0
-        // byIdentityLoads=0` on this line is 3b: the supplier compile had
-        // not STARTED by consult time).
+        // census that discriminates this geometry from the not-yet-started
+        // supplier (a red with `compilations=0 byIdentityLoads=0` on this
+        // line means the supplier compile had not STARTED by consult time).
         const awaited = lines.filter((line) =>
           line.key === "closure-replication-await-inflight"
         );
@@ -783,11 +779,10 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "a THROWING fallback read is skipped loudly, never loop-aborting — " +
-      "the next recorded candidate still rescues the child (the #6484 " +
-      "review's F5-1 contract: a store-level error on one candidate " +
-      "must not cost the replication its remaining byte-identical " +
-      "copies)",
+    "skips a THROWING fallback read loudly, never loop-aborting: the " +
+      "next recorded candidate still rescues the child, so a store-level " +
+      "error on one candidate does not cost the replication its " +
+      "remaining byte-identical copies",
     async () => {
       // R1's compile supplies the pattern OBJECT; rt2 is the manager
       // under test with its own fallback map.
@@ -857,9 +852,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         const lines = await captureManagerLines(
           async () => {
             // Origin D is dry; the map holds {G, H}; G's read THROWS.
-            // Unfixed (a bare `await readOrigin(fallback)`), the store
-            // error aborts the whole loop and the child one-shot-dies
-            // with H untried; fixed, the loop logs and continues to H.
+            // With a bare `await readOrigin(fallback)`, the store error
+            // would abort the whole loop and the child one-shot-die with H
+            // untried; the loop instead logs and continues to H.
             rt2.patternManager.replicatePatternToSpace(
               pattern,
               spaceC,
@@ -907,19 +902,18 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "a failed replication PARKS and a later matching persist record " +
-      "RE-ISSUES it — the ruled 3b close (geometry 3b, direct-CI probe 5, " +
-      "run 33198257149: the supplier compile had not STARTED at consult " +
-      "time, so no await can see it; the failure must be healed by the " +
-      "supply's own record event, with the loud one-shot line unchanged)",
+    "PARKS a failed replication and RE-ISSUES it on a later matching " +
+      "persist record: the supplier compile had not STARTED at consult " +
+      "time, so no await can see it, and the supply's own record event " +
+      "heals the failure, with the loud one-shot line unchanged",
     async () => {
       // R1's compile supplies only the pattern OBJECT (the entry ref
       // rides the module-level side table). rt2 — the manager under test
       // — has persisted NOTHING: dry fallback map, no in-flight compiles,
-      // origin D never supplied. That is 3b's defining state: every
+      // origin D never supplied. That is the park's defining state: every
       // rescue the once-await family owns is structurally absent, and
-      // pre-fix the replication one-shot-dies with the child space empty
-      // forever.
+      // without the park the replication one-shot-dies with the child
+      // space empty forever.
       const pattern = await runtime.patternManager.compileOrGetPattern(
         PROGRAM,
         spaceA,
@@ -942,7 +936,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
           rt2.patternManager.replicatePatternToSpace(pattern, spaceC, spaceD);
           await rt2.patternManager.flushCompileCacheWrites();
 
-          // THE SUPPLIER ARRIVES — after the failure, the 3b timeline:
+          // THE SUPPLIER ARRIVES — after the failure:
           // rt2's own compile of the same program persists into G and
           // records every module identity. The record is the wake: the
           // parked replication re-issues (fresh ticket, full
@@ -1004,7 +998,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         expect(healed.length).toBe(1);
         expect(healed[0].line).toContain(`entry=${entry.identity}`);
         expect(healed[0].line).toContain(`to=${spaceC}`);
-        // 3b's discriminator stands: the registries were EMPTY at the
+        // The park's discriminator stands: the registries were EMPTY at the
         // failing consult (no await-inflight announcement) — the heal is
         // the record event's doing, not a hidden once-await rescue.
         expect(
@@ -1027,8 +1021,8 @@ describe("closure replication: the in-flight sibling supplier race", () => {
     async () => {
       // R1 compiles the importer program into A (durable); rt2 warm-loads
       // the LIB pattern by its own module identity from A — the load path
-      // persists NOTHING and records NOTHING (that is the lunch
-      // geometry's supplier hole), so rt2's map stays dry while its
+      // persists NOTHING and records NOTHING (the index-served supplier
+      // hole), so rt2's map stays dry while its
       // in-memory index can serve the lib pattern object.
       const importer = await runtime.patternManager.compileOrGetPattern(
         PROGRAM_WITH_LIB,
@@ -1118,12 +1112,11 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "a failure registering while the map ALREADY holds a usable record " +
-      "re-issues IMMEDIATELY instead of parking — review-6502 F1's " +
-      "interleaving (b): the supplier completed inside the failing " +
-      "attempt's read window, its record event has already passed and " +
-      "may never recur, so a park would wait forever on yesterday's " +
-      "event",
+    "re-issues IMMEDIATELY instead of parking when a failure registers " +
+      "while the map ALREADY holds a usable record: the supplier " +
+      "completed inside the failing attempt's read window, its record " +
+      "event has already passed and may never recur, so a park would " +
+      "wait forever on yesterday's event",
     async () => {
       // rt2 both holds the pattern object and recorded a real persist:
       // its own compile into G. The failing attempt then cannot USE that
@@ -1546,9 +1539,9 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "the park registry is FIFO-capped: the 65th distinct WANTED identity " +
+    "caps the park registry FIFO: the 65th distinct WANTED identity " +
       "evicts the OLDEST loudly, and the evicted child drops back to the " +
-      "pre-ruling loud one-shot wedge — a later record of ITS identity " +
+      "loud one-shot wedge — a later record of ITS identity " +
       "wakes nothing, while a SURVIVING park's record still heals (so the " +
       "silence is the eviction, not a broken wake)",
     async () => {
@@ -1588,7 +1581,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
 
       // The pattern objects come from the COMPILING manager's in-memory
       // artifact index — no storage read, no persist, the same index-served
-      // shape the lunch geometry hands the replication. rt2, the manager
+      // shape the motivating flow hands the replication. rt2, the manager
       // under test, therefore still has an empty fallback map, so every
       // replication below is a genuine supply failure and parks.
       const libPatterns: unknown[] = [];

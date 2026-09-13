@@ -7,16 +7,16 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
-// CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
+// An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
 // compiles to a verified-binding `writeAuthorizedBy` claim. At commit the CFC
 // verifier resolves the authoring handler's identity — sourceFile/bindingPath
 // — from the function's content-addressed provenance (`bindingIdentity`,
 // recorded by Engine.#recordModuleProvenance from the transformer's
 // `__cfBindVerifiedBinding` annotation on the FACTORY object). A handler
 // declared as a NON-exported module-scope const (the shape used throughout
-// system/profile-home.tsx) surfaces through the `__cfReg` registration sink —
-// the gap this test guards is that sink registration carrying the binding
-// identity, without which the write is rejected with
+// system/profile-home.tsx) surfaces through the `__cfReg` registration sink,
+// and that sink registration must carry the binding identity, without which
+// the write is rejected with
 // "writeAuthorizedBy requires a trusted verified binding identity".
 //
 // Scope: these tests assert the writer identity is REGISTERED (provenance
@@ -44,7 +44,7 @@ const INTERNAL_SRC = `/// <cts-enable />
   });
 `;
 
-// Same handlers but EXPORTED — worked before the fix; guards against regression.
+// The same handlers, EXPORTED: the identity must resolve on that path too.
 const EXPORTED_SRC = INTERNAL_SRC.replace(
   / {2}const set/g,
   "  export const set",
@@ -100,7 +100,7 @@ async function bindingPathsResolvedDuring(
   return resolved;
 }
 
-describe("CT-1665: verified binding metadata for non-exported handlers", () => {
+describe("verified binding metadata for non-exported handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const newRuntime = () => {
