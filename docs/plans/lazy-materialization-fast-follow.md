@@ -1,8 +1,11 @@
 # Lazy materialization fast-follow
 
 Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
-deferral needed, with three bullets carried forward; F3, F4, and F5 pending.
-This plan is the separate follow-up to the
+deferral needed, with three bullets carried forward; F3's evidence assembled,
+with the integration-suite gap recorded; F3's decision, F4, and F5 pending, the
+decision with the flag's owner and the rest behind it; the lift's synchronous
+refusal fix held, as the design plan's Stage 5 records. This plan is the
+separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
 record](../history/plans/pattern-computation-cost-implementation.md) transferred
@@ -23,9 +26,10 @@ integration problem.
 Complete the outstanding work in this plan after the computation-cost arc, with
 independent PRs and acceptance evidence. Keep handler semantics separate from
 removing the lift-path rollout switch: either can expose a correctness issue the
-other does not address. The flag's owner and removal condition remain recorded
-in [Experimental
-options](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization).
+other does not address. The removal condition and the flag's author remain
+recorded in the registry's [summary
+table](../development/EXPERIMENTAL_OPTIONS.md#summary-table), which names
+Bernhard Seefeld.
 
 ## Execution tracker
 
@@ -38,7 +42,7 @@ in the same PR as behavior changes.
 | F0   | Computation-cost acceptance | Fixed baseline and remaining-call-site inventory                      | Done: [F0 baseline](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md)                                                                 |
 | F1   | F0                          | Handler materialization contract and measured prototype               | Done as far as the deferral needed, three bullets carried forward: [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)        |
 | F2   | F1                          | Reviewed handler integration, or an explicit evidence-backed deferral | Done: deferred, with the blocker and the conditions for revisiting in the [F1 record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md) |
-| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag owner                 |
+| F3   | F0                          | Default-on rollout evidence and flag-retirement decision              | Evidence: [F3 record](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md); decision pending with the flag's owner               |
 | F4   | F3                          | Remove the lift rollout switch and redundant fallback dispatch        | Pending                                                                                                                                                                |
 | F5   | F2, F4                      | Repeat measurement matrix, update guidance, and archive plans         | Pending                                                                                                                                                                |
 
@@ -84,10 +88,12 @@ which a view would narrow.
       invalidity; do not consume an event that never ran or commit partial
       handler writes as a successful handling. Defined for all four; the touched
       required-field, optional-mismatch, and caught-refusal arms are pinned for
-      client and served dispatches, and a cold linked document parked on its
-      load is defined but not pinned; a client dispatch under server execution
-      with no served carriage seals its skip rather than withdrawing it, and a
-      refusal after a write on that arm is left open.
+      client dispatches by the deferred prototype's tests, which are not in the
+      tree, and for served dispatches only as far as the existing not-run tests
+      reach, and a cold linked document parked on its load is defined but not
+      pinned; a client dispatch under server execution with no served carriage
+      seals its skip rather than withdrawing it, and a refusal after a write on
+      that arm is left open.
 - [ ] Pin receipt identity, duplicate delivery, retry, and effect behavior in
       both client and server execution. Test that a refusal after a write does
       not publish that write or an external effect. Retry, the receipt on the
@@ -126,7 +132,12 @@ stops conflicting with its commit. The record names the conditions under which
 the prototype is worth taking up again. Three bullets above stay open because
 the deferred prototype was not verified against everything they name; the record
 lists what its tests pinned and what they did not, and whoever takes the
-prototype up finishes them.
+prototype up finishes them. One design question is open for the handler path's
+owner: whether touched-path conflict sets are the intended handler contract, or
+whether a handler should be able to declare a conflict set independently of what
+it materializes. An owner ruling that they are the contract reopens the
+deferral; ruling the other way leaves it closed until a handler can declare that
+set.
 
 Use the existing transaction mark, schema-refusal state, snapshot view and
 event-finalization paths. Keep the mark's lifetime bounded to the argument/body
@@ -143,9 +154,14 @@ must not accidentally inherit it.
       production-like client/server behavior on isolated data. The runner
       suite has been run at both postures; the F3 record holds the
       off-posture result and the integration-suite gap.
-- [ ] Obtain the flag owner's retirement decision with a concrete rollback
-      route. No live data mutation is implied by this plan; coordinate any live
-      deployment separately.
+- [ ] Obtain the retirement decision from the flag's owner with a concrete
+      rollback route. No live data mutation is implied by this plan; coordinate
+      any live deployment separately. Bernhard Seefeld, whom the registry's
+      [summary table](../development/EXPERIMENTAL_OPTIONS.md#summary-table)
+      records as the flag's author, holds the decision as its owner; the F3
+      record's [What a retirement decision needs to
+      name](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md#what-a-retirement-decision-needs-to-name)
+      lists what the decision has to settle.
 - [ ] Make the accepted lift behavior unconditional and remove the flag's
       registry entry, environment/runtime option, obsolete conditional dispatch,
       and flag-specific documentation and tests. Retain substantive semantic
@@ -153,6 +169,19 @@ must not accidentally inherit it.
 - [ ] Run affected package suites, authoritative pattern checks when patterns
       change, repository type/format/lint checks, and applicable independent
       gates. Require clean antagonistic and Cubic reviews before merging.
+
+Held beside F3/F4: the lift path drops a refusal its body throws synchronously,
+and the previous result stands (measured at the F0 record's pinned revision,
+[The lift
+path](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md#the-lift-path)).
+The fix, on the branch the design plan's [Stage 5](lazy-cell-materialization.md)
+names, writes the undefined result the design specifies for a refusal the body
+raises (one raised during the argument read keeps the current disposition on
+that branch too), and with it the Pattern Update State and Baseline Integrity
+gate fails, because the fix clears a persisted derived value the defect had
+preserved, as that record's lift-path section says. It waits on a ruling from
+that gate's owner on how the vintage expectation moves. Until it lands, the
+design plan's Stage 5 records which arms hold.
 
 ### F5 — Measure and close
 
