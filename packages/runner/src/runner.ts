@@ -9707,6 +9707,14 @@ export class Runner {
    *   rather than introduced: it follows from the link's own schema, is
    *   unmeasured, and wants a decision about what a start pull should demand.
    *
+   * Which of the two a given result gets is therefore decided by whether its
+   * link carries a schema, and that is not uniform: a non-space output scope
+   * builds its cell through `getCell(space, _resultFor, undefined, tx)`, so a
+   * scoped result pulls schemaless and walks, while a space-scoped one may not.
+   * The same interaction can be safe under one scope and not the other, which
+   * is the strongest argument for settling this deliberately rather than by
+   * whichever direction a caller happens to be patched in.
+   *
    * What is settled is that narrowing this FURTHER, by passing the pattern's
    * result schema explicitly, is not the way: it measured about a quarter off a
    * thread open on the unified inbox and was reverted for exactly the hazard

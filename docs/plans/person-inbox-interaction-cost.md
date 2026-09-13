@@ -416,6 +416,15 @@ shipping: it is unmeasured, it would make every result pull a deep walk, and it
 belongs to whoever owns what a start pull should demand rather than to a
 performance change.
 
+Review turned up one more fact that sharpens it: the behaviour is **not uniform
+across output scopes**. A non-space scope builds its result cell through
+`getCell(space, _resultFor, undefined, tx)`, so a scoped result pulls
+schemaless and takes the deep walk — paying the cost but demanding everything —
+while a space-scoped result whose link carries a schema does not, and skips
+undeclared properties. The same interaction is therefore safe under one scope
+and not the other. That is the argument for deciding this once, deliberately,
+rather than by whichever direction the next caller is patched in.
+
 **What is left, and two corrections that go with it.**
 
 *First correction.* An earlier draft called "stop the second traversal" the most
