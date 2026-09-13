@@ -108,7 +108,7 @@ export type FabricContainerValue =
 export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
- * Object/record of `FabricValue`s.
+ * Read-only object/record of `FabricValue`s.
  *
  * The names `__proto__` and `constructor` are refused at the boundaries where
  * values enter or leave storage, so no `FabricPlainObject` carries one. The
