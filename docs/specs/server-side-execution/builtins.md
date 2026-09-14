@@ -103,6 +103,27 @@ covers it or the node stops. A rejected release check
 releases a claim with no dispatched owner. Accepted request records retire when
 their work settles.
 
+Served `llmDialog` captures the issuing handler's identity for transcript reads,
+claim checks, and turn-completion writes. Each asynchronous read phase uses a
+fresh transaction for that identity. Cell handles are shared per symbolic
+scope, while active turns are tracked per resolved result instance and retire
+when their model, tool, and error-write work settles. Stream markers are
+initialized independently in each instance. A cancellation takes effect only
+after its transaction and wave accept; withdrawing it leaves the accepted turn
+running. Refusal restores a binding while its attempt owns that physical
+publication coordinate; an accepted selection of another target supersedes it,
+while a withdrawn publication does not. Refusal does not append an assistant
+response for an uncommitted user message. Accepted claims retain local ownership
+before outbox dispatch, even when the stored `lastActivity` timestamp is older
+than the five-minute threshold for considering another replica's request
+inactive (`REQUEST_TIMEOUT` in `llm-dialog.ts`). Graph stop aborts active turns
+and clears matching accepted claims; later acceptance or
+dispatch cannot restart the stopped dialog. A provider release rejection clears
+its undispatched claim without replacing an active turn. These lifecycle
+guarantees do not establish actor partitioning for management-tool reads or the
+tool input integrity gate; those remain tracked under verification-coverage.md
+OW28 and OW53.
+
 Served `llm`, `generateText`, and `generateObject` bind lifecycle state and
 outbox identity to the resolved output instance. The pending request writes
 `requestHash` with `pending: true`; only a settled result or error constitutes a
