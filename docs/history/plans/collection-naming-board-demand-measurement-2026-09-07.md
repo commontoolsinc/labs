@@ -779,10 +779,10 @@ documents were not compared.
 
 ## Stated limitations
 
-- **Board size and content.** N ran from 2 to 40, one board per arm and size,
-  each in its own space. Titles were `Item <n>` and bodies were
-  `Body of item <n>. ` followed by 400 `x` characters. One member was measured,
-  the first filed.
+- **Board size and content.** N ran from 2 to 40 (§ The ladder). No block here
+  shows the fixture itself — the items' titles and bodies, how boards were
+  assigned to spaces, or which member's walk was the one measured — and the
+  rigs that built it are not in the tree.
 - **The exemplar, not Topics.** This question was measured on
   `packages/patterns/collection-naming/`, not on the Topics patterns.
 - **A query, not a resume.** The instrument is one `graph.query` rooted at a

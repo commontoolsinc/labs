@@ -24,10 +24,10 @@ This block is LIVE: the change that moves a stage updates it here.
 
 ### What remains, and none of it is built
 
-Every stage above is on main, and a collection that adopts `naming.ts` today
-gets member names end to end: allocation, resolution at the CLI, the shell
-opening `/<space>/top/42`, `#42` in the editor. **That is not the same as the
-work being finished.** Five things are outstanding, and each still needs
+The stages the table marks on main give a collection that adopts `naming.ts`
+member names end to end: allocation, resolution at the CLI, the shell opening
+`/<space>/top/42`, `#42` in the editor. **That is not the same as the work
+being finished.** Five things are outstanding, and each still needs
 execution.
 
 1. **Decision 14 — a member takes one input naming its board.** Ruled, and
