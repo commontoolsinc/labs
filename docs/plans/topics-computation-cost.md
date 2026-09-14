@@ -69,20 +69,27 @@ generations. Preserve linked record identity for editing handlers.
 
 Reactive callback operators (`.map()`, `.filter()`, `.flatMap()`, `.count()`
 with a predicate, `.minBy()`, `.maxBy()`, `.groupBy()`, and `.keyBy()`) lower to
-nested patterns numbered by position in their file, as sections
-[9.4](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#94-array-method-strategy),
-[7.2](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#72-emitter-behaviors),
+nested patterns, as sections
+[9.4](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#94-array-method-strategy)
 and
+[7.2](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#72-emitter-behaviors)
+of the transformer spec describe. The
+[hoisting transformer](../../packages/ts-transformers/src/transformers/builder-call-hoisting.ts)
+numbers those patterns per file, using the per-prefix counters section
 [11.3](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#113-hoist-placement-and-tdz-ordering)
-of the transformer spec describe, and stored state records those names. In each
-Topics source file, new operators go after the existing ones, and removing or
-reordering one has the same effect as inserting one. A new subpattern that uses
-such an operator counts where it is declared: declare it after the existing
-operator sites, or, where it cannot be, as for a subpattern the default export
-calls, put it in its own module, whose operators are numbered separately. The
+describes, and stored state records the numbers. In each Topics source file, the
+existing operators' hoists keep their numbers and bodies, and the check is
+mechanical: compare the ordered `__cfPattern_N` hoists that
+`cf check --show-transformed` prints for the baseline and for each candidate. A
+new operator, or a subpattern that uses one, keeps the invariant when declared
+after the existing operator sites, or when it lives in a pattern in its own
+module, whose operators are numbered separately; in `topic.tsx`, an operator the
+view reads, such as T4's maintained count, comes before the view's operators and
+takes the own-module route. An operator nested inside an existing operator's
+callback is numbered before that operator, so it breaks the invariant. The
 [pattern update gates](../specs/pattern-update-testing.md) do not establish that
-such a change is safe, so a candidate unable to keep that order has T6 check the
-rows those operators produce on the clone.
+a changed hoist is safe: T5 records the comparison for each accepted change, and
+T6 checks the rows of any operator whose hoist changed.
 
 ## Execution tracker
 
@@ -159,7 +166,9 @@ implementation and prototypes can begin earlier.
       regression read budgets, run all relevant authored/package/integration
       tests, preserve compatibility baselines, pass the
       [pattern update gates](../specs/pattern-update-testing.md), and update
-      maintained docs. Produce matched before/after demos and reports. Each
+      maintained docs. Produce matched before/after demos and reports, and
+      record each accepted change's hoist comparison under
+      [compatibility requirements](#compatibility-requirements). Each
       implementation PR needs a review through the
       [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
       review on its final head before merge. Exit: all accepted T1–T4 changes
@@ -306,10 +315,11 @@ board's package does not upgrade those existing children.
 6. Verify authored content independently of `space verify --expect-migration`:
    that command detects removal, not in-place clobbering. Check board
    membership, ordering, names, backlinks, titles/bodies, attribution,
-   comment/link records, handlers, and settled background churn. Check that each
-   topic's stored `topicStateVersion` reaches `TOPIC_STATE_VERSION`, or record
-   the step still pending and why. Stop the clone server, reset, restart, and
-   repeat from the pristine snapshot for a second clean pass.
+   comment/link records, handlers, settled background churn, and the rows of any
+   operator whose hoist the T5 comparison shows changed. Check that each topic's
+   stored `topicStateVersion` reaches `TOPIC_STATE_VERSION`, or record the step
+   still pending and why. Stop the clone server, reset, restart, and repeat from
+   the pristine snapshot for a second clean pass.
 7. Before live execution, record target order, link-binds, exact package hashes,
    retained source revisions, expected schema/data changes, acceptance commands,
    snapshot location, and rollback actions. Coordinate legacy writers and client
