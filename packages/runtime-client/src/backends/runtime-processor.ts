@@ -44,6 +44,7 @@ import {
   readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
+import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   ACLManager,
   type BrowserWorkerPresetParams,
@@ -83,7 +84,6 @@ import {
   SlugResolutionError,
   SpaceHostValidationError,
 } from "@commonfabric/runner";
-import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -94,8 +94,13 @@ import {
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
-import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import {
+  NameSchema,
+  rendererVDOMSchema,
+  viewPieceSchema,
+} from "@commonfabric/runner/schemas";
 import { linkRefPayload } from "@commonfabric/runner/shared";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -108,7 +113,25 @@ import {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { postToClient } from "./post-to-client.ts";
+import {
+  postContextualRuntimeError,
+  runtimeErrorPost,
+} from "./runtime-error.ts";
+import {
+  assertFabricLoggerFlags,
+  createCellRef,
+  createPieceRef,
+  getCell,
+  mapCellRefsToSigilLinks,
+} from "./utils.ts";
+import {
+  type ClientId,
+  clientKeyPrefix,
+  clientScopedKey,
+  ownerClient,
+  type WorkerClient,
+} from "./worker-client.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -223,7 +246,6 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
-
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
 import {
   normalizeOrigin,
@@ -231,25 +253,6 @@ import {
   securityContextDifferences,
 } from "@/shared/security-context.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
-import { postToClient } from "./post-to-client.ts";
-import {
-  postContextualRuntimeError,
-  runtimeErrorPost,
-} from "./runtime-error.ts";
-import {
-  type ClientId,
-  clientKeyPrefix,
-  clientScopedKey,
-  ownerClient,
-  type WorkerClient,
-} from "./worker-client.ts";
-import {
-  assertFabricLoggerFlags,
-  createCellRef,
-  createPieceRef,
-  getCell,
-  mapCellRefsToSigilLinks,
-} from "./utils.ts";
 
 /** Subscribe the worker bridge to complete terminal-attention outcomes. Keeping
  * the filter and wire projection here makes the host boundary independently
@@ -414,19 +417,17 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
 }
 
 /**
- * Worker/host server-execution posture agreement (review 2026-08-11
- * m7). The host declares its flag posture in
- * `InitializationData.experimental.serverExecution` (typed since this
- * fix — it previously rode as an untyped excess property, and
- * `data.experimental ?? {}` silently reverted an undeclared worker to
- * OFF while a flag-ON host diverted handler commits: F10 alive in one
- * realm and dead in the other). The worker asserts the CONSTRUCTED
- * runtime's resolved posture matches the declaration and refuses
- * initialization loudly on divergence — in either direction (a worker
- * whose realm-ambient default flipped ON under a host that declared
- * nothing is the same divergence mirrored). OFF-arm-neutral: a host
- * that declares nothing and a worker that resolves OFF agree, which is
- * every pre-existing deployment. Exported for testing.
+ * Asserts that the constructed runtime's resolved server-execution posture
+ * matches the one the host declared in
+ * `InitializationData.experimental.serverExecution`, and throws on a
+ * divergence in either direction: a host that declared ON over a worker
+ * that resolved OFF, or a worker whose realm-ambient default flipped ON
+ * under a host that declared nothing. Either way the F10 client contract
+ * (`docs/specs/server-side-execution/`) would run in one realm and not the
+ * other, with handler commits diverted on one side only, so initialization
+ * refuses rather than proceeding. A host that declares nothing and a worker
+ * that resolves OFF agree, so a deployment that sets no flag passes.
+ * Exported for testing.
  */
 export function assertServerExecutionPostureAgreement(
   declared: InitializationData["experimental"],
@@ -440,16 +441,16 @@ export function assertServerExecutionPostureAgreement(
         `${hostOn ? "ON" : "OFF (or absent)"} but the worker runtime ` +
         `resolved ${workerOn ? "ON" : "OFF"} — a divergent posture runs ` +
         "the F10 client contract in one realm and not the other " +
-        "(review 2026-08-11 m7; docs/specs/server-side-execution/)",
+        "(see docs/specs/server-side-execution/)",
     );
   }
 }
 
 /**
- * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
- * params (CT-1814): the shared first-party posture (CFC pins,
- * patternEnvironment from apiUrl) lives in the preset; this function only
- * carries what the host actually decided. Exported for testing.
+ * Maps host-decided `InitializationData` onto `runtimePresets.browserWorker`
+ * params. The shared first-party posture (CFC pins, patternEnvironment from
+ * apiUrl) lives in the preset; this function carries only what the host
+ * actually decided. Exported for testing.
  */
 export function browserWorkerParamsFromInitializationData(
   data: InitializationData,
@@ -716,6 +717,20 @@ type RuntimeOperationSession = {
   clientId: ClientId;
 };
 
+/**
+ * The worker side of a runtime client connection. An instance owns the
+ * worker's `Runtime`, keeps a `PiecesController` for the home space and for
+ * each other space a request has named, and serves every client attached to
+ * the worker: `handleRequest()` routes a client's request to the handler for
+ * its type, and what the runtime produces on its own (console output, errors,
+ * navigation, subscription updates) reaches the client through
+ * `postToClient()`. Subscriptions, operation sessions, and VDOM mounts are
+ * keyed by the client that opened them, so one client's departure takes down
+ * only its own. The security context is fixed at `initialize()` and is the
+ * one every attached client is held to. `dispose()` cancels what is
+ * outstanding and disposes the runtime, once, however many times it is
+ * called.
+ */
 export class RuntimeProcessor {
   #runtime: Runtime;
   #cc: PiecesController;
@@ -2227,9 +2242,14 @@ export class RuntimeProcessor {
       await landing.sync();
       const hasPattern = getPatternIdentityRef(landing) !== undefined ||
         landing.getMetaRaw("pattern") !== undefined;
-      if (!hasPattern) {
-        return { piece: createPieceRef(target) };
+      const viewScoped = this.#runtime.viewScopedReplicationRequested &&
+        await this.#runtime.viewReplication.enable(target.space);
+      if (viewScoped && (!hasPattern || targetLink.path.length > 0)) {
+        const pieceCell = target.asSchema(viewPieceSchema);
+        await pieceCell.pull();
+        return { piece: createPieceRef(pieceCell) };
       }
+      if (!hasPattern) return { piece: createPieceRef(target) };
       if (targetLink.path.length > 0) {
         // The schema a cell inside a piece is read under: what the links
         // along its path carry, as `getPieceCell()` resolves a piece cell
@@ -2607,7 +2627,13 @@ export class RuntimeProcessor {
     const timing = getTimingStatsBreakdown();
     const flags = getLoggerFlagsBreakdown();
     assertFabricLoggerFlags(flags);
-    return { counts, metadata, timing, flags };
+    return {
+      counts,
+      metadata,
+      timing,
+      flags,
+      cfc: this.#runtime.getCfcStats(),
+    };
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {
@@ -3064,7 +3090,7 @@ export class RuntimeProcessor {
   handleVDomMount(
     request: VDomMountRequest,
     client: WorkerClient = ownerClient,
-  ): VDomMountResponse {
+  ): VDomMountResponse | Promise<VDomMountResponse> {
     const { mountId, cell: cellRef } = request;
     const key = clientScopedKey(client, mountId);
 
@@ -3104,13 +3130,38 @@ export class RuntimeProcessor {
       onError: mountErrorSink(client),
     });
 
-    // Mount the cell - the reconciler will subscribe and emit initial ops
-    const cancel = reconciler.mount(cell);
-
-    // Track this mount
-    this.#vdomMounts.set(key, { reconciler, cancel, client });
-
-    return { rootId: reconciler.getRootNodeId() };
+    let active = true;
+    let cancelRender: (() => void) | undefined;
+    let cancelView: (() => void) | undefined;
+    const mount = {
+      reconciler,
+      client,
+      cancel: () => {
+        active = false;
+        cancelRender?.();
+        cancelView?.();
+      },
+    };
+    this.#vdomMounts.set(key, mount);
+    const render = () => {
+      if (active) cancelRender = reconciler.mount(cell);
+      return { rootId: reconciler.getRootNodeId() };
+    };
+    if (!this.#runtime.viewScopedReplicationRequested) return render();
+    return this.#runtime.viewReplication.mount(
+      rawCell,
+      key,
+      mountErrorSink(client),
+    ).then((cancel) => {
+      if (!active) cancel?.();
+      else cancelView = cancel;
+      return render();
+    }).catch((error) => {
+      mount.cancel();
+      reconciler.unmount();
+      if (this.#vdomMounts.get(key) === mount) this.#vdomMounts.delete(key);
+      throw error;
+    });
   }
 
   /**
@@ -3185,6 +3236,16 @@ export class RuntimeProcessor {
     };
   }
 
+  /**
+   * Constructs the worker's processor from the host's `InitializationData`:
+   * opens storage and a runtime for the home space as the given identity,
+   * wires the runtime's console, navigation, piece-creation, and error
+   * bridges to `postToClient()`, and starts the home-space site-table watch.
+   * Rejects when the runtime's server-execution posture diverges from what
+   * the host declared, or when the API host fails its health check. The
+   * returned processor handles requests at once; a caller that needs storage
+   * and pieces to have converged waits on `synced()`.
+   */
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     const identity = await Identity.fromKeyPair(
@@ -3235,9 +3296,9 @@ export class RuntimeProcessor {
 
     let homePieces: PiecesController | undefined = undefined;
     let processor: RuntimeProcessor | undefined = undefined;
-    // Everything below goes through the browserWorker preset (CT-1814):
-    // host-decided data via the params mapper, plus this worker's declared
-    // deltas (the postMessage bridges for console/navigate/piece/errors).
+    // Everything below goes through the browserWorker preset: host-decided
+    // data via the params mapper, plus this worker's declared deltas (the
+    // postMessage bridges for console/navigate/piece/errors).
     const runtime = new Runtime(runtimePresets.browserWorker({
       ...browserWorkerParamsFromInitializationData(
         data,
@@ -3287,8 +3348,6 @@ export class RuntimeProcessor {
       errorHandlers: [postContextualRuntimeError],
     }));
 
-    // Fail LOUD on a worker/host flag divergence (review 2026-08-11
-    // m7) — see assertServerExecutionPostureAgreement.
     assertServerExecutionPostureAgreement(data.experimental, runtime);
 
     if (!await runtime.healthCheck()) {
@@ -3329,11 +3388,10 @@ export class RuntimeProcessor {
     processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
       runtime,
     );
-    // Site-table v0: the home space carries space-to-host hints; the
-    // runtime reads them as its live host lookup (2026-06-09 federation
-    // session — "move the lookup into the runtime itself"). A seeded route or
-    // earlier hint can reject an entry. A default-host provider is provisional.
-    // Failures here must not block worker boot.
+    // The home-space site table carries space-to-host hints, which the
+    // runtime reads as its live host lookup. A seeded route or earlier hint
+    // can reject an entry. A default-host provider is provisional. Failures
+    // here must not block worker boot.
     processor.watchSiteTable();
     return processor;
   }

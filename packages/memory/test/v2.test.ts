@@ -1,11 +1,13 @@
-import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
 import {
   type EntityRef,
   entityRefFromString,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+
 import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
@@ -18,9 +20,11 @@ import {
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
   resetMessageCompressionConfig,
+  resetServerExecutionConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
   setMessageCompressionConfig,
+  setServerExecutionConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -131,6 +135,7 @@ describe("memory v2 flags", () => {
     resetCommitPreconditionsConfig();
     resetMessageCompressionConfig();
     resetSyncSchemaTableConfig();
+    setServerExecutionConfig(false);
     setModernCellRepConfig(false);
     setCommitPreconditionsConfig(false);
     setMessageCompressionConfig(false);
@@ -151,6 +156,7 @@ describe("memory v2 flags", () => {
       entityIdPagination: true,
       entityIdLookup: true,
       sessionHoldings: true,
+      viewScopedReplicationV1: false,
       syncSchemaTableV2: false,
     });
 
@@ -173,6 +179,7 @@ describe("memory v2 flags", () => {
       entityIdPagination: true,
       entityIdLookup: true,
       sessionHoldings: true,
+      viewScopedReplicationV1: false,
       syncSchemaTableV2: true,
     });
 
@@ -180,6 +187,7 @@ describe("memory v2 flags", () => {
     resetCommitPreconditionsConfig();
     resetMessageCompressionConfig();
     resetSyncSchemaTableConfig();
+    resetServerExecutionConfig();
   });
 
   it("treats non-wire-shape flags as optional capabilities", () => {
@@ -198,6 +206,7 @@ describe("memory v2 flags", () => {
         entityIdPagination: true,
         entityIdLookup: true,
         sessionHoldings: false,
+        viewScopedReplicationV1: true,
       },
       {
         modernCellRep: true,
@@ -216,12 +225,38 @@ describe("memory v2 flags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     ));
   });
 });
 
 describe("parseMemoryProtocolFlags", () => {
+  it("negotiates view replication as an optional server-execution capability", () => {
+    try {
+      setServerExecutionConfig(false);
+      assertEquals(getMemoryProtocolFlags().viewScopedReplicationV1, false);
+      setServerExecutionConfig(true);
+      assertEquals(getMemoryProtocolFlags().viewScopedReplicationV1, true);
+      assertEquals(
+        parseMemoryProtocolFlags({ viewScopedReplicationV1: true })
+          ?.viewScopedReplicationV1,
+        true,
+      );
+      assertEquals(
+        parseMemoryProtocolFlags({ modernCellRep: true })
+          ?.viewScopedReplicationV1,
+        false,
+      );
+      assertEquals(
+        parseMemoryProtocolFlags({ viewScopedReplicationV1: "true" }),
+        null,
+      );
+    } finally {
+      resetServerExecutionConfig();
+    }
+  });
+
   it("accepts the modernCellRep key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
@@ -237,6 +272,7 @@ describe("parseMemoryProtocolFlags", () => {
       entityIdPagination: false,
       entityIdLookup: false,
       sessionHoldings: false,
+      viewScopedReplicationV1: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -252,6 +288,7 @@ describe("parseMemoryProtocolFlags", () => {
       entityIdPagination: false,
       entityIdLookup: false,
       sessionHoldings: false,
+      viewScopedReplicationV1: false,
     });
   });
 
@@ -274,6 +311,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });
@@ -309,6 +347,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: true,
         messageCompressionV1: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -336,6 +375,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });
@@ -359,6 +399,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });
@@ -390,6 +431,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });
@@ -414,6 +456,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });
@@ -435,6 +478,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: false,
         entityIdLookup: false,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });
@@ -445,6 +489,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: true,
         entityIdLookup: true,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       }),
       {
         modernCellRep: false,
@@ -460,6 +505,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdPagination: true,
         entityIdLookup: true,
         sessionHoldings: false,
+        viewScopedReplicationV1: false,
       },
     );
   });

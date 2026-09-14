@@ -107,11 +107,12 @@ Waits split into two groups with different primitives.
   answers only while neither the host nor that control is disabled;
   `clickCfButtonsConcurrently` does the same for a group. `clickNthCfButton`
   takes the `index`-th match of a selector that already resolves to the buttons
-  themselves. `clickTrustedAction` takes the first enabled match of a
-  `data-ui-action` value. The note-button helpers take the first enabled
-  button matching a text or a title. `submitViaEnter` focuses a field and
-  presses Enter rather than clicking, and settles around resolving that field
-  the same way.
+  themselves and waits for that match and its wrapped control to become enabled,
+  counting disabled matches when locating the index. `clickTrustedAction` takes
+  the first enabled match of a `data-ui-action` value. The note-button helpers
+  take the first enabled button matching a text or a title. `submitViaEnter`
+  focuses a field and presses Enter rather than clicking, and settles around
+  resolving that field the same way.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -421,11 +422,13 @@ current server state. The assertion is therefore read once, at quiescence, with
 no convergence loop around it: a false value is a failure.
 
 Reach for this rather than a settle-and-retry loop whenever the write is
-something the test can name — name the arrival, wait on it, then read. What the
-awaiting side gets in place of the Deno fail-fast above is the orchestrator's
-worker RPC deadline, which is the ambient limit the previous paragraph
-describes: a marker that never arrives is reported against the participant,
-marker, and announcer rather than fast.
+something the test can name — name the arrival, wait on it, then read. Worker
+requests wait for a response without a wall-clock limit. A worker error rejects
+its pending and future requests. If every unfinished participant is waiting for
+an unannounced marker, the orchestrator reports a deadlock. An announced marker
+that never arrives leaves the request pending: the shared server keeps the
+event loop open, so the CI step or job limit, or local cancellation, ends that
+run.
 
 ### Browser-hosted unit tests have a harness backstop
 

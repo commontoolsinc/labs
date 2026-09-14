@@ -1,12 +1,14 @@
-// Deterministic coverage for the "removes" arm of
-// `SpaceReplica.#applySessionSync()` in
-// storage/v2.ts. A watch refresh / sync batch can carry removals when a watched
-// doc is deleted upstream. Most tests only deliver upserts, so the removes path
-// runs intermittently. Here the scripted transport answers the watch.add with a
-// sync that upserts two docs and removes one of them in the same batch, so the
-// removes loop always runs while provider.sync() is awaited.
+/**
+ * The `removes` arm of `SpaceReplica.#applySessionSync()`. A watch refresh
+ * batch carries removals when a watched doc is deleted upstream, and the
+ * scripted transport here answers the watch add with a sync that upserts
+ * two docs and removes one of them in the same batch, so the removes loop
+ * runs while `provider.sync()` is awaited, on every run.
+ */
 
-import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import {
@@ -105,28 +107,30 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
   }
 }
 
-Deno.test("memory v2 runner applies removes carried in a watch refresh batch", async () => {
-  const docA = `of:watch-remove-keep-${crypto.randomUUID()}` as URI;
-  const docB = `of:watch-remove-drop-${crypto.randomUUID()}` as URI;
-  const transport = new WatchAddRemoveTransport(docB);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-remove-coverage"),
-  }, sessionFactory);
-  const provider = storageManager.open(space) as TestProvider;
+describe("memory-v2-watch-remove-coverage", () => {
+  it("applies the removes carried in a watch refresh batch", async () => {
+    const docA = `of:watch-remove-keep-${crypto.randomUUID()}` as URI;
+    const docB = `of:watch-remove-drop-${crypto.randomUUID()}` as URI;
+    const transport = new WatchAddRemoveTransport(docB);
+    const sessionFactory = new SingleSessionFactory(transport);
+    const storageManager = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("memory://runner-v2-watch-remove-coverage"),
+    }, sessionFactory);
+    const provider = storageManager.open(space) as TestProvider;
 
-  try {
-    await Promise.all([
-      provider.sync(docA, { path: [], schema: false }),
-      provider.sync(docB, { path: [], schema: false }),
-    ]);
+    try {
+      await Promise.all([
+        provider.sync(docA, { path: [], schema: false }),
+        provider.sync(docB, { path: [], schema: false }),
+      ]);
 
-    // docA was upserted and kept; docB was upserted in the same sync and then
-    // removed, so the removes loop must have reset it back to absent.
-    assertEquals(getObjectValue(provider, docA), { label: docA });
-    assertEquals(provider.get(docB), undefined);
-  } finally {
-    await storageManager.close();
-  }
+      // docA was upserted and kept; docB was upserted in the same sync and then
+      // removed, so the removes loop must have reset it back to absent.
+      expect(getObjectValue(provider, docA)).toEqual({ label: docA });
+      expect(provider.get(docB)).toBeUndefined();
+    } finally {
+      await storageManager.close();
+    }
+  });
 });

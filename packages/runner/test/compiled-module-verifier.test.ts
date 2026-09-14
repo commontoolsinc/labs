@@ -23,7 +23,7 @@ function verify(body: string) {
 
 describe("verifyCompiledModuleBody() classifier shapes", () => {
   it("accepts the no-input lift(fn, false) form at module scope", () => {
-    // CT-1644: Phase 2 hoists a `lift(fn, false)()` computation to a module-
+    // The transformer hoists a `lift(fn, false)()` computation to a module-
     // scope const, surfacing the no-input form (argumentSchema:false) to the
     // module-scope verifier. lift is function-first, so the callback is the
     // FIRST argument and `false` (the argument schema) trails at index 1.
@@ -51,8 +51,8 @@ exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()]
   });
 
   it("accepts a hoisted handler(...) call at module scope", () => {
-    // CT-1655: extends CT-1644's whole-call hoisting to `handler`. A reactive
-    // handler (or an `action` lowered to one) is hoisted to a module-scope
+    // Whole-call hoisting reaches `handler` too. A reactive handler (or an
+    // `action` lowered to one) is hoisted to a module-scope
     // const `__cfHandler_N = handler(eventSchema, stateSchema, cb)`, with the
     // captures applied at the original site. The 3-arg form puts the callback
     // at index 2; the verifier must accept this trusted-builder call at module
@@ -69,7 +69,7 @@ exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
   });
 
   it("accepts a hoisted pattern(...) call at module scope", () => {
-    // CT-1655: extends whole-call hoisting to `pattern`. A reactive map lowers
+    // Whole-call hoisting reaches `pattern` too. A reactive map lowers
     // to `receiver.mapWithPattern(pattern(cb, inSchema, outSchema), { params })`;
     // the bare `pattern(...)` (the first mapWithPattern argument) is hoisted to
     // a module-scope const `__cfPattern_N = pattern(...)` with the callback

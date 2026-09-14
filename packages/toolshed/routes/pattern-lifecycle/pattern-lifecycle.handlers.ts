@@ -11,11 +11,13 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import { memoryEngineStoreUrl } from "@/routes/storage/memory-store-url.ts";
 import type {
   InstantiateRoute,
+  SetSourceRoute,
   UploadRoute,
 } from "./pattern-lifecycle.routes.ts";
 import {
   type LifecycleDeps,
   processInstantiate,
+  processSetSource,
   processUpload,
 } from "./pattern-lifecycle.utils.ts";
 
@@ -66,6 +68,16 @@ export const upload: AppRouteHandler<UploadRoute> = async (c) => {
 
 export const instantiate: AppRouteHandler<InstantiateRoute> = async (c) => {
   const result = await processInstantiate(
+    deps(c.get("logger")),
+    verifiedCaller(c),
+    c.req.valid("json"),
+  );
+  if (result.status === 200) return c.json(result.body, 200);
+  return c.json(result.body, result.status);
+};
+
+export const setsrc: AppRouteHandler<SetSourceRoute> = async (c) => {
+  const result = await processSetSource(
     deps(c.get("logger")),
     verifiedCaller(c),
     c.req.valid("json"),

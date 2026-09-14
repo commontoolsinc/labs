@@ -6,7 +6,7 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
 
 ## Anchors (verified on main, 2026-08-02 — re-verify before coding)
 
-- The client runtime already runs the full graph; v2 does not add a
+- The ordinary client runtime runs the full graph; v2 does not add a
   speculation engine — it REDIRECTS the existing run's writes into an
   overlay instead of a storage transaction.
 - Overlay substrate: the storage stack's transaction/journal layering in
@@ -45,6 +45,24 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
 
 ## 2. What may speculate
 
+The optional
+[view-scoped replication mode](../../features/view-scoped-client-replication.md)
+restricts this permission to the computations selected from observed server
+reads for mounted UI. Its client installs resident JavaScript bindings from the
+stored graph without executing raw factories. A transaction with an unavailable
+input aborts all writes and staged work, even if the authored body catches the
+read failure. It parks on input and eligibility dependencies until its complete
+local basis is usable. Invalidation never replaces a confirmed output with
+`undefined` merely because an input was not replicated.
+
+This mode consumes effect outputs directly, including their authoritative
+pending/error fields; it does not hash omitted request inputs to synthesize
+pending state. It also defers result-as-pattern materialization and raw
+structural builtins. Producer currency requires a successful local attempt or
+matching authoritative input/output fingerprints from a successful durable
+serving settlement. A generation or store sequence alone does not establish
+currency. The existing overlay and retirement rules below still apply.
+
 - The membership test is the SCHEDULER TELL (RULED, owner 2026-08-07;
   protocol.md §1 carries the primary statement and the owner's
   rationale): ONLY scheduler-driven work moves to the server —
@@ -57,7 +75,8 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   so its first run diverts even at instantiation. *(AMENDED 2026-09-09:
   a `cf` client sends its instantiation verb to the serving runtime
   instead of committing it itself — protocol.md §1's lifecycle-verb
-  amendment; nothing about that speculates.)*
+  amendment; nothing about that speculates. AMENDED 2026-09-11: its
+  source-update verb likewise.)*
 - Pure structural nodes: freely.
 - Handlers: run locally on fire, writes go to the overlay (events.md §2);
   the committed artifact is the event only.
@@ -132,43 +151,50 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   > being retriggered when any of the reads so far change (just like a
   > regular call), and the output being `undefined`.
 
-  — owner (Berni), 2026-08-21. Two clauses, both RULED and built:
+  — owner (Berni), 2026-08-21. Two clauses, both RULED and built, each
+  except as its text notes:
 
-  1. **The unresolved read refuses.** Link resolution marks a
-     dead-end behind a followed hop (`pendingHopDoc`); the lazy read
-     path throws `UnresolvedInputError` (a `SchemaMismatchError`
-     subclass, so the action-run boundary's existing "argument did
-     not resolve" disposal treats it identically — §4's reconciliation
-     is unchanged). This applies ONLY when the reader's schema
-     declares NO default: a declared default is the stated absent
-     value and still flows (the `get() ?? fallback` idiom, and a
-     computed that has not produced yet, are unchanged). A dead-end at
-     the reader's OWN root doc is likewise not this shape — a
-     locally-minted cell's doc does not exist until its first write.
-     Nor is a dead-end at a USER- or SESSION-scoped instance row
-     (RULED 2026-08-21, the option-3 build): a principal's row exists
-     only once that principal writes it, so its absence is knowledge —
-     the scoped first-write idiom — and the fan-out run supply
-     materializes instances by running derivations over exactly such
-     absent rows. Only a missing SPACE-scoped doc behind a hop is an
-     unresolved input; composition does not change the verdict (a
-     per-user cell relayed through a nested pattern's arg doc reads
-     its absent row as `undefined` exactly as the flat form does).
-     One window sits outside this protection, matching main: a scoped
-     row already written elsewhere (another device; a cold or lagging
-     serving replica) is transit, not knowledge — such a mid-arrival
-     read takes main's interim-undefined-then-heal. No shipped
-     pattern routes link chains through user-scoped docs (the #6179
-     review's population audit).
+  1. **The unresolved read refuses.** Link resolution marks a dead-end
+     behind a followed hop (`pendingHopDoc`); the lazy read path
+     throws `UnresolvedInputError` (a `SchemaMismatchError` subclass,
+     so the action-run boundary's existing "argument did not resolve"
+     disposal treats it identically, except that a refusal a
+     synchronous body throws leaves the previous result standing until
+     the fix clause 2 points at lands — §4's reconciliation is
+     unchanged). This applies ONLY when the reader's schema declares
+     NO default: a declared default is the stated absent value and
+     still flows (the `get() ?? fallback` idiom, and a computed that
+     has not produced yet, are unchanged). A dead-end at the reader's
+     OWN root doc is likewise not this shape — a locally-minted cell's
+     doc does not exist until its first write. Nor is a dead-end at a
+     USER- or SESSION-scoped instance row (RULED 2026-08-21, the
+     option-3 build): a principal's row exists only once that
+     principal writes it, so its absence is knowledge — the scoped
+     first-write idiom — and the fan-out run supply materializes
+     instances by running derivations over exactly such absent rows.
+     Only a missing SPACE-scoped doc behind a hop is an unresolved
+     input; composition does not change the verdict (a per-user cell
+     relayed through a nested pattern's arg doc reads its absent row
+     as `undefined` exactly as the flat form does). One window sits
+     outside this protection, matching main: a scoped row already
+     written elsewhere (another device; a cold or lagging serving
+     replica) is transit, not knowledge — such a mid-arrival read
+     takes main's interim-undefined-then-heal. No shipped pattern
+     routes link chains through user-scoped docs (the #6179 review's
+     population audit).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
-     it) and the run's transaction aborts with it as the reason —
-     the same non-event disposal, re-triggering on the reads so far.
-     A pattern body cannot yet MINT the error itself (it is
-     runner-internal; a pattern-facing refusal export is a flagged
-     API question with the owner), so the built coverage is the
-     read-propagation path — the OW51 shape — with the deliberate
-     body-throw awaiting that export.
+     it) and the run's transaction aborts with it as the reason — the
+     same non-event disposal, re-triggering on the reads so far. Today
+     that holds for an asynchronous body's rejection; a refusal a
+     synchronous body throws reaches the runner's catch before its
+     `postRun` is assigned, so the previous result stands, and the fix
+     is the one the [design plan's Stage
+     5](../../plans/lazy-cell-materialization.md) names. A pattern
+     body cannot yet MINT the error itself (it is runner-internal; a
+     pattern-facing refusal export is a flagged API question with the
+     owner), so the built coverage is the read-propagation path — the
+     OW51 shape — with the deliberate body-throw awaiting that export.
 
   **The serving-side re-trigger, explicit (RULED 2026-08-21 — the
   option-3 ruling on the demand-closure fork):**
@@ -195,9 +221,10 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   (`UnresolvedInputError`); pinned in
   `packages/runner/test/unresolved-input-lift.test.ts` (the hop-target
   dead-end disposes and re-triggers on arrival; the stated-null
-  control still flows), with the serving-runtime match witnessed by
-  `integration/default-app.test.ts` greening ON (the surface whose
-  serving-runtime crash first recorded the bug —
+  control still flows; its case has no previous result, so it does not
+  pin that one is overwritten), with the serving-runtime match
+  witnessed by `integration/default-app.test.ts` greening ON (the
+  surface whose serving-runtime crash first recorded the bug —
   verification-coverage.md OW51).
 
 ## 3. Rendering

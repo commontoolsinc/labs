@@ -303,7 +303,12 @@ export async function doSyncCycle(
     await runtime.storageManager.synced();
 
     const tx = runtime.edit();
-    pushFrameFromCause("fs-sync", { runtime, tx, space, inHandler: true });
+    const frame = pushFrameFromCause("fs-sync", {
+      runtime,
+      tx,
+      space,
+      inHandler: true,
+    });
 
     try {
       // Bind the cells to this transaction, so every read and write below
@@ -366,7 +371,7 @@ export async function doSyncCycle(
       txFailed.push(...failed);
       txEdits.set([]);
     } finally {
-      popFrame();
+      popFrame(frame);
     }
 
     // 5. Commit. A failure means a new edit was appended while this cycle was
@@ -934,7 +939,7 @@ async function fullRebuild() {
       ),
     });
   } finally {
-    popFrame();
+    popFrame(frame);
   }
   await tx.commit();
 }

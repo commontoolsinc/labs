@@ -34,9 +34,10 @@ deno task agents-host \
 options. Command-line values take precedence.
 
 The program prints the destination space DID, command cell ID, receipt cell ID,
-durable command ledger path, and debug piece ID after the initial collection.
-The owner-confidential debug registration is not added to the space-wide default
-app registry. The printed piece ID is its local discovery handle.
+durable command ledger path, debug piece ID, and every command producer's queue
+cell ID after the initial collection. The owner-confidential debug registration
+is not added to the space-wide default app registry. The printed piece ID is its
+local discovery handle.
 
 ## Command-line interface
 
@@ -137,22 +138,35 @@ branch, commit, and remotes in the session indexes. Discovery stops descending
 when it finds a checkout. A failed or cancelled discovery leaves the previous
 session and checkout indexes unchanged.
 
+`commandProducers` is an optional array of deployed pieces the host accepts
+commands from, each `{ "id", "piece" }`. `id` is a stable lowercase token that
+names the producer's queue; `piece` is the piece's ID in the destination space.
+A producer's pattern declares `commandAuthorization`, the verified handler that
+may write its queue, the way the debug pattern does. At startup the host reads
+that declaration from the deployed piece, creates the producer's own
+deterministic queue protected for the owner with that handler as its only
+writer, links the queue into the piece's `commands` input, and reads commands
+from it beside the debug view's queue. A producer whose pattern declares no
+authorization fails startup. Producer IDs must be unique. A producer's queue is
+bound before commands are subscribed. Removing a producer from the configuration
+leaves its queue and the piece's link in place; the queue is no longer read.
+
 The source fields are the connector's `AgentSourceConfig` contract:
 
-| Field                   | Use                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `id`                    | Stable, lowercase source ID                                                     |
-| `driver`                | `claude-agent-sdk`, `codex-app-server`, or `acp`                                |
-| `enabled`               | Whether this host starts the source                                             |
-| `command`               | Complete provider process command; required for an enabled ACP source           |
-| `cwd`                   | Default provider process or prompt working directory                            |
-| `env`                   | Additional provider environment values                                          |
-| `configDir`             | Claude configuration directory                                                  |
-| `codexBin`              | Codex executable used when `command` is absent                                  |
-| `codexHome`             | Codex home directory                                                            |
-| `codexTransport`        | `stdio`, `managed`, or `proxy`                                                  |
-| `codexSocket`           | Socket passed to Codex proxy mode                                               |
-| `allowDangerFullAccess` | Allows the connector's explicitly unrestricted Claude or Codex execution policy |
+| Field                   | Use                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                    | Stable, lowercase source ID                                                                                                                                                                                                                                                                                                                                        |
+| `driver`                | `claude-agent-sdk`, `codex-app-server`, or `acp`                                                                                                                                                                                                                                                                                                                   |
+| `enabled`               | Whether this host starts the source                                                                                                                                                                                                                                                                                                                                |
+| `command`               | Complete provider process command; required for an enabled ACP source                                                                                                                                                                                                                                                                                              |
+| `cwd`                   | Default provider process and prompt working directory; for Claude, the directory whose sessions the source lists and where a `start` runs, so a machine with several checkouts configures a source per checkout. Giving a `cwd` to a Claude source that had none makes its first complete collection mark the sessions it published from other directories deleted |
+| `env`                   | Additional provider environment values                                                                                                                                                                                                                                                                                                                             |
+| `configDir`             | Claude configuration directory                                                                                                                                                                                                                                                                                                                                     |
+| `codexBin`              | Codex executable used when `command` is absent                                                                                                                                                                                                                                                                                                                     |
+| `codexHome`             | Codex home directory                                                                                                                                                                                                                                                                                                                                               |
+| `codexTransport`        | `stdio`, `managed`, or `proxy`                                                                                                                                                                                                                                                                                                                                     |
+| `codexSocket`           | Socket passed to Codex proxy mode                                                                                                                                                                                                                                                                                                                                  |
+| `allowDangerFullAccess` | Allows the connector's explicitly unrestricted Claude or Codex execution policy                                                                                                                                                                                                                                                                                    |
 
 Provider behavior and the native protocols behind these fields are documented in
 the connector's [`docs/interfaces.md`](../connector/docs/interfaces.md).
@@ -192,17 +206,22 @@ flowchart LR
    owner through the pattern's command-sending handler. The host binds command
    processing to that exact protected queue. It stores the debug registration
    under the owner label and does not add the piece to the space-wide default
-   app registry. `--no-debug-view` skips this step and disables command
-   acceptance.
-6. The host opens the command ledger.
-7. `AgentsHost.start()` creates and starts every enabled driver. A failed source
+   app registry. `--no-debug-view` skips this step; command acceptance then
+   depends on the next step alone.
+6. `bindCommandProducers()` handles each configured command producer: it reads
+   the producer's verified command-writer declaration from the deployed piece,
+   binds the producer's own owner-scoped queue to that handler, and links the
+   queue into the piece's `commands` input. A host with neither a debug view nor
+   a producer accepts no commands.
+7. The host opens the command ledger.
+8. `AgentsHost.start()` creates and starts every enabled driver. A failed source
    remains visible in health while successful sources continue. A source whose
    failed startup cannot be cleaned up makes the complete host startup fail. The
    host then publishes recovered and previously unpublished receipts from the
    ledger.
-8. The host performs and publishes one complete collection. It then subscribes
-   to the owner-protected Fabric command cell unless `--once` or
-   `--no-debug-view` was used.
+9. The host performs and publishes one complete collection. It then subscribes
+   to every bound owner-protected command queue unless `--once` was used or no
+   queue was bound.
 
 The command-line host keeps startup health local until it has completed these
 steps and owns a ready or degraded host. Its first health publication includes
@@ -223,12 +242,19 @@ when the replacement host does not share the earlier host's local ledger.
 
 The command-line wrapper requests collections periodically and on `SIGHUP`. It
 keeps one pending request while a collection is active. Calls that reach
-`AgentsHost.synchronize(reason)` are serialized. Each collection asks every
-running driver for its complete inventory and session snapshots. The host
-allocates a target observation sequence before those reads. It publishes all
-successful and partial source results together through
-`AgentFabricTarget.publish()`. The sequence prevents that collection from
-overwriting a newer session refresh if the refresh finishes first.
+`AgentsHost.synchronize(reason)` are serialized. Each collection first reads the
+complete index, then asks every running driver for its complete inventory. A
+listed session is read only when its inventory summary differs from its
+published copy: a session with the same driver, update time, archived state, and
+active state as a complete published row is retained, once the running driver
+has read it: a driver learns a session's controls (its mode and configuration
+options) when it reads the session, so the first collection after a start reads
+every listed session. A retained session's graph and previews stay, and its row
+takes the checkout's current Git context. When the index cannot be read, every
+listed session is read. The host allocates a target observation sequence before
+those reads. It publishes all successful and partial source results together
+through `AgentFabricTarget.publish()`. The sequence prevents that collection
+from overwriting a newer session refresh if the refresh finishes first.
 
 Provider read failures do not discard sessions read successfully from the same
 source. They make that source and the overall host degraded. A Fabric
@@ -253,7 +279,8 @@ object or a JSON string containing that object. The debug pattern writes JSON
 strings so each append remains one inline action value. `CommandWorker` decodes
 either representation before it validates the command schema and fields.
 
-The host's receipt callback records command ID, source ID, native session ID,
+The host's receipt callback records command ID, the producer whose queue
+delivered the command when it was not the owner's, source ID, native session ID,
 status, and structured error details in the activity history. Post-command
 refresh success or failure is also recorded. A failed refresh degrades the
 source until a later complete collection succeeds. Health does not copy prompt
@@ -305,7 +332,9 @@ The debug pattern's inspection surfaces cannot change connector data. Its
 command composer can append a validated command after showing the exact value in
 a confirmation modal. The command queue requires the configured owner and the
 debug pattern's command-sending handler. Another principal cannot modify that
-queue, including by reusing the pattern handler. The pattern cannot write
+queue, including by reusing the pattern handler. Each configured command
+producer has a queue of its own under the same rule, bound to that producer's
+handler, so no pattern can write another's queue. The pattern cannot write
 indexes, health, receipts, session manifests, or event chunks. Drafts,
 confirmation state, tab selection, and filters are session-scoped and are not
 shared between viewers.

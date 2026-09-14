@@ -434,6 +434,13 @@ Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 interactive use. New reference-syntax capabilities land in the reference first;
 the alias does not grow a capability the reference lacks.
 
+`cf piece render --cell /tracker` renders the UI of the piece the slug names.
+`cf piece render --cell /top/2` renders the selected collection member's UI,
+using the scope stored in its link. Rendering takes a whole piece: a reference
+such as `/tracker/title` that continues inside the piece is refused. `--watch`
+reports later UI changes from the resolved piece, and `--no-start` renders its
+stored state without starting it.
+
 ### Writing the target
 
 On `cf cell get`, `cf cell set`, and `cf piece call`, the reference goes in the
@@ -489,12 +496,17 @@ An input-cell write is currently sharper:
 `cf cell set --piece <id> --input
 <path>` resolves that path through the piece's
 input contract and revalidates the complete input document. It can therefore be
-refused over an unrelated allocated field. Addressing the raw argument cell by
-id avoids that whole-document check, but it is an unsafe recovery tool: it can
-erase link-bearing data that a later `cf cell set` will refuse to restore
-because the serialized link has no durable source contract. The superseded
-`cf set` spelling mounts this same command and has identical validation
-behavior.
+refused over an unrelated allocated field whose value is readable and violates
+the schema. A field whose stored or supplied value is a link this replica cannot
+read — a per-user instance another principal owns, a document not replicated
+here — is not judged by that check: its value is owned elsewhere and is checked
+when a reactive read materializes it. A write that itself resolves through a
+link is also checked against its destination's contract, which still refuses a
+required field it cannot reach. Addressing the raw argument cell by id avoids
+that whole-document check, but it is an unsafe recovery tool: it can erase
+link-bearing data that a later `cf cell set` will refuse to restore because the
+serialized link has no durable source contract. The superseded `cf set` spelling
+mounts this same command and has identical validation behavior.
 
 ## Linking piece inputs
 
@@ -542,7 +554,12 @@ Preflight does not provide a frozen storage snapshot.
 Apply persists compilation artifacts before setup. It commits new module update
 authority atomically with the source pointer and revision; a refused setup
 publishes no proposed authority. Successful source updates require an owned,
-durable setup transaction.
+durable setup transaction. Against a deployment that runs the serving loop, that
+transaction is the serving runtime's: the command sends the resolved program and
+the piece's id to the deployment's pattern-lifecycle route, and the update
+commits there, directly to the store (see
+[Where a piece is created](#where-a-piece-is-created)). The check stays in this
+process on every deployment.
 
 Preflight uses setup's stored-argument validation: optional fields holding
 `undefined` count as absent, and unreadable linked values defer to reactive
@@ -592,10 +609,16 @@ loop not to derive the piece until something demands it. The receipt returns
 once the piece is durable; the serving loop derives it in the cycle after, so a
 reader that needs the derived value pulls it. Against any other deployment, and
 under `cf test`, the command performs every step itself, as before.
-`cf piece setsrc` and `cf piece setsrc --check` perform every step in this
-process on every deployment: a source update publishes module update authority,
-which requires an owned setup transaction that commits to storage, and a serving
-wave cannot supply one. The contract, including the refusals and their codes, is
+`cf piece setsrc` requests the same way against a serving deployment: it
+resolves and pins the program, sends it with the piece's id, and prints the
+receipt of the setup transaction the serving runtime committed — directly to the
+store, since a source update publishes module update authority that requires a
+transaction committing to storage itself. What stays in this process is the
+refresh a client-side update runs after its commit: the command starts the piece
+it holds and reports that outcome beside the receipt, exiting non-zero when the
+refresh fails over a durable commit. A piece addressed at a scope keeps the
+client-side path. `cf piece setsrc --check` performs every step in this process
+on every deployment. The contract, including the refusals and their codes, is
 [`server-pattern-lifecycle.md`](../../docs/features/server-pattern-lifecycle.md).
 
 ## Piece discovery

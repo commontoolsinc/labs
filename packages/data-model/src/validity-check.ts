@@ -28,11 +28,10 @@ import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 import {
   type FabricNativeObject,
   type FabricPlainObject,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { isFabricPlainObject } from "./type-check.ts";
+import { isFabricPlainObject, isFabricSpecialObject } from "./type-check.ts";
 import { tagFromNativeBuiltinClassElseNull, VALUE_TAGS } from "./value-tags.ts";
 
 /**
@@ -62,7 +61,7 @@ export function isValidFabricValueLayer(
         return true;
       }
       // `FabricSpecialObject` -- already a valid `FabricValue`.
-      if (value instanceof FabricSpecialObject) {
+      if (isFabricSpecialObject(value)) {
         return true;
       }
       if (Array.isArray(value)) {

@@ -95,7 +95,6 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["since", "a timestamp"],
   ["until", "a timestamp"],
   ["ttl-days", "a lifetime in days"],
-  ["timeout", "a timeout in milliseconds"],
   ["attrcache-timeout", "a timeout in seconds, passed to the FUSE child"],
   ["stats-action-limit", "a count"],
   ["stats-threshold", "a threshold"],

@@ -218,7 +218,13 @@ function isPatternCoverageCacheRuntimeVersion(runtimeVersion: string): boolean {
   return runtimeVersion.endsWith(`/${PATTERN_COVERAGE_CACHE_VARIANT}`);
 }
 
-function compileCachePersistenceSlotKey(
+/**
+ * Returns the key under which a compile-cache write-back is tracked: one
+ * slot per space, runtime version, and entry identity, so a remembered
+ * write-back for one entry point says nothing about another. Exported for
+ * testing.
+ */
+export function compileCachePersistenceSlotKey(
   space: MemorySpace,
   entryIdentity: string,
   opts: { runtimeVersion: string },

@@ -215,7 +215,7 @@ describe("link-utils", () => {
       const cell = runtime.getCell(space, "test");
       const result = parseLink(cell.toSigilLinkOrNull(), cell);
 
-      // A sigil-parsed link is DATA-DERIVED (OW51): parseLink stamps a
+      // A sigil-parsed link is DATA-DERIVED: parseLink stamps a
       // read-side `viaLinkHop` so a later read dead-ending at its doc is an
       // unresolved input, not a known absence. Identity + serialization
       // ignore it; the assertions carry it because they compare full output.
@@ -392,10 +392,9 @@ describe("link-utils", () => {
     });
 
     it("should not crash on BigInt values when formatting the error", () => {
-      // Regression: a previous version embedded `JSON.stringify(value)` in the
-      // error message, which throws on BigInt and masks the original "not a
-      // link" failure. Using `toCompactDebugString` instead handles BigInt
-      // safely.
+      // The error message is formatted with `toCompactDebugString`, which
+      // handles BigInt safely; `JSON.stringify(value)` would throw on BigInt
+      // and mask the original "not a link" failure.
       expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
         "Cannot parse value as link",
       );
@@ -925,7 +924,7 @@ describe("link-utils", () => {
       // link carries its own scope) and acts as a follow cap. It must NOT be
       // promoted onto the stripped schema's top-level `scope`: doing so makes it
       // look like an authored container scope, which then gets stamped onto the
-      // container link on reads and addresses the wrong scoped instance (CT-1623).
+      // container link on reads and addresses the wrong scoped instance.
       const schema = {
         type: "object",
         properties: {
@@ -1245,7 +1244,7 @@ describe("link-utils", () => {
       expect(result).not.toHaveProperty("asCell");
       // Should have processed nested properties
       expect((result as any).properties.name.type).toBe("string");
-      // CT-1142: Result should be JSON-serializable without exponential growth
+      // The result is JSON-serializable without exponential growth.
       expect(() => JSON.stringify(result)).not.toThrow();
       // The circular reference should use $ref
       const schemaRef = (result as any).properties.subPieces.items.properties
@@ -1387,7 +1386,7 @@ describe("link-utils", () => {
     });
 
     it("should process schemas inside existing $defs", () => {
-      // Bug fix test: schemas inside $defs should have asCell stripped
+      // Schemas inside `$defs` have `asCell` stripped too.
       const schema: any = {
         type: "object",
         $defs: {
@@ -1419,7 +1418,7 @@ describe("link-utils", () => {
     });
 
     it("should avoid name collisions with existing $defs", () => {
-      // Bug fix test: generated names should not overwrite existing $defs
+      // Generated names do not overwrite existing `$defs`.
       const schema: any = {
         type: "object",
         $defs: {

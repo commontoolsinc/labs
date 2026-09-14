@@ -1,5 +1,8 @@
 # Collection indexes
 
+For authoring recipes alongside `map`, `filter`, and `reduce`, see
+[reactive collections](../common/concepts/reactive-collections.md).
+
 Array-valued Cells expose `groupBy(selector)` and `keyBy(selector)`. Each
 selector receives one source element. The compiler lowers it to reactive key
 extraction; the runtime owns membership maintenance for each source occurrence.

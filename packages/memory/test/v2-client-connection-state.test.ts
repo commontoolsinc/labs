@@ -23,6 +23,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import type { FabricValue } from "@commonfabric/data-model";
 import {
   decodeMemoryBoundary,
@@ -163,8 +164,8 @@ class SeverableTransport implements Transport {
 const connectSeverable = async (reconnectHello: ReconnectHello) => {
   const transport = new SeverableTransport(reconnectHello);
   const client = await connect({ transport });
-  await client.mount("did:key:z6Mk-connection-state-space");
-  return { transport, client };
+  const session = await client.mount("did:key:z6Mk-connection-state-space");
+  return { transport, client, session };
 };
 
 describe("Client", () => {
@@ -254,6 +255,71 @@ describe("Client", () => {
           expect(client.connectionState).toBe("failed");
           expect(client.isConnected()).toBe(false);
         } finally {
+          await client.close();
+        }
+      });
+
+      it("rejects pending session restoration when reconnecting fails permanently", async () => {
+        const { transport, client, session } = await connectSeverable(
+          "mismatch",
+        );
+        const opening = Promise.withResolvers<void>();
+        const failedOpen = Promise.withResolvers<never>();
+        const transient = new Error("transient reopen failure");
+        const held = stub(client, "openSession", () => {
+          opening.resolve();
+          return failedOpen.promise;
+        });
+        try {
+          const first = session.restore();
+          const failed = expect(first).rejects.toBe(transient);
+          let state = "pending";
+          const ready = session.whenRestored().then(() => {
+            state = "restored";
+          }, (error) => {
+            state = "rejected";
+            return error;
+          });
+          await opening.promise;
+          failedOpen.reject(transient);
+          await failed;
+          expect(state).toBe("pending");
+          held.restore();
+
+          transport.sever();
+          await expect(client.restoreConnection()).rejects.toThrow(
+            "flag mismatch",
+          );
+          expect(client.connectionState).toBe("failed");
+          expect(session.closeError).toBeInstanceOf(Error);
+          expect(session.closeError?.message).toContain("flag mismatch");
+          expect(await ready).toBe(session.closeError);
+          expect(state).toBe("rejected");
+          await expect(session.whenRestored()).rejects.toBe(session.closeError);
+        } finally {
+          if (!held.restored) held.restore();
+          await client.close();
+        }
+      });
+
+      it("rejects session restoration when the handshake fails before reopening", async () => {
+        const { transport, client, session } = await connectSeverable(
+          "mismatch",
+        );
+        const restore = stub(session, "restore", () => {
+          throw new Error("incompatible handshake must not reopen a session");
+        });
+        try {
+          transport.sever();
+          await expect(client.restoreConnection()).rejects.toThrow(
+            "flag mismatch",
+          );
+          expect(restore.calls).toHaveLength(0);
+          expect(session.closeError).toBeInstanceOf(Error);
+          expect(session.closeError?.message).toContain("flag mismatch");
+          await expect(session.whenRestored()).rejects.toBe(session.closeError);
+        } finally {
+          restore.restore();
           await client.close();
         }
       });

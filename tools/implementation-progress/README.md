@@ -2,7 +2,7 @@
 
 Local execution dashboard for the design in PR #7155. The acceptance checklist
 is
-[the implementation tracker](../../docs/plans/pattern-computation-cost-implementation.md).
+[the implementation tracker](../../docs/history/plans/pattern-computation-cost-implementation.md).
 `status.json` records delivery state, review gates, questions, and demo
 milestones. Update it at each milestone and when a question or review finding
 changes. “Landed” means merged; implemented work awaiting review stays “In
@@ -21,9 +21,10 @@ tests. Questions are answered in the working conversation and recorded in
 `status.json`; the page does not submit answers.
 
 `demo.json` contains recorded output from the controlled lunch-poll run, with
-its revision and reproduction command. The page lets the reader inspect each
-interval and the reported computation rows. Totals include unlisted rows; the
-recording is not a live benchmark. Preserve provenance when replacing it.
+its revision and recorded command, alongside a command for running the fixture
+on the current checkout. The page lets the reader inspect each interval and the
+reported computation rows. Totals include unlisted rows; the recording is not a
+live benchmark. Preserve provenance when replacing it.
 
 The browser section shows recorded screenshots and diagnostic samples at three
 vote-list sizes. Its p75 timings include browser/protocol overhead and are

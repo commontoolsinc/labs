@@ -44,15 +44,24 @@ installFakeClock({
     // The engine read-through suite drives the same live ExecutorHost
     // under the same wall-clock policies.
     "engine-read-through",
+    "executor-llm-dialog",
     // The compiled-child suite runs the same live serving host. Its lease
     // renew interval must advance in real time while compiler work settles.
     "executor-compile-and-run",
-    // Scoped fetch requests use the same live serving host and lease cadence.
+    // Scoped effect requests use the same live serving host and lease cadence.
     "executor-fetch-instances",
+    "executor-fetch-program-instances",
+    "executor-sqlite-instances",
     // Same wall-clock pacing, same machinery (the SpaceServer's renew
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
     "executor-space-server",
+    // View publication drives a live ExecutorHost with the same flush, renew,
+    // and disposal deadlines. The fixture waits on view-plan events.
+    "view-replication-client",
+    // The activation lease suite controls Date and renewal intervals itself,
+    // while scheduler and transport dispatch use ordinary zero-delay timers.
+    "activation-lease",
     // The OW45 arm-B stage-1 space-root ensure suite drives a real
     // SpaceServer directly under the same wall-clock policies (renew
     // interval, flush deadline); auto-advance turns the renew cadence

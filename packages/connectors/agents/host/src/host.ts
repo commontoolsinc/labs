@@ -4,14 +4,19 @@ import {
   type AgentSourceConfig,
   type CollectedSource,
   collectSource,
+  commandIdentity,
   type CommandTarget,
   type CommandTaskFailure,
   CommandWorker,
   type DriverCapabilities,
+  type PublishedSessionState,
+  sessionKey,
+  type SessionSummary,
 } from "@commonfabric/agents-connector";
 import type { CommandLedger } from "@commonfabric/agents-connector/command-ledger";
 import { abortable } from "./abort.ts";
 import { discoverGitCheckoutDirectories } from "./checkout-discovery.ts";
+import type { BoundCommandProducer } from "./command-producers.ts";
 
 export type AgentsHostStatus =
   | "created"
@@ -69,6 +74,7 @@ export interface AgentsHostTargetDescription {
   spaceDid: string;
   ownerDid: string;
   debugPieceId?: string;
+  commandProducers?: BoundCommandProducer[];
   cells: {
     recentIndex: string;
     allIndex: string;
@@ -96,6 +102,7 @@ export interface AgentsHostHealth {
 }
 
 export interface AgentsHostTarget extends CommandTarget {
+  publishedSessions(): Promise<ReadonlyMap<string, PublishedSessionState>>;
   beginSessionObservation(): number;
   publish(
     collected: CollectedSource[],
@@ -112,10 +119,11 @@ export interface AgentsHostTarget extends CommandTarget {
   ): Promise<boolean>;
   publishHealth(value: Record<string, unknown>): Promise<void>;
   subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<() => void>;
   readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined>;
 }
 
@@ -156,6 +164,14 @@ export class AgentsHost {
   readonly #drivers = new Map<string, AgentDriver>();
   readonly #cleanupDrivers = new Map<string, AgentDriver>();
   readonly #sources = new Map<string, AgentsHostSourceHealth>();
+  /**
+   * Per source, the sessions the running driver has read since it started.
+   * A driver learns a session's controls (its mode and configuration
+   * options, for Agent Client Protocol drivers) when it reads the session,
+   * so a session is retained only once this driver has read it; the first
+   * collection after a start reads every listed session.
+   */
+  readonly #readSinceStart = new Map<string, Set<string>>();
   readonly #activity: AgentsHostActivity[] = [];
   readonly #commandFailures = new Map<string, string>();
   readonly #startedAt: string;
@@ -302,7 +318,8 @@ export class AgentsHost {
       publishReceipt: (receipt) => this.#publishReceipt(receipt),
       refreshSession: (driver, nativeSessionId) =>
         this.#refreshSession(driver, nativeSessionId),
-      readReceipt: (commandId) => this.#target.readReceipt(commandId),
+      readReceipt: (commandId, producer) =>
+        this.#target.readReceipt(commandId, producer),
     };
     this.#commandWorker = new CommandWorker(
       this.#drivers,
@@ -323,9 +340,10 @@ export class AgentsHost {
       this.#acceptingCommands = true;
       try {
         this.#subscriptionTask = this.#target.subscribeCommands(
-          (commands) => {
+          (commands, producer) => {
             if (!this.#acceptingCommands) return;
-            void this.#commandWorker?.handle(commands).catch((error) => {
+            const worker = this.#commandWorker;
+            void worker?.handle(commands, producer).catch((error) => {
               this.#logger.error(
                 `command admission failed: ${errorMessage(error)}`,
               );
@@ -575,6 +593,7 @@ export class AgentsHost {
       signal?.throwIfAborted();
       this.#cleanupDrivers.delete(config.id);
       this.#drivers.set(config.id, driver);
+      this.#readSinceStart.set(config.id, new Set());
       state.status = "ready";
       state.capabilities = structuredClone(driver.source.capabilities);
       state.lastError = undefined;
@@ -665,9 +684,10 @@ export class AgentsHost {
 
     try {
       await this.#publishHealth(signal);
+      const published = await this.#publishedSessions(signal);
       const collected = await Promise.all(
         [...this.#drivers.entries()].map(([sourceId, driver]) =>
-          this.#collectSource(sourceId, driver, signal)
+          this.#collectSource(sourceId, driver, published, signal)
         ),
       );
       signal?.throwIfAborted();
@@ -755,9 +775,32 @@ export class AgentsHost {
     }
   }
 
+  /**
+   * What the indexes hold, for retaining unchanged sessions. A lookup failure
+   * retains nothing, so the collection reads every session it lists.
+   */
+  async #publishedSessions(
+    signal?: AbortSignal,
+  ): Promise<ReadonlyMap<string, PublishedSessionState>> {
+    try {
+      const published = await this.#target.publishedSessions();
+      signal?.throwIfAborted();
+      return published;
+    } catch (error) {
+      signal?.throwIfAborted();
+      this.#recordActivity(
+        "published-sessions-unavailable",
+        "Published session lookup failed; every listed session will be read",
+        { error: errorMessage(error) },
+      );
+      return new Map();
+    }
+  }
+
   async #collectSource(
     sourceId: string,
     driver: AgentDriver,
+    published: ReadonlyMap<string, PublishedSessionState>,
     signal?: AbortSignal,
   ): Promise<CollectedSource> {
     const state = this.#sources.get(sourceId)!;
@@ -767,9 +810,22 @@ export class AgentsHost {
       undefined,
       sourceId,
     );
+    // A session is retained when its inventory summary matches a complete
+    // published copy in every field the summary can change, and this driver
+    // has read it since it started.
+    const readSinceStart = this.#readSinceStart.get(sourceId) ?? new Set();
+    const retain = (summary: SessionSummary): boolean => {
+      const key = sessionKey(sourceId, summary.nativeSessionId);
+      const prior = published.get(key);
+      return prior !== undefined && prior.syncStatus === "complete" &&
+        readSinceStart.has(key) &&
+        prior.driver === driver.source.driver &&
+        summary.updatedAt !== null && prior.updatedAt === summary.updatedAt &&
+        prior.archived === summary.archived && prior.active === summary.active;
+    };
     let collected: CollectedSource;
     try {
-      collected = await collectSource(driver, signal);
+      collected = await collectSource(driver, { signal, retain });
     } catch (error) {
       signal?.throwIfAborted();
       collected = {
@@ -780,8 +836,12 @@ export class AgentsHost {
       };
     }
 
+    for (const session of collected.sessions) {
+      readSinceStart.add(sessionKey(sourceId, session.summary.nativeSessionId));
+    }
+    const retainedCount = collected.retained?.length ?? 0;
     state.capabilities = structuredClone(driver.source.capabilities);
-    state.sessionCount = collected.sessions.length;
+    state.sessionCount = collected.sessions.length + retainedCount;
     state.complete = collected.complete;
     state.errors = structuredClone(collected.errors);
     state.lastCollectionCompletedAt = this.#now();
@@ -794,6 +854,7 @@ export class AgentsHost {
         complete: collected.complete,
         errorCount: collected.errors.length,
         sessionCount: collected.sessions.length,
+        retainedCount,
       },
       sourceId,
     );
@@ -836,6 +897,9 @@ export class AgentsHost {
       });
       throw error;
     }
+    this.#readSinceStart.get(driver.source.id)?.add(
+      sessionKey(driver.source.id, nativeSessionId),
+    );
     this.#recordActivity(
       "session-refresh-completed",
       "Post-command session refresh completed",
@@ -867,6 +931,9 @@ export class AgentsHost {
         "Command receipt publication failed",
         {
           commandId: receipt.commandId,
+          ...(receipt.producer === undefined
+            ? {}
+            : { producer: receipt.producer }),
           nativeSessionId: receipt.nativeSessionId,
           status: receipt.status,
           error: message,
@@ -885,12 +952,17 @@ export class AgentsHost {
   }
 
   #recordReceipt(receipt: AgentSessionCommandReceipt): void {
-    this.#commandFailures.delete(receipt.commandId);
+    this.#commandFailures.delete(
+      commandIdentity(receipt.commandId, receipt.producer),
+    );
     this.#recordActivity(
       "command-receipt",
       `Command receipt is ${receipt.status}`,
       {
         commandId: receipt.commandId,
+        ...(receipt.producer === undefined
+          ? {}
+          : { producer: receipt.producer }),
         nativeSessionId: receipt.nativeSessionId,
         status: receipt.status,
         ...(receipt.error ? { error: receipt.error } : {}),
@@ -906,7 +978,10 @@ export class AgentsHost {
 
   #recordCommandFailure(failure: CommandTaskFailure): void {
     const message = errorMessage(failure.error);
-    this.#commandFailures.set(failure.commandId, message);
+    this.#commandFailures.set(
+      commandIdentity(failure.commandId, failure.producer),
+      message,
+    );
     const state = this.#sources.get(failure.sourceId);
     if (state) {
       state.status = "degraded";
@@ -918,6 +993,9 @@ export class AgentsHost {
       "Command processing failed",
       {
         commandId: failure.commandId,
+        ...(failure.producer === undefined
+          ? {}
+          : { producer: failure.producer }),
         nativeSessionId: failure.nativeSessionId,
         error: message,
       },

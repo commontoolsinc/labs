@@ -1,5 +1,3 @@
-import { type JSONSchema } from "@commonfabric/runner/shared";
-
 /**
  * One mention in a document: where it points, and whether the label carrying
  * it in the text is the user's own wording.
@@ -28,19 +26,10 @@ export interface MentionRef {
  */
 export type MentionRefMap = Record<string, MentionRef>;
 
-export const MentionRefSchema = {
-  type: "object",
-  properties: {
-    destination: { type: "object", properties: {}, asCell: ["cell"] },
-    modifiedTitle: { type: "boolean", default: false },
-  },
-  required: ["destination"],
-} as const satisfies JSONSchema;
-
-export const MentionRefMapSchema = {
-  type: "object",
-  additionalProperties: MentionRefSchema,
-} as const satisfies JSONSchema;
+export {
+  MentionRefMapSchema,
+  MentionRefSchema,
+} from "@commonfabric/runner/component-read-contract";
 
 /** Length of a freshly minted key. */
 const KEY_LENGTH = 6;

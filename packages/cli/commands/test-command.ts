@@ -4,7 +4,11 @@ import { resolve } from "@std/path";
 import { Command } from "@cliffy/command";
 
 import { cliText } from "../lib/cli-name.ts";
-import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
+import {
+  compileTestPatterns,
+  discoverTestFiles,
+  runTests,
+} from "../lib/test-runner.ts";
 
 export interface TestCommandOptions {
   recordResults?: boolean;
@@ -29,19 +33,10 @@ export function createTestCommand(
       "Run all test files matching a glob pattern.",
     )
     .example(
-      cliText("cf test ./counter.test.tsx --timeout 10000"),
-      "Run with custom timeout (10 seconds).",
-    )
-    .example(
       cliText(
         "cf test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
       ),
       "Run with custom root for resolving imports from sibling directories.",
-    )
-    .option(
-      "--timeout <ms:number>",
-      "Timeout per test action in milliseconds.",
-      { default: 5000 },
     )
     .option(
       "--verbose",
@@ -50,6 +45,10 @@ export function createTestCommand(
     .option(
       "--no-idempotency-check",
       "Disable verification replay for performance measurements.",
+    )
+    .option(
+      "--compile-only",
+      "Compile each file's program into the compile byte cache and run nothing. With CF_COMPILE_CACHE_FILE set, a later run of the same files compiles none of it.",
     )
     .option(
       "--root <dir:string>",
@@ -156,6 +155,20 @@ export function createTestCommand(
         : Deno.env.get("CF_PATTERN_COVERAGE_DIR")
         ? resolve(Deno.cwd(), Deno.env.get("CF_PATTERN_COVERAGE_DIR")!)
         : undefined;
+      if (options.compileOnly) {
+        const { failed } = await compileTestPatterns(uniqueTestFiles, {
+          root,
+          dataFilePaths: options.datafile?.map((path: string) =>
+            resolve(Deno.cwd(), path)
+          ),
+          patternCoverageDir,
+        });
+        if (failed.length > 0) {
+          Deno.exit(1);
+        }
+        return;
+      }
+
       const statsInclude = options.statsInclude
         ? String(options.statsInclude)
           .split(",")
@@ -165,7 +178,6 @@ export function createTestCommand(
 
       // Run tests
       const { failed } = await runTests(uniqueTestFiles, {
-        timeout: options.timeout,
         verbose: options.verbose,
         noIdempotencyCheck: options.idempotencyCheck === false,
         root,

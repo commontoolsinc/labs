@@ -38,7 +38,11 @@ import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
-import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricSpecialObject,
+} from "@/interface.ts";
 
 describe("cloneIfNecessary()", () => {
   describe(`error cases`, () => {
@@ -550,7 +554,7 @@ describe("cloneIfNecessary()", () => {
     readonly name: string;
     // Returns either a `FabricInstance` (non-primitive cases) or a
     // `FabricPrimitive` (primitive cases). Both extend `FabricSpecialObject`.
-    readonly factory: () => FabricSpecialObject;
+    readonly factory: () => FabricPrimitive | FabricInstance;
     readonly deepCloneImplemented: boolean;
   };
 
@@ -769,7 +773,7 @@ describe("cloneIfNecessary()", () => {
                 const result = cloneIfNecessary(
                   value,
                   vec.opts,
-                ) as FabricSpecialObject;
+                ) as FabricPrimitive | FabricInstance;
 
                 // (1) Class identity is preserved.
                 expect(result).toBeInstanceOf(ctor);

@@ -247,11 +247,11 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   primitive, where class accessors count (`FabricBytes` satisfies
   `required: ["length"]` but not `required: ["x"]`) — mirroring the
   TypeScript structural rule that a `FabricBytes` is assignable to
-  `{length: number}`. The nominal brand key
-  (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/data-model/src/api.ts`), which
-  schemas from pre-vocabulary compilations name in `required` (current
-  generator emissions omit it everywhere), has no runtime existence and
-  counts as present on any `FabricSpecialObject`. Property sub-schemas are
+  `{length: number}`. The nominal brand key (`FABRIC_SPECIAL_OBJECT_BRAND` in
+  `packages/runner/src/fabric-special-object-brand.ts`), which schemas from
+  pre-vocabulary compilations name in `required` (current generator emissions
+  omit it everywhere), has no runtime existence and counts as present on any
+  `FabricSpecialObject`. Property sub-schemas are
   still not walked against a primitive: presence is checked, shapes are not, so
   `{ "type": "object", "properties": { "source": { "type": "number" } } }`
   matches a `FabricRegExp` even though its `source` is a string. Schemas

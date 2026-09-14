@@ -242,11 +242,10 @@ The toolshed log records the same thing, but it accumulates NUL bytes, so
 `grep` can decide it is binary and print nothing rather than the line that is
 there; pass `grep -a` if you read it.
 
-`restart-local-dev.sh` is the reason to check rather than assume. It runs
-`start-local-dev.sh` as a fresh process without the environment it was itself
-given, so restarting to pick up an edit returns the toolshed to the default
-while the posture the reader set appears to still be in place. Stop and start,
-or re-supply the variable to the restart.
+`start-local-dev.sh` and `restart-local-dev.sh` inherit their caller's
+environment. Supply the flags on every start or restart, or export them in the
+calling shell; a variable supplied to an earlier command does not persist for
+the next one.
 
 A posture mismatch does not announce itself. It fails the test, which reads as
 the behavior under test being broken, so a run against a default-posture
@@ -254,12 +253,33 @@ toolshed can report a test as failing at every commit while CI has that test
 green. That is enough to send a bisect to the wrong answer, which is the cost
 worth avoiding here.
 
-None of this reaches a test that opens a browser. The shell's half of the
-posture is a build-time define that the local dev servers do not carry:
-`/api/meta` reports `shellServerExecutionDefine` as null whatever the toolshed
-was started with. That is faithful only to the default role, whose shell follows
-the first-party constant. A browser test on the opposite role needs a binary
-built with the same explicit flag as the server and test process.
+The shell receives these flags through build-time defines in `felt.config.ts`.
+Felt's development server builds with those defines before serving the shell,
+so flags supplied to `deno task integration` reach the server, test processes,
+and browser workers. The runtime-client integration helper also forwards the
+environment-selected flags into its workers. `/api/meta`'s
+`shellServerExecutionDefine` describes a packaged shell build and can be null
+with local dev servers; it does not report the defines in the dev bundle.
+
+The `generated-patterns` and `pattern-tests` targets use in-process, emulated
+stores without a serving host. The integration runner explicitly disables
+`serverExecution` for these two harnesses while preserving the other inherited
+flags. Server-backed targets receive the supplied server-execution setting.
+
+For view-scoped replication, run the complete default integration suite with:
+
+```bash
+EXPERIMENTAL_SERVER_EXECUTION=true \
+EXPERIMENTAL_VIEW_SCOPED_REPLICATION=true deno task integration
+```
+
+The browser regression `shell/integration/view-scoped-replication.test.ts`
+checks the server's published posture and the shell's actual worker
+initialization. Run it through `deno task integration shell view-scoped` to
+test a flag combination, including `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION=false`
+overriding a true global default, or a true web override with the global default
+false. Restart the servers through the integration runner for each combination
+so the browser bundle is rebuilt with that environment.
 
 ### Tests that start Deno
 

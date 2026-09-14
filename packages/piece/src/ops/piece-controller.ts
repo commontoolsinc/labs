@@ -3,6 +3,7 @@ import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
+  acceptsOpaqueCellOrUnresolvedLink,
   applyPieceSourceTransition,
   Cell,
   type CellPath,
@@ -29,6 +30,7 @@ import {
   mergeSchemaDefaults,
   NAME,
   type NormalizedLink,
+  overlayUnreadableLinkPlaceholders,
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
@@ -66,6 +68,7 @@ import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  PATTERN_SCHEMAS_INCOMPATIBLE,
   schemasHaveSameContract,
 } from "../schema-compatibility.ts";
 import {
@@ -76,6 +79,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
@@ -84,7 +88,7 @@ import {
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
-import { compileProgram } from "./utils.ts";
+import { commitFailure, compileProgram } from "./utils.ts";
 
 const pieceUpdateLogger = getLogger("piece.update", {
   enabled: true,
@@ -174,12 +178,7 @@ async function snapshotCloneData(
     piece.runtime.prepareTxForCommit(tx);
     commitStarted = true;
     const { error } = await tx.commit();
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
     return { input, internals };
   } catch (error) {
     if (!commitStarted) tx.abort(error);
@@ -211,12 +210,7 @@ async function restoreCloneInternals(
     piece.runtime.prepareTxForCommit(tx);
     commitStarted = true;
     const { error } = await tx.commit();
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
   } catch (error) {
     if (!commitStarted) tx.abort(error);
     throw error;
@@ -263,6 +257,24 @@ function replaceMaterializedValueAtPath(
     writable: true,
   });
   return clone;
+}
+
+/**
+ * Whether a proper prefix of `path` holds a link in `raw`, so that a write at
+ * `path` resolves through that link into another document.
+ */
+function writePathCrossesLink(
+  raw: unknown,
+  path: readonly (string | number)[],
+): boolean {
+  let current = raw;
+  for (const segment of path.slice(0, -1)) {
+    current = current !== null && typeof current === "object"
+      ? (current as Record<PropertyKey, unknown>)[segment]
+      : undefined;
+    if (isLink(current)) return true;
+  }
+  return false;
 }
 
 /** Replace a schema-aware snapshot path, reading through Cell ancestors. */
@@ -516,6 +528,32 @@ export interface PatternCompatibilityReport {
   candidate: { identity: string; symbol: string };
 }
 
+/** What {@link PieceController.setPattern} takes beside the candidate. */
+export interface PatternUpdateOptions {
+  /** Repository locator written atomically with the setup. */
+  repository?: string;
+
+  /**
+   * Replace the source even when compatibility cannot be proven, or when
+   * the current pattern cannot be loaded at all.
+   */
+  dangerouslyAllowIncompatibleSchema?: boolean;
+
+  /** The pattern the update was proved against; a piece on another refuses. */
+  expectedPattern?: { identity: string; symbol: string };
+
+  /**
+   * The update as a serving runtime performs it on `actingUser`'s behalf
+   * (docs/features/server-pattern-lifecycle.md): the setup transaction
+   * carries that principal's trust snapshot and commits directly to the
+   * store rather than sealing into the serving wave, the piece is not
+   * started here, and no post-commit refresh runs. The loop's own swap
+   * watcher replaces a running piece's graph, and its demand pass runs an
+   * unrun one; the receipt's `refresh` is `deferred`.
+   */
+  served?: { actingUser: string };
+}
+
 /** Result of a pattern update accepted by the setup transaction. */
 export interface PatternUpdateReceipt extends PieceSourceSetResult {
   /** Stable outcome code for a successful setup transaction. */
@@ -531,9 +569,14 @@ export interface PatternUpdateReceipt extends PieceSourceSetResult {
   seq: number;
   /** Source-history revision written atomically with `.ref`. */
   revisionId: string;
-  /** Outcome of work which refreshes the running piece after commit. */
+  /**
+   * Outcome of work which refreshes the running piece after commit;
+   * `deferred` when this call ran none, leaving the piece to its runtime's
+   * own means — a serving runtime's swap watcher, or its demand pass.
+   */
   refresh:
     | { status: "completed" }
+    | { status: "deferred" }
     | { status: "failed"; warning: string };
 }
 
@@ -3382,6 +3425,45 @@ class PiecePropIo implements PieceCellIo {
           writePath,
           materializedValue,
         );
+        // A slot whose stored value routes through a link this replica cannot
+        // read — another principal's per-user instance, a document not
+        // replicated here — materializes as absent, and judged as it stands
+        // would refuse the write for a value owned elsewhere. Such a slot is
+        // staged as the unresolved-link placeholder and accepted opaquely;
+        // its schema check happens when a reactive read materializes it, the
+        // rule stored-argument validation applies. A link the caller supplies
+        // defers on the same terms — the caller vouches for the link, not for
+        // its target being replicated here — so the raw tree the overlay
+        // walks holds the caller's value, links and all, at the write path,
+        // and a scalar or `undefined` written there is judged as written.
+        // Where the write path crosses a stored link the raw tree stays as
+        // stored, so the overlay can follow that link to the fields around
+        // the written one. The overlay only ever turns an absence into an
+        // accepted opaque, so a candidate is judged against the staged root
+        // first and the overlay is consulted only when that fails.
+        const rawRoot = targetCell.withTx(tx).getRaw();
+        const rawForOverlay = writePathCrossesLink(rawRoot, writePath)
+          ? rawRoot
+          : replaceMaterializedValueAtPath(rawRoot, writePath, value);
+        const argumentLink = targetCell.getAsNormalizedFullLink();
+        const inputIssue = (candidate: unknown): string | undefined => {
+          const options = {
+            acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+          };
+          const issue = validateSchemaValue(schema, candidate, schema, options);
+          if (issue === undefined) return undefined;
+          return validateSchemaValue(
+            schema,
+            overlayUnreadableLinkPlaceholders(
+              tx,
+              argumentLink,
+              rawForOverlay,
+              candidate,
+            ),
+            schema,
+            options,
+          );
+        };
         const mergedRoot = mergeSchemaDefaults(
           stagedRoot,
           extractDefaultValues(schema),
@@ -3405,15 +3487,12 @@ class PiecePropIo implements PieceCellIo {
               mergeMaterializedLinks: true,
               acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
               acceptUnionCandidate: (candidate) =>
-                validateSchemaValue(
-                  schema,
+                inputIssue(
                   replaceMaterializedValueAtPath(
                     stagedRoot,
                     writePath,
                     candidate,
                   ),
-                  schema,
-                  { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
                 ) === undefined,
             },
           );
@@ -3425,12 +3504,7 @@ class PiecePropIo implements PieceCellIo {
             writePath,
             nextValue,
           );
-        const issue = validateSchemaValue(
-          schema,
-          validationRoot,
-          schema,
-          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
-        );
+        const issue = inputIssue(validationRoot);
         if (issue !== undefined) {
           throw new Error(`updated input does not match its schema: ${issue}`);
         }
@@ -3659,12 +3733,7 @@ class PiecePropIo implements PieceCellIo {
       }
       return { wrote: true };
     });
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
     // A committed decision not to write leaves nothing to pull.
     if (ok !== undefined && !ok.wrote) return { wrote: false };
 
@@ -4643,11 +4712,37 @@ export class PieceController<T = unknown> {
    */
   async setPattern(
     program: RuntimeProgram,
-    options?: {
-      repository?: string;
-      dangerouslyAllowIncompatibleSchema?: boolean;
-      expectedPattern?: { identity: string; symbol: string };
-    },
+    options?: PatternUpdateOptions,
+  ): Promise<PatternUpdateReceipt> {
+    return await this.#updatePattern(
+      () => compileProgram(this.#pieces, program),
+      options,
+    );
+  }
+
+  /**
+   * Like {@link setPattern}, except the candidate is a pattern already
+   * compiled into the space — the result of an earlier compile whose
+   * closure the space holds — so nothing is compiled or persisted here
+   * before the setup transaction. Everything else, the pin and the
+   * compatibility checks included, is the same.
+   */
+  async setCompiledPattern(
+    pattern: Pattern,
+    options?: PatternUpdateOptions,
+  ): Promise<PatternUpdateReceipt> {
+    return await this.#updatePattern(() => Promise.resolve(pattern), options);
+  }
+
+  /**
+   * Helper for `setPattern()` and `setCompiledPattern()`, which runs the
+   * update over the candidate `compile` produces at the point in the flow
+   * where the candidate is needed: after the current pattern and the
+   * transition's baseline are in hand, ahead of the compatibility checks.
+   */
+  async #updatePattern(
+    compile: () => Promise<Pattern>,
+    options?: PatternUpdateOptions,
   ): Promise<PatternUpdateReceipt> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
@@ -4673,9 +4768,13 @@ export class PieceController<T = unknown> {
         // identity without loading it.
         let previousPattern: Pattern | undefined;
         let previousRef: { identity: string; symbol: string };
+        // A served update repairs no cache: a write the load would seal
+        // into the serving wave is not one the update's own commit
+        // should rest on or answer for.
+        const repairCache = options?.served === undefined;
         try {
           ({ pattern: previousPattern, ref: previousRef } = await this
-            .#loadCurrentPattern());
+            .#loadCurrentPattern({ repairCache }));
         } catch (error) {
           if (!options?.dangerouslyAllowIncompatibleSchema) throw error;
           await this.#cell.sync();
@@ -4716,7 +4815,7 @@ export class PieceController<T = unknown> {
             ? { allowUnavailable: true }
             : {},
         );
-        const pattern = await compileProgram(this.#pieces, program);
+        const pattern = await compile();
         const candidate = this.#pieces.runtime.patternManager
           .getArtifactEntryRef(pattern);
         if (candidate === undefined) {
@@ -4770,6 +4869,9 @@ export class PieceController<T = unknown> {
                   ),
               repository: options?.repository,
               sourceTransition: transition,
+              ...(options?.served === undefined
+                ? {}
+                : { served: options.served }),
             },
           );
           commit = result.commit;
@@ -4821,7 +4923,9 @@ export class PieceController<T = unknown> {
       seq: commit!.seq,
       revisionId: transition!.revisionId,
       detachedOrigin: transition!.expected.origin,
-      refresh: { status: "completed" },
+      refresh: {
+        status: options?.served === undefined ? "completed" : "deferred",
+      },
     };
   }
 
@@ -5225,6 +5329,21 @@ function pieceSourceCompatibilityMessage(
     .join("\n");
 }
 
+/**
+ * Whether `error` is an update refused for the candidate's fit over the
+ * piece — its schemas against the current pattern's, the links its argument
+ * schema retains, the stored argument, or the stored CFC envelope the
+ * candidate's schema cannot migrate — rather than for a reason of setup's
+ * own.
+ */
+export function isPieceSourceCompatibilityRefusal(error: unknown): boolean {
+  return error instanceof Error && (
+    error.message.startsWith(PATTERN_SCHEMAS_INCOMPATIBLE) ||
+    isOverridableArgumentCompatibilityError(error) ||
+    isCfcMigrationRejection(error)
+  );
+}
+
 function isOverridableArgumentCompatibilityError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return error.message.includes(
@@ -5294,6 +5413,7 @@ async function executePatternUpdate(
     ) => void;
     repository?: string;
     sourceTransition: PieceSourceTransition;
+    served?: { actingUser: string };
   },
 ): Promise<{
   cell: Cell<unknown>;
