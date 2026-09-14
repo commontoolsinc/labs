@@ -64,7 +64,9 @@ describe("LLM builtin no-request paths", () => {
   afterEach(async () => {
     resetMockMode();
     await tx.commit();
-    await runtime.idle();
+    // The built-in's request chain is async work `idle()` returns ahead of;
+    // `settled()` drains it before the runtime is torn down.
+    await runtime.settled();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -196,6 +198,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -256,6 +261,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -317,6 +325,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -372,6 +383,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -438,6 +452,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell, queue: queueCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 

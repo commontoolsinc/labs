@@ -3755,7 +3755,17 @@ export function llmDialog(
     }
   };
 
-  return { action };
+  // The dialog writes its turns into the `messages` input, a cell the caller
+  // owns and may read without ever reading the dialog's own result. That
+  // envelope is what holds the node's demand: a materializer runs when its
+  // inputs change whether or not anything reads its output.
+  return {
+    action: Object.assign(action, {
+      materializerWriteEnvelopes: [
+        inputs.key("messages").resolveAsCell().getAsNormalizedFullLink(),
+      ],
+    }),
+  };
 }
 
 async function startRequest(

@@ -129,6 +129,9 @@ function runPattern(runtime: Runtime) {
   const tx = runtime.edit();
   const resultCell = runtime.getCell(space, RESULT_CAUSE, undefined, tx);
   runtime.run(tx, pattern, { tables: makeTables(cf) }, resultCell);
+  // The handle and the query are computations: a reader has to demand
+  // them, and the runtime's disposal ends the subscription.
+  resultCell.sink(() => {});
   const commit = tx.commit();
   return { resultCell, commit };
 }
