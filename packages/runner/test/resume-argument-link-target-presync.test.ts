@@ -25,9 +25,9 @@ const space = signer.did();
 // of the link TARGET — read basis seq 0 vs the server's newer seq, a
 // guaranteed ConflictError. v1 was immune (populate's aborted first runs
 // subscribed the target before the first real commit). The v2 equivalent:
-// the resume pre-sync (`Runner.#syncCellsForRunningPattern()`) must follow
-// the resumed pattern's argument links one level and pull their targets
-// before the settle runs.
+// the resume pre-sync (`Runner.#syncCellsForRunningPattern()`) must name
+// the document the computed reads through the argument link, under the
+// schema the transformer narrowed the computed to, before the settle runs.
 //
 // Two managers with their OWN replicas loopback-connected to one in-process
 // server (same shape as inspace-child-owner-seed.test.ts): a shared emulate
@@ -80,7 +80,7 @@ function commitConflictCount(): number {
     ?.total ?? 0;
 }
 
-describe("resume pre-sync covers argument link targets", () => {
+describe("resume pre-sync covers what a body reads through an argument link", () => {
   let server: MemoryV2Server.Server;
   let managerA: EmulatedStorageManager;
   let managerB: EmulatedStorageManager;
@@ -166,7 +166,7 @@ describe("resume pre-sync covers argument link targets", () => {
       };
       expect(
         replicaB.get?.(profileLink.id, profileLink.scope),
-        "resume pre-sync must pull argument link targets before the settle",
+        "resume pre-sync must name what the computed reads before the settle",
       ).toBeDefined();
 
       // Render-like demand: an effect that READS the label synchronously

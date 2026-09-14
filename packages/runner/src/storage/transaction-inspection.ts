@@ -11,6 +11,8 @@ import type {
   TransactionWriteDetail,
 } from "./interface.ts";
 
+import { pendingWriteElisionRead } from "./reactivity-log.ts";
+
 type TxLike = IStorageTransaction | IExtendedStorageTransaction;
 
 const unwrap = (tx: TxLike): IStorageTransaction => {
@@ -69,6 +71,14 @@ export function getTransactionReadActivities(
       journalIndex += 1;
     }
   })();
+}
+
+/** Reports a write that reused an unaccepted output instead of replacing it. */
+export function hasPendingWriteElision(tx: TxLike): boolean {
+  for (const { meta } of getTransactionReadActivities(tx)) {
+    if (meta === pendingWriteElisionRead) return true;
+  }
+  return false;
 }
 
 /**

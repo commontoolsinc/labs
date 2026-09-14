@@ -34,13 +34,7 @@
 // annotated from the outbox carriage captured at the original run's
 // seal; the durable outbound-append rows deliver and retire through
 // the outbox; `memo.*`/`outbox.*` counters are live.
-
 import { toCompactDebugString } from "@commonfabric/data-model";
-import {
-  type AdmittedCommitNotice,
-  type Server as MemoryServer,
-} from "@commonfabric/memory/v2/server";
-import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   type CellScope,
   type ConfirmedRead,
@@ -61,7 +55,14 @@ import {
   type StreamEventsDocValue,
   toDirtyKey,
 } from "@commonfabric/memory/v2";
+import * as Engine from "@commonfabric/memory/v2/engine";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
+import {
+  type AdmittedCommitNotice,
+  type Server as MemoryServer,
+} from "@commonfabric/memory/v2/server";
+
+import { ViewPlanPublisher } from "./view-plan-publisher.ts";
 
 /** The deferral backstop cadence: with NO input arriving at all, a
  * deferred event retries once per tick and hardens into the DROP
@@ -520,6 +521,7 @@ export class SpaceServer implements TransactionSealDestination {
   #lease: ExecutionLeaseCycle | undefined;
   #initializing = false;
   #runtime: Runtime | undefined;
+  #viewPlanPublisher = new ViewPlanPublisher();
   #disposeRuntime: (() => Promise<void>) | undefined;
   #sink: WaveCommitSink | undefined;
   #renewTimer: ReturnType<typeof setInterval> | undefined;
@@ -4680,19 +4682,32 @@ export class SpaceServer implements TransactionSealDestination {
           // collapse-to-false it was unreachable and every real
           // load/start error masqueraded as a creation-race deferral,
           // silently retried each input-driven cycle (r3739139521).
-          const verdict = await this.#attemptStructureLoad(runtime, root);
+          // A demand naming an argument or derived doc resolves to the
+          // OWNING piece root; the per-(action × instance) run supply
+          // finds the demand's identity from that piece's actions through
+          // this mapping (stage P2-F). Recorded before the piece starts,
+          // so a run the start releases finds it. The piece may already
+          // be running, started by another key's load earlier in this
+          // pass, with its nodes run before this key's demanders were
+          // reachable: those nodes re-arm for them exactly as they do for
+          // a demander who arrives after the mapping (the arrival re-arm
+          // below).
+          const onOwningRoot = (rootId: string) => {
+            if (rootId === root.id) return;
+            if (this.#pieceRootByDemandKey.get(key) === rootId) return;
+            this.#pieceRootByDemandKey.set(key, rootId);
+            this.#indexResolvedRoot(key, rootId);
+            runtime.scheduler.invalidateActionsForDemandRoots([rootId]);
+          };
+          const verdict = await this.#attemptStructureLoad(
+            runtime,
+            root,
+            onOwningRoot,
+          );
           if (!this.#active || this.#runtime !== runtime) return;
           if (verdict.started) {
             this.#pendingStructureLoads.delete(key);
             this.#structureLoadDeferralStreaks.delete(key);
-            if (verdict.rootId !== undefined && verdict.rootId !== root.id) {
-              // The demand named an argument/derived doc; remember the
-              // OWNING piece root so the per-(action × instance) run
-              // supply finds this demand's identity from that piece's
-              // actions (stage P2-F).
-              this.#pieceRootByDemandKey.set(key, verdict.rootId);
-              this.#indexResolvedRoot(key, verdict.rootId);
-            }
           } else if (verdict.reason === "no-pattern-meta") {
             // Each traversal syncs the complete addresses it reads. Re-ask
             // before terminalizing so metadata arriving during the first
@@ -4700,17 +4715,12 @@ export class SpaceServer implements TransactionSealDestination {
             const confirmed = await this.#confirmNoPatternMeta(
               runtime,
               root,
+              onOwningRoot,
             );
             if (!this.#active || this.#runtime !== runtime) return;
             if (confirmed.started) {
               this.#pendingStructureLoads.delete(key);
               this.#structureLoadDeferralStreaks.delete(key);
-              if (
-                confirmed.rootId !== undefined && confirmed.rootId !== root.id
-              ) {
-                this.#pieceRootByDemandKey.set(key, confirmed.rootId);
-                this.#indexResolvedRoot(key, confirmed.rootId);
-              }
             } else if (confirmed.reason === "no-pattern-meta") {
               const changed = [
                 ...verdict.observedDocIds,
@@ -4954,6 +4964,7 @@ export class SpaceServer implements TransactionSealDestination {
   async #attemptStructureLoad(
     runtime: Runtime,
     root: { id: string; scope?: string },
+    onOwningRoot: (rootId: string) => void,
   ): Promise<EnsurePieceVerdict> {
     const scope = root.scope ?? "space";
     const verdict = await ensurePieceRunningVerdict(runtime, {
@@ -4961,7 +4972,11 @@ export class SpaceServer implements TransactionSealDestination {
       id: root.id as never,
       scope: scope as never,
       path: [],
-    }, { propagateErrors: true, signal: this.#structureLoadAbort.signal });
+    }, {
+      propagateErrors: true,
+      signal: this.#structureLoadAbort.signal,
+      onOwningRoot,
+    });
     if (
       verdict.started || scope === "space" ||
       verdict.reason !== "no-pattern-meta"
@@ -4973,7 +4988,11 @@ export class SpaceServer implements TransactionSealDestination {
       id: root.id as never,
       scope: "space",
       path: [],
-    }, { propagateErrors: true, signal: this.#structureLoadAbort.signal });
+    }, {
+      propagateErrors: true,
+      signal: this.#structureLoadAbort.signal,
+      onOwningRoot,
+    });
     // Merge observed docs: the re-arm must watch both instances' reads.
     for (const id of verdict.observedDocIds) {
       if (!spaceVerdict.observedDocIds.includes(id)) {
@@ -4990,8 +5009,9 @@ export class SpaceServer implements TransactionSealDestination {
   #confirmNoPatternMeta(
     runtime: Runtime,
     root: { id: string; scope?: string },
+    onOwningRoot: (rootId: string) => void,
   ): Promise<EnsurePieceVerdict> {
-    return this.#attemptStructureLoad(runtime, root);
+    return this.#attemptStructureLoad(runtime, root, onOwningRoot);
   }
 
   /**
@@ -5705,6 +5725,11 @@ export class SpaceServer implements TransactionSealDestination {
       // The owed re-drain rides quiet cycles too (round-2 thread 9): a
       // transport-failed delivery must retry on the NEXT loop cycle,
       // not wait for a new input wave or a re-activation.
+      await this.#viewPlanPublisher.publish(
+        runtime,
+        this.#options.server,
+        this.#options.space,
+      );
       await this.#drainOutboxAppends(false);
       return;
     }
@@ -6060,6 +6085,14 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
+    if (outcome.aborted === undefined) {
+      await this.#viewPlanPublisher.publish(
+        runtime,
+        this.#options.server,
+        this.#options.space,
+      );
+    }
+
     // Drain the durable append rows (FP1): after a wave that landed
     // appends, and after any earlier drain left rows behind (a
     // transport-failed delivery on a long-lived active space must not
@@ -6106,6 +6139,7 @@ export class SpaceServer implements TransactionSealDestination {
    * failure logged when it lands; the park completes regardless (lease
    * released, `#parked` resolved, recovery unblocked). */
   async #disposeRuntimeTimeboxed(reason: string): Promise<void> {
+    this.#viewPlanPublisher.dispose();
     const dispose = this.#disposeRuntime;
     if (dispose === undefined) return;
     const timeoutMs = this.#options.policy?.parkDisposeTimeoutMs ??

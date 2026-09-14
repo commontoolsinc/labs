@@ -1,4 +1,5 @@
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { BuiltInLLMMessagesArraySchema } from "@commonfabric/runner/component-read-contract";
+import { type CellHandle } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
@@ -7,6 +8,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 
 import "../cf-chat-message/index.ts";
+
 import "../cf-tool-call/index.ts";
 
 import type {
@@ -26,38 +28,6 @@ import {
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
 // matching the prior phase-1 token migration pattern.
-
-const BuiltInLLMMessagesArraySchema = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      role: { type: "string" },
-      content: {
-        anyOf: [{
-          type: "array",
-          items: {
-            anyOf: [{
-              type: "object",
-              properties: {
-                // This should be anyOf with const values for type
-                type: { type: "string" },
-                text: { type: "string" },
-                image: { type: "string" },
-                toolCallId: { type: "string" },
-                toolName: { type: "string" },
-                input: { type: "object" },
-                output: {},
-              },
-              required: ["type"],
-            }, { type: "string" }],
-          },
-        }, { type: "string" }],
-      },
-    },
-    required: ["role", "content"],
-  },
-} as const satisfies JSONSchema;
 
 /**
  * CFChat - Chat container that handles message flow and tool call correlation

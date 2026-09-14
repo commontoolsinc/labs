@@ -1,5 +1,6 @@
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";
+
 import type { Module, Pattern } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
@@ -14,6 +15,9 @@ import type {
 } from "../telemetry.ts";
 
 export type TelemetryAnnotations = {
+  viewNodeId?: string;
+  viewLocalOnly?: boolean;
+  viewPiece?: NormalizedFullLink;
   pattern: Pattern;
   module: Module;
   reads: NormalizedFullLink[];
@@ -398,6 +402,16 @@ export type QueuedEvent = {
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+
+  /**
+   * The FIFO slot is held while the stale-basis retry that requeued this
+   * event waits for the state it will re-run against (the conflict's
+   * catch-up and the pull of the document it names). The head parks the
+   * queue for that wait as it does for a loading handler, so a later event
+   * cannot overtake the retry; the readiness continuation clears the flag
+   * and queues an execution.
+   */
+  retryReadinessPending?: boolean;
 
   /** Internal exactly-once guard for terminal pre-dispatch drops. */
   finalOutcomeNotified?: boolean;

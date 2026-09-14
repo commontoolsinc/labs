@@ -1,5 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
+import { FakeTime } from "@std/testing/time";
 import {
   fabricFromRealmValue,
   realmFromFabricValue,
@@ -111,6 +113,87 @@ class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
 }
 
 describe("connection", () => {
+  it("records a timed-out request exactly once even if its reply arrives late", async () => {
+    using time = new FakeTime();
+    const epoch = Date.now();
+    using _now = stub(performance, "now", () => Date.now() - epoch);
+    const transport = new FakeTransport([RequestType.Idle]);
+    const connection = await initializedConnection(transport);
+    const logger = getLogger("runtime-client");
+    logger.resetTimeStats();
+    const request = connection.request({ type: RequestType.Idle });
+    const rejection = expect(request).rejects.toThrow(
+      "RuntimeClient request timed out: runtime:idle",
+    );
+    await time.tickAsync(60_000);
+    await rejection;
+
+    expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+    expect(connection.getRequestTimelineDiagnostics().at(-1)).toMatchObject({
+      type: RequestType.Idle,
+      doneAtMs: 60_000,
+      error: true,
+      outcome: "timeout",
+    });
+    expect(logger.getTimeStats("ipc", RequestType.Idle)).toMatchObject({
+      count: 1,
+      totalTime: 60_000,
+    });
+    expect(logger.getTimeStats("ipc-outcome", "timeout", RequestType.Idle))
+      .toMatchObject({ count: 1, totalTime: 60_000 });
+    using _warning = stub(console, "warn");
+    const sent = transport.sent.find((message) =>
+      "msgId" in message && message.data.type === RequestType.Idle
+    ) as IPCClientMessage;
+    transport.emit("message", { msgId: sent.msgId });
+    expect(logger.getTimeStats("ipc", RequestType.Idle)?.count).toBe(1);
+    expect(connection.getRequestTimelineDiagnostics().at(-1)).toMatchObject({
+      outcome: "timeout",
+      doneAtMs: 60_000,
+    });
+    await connection.dispose();
+  });
+
+  it("keeps timeout statistics after the boot timeline fills", async () => {
+    using time = new FakeTime();
+    const transport = new FakeTransport([RequestType.Idle]);
+    const connection = await initializedConnection(transport);
+    for (let index = 0; index < 100; index++) {
+      await connection.request({ type: RequestType.GetLoggerCounts });
+    }
+    const timeline = connection.getRequestTimelineDiagnostics();
+    const logger = getLogger("runtime-client");
+    logger.resetTimeStats();
+    const request = connection.request({ type: RequestType.Idle });
+    const rejection = expect(request).rejects.toThrow("request timed out");
+    await time.tickAsync(60_000);
+    await rejection;
+    expect(connection.getRequestTimelineDiagnostics()).toEqual(timeline);
+    expect(
+      logger.getTimeStats("ipc-outcome", "timeout", RequestType.Idle)?.count,
+    )
+      .toBe(1);
+    await connection.dispose();
+  });
+
+  it("records cancellation as a terminal outcome", async () => {
+    const transport = new FakeTransport([RequestType.Idle]);
+    const connection = await initializedConnection(transport);
+    const request = connection.request({ type: RequestType.Idle });
+    const rejection = expect(request).rejects.toThrow();
+    await connection.dispose();
+    await rejection;
+    expect(
+      connection.getRequestTimelineDiagnostics().find((entry) =>
+        entry.type === RequestType.Idle
+      ),
+    ).toMatchObject({
+      doneAtMs: expect.any(Number),
+      outcome: "cancelled",
+      error: true,
+    });
+  });
+
   it("routes terminal event-attention notifications", async () => {
     const transport = new FakeTransport();
     const connection = await initializedConnection(transport);
@@ -326,6 +409,7 @@ describe("connection", () => {
       );
       expect(entry?.doneAtMs).toEqual(expect.any(Number));
       expect(entry?.error).toBe(true);
+      expect(entry?.outcome).toBe("send-error");
 
       // Would reject the orphan, if the bookkeeping still held one.
       await connection.dispose();
@@ -381,6 +465,53 @@ describe("connection", () => {
       const notifications = transport.sent.filter((m) => !("msgId" in m));
       expect(notifications.length).toBe(2);
       session.detach();
+    });
+
+    it("cancels a mount whose response times out before forgetting its id", async () => {
+      using time = new FakeTime();
+      const transport = new FakeTransport([RequestType.VDomMount]);
+      const connection = await initializedConnection(transport);
+      const session = connection.attachVDom(() => {});
+      try {
+        const mounting = session.mount(37, {
+          id: "of:mount-timeout",
+          space: "did:key:test",
+          scope: "space",
+          path: [],
+        });
+        const rejected = expect(mounting).rejects.toThrow(
+          "RuntimeClient request timed out: vdom:mount",
+        );
+        await time.tickAsync(60_000);
+        await rejected;
+        const requests = transport.sent.filter(
+          (message): message is IPCClientMessage => "msgId" in message,
+        );
+        const cancellations = requests.filter((message) =>
+          message.data.type === RequestType.VDomUnmount
+        );
+        expect(cancellations).toHaveLength(1);
+        expect(cancellations[0].data).toMatchObject({ mountId: 37 });
+        expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+
+        const mounted = requests.find((message) =>
+          message.data.type === RequestType.VDomMount
+        )!;
+        using _warning = stub(console, "warn");
+        transport.emit("message", {
+          msgId: mounted.msgId,
+          data: { rootId: 5 },
+        });
+        expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+        expect(
+          transport.sent.filter((message) =>
+            "msgId" in message && message.data.type === RequestType.VDomUnmount
+          ),
+        ).toHaveLength(1);
+      } finally {
+        session.detach();
+        await connection.dispose();
+      }
     });
 
     it("mounts, unmounts, and routes batch notifications via the session", async () => {
