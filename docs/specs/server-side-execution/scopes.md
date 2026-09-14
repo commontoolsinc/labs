@@ -119,8 +119,8 @@ Declared session input storage carries a non-addressing initialization
 declaration on its automatic space→user link. A graph-owned setup action reads
 the demanded user's intermediate slot and fills it only when absent. Explicit
 references and values remain authoritative, including a same-address user link
-that replaces the automatic declaration. The link value, compatibility boundary,
-and reload behavior are specified in
+that replaces the automatic declaration. The link value and compatibility
+boundary are specified in
 [scoped cell instances](../scoped-cell-instances.md).
 
 ```
