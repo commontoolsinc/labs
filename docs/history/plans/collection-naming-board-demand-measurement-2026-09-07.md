@@ -25,7 +25,8 @@ $ git log -1 --format='%H %ad %s' --date=iso
 cbdf66c3cfe4bfdc661cacfdba7704ba40ede838 2026-09-07 10:34:34 -0700 fix(llm): a system instruction is not a message (#7048)
 ```
 
-Every store was an in-process emulated memory server. No deployed space was
+No block below shows how the rigs built their store. By the author's account,
+every store was an in-process emulated memory server and no deployed space was
 contacted, read-only calls included. The rigs were never committed; code
 excerpts below are copied from them, and excerpts of `packages/memory` are from
 the tree at the commit.
@@ -320,11 +321,10 @@ $ deno run -A packages/patterns/collection-naming/measure-board-demand.ts 3 2>/d
 
 ## The instrument
 
-The memory server's `graph.query`, the walk a `session.watch.add` runs,
-answered by the emulated server behind `StorageManager.emulate` through a
-second session mounted over a loopback transport. For the member at position 0
-of `items`, the root is that member's argument document and the selector schema
-is the schema recorded on the member's argument link, unaltered:
+The memory server's `graph.query`, the walk a `session.watch.add` runs. No block
+below shows the session or store the query went through. For the member at
+position 0 of `items`, the root is that member's argument document and the
+selector schema is the schema recorded on the member's argument link, unaltered:
 
 ```ts
   const memberCell = items.key(0).resolveAsCell();
@@ -684,9 +684,9 @@ board of 20 members; root = the names table
 
 The ladder's arms A and B differ in more than where the walk starts; § Stated
 limitations lists what else differs. This probe runs both wirings on the same
-board with the same schemas. It builds one arm A board per size, and takes both
-element schemas from the schema recorded on a member's argument link,
-with the top-level cell marker removed:
+board with the same schemas. At each size it takes both element schemas from
+the schema recorded on the argument link of an arm A member, with the top-level
+cell marker removed:
 
 ```ts
   const namesSchema = withoutAsCell(
@@ -843,8 +843,9 @@ documents were not compared.
   board-given name was added after the ladder ran, and ran once, at N = 3. No
   exit status was captured for any `cf check` run or for that run.
 - **Separate runs.** The ladder, the two mutation probes and the crossing probe
-  ran separately, each on boards and spaces of its own. This record does not
-  compare figures across them.
+  ran as separate script invocations, as their quoted commands show. No block
+  shows which boards or spaces each used, and this record does not compare
+  figures across them.
 - **Experimental options were not recorded.** Each rig passed
   `experimentalOptionsFromEnv(Deno.env.get)` and did not print the options it
   read.
