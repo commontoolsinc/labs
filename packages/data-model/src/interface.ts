@@ -217,9 +217,8 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
    * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
    * and from every other object, in the type system; without it this class is
    * structurally empty. `declare` emits no runtime member, and nothing ever
-   * reads the key; it is a well-known string key rather than a `unique symbol`
-   * so that this file imports no symbol value. `api.ts` declares the identical
-   * member, and `api-agreement.ts` stops compiling if the two stop agreeing.
+   * reads the key. `api.ts` declares the identical member, and
+   * `api-agreement.ts` stops compiling if the two stop agreeing.
    */
   declare readonly "@commonfabric/FabricPrimitive": true;
 

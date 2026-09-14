@@ -978,9 +978,8 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
    * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
    * and from every other object, in the type system; without it this class is
    * structurally empty. `declare` emits no runtime member, and nothing ever
-   * reads the key; it is a well-known string key rather than a `unique symbol`
-   * so that this file imports no symbol value. `api.ts` declares the identical
-   * member, and `api-agreement.ts` stops compiling if the two stop agreeing.
+   * reads the key. `api.ts` declares the identical member, and
+   * `api-agreement.ts` stops compiling if the two stop agreeing.
    */
   declare readonly "@commonfabric/FabricPrimitive": true;
 
@@ -1732,7 +1731,7 @@ class-side `[CODEC]` (Section 2.4).
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
-const FABRIC_INSTANCE_BRAND = Symbol.for("@commonfabric/FabricInstance");
+import { FABRIC_INSTANCE_BRAND } from "./api.ts";
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
