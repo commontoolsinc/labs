@@ -39,7 +39,11 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
+import {
+  requireWaveAcceptance,
+  waveRunContextOf,
+  waveSettlementOf,
+} from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { meetCfcObservationCeilings } from "../cfc/observation.ts";
@@ -53,6 +57,7 @@ import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
   isSqliteDbRef,
+  resolveScopeKey,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
   sqliteRowToWire,
@@ -791,31 +796,31 @@ export function sqliteQuery(
   parentCell: Cell<any>,
   runtime: Runtime,
   outputBinding?: NormalizedFullLink,
+  _awaitSync?: boolean,
+  publicationBinding?: NormalizedFullLink,
 ): RawBuiltinResult {
   let initialized = false;
-  let result: Cell<QueryState>;
+  let selectedResult: Cell<QueryState>;
   let resultScope: CellScope | undefined;
 
-  /** Hashes whose RPC this node instance currently has in flight — the
-   * in-process half of the memo decision above. */
+  /** Resolved request targets with an outstanding RPC. */
   const inFlightIssues = new Set<string>();
 
-  /**
-   * The query this node staged on its most recent run, if that run staged one.
-   * A token rather than the request's hash: two stagings of the same statement
-   * are still two queries, and the ending of the first must not be read as the
-   * ending of the second.
-   */
-  let currentStaging: symbol | undefined;
+  /** Pending publications, partitioned by result and physical binding instance. */
+  const stagings = new Map<
+    string,
+    Map<string, {
+      sequence: number;
+      target: string;
+      fieldsSelected: boolean;
+      release: () => void;
+    }>
+  >();
+  let sequence = 0;
 
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
-    // Cleared for the whole run and set again only by the arm that stages a
-    // query, so every way this run can end without staging one — inputs it
-    // cannot read, a result already stored, a query already in flight — leaves
-    // the ending of an earlier query with nothing of this node's to write to.
-    currentStaging = undefined;
     const inputs = inputsCell.withTx(tx).get() as {
       db?: unknown;
       sql?: string;
@@ -856,8 +861,12 @@ export function sqliteQuery(
       clearanceScope,
     ]);
 
-    if (!initialized || resultScope !== scope) {
-      result = makeResultCell<QueryState>(
+    const runContext = waveRunContextOf(tx);
+    const servedRun = runContext !== undefined;
+    const runIdentity = runContext?.scopeKeyIdentity;
+    const needsPublication = !initialized || resultScope !== scope;
+    if (needsPublication) {
+      selectedResult = makeResultCell<QueryState>(
         runtime,
         parentCell,
         cause,
@@ -865,9 +874,84 @@ export function sqliteQuery(
         tx,
         scope,
       );
-      sendResult(tx, result);
       initialized = true;
       resultScope = scope;
+    }
+
+    const result = selectedResult;
+    const instanceKey = effectTargetKey(
+      "sqliteQuery:staging",
+      result,
+      runIdentity,
+    );
+    const bindingKey = publicationBinding
+      ? resolveScopeKey(
+        publicationBinding.scope ?? "space",
+        runIdentity ?? runtime.scopeKeyIdentity,
+      )
+      : "legacy-callback";
+    let pending = stagings.get(instanceKey);
+    if (!pending) stagings.set(instanceKey, pending = new Map());
+    const releaseStaging = () => {
+      if (pending.get(bindingKey) === staging) pending.delete(bindingKey);
+      if (pending.size === 0 && stagings.get(instanceKey) === pending) {
+        stagings.delete(instanceKey);
+      }
+    };
+    const staging = {
+      sequence: ++sequence,
+      target: effectTargetKey("publication", result),
+      fieldsSelected: true,
+      release: releaseStaging,
+    };
+    pending.set(bindingKey, staging);
+    const ownsAnnouncement = () =>
+      stagings.get(instanceKey)?.get(bindingKey) === staging;
+    const onAcceptance = (
+      publicationTx: IExtendedStorageTransaction,
+      accepted: () => void,
+      rejected?: () => void,
+    ) => {
+      if (servedRun) requireWaveAcceptance(publicationTx);
+      publicationTx.addCommitCallback((committedTx, outcome) => {
+        if (outcome.error) return rejected?.();
+        const settlement = waveSettlementOf(committedTx) ??
+          waveSettlementOf(publicationTx);
+        if (settlement) {
+          settlement.then((verdict) => {
+            if (!verdict.error) accepted();
+            else rejected?.();
+          });
+        } else accepted();
+      });
+    };
+    const recordPublication = (publicationTx: IExtendedStorageTransaction) => {
+      onAcceptance(publicationTx, () => {
+        for (const other of stagings.values()) {
+          const previous = other.get(bindingKey);
+          if (
+            previous && previous.sequence < staging.sequence &&
+            previous.target !== staging.target
+          ) {
+            previous.release();
+          }
+        }
+      });
+    };
+    let requestStaged = false;
+    onAcceptance(tx, () => {
+      for (const previous of stagings.get(instanceKey)?.values() ?? []) {
+        if (previous.sequence < staging.sequence) {
+          previous.fieldsSelected = false;
+        }
+      }
+      releaseStaging();
+    }, () => {
+      if (!requestStaged) releaseStaging();
+    });
+    if (servedRun || needsPublication) {
+      sendResult(tx, result);
+      recordPublication(tx);
     }
 
     if (!inputs?.db || typeof inputs.sql !== "string") return;
@@ -927,28 +1011,11 @@ export function sqliteQuery(
     // here — with the run's instance identity — for the flush below: the
     // flush runs OUTSIDE the run, on transactions of its own, where the
     // ambient identity is the SERVICE on a serving runtime.
-    const runContext = waveRunContextOf(tx);
-    const servedRun = runContext !== undefined;
-    const runIdentity = runContext?.scopeKeyIdentity;
     const actingReader = sqliteRunActingPrincipal(runtime, tx);
-    // A session-scoped cleared result joins the run's SESSION to the
-    // request identity alongside the user (RULED 2026-08-22,
-    // verification-coverage.md OW53): one cleared cell per
-    // query-and-reader-at-matching-granularity. The session rides the
-    // hash's reader component, and through the hash the effect/outbox
-    // key — without it, two sessions of one user on one serving runtime
-    // share hash AND key across DISTINCT session instances of the
-    // result cell, and the second rides the first's in-flight dedupe
-    // (starvation until an unrelated re-run). Sourced from the run's
-    // `scopeKeyIdentity` — the SAME identity the flush's writebacks
-    // resolve instances against, so request identity and cell instance
-    // split together. Unstamped runs (clients, ON-arm speculation, the
-    // whole OFF arm) carry no context and keep today's bare-principal
-    // shape; USER-scoped cleared results never take this arm at all —
-    // both byte-identical. `session` is CELL_SCOPES' only sub-user
-    // member (scope.ts); a future narrower-than-user scope must join
-    // this granularity test (and builtins.md §2's rule) rather than
-    // staying silently session-blind at the new scope.
+    // Cleared memo identity matches the result's granularity: the reader
+    // principal for user scope, and the reader/session pair for session scope.
+    // Outbox identity additionally resolves the result target's scope instance.
+    // Row admission remains a principal decision at both granularities.
     const clearanceSession = inputs.readClearance && scope === "session"
       ? runIdentity?.sessionId
       : undefined;
@@ -994,11 +1061,16 @@ export function sqliteQuery(
     // §6 step 3).
     // The claim as it stands before this request writes its own, for the
     // abandonment ending below to compare against.
+    const effectKey = effectTargetKey(
+      `sqliteQuery:${hash}`,
+      result,
+      runIdentity,
+    );
     const storedBeforeClaim = result.withTx(tx).get();
     const decision = sqliteQueryMemoDecision({
       stored: storedBeforeClaim,
       hash,
-      inFlightHere: inFlightIssues.has(hash),
+      inFlightHere: inFlightIssues.has(effectKey),
       servedRun,
     });
     if (decision === "hit") {
@@ -1009,16 +1081,14 @@ export function sqliteQuery(
       return;
     }
     if (decision === "dedupe") return;
-    const staging = Symbol(hash);
-    currentStaging = staging;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
+    requestStaged = true;
     // Per-target dedupe key (stage-G round-2 headline): the bare
     // `sqliteQuery:<hash>` collides across DISTINCT nodes issuing the
     // same query, and the dropped second closure would leave that
     // node's result cell pending forever.
-    const effectKey = effectTargetKey(`sqliteQuery:${hash}`, result);
     tx.enqueuePostCommitEffect({
       id: `sqliteQuery:${hash}`,
       idempotencyKey: effectKey,
@@ -1034,7 +1104,12 @@ export function sqliteQuery(
             "sqliteQuery",
             effectKey,
             (settleTx) => {
+              if (runIdentity !== undefined) {
+                settleTx.tx.scopeKeyIdentity = runIdentity;
+              }
+              if (!ownsAnnouncement()) return;
               sendResult(settleTx, result);
+              recordPublication(settleTx);
               // Read the stored claim at write time. Another query holds
               // this result in either of two ways, and the ending steps around
               // both. One is running: the pending flag is up under a hash that
@@ -1051,12 +1126,10 @@ export function sqliteQuery(
               // the pattern holding the finished query's rows under a statement
               // it no longer runs.
               const stored = result.withTx(settleTx).get();
-              // This node has moved on if its latest run staged something
-              // else, or staged nothing at all. The store can say nothing about
-              // that: a run whose statement returns to one already answered
-              // reads that answer and writes nothing, so the two durable tests
-              // below both see exactly what this query left behind.
-              if (currentStaging !== staging) return;
+              // A newer accepted action can select a memo without changing
+              // its stored value. Publication ownership permits this binding
+              // to link that result; field ownership preserves the memo.
+              if (!ownsAnnouncement() || !staging.fieldsSelected) return;
               const running = stored?.pending === true &&
                 stored.requestHash !== undefined && stored.requestHash !== hash;
               // Whole value, not one field of it: a query that answers
@@ -1085,7 +1158,7 @@ export function sqliteQuery(
                 requestHash: hash,
               });
             },
-          ),
+          ).finally(releaseStaging),
           parentCell,
         );
       },
@@ -1095,7 +1168,7 @@ export function sqliteQuery(
       // `trackAsyncWork` for that reason; the abandonment settle above is
       // separate work with its own completion, and is registered.
       async flush() {
-        inFlightIssues.add(hash);
+        inFlightIssues.add(effectKey);
         // The requesting RUN's identity, applied to every writeback
         // transaction of this flush (OW53; serving-loop.md §4: the effect
         // carries the run's identity carriage, and the completion's reads
@@ -1398,7 +1471,7 @@ export function sqliteQuery(
             await failQuery(errMsg(error));
           }
         } finally {
-          inFlightIssues.delete(hash);
+          inFlightIssues.delete(effectKey);
         }
       },
     });
