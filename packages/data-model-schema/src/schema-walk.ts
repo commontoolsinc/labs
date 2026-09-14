@@ -505,7 +505,6 @@ export function walkSchema(
     edge: Pick<SchemaNode, "keyword" | "key" | "index" | "viaRef">,
     parent: JSONSchemaObj | undefined,
   ): void => {
-    if (stopped) return;
     // The root and a `resolveRef` result come straight from the caller; every
     // other node arrives already filtered by `forEachSubschema`.
     if (!isSubschema(schema)) return;
