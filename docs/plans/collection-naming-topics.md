@@ -52,12 +52,13 @@ execution.
    so the two belong in one pass.
 
 3. **S6 item 4 — the production backfill.** Held for want of a demand rather
-   than a technical answer, with the sequence recorded under S6 below. Two
-   things that gated it have since moved: #6969 is fixed, so the deployed board
-   can be pre-flighted; and an optional `unknown` member demand no longer
-   refuses. What still needs an accepted break is the typed `shortName` demand
-   and the compact mention index's removal of `result.mentionable[].body` —
-   see the [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md).
+   than a technical answer. Its sequence, and the contract breaks it still
+   needs, are recorded under S6 below. Two things that gated it have since
+   moved. #6969 was closed by #7178, and the patched check accepted the board
+   source retrieved from a local snapshot of the Topics board taken August 31;
+   and an optional `unknown` member demand no longer refuses. The
+   [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md)
+   records both.
 
 4. **The `naming` declaration has no reader** (#6986, #6994). Every collection
    publishes `NamingPolicy`; nothing consumes it. Member resolution applies no
@@ -389,11 +390,13 @@ Mike's call, after S4.
    The sequence that makes running it routine rather than a one-way door,
    whenever consensus appears:
 
-   1. Fix #6969 first. `setsrc --check` exhausts the heap against the
-      deployed board, so today the live board cannot be inspected before it
-      is written to. That is the only step that converts this into a
-      checkable operation, and it is worth doing whether or not the graft
-      runs.
+   1. Check the deployed board with `setsrc --check` before writing to it.
+      #6969, that check exhausting the heap against the deployed board, was
+      closed by #7178. The
+      [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md)
+      ran the patched check over a local snapshot of the board taken August
+      31, where it accepted the retrieved board source; production was not
+      contacted.
    2. Deploy the board leg, which is refused over topics filed before the
       namespace and needs `--dangerously-allow-incompatible-schema` until a
       general mechanism for adding a property to existing data exists.
