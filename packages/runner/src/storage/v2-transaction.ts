@@ -76,6 +76,12 @@ import type {
 } from "./interface.ts";
 import { createReadOnlyTransactionError } from "./interface.ts";
 import {
+  assertLocalReadAvailable,
+  releaseLocalReadBasis,
+  usesLocalReads,
+  validateLocalReadBasis,
+} from "./local-read-policy.ts";
+import {
   buildMergeableIntent,
   foldMergeableIntent,
   isNoopMergeableDelta,
@@ -1134,6 +1140,14 @@ export class V2StorageTransaction implements IStorageTransaction {
    * action's dependencies from those reads.
    */
   #finish(result: Result<Unit, StorageTransactionFailed>): void {
+    // A rejected scheduler attempt retains eligibility that expired while its
+    // commit waited, so finalization can stop a retry and release the basis.
+    if (
+      (this as IStorageTransaction).sourceAction === undefined ||
+      result.error === undefined || validateLocalReadBasis(this) === undefined
+    ) {
+      releaseLocalReadBasis(this);
+    }
     this.#state = { status: "done", result };
     this.#branches.clear();
     this.#readActivities.length = 0;
@@ -1729,6 +1743,25 @@ export class V2StorageTransaction implements IStorageTransaction {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
+    }
+
+    if (usesLocalReads(this) && !hasDataUriScheme(address.id)) {
+      const written = this.#readEpoch === undefined &&
+        [...(doc.patchDetails?.values() ?? [])].some((write) =>
+          isPrefixPath(write.address.path, address.path)
+        );
+      const replica = branch.replica;
+      const identity = this.#scopeKeyIdentity;
+      assertLocalReadAvailable(
+        this,
+        address,
+        () =>
+          written || replica.hasLocalDocumentCoverage?.(
+              address.id,
+              address.scope,
+              identity,
+            ) === true,
+      );
     }
 
     if (isMutableTransactionReadAllowed(readMeta)) {
@@ -2510,6 +2543,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       status: "done",
       result: { error: TransactionAborted(reason) },
     };
+    if ((this as IStorageTransaction).sourceAction === undefined) {
+      releaseLocalReadBasis(this);
+    }
     return { ok: {} };
   }
 
@@ -2557,6 +2593,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, CommitError>> {
     this.#assertWritable("commit()");
+    const unavailable = validateLocalReadBasis(this);
+    if (unavailable !== undefined && this.#state.status === "ready") {
+      this.abort(unavailable);
+    }
     const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
@@ -2878,6 +2918,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     sink: ITransactionSealSink,
   ): Promise<Result<Unit, CommitError>> {
     this.#assertWritable("sealInto()");
+    const unavailable = validateLocalReadBasis(this);
+    if (unavailable !== undefined && this.#state.status === "ready") {
+      this.abort(unavailable);
+    }
     const ready = this.#editable();
     if (ready.error) {
       return { error: ready.error };
@@ -3235,6 +3279,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // link-target kick in `Runtime.ensureLinkedDocLoaded`. Never on the
     // OFF arm (no identity) — byte-identical read path.
     if (
+      !usesLocalReads(this) &&
       value === undefined && identity !== undefined &&
       normalizeCellScope(address.scope) !== "space" &&
       typeof this.#storage.syncInstance === "function" &&

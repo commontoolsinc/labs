@@ -57,13 +57,15 @@
  * over one untimed burst, are written to stderr and so into the run's
  * `diagnostics.log`.
  *
- * No toolshed and no browser: the harness hosts its own storage server in
- * process. The runtime inside each worker reports that it cannot compile the
- * `#profile` create surface, which is why the poll is driven through the
- * `lunch-poll-keyed-votes` fixture's own identity seam; those lines are the
- * harness's, not this file's.
+ * With server execution disabled, the harness hosts its own storage server.
+ * EXPERIMENTAL_SERVER_EXECUTION=true selects the serving toolshed at API_URL.
+ * Both modes use ordinary worker clients without renderer mounts, so the
+ * view-scoped web-client flag does not activate selective replication here.
+ * The poll uses the `lunch-poll-keyed-votes` fixture's identity seam because
+ * these clients do not render the `#profile` create surface.
  */
 
+import { expect } from "@std/expect";
 import { join } from "@std/path";
 import {
   MultiRuntimeHarness,
@@ -119,6 +121,8 @@ for (const title of TITLES) {
 }
 const options = (await voters[0].read(["options"]) as { id: string }[])
   .map((option) => option.id);
+expect(options).toHaveLength(OPTIONS);
+expect(await voters[0].read(["userCount"])).toBe(VOTERS);
 
 const votes = voters.length * options.length;
 
@@ -139,7 +143,41 @@ async function burst(round: number): Promise<void> {
       )
     ),
   );
+  // A measured burst ends only after its served consequences arrive. The
+  // harness's budgeted settle can return while those consequences are pending.
+  await Promise.all(voters.map(async (voter) => {
+    await voter.idle();
+    await voter.awaitEventConsequences();
+  }));
   await harness.settle();
+}
+
+/** Validate each replica's vote distribution outside the measured interval. */
+async function verifyBurst(round: number): Promise<void> {
+  const expected = options.map((_, position) =>
+    COLORS.map((color) =>
+      voters.filter((_, index) =>
+        COLORS[(index + position + round) % COLORS.length] === color
+      ).length
+    )
+  );
+  await Promise.all(voters.map(async (voter) => {
+    const result = await voter.read(["votes"]) as {
+      optionId: string;
+      voteType: string;
+    }[];
+    expect(result, voter.label).toHaveLength(votes);
+    expect(
+      options.map((optionId) =>
+        COLORS.map((color) =>
+          result.filter((vote) =>
+            vote.optionId === optionId && vote.voteType === color
+          ).length
+        )
+      ),
+      voter.label,
+    ).toEqual(expected);
+  }));
 }
 
 /**
@@ -173,13 +211,16 @@ async function reverts(sessions: readonly MultiRuntimeSession[]) {
 // Warm-up: every session materializes the vote list and its own keyed vote
 // entities, so no measured iteration pays a first-write cost.
 await burst(0);
+await verifyBurst(0);
 await burst(1);
+await verifyBurst(1);
 
 // Contention accounting, over one burst that no measurement covers. What a
 // regression in the vote write costs shows up here as writes thrown away,
 // beside the wall-clock the benchmark reports.
 const before = await reverts(voters);
 await burst(2);
+await verifyBurst(2);
 const after = await reverts(voters);
 console.error(
   `[lunch-poll vote burst] ${voters.length} voters x ${options.length} ` +
@@ -199,7 +240,11 @@ let round = 3;
 Deno.bench({
   name: `vote burst ${voters.length}x${options.length}`,
   group: GROUP,
-  async fn() {
-    await burst(round++);
+  async fn(b) {
+    const current = round++;
+    b.start();
+    await burst(current);
+    b.end();
+    await verifyBurst(current);
   },
 });

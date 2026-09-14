@@ -1,11 +1,15 @@
+import {
+  boundsSchema,
+  latLngSchema,
+  mapValueSchema,
+} from "@commonfabric/runner/component-read-contract";
 /**
  * cf-map - Interactive map component using Leaflet
  *
  * Displays markers, circles, and polylines with bidirectional Cell reactivity.
  * Uses OpenStreetMap tiles (no API key required).
  */
-
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { type CellHandle } from "@commonfabric/runtime-client";
 // @ts-types="@types/leaflet"
 import * as L from "leaflet";
 import { html, PropertyValues } from "lit";
@@ -53,77 +57,6 @@ const EMOJI_REGEX =
 
 // ResizeObserver debounce delay in milliseconds
 const RESIZE_DEBOUNCE_MS = 150;
-
-// JSON Schemas for nested cell resolution via CellController.bind()
-// These schemas enable automatic resolution of nested CellHandles
-const latLngSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    lat: { type: "number" },
-    lng: { type: "number" },
-  },
-};
-
-const boundsSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    north: { type: "number" },
-    south: { type: "number" },
-    east: { type: "number" },
-    west: { type: "number" },
-  },
-};
-
-const mapValueSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    markers: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          position: latLngSchema,
-          title: { type: "string" },
-          description: { type: "string" },
-          icon: { type: "string" },
-          draggable: { type: "boolean" },
-          // popup is Reactive, left unspecified to preserve as-is
-        },
-      },
-    },
-    circles: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          center: latLngSchema,
-          radius: { type: "number" },
-          color: { type: "string" },
-          fillOpacity: { type: "number" },
-          strokeWidth: { type: "number" },
-          title: { type: "string" },
-          description: { type: "string" },
-          // popup is Reactive, left unspecified to preserve as-is
-        },
-      },
-    },
-    polylines: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          points: {
-            type: "array",
-            items: latLngSchema,
-          },
-          color: { type: "string" },
-          strokeWidth: { type: "number" },
-          dashArray: { type: "string" },
-        },
-      },
-    },
-  },
-};
 
 /**
  * CFMap - Interactive map component with markers, circles, and polylines

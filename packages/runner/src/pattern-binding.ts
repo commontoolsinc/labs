@@ -1,5 +1,3 @@
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   fabricAwareEqual,
   FabricInstance,
@@ -10,13 +8,23 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
+import { getServerExecutionConfig } from "@commonfabric/memory/v2";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isAliasBinding } from "./alias-binding.ts";
+import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import type {
+  Cell,
+  CellScope,
+  DerivedInternalCellDescriptor,
+} from "./builder/types.ts";
 import {
   type FabricExecValue,
   isPattern,
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell, isCell } from "./cell.ts";
 import {
   carryCfcReferenceProvenance,
@@ -26,6 +34,10 @@ import {
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { joinCfcObservedConfidentiality } from "./cfc/observation.ts";
 import { diffAndUpdate, recordTrustedLinkValueWrite } from "./data-updating.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -40,26 +52,15 @@ import {
   sanitizeSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
-import { isAliasBinding } from "./alias-binding.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   internalVerifierRead,
   linkResolutionProbe,
   machineryRead,
 } from "./storage/reactivity-log.ts";
-import {
-  ContextualFlowControl,
-  resolveExternalRootRefForStructure,
-} from "./cfc.ts";
-import type {
-  Cell,
-  CellScope,
-  DerivedInternalCellDescriptor,
-} from "./builder/types.ts";
-import { isCellScope, scopeRank } from "./scope.ts";
 import { schemaWithRetainedReferenceScope } from "./cfc/reference-scope.ts";
-import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 
 /**
  * Longest rendering of a binding an error message carries. A binding can
@@ -912,7 +913,10 @@ export function opaqueArgumentKeys(
 export function findAllWriteRedirectCells<T>(
   binding: unknown,
   baseCell: AnyCell<T>,
-  options?: { skipTopLevelKeys?: ReadonlySet<string> },
+  options?: {
+    skipTopLevelKeys?: ReadonlySet<string>;
+    followRedirectChains?: boolean;
+  },
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
@@ -932,6 +936,7 @@ export function findAllWriteRedirectCells<T>(
         !seen.some((candidate) => areNormalizedLinksSame(candidate, link))
       ) {
         seen.push(link);
+        if (options?.followRedirectChains === false) return;
         // Dependency discovery observes redirect topology. A terminal value's
         // contents and nested references belong to the action's later reads.
         const target = resolveLink(baseCell.runtime, tx, link, "top", {

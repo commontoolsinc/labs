@@ -147,6 +147,21 @@ reads the worker's scheduler, runner and storage rows plus main-thread IPC, with
 row recording set sizes rather than milliseconds will evict real timings — read
 those by name instead of widening the summary.
 
+Main-thread `runtime-client/ipc/<type>` rows measure every terminal request
+wait. `ipc-outcome/<outcome>/<type>` splits those same waits into `success`,
+`error`, `timeout`, `cancelled`, and `send-error`; the two views overlap and must
+not be summed. A timeout duration is the caller's abandoned wait, not a
+measurement of when the worker finished. The bounded request timeline records
+that outcome and its terminal timestamp too. Aggregate outcome rows continue
+counting after the boot timeline fills.
+
+`collectBrowserLoadSummary` prints all non-success outcomes in `ipcFailures`,
+without top-row truncation. It skips the worker RPC after a timeout. Pass
+`{ includeWorker: false }` when collecting diagnostics for another failed
+operation; `workerStatus` distinguishes missing worker statistics from zero
+activity. Worker-side duration rows describe completed spans, so they cannot
+alone account for an operation stuck inside synchronous work.
+
 The storage rows follow one inbound frame in arrival order, each keyed by the
 module that pays for the step: `storage.v2.remote/receive/decodeFrame`
 (websocket decompression), `memory.v2.client/receive/decodeBoundary` then

@@ -229,6 +229,10 @@ keep them out of public logs and never retain owner credentials in the record.
 - [ ] Verify local dispatch, served replay, same-space cascades, and cross-space
       outbox propagation of stream-selection confidentiality, including events
       with no references in their payload.
+- [ ] Exercise every supported client replication mode in the cohort, including
+      view-scoped replication when enabled. Mount replacement, missing local
+      inputs, and reconnect must preserve reference history and required commit
+      dependencies; an unavailable preview cannot substitute public evidence.
 - [ ] Run the CFC gallery after trusted handler actions and cold resume with the
       render ceiling enabled. The admitted prompt-influence card must remain
       visible while the source-provenance and fact-check cards stay blocked;

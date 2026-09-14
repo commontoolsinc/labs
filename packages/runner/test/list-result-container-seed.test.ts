@@ -355,5 +355,46 @@ describe("list-result-container-seed", () => {
       expect(valueOf(container)).toEqual([]);
       expect(logger.warnings).toEqual([]);
     });
+
+    it("carries the viewing identity into every deferred seed attempt", async () => {
+      const container = newContainer("viewing-instance-seed");
+      const identity = {
+        principal: (await Identity.fromPassphrase("list seed viewer")).did(),
+        sessionId: "viewer-session",
+      };
+      const commits = refuseFirstCommit({
+        name: "ConflictError",
+        message: "stale confirmed read: of:test at seq 0 conflicted with seq 9",
+        readyToRetry: () => Promise.resolve(),
+      });
+      const stamped: ServerRunInfo[] = [];
+      const transactionIdentities:
+        IExtendedStorageTransaction["tx"]["scopeKeyIdentity"][] = [];
+      const stamp = runtime.stampServerRun.bind(runtime);
+      runtime.stampServerRun = (tx, info) => {
+        transactionIdentities.push(tx.tx.scopeKeyIdentity);
+        stamped.push(info);
+        stamp(tx, info);
+      };
+      const pull = Promise.withResolvers<void>();
+      const seeded = seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        pull.promise,
+        logger,
+        "map/resume-seed/viewing-instance",
+        identity,
+      );
+      pull.resolve();
+      await seeded;
+      expect(commits()).toBe(2);
+      expect(transactionIdentities).toEqual([identity, identity]);
+      expect(stamped.map((info) => info.scopeKeyIdentity)).toEqual([
+        identity,
+        identity,
+      ]);
+      expect(logger.warnings).toEqual([]);
+    });
   });
 });

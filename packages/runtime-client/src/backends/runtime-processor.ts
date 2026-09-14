@@ -44,6 +44,7 @@ import {
   readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
+import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   ACLManager,
   type BrowserWorkerPresetParams,
@@ -85,7 +86,6 @@ import {
   SlugResolutionError,
   SpaceHostValidationError,
 } from "@commonfabric/runner";
-import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   carryCfcReferenceProvenance,
   cfcLabelViewForCell,
@@ -97,8 +97,13 @@ import {
   type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
-import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import {
+  NameSchema,
+  rendererVDOMSchema,
+  viewPieceSchema,
+} from "@commonfabric/runner/schemas";
 import { linkRefPayload } from "@commonfabric/runner/shared";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -111,7 +116,25 @@ import {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { postToClient } from "./post-to-client.ts";
+import {
+  postContextualRuntimeError,
+  runtimeErrorPost,
+} from "./runtime-error.ts";
+import {
+  assertFabricLoggerFlags,
+  createCellRef,
+  createPieceRef,
+  getCell,
+  mapCellRefsToSigilLinks,
+} from "./utils.ts";
+import {
+  type ClientId,
+  clientKeyPrefix,
+  clientScopedKey,
+  ownerClient,
+  type WorkerClient,
+} from "./worker-client.ts";
 import {
   type AcquireCellRequest,
   type ActionRunTraceResponse,
@@ -227,7 +250,6 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
-
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
 import {
   normalizeOrigin,
@@ -235,26 +257,7 @@ import {
   securityContextDifferences,
 } from "@/shared/security-context.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
-import { postToClient } from "./post-to-client.ts";
-import {
-  postContextualRuntimeError,
-  runtimeErrorPost,
-} from "./runtime-error.ts";
-import {
-  type ClientId,
-  clientKeyPrefix,
-  clientScopedKey,
-  ownerClient,
-  type WorkerClient,
-} from "./worker-client.ts";
 import { ReferenceRegistry } from "./reference-registry.ts";
-import {
-  assertFabricLoggerFlags,
-  createCellRef,
-  createPieceRef,
-  getCell,
-  mapCellRefsToSigilLinks,
-} from "./utils.ts";
 
 /** Subscribe the worker bridge to complete terminal-attention outcomes. Keeping
  * the filter and wire projection here makes the host boundary independently
@@ -2324,10 +2327,9 @@ export class RuntimeProcessor {
    * address takes: the requested document, and behind a redirect the document
    * the redirect lands in, whose metadata says whether it is a piece and what
    * result schema a cell inside it takes. Serving a slug document, the server
-   * resolves the redirect through the links on its path, which is the floor
-   * for an address a redirect answers. Nothing here reads the target's value,
-   * so whatever that value reaches stays cold until a caller subscribes to
-   * the cell it was handed.
+   * resolves the redirect through the links on its path. View-scoped opens also
+   * read the name and opaque UI tip through `viewPieceSchema`. Further target
+   * contents load according to the caller's subscriptions and mounted views.
    *
    * Resolves a redirect here rather than through the runner's slug
    * resolution, which `handleSlugResolve()` uses. Do not copy the bare
@@ -2389,6 +2391,13 @@ export class RuntimeProcessor {
       await landing.sync();
       const hasPattern = getPatternIdentityRef(landing) !== undefined ||
         landing.getMetaRaw("pattern") !== undefined;
+      const viewScoped = this.#runtime.viewScopedReplicationRequested &&
+        await this.#runtime.viewReplication.enable(target.space);
+      if (viewScoped && (!hasPattern || targetLink.path.length > 0)) {
+        const pieceCell = target.asSchema(viewPieceSchema);
+        await pieceCell.pull();
+        return { piece: createPieceRef(pieceCell, this.#referenceRegistry) };
+      }
       if (!hasPattern) {
         return { piece: createPieceRef(target, this.#referenceRegistry) };
       }
@@ -3246,7 +3255,7 @@ export class RuntimeProcessor {
   handleVDomMount(
     request: VDomMountRequest,
     client: WorkerClient = ownerClient,
-  ): VDomMountResponse {
+  ): VDomMountResponse | Promise<VDomMountResponse> {
     const { mountId, cell: cellRef } = request;
     const key = clientScopedKey(client, mountId);
 
@@ -3295,13 +3304,38 @@ export class RuntimeProcessor {
       onError: mountErrorSink(client),
     });
 
-    // Mount the cell - the reconciler will subscribe and emit initial ops
-    const cancel = reconciler.mount(cell);
-
-    // Track this mount
-    this.#vdomMounts.set(key, { reconciler, cancel, client });
-
-    return { rootId: reconciler.getRootNodeId() };
+    let active = true;
+    let cancelRender: (() => void) | undefined;
+    let cancelView: (() => void) | undefined;
+    const mount = {
+      reconciler,
+      client,
+      cancel: () => {
+        active = false;
+        cancelRender?.();
+        cancelView?.();
+      },
+    };
+    this.#vdomMounts.set(key, mount);
+    const render = () => {
+      if (active) cancelRender = reconciler.mount(cell);
+      return { rootId: reconciler.getRootNodeId() };
+    };
+    if (!this.#runtime.viewScopedReplicationRequested) return render();
+    return this.#runtime.viewReplication.mount(
+      rawCell,
+      key,
+      mountErrorSink(client),
+    ).then((cancel) => {
+      if (!active) cancel?.();
+      else cancelView = cancel;
+      return render();
+    }).catch((error) => {
+      mount.cancel();
+      reconciler.unmount();
+      if (this.#vdomMounts.get(key) === mount) this.#vdomMounts.delete(key);
+      throw error;
+    });
   }
 
   /**

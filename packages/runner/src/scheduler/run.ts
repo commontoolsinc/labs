@@ -1,10 +1,13 @@
-import { getLogger } from "@commonfabric/utils/logger";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
 import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
 import { startReadStats } from "../read-stats.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -12,13 +15,24 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import {
+  localReadsReady,
+  releaseLocalReadBasis,
+  requireLocalReadCondition,
+  usesLocalReads,
+  validateLocalReadBasis,
+} from "../storage/local-read-policy.ts";
+import {
   isConflictRejection,
   isPermanentRejection,
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
-import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import type {
+  ActionReadStats,
+  NonIdempotentReport,
+  SchedulerActionInfo,
+} from "../telemetry.ts";
+import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_RETRIES_FOR_REACTIVE,
@@ -29,20 +43,10 @@ import {
   type DiagnosisRecord,
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
-import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
-import { RetryImmediately } from "./retry-immediately.ts";
 import {
   getSchedulerActionName,
   toActionRunTraceAddress,
 } from "./diagnostics.ts";
-import { txToReactivityLog } from "./reactivity.ts";
-import { type ActionTimingState, recordActionTime } from "./timing.ts";
-import type { NodeRegistry } from "./node-record.ts";
-import {
-  type MarkInvalidOptions,
-  restoreInvalidCauses,
-  takeInvalidCauses,
-} from "./invalidation.ts";
 import {
   dirtyFanOutKey,
   type FanOutInstance,
@@ -56,6 +60,15 @@ import {
   newFanOutNodeState,
   pruneFanOutInstances,
 } from "./fan-out.ts";
+import {
+  type MarkInvalidOptions,
+  restoreInvalidCauses,
+  takeInvalidCauses,
+} from "./invalidation.ts";
+import type { NodeRegistry } from "./node-record.ts";
+import { txToReactivityLog } from "./reactivity.ts";
+import { RetryImmediately } from "./retry-immediately.ts";
+import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -63,11 +76,6 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "./types.ts";
-import type {
-  ActionReadStats,
-  NonIdempotentReport,
-  SchedulerActionInfo,
-} from "../telemetry.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -122,7 +130,11 @@ export function invokeReactiveAction(state: {
     state.setExecutingAction(args.action, args.actionId);
     logger.timeStart("scheduler", "run", "action");
     return Promise.resolve(
-      state.runtime.harness.invoke(() => args.action(args.tx)),
+      state.runtime.harness.invoke(() => {
+        state.runtime.scheduler.prepareViewAction(args.tx, args.action);
+        state.runtime.scheduler.beginViewAction(args.action);
+        return args.action(args.tx);
+      }),
     )
       .then((actionResult) => {
         logger.timeEndDetailed(measureDetail, "scheduler", "run", "action");
@@ -195,14 +207,19 @@ export function watchReactiveActionCommit(state: {
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
   readonly reportTerminalRejection?: (error: Error) => void;
+  readonly handleUnavailable?: () => boolean;
+  readonly onSuccess?: () => void;
 }): Promise<void> {
   const handleResult = async (error: unknown): Promise<void> => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
+      state.onSuccess?.();
       return;
     }
+
+    if (state.handleUnavailable?.()) return;
 
     logger.info(
       "schedule-run-error",
@@ -487,6 +504,8 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markInvalid: (action: Action, options?: MarkInvalidOptions) => void;
+  readonly isDisposed?: () => boolean;
+  readonly parkLocalRead?: (action: Action, log: ReactivityLog) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -514,8 +533,11 @@ export async function runSchedulerAction(
   if (runningPromise) await runningPromise;
 
   const record = state.nodes.get(action);
+  const registrationToken = record?.registrationToken;
   const invalidCauses = record ? takeInvalidCauses(record) : undefined;
   if (record) {
+    record.cancelLocalReadWake?.();
+    record.cancelLocalReadWake = undefined;
     state.nodes.setStatus(action, "clean");
   }
 
@@ -634,6 +656,7 @@ export async function runSchedulerAction(
     const actionStartTime = performance.now();
 
     let result: any;
+    let succeeded = false;
     return new Promise((resolve) => {
       let committedLog: ReactivityLog | undefined;
       let retryImmediately = false;
@@ -657,8 +680,15 @@ export async function runSchedulerAction(
           actionStartTime,
           actionEndTime,
           reads,
+          registrationIsCurrent: () =>
+            state.isDisposed?.() !== true &&
+            record !== undefined &&
+            record.registrationToken === registrationToken &&
+            (state.nodes.effects.has(action) ||
+              state.nodes.computations.has(action)),
           invalidCauses: causes,
           result,
+          succeeded,
           error,
           resolve: (value) =>
             resolve({ result: value, log: committedLog, retryImmediately }),
@@ -692,6 +722,7 @@ export async function runSchedulerAction(
       })
         .then((invocation) => {
           if (invocation.ok) {
+            succeeded = true;
             result = invocation.result;
             finalizeAction();
           } else {
@@ -828,6 +859,52 @@ interface FanOutRunArgs {
   readonly deferInstance: () => void;
 }
 
+/** Disposes unavailable work and parks its still-live registration. */
+function parkUnavailableRun(state: SchedulerActionRunState, args: {
+  action: Action;
+  tx: IExtendedStorageTransaction;
+  registrationIsCurrent: () => boolean;
+  resolve: (value: unknown) => void;
+}): boolean {
+  if (usesLocalReads(args.tx) && !args.registrationIsCurrent()) {
+    if (args.tx.status().status === "ready") {
+      args.tx.abort("local action registration retired");
+    }
+    releaseLocalReadBasis(args.tx);
+    args.resolve(undefined);
+    return true;
+  }
+  const unavailable = validateLocalReadBasis(args.tx);
+  if (unavailable !== undefined) {
+    const attempted = txToReactivityLog(args.tx);
+    const log = {
+      reads: [...attempted.reads, unavailable.address],
+      shallowReads: attempted.shallowReads,
+      writes: [],
+    };
+    if (args.tx.status().status === "ready") args.tx.abort(unavailable);
+    if (!args.registrationIsCurrent()) {
+      releaseLocalReadBasis(args.tx);
+      args.resolve(undefined);
+      return true;
+    }
+    state.pending.delete(args.action);
+    state.parkLocalRead?.(args.action, log);
+    state.nodes.setStatus(args.action, "unavailable");
+    // Subscribe first, then recheck: delivery may have arrived during an await
+    // after the failed read and before its wake subscription was installed.
+    if (localReadsReady(args.tx)) {
+      state.markInvalid(args.action);
+      state.queueExecution();
+    }
+    releaseLocalReadBasis(args.tx);
+    args.resolve(undefined);
+    return true;
+  }
+
+  return false;
+}
+
 function finalizeSchedulerAction(
   state: SchedulerActionRunState,
   args: {
@@ -837,13 +914,28 @@ function finalizeSchedulerAction(
     readonly actionStartTime: number;
     readonly actionEndTime: number;
     readonly reads?: ActionReadStats;
+    readonly registrationIsCurrent: () => boolean;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
+    readonly succeeded: boolean;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
     readonly fanOutRun?: FanOutRunArgs;
   },
 ): void {
+  if (parkUnavailableRun(state, args)) return;
+  if (usesLocalReads(args.tx)) {
+    const log = txToReactivityLog(args.tx);
+    const address = log.reads[0] ?? log.shallowReads[0] ?? log.writes[0];
+    if (address !== undefined) {
+      requireLocalReadCondition(
+        args.tx.tx,
+        address,
+        args.registrationIsCurrent,
+      );
+    }
+  }
+
   // Record action execution time for cycle-aware scheduling
   const elapsed = args.actionEndTime - args.actionStartTime;
   recordActionTime(
@@ -1015,9 +1107,12 @@ function finalizeReactiveActionCommit(
   args: {
     readonly action: Action;
     readonly actionId: string;
+    readonly registrationIsCurrent: () => boolean;
     readonly tx: IExtendedStorageTransaction;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
+    readonly succeeded: boolean;
+    readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
     readonly fanOutRun?: FanOutRunArgs;
   },
@@ -1042,6 +1137,7 @@ function finalizeReactiveActionCommit(
   }, {
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
+      if (validateLocalReadBasis(args.tx) !== undefined) return;
       warnOnWriteSurfaceViolations(state, args, log);
       hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
       if (args.fanOutRun !== undefined) {
@@ -1063,6 +1159,7 @@ function finalizeReactiveActionCommit(
       }
     },
   });
+  if (parkUnavailableRun(state, args)) return;
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
   }
@@ -1081,6 +1178,14 @@ function finalizeReactiveActionCommit(
     state.runtime.trackAsyncWork(args.tx.postCommitEffectsSettled());
   }
   const committedLog = log;
+  state.runtime.scheduler.recordViewActionOutcome(
+    args.action,
+    args.tx,
+    committedLog,
+    args.succeeded,
+    commitPromise,
+    args.error,
+  );
   const fanOutRun = args.fanOutRun;
   const handled = watchReactiveActionCommit({
     action: args.action,
@@ -1090,6 +1195,7 @@ function finalizeReactiveActionCommit(
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
+    onSuccess: () => state.runtime.scheduler.noteViewActionCurrent(args.action),
     // A fanned-out instance's retry paths (a conflict, a refused seal —
     // the early-emit guard's fail-closed refusal among them) re-arm THAT
     // instance: its key is dirtied, its siblings stay current, and the
@@ -1122,6 +1228,7 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    handleUnavailable: () => parkUnavailableRun(state, args),
     reportTerminalRejection: (error) => state.handleError(error, args.action),
   });
   // The barrier entry commit() registered settles with the commit promise,

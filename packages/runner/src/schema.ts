@@ -24,41 +24,11 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
 import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
-import {
-  readMaybeLink,
-  rebaseScopeCaps,
-  resolveLink,
-  resolveLinkTracingDereferences,
-  schemaScopeForLinkAtDepth,
-  undefinedDataLink,
-} from "./link-resolution.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
-import { waveRunContextOf } from "./executor/wave.ts";
-import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import type { Runtime } from "./runtime.ts";
-import type {
-  IMemorySpaceValueAddress,
-  NormalizedFullLink,
-} from "./link-utils.ts";
-import {
-  createQueryResultProxy,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { opaqueReference, toCell } from "./back-to-cell.ts";
-import {
-  defaultForAbsentValue,
-  materializeSchemaView,
-  schemaViewPresence,
-  UnresolvedInputError,
-} from "./schema-view.ts";
-import {
-  externalResolutionMissCount,
-  onSchemaRegistryClear,
-} from "./schema-registry.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell, snapshotValueAtAddress } from "./cell.ts";
 import {
@@ -82,11 +52,42 @@ import {
 } from "./cfc/reference-provenance.ts";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { schemaWithRetainedReferenceScope } from "./cfc/reference-scope.ts";
-import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import type { CfcAddress } from "./cfc/types.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import {
+  readMaybeLink,
+  rebaseScopeCaps,
+  resolveLink,
+  resolveLinkTracingDereferences,
+  schemaScopeForLinkAtDepth,
+  undefinedDataLink,
+} from "./link-resolution.ts";
+import type {
+  IMemorySpaceValueAddress,
+  NormalizedFullLink,
+} from "./link-utils.ts";
+import {
+  createQueryResultProxy,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
+import {
+  defaultForAbsentValue,
+  materializeSchemaView,
+  schemaViewPresence,
+  UnresolvedInputError,
+} from "./schema-view.ts";
 import { canFollowScopedLink, isCellScope, narrowerScopeCap } from "./scope.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { usesLocalReads } from "./storage/local-read-policy.ts";
 import {
   excludeReadFromConflict,
   internalVerifierRead,
@@ -1395,8 +1396,10 @@ export function validateAndTransform(
       // tracked read re-runs the reader on arrival. A served per-instance
       // run's absent target loads AS that run's instance (stage A — the
       // runner's explicit-instance read).
-      (missing, sourceSpace) =>
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity),
+      usesLocalReads(tx)
+        ? undefined
+        : (missing, sourceSpace) =>
+          runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity),
     ),
     objectCreator,
   );
