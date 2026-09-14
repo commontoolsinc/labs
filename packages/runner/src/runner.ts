@@ -1294,12 +1294,12 @@ export interface PieceSourceTransition {
  * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
  * the result document, what each node's plan names under its read schema,
  * and the cells the pattern owns; on a fresh run the plans bind against an
- * immutable stand-in holding `inputs`. Resolves to whether the plans ran,
- * which they do not for a module: the shape of `Runner`'s own step.
+ * immutable stand-in holding `inputs`. Resolves to whether the plans ran:
+ * the shape of `Runner`'s own step.
  */
 export type DependencySync = (
   resultCell: Cell<any>,
-  pattern: Module | Pattern,
+  pattern: Pattern,
   inputs?: any,
 ) => Promise<boolean>;
 
@@ -6825,11 +6825,15 @@ export class Runner {
       // entry points pass through, before any work is done.
       throw new Error("a synced run requires a pattern");
     }
+    // A module runs as the one-node pattern `run()` wraps it in, and the
+    // pre-sync names what that node reads: `inputs` under the module's
+    // argument schema.
+    const presyncPattern = this.#resolveToPattern(pattern);
     await resultCell.sync();
 
     const synced = await this.#syncCellsForRunningPattern(
       resultCell,
-      pattern,
+      presyncPattern,
       inputs,
     );
 
@@ -7012,7 +7016,7 @@ export class Runner {
     try {
       // If a new pattern was specified, make sure to sync any new cells
       if (pattern || !synced) {
-        await this.#syncCellsForRunningPattern(resultCell, pattern);
+        await this.#syncCellsForRunningPattern(resultCell, presyncPattern);
       }
 
       if (setupRes?.needsStart && options?.start !== false) {
@@ -7328,22 +7332,22 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
   ): Promise<void> {
-    return this.#syncCellsForRunningPattern(resultCell, pattern).then(
-      () => {},
-    );
+    return this.#syncCellsForRunningPattern(
+      resultCell,
+      this.#resolveToPattern(pattern),
+    ).then(() => {});
   }
 
   /**
    * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
    * the result document, what each node's plan names under its read schema,
    * and the cells the pattern owns; on a fresh run the plans bind against an
-   * immutable stand-in holding `inputs`. Resolves to whether the plans ran,
-   * which they do not for a module. A syncer a test supplied wraps the whole
-   * step.
+   * immutable stand-in holding `inputs`. Resolves to whether the plans ran.
+   * A syncer a test supplied wraps the whole step.
    */
   #syncCellsForRunningPattern(
     resultCell: Cell<any>,
-    pattern: Module | Pattern,
+    pattern: Pattern,
     inputs?: any,
     identity = resultCell.tx?.tx.scopeKeyIdentity,
   ): Promise<boolean> {
@@ -7377,7 +7381,7 @@ export class Runner {
   /** Helper for `#syncCellsForRunningPattern()`, which does the syncing. */
   async #syncCellsForRunningPatternInner(
     resultCell: Cell<any>,
-    pattern: Module | Pattern,
+    pattern: Pattern,
     inputs?: any,
     identity?: ScopeKeyIdentity,
   ): Promise<boolean> {
@@ -7387,23 +7391,6 @@ export class Runner {
       resultCell = resultCell.withTx(this.#familyReadTx(identity));
     }
     logger.time(resultSyncStart, "start", "resumeResultSync");
-
-    // A module reads `inputs` under its argument schema and nothing else.
-    // The caller runs this again once the module has run, when it returns
-    // false.
-    if (isModule(pattern)) {
-      if (inputs !== undefined) {
-        const inputsSyncStart = performance.now();
-        await this.#syncFamilyCell(
-          this.#runtime
-            .getImmutableCell(resultCell.space, inputs, undefined)
-            .asSchema(pattern.argumentSchema),
-          identity,
-        );
-        logger.time(inputsSyncStart, "start", "resumeInputsSync");
-      }
-      return false;
-    }
 
     const cells: Cell<any>[] = [];
     const plans: NodePlan[] = [];
@@ -7638,10 +7625,7 @@ export class Runner {
     identity: ScopeKeyIdentity | undefined,
   ): Promise<void> {
     const manager = this.#runtime.storageManager;
-    if (
-      manager.pendingLoadAddresses === undefined ||
-      manager.loadsSettled === undefined
-    ) return;
+    if (!manager.loadsSettled || !manager.pendingLoadAddresses) return;
     const awaited = new Set<string>();
     for (;;) {
       const readTx = this.#familyReadTx(identity);
