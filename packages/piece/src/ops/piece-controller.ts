@@ -25,6 +25,7 @@ import {
   isStream,
   type JSONSchema,
   KeepAsCell,
+  type MemorySpace,
   mergeSchemaDefaults,
   NAME,
   type NormalizedLink,
@@ -40,6 +41,7 @@ import {
   type PieceSourceTransition,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
+  readResultSchemaMeta,
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
@@ -50,8 +52,8 @@ import {
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
-  cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
+  cfcSchemaResolvedRoot,
   loadStoredCfcEnvelope,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -64,6 +66,7 @@ import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  PATTERN_SCHEMAS_INCOMPATIBLE,
   schemasHaveSameContract,
 } from "../schema-compatibility.ts";
 import {
@@ -74,6 +77,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
@@ -82,7 +86,7 @@ import {
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
-import { compileProgram } from "./utils.ts";
+import { commitFailure, compileProgram } from "./utils.ts";
 
 const pieceUpdateLogger = getLogger("piece.update", {
   enabled: true,
@@ -172,12 +176,7 @@ async function snapshotCloneData(
     piece.runtime.prepareTxForCommit(tx);
     commitStarted = true;
     const { error } = await tx.commit();
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
     return { input, internals };
   } catch (error) {
     if (!commitStarted) tx.abort(error);
@@ -209,12 +208,7 @@ async function restoreCloneInternals(
     piece.runtime.prepareTxForCommit(tx);
     commitStarted = true;
     const { error } = await tx.commit();
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
   } catch (error) {
     if (!commitStarted) tx.abort(error);
     throw error;
@@ -514,20 +508,74 @@ export interface PatternCompatibilityReport {
   candidate: { identity: string; symbol: string };
 }
 
+/** What {@link PieceController.setPattern} takes beside the candidate. */
+export interface PatternUpdateOptions {
+  /** Repository locator written atomically with the setup. */
+  repository?: string;
+
+  /**
+   * Replace the source even when compatibility cannot be proven, or when
+   * the current pattern cannot be loaded at all.
+   */
+  dangerouslyAllowIncompatibleSchema?: boolean;
+
+  /** The pattern the update was proved against; a piece on another refuses. */
+  expectedPattern?: { identity: string; symbol: string };
+
+  /**
+   * The update as a serving runtime performs it on `actingUser`'s behalf
+   * (docs/features/server-pattern-lifecycle.md): the setup transaction
+   * carries that principal's trust snapshot and commits directly to the
+   * store rather than sealing into the serving wave, the piece is not
+   * started here, and no post-commit refresh runs. The loop's own swap
+   * watcher replaces a running piece's graph, and its demand pass runs an
+   * unrun one; the receipt's `refresh` is `deferred`.
+   */
+  served?: { actingUser: string };
+}
+
 /** Result of a pattern update accepted by the setup transaction. */
 export interface PatternUpdateReceipt extends PieceSourceSetResult {
   /** Stable outcome code for a successful setup transaction. */
   status: "committed";
   /** Content-addressed pattern pointer written by the transaction. */
   ref: { identity: string; symbol: string };
+  /** The space whose commit log accepted the setup transaction. */
+  space: MemorySpace;
+  /**
+   * Position in `space`'s commit log at which the transaction was accepted:
+   * the seq `cf inspect value-at --seq` and `diff --from/--to` read.
+   */
+  seq: number;
   /** Source-history revision written atomically with `.ref`. */
   revisionId: string;
-  /** Outcome of work which refreshes the running piece after commit. */
+  /**
+   * Outcome of work which refreshes the running piece after commit;
+   * `deferred` when this call ran none, leaving the piece to its runtime's
+   * own means — a serving runtime's swap watcher, or its demand pass.
+   */
   refresh:
     | { status: "completed" }
+    | { status: "deferred" }
     | { status: "failed"; warning: string };
 }
 
+/**
+ * The verdict {@link PieceController.changeSource} returns: `applied` when
+ * storage accepted the transaction carrying the source transition, and
+ * `incompatible` when the candidate cannot run over the piece's retained
+ * state, with the prepared change a caller may confirm to apply anyway. An
+ * update that finds its active origin already current makes no transition;
+ * it reports `applied` after recording that finding.
+ *
+ * A transition's `applied` is its transaction's own outcome, never a read of
+ * the piece beside the call — a read answers what the piece points at now,
+ * which a concurrent later change may have moved, and it resolves from local
+ * cache over a provider failure. `executionWarning` reports a failure in the work
+ * that refreshes the running piece after its transition committed; such a
+ * failure does not undo the accepted transition, the same split
+ * {@link PatternUpdateReceipt}'s `refresh` arm reports for a direct edit.
+ */
 export type PieceSourceActionResult =
   | { status: "applied"; executionWarning?: string }
   | {
@@ -609,7 +657,7 @@ function resolvePathSchemaContract(
   contract: PathSchemaContract,
 ): PathSchemaContract {
   const schema = contract.schema;
-  const schemaRoot = cfcSchemaChildRoot(schema, contract.root);
+  const schemaRoot = contract.root;
   if (
     typeof schema !== "object" || schema === null ||
     typeof schema.$ref !== "string"
@@ -624,7 +672,7 @@ function resolvePathSchemaContract(
   return {
     ...contract,
     schema: resolved,
-    root: cfcSchemaChildRoot(resolved, owningRoot),
+    root: cfcSchemaResolvedRoot(resolved, owningRoot),
   };
 }
 
@@ -720,7 +768,7 @@ export function linkPathContracts(
         }
         next.push(...applicable.map((child) => ({
           schema: child,
-          root: cfcSchemaChildRoot(child, root),
+          root: root,
           mayBeMissing,
         })));
         continue;
@@ -741,7 +789,7 @@ export function linkPathContracts(
           : schema.items ?? true;
         next.push({
           schema: child,
-          root: cfcSchemaChildRoot(child, root),
+          root: root,
           mayBeMissing,
         });
         continue;
@@ -943,7 +991,7 @@ export function currentValuePathContracts(
           {
             ...contract,
             schema: selectedContainer,
-            root: cfcSchemaChildRoot(selectedContainer, root),
+            root: root,
           },
           segment,
           currentValue,
@@ -974,7 +1022,7 @@ export function currentValuePathContracts(
           {
             ...contract,
             schema: base,
-            root: cfcSchemaChildRoot(base, root),
+            root: root,
           },
           segment,
           currentValue,
@@ -992,10 +1040,10 @@ export function currentValuePathContracts(
       const branchContract = (branch: JSONSchema): PathSchemaContract => ({
         ...contract,
         schema: branch,
-        root: cfcSchemaChildRoot(branch, root),
+        root: root,
       });
       const branchMatches = (branch: JSONSchema, value: unknown): boolean => {
-        const branchRoot = cfcSchemaChildRoot(branch, root);
+        const branchRoot = root;
         return validateSchemaValue(
           branch,
           value,
@@ -1152,7 +1200,7 @@ export function localizeOuterCellContract(
         localizeOuterCellContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           stored,
           active,
@@ -1225,7 +1273,7 @@ export function localizeOuterCellContract(
         localizeOuterCellContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           stored,
           active,
@@ -1334,7 +1382,7 @@ export function assertWritablePiecePath(
         ]);
         return {
           schema: child,
-          root: cfcSchemaChildRoot(child, contract.root),
+          root: contract.root,
         };
       });
     }
@@ -1392,7 +1440,7 @@ export function localizeStreamEventContract(
         localizeStreamEventContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           active,
         )
@@ -1427,7 +1475,7 @@ export function localizeStreamEventContract(
         localizeStreamEventContract(
           {
             schema: alternative,
-            root: cfcSchemaChildRoot(alternative, root),
+            root: root,
           },
           active,
         )
@@ -1521,9 +1569,7 @@ export function durableSourceContract(
     linkedCell.tx,
   );
 
-  const resultSchema = sourceRoot.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
+  const resultSchema = readResultSchemaMeta(sourceRoot);
   if (resultSchema !== undefined) {
     return {
       schemas: [{
@@ -1632,9 +1678,7 @@ export function durableSourceContract(
   // public result projections. Every current projection is an additional
   // producer-owned constraint: a write must preserve the argument/internal
   // contract and all public result contracts simultaneously.
-  const ownerSchema = ownerResult.getMetaRaw("schema") as
-    | JSONSchema
-    | undefined;
+  const ownerSchema = readResultSchemaMeta(ownerResult);
   const projected: DurableSchemaPath[] = [];
   if (ownerSchema !== undefined) {
     const rawResult = ownerResult.getRawUntyped({ lastNode: "top" });
@@ -3137,9 +3181,7 @@ class PiecePropIo implements PieceCellIo {
         assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
-        const durableSchema = resultCell.getMetaRaw("schema") as
-          | JSONSchema
-          | undefined;
+        const durableSchema = readResultSchemaMeta(resultCell);
         targetCell = durableSchema === undefined
           ? resultCell
           : resultCell.asSchema(durableSchema);
@@ -3640,12 +3682,7 @@ class PiecePropIo implements PieceCellIo {
       }
       return { wrote: true };
     });
-    if (error) {
-      if ("reason" in error && error.reason instanceof Error) {
-        throw error.reason;
-      }
-      throw error;
-    }
+    if (error) throw commitFailure(error);
     // A committed decision not to write leaves nothing to pull.
     if (ok !== undefined && !ok.wrote) return { wrote: false };
 
@@ -3953,7 +3990,10 @@ export class PieceController<T = unknown> {
   }
 
   async #loadCurrentPattern(
-    { projectResult = true }: { projectResult?: boolean } = {},
+    { projectResult = true, repairCache = true }: {
+      projectResult?: boolean;
+      repairCache?: boolean;
+    } = {},
   ): Promise<{
     pattern: Pattern;
     ref: { identity: string; symbol: string };
@@ -3967,6 +4007,7 @@ export class PieceController<T = unknown> {
       ref.identity,
       ref.symbol,
       this.#pieces.getSpace(),
+      { repairCache },
     );
     if (!pattern) {
       throw new Error(
@@ -4176,6 +4217,11 @@ export class PieceController<T = unknown> {
         baseline,
       );
       const mutationVersion = ++this.#mutationVersion;
+      // The transaction's own verdict: `editWithRetry` reports a rejected
+      // commit in its result, so past that check the transition is written.
+      // What can still fail is the schema refresh `#runMutation` runs after
+      // the operation, which does not undo the accepted detach.
+      let committed = false;
       try {
         await this.#runMutation(mutationVersion, async () => {
           const result = await this.#pieces.runtime.editWithRetry((tx) => {
@@ -4189,11 +4235,12 @@ export class PieceController<T = unknown> {
             return true;
           });
           if (result.error !== undefined) throw result.error;
+          committed = true;
           return this.#cell;
         });
         return { status: "applied" };
       } catch (error) {
-        if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        if (committed) {
           return {
             status: "applied",
             executionWarning: pieceSourceErrorMessage(error),
@@ -4345,9 +4392,7 @@ export class PieceController<T = unknown> {
         }
       }
 
-      candidate = await compileProgram(this.#pieces, program, {
-        previousEntryIdentity: previousRef.identity,
-      });
+      candidate = await compileProgram(this.#pieces, program);
       const candidateRef = this.#pieces.runtime.patternManager
         .getArtifactEntryRef(candidate);
       if (candidateRef === undefined) {
@@ -4418,48 +4463,61 @@ export class PieceController<T = unknown> {
       { selectedRevisionId: prepared.selectedRevisionId },
     );
     const mutationVersion = ++this.#mutationVersion;
+    // The accepted setup transaction's receipt, held exactly when storage
+    // accepted this change's transaction: from the resolved update, or from
+    // the post-commit error that carries it. It is what lets the catch below
+    // tell a transition that landed from one that did not.
+    let commit: PatternSetupCommitReceipt | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
-        return await execute(
-          this.#pieces,
-          this.id,
-          candidate,
-          undefined,
-          {
-            start: true,
-            expectedPatternIdentity: previousRef,
-            validateCurrentArgument: acceptedReview === undefined
-              ? undefined
-              : (argumentCell) => {
-                const evidence = pieceSourceArgumentEvidence(
-                  argumentCell,
-                  this.#pieces,
-                );
-                if (evidence !== acceptedReview.argumentEvidence) {
-                  throw new Error(
-                    "the retained piece input changed after compatibility was checked",
+        try {
+          const result = await executePatternUpdate(
+            this.#pieces,
+            this.id,
+            candidate,
+            undefined,
+            {
+              expectedPatternIdentity: previousRef,
+              validateCurrentArgument: acceptedReview === undefined
+                ? undefined
+                : (argumentCell) => {
+                  const evidence = pieceSourceArgumentEvidence(
+                    argumentCell,
+                    this.#pieces,
                   );
+                  if (evidence !== acceptedReview.argumentEvidence) {
+                    throw new Error(
+                      "the retained piece input changed after compatibility was checked",
+                    );
+                  }
+                },
+              validateArgumentLinks: (argumentCell, argumentSchema) => {
+                try {
+                  assertPieceSourceRetainedLinksCompatible(
+                    argumentCell,
+                    argumentSchema,
+                    this.#pieces,
+                    previousPattern.argumentSchema,
+                  );
+                } catch (error) {
+                  const message = error instanceof Error
+                    ? error.message
+                    : String(error);
+                  if (acceptedReview?.issues.retainedLinks === message) return;
+                  throw error;
                 }
               },
-            validateArgumentLinks: (argumentCell, argumentSchema) => {
-              try {
-                assertPieceSourceRetainedLinksCompatible(
-                  argumentCell,
-                  argumentSchema,
-                  this.#pieces,
-                  previousPattern.argumentSchema,
-                );
-              } catch (error) {
-                const message = error instanceof Error
-                  ? error.message
-                  : String(error);
-                if (acceptedReview?.issues.retainedLinks === message) return;
-                throw error;
-              }
+              sourceTransition: transition,
             },
-            sourceTransition: transition,
-          },
-        ) as Cell<T>;
+          );
+          commit = result.commit;
+          return result.cell as Cell<T>;
+        } catch (error) {
+          if (error instanceof PatternSetupPostCommitError) {
+            commit = error.commit;
+          }
+          throw error;
+        }
       });
       // The transition cleared whatever the last reconciliation concluded,
       // and this is the fresh answer: the piece now runs what this origin
@@ -4485,15 +4543,20 @@ export class PieceController<T = unknown> {
       }
       return { status: "applied" };
     } catch (error) {
-      if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+      if (commit !== undefined) {
         // The transition committed and running its source then failed, so
         // neither outcome is true: the piece did not decline this source, and
         // it is not demonstrably running it either. The warning below says
         // what happened, and the next reconciliation settles what the piece
-        // is doing rather than this guessing now.
+        // is doing rather than this guessing now. The wrapper's own message
+        // only restates that split, so the warning carries the cause — the
+        // failure itself — as `setPattern`'s refresh arm does.
+        const cause = error instanceof PatternSetupPostCommitError
+          ? error.cause
+          : error;
         return {
           status: "applied",
-          executionWarning: pieceSourceErrorMessage(error),
+          executionWarning: pieceSourceErrorMessage(cause),
         };
       }
       if (isOverridableArgumentCompatibilityError(error)) {
@@ -4524,28 +4587,21 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Would `setPattern(program)` be accepted? Answers without changing the piece.
-   *
-   * Drives the SAME review the apply path runs — no second copy of the rules,
-   * because a preflight that reimplements them drifts and starts lying.
-   *
-   * It is not, however, a pure read. Compiling the candidate goes through
-   * `compileAndSavePattern`, which writes the compiled module set and its
-   * source docs into the space's content-addressed store (CT-1623) — the same
-   * write the apply would do, idempotent, and attached to nothing. What it
-   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
-   * source transition, no revision. So a refused check leaves the piece
-   * running exactly what it was running, which is the guarantee a caller
-   * actually needs; it does not leave the space byte-identical.
+   * Review a candidate with the same compatibility rules used by source setup.
+   * Compilation and source loading reuse verified caches without writing to
+   * storage or creating module-update authority. Reads retain their normal
+   * server-demand semantics. Apply validates retained input and source currency
+   * again at commit time.
    */
   async checkPattern(
     program: RuntimeProgram,
   ): Promise<PatternCompatibilityReport> {
-    const { pattern: previousPattern, ref: previousRef } = await this
-      .#loadCurrentPattern();
-    const candidate = await compileProgram(this.#pieces, program, {
-      previousEntryIdentity: previousRef.identity,
-    });
+    const { pattern: previousPattern } = await this
+      .#loadCurrentPattern({ repairCache: false });
+    const candidate = await this.#pieces.runtime.patternManager.compilePattern(
+      program,
+      { space: this.#pieces.getSpace(), persist: false },
+    );
     const candidateRef = this.#pieces.runtime.patternManager
       .getArtifactEntryRef(candidate);
     if (candidateRef === undefined) {
@@ -4605,15 +4661,41 @@ export class PieceController<T = unknown> {
    */
   async setPattern(
     program: RuntimeProgram,
-    options?: {
-      repository?: string;
-      dangerouslyAllowIncompatibleSchema?: boolean;
-      expectedPattern?: { identity: string; symbol: string };
-    },
+    options?: PatternUpdateOptions,
+  ): Promise<PatternUpdateReceipt> {
+    return await this.#updatePattern(
+      () => compileProgram(this.#pieces, program),
+      options,
+    );
+  }
+
+  /**
+   * Like {@link setPattern}, except the candidate is a pattern already
+   * compiled into the space — the result of an earlier compile whose
+   * closure the space holds — so nothing is compiled or persisted here
+   * before the setup transaction. Everything else, the pin and the
+   * compatibility checks included, is the same.
+   */
+  async setCompiledPattern(
+    pattern: Pattern,
+    options?: PatternUpdateOptions,
+  ): Promise<PatternUpdateReceipt> {
+    return await this.#updatePattern(() => Promise.resolve(pattern), options);
+  }
+
+  /**
+   * Helper for `setPattern()` and `setCompiledPattern()`, which runs the
+   * update over the candidate `compile` produces at the point in the flow
+   * where the candidate is needed: after the current pattern and the
+   * transition's baseline are in hand, ahead of the compatibility checks.
+   */
+  async #updatePattern(
+    compile: () => Promise<Pattern>,
+    options?: PatternUpdateOptions,
   ): Promise<PatternUpdateReceipt> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
-    let committedRef: { identity: string; symbol: string } | undefined;
+    let commit: PatternSetupCommitReceipt | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
         // A piece whose current pattern cannot load is exactly the piece a
@@ -4635,9 +4717,13 @@ export class PieceController<T = unknown> {
         // identity without loading it.
         let previousPattern: Pattern | undefined;
         let previousRef: { identity: string; symbol: string };
+        // A served update repairs no cache: a write the load would seal
+        // into the serving wave is not one the update's own commit
+        // should rest on or answer for.
+        const repairCache = options?.served === undefined;
         try {
           ({ pattern: previousPattern, ref: previousRef } = await this
-            .#loadCurrentPattern());
+            .#loadCurrentPattern({ repairCache }));
         } catch (error) {
           if (!options?.dangerouslyAllowIncompatibleSchema) throw error;
           await this.#cell.sync();
@@ -4678,13 +4764,7 @@ export class PieceController<T = unknown> {
             ? { allowUnavailable: true }
             : {},
         );
-        const pattern = await compileProgram(
-          this.#pieces,
-          program,
-          baseline.kind === "retain"
-            ? { previousEntryIdentity: previousRef.identity }
-            : {},
-        );
+        const pattern = await compile();
         const candidate = this.#pieces.runtime.patternManager
           .getArtifactEntryRef(pattern);
         if (candidate === undefined) {
@@ -4738,19 +4818,22 @@ export class PieceController<T = unknown> {
                   ),
               repository: options?.repository,
               sourceTransition: transition,
+              ...(options?.served === undefined
+                ? {}
+                : { served: options.served }),
             },
           );
-          committedRef = result.commit.pattern;
+          commit = result.commit;
           return result.cell as Cell<T>;
         } catch (error) {
           if (error instanceof PatternSetupPostCommitError) {
-            committedRef = error.commit.pattern;
+            commit = error.commit;
           }
           throw error;
         }
       });
     } catch (error) {
-      if (transition !== undefined && committedRef !== undefined) {
+      if (transition !== undefined && commit !== undefined) {
         // The wrapper says only that post-commit work failed, which this line
         // already says; what a reader needs is which work and why. Log the
         // cause, the same failure `refresh.warning` reports, so the console
@@ -4767,7 +4850,9 @@ export class PieceController<T = unknown> {
         // named, whatever happened to the refresh afterwards.
         return {
           status: "committed",
-          ref: committedRef,
+          ref: commit.pattern,
+          space: commit.space,
+          seq: commit.seq,
           revisionId: transition.revisionId,
           detachedOrigin: transition.expected.origin,
           refresh: { status: "failed", warning },
@@ -4776,16 +4861,20 @@ export class PieceController<T = unknown> {
       throw pinnedSourceMoved(error, options?.expectedPattern);
     }
     // The mutation assigns `transition` before the write it belongs to, and
-    // sets `committedRef` from the accepted transaction's receipt; every
-    // earlier exit from it throws — so a mutation that resolved has both, and
-    // a mutation that did not took the catch above. Asserted rather than
-    // guarded because a guard here could never fire.
+    // holds the accepted transaction's receipt in `commit`; every earlier exit
+    // from it throws — so a mutation that resolved has both, and a mutation
+    // that did not took the catch above. Asserted rather than guarded because
+    // a guard here could never fire.
     return {
       status: "committed",
-      ref: committedRef!,
+      ref: commit!.pattern,
+      space: commit!.space,
+      seq: commit!.seq,
       revisionId: transition!.revisionId,
       detachedOrigin: transition!.expected.origin,
-      refresh: { status: "completed" },
+      refresh: {
+        status: options?.served === undefined ? "completed" : "deferred",
+      },
     };
   }
 
@@ -4850,24 +4939,6 @@ export class PieceController<T = unknown> {
         this.#cell = cell.asSchema(pattern.resultSchema);
       }
       return;
-    }
-  }
-
-  async #sourceTransitionCommitted(revisionId: string): Promise<boolean> {
-    try {
-      if (
-        getPieceSourceRevisions(this.#cell).some((revision) =>
-          revision.revisionId === revisionId
-        )
-      ) {
-        return true;
-      }
-      await this.#cell.sync();
-      return getPieceSourceRevisions(this.#cell).some((revision) =>
-        revision.revisionId === revisionId
-      );
-    } catch {
-      return false;
     }
   }
 
@@ -5207,6 +5278,21 @@ function pieceSourceCompatibilityMessage(
     .join("\n");
 }
 
+/**
+ * Whether `error` is an update refused for the candidate's fit over the
+ * piece — its schemas against the current pattern's, the links its argument
+ * schema retains, the stored argument, or the stored CFC envelope the
+ * candidate's schema cannot migrate — rather than for a reason of setup's
+ * own.
+ */
+export function isPieceSourceCompatibilityRefusal(error: unknown): boolean {
+  return error instanceof Error && (
+    error.message.startsWith(PATTERN_SCHEMAS_INCOMPATIBLE) ||
+    isOverridableArgumentCompatibilityError(error) ||
+    isCfcMigrationRejection(error)
+  );
+}
+
 function isOverridableArgumentCompatibilityError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return error.message.includes(
@@ -5239,6 +5325,12 @@ function pieceSourceTransition(
   };
 }
 
+/**
+ * Helper for `setInput()`, which re-runs the piece's current pattern over a
+ * caller-supplied argument. A source change goes through
+ * `executePatternUpdate` below instead, which carries the transition and
+ * returns the accepted transaction's receipt.
+ */
 async function execute(
   pieces: PiecesController,
   pieceId: string,
@@ -5247,15 +5339,6 @@ async function execute(
   options?: {
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
-    validateCurrentArgument?: (
-      argumentCell: Cell<unknown>,
-    ) => void;
-    validateArgumentLinks?: (
-      argumentCell: Cell<unknown>,
-      argumentSchema: JSONSchema,
-    ) => void;
-    repository?: string;
-    sourceTransition?: PieceSourceTransition;
   },
 ): Promise<Cell<unknown>> {
   return await pieces.runWithPattern(pattern, pieceId, input, options);
@@ -5279,6 +5362,7 @@ async function executePatternUpdate(
     ) => void;
     repository?: string;
     sourceTransition: PieceSourceTransition;
+    served?: { actingUser: string };
   },
 ): Promise<{
   cell: Cell<unknown>;

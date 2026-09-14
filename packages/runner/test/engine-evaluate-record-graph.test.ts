@@ -1,16 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  compileWithEntryBody,
   Engine,
+  evaluateWithEntryBody,
   getVerifiedProvenance,
   joinedBodies,
   Runtime,
   signer,
   StorageManager,
-} from "./engine-test-support.ts";
-import {
-  compileWithEntryBody,
-  evaluateWithEntryBody,
 } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 import { validateCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";

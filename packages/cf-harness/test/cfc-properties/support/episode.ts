@@ -19,7 +19,10 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcEnforcementMode,
+  CfcSandboxResult,
+} from "@commonfabric/runner/cfc";
 
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
@@ -32,7 +35,6 @@ import { auditRunFamily } from "../../../audit/checks/structural.ts";
 import { discoverRunFamilies } from "../../../audit/evidence.ts";
 import type { CheckResult, CheckVerdict } from "../../../audit/report.ts";
 import { type PromptSlotBinding } from "../../../src/contracts/prompt-slot.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 
 import { CAPABILITY_PROBE_SENTINEL } from "../../../src/diagnostics.ts";
 import type {

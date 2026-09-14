@@ -1,3 +1,4 @@
+import type { CellScope } from "../builder/types.ts";
 import type { Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { ElementRun } from "./list-element-rollback.ts";
@@ -26,7 +27,8 @@ export function listElementKeys(list: Cell<any>[]): Map<number, string> {
 
 /**
  * Drop the element runs whose elements the list no longer holds, releasing the
- * child each one launched.
+ * child each one launched. When a scope is supplied, a child from another
+ * scope is released even if its element remains present.
  *
  * It is a release rather than a stop, so an element result that something
  * opened in its own right keeps running; `docs/specs/runner-child-run-ownership.md`
@@ -46,10 +48,15 @@ export function releaseRemovedElements(
   runtime: Runtime,
   elementRuns: Map<string, ElementRun>,
   currentKeys: ReadonlySet<string>,
+  scope?: CellScope,
 ): void {
   const errors: unknown[] = [];
   for (const [elementKey, entry] of [...elementRuns]) {
-    if (currentKeys.has(elementKey)) continue;
+    if (
+      currentKeys.has(elementKey) &&
+      (scope === undefined ||
+        entry.resultCell.getAsNormalizedFullLink().scope === scope)
+    ) continue;
     try {
       runtime.runner.releaseChild(entry.resultCell, undefined);
       elementRuns.delete(elementKey);

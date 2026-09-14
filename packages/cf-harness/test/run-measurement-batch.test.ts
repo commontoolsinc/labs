@@ -10,6 +10,7 @@ import {
   indexChangeOf,
   type IndexPreflight,
   type IndexSnapshot,
+  main,
   parseMeasurementSuite,
   preflightCellSpec,
   preflightPosture,
@@ -21,7 +22,6 @@ import {
   resolveImportedPatternOrigins,
   runTask,
 } from "../scripts/run-measurement-batch.ts";
-import { main } from "../scripts/run-measurement-batch.ts";
 import { emptyTotals as emptyMeasurementTotals } from "../scripts/measure-runs.ts";
 import observedStatus from "./support/measurement-console-status.json" with {
   type: "json",

@@ -169,14 +169,23 @@ describe("cfc render policy demo integration test", () => {
       "Content hidden by policy",
     );
 
-    // The value the reveal would have shown reaches no part of the document,
-    // and neither does the untrusted card, which renders the same value behind
-    // no trusted surface at all.
+    // The value the reveal would have shown reaches no part of the document.
     await waitForTextAbsent(page, "cf-screen", "Sensitive health data:");
-    await waitForTextAbsent(
+
+    // Each surface is a sub-pattern taking the health record as an argument,
+    // and the ceiling reaches the value inside each rather than the card
+    // around it. So the untrusted card is on the page, carrying the authored
+    // text it is built from, with its own boundary holding the value back —
+    // the same shape the trusted surface is left in above.
+    await waitForText(
       page,
-      "cf-screen",
+      "#raw-health-attempt",
       "Untrusted direct render attempt",
+    );
+    await waitForSettledText(
+      page,
+      "#raw-health-attempt",
+      "Content hidden by policy",
     );
   });
 });

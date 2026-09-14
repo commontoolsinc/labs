@@ -1207,6 +1207,7 @@ export function classifyExpressionSiteHandling(
   if (
     supportedCallRootKind === "array-method-owned-receiver-method"
   ) {
+    if (isDirectArrayMethodRootExpression(expression)) return sharedDecision();
     return ownedDecision(
       "array-method-receiver-method",
       getAnalysis().requiresRewrite,

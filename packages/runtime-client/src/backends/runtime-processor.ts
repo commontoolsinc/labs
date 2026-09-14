@@ -1,3 +1,4 @@
+import type { JSONSchema } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
@@ -43,16 +44,19 @@ import {
   readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
+import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   ACLManager,
   type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
+  ContextualFlowControl,
   convertCellsToLinks,
   encodeSqliteParams,
   entityIdFrom,
   type EventIntentOutcome,
   getCellOrThrow,
+  getMetaLink,
   getPatternIdentityRef,
   hasOperationStorageCapability,
   type IExtendedStorageTransaction,
@@ -60,8 +64,11 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
+  KeepAsCell,
   markDurableReadTx,
+  type NormalizedFullLink,
   normalizeSpaceHost,
+  parseLink,
   PatternCoverageCollector,
   popFrame,
   pushFrame,
@@ -77,7 +84,6 @@ import {
   SlugResolutionError,
   SpaceHostValidationError,
 } from "@commonfabric/runner";
-import type { RuntimeOptions } from "@commonfabric/runner";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -88,8 +94,13 @@ import {
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
-import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import {
+  NameSchema,
+  rendererVDOMSchema,
+  viewPieceSchema,
+} from "@commonfabric/runner/schemas";
 import { linkRefPayload } from "@commonfabric/runner/shared";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -102,13 +113,25 @@ import {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
+import { postToClient } from "./post-to-client.ts";
 import {
-  getMetaLink,
-  KeepAsCell,
-  type NormalizedFullLink,
-  parseLink,
-} from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache";
+  postContextualRuntimeError,
+  runtimeErrorPost,
+} from "./runtime-error.ts";
+import {
+  assertFabricLoggerFlags,
+  createCellRef,
+  createPieceRef,
+  getCell,
+  mapCellRefsToSigilLinks,
+} from "./utils.ts";
+import {
+  type ClientId,
+  clientKeyPrefix,
+  clientScopedKey,
+  ownerClient,
+  type WorkerClient,
+} from "./worker-client.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -194,6 +217,7 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetMemoryMessageCompressionRequest,
+  type SetReadStatsEnabledRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -222,7 +246,6 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
-
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
 import {
   normalizeOrigin,
@@ -230,25 +253,6 @@ import {
   securityContextDifferences,
 } from "@/shared/security-context.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
-import { postToClient } from "./post-to-client.ts";
-import {
-  postContextualRuntimeError,
-  runtimeErrorPost,
-} from "./runtime-error.ts";
-import {
-  type ClientId,
-  clientKeyPrefix,
-  clientScopedKey,
-  ownerClient,
-  type WorkerClient,
-} from "./worker-client.ts";
-import {
-  assertFabricLoggerFlags,
-  createCellRef,
-  createPieceRef,
-  getCell,
-  mapCellRefsToSigilLinks,
-} from "./utils.ts";
 
 /** Subscribe the worker bridge to complete terminal-attention outcomes. Keeping
  * the filter and wire projection here makes the host boundary independently
@@ -413,19 +417,17 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
 }
 
 /**
- * Worker/host server-execution posture agreement (review 2026-08-11
- * m7). The host declares its flag posture in
- * `InitializationData.experimental.serverExecution` (typed since this
- * fix — it previously rode as an untyped excess property, and
- * `data.experimental ?? {}` silently reverted an undeclared worker to
- * OFF while a flag-ON host diverted handler commits: F10 alive in one
- * realm and dead in the other). The worker asserts the CONSTRUCTED
- * runtime's resolved posture matches the declaration and refuses
- * initialization loudly on divergence — in either direction (a worker
- * whose realm-ambient default flipped ON under a host that declared
- * nothing is the same divergence mirrored). OFF-arm-neutral: a host
- * that declares nothing and a worker that resolves OFF agree, which is
- * every pre-existing deployment. Exported for testing.
+ * Asserts that the constructed runtime's resolved server-execution posture
+ * matches the one the host declared in
+ * `InitializationData.experimental.serverExecution`, and throws on a
+ * divergence in either direction: a host that declared ON over a worker
+ * that resolved OFF, or a worker whose realm-ambient default flipped ON
+ * under a host that declared nothing. Either way the F10 client contract
+ * (`docs/specs/server-side-execution/`) would run in one realm and not the
+ * other, with handler commits diverted on one side only, so initialization
+ * refuses rather than proceeding. A host that declares nothing and a worker
+ * that resolves OFF agree, so a deployment that sets no flag passes.
+ * Exported for testing.
  */
 export function assertServerExecutionPostureAgreement(
   declared: InitializationData["experimental"],
@@ -439,16 +441,16 @@ export function assertServerExecutionPostureAgreement(
         `${hostOn ? "ON" : "OFF (or absent)"} but the worker runtime ` +
         `resolved ${workerOn ? "ON" : "OFF"} — a divergent posture runs ` +
         "the F10 client contract in one realm and not the other " +
-        "(review 2026-08-11 m7; docs/specs/server-side-execution/)",
+        "(see docs/specs/server-side-execution/)",
     );
   }
 }
 
 /**
- * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
- * params (CT-1814): the shared first-party posture (CFC pins,
- * patternEnvironment from apiUrl) lives in the preset; this function only
- * carries what the host actually decided. Exported for testing.
+ * Maps host-decided `InitializationData` onto `runtimePresets.browserWorker`
+ * params. The shared first-party posture (CFC pins, patternEnvironment from
+ * apiUrl) lives in the preset; this function carries only what the host
+ * actually decided. Exported for testing.
  */
 export function browserWorkerParamsFromInitializationData(
   data: InitializationData,
@@ -715,6 +717,20 @@ type RuntimeOperationSession = {
   clientId: ClientId;
 };
 
+/**
+ * The worker side of a runtime client connection. An instance owns the
+ * worker's `Runtime`, keeps a `PiecesController` for the home space and for
+ * each other space a request has named, and serves every client attached to
+ * the worker: `handleRequest()` routes a client's request to the handler for
+ * its type, and what the runtime produces on its own (console output, errors,
+ * navigation, subscription updates) reaches the client through
+ * `postToClient()`. Subscriptions, operation sessions, and VDOM mounts are
+ * keyed by the client that opened them, so one client's departure takes down
+ * only its own. The security context is fixed at `initialize()` and is the
+ * one every attached client is held to. `dispose()` cancels what is
+ * outstanding and disposes the runtime, once, however many times it is
+ * called.
+ */
 export class RuntimeProcessor {
   #runtime: Runtime;
   #cc: PiecesController;
@@ -2159,10 +2175,20 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Handles a `PieceGetRequest`. Resolves a redirect here rather than through
-   * the runner's slug resolution, which `handleSlugResolve()` uses. Do not copy
-   * the bare `parseLink()` below into a new caller: a slug cell can be written
-   * by a foreign client over the memory protocol, and `parseSlugRedirect()` in
+   * Handles a `PieceGetRequest`. The answer is an address — a cell carrying
+   * the schema it is read under — so what this loads is what deciding the
+   * address takes: the requested document, and behind a redirect the document
+   * the redirect lands in, whose metadata says whether it is a piece and what
+   * result schema a cell inside it takes. Serving a slug document, the server
+   * resolves the redirect through the links on its path, which is the floor
+   * for an address a redirect answers. Nothing here reads the target's value,
+   * so whatever that value reaches stays cold until a caller subscribes to
+   * the cell it was handed.
+   *
+   * Resolves a redirect here rather than through the runner's slug
+   * resolution, which `handleSlugResolve()` uses. Do not copy the bare
+   * `parseLink()` below into a new caller: a slug cell can be written by a
+   * foreign client over the memory protocol, and `parseSlugRedirect()` in
    * `packages/runner/src/slug-resolution.ts` exists to fold the `TypeError` a
    * sigil-shaped payload with broken internals throws into a typed refusal.
    * These are one walk with two implementations, and this is the copy to
@@ -2185,6 +2211,9 @@ export class RuntimeProcessor {
       undefined,
       request.scope,
     );
+    // Schema-less, so the selector rejects the value's subtree: the document
+    // arrives, plus what the server resolves at the address itself when the
+    // value stored there is a link.
     await requestedCell.sync();
     const redirect = parseLink(
       requestedCell.getRaw(),
@@ -2196,27 +2225,56 @@ export class RuntimeProcessor {
         space: redirect.space ?? cc.getSpace(),
         scope: redirect.scope ?? "space",
       });
-      await target.sync();
       const targetLink = target.getAsNormalizedFullLink();
-      const hasPattern = getPatternIdentityRef(target) !== undefined ||
-        target.getMetaRaw("pattern") !== undefined;
-      if (!hasPattern || targetLink.path.length > 0) {
-        const pieceCell = hasPattern && targetLink.path.length > 0
-          ? target.asSchemaFromLinks()
-          : target;
+      // The document the redirect lands in, at its root. Whether it is a
+      // piece, and the result schema a cell inside it takes, are its
+      // metadata. Synced at the root rather than at the redirect's path, so
+      // the watch this leaves behind covers the document alone rather than
+      // every link the server resolves along that path.
+      const landing = targetLink.path.length === 0
+        ? target
+        : this.#runtime.getCellFromLink({
+          id: targetLink.id,
+          space: targetLink.space,
+          scope: targetLink.scope,
+          path: [],
+        });
+      await landing.sync();
+      const hasPattern = getPatternIdentityRef(landing) !== undefined ||
+        landing.getMetaRaw("pattern") !== undefined;
+      const viewScoped = this.#runtime.viewScopedReplicationRequested &&
+        await this.#runtime.viewReplication.enable(target.space);
+      if (viewScoped && (!hasPattern || targetLink.path.length > 0)) {
+        const pieceCell = target.asSchema(viewPieceSchema);
         await pieceCell.pull();
-        return {
-          piece: createPieceRef(pieceCell),
-        };
+        return { piece: createPieceRef(pieceCell) };
       }
-
-      const cell = await cc.getPieceCell(
-        target,
-        request.runIt ?? false,
-      );
-      return {
-        piece: createPieceRef(cell),
-      };
+      if (!hasPattern) return { piece: createPieceRef(target) };
+      if (targetLink.path.length > 0) {
+        // The schema a cell inside a piece is read under: what the links
+        // along its path carry, as `getPieceCell()` resolves a piece cell
+        // reached with a path; else what the redirect itself carries; else
+        // the piece's result schema at that path. Reached through the
+        // landing document, whose sync it shares, so that nothing here
+        // starts a watch at the path.
+        const inside = landing.key(...targetLink.path);
+        const linked = inside.asSchemaFromLinks();
+        if (linked.getAsNormalizedFullLink().schema !== undefined) {
+          return { piece: createPieceRef(linked) };
+        }
+        if (targetLink.schema !== undefined) {
+          return { piece: createPieceRef(inside.asSchema(targetLink.schema)) };
+        }
+        const resultSchema = landing.getMetaRaw("schema") as
+          | JSONSchema
+          | undefined;
+        const cell = resultSchema === undefined ? inside : inside.asSchema(
+          ContextualFlowControl.schemaAtPath(resultSchema, targetLink.path),
+        );
+        return { piece: createPieceRef(cell) };
+      }
+      const cell = await cc.getPieceCell(landing, request.runIt ?? false);
+      return { piece: createPieceRef(cell) };
     }
 
     const cell = await cc.getPieceCell(
@@ -2569,7 +2627,13 @@ export class RuntimeProcessor {
     const timing = getTimingStatsBreakdown();
     const flags = getLoggerFlagsBreakdown();
     assertFabricLoggerFlags(flags);
-    return { counts, metadata, timing, flags };
+    return {
+      counts,
+      metadata,
+      timing,
+      flags,
+      cfc: this.#runtime.getCfcStats(),
+    };
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {
@@ -2589,6 +2653,11 @@ export class RuntimeProcessor {
   setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
     this.#telemetryEnabled = request.enabled;
     this.#runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
+  }
+
+  /** Sets body accounting independently of telemetry transport. */
+  setReadStatsEnabled(request: SetReadStatsEnabledRequest): void {
+    this.#runtime.scheduler.setReadStatsEnabled(request.enabled);
   }
 
   /** Changes memory-message compression for every remote storage session. */
@@ -2916,6 +2985,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetReadStatsEnabled:
+        return this.setReadStatsEnabled(request);
       case RequestType.SetMemoryMessageCompression:
         return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:
@@ -3019,7 +3090,7 @@ export class RuntimeProcessor {
   handleVDomMount(
     request: VDomMountRequest,
     client: WorkerClient = ownerClient,
-  ): VDomMountResponse {
+  ): VDomMountResponse | Promise<VDomMountResponse> {
     const { mountId, cell: cellRef } = request;
     const key = clientScopedKey(client, mountId);
 
@@ -3059,13 +3130,38 @@ export class RuntimeProcessor {
       onError: mountErrorSink(client),
     });
 
-    // Mount the cell - the reconciler will subscribe and emit initial ops
-    const cancel = reconciler.mount(cell);
-
-    // Track this mount
-    this.#vdomMounts.set(key, { reconciler, cancel, client });
-
-    return { rootId: reconciler.getRootNodeId() };
+    let active = true;
+    let cancelRender: (() => void) | undefined;
+    let cancelView: (() => void) | undefined;
+    const mount = {
+      reconciler,
+      client,
+      cancel: () => {
+        active = false;
+        cancelRender?.();
+        cancelView?.();
+      },
+    };
+    this.#vdomMounts.set(key, mount);
+    const render = () => {
+      if (active) cancelRender = reconciler.mount(cell);
+      return { rootId: reconciler.getRootNodeId() };
+    };
+    if (!this.#runtime.viewScopedReplicationRequested) return render();
+    return this.#runtime.viewReplication.mount(
+      rawCell,
+      key,
+      mountErrorSink(client),
+    ).then((cancel) => {
+      if (!active) cancel?.();
+      else cancelView = cancel;
+      return render();
+    }).catch((error) => {
+      mount.cancel();
+      reconciler.unmount();
+      if (this.#vdomMounts.get(key) === mount) this.#vdomMounts.delete(key);
+      throw error;
+    });
   }
 
   /**
@@ -3140,6 +3236,16 @@ export class RuntimeProcessor {
     };
   }
 
+  /**
+   * Constructs the worker's processor from the host's `InitializationData`:
+   * opens storage and a runtime for the home space as the given identity,
+   * wires the runtime's console, navigation, piece-creation, and error
+   * bridges to `postToClient()`, and starts the home-space site-table watch.
+   * Rejects when the runtime's server-execution posture diverges from what
+   * the host declared, or when the API host fails its health check. The
+   * returned processor handles requests at once; a caller that needs storage
+   * and pieces to have converged waits on `synced()`.
+   */
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     const identity = await Identity.fromKeyPair(
@@ -3190,9 +3296,9 @@ export class RuntimeProcessor {
 
     let homePieces: PiecesController | undefined = undefined;
     let processor: RuntimeProcessor | undefined = undefined;
-    // Everything below goes through the browserWorker preset (CT-1814):
-    // host-decided data via the params mapper, plus this worker's declared
-    // deltas (the postMessage bridges for console/navigate/piece/errors).
+    // Everything below goes through the browserWorker preset: host-decided
+    // data via the params mapper, plus this worker's declared deltas (the
+    // postMessage bridges for console/navigate/piece/errors).
     const runtime = new Runtime(runtimePresets.browserWorker({
       ...browserWorkerParamsFromInitializationData(
         data,
@@ -3242,8 +3348,6 @@ export class RuntimeProcessor {
       errorHandlers: [postContextualRuntimeError],
     }));
 
-    // Fail LOUD on a worker/host flag divergence (review 2026-08-11
-    // m7) — see assertServerExecutionPostureAgreement.
     assertServerExecutionPostureAgreement(data.experimental, runtime);
 
     if (!await runtime.healthCheck()) {
@@ -3284,11 +3388,10 @@ export class RuntimeProcessor {
     processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
       runtime,
     );
-    // Site-table v0: the home space carries space-to-host hints; the
-    // runtime reads them as its live host lookup (2026-06-09 federation
-    // session — "move the lookup into the runtime itself"). A seeded route or
-    // earlier hint can reject an entry. A default-host provider is provisional.
-    // Failures here must not block worker boot.
+    // The home-space site table carries space-to-host hints, which the
+    // runtime reads as its live host lookup. A seeded route or earlier hint
+    // can reject an entry. A default-host provider is provisional. Failures
+    // here must not block worker boot.
     processor.watchSiteTable();
     return processor;
   }

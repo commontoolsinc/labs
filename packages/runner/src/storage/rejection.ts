@@ -80,11 +80,14 @@ export function isTerminalRejection(
  * is ahead of this replica. A reactive compute or effect recovers from one by
  * re-arming its subscription, waiting for the conflict's `readyToRetry`
  * catch-up, and re-queuing — off the retry budget, since a conflict is a
- * wait-for-catch-up, not a failure. (Reader-dirty propagation re-triggers it too
- * when the catch-up write lands as a fresh notification, but that does not cover
- * a conflict whose triggering write was already delivered, so the re-queue is
- * what guarantees re-evaluation.) The reactive path recovers the local
- * stale-basis guard (`isStorageTransactionInconsistent`) the same way — it too
+ * wait-for-catch-up, not a failure, and past the node's debounce and
+ * throttle (`MarkInvalidOptions.retry`), since the re-run is the
+ * scheduler's own rather than an input change. (Reader-dirty propagation
+ * re-triggers it too when the catch-up write lands as a fresh notification,
+ * but that does not cover a conflict whose triggering write was already
+ * delivered, so the re-queue is what guarantees re-evaluation.) The reactive
+ * path recovers the local stale-basis guard
+ * (`isStorageTransactionInconsistent`) the same way — it too
  * converges by re-running, so it re-queues off the budget rather than stranding
  * a compute as a zombie under a contention burst. Only a non-permanent error
  * that re-queueing cannot resolve — a transport or malformed-store error —

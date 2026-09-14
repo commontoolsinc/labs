@@ -10,8 +10,8 @@ import {
   cloneIfNecessary,
   fabricFromNativeValue,
   type FabricPlainObject,
-  FabricSpecialObject,
   type FabricValue,
+  isFabricSpecialObject,
   isKeyableObjectNotArray,
   shallowFabricFromNativeObjectElseUndefined,
   toCompactDebugString,
@@ -48,6 +48,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
   type CfcAddress,
   runtimeWritePolicyAuthorization,
 } from "./cfc/types.ts";
@@ -65,6 +66,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import {
   getCellOrThrow,
@@ -83,7 +85,10 @@ import type {
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
-import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
+import {
+  ignoreReadForScheduling,
+  linkResolutionProbe,
+} from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
 
@@ -218,10 +223,7 @@ const hasPendingSchemaPolicyInput = (
   source: NormalizedFullLink,
 ): boolean => {
   const sourcePath = canonicalizeLogicalPath(source.path);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
-    input.kind === "schema" &&
-    input.target.space === source.space &&
-    input.target.id === source.id &&
+  return tx.getCfcSchemaPolicyInputs(source.space, source.id).some((input) =>
     pathsOverlap(canonicalizeLogicalPath(input.target.path), sourcePath) &&
     schemaIfcOverlapsPath(
       input.schema,
@@ -238,6 +240,15 @@ const recordLinkWritePolicyInput = (
   cfcLabelView?: CfcLabelView,
 ): void => {
   if (tx.getCfcState().enforcementMode === "disabled") {
+    return;
+  }
+  // A content-addressed document is a runtime surface outside labeling:
+  // immutable, named by its own content, and never given an envelope —
+  // the write-policy and flow-read passes exclude `cid:` ids on the same
+  // ground. A link to one carries nothing a label could describe, so it
+  // records no policy input; recording one would demand source metadata
+  // the document can never carry.
+  if (source.id.startsWith("cid:")) {
     return;
   }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
@@ -460,6 +471,258 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
+/** Declared input fields whose default storage continues through a user row. */
+export function sessionScopedArgumentKeys(
+  schema: JSONSchema | undefined,
+): string[] {
+  const resolved = resolveSchema(schema);
+  if (!isObjectOrArray(resolved) || !isObjectOrArray(resolved.properties)) {
+    return [];
+  }
+  return Object.keys(resolved.properties).filter((key) =>
+    declaredCellScope(ContextualFlowControl.getSchemaAtPath(schema, [key])) ===
+      "session"
+  );
+}
+
+/** The default initialization declaration carried by a stored link value. */
+function scopeInitialization(value: unknown): "session" | undefined {
+  if (!isPrimitiveCellLink(value)) return undefined;
+  return (linkRefPayload(value) as Record<string, unknown>)
+      .scopeInitialization === "session"
+    ? "session"
+    : undefined;
+}
+
+/** A space-to-user default link whose missing user instances continue to session. */
+function sessionInitializationLink(
+  target: NormalizedFullLink,
+  base: NormalizedFullLink,
+) {
+  return linkRefFrom({
+    ...linkRefPayload(createSigilLinkFromParsedLink(target, { base })),
+    scopeInitialization: "session",
+  });
+}
+
+/** The canonical user continuation named by an automatic session default. */
+function sessionInitializationTarget(
+  value: unknown,
+  source: NormalizedFullLink,
+): NormalizedFullLink | undefined {
+  if (source.scope !== "space" || scopeInitialization(value) !== "session") {
+    return undefined;
+  }
+  const target = parseLink(value, source);
+  return target && areNormalizedLinksSame(target, { ...source, scope: "user" })
+    ? target
+    : undefined;
+}
+
+/** User slots whose presence must be loaded before initializing a session default. */
+export function scopedArgumentInitializationTargets(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  argument: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): NormalizedFullLink[] {
+  if (!getServerExecutionConfig()) return [];
+  let blocked = false;
+  const container = resolveLink(runtime, tx, argument, "value", {
+    onScopeBlocked: () => blocked = true,
+  });
+  if (
+    blocked || container.pendingHopDoc || container.scope !== "space" ||
+    isFabricDataUri(container.id)
+  ) return [];
+  const value = tx.readValueOrThrow(container, {
+    nonRecursive: true,
+    meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+  });
+  if (!isKeyableObjectNotArray(value) || isPrimitiveCellLink(value)) return [];
+  return sessionScopedArgumentKeys(schema).flatMap((key) => {
+    const source = { ...container, path: [...container.path, key] };
+    const target = Object.hasOwn(value, key)
+      ? sessionInitializationTarget(
+        tx.readValueOrThrow(source, { meta: linkResolutionProbe }),
+        source,
+      )
+      : { ...source, scope: "user" as const };
+    return target ? [target] : [];
+  });
+}
+
+/** Materialize absent scoped input slots and declared session continuations. */
+export function initializeScopedArgumentSlots(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  argumentLink: NormalizedFullLink,
+  schema: JSONSchema | undefined,
+): void {
+  const resolvedSchema = resolveSchema(schema);
+  if (
+    !isObjectOrArray(resolvedSchema) ||
+    !isObjectOrArray(resolvedSchema.properties)
+  ) return;
+  let blocked = false;
+  const container = resolveLink(runtime, tx, argumentLink, "value", {
+    onScopeBlocked: () => blocked = true,
+  });
+  if (blocked || container.pendingHopDoc || isFabricDataUri(container.id)) {
+    return;
+  }
+  const options = {
+    nonRecursive: true,
+    meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+  };
+  const value = tx.readValueOrThrow(container, options);
+  if (!isKeyableObjectNotArray(value) || isPrimitiveCellLink(value)) return;
+  const changes: ChangeSet = [];
+  for (const key of Object.keys(resolvedSchema.properties)) {
+    const childSchema = ContextualFlowControl.getSchemaAtPath(schema, [key]);
+    const scope = declaredCellScope(childSchema);
+    if (scope === undefined || scopeRank(scope) <= scopeRank(container.scope)) {
+      continue;
+    }
+    const childLink: NormalizedFullLink = {
+      ...container,
+      path: [...container.path, key],
+      schema: childSchema,
+    };
+    const present = Object.hasOwn(value, key);
+    if (
+      getServerExecutionConfig() && scope === "session" &&
+      container.scope === "space"
+    ) {
+      // The declaration is a link-value dependency, including changes that
+      // preserve the containing object's key set and the reference address.
+      const target = present
+        ? sessionInitializationTarget(
+          tx.readValueOrThrow(childLink, { meta: linkResolutionProbe }),
+          childLink,
+        )
+        : { ...childLink, scope: "user" as const };
+      if (!target) continue;
+      let targetBlocked = false;
+      const resolvedTarget = resolveLink(runtime, tx, target, "top", {
+        onScopeBlocked: () => targetBlocked = true,
+      });
+      if (
+        targetBlocked || resolvedTarget.pendingHopDoc ||
+        !areNormalizedLinksSame(target, resolvedTarget)
+      ) continue;
+      if (!present) {
+        changes.push(...normalizeAndDiff(
+          runtime,
+          tx,
+          childLink,
+          sessionInitializationLink(target, childLink),
+          argumentLink,
+          options,
+          { seen: new Map() },
+          undefined,
+        ));
+      }
+      const parent = tx.readValueOrThrow({
+        ...target,
+        path: target.path.slice(0, -1),
+      }, options);
+      // The leaf absence remains a commit dependency when a concurrent write
+      // fills the slot without changing its parent's nonrecursive shape.
+      tx.readValueOrThrow(target, options);
+      if (
+        parent !== undefined && (
+          !isKeyableObjectNotArray(parent) || isPrimitiveCellLink(parent) ||
+          Object.hasOwn(parent, target.path.at(-1)!)
+        )
+      ) continue;
+      if (parent === undefined) {
+        // Missing containers may be created, but an explicitly undefined
+        // ancestor is an authored value and must not be replaced by a record.
+        const address = toMemorySpaceAddress(target);
+        let presentAncestor = false;
+        for (let depth = address.path.length - 1; depth > 0; depth--) {
+          const owner = tx.readOrThrow({
+            ...address,
+            path: address.path.slice(0, depth - 1),
+          }, options);
+          if (owner === undefined) continue;
+          presentAncestor = !isKeyableObjectNotArray(owner) ||
+            Object.hasOwn(owner, address.path[depth - 1]);
+          break;
+        }
+        if (presentAncestor) continue;
+      }
+      changes.push(...normalizeAndDiff(
+        runtime,
+        tx,
+        target,
+        createSigilLinkFromParsedLink({ ...target, scope: "session" }, {
+          base: target,
+        }),
+        argumentLink,
+        options,
+        { seen: new Map() },
+        undefined,
+      ));
+      continue;
+    }
+    if (present) continue;
+    changes.push(...scopedRedirectChanges(
+      runtime,
+      tx,
+      childLink,
+      scope,
+      argumentLink,
+      options,
+      { seen: new Map() },
+      undefined,
+    ));
+  }
+  applyChangeSet(tx, changes);
+}
+
+/** Build the redirect chain for a declared narrower slot without writing its content. */
+function scopedRedirectChanges(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  scope: CellScope,
+  context: unknown,
+  options: DiffAndUpdateOptions | undefined,
+  state: DiffWalkState,
+  currentValue: unknown,
+): ChangeSet {
+  const scopedLink: NormalizedFullLink = { ...link, scope };
+  const viaUser = getServerExecutionConfig() && scope === "session" &&
+    scopeRank(link.scope) < scopeRank("user");
+  const target = viaUser ? { ...link, scope: "user" as const } : scopedLink;
+  const changes = viaUser
+    ? normalizeAndDiff(
+      runtime,
+      tx,
+      target,
+      createSigilLinkFromParsedLink(scopedLink, { base: target }),
+      context,
+      options,
+      state,
+    )
+    : [];
+  changes.push(...normalizeAndDiff(
+    runtime,
+    tx,
+    link,
+    viaUser
+      ? sessionInitializationLink(target, link)
+      : createSigilLinkFromParsedLink(target, { base: link }),
+    context,
+    options,
+    state,
+    currentValue,
+  ));
+  return changes;
+}
+
 export type ChangeSet = {
   location: NormalizedFullLink;
   value: FabricValue;
@@ -570,6 +833,38 @@ function anchorValueAsEntity(
         path: [],
       },
       claim: CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+      sources: [{
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        path: [...path],
+      }],
+    }, runtimeWritePolicyAuthorization);
+  }
+
+  // The same carry for the other class of parent, on the same reasoning. A
+  // document no schema declares a policy on splits its value the same way: a
+  // cache document's `imports` array holds one document per edge, and what
+  // each holds is a piece of the parent's own record at an id derived here.
+  // Without the carry the parent is exempt and its children are measured, so
+  // a transaction carrying a join that rewrites a cache document is refused
+  // at the child.
+  if (
+    tx.isUndeclarablePolicyStore(
+      link.space,
+      link.id,
+      runtimeWritePolicyAuthorization,
+    )
+  ) {
+    tx.recordCfcWritePolicyInput({
+      kind: "structural-provenance",
+      target: {
+        space: newEntryLink.space,
+        id: newEntryLink.id,
+        scope: newEntryLink.scope,
+        path: [],
+      },
+      claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
       sources: [{
         space: link.space,
         id: link.id,
@@ -809,7 +1104,7 @@ export function normalizeAndDiff(
           runtime,
           tx,
           link,
-          createSigilLinkFromParsedLink(userLink, { base: link }) as unknown,
+          sessionInitializationLink(userLink, link),
           context,
           options,
           state,
@@ -1049,6 +1344,7 @@ export function normalizeAndDiff(
       if (cfcLabelViewHasValues(carriedCfcLabelView)) {
         recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
       }
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
       return [];
     } else {
       diffLogger.debug(
@@ -1172,7 +1468,8 @@ export function normalizeAndDiff(
     }
     if (
       isPrimitiveCellLink(currentValue) &&
-      areLinksSame(newValue, currentValue, link)
+      areLinksSame(newValue, currentValue, link) &&
+      scopeInitialization(newValue) === scopeInitialization(currentValue)
     ) {
       diffLogger.debug(
         "diff",
@@ -1181,6 +1478,7 @@ export function normalizeAndDiff(
       if (cfcLabelViewHasValues(carriedCfcLabelView)) {
         recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
       }
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
       return [];
     } else {
       // Scope-isolation guard (spec: docs/specs/scoped-cell-instances.md,
@@ -1519,6 +1817,8 @@ export function normalizeAndDiff(
         location: link,
         value: cloneIfNecessary(newValue as FabricValue, { deep: false }),
       });
+    } else if (changes.length === 0) {
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
     }
 
     return changes;
@@ -1535,7 +1835,7 @@ export function normalizeAndDiff(
   // serialization (via each type's `[CODEC]`). Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
   // not on the redirect itself.
-  if (newValue instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(newValue)) {
     diffLogger.debug(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
@@ -1718,64 +2018,16 @@ export function normalizeAndDiff(
           path: [...link.path, key],
           schema: childSchema,
         };
-        const scopedLink: NormalizedFullLink = {
-          ...childLink,
-          scope: childScope,
-        };
-        // The eager via-user hop (scopes.md §2's MUST, flag-gated): an
-        // eager space→session redirect chains via user like every other
-        // narrowing write, so the chain shape stays uniform.
-        if (
-          getServerExecutionConfig() &&
-          childScope === "session" &&
-          scopeRank(link.scope) < scopeRank("user")
-        ) {
-          const userLink: NormalizedFullLink = {
-            ...childLink,
-            scope: "user",
-          };
-          changes.push(
-            ...normalizeAndDiff(
-              runtime,
-              tx,
-              userLink,
-              createSigilLinkFromParsedLink(scopedLink, {
-                base: userLink,
-              }) as unknown,
-              context,
-              options,
-              state,
-            ),
-            ...normalizeAndDiff(
-              runtime,
-              tx,
-              childLink,
-              createSigilLinkFromParsedLink(userLink, {
-                base: childLink,
-              }) as unknown,
-              context,
-              options,
-              state,
-              currentRecord[key],
-            ),
-          );
-          eagerScopedKeys.add(key);
-          continue;
-        }
-        changes.push(
-          ...normalizeAndDiff(
-            runtime,
-            tx,
-            childLink,
-            createSigilLinkFromParsedLink(scopedLink, {
-              base: childLink,
-            }) as unknown,
-            context,
-            options,
-            state,
-            currentRecord[key],
-          ),
-        );
+        changes.push(...scopedRedirectChanges(
+          runtime,
+          tx,
+          childLink,
+          childScope,
+          context,
+          options,
+          state,
+          currentRecord[key],
+        ));
         eagerScopedKeys.add(key);
       }
     }
@@ -1811,6 +2063,8 @@ export function normalizeAndDiff(
         location: link,
         value: cloneIfNecessary(newValue as FabricValue, { deep: false }),
       });
+    } else if (changes.length === 0) {
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
     }
 
     return changes;
@@ -1869,6 +2123,8 @@ export function normalizeAndDiff(
     tx.isAuthoritativeWrites?.() === true
   ) {
     changes.push({ location: link, value: newValue as FabricValue });
+  } else {
+    tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
   }
 
   return changes;

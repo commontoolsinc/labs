@@ -169,8 +169,14 @@ export async function readWorkspaceMembers(
   configPath: string | URL = "./deno.jsonc",
 ): Promise<string[]> {
   const manifest = parseJsonc(await Deno.readTextFile(configPath)) as {
-    workspace: string[];
+    workspace?: string[];
   };
+  // A manifest that declares no workspace is a member's own rather than
+  // the root's, and answering with nothing would read downstream as a
+  // repository holding no packages at all.
+  if (!Array.isArray(manifest.workspace)) {
+    throw new Error(`${configPath} declares no workspace`);
+  }
   return manifest.workspace;
 }
 
@@ -218,15 +224,17 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 //
 // A task carrying a shell metacharacter puts the appended flag somewhere
 // other than the test command: `api` chains a type-performance benchmark
-// after its tests, and `patterns` and `ui` run two test commands each, so
-// the flag would reach only the last one.
+// after its tests, and `patterns` runs two test commands, so the flag
+// would reach only the last one. A member that names its halves as
+// separate tasks has no `test` command at all, and takes neither flag for
+// the same reason a dependencies-only task does not.
 //
 // A task that runs a script cannot show what the script does with the
 // flags it is handed. The members listed here route through a runner that
 // forwards them to one `deno test`. The runners that do not appear here
 // keep their leaves out: `cli` runs three `deno test` invocations per
-// slice, which would each overwrite the file, and `dashboard`, `identity`,
-// and `iframe-sandbox` drive browser harnesses that record through the
+// slice, which would each overwrite the file, and `dashboard` and
+// `identity` drive browser harnesses that record through the
 // deno-web-test reporter instead.
 const FLAG_FORWARDING_RUNNERS = new Set([
   "./packages/connectors/agents/host",

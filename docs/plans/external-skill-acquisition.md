@@ -226,21 +226,39 @@ with optional `scripts/` (executable code), `references/`, and `assets/` — and
 the registry's download endpoint returns whatever files the snapshot holds. An
 unenforced assumption about what arrives is not a boundary.
 
-Enforcement lives in the host acquisition write step, at the single point
-where fetched bytes become a cell value, and it is a **whitelist on paths, not
-a blacklist on names**:
+Enforcement lives in the host acquisition step, at the single point where
+fetched bytes are admitted, and it is a **whitelist on paths, not a blacklist
+on names**:
 
-- Exactly one file is admitted: the `SKILL.md` at the skill root. Its text is
-  what the cell holds.
+- Two things are admitted: the `SKILL.md` at the skill root, whose text is what
+  the cell holds, and the regular files directly under the root's `scripts/`,
+  which stay host-side. A skill is a directory and its scripts are part of it —
+  a skill whose instructions reference `scripts/foo.py` is not the same skill
+  without it, and admitting the prose alone yields one that will instruct the
+  model to run something that is not there.
 - Any other path in the payload causes the acquisition to **refuse**, naming
   the count and the offending paths, rather than to succeed while quietly
-  dropping them. Silently discarding scripts would make "instructions-only"
-  true of the cell and invisible in the record, and the operator reading that
-  record could not tell a plain skill from one that arrived carrying code.
-- The refusal is the honest outcome because a skill whose instructions
-  reference `scripts/foo.py` is not the same skill without it. Admitting the
-  prose alone yields a skill that will instruct the model to run something
-  that is not there.
+  dropping them. Silently discarding a reference or an asset would make what
+  the cell holds true of the cell and invisible in the record, and the operator
+  reading that record could not tell a skill that arrived whole from one that
+  arrived in part. A directory nested below `scripts/`, a symlink and a
+  submodule are refusals of this kind: the first is a tree the whitelist never
+  judged, and the other two name bytes the inventory does not vouch for.
+- A script's filename is held to printable ASCII without a path separator, a
+  control codepoint or a leading dot. An admitted path is reported — it reaches
+  the acquisition's own record and the tool output, neither of which sanitizes
+  on the way out — so a name the publisher chose is refused here rather than
+  carried and cleaned later.
+- A skill shipping more scripts than one acquisition admits refuses on the
+  inventory, before a single one is fetched. That count cap and the per-file
+  size cap bound different things: the size cap bounds a file's bytes, and the
+  count cap is what keeps the number of requests ours rather than the
+  publisher's.
+
+Admitting the scripts is not admitting them to the registry. The acquired tree
+is host-side, nothing is written into the skills root, and whether a script may
+run is decided by the same operator allowlist a registry skill's script answers
+to — the third of the three properties below, unchanged by this.
 
 For GitHub commit acquisition, the inventory is the recursive tree API at the
 pinned SHA. A response marked `truncated` refuses with its own reason: an unread
@@ -383,8 +401,10 @@ there.
    registry's unverified hash.
 3. **Isolated verified acquisition.** The parent-facing `acquire_skill` effect
    resolves and fetches host-side, with commit-SHA acquisition fail-closed, the
-   recursive single-file payload whitelist, and first-class refusal. It writes
-   into a cell, returns a handle, and proves with an adversarial canary that the
+   recursive payload whitelist above — the root `SKILL.md` and the regular
+   files directly under `scripts/`, everything else refusing — and first-class
+   refusal. It writes the instructions into a cell, holds the scripts
+   host-side, returns a handle, and proves with an adversarial canary that the
    parent never received the skill text. A `.well-known` digest route can join
    the same boundary when a source publishes one.
 4. **The provenance mark**, minted split-mint style on the acquiring write.

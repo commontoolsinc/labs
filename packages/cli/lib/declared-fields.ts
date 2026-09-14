@@ -15,7 +15,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
-import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
+import { cfcSchemaResolvedRoot } from "@commonfabric/runner/cfc/schema-refs";
 import { localRefTarget } from "@commonfabric/runner/cfc/schema-sanitization";
 import {
   isObjectNotArray,
@@ -159,7 +159,7 @@ export function declaredFieldsAt(
   }
   if (!Array.isArray(node.allOf)) return into;
   for (const member of node.allOf as JSONSchema[]) {
-    const memberRoot = cfcSchemaChildRoot(member, root);
+    const memberRoot = root;
     if (isSchemaObject(member) && typeof member.$ref === "string") {
       let inScope = followed.get(memberRoot);
       if (inScope?.has(member.$ref)) continue;
@@ -177,7 +177,9 @@ export function declaredFieldsAt(
     }
     declaredFieldsAt(
       resolved,
-      cfcSchemaChildRoot(resolved, memberRoot),
+      resolved !== member
+        ? cfcSchemaResolvedRoot(resolved, memberRoot)
+        : memberRoot,
       into,
       followed,
     );

@@ -27,6 +27,7 @@ import type {
   CfcPostureProvenance,
   CfcPostureReport,
 } from "@commonfabric/runner/cfc";
+import type { MAX_ENFORCEMENT_CFC_OPTIONS } from "@commonfabric/runner";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
@@ -360,6 +361,27 @@ const defaultModeDrift: AuditCheck = {
   },
 };
 
+/**
+ * The flow-label rung a run claiming the max-enforcement bundle is held to.
+ *
+ * A record carries the rung the run resolved and the name of the bundle it
+ * claimed, never the rung that bundle asserted, so the audit carries the
+ * second one. This rung moves when this line is edited and at no other time,
+ * which is what keeps a verdict on an already-recorded artifact from turning
+ * over as the runner's bundle moves.
+ *
+ * The pin is what makes moving it a decision. It reads no value out of the
+ * runner: `satisfies` fails `deno check` when the bundle sets a different
+ * rung or stops setting one, so the move surfaces where it is made rather
+ * than as an audit that quietly grades the corpus by a new rule.
+ *
+ * `persist` is the strongest rung of `CfcFlowLabelsMode`, which is what makes
+ * the inequality below read as `falsifiedBy` states it — weaker than the
+ * bundle asserts, rather than merely different from it.
+ */
+const EXPECTED_MAX_ENFORCEMENT_FLOW_LABELS =
+  "persist" satisfies typeof MAX_ENFORCEMENT_CFC_OPTIONS["cfcFlowLabels"];
+
 const defaultDialDrift: AuditCheck = {
   id: "AUD-15a",
   title: "default-sourced dial drift",
@@ -386,12 +408,13 @@ const defaultDialDrift: AuditCheck = {
       };
     }
     if (
-      posture.flowLabelsSource === "default" && posture.flowLabels !== "persist"
+      posture.flowLabelsSource === "default" &&
+      posture.flowLabels !== EXPECTED_MAX_ENFORCEMENT_FLOW_LABELS
     ) {
       return {
         verdict: "fail",
         message:
-          `this run's flow-label dial came from a default and landed at \`${posture.flowLabels}\`, while the max-enforcement bundle it claims asserts \`persist\``,
+          `this run's flow-label dial came from a default and landed at \`${posture.flowLabels}\`, while the max-enforcement bundle it claims asserts \`${EXPECTED_MAX_ENFORCEMENT_FLOW_LABELS}\``,
         evidence: [{
           artifact: "run-state.json",
           pointer: "fabricSessionCfc.flowLabelsSource",

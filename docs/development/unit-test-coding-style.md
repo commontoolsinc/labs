@@ -458,6 +458,52 @@ replica has examined the document and also once a local write for it is
 pending, so a case turning on the first of those says in a comment that
 nothing has written the document yet.
 
+**A label-map absence assertion passes in four different states.** A test
+reaches the CFC label map through a chain like
+`replica.getDocument(id)?.cfc?.labelMap?.entries ?? []`. The `getDocument()`
+collapse above accounts for the first of the four. Two more come from the rest
+of the chain: the document carries no `cfc` metadata, and that metadata
+carries no `labelMap`. Each of the three yields the empty list the `??` hands
+back. The fourth is the one an absence assertion means — the label map is
+there and holds no matching entry — where `entries` may well be non-empty and
+it is the `find()` or `filter()` over it that comes back empty. All four look
+alike by the time the matcher runs, and where no passing run stamps that
+document, the case cannot fail at all.
+
+Say which state is meant. A positive companion the same helper reads back from
+that same document closes the first three: the entry is there, so the label
+map, the metadata and the document are there too, and the fourth is left as
+the claim. Where the run labels nothing on that document, no such companion
+exists, and naming the value the document stores is what there is. It rules
+out a missing document and nothing else, which leaves the two middle states
+standing — and those are what such a case asserts, since a document the run
+stamps nothing on is one carrying no metadata. A companion read from another
+document closes none of the three. It says the run stamped something
+somewhere, which is worth asserting where the case turns on a label that must
+not travel, and is not a substitute for pinning the document under assertion.
+
+```ts
+// Shown at module scope.
+import { expect } from "@std/expect";
+
+type StoredEntry = { label: { confidentiality?: string[] } };
+
+declare const entriesOf: (id: string) => StoredEntry[];
+declare const storedDocument: (id: string) => { value?: unknown } | undefined;
+declare const sourceId: string;
+declare const copyId: string;
+
+// The stored value pins the copy document, and the source carries the atom
+// the copy must not.
+expect(storedDocument(copyId)?.value).toEqual({ reading: "37.77,-122.41" });
+expect(
+  entriesOf(sourceId).flatMap((e) => e.label.confidentiality ?? []),
+).toContain("secret");
+expect(
+  entriesOf(copyId).flatMap((e) => e.label.confidentiality ?? []),
+).not.toContain("secret");
+```
+
 ## What a claim ranges over
 
 A test exhibits instances. To exhibit an absence it has to exhaust the set the

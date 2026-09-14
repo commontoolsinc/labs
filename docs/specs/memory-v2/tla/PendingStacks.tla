@@ -23,6 +23,16 @@
 (*     contributor (CT-1872 "1c") and a missed concurrent write            *)
 (*     (CT-1910).                                                          *)
 (*                                                                         *)
+(*   - Each commit carries one value from the constant set Values, which   *)
+(*     every path it writes receives.  A path's CONTENT is the set of      *)
+(*     values its accepted writes carried, so writing a value the path     *)
+(*     already holds changes nothing: that is the identity commit of       *)
+(*     03-commit-model.md section 3.6.1 in this abstraction, and the       *)
+(*     set-union fold is the idempotence its patch rule requires.  A       *)
+(*     single value already makes a stale re-write of it an identity;      *)
+(*     the second value is what exercises the other side, a write the      *)
+(*     proof must refuse, and IdentityMode is what turns elision on.       *)
+(*                                                                         *)
 (*   - Verdict delivery is a mode (DeliveryMode below).  "atomic" fuses    *)
 (*     the server's verdict with the client's mirrored effects, the       *)
 (*     original abstraction; "channel" splits them: the server decides,    *)
@@ -70,20 +80,34 @@
 (*   DeliveryMode - when the client PROCESSES a verdict (see above):        *)
 (*       "atomic"    verdict and mirrored client effects in one action.    *)
 (*       "channel"   verdicts processed later, in order, by Deliver.       *)
+(*                                                                         *)
+(*   IdentityMode - what a staleness refusal does with a commit whose      *)
+(*     writes would change nothing (03-commit-model.md section 3.6.1):     *)
+(*       "none"      refuse it, like any stale commit.                     *)
+(*       "elide"     shipped: prove the identity against the stored        *)
+(*                   content and the content at the reader's basis, and   *)
+(*                   accept the commit with every write elided - it takes  *)
+(*                   a seq and resolves its localSeq but appends nothing   *)
+(*                   to any path's content.  The proof runs only on a      *)
+(*                   staleness refusal; a dead dependency still refuses.   *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS
   Sessions,     \* logical sessions, e.g. {"s1", "s2"}
   Paths,        \* leaf paths of the single modeled document, e.g. {"p1", "p2"}
+  Values,       \* values a commit may write, e.g. {"a", "b"}
   MaxTotal,     \* bound on the total number of commits built, all sessions
   DepMode,      \* "fullstack" | "filtered"
   BasisMode,    \* "maxdep" | "confirmed"
-  DeliveryMode  \* "atomic" | "channel"
+  DeliveryMode, \* "atomic" | "channel"
+  IdentityMode  \* "none" | "elide"
 
 ASSUME DepMode \in {"fullstack", "filtered"}
 ASSUME BasisMode \in {"maxdep", "confirmed"}
 ASSUME DeliveryMode \in {"atomic", "channel"}
+ASSUME IdentityMode \in {"none", "elide"}
+ASSUME Values # {}
 ASSUME MaxTotal \in Nat \ {0}
 
 VARIABLES
@@ -151,10 +175,11 @@ ReadRecord(s, p) ==
       obsC |-> ObsConfirmed(s, p),
       obsP |-> wl]
 
-Build(s, R, W) ==
+Build(s, R, W, v) ==
   /\ built < MaxTotal
   /\ LET c == [lseq |-> nextLocal[s],
                writes |-> W,
+               val |-> v,
                reads |-> {ReadRecord(s, p) : p \in R}]
      IN pend' = [pend EXCEPT ![s] = Append(@, c)]
   /\ nextLocal' = [nextLocal EXCEPT ![s] = @ + 1]
@@ -230,24 +255,79 @@ ChannelReject(s, c) ==
   /\ res' = [res EXCEPT ![s][c.lseq] = [st |-> "rej", seq |-> 0]]
   /\ UNCHANGED <<log, pend, known, localrej, csn, nextLocal, built>>
 
-Accept(s, c, k) ==
+(* Content: the set of values the accepted writes to a path carried.
+   ContentBelow(p, k) is the content a commit admitted at seq k finds
+   stored; ContentAt(p, n) is the content at seq n inclusive, which is what
+   a reader whose basis is n saw. *)
+DurableWriters(p, k) == {i \in 1..(k - 1) : p \in log[i].writes}
+ContentBelow(p, k) == {log[i].val : i \in DurableWriters(p, k)}
+ContentAt(p, n) == ContentBelow(p, n + 1)
+
+(* The content the reader SAW at p, reconstructed from the commit's own
+   read of p as the engine's basisOf does: a confirmed read's content at
+   its basis; a pending read's content at its confirmed basis plus the
+   values the own layers it names wrote to p - an elided layer's included,
+   since the client folded that write whether or not the server recorded
+   a revision for it; and the stored content itself when the commit did
+   not read p (a write with no read is an identity only where it is
+   idempotent).  What this is NOT is the durable content at a named
+   layer's resolution: that carries every foreign write that landed
+   before the layer, which the reader had not integrated, and judging
+   from it accepts a write the reader's own view would not have produced
+   (the reviewed defect this definition replaced). *)
+LayerVal(s, d) ==
+  IF res[s][d].st = "acc" THEN {log[res[s][d].seq].val} ELSE {}
+LayerWrote(s, d, p) ==
+  /\ res[s][d].st = "acc"
+  /\ p \in log[res[s][d].seq].writes \cup log[res[s][d].seq].elided
+ObservedContent(s, c, p, k) ==
+  IF \E r \in c.reads : r.path = p
+  THEN LET r == CHOOSE r \in c.reads : r.path = p
+       IN ContentAt(p, r.cbasis) \cup
+            UNION {LayerVal(s, d) : d \in {d \in r.deps : LayerWrote(s, d, p)}}
+  ELSE ContentBelow(p, k)
+
+(* The identity proof of 03-commit-model.md section 3.6.1 over content:
+   for every path the commit writes, folding its value onto the content
+   the reader saw yields the stored content, and folding it onto the
+   stored content leaves that unchanged.  Under the set-union fold the
+   second half is membership and the first says nothing but the commit's
+   own value landed on the path since the reader's view.  Only reachable
+   from a staleness refusal; HasDeadDep is decided first. *)
+IsIdentity(s, c, k) ==
+  /\ IdentityMode = "elide"
+  /\ \A p \in c.writes :
+       /\ c.val \in ContentBelow(p, k)
+       /\ ContentBelow(p, k) \subseteq ObservedContent(s, c, p, k) \cup {c.val}
+
+(* An elided acceptance appends an entry with no writes: the commit takes
+   seq k and resolves its localSeq like any accepted commit, and records
+   what it would have written under `elided` for the invariants below. *)
+Accept(s, c, k, elide) ==
   /\ log' = Append(log, [sess |-> s, lseq |-> c.lseq,
-                         writes |-> c.writes, reads |-> c.reads])
+                         writes |-> IF elide THEN {} ELSE c.writes,
+                         elided |-> IF elide THEN c.writes ELSE {},
+                         val |-> c.val, reads |-> c.reads])
   /\ res' = [res EXCEPT ![s][c.lseq] = [st |-> "acc", seq |-> k]]
   /\ known' = IF DeliveryMode = "atomic"
               THEN [known EXCEPT ![s][c.lseq] = "acc"]
               ELSE known
   /\ UNCHANGED <<pend, localrej, csn, nextLocal, built>>
 
+Reject(s, c) ==
+  IF DeliveryMode = "atomic" THEN AtomicReject(s, c) ELSE ChannelReject(s, c)
+
 Process(s) ==
   /\ Unresolved(s) # {}
   /\ LET c == pend[s][Min(Unresolved(s))]
          k == Len(log) + 1
-     IN IF HasDeadDep(s, c) \/ HasConflict(s, c, k)
-        THEN IF DeliveryMode = "atomic"
-             THEN AtomicReject(s, c)
-             ELSE ChannelReject(s, c)
-        ELSE Accept(s, c, k)
+     IN IF HasDeadDep(s, c)
+        THEN Reject(s, c)
+        ELSE IF HasConflict(s, c, k)
+             THEN IF IsIdentity(s, c, k)
+                  THEN Accept(s, c, k, TRUE)
+                  ELSE Reject(s, c)
+             ELSE Accept(s, c, k, FALSE)
 
 (***************************************************************************)
 (* Verdict processing (channel mode).  Deliver is the point where the      *)
@@ -324,7 +404,7 @@ Init ==
 
 Next ==
   \/ \E s \in Sessions : \E R \in ReadChoices : \E W \in WriteChoices :
-       Build(s, R, W)
+       \E v \in Values : Build(s, R, W, v)
   \/ \E s \in Sessions : Process(s)
   \/ \E s \in Sessions : Deliver(s)
   \/ \E s \in Sessions : Integrate(s)
@@ -338,14 +418,51 @@ Spec == Init /\ [][Next]_vars
 (* INV-1.  The contributor set a read observed, mapped through resolution
    (a rejected or unresolved pending contributor maps to 0, which is never
    durable), equals the set of accepted writes to that path below the
-   reader's own seq. *)
+   reader's own seq.  This is the writer-set form: it is the invariant
+   whenever IdentityMode is "none", and it is deliberately NOT the
+   statement under "elide".  An elided commit's own observation is stale
+   by construction, which is the exemption 09-invariants.md records under
+   INV-1; and even restricted to commits that wrote something
+   (ReadCoherenceOfWrites) the writer-set form fails, because an elided
+   layer stays in its session's stack and is observed there as a
+   contributor while durable history holds the foreign write that carried
+   the same value instead, so the writer sets differ where the content
+   does not.  ContentCoherence below is the form that mode is held to. *)
 MappedObs(s, r) == r.obsC \cup {res[s][d].seq : d \in r.obsP}
-DurableWriters(p, k) == {i \in 1..(k - 1) : p \in log[i].writes}
 
 ReadCoherence ==
   \A k \in DOMAIN log :
     \A r \in log[k].reads :
       MappedObs(log[k].sess, r) = DurableWriters(r.path, k)
+
+ReadCoherenceOfWrites ==
+  \A k \in DOMAIN log :
+    log[k].writes # {} =>
+      \A r \in log[k].reads :
+        MappedObs(log[k].sess, r) = DurableWriters(r.path, k)
+
+(* INV-1 over content.  The content a read observed - the values of its
+   confirmed contributors plus the values its pending layers carried, an
+   elided layer's included, since the client's view folds its own pending
+   write whether or not the server recorded a revision for it - equals the
+   content durable below the reader's own seq.  Every accepted commit that
+   wrote something is held to it; an elided commit is the deviation
+   09-invariants.md records under INV-1: its observation may be stale, and
+   it produced no write for that staleness to have misled. *)
+ObsContent(s, r) ==
+  {log[i].val : i \in r.obsC} \cup UNION {LayerVal(s, d) : d \in r.obsP}
+
+ContentCoherence ==
+  \A k \in DOMAIN log :
+    log[k].writes # {} =>
+      \A r \in log[k].reads :
+        ObsContent(log[k].sess, r) = ContentBelow(r.path, k)
+
+(* An elided commit changed nothing: every path it would have written
+   already held its value at its resolution point. *)
+ElidedUnchanged ==
+  \A k \in DOMAIN log :
+    \A p \in log[k].elided : log[k].val \in ContentBelow(p, k)
 
 (* INV-4 (with INV-3(a)): no accepted commit names a dependency that did
    not itself resolve to acceptance. *)

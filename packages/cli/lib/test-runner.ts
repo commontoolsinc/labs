@@ -54,6 +54,7 @@ import {
   Runtime,
   type RuntimeOptions,
   runtimePresets,
+  RuntimeTelemetryEvent,
   TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
@@ -85,6 +86,15 @@ import {
 import { timeout } from "@commonfabric/utils/sleep";
 
 import { assertionOutcome } from "./assert-record.ts";
+import { ActionReadReport } from "./action-read-report.ts";
+import {
+  evaluateReadBudget,
+  parseReadBudgets,
+  type ReadBudget,
+  readBudgetForStep,
+  ReadBudgetMeasurement,
+  type ReadBudgets,
+} from "./read-budgets.ts";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   appendLoggerDeltaMessages,
@@ -195,6 +205,7 @@ function indentLines(text: string, indent: string): string {
  * `unknown`, so this is deliberately permissive.
  */
 type HarnessTestStepMeta = {
+  readBudget?: unknown;
   action?: unknown;
   assertion?: unknown;
   event?: unknown;
@@ -236,6 +247,7 @@ const testStepPeekSchema = internSchema(
       },
       render: { type: "unknown" },
       skip: { type: "boolean" },
+      readBudget: true,
       settle: { type: "boolean" },
       label: { type: "string" },
       await: { type: "string" },
@@ -338,6 +350,8 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+  /** Disables diagnostic replay for timing measurements. */
+  noIdempotencyCheck?: boolean;
 
   /**
    * Root directory for resolving imports. If not provided, the nearest
@@ -1158,7 +1172,53 @@ export async function runTestPattern(
         },
       })),
   );
-  runtime.enableIdempotencyCheck();
+  if (!options.noIdempotencyCheck) runtime.enableIdempotencyCheck();
+  else if (options.verbose) {
+    console.log("  Idempotency verification disabled for this measurement.");
+  }
+  const readCost = options.verbose ? new ActionReadReport() : undefined;
+  let readBudgets: ReadBudgets | undefined;
+  let initializationBudgetPending = false;
+  let initializationBudgetSettlement: Promise<void> | undefined;
+  const budgetMeasurement = new ReadBudgetMeasurement();
+  const budgetFailures: string[] = [];
+  const budgetResults: TestResult[] = [];
+  const checkBudget = (label: string, budget: ReadBudget | undefined) => {
+    const failures = evaluateReadBudget(budget, budgetMeasurement).map((v) =>
+      `${label}: read budget ${v.kind} exceeded: ${v.actual} accesses > ${v.limit}\n${
+        budgetMeasurement.contributors(v.kind).map((line) => `      ${line}`)
+          .join("\n")
+      }`
+    );
+    budgetFailures.push(...failures);
+    if (options.verbose && readBudgets !== undefined) {
+      console.log(
+        `    Read budget (${label}): ${budgetMeasurement.total} attempt accesses, ${budgetMeasurement.perRun} maximum body accesses${
+          failures.length ? " — FAIL" : ""
+        }`,
+      );
+    }
+    return failures;
+  };
+  const onReadCost = (event: Event) => {
+    if (event instanceof RuntimeTelemetryEvent) {
+      readCost?.record(event.marker);
+      if (readBudgets !== undefined) budgetMeasurement.record(event.marker);
+    }
+  };
+  const printReadCost = (label: string, started: number) => {
+    if (
+      readCost === undefined ||
+      performance.now() - started < (options.statsThreshold ?? 5000)
+    ) return;
+    for (const line of readCost.format(label, options.statsActionLimit ?? 10)) {
+      console.log(line);
+    }
+  };
+  if (readCost !== undefined) {
+    runtime.scheduler.setReadStatsEnabled(true);
+  }
+  runtime.telemetry.addEventListener("telemetry", onReadCost);
   // Channel 1: capture pattern-code console.error / console.warn calls that
   // flow through the scheduler's harness console event.  The handler must
   // return args unchanged so the call still appears in the host console.
@@ -1229,6 +1289,7 @@ export async function runTestPattern(
     // entries must be in place before `runtime.run(...)` below. `main` is the
     // module namespace, so a named `fetchMocks` export is reachable.
     fetchMockEntries = readFetchMocks(main);
+    readBudgets = parseReadBudgets(main.readBudgets);
 
     // Multi-user tests export a descriptor ({ setup?, participants }) as the
     // default export. They run in worker-isolated runtimes against a shared
@@ -1236,6 +1297,9 @@ export async function runTestPattern(
     // runtime is only used for detection; the try/finally below disposes it).
     const multiUserMeta = multiUserDescriptorMeta(main.default);
     if (multiUserMeta) {
+      if (readBudgets !== undefined) {
+        throw new Error("Read budgets are not supported in multi-user tests");
+      }
       writeLocalPatternCoverage = false;
       return await withPhase(
         ["runTestPattern", "multiUser"],
@@ -1310,12 +1374,17 @@ export async function runTestPattern(
     // level through the runtime logger.
     const loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
     consoleCaptureActive = true;
+    if (readBudgets !== undefined) {
+      runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
+      initializationBudgetPending = true;
+    }
 
     // 4. Instantiate the test pattern using runtime.run() for proper space context
     const patternResult = await withPhase(
       ["runTestPattern", "patternRun"],
       async () => {
         const tx = runtime.edit();
+        runtime.scheduler.beginReadAttempt(tx, "initialization");
 
         // Create a result cell for the pattern
         const resultCell = runtime.getCell<Record<string, unknown>>(
@@ -1326,13 +1395,18 @@ export async function runTestPattern(
           tx,
         );
 
-        // Run the pattern with proper space context
-        const value = runtime.run(tx, testPatternFactory, {}, resultCell);
+        try {
+          // Run the pattern with proper space context
+          const value = runtime.run(tx, testPatternFactory, {}, resultCell);
 
-        // Commit the transaction
-        runtime.prepareTxForCommit?.(tx);
-        await tx.commit();
-        return value;
+          // Commit the transaction
+          runtime.prepareTxForCommit?.(tx);
+          await tx.commit();
+          return value;
+        } catch (error) {
+          tx.abort(error);
+          throw error;
+        }
       },
     );
 
@@ -1350,7 +1424,10 @@ export async function runTestPattern(
       }
     }
 
-    await withPhase(["runTestPattern", "initialSettle"], async () => {
+    initializationBudgetSettlement = withPhase([
+      "runTestPattern",
+      "initialSettle",
+    ], async () => {
       // Wait for initial setup to complete
       await runtime.idle();
       // Also wait for all in-flight storage subscriptions to settle.
@@ -1359,6 +1436,8 @@ export async function runTestPattern(
       await storageManager.synced();
       await runtime.idle();
     });
+    await initializationBudgetSettlement;
+    initializationBudgetSettlement = undefined;
 
     // 4. Get the tests array from pattern output (the reserved [TESTS] key)
     const testsCell = await withPhase(
@@ -1423,6 +1502,7 @@ export async function runTestPattern(
       resetAllTimingBaselines();
     }
 
+    let settlementFailed = false;
     const settleRuntime = async (
       stepIndex: number,
       stepLabel: string,
@@ -1477,7 +1557,10 @@ export async function runTestPattern(
               `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
             ),
           ]),
-      );
+      ).catch((error) => {
+        settlementFailed = true;
+        throw error;
+      });
     };
 
     // Explicit `{ settle: true }` test step: in addition to the light per-action
@@ -1496,17 +1579,48 @@ export async function runTestPattern(
               `Settle step at index ${stepIndex} timed out after ${TIMEOUT}ms`,
             ),
           ]),
-      );
+      ).catch((error) => {
+        settlementFailed = true;
+        throw error;
+      });
     };
 
     // 5. Process tests sequentially
-    const results: TestResult[] = [];
+    const results: TestResult[] = readBudgets === undefined
+      ? []
+      : budgetResults;
+    if (readBudgets !== undefined) {
+      initializationBudgetSettlement = runtime.settled(Infinity);
+      await initializationBudgetSettlement;
+      initializationBudgetPending = false;
+      for (
+        const error of checkBudget("initialization", readBudgets.initialization)
+      ) {
+        results.push({
+          name: "initialization read budget",
+          passed: false,
+          afterAction: null,
+          error,
+          durationMs: 0,
+        });
+      }
+    }
     let lastActionIndex: number | null = null;
     let assertionCount = 0;
     let actionCount = 0;
     let renderCount = 0;
 
+    if (readCost !== undefined) {
+      for (
+        const line of readCost.format(
+          "initialization",
+          options.statsActionLimit ?? 10,
+        )
+      ) console.log(line);
+    }
     for (let i = 0; i < testSteps.length; i++) {
+      readCost?.clear();
+      budgetMeasurement.clear();
       if (options.verbose) {
         resetAllCountBaselines();
         resetAllTimingBaselines();
@@ -1527,356 +1641,435 @@ export async function runTestPattern(
       // A multi-user marker in a single-user run: inert, and transparent to
       // the reported results.
       if (isMarker) continue;
-
-      // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
-      // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
-      // before the next step. A test inserts this before an assertion that reads
-      // an async-builtin result so it never observes a half-settled state. The
-      // step is transparent — it produces no result. A settle timeout propagates
-      // to the outer handler and fails the whole run (a stuck settle is fatal).
-      if (isSettle) {
-        if (!stepValue.skip) await settleFully(i);
-        continue;
-      }
-
-      // `{ render: subject[UI] }` is a headless, per-step demand window. Run
-      // the VDOM through the worker reconciler, discard its DOM
-      // operations, wait for all recursively discovered UI cells, then remove
-      // the demand before advancing to the next step.
-      if (isRender) {
-        renderCount++;
-        const renderName = `render_${renderCount}`;
-        if (!stepValue.skip) {
-          await materializeTestVDOM(
-            stepCell.key("render") as Cell<unknown>,
-            () => settleRuntime(i, renderName, 20),
-          );
-          if (options.verbose) console.log(`  ◇ ${renderName}`);
-        } else if (options.verbose) {
-          console.log(`  ⊘ ${renderName} (skipped)`);
+      const stepBudget = readBudgetForStep(
+        readBudgets,
+        stepValue.readBudget,
+        i + 1,
+      );
+      let stepFailed = false;
+      settlementFailed = false;
+      try {
+        // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
+        // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
+        // before the next step. A test inserts this before an assertion that reads
+        // an async-builtin result so it never observes a half-settled state. The
+        // step is transparent — it produces no result. A settle timeout propagates
+        // to the outer handler and fails the whole run (a stuck settle is fatal).
+        if (isSettle) {
+          try {
+            if (!stepValue.skip) await settleFully(i);
+          } finally {
+            printReadCost(`settle_${i}`, itemStart);
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (!isAction && !isAssertion) {
-        throw new Error(
-          `Test step at index ${i} must have an 'action', 'assertion', ` +
-            `'render', 'settle', 'label', or 'await' key. Got: ${
-              toCompactDebugString(Object.keys(stepCell.get() as object))
-            }`,
-        );
-      }
+        // `{ render: subject[UI] }` is a headless, per-step demand window. Run
+        // the VDOM through the worker reconciler, discard its DOM
+        // operations, wait for all recursively discovered UI cells, then remove
+        // the demand before advancing to the next step.
+        if (isRender) {
+          renderCount++;
+          const renderName = `render_${renderCount}`;
+          try {
+            if (!stepValue.skip) {
+              await materializeTestVDOM(
+                stepCell.key("render") as Cell<unknown>,
+                () => settleRuntime(i, renderName, 20),
+              );
+              if (options.verbose) console.log(`  ◇ ${renderName}`);
+            } else if (options.verbose) {
+              console.log(`  ⊘ ${renderName} (skipped)`);
+            }
+          } finally {
+            printReadCost(renderName, itemStart);
+          }
+          continue;
+        }
 
-      // Handle skipped steps
-      if (stepValue.skip) {
+        if (!isAction && !isAssertion) {
+          throw new Error(
+            `Test step at index ${i} must have an 'action', 'assertion', ` +
+              `'render', 'settle', 'label', or 'await' key. Got: ${
+                toCompactDebugString(Object.keys(stepCell.get() as object))
+              }`,
+          );
+        }
+
+        // Handle skipped steps
+        if (stepValue.skip) {
+          if (isAction) {
+            actionCount++;
+            const actionName = `action_${actionCount}`;
+            if (options.verbose) {
+              console.log(`  ⊘ ${actionName} (skipped)`);
+            }
+          } else {
+            assertionCount++;
+            const assertionName = `assertion_${assertionCount}`;
+            const suffix = lastActionIndex !== null
+              ? ` (after action_${actionCount})`
+              : "";
+            results.push({
+              name: assertionName,
+              passed: true,
+              skipped: true,
+              afterAction: lastActionIndex !== null
+                ? `action_${actionCount}`
+                : null,
+              durationMs: 0,
+            });
+            if (options.verbose) {
+              console.log(`  ⊘ ${assertionName}${suffix} (skipped)`);
+            }
+          }
+          continue;
+        }
+
         if (isAction) {
+          // It's an action - invoke it
           actionCount++;
+          lastActionIndex = i;
+          currentActionIndex = i;
           const actionName = `action_${actionCount}`;
+
           if (options.verbose) {
-            console.log(`  ⊘ ${actionName} (skipped)`);
+            console.log(`  → Running ${actionName}...`);
           }
-        } else {
-          assertionCount++;
-          const assertionName = `assertion_${assertionCount}`;
-          const suffix = lastActionIndex !== null
-            ? ` (after action_${actionCount})`
-            : "";
-          results.push({
-            name: assertionName,
-            passed: true,
-            skipped: true,
-            afterAction: lastActionIndex !== null
-              ? `action_${actionCount}`
-              : null,
-            durationMs: 0,
-          });
+
+          // Snapshot action stats before running (for delta tracking)
+          const statsThreshold = options.statsThreshold ?? 5000;
+          let preRunCounts: Map<string, number> | undefined;
           if (options.verbose) {
-            console.log(`  ⊘ ${assertionName}${suffix} (skipped)`);
-          }
-        }
-        continue;
-      }
-
-      if (isAction) {
-        // It's an action - invoke it
-        actionCount++;
-        lastActionIndex = i;
-        currentActionIndex = i;
-        const actionName = `action_${actionCount}`;
-
-        if (options.verbose) {
-          console.log(`  → Running ${actionName}...`);
-        }
-
-        // Snapshot action stats before running (for delta tracking)
-        const statsThreshold = options.statsThreshold ?? 5000;
-        let preRunCounts: Map<string, number> | undefined;
-        if (options.verbose) {
-          preRunCounts = new Map();
-          for (const node of runtime.scheduler.getGraphSnapshot().nodes) {
-            if (node.stats) {
-              preRunCounts.set(node.id, node.stats.runCount);
+            preRunCounts = new Map();
+            for (const node of runtime.scheduler.getGraphSnapshot().nodes) {
+              if (node.stats) {
+                preRunCounts.set(node.id, node.stats.runCount);
+              }
             }
           }
-        }
 
-        // Get the action stream via .key()
-        const actionStream = await withPhase(
-          ["runTestPattern", "step", actionName, "stream"],
-          () => actionStreamForStep(stepCell),
-        );
-
-        // Send the step's event (undefined for plain void actions), wrapped
-        // with renderer-trusted provenance when the step declares `trustedUi`.
-        await withPhase(["runTestPattern", "step", actionName, "send"], () => {
-          actionStream.send(
-            buildActionEvent(stepValue.event, stepValue.trustedUi),
+          // Get the action stream via .key()
+          const actionStream = await withPhase(
+            ["runTestPattern", "step", actionName, "stream"],
+            () => actionStreamForStep(stepCell),
           );
-        });
 
-        // Wait for idle, then settle commits and re-idle.
-        // Optimistic commits can fail (CAS conflicts), causing rollbacks
-        // and reactive re-scheduling. We loop idle→synced until both
-        // resolve quickly (< 1ms), indicating quiescence. Max iterations
-        // as a safety net against infinite loops.
-        try {
-          await settleRuntime(i, actionName, 20);
-        } catch (err) {
-          results.push({
-            name: actionName,
-            passed: false,
-            afterAction: null,
-            error: err instanceof Error ? err.message : String(err),
-            durationMs: performance.now() - itemStart,
-          });
-        }
+          // Send the step's event (undefined for plain void actions), wrapped
+          // with renderer-trusted provenance when the step declares `trustedUi`.
+          await withPhase(
+            ["runTestPattern", "step", actionName, "send"],
+            () => {
+              actionStream.send(
+                buildActionEvent(stepValue.event, stepValue.trustedUi),
+              );
+            },
+          );
 
-        // Print per-action run deltas for slow actions
-        if (
-          options.verbose && preRunCounts &&
-          (performance.now() - itemStart > statsThreshold ||
-            statsThreshold === 0)
-        ) {
-          const postSnapshot = runtime.scheduler.getGraphSnapshot();
-          const deltas: { id: string; preview?: string; delta: number }[] = [];
-          const seen = new Set<string>();
-          for (const node of postSnapshot.nodes) {
-            if (!node.stats || seen.has(node.id)) continue;
-            seen.add(node.id);
-            const pre = preRunCounts.get(node.id) ?? 0;
-            const delta = node.stats.runCount - pre;
-            if (delta > 0) {
-              deltas.push({
-                id: node.id,
-                preview: node.preview,
-                delta,
-              });
-            }
+          // Wait for idle, then settle commits and re-idle.
+          // Optimistic commits can fail (CAS conflicts), causing rollbacks
+          // and reactive re-scheduling. We loop idle→synced until both
+          // resolve quickly (< 1ms), indicating quiescence. Max iterations
+          // as a safety net against infinite loops.
+          try {
+            await settleRuntime(i, actionName, 20);
+          } catch (err) {
+            results.push({
+              name: actionName,
+              passed: false,
+              afterAction: null,
+              error: err instanceof Error ? err.message : String(err),
+              durationMs: performance.now() - itemStart,
+            });
           }
-          if (deltas.length > 0) {
-            deltas.sort((a, b) => b.delta - a.delta);
-            const totalDelta = deltas.reduce((s, d) => s + d.delta, 0);
-            const actionLimit = options.statsActionLimit ?? 10;
-            console.log(
-              `    ⟳ ${totalDelta} scheduler runs across ${deltas.length} actions:`,
-            );
-            // Build reads/writes lookup from post-snapshot
-            const nodeInfo = new Map<
-              string,
-              { reads?: string[]; writes?: string[] }
-            >();
+
+          // Print per-action run deltas for slow actions
+          if (
+            options.verbose && preRunCounts &&
+            (performance.now() - itemStart > statsThreshold ||
+              statsThreshold === 0)
+          ) {
+            const postSnapshot = runtime.scheduler.getGraphSnapshot();
+            const deltas: { id: string; preview?: string; delta: number }[] =
+              [];
+            const seen = new Set<string>();
             for (const node of postSnapshot.nodes) {
-              if (!nodeInfo.has(node.id)) {
-                nodeInfo.set(node.id, {
-                  reads: node.reads,
-                  writes: node.writes,
+              if (!node.stats || seen.has(node.id)) continue;
+              seen.add(node.id);
+              const pre = preRunCounts.get(node.id) ?? 0;
+              const delta = node.stats.runCount - pre;
+              if (delta > 0) {
+                deltas.push({
+                  id: node.id,
+                  preview: node.preview,
+                  delta,
                 });
               }
             }
-            // Helper to shorten cell paths: did:key:z6Mk.../of:fid1:abc.../value/foo → …abc.../value/foo
-            const shortenPath = (r: string): string => {
-              // Format: did:key:.../of:fid1:abc.../path/parts
-              const ofIdx = r.indexOf("/of:");
-              if (ofIdx < 0) return r.length > 40 ? "…" + r.slice(-39) : r;
-              const afterOf = r.slice(ofIdx + 4);
-              const slashIdx = afterOf.indexOf("/");
-              if (slashIdx < 0) return "…" + afterOf.slice(-20);
-              const entityId = afterOf.slice(0, slashIdx);
-              const path = afterOf.slice(slashIdx);
-              const shortEntity = entityId.length > 10
-                ? entityId.slice(0, 8) + "…"
-                : entityId;
-              return shortEntity + path;
-            };
-            // Collect all entity IDs read by re-triggered actions
-            const entityReadCounts = new Map<string, number>();
-            for (const d of deltas) {
-              const info = nodeInfo.get(d.id);
-              if (info?.reads) {
-                for (const r of info.reads) {
-                  // Extract entity: everything between /of: and the next /
-                  const ofIdx = r.indexOf("/of:");
-                  if (ofIdx < 0) continue;
-                  const afterOf = r.slice(ofIdx + 4);
-                  const slashIdx = afterOf.indexOf("/");
-                  const entity = slashIdx < 0
-                    ? afterOf
-                    : afterOf.slice(0, slashIdx);
-                  const path = slashIdx < 0 ? "" : afterOf.slice(slashIdx);
-                  const key = entity.slice(0, 8) + "…" + path;
-                  entityReadCounts.set(
-                    key,
-                    (entityReadCounts.get(key) ?? 0) + d.delta,
-                  );
+            if (deltas.length > 0) {
+              deltas.sort((a, b) => b.delta - a.delta);
+              const totalDelta = deltas.reduce((s, d) => s + d.delta, 0);
+              const actionLimit = options.statsActionLimit ?? 10;
+              console.log(
+                `    ⟳ ${totalDelta} scheduler runs across ${deltas.length} actions:`,
+              );
+              // Build reads/writes lookup from post-snapshot
+              const nodeInfo = new Map<
+                string,
+                { reads?: string[]; writes?: string[] }
+              >();
+              for (const node of postSnapshot.nodes) {
+                if (!nodeInfo.has(node.id)) {
+                  nodeInfo.set(node.id, {
+                    reads: node.reads,
+                    writes: node.writes,
+                  });
                 }
               }
-            }
+              // Helper to shorten cell paths: did:key:z6Mk.../of:fid1:abc.../value/foo → …abc.../value/foo
+              const shortenPath = (r: string): string => {
+                // Format: did:key:.../of:fid1:abc.../path/parts
+                const ofIdx = r.indexOf("/of:");
+                if (ofIdx < 0) return r.length > 40 ? "…" + r.slice(-39) : r;
+                const afterOf = r.slice(ofIdx + 4);
+                const slashIdx = afterOf.indexOf("/");
+                if (slashIdx < 0) return "…" + afterOf.slice(-20);
+                const entityId = afterOf.slice(0, slashIdx);
+                const path = afterOf.slice(slashIdx);
+                const shortEntity = entityId.length > 10
+                  ? entityId.slice(0, 8) + "…"
+                  : entityId;
+                return shortEntity + path;
+              };
+              // Collect all entity IDs read by re-triggered actions
+              const entityReadCounts = new Map<string, number>();
+              for (const d of deltas) {
+                const info = nodeInfo.get(d.id);
+                if (info?.reads) {
+                  for (const r of info.reads) {
+                    // Extract entity: everything between /of: and the next /
+                    const ofIdx = r.indexOf("/of:");
+                    if (ofIdx < 0) continue;
+                    const afterOf = r.slice(ofIdx + 4);
+                    const slashIdx = afterOf.indexOf("/");
+                    const entity = slashIdx < 0
+                      ? afterOf
+                      : afterOf.slice(0, slashIdx);
+                    const path = slashIdx < 0 ? "" : afterOf.slice(slashIdx);
+                    const key = entity.slice(0, 8) + "…" + path;
+                    entityReadCounts.set(
+                      key,
+                      (entityReadCounts.get(key) ?? 0) + d.delta,
+                    );
+                  }
+                }
+              }
 
-            for (const d of deltas.slice(0, actionLimit)) {
-              const label = d.preview
-                ? d.preview.split("\n")[0].trim().slice(0, 50)
-                : d.id;
-              const info = nodeInfo.get(d.id);
-              const reads = info?.reads;
-              const writes = info?.writes;
-              // Show non-schema reads (skip the first entry which is typically the schema query)
-              const nonSchemaReads = reads?.filter((r) =>
-                !r.includes("%22query%22")
-              ) ?? [];
-              const rStr = nonSchemaReads.length > 0
-                ? ` r:[${
-                  nonSchemaReads.slice(0, 3).map(shortenPath).join(", ")
-                }${
-                  nonSchemaReads.length > 3
-                    ? ` +${nonSchemaReads.length - 3}`
-                    : ""
-                }]`
-                : reads && reads.length > 0
-                ? ` r:[schema-query +${reads.length - 1}]`
-                : "";
-              const wStr = writes && writes.length > 0
-                ? ` w:[${writes.slice(0, 2).map(shortenPath).join(", ")}${
-                  writes.length > 2 ? ` +${writes.length - 2}` : ""
-                }]`
-                : "";
-              console.log(
-                `      ${String(d.delta).padStart(4)}× ${label}${rStr}${wStr}`,
-              );
-            }
+              for (const d of deltas.slice(0, actionLimit)) {
+                const label = d.preview
+                  ? d.preview.split("\n")[0].trim().slice(0, 50)
+                  : d.id;
+                const info = nodeInfo.get(d.id);
+                const reads = info?.reads;
+                const writes = info?.writes;
+                // Show non-schema reads (skip the first entry which is typically the schema query)
+                const nonSchemaReads = reads?.filter((r) =>
+                  !r.includes("%22query%22")
+                ) ?? [];
+                const rStr = nonSchemaReads.length > 0
+                  ? ` r:[${
+                    nonSchemaReads.slice(0, 3).map(shortenPath).join(", ")
+                  }${
+                    nonSchemaReads.length > 3
+                      ? ` +${nonSchemaReads.length - 3}`
+                      : ""
+                  }]`
+                  : reads && reads.length > 0
+                  ? ` r:[schema-query +${reads.length - 1}]`
+                  : "";
+                const wStr = writes && writes.length > 0
+                  ? ` w:[${writes.slice(0, 2).map(shortenPath).join(", ")}${
+                    writes.length > 2 ? ` +${writes.length - 2}` : ""
+                  }]`
+                  : "";
+                console.log(
+                  `      ${
+                    String(d.delta).padStart(4)
+                  }× ${label}${rStr}${wStr}`,
+                );
+              }
 
-            // Show top read entities across all re-triggered actions
-            const topReads = [...entityReadCounts.entries()]
-              .filter(([k]) => !k.includes("%22query%22"))
-              .sort((a, b) => b[1] - a[1]);
-            if (topReads.length > 0) {
-              console.log(`    📖 Most-read entities:`);
-              for (const [entity, count] of topReads.slice(0, 5)) {
-                console.log(`      ${String(count).padStart(4)}× ${entity}`);
+              // Show top read entities across all re-triggered actions
+              const topReads = [...entityReadCounts.entries()]
+                .filter(([k]) => !k.includes("%22query%22"))
+                .sort((a, b) => b[1] - a[1]);
+              if (topReads.length > 0) {
+                console.log(`    📖 Most-read entities:`);
+                for (const [entity, count] of topReads.slice(0, 5)) {
+                  console.log(`      ${String(count).padStart(4)}× ${entity}`);
+                }
+              }
+              if (deltas.length > actionLimit) {
+                const rest = deltas.slice(actionLimit).reduce(
+                  (s, d) => s + d.delta,
+                  0,
+                );
+                console.log(
+                  `      ${String(rest).padStart(4)}× (${
+                    deltas.length - actionLimit
+                  } more actions)`,
+                );
               }
             }
-            if (deltas.length > actionLimit) {
-              const rest = deltas.slice(actionLimit).reduce(
-                (s, d) => s + d.delta,
-                0,
-              );
-              console.log(
-                `      ${String(rest).padStart(4)}× (${
-                  deltas.length - actionLimit
-                } more actions)`,
-              );
+          }
+        } else {
+          // It's an assertion - check the boolean value
+          assertionCount++;
+          const assertionName = `assertion_${assertionCount}`;
+
+          let passed = false;
+          let error: string | undefined;
+
+          const evaluateAssertion = async (): Promise<
+            { passed: boolean; error?: string }
+          > => {
+            // Get the assertion cell via .key()
+            try {
+              const assertCell = stepCell.key("assertion") as Cell<unknown>;
+              const value = await assertCell.pull();
+              // An `assert(...)` assertion carries the operands recorded while
+              // the condition ran, so a failure names them and their values.
+              return assertionOutcome(value);
+            } catch (err) {
+              return {
+                passed: false,
+                error: `Error reading assertion: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              };
+            }
+          };
+
+          ({ passed, error } = await withPhase(
+            ["runTestPattern", "step", assertionName, "evaluate"],
+            () => evaluateAssertion(),
+          ));
+
+          if (!passed && lastActionIndex !== null) {
+            try {
+              for (let retry = 0; retry < 3 && !passed; retry++) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+                await settleRuntime(i, assertionName, 6);
+                ({ passed, error } = await withPhase(
+                  [
+                    "runTestPattern",
+                    "step",
+                    assertionName,
+                    `retry-${retry + 1}`,
+                    "evaluate",
+                  ],
+                  () => evaluateAssertion(),
+                ));
+              }
+            } catch (err) {
+              passed = false;
+              error = err instanceof Error ? err.message : String(err);
             }
           }
-        }
-      } else {
-        // It's an assertion - check the boolean value
-        assertionCount++;
-        const assertionName = `assertion_${assertionCount}`;
 
-        let passed = false;
-        let error: string | undefined;
+          results.push({
+            name: assertionName,
+            passed,
+            afterAction: lastActionIndex !== null
+              ? `action_${actionCount}`
+              : null,
+            error,
+            durationMs: performance.now() - itemStart,
+          });
 
-        const evaluateAssertion = async (): Promise<
-          { passed: boolean; error?: string }
-        > => {
-          // Get the assertion cell via .key()
-          try {
-            const assertCell = stepCell.key("assertion") as Cell<unknown>;
-            const value = await assertCell.pull();
-            // An `assert(...)` assertion carries the operands recorded while
-            // the condition ran, so a failure names them and their values.
-            return assertionOutcome(value);
-          } catch (err) {
-            return {
-              passed: false,
-              error: `Error reading assertion: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-            };
-          }
-        };
-
-        ({ passed, error } = await withPhase(
-          ["runTestPattern", "step", assertionName, "evaluate"],
-          () => evaluateAssertion(),
-        ));
-
-        if (!passed && lastActionIndex !== null) {
-          try {
-            for (let retry = 0; retry < 3 && !passed; retry++) {
-              await new Promise((resolve) => setTimeout(resolve, 0));
-              await settleRuntime(i, assertionName, 6);
-              ({ passed, error } = await withPhase(
-                [
-                  "runTestPattern",
-                  "step",
-                  assertionName,
-                  `retry-${retry + 1}`,
-                  "evaluate",
-                ],
-                () => evaluateAssertion(),
-              ));
-            }
-          } catch (err) {
-            passed = false;
-            error = err instanceof Error ? err.message : String(err);
+          if (options.verbose) {
+            const status = passed ? "✓" : "✗";
+            const suffix = lastActionIndex !== null
+              ? ` (after action_${actionCount})`
+              : "";
+            console.log(`  ${status} ${assertionName}${suffix}`);
           }
         }
 
-        results.push({
-          name: assertionName,
-          passed,
-          afterAction: lastActionIndex !== null
-            ? `action_${actionCount}`
-            : null,
-          error,
-          durationMs: performance.now() - itemStart,
-        });
-
+        // Print delta stats for slow steps
         if (options.verbose) {
-          const status = passed ? "✓" : "✗";
-          const suffix = lastActionIndex !== null
-            ? ` (after action_${actionCount})`
-            : "";
-          console.log(`  ${status} ${assertionName}${suffix}`);
+          const statsThreshold = options.statsThreshold ?? 5000;
+          const stepDuration = performance.now() - itemStart;
+          if (stepDuration > statsThreshold || statsThreshold === 0) {
+            printReadCost(
+              isAction
+                ? `action_${actionCount}`
+                : `assertion_${assertionCount}`,
+              itemStart,
+            );
+            const stepLabel = isAction
+              ? `action_${actionCount}`
+              : `assertion_${assertionCount}`;
+            printLoggerStats(
+              performance.now() - startTime,
+              true,
+              `${stepLabel} took ${fmtMs(stepDuration)}`,
+              options.statsInclude,
+            );
+            printSettleStats(runtime.scheduler.getSettleStats());
+          }
+        }
+      } catch (error) {
+        stepFailed = true;
+        throw error;
+      } finally {
+        if (readBudgets !== undefined) {
+          if (settlementFailed) {
+            budgetFailures.push(
+              `step ${
+                i + 1
+              }: read budget measurement incomplete after a settlement failure`,
+            );
+          }
+          const settled = !settlementFailed &&
+            await runtime.settled(Infinity).then(
+              () => true,
+              (error) => {
+                if (!stepFailed) throw error;
+                budgetFailures.push(
+                  `step ${
+                    i + 1
+                  }: read budget measurement incomplete because settlement failed: ${
+                    String(error)
+                  }`,
+                );
+                return false;
+              },
+            );
+          for (
+            const error of settled
+              ? checkBudget(
+                `${stepValue.skip ? "skipped " : ""}step ${i + 1}`,
+                stepValue.skip ? undefined : stepBudget,
+              )
+              : []
+          ) {
+            results.push({
+              name: `step ${i + 1} read budget`,
+              passed: false,
+              afterAction: null,
+              error,
+              durationMs: performance.now() - itemStart,
+            });
+          }
         }
       }
-
-      // Print delta stats for slow steps
-      if (options.verbose) {
-        const statsThreshold = options.statsThreshold ?? 5000;
-        const stepDuration = performance.now() - itemStart;
-        if (stepDuration > statsThreshold || statsThreshold === 0) {
-          const stepLabel = isAction
-            ? `action_${actionCount}`
-            : `assertion_${assertionCount}`;
-          printLoggerStats(
-            performance.now() - startTime,
-            true,
-            `${stepLabel} took ${fmtMs(stepDuration)}`,
-            options.statsInclude,
-          );
-          printSettleStats(runtime.scheduler.getSettleStats());
-        }
+      if (readBudgets !== undefined && settlementFailed) {
+        throw new Error(
+          `step ${
+            i + 1
+          }: read budget measurement incomplete after a settlement failure`,
+        );
       }
     }
 
@@ -1929,6 +2122,31 @@ export async function runTestPattern(
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
+    if (initializationBudgetPending) {
+      try {
+        await (initializationBudgetSettlement ?? runtime.settled(Infinity));
+        checkBudget("initialization", readBudgets?.initialization);
+      } catch (error) {
+        budgetFailures.push(
+          `initialization: read budget measurement incomplete because settlement failed: ${
+            String(error)
+          }`,
+        );
+      }
+    }
+    if (budgetFailures.length > 0) {
+      errorMessage += `\n${budgetFailures.join("\n")}`;
+    }
+    const functionalFailures = budgetResults.filter((result) =>
+      !result.passed && !result.name.endsWith("read budget")
+    );
+    if (functionalFailures.length > 0) {
+      errorMessage += `\n${
+        functionalFailures.map((result) =>
+          `${result.name}: ${result.error ?? "assertion failed"}`
+        ).join("\n")
+      }`;
+    }
 
     // Add helpful hint for import resolution errors when --root wasn't provided
     if (
@@ -1947,7 +2165,7 @@ export async function runTestPattern(
     ];
     return {
       path: testPath,
-      results: [],
+      results: budgetResults,
       totalDurationMs: performance.now() - startTime,
       navigations,
       runtimeErrors: errorMessages,
@@ -1957,6 +2175,7 @@ export async function runTestPattern(
       consoleWarnings,
     };
   } finally {
+    runtime.telemetry.removeEventListener("telemetry", onReadCost);
     if (
       patternCoverage && options.patternCoverageDir &&
       writeLocalPatternCoverage

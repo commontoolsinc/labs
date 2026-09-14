@@ -29,8 +29,6 @@ import {
   agentOwnerSchema,
   agentPrincipalSchema,
   cellHasOwnerProtection,
-} from "../src/fabric-graph.ts";
-import {
   pushStableCellGraph,
   readStableCellGraphValue,
 } from "../src/fabric-graph.ts";
@@ -2182,6 +2180,64 @@ Deno.test("newer session refresh wins over an older full collection", async () =
         }),
       ),
       [{ nativeSessionId: "session-1", syncStatus: "deleted" }],
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("publication refuses a stored index whose source capabilities are malformed", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector malformed capabilities test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const target = await AgentFabricTarget.open(connection);
+    const source: SourceDescriptor = {
+      id: "claude-code:test",
+      driver: "claude-agent-sdk",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: true,
+        setConfigOption: true,
+      },
+    };
+    await target.publish(
+      [{ source, sessions: [], errors: [], complete: true }],
+      {
+        observationSequence: target.beginSessionObservation(),
+      },
+    );
+    // A capability flag that is not a boolean, written into the stored row
+    // past the connector, as a row the connector never produced would be.
+    const tx = runtime.edit();
+    tx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: AGENT_CONNECTOR_WRITER_ID,
+    });
+    target.cells.allIndex.key("sources").key(0).key("capabilities").withTx(tx)
+      .set({ ...source.capabilities, startSession: "yes" });
+    tx.prepareCfc();
+    const commit = await tx.commit();
+    if (commit.error) throw commit.error;
+    await assertRejects(
+      () =>
+        target.publish([], {
+          observationSequence: target.beginSessionObservation(),
+        }),
+      Error,
+      "has an invalid shape",
     );
   } finally {
     await runtime.dispose();

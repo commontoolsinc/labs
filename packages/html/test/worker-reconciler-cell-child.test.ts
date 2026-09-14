@@ -111,9 +111,8 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
     sink(callback: (value: any) => void) {
       this.#subscribers.add(callback);
-      // Ensure callback is called asynchronously to match Reconciler expectations?
-      // Actually reconciler doesn't rely on async usually for initial render.
-      // But let's be safe and do it synchronously as it worked for others.
+      // A real cell's `sink()` publishes the current value synchronously at
+      // subscription, and the reconciler renders from that first delivery.
       callback(this.value);
       return () => {
         this.#subscribers.delete(callback);

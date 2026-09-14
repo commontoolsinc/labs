@@ -43,6 +43,7 @@ import {
   type Invocation,
   type Suite,
   unavailableUnits,
+  type Unit,
   type UnitRequest,
 } from "./test-topology/suite.ts";
 import { collectRecords } from "./test-records-gather.ts";
@@ -54,8 +55,15 @@ import {
   type SelectionReason,
 } from "./test-selection/plan.ts";
 import { type Census, census } from "./test-selection/census.ts";
+import {
+  type CoverageGateSelection,
+  measuredMembersOf,
+  measuredSetDirectory,
+  measuredSetName,
+} from "./test-selection/coverage.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
+import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
@@ -91,7 +99,38 @@ export interface LaneOptions {
    */
   at?: string;
 
+  /**
+   * Where coverage profiles and the reports converted from them go,
+   * relative to the root. The job uploads what is under it.
+   */
+  coverageDir?: string;
+
   root: string;
+}
+
+/** Where coverage goes when the command line names nowhere else. */
+export const DEFAULT_COVERAGE_DIR = "coverage";
+
+/** Where a lane puts the profiles it collects, under its coverage directory. */
+export const COVERAGE_PROFILE_DIR = "raw";
+
+/** Where a lane puts the reports it converts, under its coverage directory. */
+export const COVERAGE_REPORT_DIR = "lcov/sets";
+
+/**
+ * What a lane calls each report. One directory per measured set rather
+ * than one file per set in a shared directory, because the conversion
+ * puts what a report does not cover beside the report, and two sets
+ * sharing a directory would share that too.
+ */
+export const COVERAGE_REPORT_FILE = "coverage.lcov";
+
+/** Where this lane's coverage goes, absolute. */
+export function coverageRoot(options: LaneOptions): string {
+  return path.resolve(
+    options.root,
+    options.coverageDir ?? DEFAULT_COVERAGE_DIR,
+  );
 }
 
 /** Reads the command line, or returns undefined for a malformed one. */
@@ -136,6 +175,9 @@ export function parseLaneArgs(
         break;
       case "--at":
         options.at = value;
+        break;
+      case "--coverage-dir":
+        options.coverageDir = value;
         break;
       default:
         return undefined;
@@ -238,8 +280,27 @@ export interface Batch {
   /** Each unit, and the identities inside it that are not to run. */
   units: UnitRequest[];
 
-  /** How many times this batch runs. Every run must pass. */
-  repeats: number;
+  /**
+   * How many times each unit runs, by unit. Every run must pass.
+   *
+   * Per unit rather than per batch, because what a repeat is for is
+   * catching one test disagreeing with itself. One flaky unit is not a
+   * reason to run the rest of the batch again, and running it again
+   * would cost the lane time the packer never charged it for.
+   */
+  runs: Map<Unit, number>;
+}
+
+/** How many times a batch's longest-running unit runs. */
+export function batchRepeats(batch: Batch): number {
+  let most = 1;
+  for (const runs of batch.runs.values()) most = Math.max(most, runs);
+  return most;
+}
+
+/** The units of a batch that are still running on the `run`th time round. */
+export function unitsForRun(batch: Batch, run: number): UnitRequest[] {
+  return batch.units.filter((unit) => (batch.runs.get(unit.unit) ?? 1) >= run);
 }
 
 /**
@@ -287,10 +348,14 @@ export function batchesOf(
     const batch = batches.get(suiteId);
     const request: UnitRequest = { unit, skip };
     if (batch === undefined) {
-      batches.set(suiteId, { suite, units: [request], repeats });
+      batches.set(suiteId, {
+        suite,
+        units: [request],
+        runs: new Map([[unit, repeats]]),
+      });
     } else {
       batch.units.push(request);
-      batch.repeats = Math.max(batch.repeats, repeats);
+      batch.runs.set(unit, repeats);
     }
   }
   // Both orders are the tree's rather than the packer's, so what a
@@ -377,6 +442,83 @@ export function spoolRecords(
   writer.close();
 }
 
+/** Where one batch's coverage profiles go, and which members write them. */
+export interface BatchCoverage {
+  /** The directory this suite's profiles go under, absolute. */
+  dir: string;
+
+  /**
+   * The members to measure, or nothing to measure every member the batch
+   * runs, which is what the full run asks for.
+   */
+  members?: ReadonlySet<string>;
+}
+
+/**
+ * What a lane measures, given what the coverage gate decided.
+ *
+ * A pull request measures the members of the sets the gate is scoring and
+ * no others: coverage costs time, and a profile no set is scored from is
+ * time spent on something nothing reads. The full run measures every
+ * member of every suite, because both the baselines and the
+ * repository-wide trend come out of it.
+ */
+export function batchCoverage(
+  options: LaneOptions,
+  suiteId: string,
+  gate: CoverageGateSelection,
+): BatchCoverage | undefined {
+  const dir = path.join(coverageRoot(options), COVERAGE_PROFILE_DIR, suiteId);
+  if (options.full) return { dir };
+  const members = measuredMembersOf(gate, suiteId);
+  return members.size === 0 ? undefined : { dir, members };
+}
+
+/**
+ * Converts every profile directory a lane wrote into one report beside
+ * it, and says whether every conversion accounted for what it was given.
+ *
+ * Every directory is converted rather than only the ones a measured set
+ * names, because the repository-wide figure the full run publishes is the
+ * merge of all of them. Which of the reports the gate scores is decided
+ * from the declarations, so an unscored report costs a conversion and
+ * nothing else.
+ */
+export async function convertCoverage(
+  options: LaneOptions,
+): Promise<{ ok: boolean; reports: string[] }> {
+  const root = coverageRoot(options);
+  const profiles = path.join(root, COVERAGE_PROFILE_DIR);
+  const reports: string[] = [];
+  let ok = true;
+  for (const suiteId of await directoriesIn(profiles)) {
+    for (const member of await directoriesIn(path.join(profiles, suiteId))) {
+      const name = `${suiteId}/${member}`;
+      const outcome = await writeLcovReport(
+        path.join(profiles, suiteId, member),
+        path.join(root, COVERAGE_REPORT_DIR, name, COVERAGE_REPORT_FILE),
+      );
+      if (!outcome.ok) ok = false;
+      reports.push(name);
+    }
+  }
+  return { ok, reports: reports.sort() };
+}
+
+/** The subdirectories of a directory, or none where it does not exist. */
+async function directoriesIn(at: string): Promise<string[]> {
+  const names: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(at)) {
+      if (entry.isDirectory) names.push(entry.name);
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
+  }
+  return names.sort();
+}
+
 /**
  * Runs one batch, once per repeat, gathering each execution's records
  * before the next can reuse a path the runner owns. Every repeat must
@@ -396,6 +538,7 @@ export async function runBatch(
   workDir: string,
   spool: string | undefined,
   env: Record<string, string>,
+  coverage?: BatchCoverage,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -406,15 +549,21 @@ export async function runBatch(
   const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
-  for (let run = 1; run <= batch.repeats; run++) {
+  for (let run = 1; run <= batchRepeats(batch); run++) {
     const outputDir = path.join(workDir, `${batch.suite.id}-${run}`);
     const batchSpool = path.join(outputDir, "spool");
     await Deno.mkdir(batchSpool, { recursive: true });
-    const invocations = await batch.suite.command(batch.units, {
+    const invocations = await batch.suite.command(unitsForRun(batch, run), {
       root: options.root,
       outputDir,
       spoolDir: batchSpool,
       ...(options.base === undefined ? {} : { baseRef: options.base }),
+      ...(coverage === undefined ? {} : {
+        coverageDir: coverage.dir,
+        ...(coverage.members === undefined
+          ? {}
+          : { measuredMembers: coverage.members }),
+      }),
     });
     for (const invocation of invocations) {
       const outcome = await runInvocation(invocation, {
@@ -596,7 +745,8 @@ export function describePlan(
     const share = chosenFor(batch.suite.id, chosen.selections);
     lines.push(
       `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
-        `${share.seconds.toFixed(1)}s | ${batch.repeats} | ${share.why} |`,
+        `${share.seconds.toFixed(1)}s | ${batchRepeats(batch)} | ` +
+        `${share.why} |`,
     );
   }
   if (unschedulable.length > 0) {
@@ -862,6 +1012,7 @@ export async function runLane(
         // things by it, and the two server-execution arms can share a
         // lane.
         opened.envFor(batch.suite.needs),
+        batchCoverage(options, batch.suite.id, seen.coverage),
       );
       if (!result.ok) ok = false;
       conflicts.push(...result.conflicts);
@@ -873,7 +1024,52 @@ export async function runLane(
     await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
   describeConflicts(conflicts);
+  // After the capabilities are closed, because a conversion is the lane's
+  // own work and needs nothing a suite opened. A conversion that lost a
+  // tracked file fails the lane: every line of that file reads as
+  // uncovered downstream, so a gate scored from it would fail somebody
+  // for a report that was never complete.
+  const converted = await convertCoverage(options);
+  if (!converted.ok) ok = false;
+  describeCoverage(seen.coverage, converted.reports);
   return ok;
+}
+
+/**
+ * Says what the coverage gate is doing, and what this lane measured for
+ * it. A change that reached a set and is not being gated says why here,
+ * so that a set the cap left unforced is visible rather than absent.
+ */
+export function describeCoverage(
+  gate: CoverageGateSelection,
+  reports: readonly string[],
+): void {
+  if (gate.reached.length === 0 && reports.length === 0) return;
+  const lines = ["## Coverage", ""];
+  if (gate.off !== undefined) {
+    lines.push(`No measured set is forced: ${gate.off}.`, "");
+    lines.push("Reached, and not forced:", "");
+    for (const ref of gate.reached) lines.push(`- ${measuredSetName(ref)}`);
+  } else if (gate.sets.length > 0) {
+    lines.push("Measured sets this change reaches, run whole and scored:", "");
+    for (const ref of gate.sets) lines.push(`- ${measuredSetName(ref)}`);
+  }
+  if (reports.length > 0) {
+    // A report belonging to a set is named as the set, so one summary
+    // does not spell one thing two ways. What is left is a directory a
+    // suite wrote and no set is scored from, which only the full run's
+    // merge reads.
+    const named = new Map(
+      gate.reached.map((
+        ref,
+      ) => [measuredSetDirectory(ref), measuredSetName(ref)]),
+    );
+    lines.push("", "Reports this lane wrote:", "");
+    for (const report of reports) {
+      lines.push(`- ${named.get(report) ?? report}`);
+    }
+  }
+  say(lines);
 }
 
 /**
@@ -890,7 +1086,7 @@ export async function main(
   if (options === undefined) {
     console.error(
       "usage: ci-lane.ts [--lane N] [--of M] [--full] [--dry-run] " +
-        "[--lane-count] [--base <ref>] [--at <iso>]",
+        "[--lane-count] [--base <ref>] [--at <iso>] [--coverage-dir <dir>]",
     );
     return 2;
   }

@@ -1,11 +1,13 @@
 {
   "name": "@commonfabric/data-model",
   "compilerOptions": {
+    "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./src/",
+    "@/value-visit": "./src/value-visit/index.ts",
     "@node/crypto": "node:crypto"
   },
   "tasks": {

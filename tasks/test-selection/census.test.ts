@@ -394,3 +394,116 @@ describe("what the tree says and the manifest does not", () => {
       .toEqual([UNMEASURED_COST_SECONDS, UNMEASURED_COST_SECONDS]);
   });
 });
+
+describe("what a measured set makes mandatory", () => {
+  const measured = suite({
+    id: "workspace-unit",
+    units: [
+      "packages/bakery/glaze.test.ts",
+      "packages/bakery/proof.test.ts",
+      "packages/cellar/rack.test.ts",
+    ],
+    measured: [{
+      member: "packages/bakery",
+      reachedBy: ["packages/bakery/"],
+      units: [
+        "packages/bakery/glaze.test.ts",
+        "packages/bakery/proof.test.ts",
+      ],
+    }],
+  });
+
+  const manifest = manifestOf([
+    {
+      unit: "packages/bakery/glaze.test.ts",
+      test: { k: "unit", s: "bakery", n: "glaze" },
+    },
+    {
+      unit: "packages/bakery/proof.test.ts",
+      test: { k: "unit", s: "bakery", n: "proof" },
+    },
+    {
+      unit: "packages/cellar/rack.test.ts",
+      test: { k: "unit", s: "bakery", n: "rack" },
+    },
+  ]);
+
+  it("requires every unit of a set the change reaches", () => {
+    const seen = census(
+      [measured],
+      manifest,
+      new Set(["packages/bakery/src/oven.ts"]),
+    );
+    expect([...seen.mandatory.values()]).toEqual([
+      "coverage-gate",
+      "coverage-gate",
+    ]);
+    expect(seen.coverage.sets).toHaveLength(1);
+  });
+
+  it("leaves a member the change did not reach alone", () => {
+    const seen = census(
+      [measured],
+      manifest,
+      new Set(["packages/bakery/src/oven.ts"]),
+    );
+    expect(
+      seen.mandatory.has(
+        testIdentityKey({ k: "unit", s: "bakery", n: "rack" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("says the change touched a test file rather than reached a set", () => {
+    // Both hold for a changed test file inside a measured set, and the
+    // diff naming the unit outright is the more exact answer.
+    const seen = census(
+      [measured],
+      manifest,
+      new Set(["packages/bakery/glaze.test.ts"]),
+    );
+    expect(
+      seen.mandatory.get(
+        testIdentityKey({ k: "unit", s: "bakery", n: "glaze" }),
+      ),
+    ).toBe("changed");
+    expect(
+      seen.mandatory.get(
+        testIdentityKey({ k: "unit", s: "bakery", n: "proof" }),
+      ),
+    ).toBe("coverage-gate");
+  });
+
+  it("requires nothing for a change that reaches no set", () => {
+    const seen = census([measured], manifest, new Set(["docs/README.md"]));
+    expect(seen.mandatory.size).toBe(0);
+    expect(seen.coverage.sets).toEqual([]);
+  });
+
+  it("requires nothing where the cap turned the gate off", () => {
+    const many = suite({
+      id: "workspace-unit",
+      units: [
+        "packages/a/one.test.ts",
+        "packages/b/one.test.ts",
+        "packages/c/one.test.ts",
+      ],
+      measured: ["a", "b", "c"].map((name) => ({
+        member: `packages/${name}`,
+        reachedBy: [`packages/${name}/`],
+        units: [`packages/${name}/one.test.ts`],
+      })),
+    });
+    const seen = census(
+      [many],
+      manifestOf(["a", "b", "c"].map((name) => ({
+        unit: `packages/${name}/one.test.ts`,
+        test: { k: "unit", s: "bakery", n: name },
+      }))),
+      new Set(["packages/a/x.ts", "packages/b/x.ts", "packages/c/x.ts"]),
+    );
+    expect(seen.mandatory.size).toBe(0);
+    expect(seen.coverage.off).toBeDefined();
+    expect(seen.coverage.reached).toHaveLength(3);
+  });
+});

@@ -64,7 +64,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 - Setup merges defaults into the argument cell, materializes
   `derivedInternalCells` into result-relative internal cells, and binds the
   serialized pattern graph via `unwrapOneLevelAndBindToDoc`.
-- `Runner.#startWithTx()` iterates serialized nodes, resolves modules, and
+- `Runner.#startCore()` iterates serialized nodes, resolves modules, and
   calls `instantiateNode`, turning aliases into real `Cell` instances through
   `sendValueToBinding`. The scheduler maintains reactivity.
 - Handlers can emit new patterns; lifts that return patterns spawn fresh graphs

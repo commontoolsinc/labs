@@ -11,18 +11,35 @@ files so repo-wide pattern checks do not compile it as a pattern:
 Deployment and migration details, including why link-bearing JSON exports are
 not restorable backups, live in [`DEPLOY-AND-SHARE.md`](./DEPLOY-AND-SHARE.md).
 
+`read-cost.test.tsx` seeds 14 options, eight same-space voters, and 74 keyed
+votes, then changes one vote while preserving the vote count. For read-cost
+measurements, keep its exported UI demanded throughout the update:
+
+```bash
+CF_TEST_CONTINUOUS_UI=1 deno task cf test \
+  packages/patterns/lunch-poll/read-cost.test.tsx \
+  --verbose --stats-threshold 0
+```
+
+The report separates initialization, seeding, viewer setup, the vote update
+(step 5), and assertions. Counters cover reactive action bodies; they exclude
+event dispatch, commit processing, and diagnostic idempotency reruns. The
+headless reconciler exercises UI demand without creating a browser DOM. Test
+durations include idempotency verification and are not product timing evidence.
+
 By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
 
-Each case opens one poll across as many runtimes as it has voters, gives every
-voter an identity, joins them, has the host add the options, and then runs the
-requested number of rounds of concurrent voting. Every phase is sampled for
+Each case opens one poll across as many runtimes as it has users, gives every
+user an identity, joins them, has the host add the options, and then runs the
+requested number of rounds of concurrent voting by the users who vote, which is
+all of them unless `--voters` says otherwise. Every phase is sampled for
 scheduler graph size, settle cost, and action-run trace, and each case ends with
 the commit-churn counters and a cross-session convergence check. The sampled
 phases go to standard output as one JSON document; the per-phase summary lines
 go to standard error.
 
-Run a single lunch-poll scenario with `N` options, `M` voters, and `X` vote
+Run a single lunch-poll scenario with `N` options, `M` users, and `X` vote
 cycles by setting one option count, one user count, and one round count. `M`
 must be at least `1` because one user is the host that creates options and
 drives refreshes:
@@ -41,6 +58,20 @@ changes across multiple sizes:
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
   --cases=1x2,3x5,10x5 \
   --rounds=3
+```
+
+`--users` and the `users` half of a `--cases` entry count sessions: every one
+opens the poll and joins it. `--voters=N` has only the first `N` of them cast in
+each vote round, the host among them, while the remaining users only observe; a
+case with fewer users than `N` is refused. The churn line then breaks down per
+session, which separates the conflicts an observer's own derivations raise from
+those its votes raise. A poll one user votes in and one only watches:
+
+```bash
+deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
+  --cases=14x2 \
+  --rounds=3 \
+  --voters=1
 ```
 
 `--quick` is the smoke-sized default matrix — options `1,3` against `2` users

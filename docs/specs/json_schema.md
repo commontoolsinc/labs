@@ -165,22 +165,42 @@ consolidated specification, and
 for the rules in the query pipeline's context, including the rollback flag
 and the cfc-relevance marking that stays independent of the combination.
 
-## Unsupported Features
+## What each operation supports
 
-We currently don't support a significant subset of JSON Schema validation
-features. While this list isn't exhaustive, here are some key limitations:
+How much of the vocabulary is implemented depends on which operation is asking.
+Two operations ask different questions of a schema, and they answer to different
+subsets of it.
 
-The `anyOf` field has limited support. Some parts of our codebase handle `anyOf`
-well, while others are restricted to matching only primitives.
+**Traversal** is a filter. It decides which linked cells a read loads and which
+properties come back, so it implements the keywords that shape a value and
+ignores the ones that only accept or reject a whole value. It follows `$ref`,
+`anyOf`, `oneOf`, `allOf`, `properties`, `additionalProperties`, `items` and
+`prefixItems`, and it checks `type` and `required`. It does not check
+`maxProperties`, `uniqueItems`, `enum` or `const`, and a value violating one of
+those reads back unchanged. It does not follow `patternProperties` either: a
+property whose only description is a pattern is neither shaped by that pattern
+nor admitted by it through a closed object.
+[Traversal](space-model/8-traversal.md) is the specification, including how
+`anyOf`, `oneOf` and `allOf` branch results are merged, which is
+runtime-specific rather than standard. Narrowing a schema across a path
+boundary can be more permissive than standard semantics, for the reason
+[Schema Narrowing](#schema-narrowing) gives below.
 
-The following operations have minimal or no support:
+**Validation** answers whether a value satisfies a schema, and it is the
+operation a verb call's payload, a pattern's structured result, and a stored
+argument are measured by. It implements nearly the whole 2020-12 vocabulary:
+`allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `enum`, `const`,
+`contains`, `maxContains`, `propertyNames`, `dependentSchemas`,
+`dependentRequired`, `maxProperties`, `uniqueItems` and `patternProperties` are
+each enforced. Two keywords are not: `unevaluatedProperties` and
+`unevaluatedItems` are accepted and never applied, so a schema relying on one
+of them constrains nothing. `contentSchema` is refused rather than ignored —
+validating it reports that content validation is not supported.
 
-- Core logic: `allOf`, `anyOf`, `oneOf`, `not`
-- Core conditionals: `if`, `then`, `else`
-- Validation: `enum`
-
-Generally, these limitations make our system more permissive than standard JSON
-Schema implementations.
+The gap between the two matters where a value crosses from one to the other. A
+value that reads back through traversal is not thereby a value validation
+accepts. Traversal ignores some keywords entirely, so a schema built only from
+those rejects nothing until something validates against it.
 
 ## TypeScript Type Mappings
 
@@ -240,9 +260,18 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   `packages/api/index.ts`.
 
-Generated schemas also hoist named types into `$defs` and reference them via
-`#/$defs/...`. The full TypeScript→schema mapping is specified in the
-schema-generator mapping spec (`docs/specs/schema-generator/`).
+A generated schema places each named type in its root `$defs` and refers to
+it by `#/$defs/<name>`. The full TypeScript→schema mapping is specified in
+the schema-generator mapping spec (`docs/specs/schema-generator/`).
+
+A `#/$defs/<name>` ref names a definition of the document root, as JSON
+Schema resolves it. The runtime supports no keyword that starts another
+resource below the root (`$id`, `$anchor`, and the dynamic-ref keywords are
+refused), so a `$defs` on a subschema is inert. Only an embedded or `cid:`
+external ref enters another document, whose own map governs everything below
+it; `docs/specs/content-addressed-schemas.md` gives the `cid:` form. A
+fragment evaluated apart from its document carries a copy of the document's
+map, which opens no scope of its own.
 
 ### Handling of `never`
 

@@ -26,6 +26,8 @@ import {
   type Invocation,
   type LocatableRecord,
   type Location,
+  type MeasuredSet,
+  measuringInto,
   recordingArguments,
   type RecordSurface,
   skipListOf,
@@ -34,6 +36,7 @@ import {
   writeSkipList,
 } from "./suite.ts";
 import type { CapabilityId } from "../ci-capabilities.ts";
+import { EXCLUDED_FROM_COVERAGE_GATE } from "../test-selection/policy.ts";
 
 /** The member the runner suite owns; every other member is the other one. */
 const RUNNER_MEMBER = "./packages/runner";
@@ -118,7 +121,7 @@ async function readMember(
     // the browser unit is one unit rather than one per file. The same
     // paths the task names, read without its ignores, so the difference
     // is what an ignore took out rather than what the task never looked
-    // at. No member in the tree has that shape yet.
+    // at.
     const everything = new Set(
       (await memberTestFiles(memberDir, { ...tasks.denoTest, ignores: [] }))
         .map(relative),
@@ -132,6 +135,46 @@ async function readMember(
 /** A member's own unit, which is the whole of it. */
 function wholeUnit(member: Member): string {
   return member.memberPath.replace(/^\.\//, "");
+}
+
+/**
+ * The measured set one member carries, or nothing where it carries none.
+ *
+ * A set holds the units of the member's Deno-only half and never its
+ * browser unit, so that adding a test needing a browser costs a member
+ * nothing here. The browser unit therefore writes no coverage into the
+ * set's directory either: it is not one of the set's units, so counting
+ * what it reached would make the set's number depend on whether a lane
+ * selected it.
+ *
+ * The paths that reach the set are the member's own tree, less the trees
+ * of any member nested inside it, which belong to that member's set
+ * instead.
+ */
+function measuredSetOf(
+  member: Member,
+  members: readonly Member[],
+): MeasuredSet | undefined {
+  const memberPath = wholeUnit(member);
+  // The gate is over `packages/`. `tasks` is one coverage group rather
+  // than a tree of them, and `scripts` is outside coverage accounting.
+  if (!memberPath.startsWith("packages/")) return undefined;
+  if (EXCLUDED_FROM_COVERAGE_GATE.has(memberPath)) return undefined;
+  const units = member.files.length > 0
+    ? member.files
+    : member.denoHalf
+    ? [memberPath]
+    : [];
+  if (units.length === 0) return undefined;
+  const nested = members
+    .map(wholeUnit)
+    .filter((other) => other.startsWith(`${memberPath}/`))
+    .map((other) => `!${other}/`);
+  return {
+    member: memberPath,
+    reachedBy: [`${memberPath}/`, ...nested],
+    units,
+  };
 }
 
 /**
@@ -174,6 +217,9 @@ function unitSuite(
   }
 
   const sources = members.flatMap((member) => member.browserFiles);
+  const measured = members
+    .map((member) => measuredSetOf(member, members))
+    .filter((set): set is MeasuredSet => set !== undefined);
 
   return {
     id,
@@ -182,6 +228,7 @@ function unitSuite(
     units,
     unavailable: [],
     ...(sources.length === 0 ? {} : { sources }),
+    ...(measured.length === 0 ? {} : { measured }),
 
     locate(record: LocatableRecord): Location | undefined {
       if (!claimsIdentity({ recordSurfaces }, record.test)) return undefined;
@@ -223,11 +270,17 @@ function unitSuite(
       for (const [member, group] of byMember) {
         const memberDir = path.resolve(context.root, member.memberPath);
         const slug = member.scope.replaceAll("/", "__");
-        const env: Record<string, string> = { ENV: "test", ...member.run?.env };
-        if (context.coverageDir !== undefined) {
-          env.DENO_COVERAGE_DIR = path.join(context.coverageDir, slug);
-        }
         const whole = wholeUnit(member);
+        const env: Record<string, string> = { ENV: "test", ...member.run?.env };
+        // Only the Deno-only half writes into the member's measured-set
+        // directory. The browser unit is not one of the set's units, so
+        // its profiles would make the set's number depend on whether a
+        // lane happened to select it, which is the one thing the set
+        // exists to rule out.
+        const measured = measuringInto(context, whole);
+        const denoEnv = measured === undefined
+          ? env
+          : { ...env, DENO_COVERAGE_DIR: measured };
         const files: UnitRequest[] = [];
         let runsWhole = false;
         let runsBrowser = false;
@@ -245,7 +298,7 @@ function unitSuite(
             command: [Deno.execPath(), "task", member.denoTestTask],
             cwd: memberDir,
             env: {
-              ...env,
+              ...denoEnv,
               ...await skipEnv(context, slug, group),
             },
           });
@@ -267,7 +320,7 @@ function unitSuite(
               ),
             ],
             cwd: memberDir,
-            env: { ...env, ...await skipEnv(context, slug, files) },
+            env: { ...denoEnv, ...await skipEnv(context, slug, files) },
             junit: [{
               path: junitPath,
               kind: "unit",

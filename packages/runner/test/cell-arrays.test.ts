@@ -9,6 +9,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -19,6 +20,7 @@ import { type Cell, elementSchemaFor, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isLinkResolutionProbe } from "../src/storage/reactivity-log.ts";
 import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -307,18 +309,22 @@ describe("plain-schema array traversal", () => {
     ]);
     const batchedLog = tx.getReactivityLog!();
     const fallbackLog = fallbackTx.getReactivityLog!();
-    const byAddress = (a: { id: string; path: readonly string[] }, b: {
-      id: string;
-      path: readonly string[];
-    }) =>
-      `${a.id}\0${a.path.join("\0")}`.localeCompare(
-        `${b.id}\0${b.path.join("\0")}`,
-      );
-    expect([...batchedLog.reads].sort(byAddress)).toEqual(
-      [...fallbackLog.reads].sort(byAddress),
+    // Compared as sets of addresses: the reactivity log is one, so a repeated
+    // address adds no dependency. The wrapper carries no snapshot memo, so
+    // the fallback walk journals the repeated sigil probes the memoized walk
+    // does not.
+    const addressOf = (read: { id: string; path: readonly string[] }) =>
+      `${read.id}\0${read.path.join("\0")}`;
+    const distinctByAddress = <
+      Read extends { id: string; path: readonly string[] },
+    >(reads: readonly Read[]): Read[] =>
+      [...new Map(reads.map((read) => [addressOf(read), read])).values()]
+        .sort((a, b) => addressOf(a).localeCompare(addressOf(b)));
+    expect(distinctByAddress(batchedLog.reads)).toEqual(
+      distinctByAddress(fallbackLog.reads),
     );
-    expect([...batchedLog.shallowReads].sort(byAddress)).toEqual(
-      [...fallbackLog.shallowReads].sort(byAddress),
+    expect(distinctByAddress(batchedLog.shallowReads)).toEqual(
+      distinctByAddress(fallbackLog.shallowReads),
     );
     expect(batchedLog.writes).toEqual(fallbackLog.writes);
     fallbackTx.abort();
@@ -593,18 +599,29 @@ describe("plain-schema array traversal", () => {
     );
     expect(fallbackCell.get()).toBeUndefined();
     const fallbackActivities = [...getTransactionReadActivities(fallbackTx)];
+    // Compared as sets of addresses, each read class on its own: a repeated
+    // address adds no dependency, and the wrapper carries no snapshot memo,
+    // so the fallback walk journals the repeated sigil probes the memoized
+    // walk does not.
     const withoutOrder = ({ journalIndex: _journalIndex, ...activity }: (
       typeof batchedActivities
     )[number]) => activity;
-    const byAddress = (
-      a: ReturnType<typeof withoutOrder>,
-      b: ReturnType<typeof withoutOrder>,
+    const addressOf = (activity: ReturnType<typeof withoutOrder>) =>
+      `${activity.id}\0${activity.path.join("\0")}\0` +
+      `${activity.nonRecursive === true}\0` +
+      `${isLinkResolutionProbe(activity.meta)}`;
+    const distinctByAddress = (
+      activities: readonly (typeof batchedActivities)[number][],
     ) =>
-      `${a.id}\0${a.path.join("\0")}\0${a.nonRecursive === true}`.localeCompare(
-        `${b.id}\0${b.path.join("\0")}\0${b.nonRecursive === true}`,
-      );
-    expect(batchedActivities.map(withoutOrder).sort(byAddress)).toEqual(
-      fallbackActivities.map(withoutOrder).sort(byAddress),
+      [
+        ...new Map(
+          activities.map(withoutOrder).map((
+            activity,
+          ) => [addressOf(activity), activity]),
+        ).values(),
+      ].sort((a, b) => addressOf(a).localeCompare(addressOf(b)));
+    expect(distinctByAddress(batchedActivities)).toEqual(
+      distinctByAddress(fallbackActivities),
     );
     fallbackTx.abort();
   });
@@ -645,17 +662,21 @@ describe("plain-schema array traversal", () => {
 //
 
 describe("elementSchemaFor tuple (prefixItems) schemas", () => {
-  const tupleArraySchema = {
-    type: "array",
-    prefixItems: [
-      { $ref: "#/$defs/Point" },
-      { type: "number" },
-    ],
-    items: { type: "string" },
-    $defs: {
-      Point: { type: "object", properties: { x: { type: "number" } } },
-    },
-  } as const satisfies JSONSchema;
+  // Interned, as a cell's schema is: a slot with no local ref then comes back
+  // without `$defs`. An unfrozen schema would have them attached unscanned.
+  const tupleArraySchema = internSchema(
+    {
+      type: "array",
+      prefixItems: [
+        { $ref: "#/$defs/Point" },
+        { type: "number" },
+      ],
+      items: { type: "string" },
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    } as const satisfies JSONSchema,
+  ) as JSONSchema;
 
   it("picks the slot schema for a covered index, threading $defs", () => {
     expect(elementSchemaFor(tupleArraySchema, 0)).toEqual({
@@ -664,32 +685,18 @@ describe("elementSchemaFor tuple (prefixItems) schemas", () => {
         Point: { type: "object", properties: { x: { type: "number" } } },
       },
     });
-    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({
-      type: "number",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    // A slot with no local ref needs no definitions.
+    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({ type: "number" });
   });
 
   it("picks items past the tuple slots", () => {
-    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({
-      type: "string",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({ type: "string" });
   });
 
   it("treats an index-less element as rest-region (items)", () => {
     // elementById is id-keyed: tuple slots are positional and cannot be
     // id-addressed, so the element falls under `items`.
-    expect(elementSchemaFor(tupleArraySchema)).toEqual({
-      type: "string",
-      $defs: {
-        Point: { type: "object", properties: { x: { type: "number" } } },
-      },
-    });
+    expect(elementSchemaFor(tupleArraySchema)).toEqual({ type: "string" });
   });
 
   it("yields undefined for a pure tuple (no items) without an index", () => {

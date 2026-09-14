@@ -168,11 +168,27 @@ export interface LanePlan {
   batches: Array<{ suite: string; identities: string[] }>;
 }
 
-/** What a covered package's own tests reached at one `main` commit. */
+/**
+ * What one measured set reached at one `main` commit: the uncovered line
+ * count of `member` as one suite's tests alone measured it.
+ *
+ * Two sets over one member are two baselines and are never added
+ * together, which is why the suite is part of what identifies one.
+ */
 export interface CoverageBaseline {
+  suite: string;
   member: string;
   commit: string;
-  day: string;
+
+  /**
+   * When the run that measured it was created, ISO 8601. It decides one
+   * thing: a publisher keeps a baseline while it is younger than the
+   * window a manifest covers, and drops it once it is older than that.
+   * Which baseline a comparison takes is decided by the order of their
+   * commits in the default branch's history, and never by this.
+   */
+  createdAt: string;
+
   uncoveredLines: number;
 }
 
@@ -472,16 +488,19 @@ function parseLane(value: unknown): LanePlan | undefined {
 function parseBaseline(value: unknown): CoverageBaseline | undefined {
   if (!isRecord(value)) return undefined;
   if (
-    !isNonEmptyString(value.member) || !isNonEmptyString(value.commit) ||
-    !isNonEmptyString(value.day) || !isFiniteNumber(value.uncoveredLines) ||
+    !isNonEmptyString(value.suite) || !isNonEmptyString(value.member) ||
+    !isNonEmptyString(value.commit) ||
+    !isTimestamp(value.createdAt) ||
+    !isFiniteNumber(value.uncoveredLines) ||
     value.uncoveredLines < 0
   ) {
     return undefined;
   }
   return {
+    suite: value.suite,
     member: value.member,
     commit: value.commit,
-    day: value.day,
+    createdAt: value.createdAt,
     uncoveredLines: value.uncoveredLines,
   };
 }

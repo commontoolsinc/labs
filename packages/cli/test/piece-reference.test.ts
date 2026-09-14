@@ -185,6 +185,7 @@ describe("piece-reference", () => {
         {},
         {
           loadPieces: () => Promise.resolve(pieces as never),
+          loadPieceForRead: (_pieces, id) => pieces.get(id) as never,
           resolvePieceReference: (_pieces, token, path) => {
             seen.token = token;
             seen.path = path;

@@ -73,6 +73,7 @@ import {
 import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest.ts";
 import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
+import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
@@ -105,11 +106,16 @@ import {
   PatternIndexError,
 } from "../src/pattern-index/client.ts";
 import {
+  feedbackEventType,
+  recordPatternFeedback,
+} from "../src/tools/record-feedback.ts";
+import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
 } from "../src/sandbox/docker-runsc.ts";
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import { parseConnectorGrants } from "./connector-grants.ts";
 import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
 import { liveCanonicalRedirect } from "./src/mount.ts";
 import {
@@ -235,10 +241,14 @@ const CONSOLE_CREDENTIAL_OWNER = {
 /**
  * The index functions the Index view may reach through the proxy. Every one of
  * them reads: this surface inspects what the index holds and never writes to
- * it, so a page that asked for `publishPattern` or `recordEvent` is refused by
- * name rather than by the index. `getPattern` is called without
+ * it, so a caller that asked for `publishPattern` or `recordEvent` is refused
+ * by name rather than by the index. `getPattern` is called without
  * `includeSource`, which is why a pattern's source cannot arrive at the page
  * whatever the page sends.
+ *
+ * The console's one write to the index is `/api/index/feedback`, which takes a
+ * pattern id and a verdict and composes the event itself. Widening this
+ * allowlist is not how a second write is added.
  */
 const INDEX_FUNCTIONS = [
   "searchPatterns",
@@ -248,6 +258,10 @@ const INDEX_FUNCTIONS = [
 ] as const;
 
 type IndexFunction = typeof INDEX_FUNCTIONS[number];
+
+/** What a server with no pattern index tells a caller who wanted one. */
+const NO_PATTERN_INDEX =
+  "this server was started without a pattern index; restart it with --pattern-index-url or CF_HARNESS_PATTERN_INDEX_URL";
 
 const isIndexFunction = (value: unknown): value is IndexFunction =>
   typeof value === "string" &&
@@ -334,6 +348,30 @@ const parseTaskInputCells = (
     specs.push(spec);
   }
   return specs;
+};
+
+/**
+ * Refuses a task whose input cells collide with the console's own connector
+ * grants. Both reach the model as a name paired with a token, so two of the
+ * same name is a prompt that says one word for two references — and the caller
+ * cannot see the grants to avoid them, which is why the refusal names the
+ * connection the grant came from rather than only the word.
+ *
+ * @throws Error naming both sides, which the route answers 400 with.
+ */
+const checkTaskInputCellNames = (
+  inputCells: readonly HarnessInputCellSpec[],
+  connectorGrants: readonly HarnessConnectorGrantSpec[],
+): void => {
+  for (const cell of inputCells) {
+    const grant = connectorGrants.find((entry) => entry.name === cell.name);
+    if (grant !== undefined) {
+      throw new Error(
+        `inputCells names \`${cell.name}\`, which is already this console's ` +
+          `grant for the \`${grant.source.connection}\` connector handle`,
+      );
+    }
+  }
 };
 
 /**
@@ -703,6 +741,12 @@ export const resolveConsoleConfig = async (
     skillScriptExecutionTarget: "sandbox",
     handleValueOrigins: [],
     inputCells: [],
+    // The exception: the connector handles the launcher resolved off the loom
+    // instance behind this fabric. They belong to the console rather than to a
+    // task, so every session it runs is granted them at start.
+    connectorGrants: parseConnectorGrants(
+      nonEmpty(env.CF_HARNESS_CONNECTOR_GRANTS),
+    ),
     patternRefs: [],
     // The tool surface is left to the session's own backing rather than
     // listed here, so a tool the harness gains reaches this surface with it.
@@ -1027,6 +1071,9 @@ export class ConsoleServer {
     if (request.method === "POST" && url.pathname === "/api/index/call") {
       return await this.#indexCall(request);
     }
+    if (request.method === "POST" && url.pathname === "/api/index/feedback") {
+      return await this.#indexFeedback(request);
+    }
     if (request.method === "POST" && url.pathname === "/api/cancel") {
       return await this.#cancel(request);
     }
@@ -1322,6 +1369,7 @@ export class ConsoleServer {
     let patternRefs: readonly HarnessPatternRefSpec[];
     try {
       inputCells = parseTaskInputCells(body.inputCells);
+      checkTaskInputCellNames(inputCells, this.#config.connectorGrants);
       patternRefs = parseTaskPatternRefs(body.patternRefs);
     } catch (error) {
       return Response.json({
@@ -1390,10 +1438,7 @@ export class ConsoleServer {
   async #indexCall(request: Request): Promise<Response> {
     const factory = this.#patternIndexClientFactory;
     if (factory === undefined) {
-      return Response.json({
-        error:
-          "this server was started without a pattern index; restart it with --pattern-index-url or CF_HARNESS_PATTERN_INDEX_URL",
-      }, { status: 404 });
+      return Response.json({ error: NO_PATTERN_INDEX }, { status: 404 });
     }
     let parsed: unknown;
     try {
@@ -1421,28 +1466,89 @@ export class ConsoleServer {
       const client = await factory();
       return Response.json(await callPatternIndex(client, envelope.fn, body));
     } catch (error) {
-      // The index's own status is passed through when it named a fault in the
-      // request — a pattern that is not there, an identity it will not take —
-      // and anything else reads as this server failing to reach it. The
-      // message alone: a `PatternIndexError`'s detail is the index's body,
-      // which is not what an operator page renders.
-      // Only the typed index error's stable message crosses to the page: a
-      // host-side failure — an unreadable identity keyfile among them — can
-      // name paths this machine's operator configured, which the browser has
-      // no business reading.
-      if (error instanceof PatternIndexError) {
-        const status = error.status >= 400 && error.status < 500
-          ? error.status
-          : 502;
-        return Response.json({ error: error.message }, { status });
-      }
-      // The generic answer promises the log carries the detail, so it must.
-      console.error("index proxy failed host-side:", error);
-      return Response.json(
-        { error: "the index request failed on this server; see its log" },
-        { status: 502 },
-      );
+      return this.#indexFailure(error, "index proxy");
     }
+  }
+
+  /**
+   * One vote on a pattern, recorded against the index under this server's
+   * fabric identity. The caller supplies a pattern id and a verdict and
+   * nothing else: the event is composed here, from the same verdict mapping
+   * the `record_feedback` tool records through, so the two surfaces cannot
+   * come to vote differently.
+   *
+   * Separate from `#indexCall` rather than another name in its allowlist.
+   * That route is reads, composed from what a caller asked for; this one is
+   * the console's only write to the index, and keeping it a route of its own
+   * is what leaves the allowlist meaning what it says.
+   */
+  async #indexFeedback(request: Request): Promise<Response> {
+    const factory = this.#patternIndexClientFactory;
+    if (factory === undefined) {
+      return Response.json({ error: NO_PATTERN_INDEX }, { status: 503 });
+    }
+    let parsed: unknown;
+    try {
+      parsed = await request.json();
+    } catch {
+      return Response.json({ error: "request body is not JSON" }, {
+        status: 400,
+      });
+    }
+    const { patternId, verdict } =
+      (typeof parsed === "object" && parsed !== null ? parsed : {}) as {
+        patternId?: unknown;
+        verdict?: unknown;
+      };
+    if (typeof patternId !== "string" || patternId === "") {
+      return Response.json({ error: "patternId is required" }, { status: 400 });
+    }
+    const eventType = feedbackEventType(verdict);
+    if (eventType === undefined) {
+      return Response.json({ error: 'verdict must be "up" or "down"' }, {
+        status: 400,
+      });
+    }
+    try {
+      const client = await factory();
+      const recorded = await recordPatternFeedback(client, {
+        patternId,
+        eventType,
+      });
+      return recorded.ok
+        ? Response.json({ patternId, eventType, recordedBy: client.did })
+        : Response.json({ error: recorded.message }, { status: 502 });
+    } catch (error) {
+      return this.#indexFailure(error, "index feedback");
+    }
+  }
+
+  /**
+   * Renders one failed index call for whoever asked. The index's own status is
+   * passed through when it named a fault in the request — a pattern that is
+   * not there, an identity it will not take — and anything else reads as this
+   * server failing to reach it.
+   *
+   * Only the typed index error's stable message crosses the wire. A
+   * `PatternIndexError`'s detail is the index's body, which is not what an
+   * operator page renders; and a host-side failure — an unreadable identity
+   * keyfile among them — can name paths this machine's operator configured,
+   * which the caller has no business reading. `where` says which route was
+   * being served, for the log alone.
+   */
+  #indexFailure(error: unknown, where: string): Response {
+    if (error instanceof PatternIndexError) {
+      const status = error.status >= 400 && error.status < 500
+        ? error.status
+        : 502;
+      return Response.json({ error: error.message }, { status });
+    }
+    // The generic answer promises the log carries the detail, so it must.
+    console.error(`${where} failed host-side:`, error);
+    return Response.json(
+      { error: "the index request failed on this server; see its log" },
+      { status: 502 },
+    );
   }
 
   /**

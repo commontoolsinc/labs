@@ -516,6 +516,15 @@ linked data:
    may roll `runtimeVersion` alone only after the fingerprint inputs distinguish
    it from executable semantics.
 
+A source or compiled document is written whole, and only when the stored
+document differs. Its `imports` elements are stored inline in the document,
+not in documents of their own, so a write of the same document from any
+session lands on that one document and touches no other. A stored document
+whose elements sit in documents of their own is rewritten whole, and those
+element documents are left behind. The pre-write sync loads each document the
+write-back writes, so the write reads it with its true version rather than
+claiming it absent, a claim the store refuses.
+
 Each new source document whose reachable graph contains an external dependency
 also records the runtime fingerprint used for its identity. A source document
 without such a dependency uses the canonical empty fingerprint, and writers
@@ -536,8 +545,15 @@ every document.
 
 Source and compiled documents share the base shape
 `{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`.
-A source document may additionally carry the runtime fingerprint used for its
-identity. Their link sets are different. A source document stores internal
+`code` is a sigil link to the content-addressed code document holding the
+module's text, `cid:<taggedHash>` over the string alone, so identical text is
+one document per space however many records or runtime versions name it
+([code documents](content-addressed-schemas.md#code-documents)). A read
+under the document schema resolves the link to the string, and the loader
+checks that the string hashes to the id the link names. A document written
+before code documents existed holds the string inline, and readers accept
+both. A source document may additionally carry the runtime fingerprint used
+for its identity. Their link sets are different. A source document stores internal
 authored-import links, including links to authored declarations. It omits fabric
 edges so one program's source closure does not absorb another program.
 Synthetic retention links may keep other source roots alive, but they are
@@ -563,17 +579,18 @@ document.
 
 `delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
 identity, that records predecessor module hashes whose writer authority the
-current module may exercise. Since content addressing does not authenticate
-that mutable field, source documents carry the compiler integrity stamp on the
+current module may exercise. Since content addressing does not authenticate that
+mutable field, source documents carry the compiler integrity stamp on the
 delegation field alone. Compiled documents authenticate it with their existing
 root compiler stamp. Loaders discard delegation metadata without the applicable
-stamp. The general source and compiled save path
-([`writeSourceAndCompiledDocs`][c14]) computes one union of newly derived entries
-and authenticated entries already stored in either document set under
-`editWithRetry`. It writes that same union to both sets and registers the union
-from the successful commit under the attesting space in the active runtime. It
-never replaces entries, because one content-addressed successor can be shared by
-patterns updated from different predecessors.
+stamp. The source-update transaction computes a union of proposed entries and
+authenticated entries already stored in either document set under
+`editWithRetry`. It writes the same union to both sets with the source pointer
+and revision, and registers it in the active runtime only after the durable
+commit succeeds. General cache saves ([`writeSourceAndCompiledDocs`][c14])
+preserve authenticated authority already present in either set. Entries
+accumulate because one content-addressed successor can be shared by patterns
+updated from different predecessors.
 
 Because `identity` is a one-way Merkle hash, internal source links are
 load-bearing and stored explicitly. The parent hash commits to those children's
@@ -598,36 +615,74 @@ model).
 ### Module update delegation (`piece setsrc`)
 
 `piece setsrc` is the temporary authority handoff while pattern files remain
-local, content-addressed modules. Before compiling the replacement it loads the
-current entry's verified recursive source closure. After compilation it matches
-old and new modules by their canonical full authored filename (resolved relative
-imports therefore meet at the same stored path; basenames are never matched).
-For every unambiguous match, the successor records the direct predecessor plus
-the predecessor's cumulative delegation list ([`deriveModuleDelegations`][c14]).
-This makes an update chain cold-reload-stable.
+local, content-addressed modules. Compilation persists artifacts without
+granting update authority. Setup prepares a proposal from the current and
+candidate entries' verified recursive source closures, matching their modules by
+canonical full authored filename (resolved relative imports meet at the same
+stored path; basenames are never matched). For every unambiguous match, the
+successor inherits the direct predecessor plus the predecessor's cumulative
+delegation list ([`deriveModuleDelegations`][c14]). Each setup attempt pins the
+proposal alongside committed authority in its own transaction; ordinary
+transactions cannot observe it. The authority fields commit atomically with the
+source transition. Rejection publishes no proposed authority, while success
+registers the committed union before the updated pattern starts. This makes an
+update chain cold-reload-stable.
 
-Verified source loads register only field-integrity-authenticated lists;
-integrity-valid compiled-cache loads register lists from their root-authenticated
-documents. Registration and transitive closure are scoped by the space carrying
-that attestation. Each transaction snapshots the resulting per-space maps, and
+A source update carrying proposed authority requires an owned setup transaction
+that commits to storage. A serving wave's withdrawable acceptance cannot publish
+runtime authority and is refused at this boundary. On a serving runtime the
+served `setsrc` verb's setup transaction therefore commits directly to the
+store, outside the wave, and registers its authority from that verdict
+([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)).
+
+`piece setsrc --check` compiles and reviews the candidate without saving it or
+repairing the current source's compiled cache. It issues no storage writes and
+creates no module update authority. Verified byte caches and in-memory compiler
+state may be reused by later operations. Normal storage reads can demand
+materialization by an active server executor; preflight does not freeze the
+space or suppress other actors' writes.
+
+Asynchronous source and compiled closure loads register authority only when the
+transaction carries no uncommitted writes (`tx.hasWrites()` is false). Source
+loads register only field-integrity-authenticated lists; integrity-valid
+compiled-cache loads register lists from their root-authenticated documents.
+Loads in a transaction with writes still return the verified closure but do not
+publish its delegation metadata ahead of a commit verdict. Synchronous source
+verification within setup retains transaction reads without registering authority.
+
+A runtime can hold a successor module before another runtime's source update
+grants it a predecessor's authority, and resolving a pattern from memory loads
+no closure. A source update records the pattern it moves a piece to as the
+latest revision of the piece's source history. So when the runner starts a
+piece, or swaps a running one after its pattern pointer moves, and the latest
+revision names the pattern it is about to run, it checks that the runtime
+registers the new pattern's module as inheriting from every other pattern the
+history names. A grant registered for one of them settles nothing about the
+rest, since a later update onto the same successor extends its stored grants
+with that update's own predecessors. If any is missing, the runner first reads
+the new pattern's verified source closure in a transaction without writes,
+which registers whatever delegation that closure durably carries. The start or
+swap proceeds once the read settles, whether or not it added a grant.
+
+Registration and transitive closure are scoped by the space carrying that
+attestation. Each transaction snapshots the resulting per-space maps, and
 `writeAuthorizedBy` consults only the map for the target document's space. It may
 then match the live writer's module hash directly or through that space's
 snapshot, while its binding path must still match exactly. Delegation metadata
-loaded from another space grants no authority. Source and compiled closure
-loaders reject a cache graph containing any cross-space import link, so a child
-document's local attestation cannot be flattened into the root's space.
-Source-file spelling is diagnostic at verification because it is
-resolver-dependent; a rename still receives no delegation because old and new
-modules no longer match by canonical authored filename.
-Ambiguous canonical filenames and unauthenticated metadata fail closed by
-receiving no delegation. If a runtime-version miss recompiles from source, the
-compiled-cache repair carries the authenticated map forward so later warm loads
-retain the same authority chain. Cross-space closure replication copies code and
-imports but omits the origin space's delegation metadata; the destination save
-preserves only authority already authenticated in the destination. When multiple
-patterns converge on one successor within a space across restarts, save-time
-unioning preserves every predecessor in both cache sets and in the runtime that
-performed the later update.
+loaded from another space grants no authority. Source and compiled closure loaders
+reject a cache graph containing any cross-space import link, so a child document's
+local attestation cannot be flattened into the root's space. Source-file spelling
+is diagnostic at verification because it is resolver-dependent; a rename still
+receives no delegation because old and new modules no longer match by canonical
+authored filename. Ambiguous canonical filenames and unauthenticated metadata
+fail closed by receiving no delegation. If a runtime-version miss recompiles
+from source, the compiled-cache repair carries the authenticated map forward so
+later warm loads retain the same authority chain. Cross-space closure
+replication copies code and imports but omits the origin space's delegation
+metadata; the destination save preserves only authority already authenticated in
+the destination. When multiple patterns converge on one successor within a space
+across restarts, save-time unioning preserves every predecessor in both cache
+sets and in the runtime that performed the later update.
 
 ## Verifiable Execution
 
@@ -694,6 +749,26 @@ cell's contents. The cache is designed around this:
   The compiled document therefore carries a **CFC integrity label**, written with
   the entry (`addIntegrity`) and **required on read** (`requiredIntegrity`). The
   label — not the SES verifier — is the security boundary for cache hits.
+- **A cache document declares no confidentiality policy, and says so.** Both
+  sets are addressed by causes built from the module's content-derived
+  identity, so no pattern names one of these records, and the schemas
+  describing their fields are the two write schemas in `cell-cache.ts`, which
+  declare integrity alone. So the ceiling the §8.12.4 writer-fit check
+  resolves at a cache write is the empty one, and at `enforce-strict` a write
+  carrying any confidentiality clause is a refused commit — which any
+  transaction that both reads labeled data and reaches a cache write takes, a
+  piece's source transition among them. Each cache write therefore records a
+  `runtime.undeclarable-store` marker naming its document
+  (`recordUndeclarablePolicyStore`), and the check skips the ceiling there.
+  The skip is scoped to a join the target's own space produced: where a clause
+  reached the join from another space, the cache write is measured like any
+  other, so a compile cannot carry a foreign space's labeled value into a
+  local record. The write stays a flow-stamp target, so the transaction's join
+  still lands on the record and a later read of a stamped path carries that
+  clause. The module's bytes are unaffected: they live in a `cid:` document,
+  which CFC leaves out of the flow join on both sides, so what a stamp can
+  reach is the compiler's bookkeeping beside them. `cfc-enforcement-matrix.md`
+  §4 carries the reasoning, including where this stops short of spec §18.6.2.
 - **Fail-closed, not fail-hard.** A compiled document with a missing or invalid
   integrity label is treated as a **cache miss** and recompiled from the
   (self-verifying) source set, which re-runs the SES verifier. So the verifier

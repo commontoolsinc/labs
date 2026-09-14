@@ -14,7 +14,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { ContextualFlowControl } from "./cfc.ts";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -72,7 +72,7 @@ export function schemaHasIfc(
   }
   const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
   if (seen.size > 0) {
-    const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
+    const initialRoot = fullSchema ?? schema;
     const rootKey = isObjectOrArray(initialRoot) ? initialRoot : schema;
     const initialSeen = new WeakSet<object>();
     for (const item of seen) {
@@ -100,7 +100,7 @@ function _schemaHasIfcUncached(
   fullSchema: JSONSchema | undefined,
   context: SchemaHasIfcContext,
 ): boolean {
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
+  const schemaRoot = fullSchema ?? schema;
   const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   let seen = context.seenByRoot.get(rootKey);
   if (seen?.has(schema)) return false;
@@ -116,12 +116,12 @@ function _schemaHasIfcUncached(
   if (resolved === true || resolved === false || !isObjectOrArray(resolved)) {
     return false;
   }
-  const childFullSchema = cfcSchemaChildRoot(
-    resolved,
-    typeof schema.$ref === "string"
-      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-      : schemaRoot,
-  );
+  const childFullSchema = typeof schema.$ref === "string"
+    ? cfcSchemaResolvedRoot(
+      resolved,
+      resolveCfcSchemaRefRoot(schema, schemaRoot),
+    )
+    : schemaRoot;
   if (resolved.ifc !== undefined) {
     return true;
   }

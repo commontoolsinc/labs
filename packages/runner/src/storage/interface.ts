@@ -3,33 +3,6 @@ import type {
   FabricValue,
   SchemaPathSelector,
 } from "@commonfabric/api";
-import type {
-  ApplyOpOperation,
-  ApplyOpResolution,
-  ClientCommit,
-  CommitClass,
-  CommitPrecondition,
-  EntityDocument,
-  EntityIdListOptions,
-  EntityIdListResult,
-  EventAttentionResolveResult,
-  OperationFieldQuery,
-  OperationFieldSnapshot,
-  PatchOp,
-  ReleaseOpFieldOperation,
-  ScopeKey,
-  ScopeKeyIdentity,
-  SqliteDbRef,
-  SqliteOperation,
-  SqliteParamsWire,
-  SqliteQueryResult,
-  SqliteRegisterDiskSourceResult,
-} from "@commonfabric/memory/v2";
-import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
-import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
-import type { Cancel } from "../cancel.ts";
-import type { EntityId } from "../create-ref.ts";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   type ACL,
   type AuthorizationError as IAuthorizationError,
@@ -48,8 +21,36 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
+import type {
+  ApplyOpOperation,
+  ApplyOpResolution,
+  ClientCommit,
+  CommitClass,
+  CommitPrecondition,
+  DeliveryFailureClass,
+  EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
+  EventAttentionResolveResult,
+  OperationFieldQuery,
+  OperationFieldSnapshot,
+  PatchOp,
+  ReleaseOpFieldOperation,
+  ScopeKey,
+  ScopeKeyIdentity,
+  SessionSyncUpsert,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
+  ViewInterest,
+  ViewPlan,
+} from "@commonfabric/memory/v2";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Immutable } from "@commonfabric/utils/types";
 
+import type { Cancel } from "../cancel.ts";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
@@ -75,9 +76,11 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
+import type { EntityId } from "../create-ref.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { RAW_META_WRITE } from "../meta-seam.ts";
 import { BaseMemoryAddress } from "../traverse.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 export type {
   ACL,
   DID,
@@ -201,6 +204,22 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
+/**
+ * A synchronous read of one document instance straight from the space's
+ * durable store, in the shape a session frame would deliver it: the
+ * document at its current head, or a `deleted` entry at seq 0 when the
+ * store holds nothing at that address. A replica with one installed
+ * serves a miss from it instead of pulling over its session, and
+ * `IStorageManager.integrateStoreWrites` re-reads held documents through
+ * it when the store admits a commit touching them. Only a caller
+ * co-hosted with the store can supply one; the store's own admission
+ * rules are not consulted, so the read runs with whatever authority the
+ * caller holds.
+ */
+export type StoreReadThrough = (
+  address: { id: URI; scopeKey: ScopeKey },
+) => SessionSyncUpsert | undefined;
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -230,13 +249,38 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Whether SPACE's replica holds server-confirmed verified content for
-   * `cid:<hash>` — the write-side elision seam for schema-document
-   * staging. Confirmed only: a pending local write is not evidence the
+   * `cid:<hash>` — the write-side elision seam for content-addressed
+   * document staging, schema and code documents alike. Confirmed only: a
+   * pending local write is not evidence the
    * server holds the document. Consults an already-open replica and
    * answers false otherwise; false stages, which is always the safe
    * direction.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
+
+  /**
+   * Install a store read-through for SPACE's replica: from then on a
+   * document the replica does not hold is read synchronously from the
+   * store on first access, a `sync()` of one resolves from the store
+   * without registering a watch, and a `sync()` of a held document is
+   * answered from the replica — `integrateStoreWrites` is what moves a
+   * held record. Optional: only a manager co-hosted with the store can
+   * serve one.
+   */
+  installStoreReadThrough?(space: MemorySpace, read: StoreReadThrough): void;
+
+  /**
+   * Re-read every listed document instance that SPACE's replica holds
+   * through its installed read-through and integrate the result as an
+   * inbound frame, so a store commit the replica has no watch for still
+   * reaches its subscribers. Returns how many documents were refreshed;
+   * zero when no read-through is installed or the replica holds none of
+   * them.
+   */
+  integrateStoreWrites?(
+    space: MemorySpace,
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number;
 
   /**
    * Observer of FIRST opens per space (server-execution v2 Phase 4): the
@@ -687,6 +731,13 @@ export interface IStorageProvider {
 
   /** Establish the authenticated space session without reading entity values. */
   ensureSession?(): Promise<void>;
+
+  /**
+   * Wait for an ordered response after this space's published input frames.
+   * Frame application completes before the response; pending local writes may
+   * still shadow those inputs. This does not wait for commit durability.
+   */
+  pullToServerHead?(): Promise<void>;
 
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
@@ -1355,11 +1406,20 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
-   * The manager's `isSchemaDocPersisted`, reachable from the transaction
-   * (the staging scan runs inside one). Optional the same way; absent
-   * means never elide.
+   * Retains the exact-instance commit basis of an elided write when its target
+   * has pending state. The dependency adds neither a scheduling subscription
+   * nor CFC value taint. Transactions without optimistic pending layers may
+   * omit this operation. Callers supply the resolved target that compared equal,
+   * not an outer binding that may point into another document or scope.
    */
-  isSchemaDocPersisted?(space: MemorySpace, hash: string): boolean;
+  retainPendingWriteElision?(address: IMemorySpaceAddress): void;
+
+  /**
+   * The manager's `isContentAddressedDocPersisted`, reachable from the
+   * transaction (the staging scan runs inside one). Optional the same
+   * way; absent means never elide.
+   */
+  isContentAddressedDocPersisted?(space: MemorySpace, hash: string): boolean;
 
   /**
    * Optional read details for the given space: the values this transaction
@@ -1380,6 +1440,16 @@ export interface IStorageTransaction {
    * Each status variant includes a `journal` field with transaction operations.
    */
   status(): StorageTransactionStatus;
+
+  /**
+   * The store seq `space` accepted this transaction's commit at: the position
+   * in that space's commit log the writes landed at, which
+   * `cf inspect value-at --seq` and `diff --from/--to` read. Known once the
+   * commit's verdict arrives; undefined before it, for a commit the space
+   * rejected, and for a space this transaction wrote nothing to. Optional the
+   * same way as the read hooks above; absent means unknown.
+   */
+  committedSeq?(space: MemorySpace): number | undefined;
 
   /**
    * Reads a value from a (local) memory address and captures corresponding
@@ -1636,6 +1706,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * a caller writing documents itself.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void;
+
+  /**
+   * Stages the content-addressed document holding `value` into this
+   * transaction and returns its id: `cid:` plus the general content hash
+   * of the value. The document is the value and nothing else, so no
+   * closure follows it; the write is blind and idempotent, deduped per
+   * transaction, and elided when the space's server already holds the
+   * document. Required for the same reason as `stageSchemaDocClosure`:
+   * the dedupe and the elision cannot be bypassed by a caller writing
+   * the document itself.
+   */
+  stageContentAddressedDocument(space: MemorySpace, value: FabricValue): URI;
 
   tx: IStorageTransaction;
 
@@ -1984,6 +2066,16 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Returns read-only schema inputs recorded for the document across scopes.
+   * Each query includes inputs appended since earlier queries, including a
+   * query that found none. Path and IFC relevance remain the caller's checks.
+   */
+  getCfcSchemaPolicyInputs(
+    space: MemorySpace,
+    id: string,
+  ): readonly Extract<WritePolicyInput, { kind: "schema" }>[];
+
+  /**
    * Whether `input` was recorded by the runtime, under
    * `runtimeWritePolicyAuthorization`.
    *
@@ -2035,6 +2127,29 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * pattern-authored code whether a given piece is running here.
    */
   isRuntimeOwnedStore(
+    space: string,
+    id: string,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): boolean;
+
+  /**
+   * Whether the store at `id` in `space` is one no schema declares a policy
+   * on — named by an authorized whole-document
+   * `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE` marker on this transaction.
+   *
+   * The §8.12.4 writer-fit measurement quantifies over the paths a schema
+   * could have declared a policy at, and skips the ones it cannot ask about.
+   * Two of those it reads off the id alone; this is the answer for a document
+   * whose id says nothing, which the runtime names as it writes it.
+   *
+   * This transaction alone, with no enrollment beside it: the measurement runs
+   * over documents the asking transaction wrote, so a marker recorded beside
+   * the write always covers the question.
+   *
+   * Takes the runtime's mark for the same reason {@link isRuntimeOwnedStore}
+   * does: the gate acts on the claim rather than measuring it.
+   */
+  isUndeclarablePolicyStore(
     space: string,
     id: string,
     authorization?: RuntimeWritePolicyAuthorization,
@@ -2258,6 +2373,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * through a higher-level diff path such as `markReadAsAttemptedWrite`.
    * Runner-owned system metadata writes may also use this directly when they
    * are intentionally out of phase-1 value-surface CFC scope.
+   * Outside UI blind-write mode, elision over pending state retains an internal
+   * commit dependency; this does not add attempted-target coverage.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
@@ -2673,6 +2790,21 @@ export type EventAppendDeliveryOutcome =
   | { delivered: true; deduped?: boolean }
   | { delivered: false; refused: string };
 
+/** Exclusive renderer ownership across runtimes sharing one replica. */
+export interface ViewInterestLease {
+  /** Whether this lease still owns the replica's renderer interests. */
+  isCurrent(): boolean;
+
+  /** Allocates a revision that outlives an individual runtime. */
+  nextRevision(): number;
+
+  /** Replaces only this owner's interests; retired leases are inert. */
+  set(views: ViewInterest[]): Promise<boolean>;
+
+  /** Releases this ownership without clearing a replacement owner's views. */
+  release(): void;
+}
+
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
@@ -2696,6 +2828,50 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /** Whether this exact document instance has an unpromoted local write. */
+  hasPendingWrite(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
+  /** Claims renderer ownership and retires the previous owner's local graphs. */
+  acquireViewInterests?(onReplaced: Cancel): ViewInterestLease;
+
+  /** Replaces renderer interests while the optional ownership fence holds. */
+  setViewInterests?(
+    views: ViewInterest[],
+    isCurrent?: () => boolean,
+  ): Promise<boolean>;
+
+  /** Negotiates view delivery on this replica's authenticated session. */
+  supportsViewReplication?(): Promise<boolean>;
+
+  /** Whether the current connection retains the negotiated view protocol. */
+  viewReplicationSupported?(): boolean;
+
+  /** Waits for session restoration before issuing fallback subscriptions. */
+  whenSessionRestored?(): Promise<void>;
+
+  /** Observes plan snapshots after their input documents arrive. */
+  subscribeViewPlans?(
+    observer: (plans: readonly ViewPlan[]) => void,
+  ): () => void;
+
+  /** Whether a complete local basis exists, including confirmed absence. */
+  hasLocalDocumentCoverage?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
+  /** Observes changes in residency, including delivery of a known absence. */
+  subscribeLocalCoverage?(
+    observer: (
+      addresses: readonly Pick<IMemorySpaceAddress, "id" | "scope">[],
+    ) => void,
+  ): () => void;
 
   /**
    * The doc's NON-speculative document: confirmed state plus only the
@@ -2760,8 +2936,35 @@ export interface ISpaceReplica extends ISpace {
        * read set is built against those instances' pending stacks.
        * Absent = the replica's own identity, exactly as before. */
       readonly identity?: ScopeKeyIdentity;
+
+      /** The read set to seal under instead of building one here: the set
+       * {@link storeCommitOf} took for the same transaction and identity,
+       * which the store has validated, so the store's verdict and the local
+       * seal rest on one snapshot. Absent, the seal builds its own. */
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit;
+
+  /**
+   * The operations, preconditions, and read set `transaction` would hand
+   * the store, as {@link sealNative} builds them into a sealed commit,
+   * without applying anything to this replica. A committer that commits to
+   * the store ahead of sealing the transaction here (the serving loop's
+   * direct commit) reads the store's shape from this; the reads are
+   * `source`'s against this replica's records for `identity`'s instances
+   * (the replica's own when absent, as {@link sealNative}'s), a pending
+   * read naming the durable basis beneath its layers. Optional, as
+   * {@link sealNative} is.
+   */
+  storeCommitOf?(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
+  };
 
   /**
    * Resolves when the accepted commit at `localSeq` has been APPLIED to

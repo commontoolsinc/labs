@@ -422,10 +422,14 @@ Three questions, each asked only where there is one to ask:
   straight back, `isPieceHandle` being a length rule — so the space's own
   identifier index is asked whether it holds that piece (`entityIdExists`,
   `PiecesController`, which tests one identifier without selecting a
-  stored value). A value read cannot stand in for it: a piece the space
-  does not hold reads as nothing, and so does an empty one. A slug needs
-  no such lookup, its resolution having reached the document to take an id
-  from it, and neither does the piece a move already stands on.
+  stored value). The lookup reads either spelling of an unkinded entity —
+  the bare tagged hash a piece reports as its own id, which is what
+  `pieces/` lists, and the `of:` id the index keys on — so a handle typed
+  back off a listing is one it answers about. A value read cannot stand in
+  for it: a piece the space does not hold reads as nothing, and so does an
+  empty one. A slug needs no such lookup, its resolution having reached the
+  document to take an id from it, and neither does the piece a move already
+  stands on.
 - **The path.** One read of the cell at the deepest level already stood
   at, walked segment by segment through the value it returned. The first
   segment that is not a key of the level above it is refused by name, with
@@ -470,7 +474,7 @@ A space root lists **facets**, never pieces directly — a populated space is
 too large for a flat root. The starting facet set:
 
 - `slugs/` — the slug index: named pieces, the primary human view.
-- `pieces/` — pieces by id.
+- `pieces/` — pieces by id, each showing what it calls itself.
 
 A `fuse/` facet mirroring the FUSE layout is designed and deferred past v1
 ([`futures.md`](futures.md)); shuttle leverages `packages/fuse`'s naming
@@ -543,13 +547,33 @@ not a convenience.
 
 ## Listings, pagination, search
 
-`ls` lists what stands at the place: a space root's facets, the slugs the
+`ls` lists what stands at a place: a space root's facets, the slugs the
 space's index records, the space's pieces, or the keys directly under the
 cell the place names. A row that failed on its own account is still a row —
 a slug the index names and nothing resolves is a name the space has — so it
 carries what went wrong rather than being dropped, and one failed row never
 takes the listing down with it. A read that failed outright is no listing at
 all and raises.
+
+**Which place is `ls`'s operand to say, and the place shuttle stands at
+where the line writes none.** The operand is read through the door every
+reading verb reads one through, so `ls`, `get`, `describe` and `verbs` spell
+a target the same way: a relative path, another piece, a slug, a facet, a
+rooted or complete reference, a `%n` row of the last listing. What a verb
+then does with what that door found is its own, and `ls` parts from `get`
+twice, each time because a listing is not a value. A space root and a facet
+hold no value and are refused there; here they are what a listing is for.
+And the `#argument` suffix, which `get` takes, is refused here — a place
+carries no selection between a piece's two cells, and a listing's rows are
+reached from the place they were listed at. Nothing moves either way:
+listing a child reads it without standing on it, exactly as reading one
+does.
+
+A listed target renumbers, as every listing does: `%n` is a reference until
+the next listing (decision 17), and the rows a target's listing prints are
+the rows the next line's handles name. The alternative is the one thing a
+numbered listing may not be — numbers printed beside rows the next command
+will not take.
 
 A listing says what it is a listing of wherever its rows are not everything
 standing there. `slugs/` is the case that has such a bound: the index names
@@ -572,6 +596,12 @@ the whole line: an error written after a name is text the fabric produced,
 and an odd quote in it leaves the line as a whole refusing to split. The
 handle column is the other half of the same claim — a numbered handle is a
 reference too, so both columns of a listed line are things to type.
+
+A piece carries what it calls itself as well, where the read found it a
+name, and that is written after the name column rather than in it: it is
+what the fabric holds rather than an address, so the name column stays the
+one thing on the line a reader copies to reach the row. A piece the read
+found no name for shows its handle and nothing else.
 
 A row that is one of the piece's callables is annotated as one, and no other
 kind is annotated. That is the promise the facets section makes: a callable

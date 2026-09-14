@@ -583,9 +583,13 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await result.pull();
     await runtime.idle();
 
-    const sc = structureConfidentiality(
-      resolvedContainerId(result.key("kept")),
-    );
+    const containerId = resolvedContainerId(result.key("kept"));
+    // The kept element's own entry carries alice-secret, so the structure
+    // label below is read from a container that holds a label map.
+    expect(
+      entriesOf(containerId).flatMap((e) => e.label.confidentiality ?? []),
+    ).toContainEqual("alice-secret");
+    const sc = structureConfidentiality(containerId);
     expect(sc).not.toContainEqual("alice-secret");
     expect(sc).not.toContainEqual("bob-secret");
   });

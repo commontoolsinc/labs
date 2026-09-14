@@ -1,6 +1,10 @@
 /**
  * The `acquire_skill` tool: resolve a discovery id to a GitHub commit, enforce
- * the instructions-only tree whitelist, and durably return only a handle.
+ * the tree whitelist, and durably return only a handle.
+ *
+ * The handle names the instructions and nothing else. A skill's scripts are
+ * acquired beside them and stay host-side, so what a chooser can hand onward
+ * is still the prose it never read.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
@@ -30,7 +34,14 @@ export interface AcquireSkillToolLoadedOutput {
   readonly pin: SkillsShPinnedAddress;
   readonly loaded: {
     readonly skillRoot: string;
-    readonly paths: readonly ["SKILL.md"];
+
+    /**
+     * Every path the acquisition admitted, `SKILL.md` first and the skill's
+     * scripts after it. What the model is told it now holds: the instructions
+     * reach it through the handle, and a script is something the operator's
+     * allowlist decides whether it may run.
+     */
+    readonly paths: readonly string[];
     readonly sourceUrl: string;
     readonly verification: "git-commit-sha";
     readonly valueDigest: string;
@@ -106,10 +117,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
           type: "object",
           properties: {
             skillRoot: { type: "string" },
-            paths: {
-              type: "array",
-              items: { type: "string", enum: ["SKILL.md"] },
-            },
+            paths: { type: "array", items: { type: "string" } },
             sourceUrl: { type: "string" },
             verification: { type: "string", enum: ["git-commit-sha"] },
             valueDigest: { type: "string" },

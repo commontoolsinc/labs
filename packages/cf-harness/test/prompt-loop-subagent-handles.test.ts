@@ -11,7 +11,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { type Cell, isCell, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { normalize } from "@std/path/posix";
+import { join, normalize } from "@std/path/posix";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
@@ -232,6 +232,29 @@ const dispatchedCommand = (
   return request.command;
 };
 
+/**
+ * A session carrying only what well-known-grant resolution reads: the space
+ * and the default pattern's root pointer. Enough that a run which establishes
+ * its grants mints them, which is what makes the child assertions above
+ * capable of failing.
+ */
+const grantResolvingSession = () =>
+  ({
+    pieces: {
+      getSpace: () => "did:key:zGrantResolvingSession",
+      getDefaultPattern: () =>
+        Promise.resolve({
+          key: (segment: string) => ({
+            getAsNormalizedFullLink: () => ({
+              id: URI_A,
+              path: [segment],
+            }),
+          }),
+        }),
+    },
+    // deno-lint-ignore no-explicit-any
+  }) as any;
+
 describe("prompt-loop cross-agent address handles", () => {
   it("resolves a token named in the delegate_task goal against the child's own table", async () => {
     const runId = "run-subagent-handles-seeded";
@@ -345,6 +368,65 @@ describe("prompt-loop cross-agent address handles", () => {
     const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(parentToken);
     expect(command).not.toContain(HASH_A);
+  });
+
+  it("records no well-known grants on a child whose brief names no token", async () => {
+    // Configuration flows to a child and entitlement does not. The child
+    // engine carries the parent's `connectorGrants` so both resolve from one
+    // configuration, and nothing on the child path establishes them: a child
+    // receives only the handles its brief names (spec §5, `AH-CFC-12`). The
+    // parent is given a session, so a child that DID establish its own grants
+    // would mint them and record them — which is what this rules out, read
+    // from the child's own persisted run state.
+
+    const runId = "run-subagent-connector-grants";
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-subagent-grants-",
+    });
+    try {
+      const table = await parentTableOf(runId, [URI_A]);
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        artifactRoot,
+        fabricSessionFactory: () => Promise.resolve(grantResolvingSession()),
+        connectorGrants: [{
+          name: "email",
+          ref: `/${URI_A}`,
+          source: {
+            connection: "gmail-work",
+            piece: "cf-gmail-messages--gmail-work",
+          },
+        }],
+      });
+      await engine.recordHandleTable(table);
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-delegate", {
+            goal: "Summarize the workspace README.",
+          }),
+          finalTurn("Child done."),
+          finalTurn("Parent done."),
+        ]),
+      });
+
+      await loop.runPrompt({
+        prompt: "Delegate the summary.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      const childState = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactRoot, `${runId}.subagent.1`, "run-state.json"),
+        ),
+      ) as { wellKnownGrants?: unknown };
+      expect(childState.wellKnownGrants).toBeUndefined();
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
   });
 
   it("shows the child the token rather than the reference in its own prompt", async () => {

@@ -30,6 +30,18 @@ import type { Shuttle, VerbDeps } from "../lib/shuttle/vocabulary.ts";
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
 
+/**
+ * The spelling a piece reports its own id as, and so the spelling the pieces
+ * facet lists one under.
+ */
+const BARE_HANDLE = "fid1:abcdefghijklmnop";
+
+/**
+ * A second piece, so that a completion over the facet's rows decides by more
+ * than the `fid1:` opening every handle shares.
+ */
+const OTHER_BARE_HANDLE = "fid1:qrstuvwxyz012345";
+
 const CONFIG: SpaceConfig = {
   apiUrl: "https://toolshed.example/",
   space: SPACE,
@@ -95,6 +107,18 @@ function slugged(...slugs: readonly string[]): VerbDeps {
       ...READS_NOTHING.listing,
       listSpaceSlugs: () =>
         Promise.resolve(slugs.map((slug) => ({ slug, piece: HANDLE }))),
+    },
+  };
+}
+
+/** Helper for the cases below, which stands `ids` in for the space's pieces. */
+function pieced(...ids: readonly string[]): VerbDeps {
+  return {
+    ...READS_NOTHING,
+    listing: {
+      ...READS_NOTHING.listing,
+      listPieces: () =>
+        Promise.resolve(ids.map((id) => ({ id, name: "Thermostat" }))),
     },
   };
 }
@@ -232,6 +256,26 @@ describe("completion", () => {
         .toBe("cd board");
     });
 
+    it("writes a piece's whole handle, under the facet that lists them", async () => {
+      // The handle a piece is listed under is the handle `cd` takes to it, so
+      // what a completion writes is a line that runs. The name the row also
+      // carries is no address and is offered by nothing: a completion writes
+      // what reaches the row.
+
+      const shuttle = shuttleIn();
+      moved(shuttle.place, "pieces");
+      expect(
+        await completeLine(
+          shuttle,
+          `cd ${BARE_HANDLE.slice(0, 8)}`,
+          pieced(
+            BARE_HANDLE,
+            OTHER_BARE_HANDLE,
+          ),
+        ),
+      ).toBe(`cd ${BARE_HANDLE}`);
+    });
+
     it("writes a key of the cell shuttle stands in", async () => {
       // `entities` holds `ti` without opening with it, so the filter is a
       // prefix test rather than a search.
@@ -249,6 +293,16 @@ describe("completion", () => {
       expect(
         await completeLine(atPiece(), "get ti", holding({ title: "a" })),
       ).toBe("get title");
+    });
+
+    it("writes the key for `ls`, whose operand names the place to list", async () => {
+      // The arm `ls` declares is the one that carries a slot to fill, so a
+      // target is offered where a target may be written — the same candidates
+      // `cd` and `get` are offered, from the one listing under the place.
+
+      expect(
+        await completeLine(atPiece(), "ls ti", holding({ title: "a" })),
+      ).toBe("ls title");
     });
 
     it("writes every key where the token being completed is empty", async () => {
@@ -330,7 +384,7 @@ describe("completion", () => {
 
   describe("completeLine() over where a token may stand", () => {
     it("writes nothing for a verb that takes no operand", async () => {
-      expect(await completeLine(shuttleIn(), "ls sl", READS_NOTHING))
+      expect(await completeLine(shuttleIn(), "pwd sl", READS_NOTHING))
         .toBeUndefined();
     });
 

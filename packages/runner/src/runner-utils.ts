@@ -20,7 +20,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { isCellLink } from "./link-utils.ts";
 import { type SigilLink, type URI } from "./sigil-types.ts";
 import {
-  cfcSchemaChildRoot,
+  cfcSchemaResolvedRoot,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./cfc/schema-refs.ts";
@@ -256,17 +256,19 @@ function extractDefaultValuesInternal(
     return NO_SCHEMA_DEFAULT;
   }
 
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const schemaRoot = fullSchema;
   const resolved = schema.$ref
     ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
   if (typeof resolved !== "object" || resolved === null) {
     return NO_SCHEMA_DEFAULT;
   }
-  const resolvedRoot = cfcSchemaChildRoot(
-    resolved,
-    schema.$ref ? resolveCfcSchemaRefRoot(schema, schemaRoot) : schemaRoot,
-  );
+  const resolvedRoot = schema.$ref
+    ? cfcSchemaResolvedRoot(
+      resolved,
+      resolveCfcSchemaRefRoot(schema, schemaRoot),
+    )
+    : schemaRoot;
 
   const canonical = internSchema(resolved);
   const rootKey = typeof resolvedRoot === "object" && resolvedRoot !== null
@@ -605,16 +607,17 @@ function mergeSchemaDefaultsUncached(
   acceptUnionCandidate: ((candidate: unknown) => boolean) | undefined,
   context: DefaultMergeContext,
 ): unknown {
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const schemaRoot = fullSchema;
   const resolved = typeof schema === "object" && schema !== null && schema.$ref
     ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
-  const resolvedRoot = cfcSchemaChildRoot(
-    resolved ?? schema,
+  const resolvedRoot =
     typeof schema === "object" && schema !== null && schema.$ref
-      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-      : schemaRoot,
-  );
+      ? cfcSchemaResolvedRoot(
+        resolved ?? schema,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      )
+      : schemaRoot;
 
   const trackedValue = valuePresent && value !== null &&
       typeof value === "object"

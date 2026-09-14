@@ -45,12 +45,14 @@ describe("listResultSchema", () => {
     storageManager = undefined;
   });
 
-  it("attaches claim-free array schemas to list builtin outputs", async () => {
-    // Do-not-regress for the flowPrecisionClaim removal: list builtin result
-    // containers get plain array schemas with no ifc annotations. Pointwise
-    // label precision is structural (per-element ops run in their own
-    // transactions reading only their element), not a minted trusted claim.
-
+  // The three container schemas a run of map, filter and flatMap over one
+  // source array produces, as each op's own output cell reports them. The
+  // pattern's argument schema is the knob: it is what the builder reads the
+  // source's label off.
+  const containerSchemas = async (
+    argumentSchema: JSONSchema,
+    cause: string,
+  ): Promise<(JSONSchema | undefined)[]> => {
     storageManager = StorageManager.emulate({
       as: signer,
     });
@@ -68,11 +70,8 @@ describe("listResultSchema", () => {
     const tx = runtime.edit();
     const valuesCell = runtime.getCell(
       space,
-      "list-result-schema-values",
-      {
-        type: "array",
-        items: { type: "number" },
-      },
+      `${cause}-values`,
+      { type: "array", items: { type: "number" } },
       tx,
     );
     valuesCell.set([]);
@@ -101,11 +100,11 @@ describe("listResultSchema", () => {
         filtered: filteredRef,
         flattened: flattenedRef,
       };
-    });
+    }, argumentSchema);
 
     const resultCell = runtime.getCell(
       space,
-      "list-result-schema-result",
+      `${cause}-result`,
       undefined,
       tx,
     );
@@ -119,10 +118,57 @@ describe("listResultSchema", () => {
     await tx.commit();
     await result.pull();
 
-    for (const ref of [mappedRef, filteredRef, flattenedRef]) {
-      const schema = ref.export().schema;
-      expect(schema?.type).toBe("array");
-      expect(schema?.ifc).toBeUndefined();
+    return [mappedRef, filteredRef, flattenedRef].map((ref) =>
+      ref.export().schema
+    );
+  };
+
+  it("attaches claim-free array schemas to list builtin outputs", async () => {
+    // Do-not-regress for the flowPrecisionClaim removal: an unlabeled source
+    // yields a plain array schema, and no op mints an ifc annotation of its
+    // own. Pointwise label precision is structural (per-element ops run in
+    // their own transactions reading only their element), not a minted
+    // trusted claim.
+
+    const schemas = await containerSchemas(
+      {
+        type: "object",
+        properties: {
+          values: { type: "array", items: { type: "number" } },
+        },
+      },
+      "list-result-schema",
+    );
+
+    for (const schema of schemas) {
+      expect((schema as any)?.type).toBe("array");
+      expect((schema as any)?.ifc).toBeUndefined();
+    }
+  });
+
+  it("carries a labeled source's confidentiality onto each container", async () => {
+    // The source array is the only input any of the three ops reads, so its
+    // label is the one the result container stands for. The op writes the
+    // container schema over the link the node factory labeled, and this is
+    // the assertion that the label survives that write.
+
+    const schemas = await containerSchemas(
+      {
+        type: "object",
+        properties: {
+          values: {
+            type: "array",
+            items: { type: "number" },
+            ifc: { confidentiality: ["secret"] },
+          },
+        },
+      },
+      "list-result-schema-labeled",
+    );
+
+    for (const schema of schemas) {
+      expect((schema as any)?.type).toBe("array");
+      expect((schema as any)?.ifc?.confidentiality).toEqual(["secret"]);
     }
   });
 });

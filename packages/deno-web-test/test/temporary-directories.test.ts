@@ -10,10 +10,9 @@
  * that a run making no such directory would fail there rather than pass
  * silently here.
  *
- * `BrowserProcess.close()` returns once every process holding the browser's
- * output pipes has gone, and the run closes the browser before it returns.
- * Nothing the run started is writing into the directory while it is read
- * below.
+ * The run closes the browser before it returns. `BrowserProcess.close()`
+ * waits for the browser's exit and the closure of inherited output pipes;
+ * profile removal follows those waits.
  */
 
 import { describe, it } from "@std/testing/bdd";

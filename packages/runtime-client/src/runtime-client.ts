@@ -934,6 +934,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     metadata: LoggerMetadata;
     timing: LoggerTimingData;
     flags: LoggerFlagsData;
+    cfc: Record<string, number>;
   }> {
     const res = await this.#conn.request<RequestType.GetLoggerCounts>({
       type: RequestType.GetLoggerCounts,
@@ -943,6 +944,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       metadata: res.metadata,
       timing: res.timing,
       flags: res.flags,
+      cfc: res.cfc,
     };
   }
 
@@ -993,6 +995,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async setTelemetryEnabled(enabled: boolean): Promise<void> {
     await this.#conn.request<RequestType.SetTelemetryEnabled>({
       type: RequestType.SetTelemetryEnabled,
+      enabled,
+    });
+  }
+
+  /**
+   * Measures subsequent reactive action bodies in the worker. Read samples
+   * appear in action statistics and in completion events when telemetry is on.
+   */
+  async setReadStatsEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetReadStatsEnabled>({
+      type: RequestType.SetReadStatsEnabled,
       enabled,
     });
   }

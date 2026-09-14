@@ -14,6 +14,12 @@ import type {
   schema as schemaFunction,
   SELF as SELFSymbol,
 } from "@commonfabric/api";
+// The declared surface this file checks against is `typeof` this whole
+// module, which only a namespace import can name, and a namespace import
+// takes no other name beside it. So this statement and the one above it
+// cannot become one, and reaching through the namespace instead would
+// prefix every use of the types above.
+// deno-lint-ignore cf-import-list/one-statement-per-kind
 import type * as DeclaredApi from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
 import {
@@ -176,7 +182,6 @@ declare module "@commonfabric/api" {
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
-    propagateInputIfc?: boolean;
 
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;

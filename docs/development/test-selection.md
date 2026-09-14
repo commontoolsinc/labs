@@ -50,10 +50,15 @@ where the value comes from, and which way you would move it.
 
 ### `coverage`
 
-Every workspace member, whether it carries the per-package coverage gate,
-the reason beside it when it does not, and the baseline the newest
-manifest holds for it. This is what answers "why is my package not gated?"
-and "what am I being compared against?".
+Every measured set — one suite's units over one workspace member's lines
+— with how many units it holds and the baseline the newest manifest holds
+for it, and then every workspace member that carries no set, with the
+reason. This is what answers "why is my package not gated?" and "what am
+I being compared against?".
+
+A member with two measured sets has two lines and two baselines. The
+counts are never added together: a line one suite's tests cover says
+nothing about whether another suite's do.
 
 ### `plan --dry-run [--lane N]`
 
@@ -96,6 +101,58 @@ tree instead — the larger of the number of suites with anything to run
 and what packing the stand-ins asks for — and says on the error stream
 that it did so, since a projection from costs nobody has measured would
 be arithmetic over an invented figure.
+
+## The coverage gate
+
+A **measured set** is one suite's units over one workspace member's lines.
+`deno task test-selection coverage` lists them.
+
+A change that touches a member's tree reaches its set, and reaching a set
+makes every one of its units run, with coverage turned on. How often each
+of them runs is unchanged: a unit its flake rate says to repeat is still
+repeated, and the repeats leave the set's number where it was, since a
+coverage count is the union over what the runs reached. The job that
+joins the lanes adds up what they measured for each set, scores each set
+over its member's own source, and compares that against what the same set
+measured at the newest `main` commit the branch contains. A rise fails the
+pull request.
+
+Run it yourself the way that job does:
+
+```
+deno run -A tasks/coverage-gate.ts --base origin/main --reports <directory>
+```
+
+where the directory holds the lanes' uploaded coverage. It prints a row
+per set — the baseline, this run's count, the change, and the outcome —
+and stops with a non-zero status on a rise nothing accepted.
+
+Four things are worth knowing before reading a failure.
+
+- **Each set is on its own.** A member with two measured sets has two
+  numbers, and neither pays the other down. Nor does the source group over
+  the same member, which is that member's source measured by every test in
+  the run: `deno task test-selection coverage` shows the set's number and
+  the coverage tile shows the group's.
+- **Accept a rise in the pull request's description**, on a line of its
+  own at the left margin, naming the member and the rise:
+  `ACCEPT_COVERAGE_DEBT: packages/memory +12 lines`. The gate prints the
+  line to paste with the number already filled in. One marker covers every
+  set over that member.
+- **A change reaching more than `LOCAL_COVERAGE_MAX_SETS` sets forces
+  none of them**, and the summary says so. The tests still run under the
+  ordinary rules; it is the run-the-whole-set part that stops. A set some
+  run measured anyway is still scored, so a pull request labelled
+  `ci: full`, which measures every set, is gated whatever the cap says.
+- **A run with a failing test is reported rather than gated.** Coverage
+  measured through a failure says nothing about whether the change was
+  tested, and the failing test is what to fix. So is a set whose reports
+  name no line of its member: that is a conversion that produced
+  nothing, not a set that covered nothing.
+
+Nothing about coverage fails a run on `main`. That run measures every set,
+which is where the baselines come from, and merges every report into the
+repository-wide figure the dashboard tile shows.
 
 ## Every dial
 
@@ -171,10 +228,10 @@ setting to fix.
 | `MAX_EXECUTIONS` | 10 | runs of one item | chosen | Where the line stops. Up when the flakiest items a change forces in still are not proven by what runs; down when they crowd a lane. |
 | `SUITE_FLAKE_PRIOR_RATE` | 0.02 | share of runs | chosen | Up when too many suites count as flake-prone and their new items are repeated needlessly; down when new tests in a noisy suite land unrepeated and then flake. |
 | `COVERAGE_COMMENT_LINES` | 25 | lines | chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
-| `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | chosen | Up when too many packages are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
-| `LOCAL_COVERAGE_MAX_PACKAGES` | 2 | packages | chosen | Up when broader changes should still be gated and the run can afford their packages' whole test sets; down when sweeping changes are crowding lanes. |
-| `EXCLUDED_FROM_COVERAGE_GATE` | 9 | workspace members | chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which turns its gate on. A line goes on when a package's own tests stop being what covers it. |
-| `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | chosen | Up when branches based further back are being reported for want of an ancestor baseline; down when the manifest carries more history than anybody reads. |
+| `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | chosen | Up when too many sets are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
+| `LOCAL_COVERAGE_MAX_SETS` | 2 | measured sets | chosen | Up when broader changes should still be gated and the run can afford those sets' whole unit lists; down when sweeping changes are crowding lanes. |
+| `EXCLUDED_FROM_COVERAGE_GATE` | 9 | workspace members | chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which gives it a measured set. A line goes on when a package's own tests stop being what covers it. |
+| `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | chosen | Up when branches based further back are being reported for want of a baseline they contain; down when the manifest carries more history than anybody reads. |
 | `COVERAGE_TREND_WEEKS` | 3 | weeks | chosen | Up when the tile goes amber too readily; down when debt climbs for a month before anybody is told. |
 | `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
 | `SAME_COMMIT_REACH_DAYS` | 2 | days | chosen | How far back the fold remembers a commit's outcomes, so that a rerun landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when reruns land far enough behind that their disagreement is being counted as a catch; down when the fold's memory is the thing that will not fit. It costs the number of identities that have failed times the number of commits, so it is the dial to check first when a run runs out of memory. |
@@ -474,6 +531,19 @@ nothing has been recorded twice with no unit.
 A run folding into an empty aggregate has nothing to compare against, and
 says neither.
 
+## What the run on the default branch does with a flaky test
+
+A test whose flake share is above `FLAKE_EXCLUSION_RATE` is not selected
+for a change. Where it may be run without its neighbours, the run on the
+default branch runs it as many times as its share asks for and does not
+fail for it, so it goes on being measured while it is out of changes, and
+a green run of the default branch can carry a failure of one of these
+tests and still deploy. `explain <identity>` says of any test whether the
+newest manifest withholds it and how many runs it is given. The lanes are
+what carry this, so it describes what lands with them rather than what runs
+today, and the reasoning behind each part is in [the
+plan](../plans/pull-request-test-selection.md#an-excluded-test-still-runs-on-main).
+
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
@@ -533,7 +603,7 @@ A commit whose subject names a number that is not a pull request gets
 nothing. An issue takes comments the same way a pull request does, so
 the number is looked up before anything is written.
 
-The comment carries up to six notes, and it carries a note only when the
+The comment carries up to seven notes, and it carries a note only when the
 run found something the pull request's own run could not have found for
 itself.
 
@@ -568,28 +638,38 @@ itself.
   failure, and never for one line. A change that touched no source at
   all is not asked about, because the repository-wide figure moves a
   little between runs on its own.
-- **A rise in a covered package's own-tests number**, naming what let it
-  past the per-package gate. As with the repository-wide figure, a change
-  that touched no source at all is not asked about. The routes are: the package is on
-  `EXCLUDED_FROM_COVERAGE_GATE`; the change touched more covered packages
-  than `LOCAL_COVERAGE_MAX_PACKAGES` allows, so the gate did not run; the
-  change did not touch the package, so the gate had nothing to compare;
-  or the gate did measure the package and passed it, which means the two
-  measurements disagree. Each calls for something different, which is why
-  the note names it. The number is the package's source measured by only
-  the package's own tests, which a run measures whole however much of the
-  corpus it ran. That is a different number from the source group of the
-  same name, which is the package measured by every test in the run and
-  which a selected run only samples; `ownTestsCoverageMetric` in
-  `tasks/ci-check-lib.ts` is the one name the producer and the reader
-  share. The per-package gate is what publishes it, so this note is
-  silent until that gate lands.
+- **A rise in a measured set's number**, naming what let it past the
+  coverage gate. As with the repository-wide figure, a change that
+  touched no source at all is not asked about. The routes are: the
+  member is on `EXCLUDED_FROM_COVERAGE_GATE`, so it carries no set; the
+  change reached more measured sets than `LOCAL_COVERAGE_MAX_SETS`
+  allows, so the gate did not run; the change did not touch the member,
+  so the gate had nothing to compare; or the gate did measure the set
+  and passed it, which means the two measurements disagree. Each calls
+  for something different, which is why the note names it. The number is
+  one member's source measured by one suite's tests alone, which a run
+  measures whole however much of the corpus it ran. That is a different
+  number from the source group over the same member, which is that
+  member measured by every test in the run and which a selected run only
+  samples; `measuredSetCoverageMetric` in `tasks/ci-check-lib.ts` is the
+  one name the producer and the reader share. The full run on the
+  default branch is what publishes it, so this note is silent until the
+  lanes carry that run.
 - **A new test that turned out to be flaky.** A test this run ran, the
   previous run did not, and the store has never seen — that third
   condition is what stops a run that shipped part of its records making
   every test in the missing part look new — which passed and failed at
   this one commit, across the repeats a lane runs, across shards and
   across attempts.
+- **A test too flaky for a change that failed every one of its runs at
+  this commit and passed every one at the parent.** Those failures do not
+  fail the run, so the lane's job summary is the only other place they
+  appear, and nobody reads the summary of a run that passed. It says the
+  test is one the store has seen disagreeing with itself, that the run
+  stayed green, and that one bad runner produces the same record, since
+  every run of a test at a commit shares a lane. The
+  extra runs are what make the observation possible, so this note is
+  silent until they land.
 - **A rename that discarded history**, with the number of catches it
   would bring back and the line to append to
   `tasks/test-identity-aliases.jsonl`. Four things have to hold: the

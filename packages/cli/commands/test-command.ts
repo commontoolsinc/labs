@@ -48,6 +48,10 @@ export function createTestCommand(
       "Show detailed execution logs.",
     )
     .option(
+      "--no-idempotency-check",
+      "Disable verification replay for performance measurements.",
+    )
+    .option(
       "--root <dir:string>",
       "Root directory for resolving imports. Defaults to the nearest ancestor whose deno.json(c) declares a package name, else the test file's directory.",
     )
@@ -163,6 +167,7 @@ export function createTestCommand(
       const { failed } = await runTests(uniqueTestFiles, {
         timeout: options.timeout,
         verbose: options.verbose,
+        noIdempotencyCheck: options.idempotencyCheck === false,
         root,
         dataFilePaths: options.datafile?.map((path: string) =>
           resolve(Deno.cwd(), path)

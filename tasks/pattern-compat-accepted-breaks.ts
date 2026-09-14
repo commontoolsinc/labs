@@ -63,6 +63,28 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
+    // The Join verb's event opens: `Record<PropertyKey, never>` compiled to
+    // a closed empty object the runner's closed-world gate now enforces, so
+    // the rendered button's serialized DOM event was refused and the roster
+    // could never be joined. `void` (the lobby's shape) is a different
+    // recorded contract for the stream; nothing held state under the old one.
+    pattern: "profile-roster-live-demo.tsx",
+    baselines: ["20260729T022742Z-QNOFVBAs80X9XKZu"],
+    paths: ["result.join"],
+    reason:
+      "the Join verb's closed empty event refused every rendered click; re-declared void",
+    record: "docs/history/roster-join-event-opened.md",
+  },
+  {
+    // The same break in the shared roster, same record.
+    pattern: "shared-profile-roster/main.tsx",
+    baselines: ["20260729T022742Z-MLeLOCqjpbIUoIib"],
+    paths: ["result.join"],
+    reason:
+      "the Join verb's closed empty event refused every rendered click; re-declared void",
+    record: "docs/history/roster-join-event-opened.md",
+  },
+  {
     // One entry per (pattern, BASELINE) pair, and that is a requirement
     // rather than tidiness: the gate keys accepted pairs into a Map, so a
     // second entry naming a baseline this one also names REPLACES its path
@@ -502,5 +524,65 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "The `system` role leaving `LLMMessageSchema`, recorded once for both " +
       "patterns it breaks.",
     record: "docs/history/features/llm-message-role-narrowing-break.md",
+  },
+  {
+    // A pattern's result schema no longer carries the least upper bound of
+    // its argument schema's `ifc.confidentiality` at its root. That clause was
+    // a dependency measurement written into the component CFC §8.12.8 reserves
+    // for declared store policy, and at a document root it covers every field,
+    // `$UI` included — which is what denied the whole rendered sub-view of any
+    // pattern holding a confidential argument. The author's own per-field
+    // declarations are untouched.
+    pattern: "budget-tracker/confidential.tsx",
+    baselines: [
+      "20260818T045519Z-gy2rtE24CYfgovy8",
+    ],
+    // `ifc` is compared for exact equality, so dropping the synthesized clause
+    // reads as a break. It sat at the result root, which the proof names as
+    // the whole role.
+    paths: [
+      "result",
+    ],
+    reason:
+      "The builder synthesized a covering confidentiality clause at the " +
+      "result schema's root from the argument schema's shape, measuring no " +
+      "transaction. Stored, it labels every field of the result document, so " +
+      "the display ceiling denies the pattern's entire view. No shape of the " +
+      "pattern avoids the change: the clause came from the builder rather " +
+      "than from the source. A deployed piece keeps its stored labels, which " +
+      "are grow-only; what it loses is the ability to be updated in place " +
+      "onto the narrowed contract.",
+    record: "docs/history/pattern-result-ifc-contract-break.md",
+  },
+  {
+    // The second pattern of the same ruling. Its baseline appears in no other
+    // entry, so the pairs stay disjoint.
+    pattern: "cfc-input-cell-demo/briefing.tsx",
+    baselines: [
+      "20260828T041445Z-xK1PX5XOqtJknIj6",
+    ],
+    paths: [
+      "result",
+    ],
+    reason: "The synthesized result-root confidentiality clause leaving the " +
+      "builder, recorded once for all three patterns it breaks. This one " +
+      "exists to show that its two results carry different labels, which a " +
+      "clause on the object containing them contradicted.",
+    record: "docs/history/pattern-result-ifc-contract-break.md",
+  },
+  {
+    // The third pattern of the same ruling.
+    pattern: "cfc-input-cell-demo/seed.tsx",
+    baselines: [
+      "20260828T041445Z-77e4kMM67vF8OWFf",
+    ],
+    paths: [
+      "result",
+    ],
+    reason: "The synthesized result-root confidentiality clause leaving the " +
+      "builder, recorded once for all three patterns it breaks. This one " +
+      "seeds one labeled cell beside one unlabeled cell, which a clause over " +
+      "both defeated.",
+    record: "docs/history/pattern-result-ifc-contract-break.md",
   },
 ];

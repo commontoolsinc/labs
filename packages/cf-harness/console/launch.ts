@@ -34,10 +34,12 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
+import type { HarnessConnectorGrantSpec } from "../src/contracts/well-known-grants.ts";
 import {
   DEFAULT_DOCKER_BINARY,
   registeredCfcSidecarHostDirs,
 } from "../src/sandbox/docker-runsc.ts";
+import { resolveConnectorGrants } from "./connector-grants.ts";
 import { startConsoleServer } from "./server.ts";
 
 /** The port Weaver's harness-console setting and loom's proxy both address. */
@@ -91,6 +93,7 @@ export const LAUNCHER_OWNED_VARIABLES = [
   "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
   "CF_HARNESS_RUNSC_CFC_RESULT_DIR",
   "CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR",
+  "CF_HARNESS_CONNECTOR_GRANTS",
   "CF_HARNESS_PATTERN_INDEX_URL",
   "CF_HARNESS_SKILLS_REGISTRY_URL",
   "CF_HARNESS_SPACE_DB",
@@ -125,6 +128,15 @@ export interface LoomInstanceRecords {
    * could not instance-scope it.
    */
   toolshedStoreDir: string;
+  /**
+   * The instance's `sqlite-injection/handles.json` — the receipt its daemon
+   * writes for the connector handles it has injected — or `undefined` when
+   * the file does not exist yet, which is what an instance that has injected
+   * none looks like.
+   */
+  handlesJson?: string;
+  /** The absolute path `handlesJson` would be read from, for error text. */
+  handlesJsonPath: string;
 }
 
 /** What the launcher read before resolving anything. */
@@ -364,6 +376,38 @@ export const resolveConsoleLaunchPlan = (
     "MEMORY_DIR",
   );
 
+  // Every session this console runs holds these, so they are resolved here
+  // with the rest of the fabric's own facts rather than attached per task by
+  // whatever opens the console.
+  const connectorGrants: HarnessConnectorGrantSpec[] = [];
+  const connectorResolved: ResolvedValue[] = [];
+  if (instance !== undefined) {
+    const resolvedConnectors = resolveConnectorGrants({
+      ...(instance.handlesJson !== undefined
+        ? { handlesJson: instance.handlesJson }
+        : {}),
+      handlesJsonPath: instance.handlesJsonPath,
+      piecesJson: instance.piecesJson,
+      piecesJsonPath: instance.piecesJsonPath,
+    });
+    connectorGrants.push(...resolvedConnectors.grants);
+    for (const grant of resolvedConnectors.grants) {
+      connectorResolved.push({
+        name: `grant ${grant.name}`,
+        value: grant.ref,
+        source: `\`${instance.handlesJsonPath}\`, classed by ` +
+          `\`${grant.source.piece}\` in \`${instance.piecesJsonPath}\``,
+      });
+    }
+    for (const handle of resolvedConnectors.unnamed) {
+      connectorResolved.push({
+        name: `grant ${handle.connection}`,
+        value: `(none: ${handle.reason})`,
+        source: `\`${instance.handlesJsonPath}\``,
+      });
+    }
+  }
+
   const sidecars = registeredCfcSidecarHostDirs({
     runtimeName: RUNSC_CFC_RUNTIME,
     runtimes: records.dockerRuntimes,
@@ -504,6 +548,7 @@ export const resolveConsoleLaunchPlan = (
         ? NAMED
         : deploymentDefault,
     },
+    ...connectorResolved,
     {
       name: "proxy",
       value: "removed from the environment",
@@ -523,6 +568,9 @@ export const resolveConsoleLaunchPlan = (
     CF_HARNESS_RUNSC_CFC_RESULT_DIR: cfcResultDir,
     CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR: cfcInvocationContextDir,
     MEMORY_DIR: storeDirectoryPath(store.value),
+    ...(connectorGrants.length > 0
+      ? { CF_HARNESS_CONNECTOR_GRANTS: JSON.stringify(connectorGrants) }
+      : {}),
     ...(patternIndexUrl !== undefined
       ? { CF_HARNESS_PATTERN_INDEX_URL: patternIndexUrl }
       : {}),
@@ -753,11 +801,21 @@ export const prepareConsoleLaunch = async (
           `a running instance with \`--instance\``,
       );
     }
+    const handlesJsonPath = join(
+      loomDataDirectory(env),
+      "instances",
+      instanceId,
+      "sqlite-injection",
+      "handles.json",
+    );
+    const handlesJson = await io.readTextFile(handlesJsonPath);
     instance = {
       id: instanceId,
       piecesJson,
       piecesJsonPath,
       toolshedStoreDir: await io.readToolshedStoreDir(loomBinary, instanceId),
+      ...(handlesJson !== undefined ? { handlesJson } : {}),
+      handlesJsonPath,
     };
   }
 

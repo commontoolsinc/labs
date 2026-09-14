@@ -70,6 +70,7 @@ import {
   when,
   wish,
 } from "./built-in.ts";
+import { tagCollectionKey } from "./collection-key.ts";
 import { getPatternEnvironment } from "./env.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";
 import {
@@ -109,6 +110,8 @@ import {
 } from "./types.ts";
 import {
   CFC_CANONICAL_ALIAS_NAMES,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
   FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
@@ -321,6 +324,8 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FABRIC_PRIMITIVE_SCHEMA_TYPES,
     isFabricPrimitiveSchemaType,
     FABRIC_SPECIAL_OBJECT_BRAND,
+    FABRIC_INSTANCE_PLUS_BRAND,
+    FABRIC_PRIMITIVE_BRAND,
     MERGEABLE_OP_METHODS,
     CFC_CANONICAL_ALIAS_NAMES,
 
@@ -353,6 +358,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Value comparison helper exposed for pattern code
     valueEqual,
+    tagCollectionKey,
   };
 
   // The helpers object the transformer's output reaches for is this same

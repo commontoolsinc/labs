@@ -587,14 +587,11 @@ describe("pattern", () => {
     expect(
       resolvedSchema((result as any).capitalized.$alias.schema),
     ).toMatchObject({ ifc: { confidentiality: ["confidential"] } });
-    expect(resultSchema).toMatchObject({
-      ...ResultSchema,
-      ...{ ifc: { confidentiality: ["confidential"] } },
-    });
-
-    // Perhaps I should handle a similar pattern that only accesses the name
-    // in such a way that it does not end up confidential. For now, I've decided
-    // not to do this, since I'm not confident enough that code can't get out.
+    // The pattern's own result schema is the one declared above. What carries
+    // the confidentiality into the result is the alias, whose schema the lift's
+    // module joined it onto.
+    expect(resultSchema).toMatchObject(ResultSchema);
+    expect((resultSchema as { ifc?: unknown }).ifc).toBeUndefined();
   });
 
   it("creates a pattern with function-only syntax (no schema)", () => {

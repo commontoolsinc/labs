@@ -72,7 +72,11 @@ about one aspect of the runtime, are indexed in
   evaluates the module, side effects included: drop it, and put what it was
   there for in a comment on the surviving statement. Against nothing but an
   `import type`, it stays — a type-only import is erased and evaluates nothing,
-  so the bare import is the only thing producing the effect.
+  so the bare import is the only thing producing the effect. A statement whose
+  every name is marked `type` inline is erased the same way, so it belongs to
+  that second case rather than the first: the bare import stays, and that
+  statement is written `import type` to say what it is, which leaves the pair
+  one statement of each kind.
 - Import a given module in exactly one or two statements. Two shapes are
   allowed:
   - One unified statement, marking any type-only names inline:
@@ -84,8 +88,25 @@ about one aspect of the runtime, are indexed in
   allows is a second statement of the same kind — two value imports from one
   module, or two `import type`s from it. Those represent one dependency as
   though it were two, and the second is easy to miss when the first is being
-  edited or removed, so merge their specifier lists. A bare `import "x";` counts
-  toward the total.
+  edited or removed, so merge their specifier lists. Where one of the two takes
+  the module as a namespace, `import * as name from "x";`, no other name may
+  sit beside it in that statement, and the merge is to reach through the
+  namespace for what the other statement named. Where that reads worse than
+  the pair — a namespace imported only so its `typeof` names the whole module,
+  against a list of names the file uses throughout — the two statements stay,
+  with a `deno-lint-ignore` saying which case it is.
+  `packages/runner/src/builder/types.ts` is the one file in that position
+  today. A bare `import "x";` counts toward the total.
+
+  The `cf-import-list/one-statement-per-kind` lint rule
+  (`tasks/lint-import-list.ts`, registered in the root `deno.jsonc`) holds this
+  bullet, and this one alone. The grouping, collation, sorting and `@/` rules
+  around it are left to review, since several of them have exceptions that a
+  checker reading a file from top to bottom would call correct code wrong. The
+  rule reads a specifier as written, so `@/thing.ts` and `../thing.ts` are two
+  modules to it. Where it reports, the statement that survives the merge goes
+  where the earliest of the ones it replaces sat, which keeps the module's
+  evaluation at the point in the list it was already reached from.
 - Within a package that defines the `@/` import alias, address the aliased tree
   as `@/...` rather than by a `../` path that climbs out of the current
   directory to reach it. The alias exists so that a module's address does not
@@ -100,7 +121,7 @@ about one aspect of the runtime, are indexed in
 - These rules govern the declaration list. What may not be written outside it
   at all — a type spelled `import("./mod.ts").Thing`, and a module loaded by an
   `import("./mod.ts")` expression under some function — is
-  [`imports.md`](imports.md), which two lint rules enforce.
+  [`imports.md`](imports.md), which two further lint rules enforce.
 
 ### Classes
 

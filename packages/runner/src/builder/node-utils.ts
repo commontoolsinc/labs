@@ -50,13 +50,16 @@ export function connectInputAndOutputs(node: NodeRef) {
   node.inputs = traverseValue(node.inputs, connect);
   node.outputs = traverseValue(node.outputs, connect);
 
-  // We will also apply ifc tags from inputs to outputs, unless the module has
-  // precise built-in flow handling for its result.
-  if (
-    !isObjectOrArray(node.module) || node.module.propagateInputIfc !== false
-  ) {
-    applyInputIfcToOutput(node.inputs, node.outputs);
-  }
+  // Every module's outputs carry the join of its inputs' ifc tags. The graph is
+  // assembled before anything is read, so the join over-approximates what any
+  // one attempt goes on to consume, and it stays the floor: it mints a
+  // `declared` entry, and a path's effective label is the join of all its
+  // components, so no later measurement narrows it. Labeling an output below
+  // the join is the flow-precision claim of CFC §8.9.1, which that section
+  // holds to trust in the executing implementation for `flow-taint-precision`
+  // under the acting user, and this seam names no user.
+  // `docs/specs/cfc-render-boundary-composition.md` states the rest.
+  applyInputIfcToOutput(node.inputs, node.outputs);
 }
 
 export function applyArgumentIfcToResult(
@@ -116,21 +119,14 @@ function attachCfcToOutputs(
         ? { ...outputSchema.ifc }
         : {};
     ifc.confidentiality = ContextualFlowControl.lub(joined);
-    const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
-      ? {}
-      : outputSchema === false
-      ? { not: true }
-      : outputSchema;
     const cfcSchema: JSONSchema = {
-      ...outpuSchemaObj,
+      ...ContextualFlowControl.toSchemaObj(outputSchema),
       ifc,
     };
-    try {
-      outputs.setSchema(cfcSchema);
-    } catch {
-      // Cell already has a cause (computed/derived output) — its schema was
-      // set during construction, so we cannot override it here.
-    }
+    // The label reaches the cell through its link schema, which `setSchema`
+    // takes only while the cell carries neither a cause nor a link. A cell
+    // carrying either throws here, stopping the build.
+    outputs.setSchema(cfcSchema);
     return;
   } else if (isObjectOrArray(outputs)) {
     // Descend into objects and arrays.

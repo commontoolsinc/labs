@@ -110,6 +110,7 @@ function processBranch(
       context,
       {
         preferInputBoundWrapper: preferInputBoundWrappers,
+        filterNestedFunctionLocalCaptures: true,
       },
     );
     if (derived) {

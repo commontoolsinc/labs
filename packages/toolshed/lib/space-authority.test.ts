@@ -12,9 +12,11 @@ import {
 } from "@/lib/test-support/memory-acl.ts";
 import {
   authorizeSpaceOwner,
+  authorizeSpaceWriter,
   hostsSpaceInStore,
   isExplicitSpaceOwner,
   isValidSpaceDid,
+  NOT_WRITER_MESSAGE,
 } from "@/lib/space-authority.ts";
 
 // Shaped like real ed25519 did:keys, and valid base58btc (no 0, O, I or l).
@@ -189,6 +191,51 @@ describe("authorizeSpaceOwner against real ACL enforcement", () => {
     expect(notHosted.kind).toBe(notOwned.kind);
     expect(notHosted.message).toBe(notOwned.message);
     expect(notHosted.logDetail).not.toBe(notOwned.logDetail);
+  });
+
+  it("refuses a writer with one denial for a bad DID, an unhosted space, and no ACL", async () => {
+    // The writer check's denial is one message whatever the cause, like the
+    // owner check's; the cause is for the log alone.
+    const badDid = await authorizeSpaceWriter(deps(), "not-a-did", alice.did());
+    const unhosted = await authorizeSpaceWriter(
+      { ...deps(), hostsSpace: () => false },
+      space,
+      alice.did(),
+    );
+    const noAcl = await authorizeSpaceWriter(deps(), space, alice.did());
+    const details = new Set<string>();
+    for (const denial of [badDid, unhosted, noAcl]) {
+      expect(denial.ok).toBe(false);
+      assert(!denial.ok);
+      expect(denial.message).toBe(NOT_WRITER_MESSAGE);
+      details.add(denial.logDetail);
+    }
+    expect(details.size).toBe(3);
+  });
+
+  it("admits an owner and a writer, and refuses a reader", async () => {
+    await genesisAcl(factory, spaceIdentity, {
+      [alice.did()]: "OWNER",
+      [operator.did()]: "WRITE",
+      [mallory.did()]: "READ",
+    });
+    expect((await authorizeSpaceWriter(deps(), space, alice.did())).ok).toBe(
+      true,
+    );
+    expect((await authorizeSpaceWriter(deps(), space, operator.did())).ok)
+      .toBe(true);
+    expect((await authorizeSpaceWriter(deps(), space, mallory.did())).ok).toBe(
+      false,
+    );
+  });
+
+  it("admits every caller as a writer where the deployment enforces no ACL", async () => {
+    const admitted = await authorizeSpaceWriter(
+      { ...deps(), aclMode: "off" },
+      space,
+      mallory.did(),
+    );
+    expect(admitted).toEqual({ ok: true });
   });
 
   it("refuses everyone when the space has no ACL, without leaking that fact", async () => {

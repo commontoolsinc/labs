@@ -3,7 +3,7 @@ import {
   SERVER_EXECUTION_EFFECTS_DOC_ID,
 } from "@commonfabric/memory/v2";
 import { type Cell, createCell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type {
@@ -11,7 +11,6 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import { mergeableOpRead } from "../storage/reactivity-log.ts";
 import { waveRunContextOf } from "../executor/wave.ts";
 import { speculationRunContextOf } from "../speculation/overlay-destination.ts";

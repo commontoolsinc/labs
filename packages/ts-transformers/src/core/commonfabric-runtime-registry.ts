@@ -29,6 +29,11 @@ export type CommonFabricRuntimeExportSpec =
 
 export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
   {
+    exportName: "tagCollectionKey",
+    category: "ignored",
+    reactiveOrigin: false,
+  },
+  {
     exportName: "pattern",
     category: "builder",
     builderName: "pattern",

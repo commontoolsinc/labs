@@ -442,6 +442,16 @@ readers before dormancy is decided. If a time gate defers the node past its
 creating pass, provisional demand persists until that first completed run,
 so the materializing run is never lost.
 
+A computation whose output addresses are known at registration may opt into
+`deferUntilDemand`. A new computation keeps its declared write surface and
+`never-ran` status without inheriting provisional parent demand. Readers of that
+surface determine when it first executes. Collection-index key enumeration uses
+this option so lookup-only initialization and resume do not enumerate occupied
+keys. The option requires a nonempty effective write surface and is invalid for
+an effect, including an already registered effect. Rejection precedes any
+registration mutation. Idempotency diagnostics retain their separate policy of
+executing computations.
+
 This is the principled form of v1's `pullDemandedFirstRunComputations` +
 `hasDemandedParentContext`. v1's *continuation* set
 (`pullDemandedContinuationComputations` — "child wrote what the already-run
@@ -1041,6 +1051,19 @@ skipped by `collectWorkSet`, and nothing downstream of them runs early
 (downstream is only invalidated by actual changes, P2). A parked head event
 (§7.5) is the same condition surfacing through the event path.
 
+A retry the scheduler owes after a wait — a run whose commit was refused for a
+stale basis, re-queued once the conflict's catch-up gate (§7.6) resolved — is
+not an input change and is queued past the debounce and throttle: the debounce
+is not re-armed and an armed readiness of either is released (the `retry`
+option of `MarkInvalidOptions`; the §7.7 backoff stays). The refused run left
+nothing durable and its wait was its delay. Held behind the debounce, such a
+retry would count as a deferred re-run of an already-ran computation, which is
+not idle work and gets its expiry wake only from a live demander — a one-shot
+`pull()` has none once it resolves, so the retry would never run. A re-queue
+that waited on
+nothing (a local inconsistency, a transport error) keeps its gates: there the
+debounce is the spacing between the re-run and the local writer it raced.
+
 ### 8.4 One wake timer
 
 At pass end, if no work is runnable now but some `invalid ∧ live` node (or
@@ -1120,7 +1143,9 @@ What remains live here:
   still exists because of them. Self-suppressed changes (P5) never enter
   `invalidCauses` — a change that did not cause scheduling must not taint it.
 - **`attemptedWrites`** remain CFC prepare/digest evidence only — never
-  dependency or scheduling evidence. v2 removes the one v1 use that blurred
+  dependency or scheduling evidence. Reads marked as attempted writes retain
+  that evidence when they are ignored for scheduling, including no-op writes.
+  v2 removes the one v1 use that blurred
   this (dependency prefetch marking output reads as attempted writes).
 - **Event preflight transactions** commit as no-ops and stay out of CFC
   gating (unchanged).

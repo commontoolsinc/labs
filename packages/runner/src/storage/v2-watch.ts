@@ -1,4 +1,4 @@
-import type { SchemaPathSelector } from "@commonfabric/api";
+import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 import {
   hashSchema,
   internPathSelector,
@@ -11,8 +11,6 @@ import type {
   ScopeKey,
   ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
-
-import type { JSONSchemaObj } from "@commonfabric/api";
 
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import {
@@ -82,7 +80,7 @@ export class SelectorClosureUnavailableError extends Error {
  * emissions deploy together). Two obligations meet here:
  *
  * - PREFERENCE (flag-gated): a schema whose whole closure
- *   `isSchemaDocPersisted` confirms in the target space emits as a
+ *   `isContentAddressedDocPersisted` confirms in the target space emits as a
  *   reference — server-confirmed local presence implies server presence,
  *   since a confirmed document arrived by delivery or an acknowledged
  *   commit and can never change.
@@ -114,7 +112,7 @@ export class SelectorClosureUnavailableError extends Error {
  */
 export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
-  isSchemaDocPersisted: (hash: string) => boolean,
+  isContentAddressedDocPersisted: (hash: string) => boolean,
 ): SchemaPathSelector => {
   const schema = selector.schema;
   if (schema === undefined || typeof schema === "boolean") return selector;
@@ -128,7 +126,7 @@ export const externalizeSyncSelector = (
       registerSchemaDocument(hash, document);
     }
     const persisted = [...documents.keys()].every((hash) =>
-      isSchemaDocPersisted(hash)
+      isContentAddressedDocPersisted(hash)
     );
     if (persisted && getContentAddressedSchemasConfig()) {
       return internPathSelector({
@@ -162,7 +160,7 @@ export const externalizeSyncSelector = (
       // the server's refusal.
       const unemittable = [
         ...collectExternalSchemaRefHashes(schema as JSONSchemaObj),
-      ].filter((hash) => !isSchemaDocPersisted(hash));
+      ].filter((hash) => !isContentAddressedDocPersisted(hash));
       if (unemittable.length === 0) return selector;
       throw new SelectorClosureUnavailableError(unemittable, error);
     }

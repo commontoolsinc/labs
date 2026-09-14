@@ -1,3 +1,5 @@
+import { terminateChildProcess } from "../child-process.ts";
+
 interface JsonRpcError {
   code?: number;
   message?: string;
@@ -165,11 +167,7 @@ export class CodexJsonlClient {
     const stderrTask = this.#stderrTask;
     this.#stderrTask = undefined;
     const closeTask = writer?.close().catch(() => undefined);
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // Child already exited.
-    }
+    terminateChildProcess(child);
     const cleanup = Promise.allSettled([
       child.status,
       closeTask,

@@ -7,7 +7,7 @@ rendering to the host. They live under `packages/patterns/primitives/` and
 form the `primitive` tier in
 [`packages/patterns/index.md`](../../../packages/patterns/index.md).
 
-**Status: eight occupants, all adopted by the pattern index** — see
+**Status: nine occupants, all adopted by the pattern index** — see
 [`packages/patterns/index.md`](../../../packages/patterns/index.md). An earlier
 candidate (`EditableList`) was built, proven against real callers, and retired —
 see [Lessons](#lessons-from-the-first-primitive) below, which is required
@@ -63,7 +63,8 @@ has to hand it a database. Its pattern test builds one with `sqliteDatabase()`
 and seeds it through a handler. Two things about that test are worth knowing
 before writing another. A query the primitive declares no `reactOn` for does
 not re-run after the seed, so the test drives one of the primitive's own
-reactive inputs — the month — and that is what reads the seeded rows. And
+reactive inputs — the month, or the predicate it counts under — and that is
+what reads the seeded rows. And
 reading `[UI]` stores links to the session-scoped query results in the vnode
 tree, which the runtime warns about; the test carries
 `allowConsoleWarnings: true` and says why.

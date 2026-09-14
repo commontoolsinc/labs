@@ -290,6 +290,53 @@ Deno.test('schemaToTypeString formats asCell: ["stream", "cell"] as Stream<Cell<
   assertEquals(result, "(Cell<number>) => void");
 });
 
+Deno.test("schemaToTypeString names a sqlite handle SqliteDb", () => {
+  // The shape a pattern's argument schema carries at a `SqliteDb` position:
+  // the brand hoisted into `$defs` under its own name, with the sqlite cell
+  // kind beside the reference to it.
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: {
+        bank: { $ref: "#/$defs/SqliteDatabase", asCell: ["sqlite"] },
+      },
+      required: ["bank"],
+      $defs: {
+        SqliteDatabase: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            tables: { type: "object", additionalProperties: true },
+            rev: { type: "number" },
+          },
+          additionalProperties: true,
+        },
+      },
+    } as any),
+    "{\n  bank: SqliteDb\n}",
+  );
+});
+
+Deno.test("schemaToTypeString names a sqlite handle at the depth cap", () => {
+  assertEquals(
+    schemaToTypeString({ type: "object", asCell: ["sqlite"] } as any, {
+      depth: 9,
+      maxDepth: 4,
+    }),
+    "SqliteDb",
+  );
+});
+
+Deno.test("schemaToTypeString scopes a sqlite handle from its own entry", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      asCell: [{ kind: "sqlite", scope: "user" }],
+    } as any),
+    "PerUser<SqliteDb>",
+  );
+});
+
 Deno.test("schemaToTypeString restores scope wrappers", () => {
   assertEquals(
     schemaToTypeString({

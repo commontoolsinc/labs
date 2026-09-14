@@ -244,6 +244,9 @@ Deno.test("the selection tile goes amber once the manifest has gone stale", asyn
   }).collect(CTX);
   assertEquals(view.status, "warn");
   assertEquals(view.aside, '<span class="hfacet" title="28h old">28h old</span>');
+  // Staleness reports itself in the badge, so it leaves the sub line to
+  // the counts rather than taking it.
+  assertEquals(view.sub, "0 of 1 tests");
 });
 
 Deno.test("the lane budget comes from the manifest that named it", () => {
@@ -276,6 +279,69 @@ Deno.test("the selection tile goes red when a lane is past its budget", async ()
     view.sub,
     `fullest lane 400s of ${LANE_BUDGET_FALLBACK_SECONDS}s`,
   );
+});
+
+Deno.test("the selection tile goes amber while a test is too long for any lane", async () => {
+  const huge = sampleEntry({ k: "integration", s: "cli", n: "acl.sh" }, { cost: 900 });
+  const other = sampleEntry({ k: "unit", s: "memory", n: "b" }, { cost: 1 });
+  const manifest = sampleManifest({
+    entries: [huge, other],
+    unschedulable: [{ test: huge.test, suite: huge.suite, cost: 900 }],
+    lanes: [{
+      lane: 1,
+      projectedSeconds: 1,
+      batches: [{ suite: other.suite, identities: [JSON.stringify(other.test)] }],
+    }],
+  });
+  const view = await makeTestSelection({
+    read: reading(manifest),
+    now: () => Date.parse("2026-08-20T05:00:00.000Z"),
+  }).collect(CTX);
+  assertEquals(view.status, "warn");
+  // The share is still the headline; what the tile turned amber for takes
+  // the line under it.
+  assertEquals(view.value, "50%");
+  assertEquals(view.sub, "1 test too long for any lane");
+  assertEquals(view.href, TEST_SELECTION_PATH);
+  assertEquals(view.hint, "lanes ↗");
+});
+
+Deno.test("the selection tile counts every test no lane can hold", async () => {
+  const heavy = (n: string) =>
+    sampleEntry({ k: "integration", s: "cli", n }, { cost: 900 });
+  const manifest = sampleManifest({
+    entries: [heavy("a"), heavy("b")],
+    unschedulable: [
+      { test: heavy("a").test, suite: "cli", cost: 900 },
+      { test: heavy("b").test, suite: "cli", cost: 900 },
+    ],
+  });
+  const view = await makeTestSelection({
+    read: reading(manifest),
+    now: () => Date.parse("2026-08-20T05:00:00.000Z"),
+  }).collect(CTX);
+  assertEquals(view.status, "warn");
+  assertEquals(view.sub, "2 tests too long for any lane");
+});
+
+Deno.test("a lane past its budget outranks the tests no lane can hold", async () => {
+  const heavy = sampleEntry({ k: "unit", s: "memory", n: "a" }, { cost: 400 });
+  const huge = sampleEntry({ k: "integration", s: "cli", n: "acl.sh" }, { cost: 900 });
+  const manifest = sampleManifest({
+    entries: [heavy, huge],
+    unschedulable: [{ test: huge.test, suite: huge.suite, cost: 900 }],
+    lanes: [{
+      lane: 1,
+      projectedSeconds: 400,
+      batches: [{ suite: heavy.suite, identities: [JSON.stringify(heavy.test)] }],
+    }],
+  });
+  const view = await makeTestSelection({
+    read: reading(manifest),
+    now: () => Date.parse("2026-08-20T05:00:00.000Z"),
+  }).collect(CTX);
+  assertEquals(view.status, "bad");
+  assertEquals(view.sub, `fullest lane 400s of ${LANE_BUDGET_FALLBACK_SECONDS}s`);
 });
 
 Deno.test("the selection tile serves the page both tiles link to", async () => {

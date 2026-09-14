@@ -865,7 +865,10 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       "both pieces' labels to land and bob's solo demand to register",
     );
     await servingRuntime!.idle();
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitUntil(
+      () => servingRuntime!.scheduler.demandedWriterCount >= 4,
+      "both pieces' writers to enter the demand root set",
+    );
     const writersBefore = servingRuntime!.scheduler.demandedWriterCount;
     const leavesBefore = host!.stats().demand.demandRootLeaves;
     expect(writersBefore).toBeGreaterThanOrEqual(4);
@@ -876,7 +879,6 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     await bobClient.manager.close();
     runtimes.splice(runtimes.indexOf(bob), 1);
     managers.splice(managers.indexOf(bobClient.manager), 1);
-    await new Promise((resolve) => setTimeout(resolve, 800));
     await waitUntil(
       () => {
         host!.spaceServer(space)!.noteDemandChanged();
@@ -886,7 +888,12 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       },
       "bob's rows to leave the demand set",
     );
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await waitUntil(
+      () =>
+        servingRuntime!.scheduler.demandedWriterCount < writersBefore &&
+        host!.stats().demand.demandRootLeaves > leavesBefore,
+      "the departing session's writers to release their demand roots",
+    );
     const writersAfter = servingRuntime!.scheduler.demandedWriterCount;
     const leavesAfter = host!.stats().demand.demandRootLeaves;
     console.log(

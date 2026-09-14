@@ -110,6 +110,14 @@ const makeRuntime = (options: {
   return { storageManager, runtime };
 };
 
+const storedDocument = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  id: string,
+): { value?: unknown } | undefined =>
+  (storageManager.open(signer.did()).replica as unknown as {
+    getDocument(id: string): { value?: unknown } | undefined;
+  }).getDocument(id);
+
 describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
   it("recorded observations join the flow derivation with their population labels", async () => {
     const { storageManager, runtime } = makeRuntime();
@@ -282,12 +290,15 @@ describe("CFC label-metadata observation channel (inv-12 Stage 2)", () => {
       expect((await txA.commit()).ok).toBeDefined();
       await txB.commit();
 
+      const outAId = outA.getAsNormalizedFullLink().id;
       const check = runtime.edit();
-      const stored = readStoredCfcMetadata(check, {
-        space,
-        id: outA.getAsNormalizedFullLink().id,
-      });
+      const stored = readStoredCfcMetadata(check, { space, id: outAId });
       await check.commit();
+      // The stored value pins the document the metadata is read from, so an
+      // envelope carrying no derived entry is that document's own.
+      expect(storedDocument(storageManager, outAId)?.value).toEqual({
+        copied: "no-taint",
+      });
       expect(
         stored?.labelMap.entries.some((entry) => entry.origin === "derived"),
       ).not.toBe(true);

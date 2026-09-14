@@ -74,8 +74,8 @@ describe("Engine implementation identity", () => {
     const a = await loadAndResolve(programA, "/shared.ts");
     const b = await loadAndResolve(programB, "/shared.ts");
 
-    // The whole-program ids differ (entry-point dependent), which is exactly
-    // what used to make the implementation fingerprint unstable.
+    // The whole-program ids differ (entry-point dependent), so an
+    // implementation fingerprint built on them would be unstable.
     expect(a.id).not.toBe(b.id);
 
     // The content-addressed module identity is stable across entry points.
@@ -84,15 +84,15 @@ describe("Engine implementation identity", () => {
     expect(a.moduleIdentity!.startsWith("cf:module/")).toBe(true);
   });
 
-  it("hashes module identity over PRISTINE authored source, not the helper-injected form (CT-1740)", async () => {
+  it("hashes module identity over PRISTINE authored source, not the helper-injected form", async () => {
     // module-loading.md §"Module Identity: Merkle hash over the import graph"
     // (`normSrc`) and §"Stability and sensitivity properties": a module's
     // identity is over its AUTHORED TypeScript, BEFORE the pretransform
-    // helper-injection decoration,
-    // so it is TCB-version independent. Folding in the injection (the bug)
-    // rotates a module's identity whenever the decoration changes between
-    // compiles — which is the CT-1740 `writeAuthorizedBy` stamp divergence
-    // (a profile stamped under an older decoration vs. recompiled today).
+    // helper-injection decoration, so it is TCB-version independent. Folding
+    // in the injection would rotate a module's identity whenever the
+    // decoration changes between compiles — a `writeAuthorizedBy` stamp
+    // divergence between a profile stamped under an older decoration and one
+    // recompiled today.
     const program: RuntimeProgram = {
       main: "/m.tsx",
       files: [{ name: "/m.tsx", contents: SHARED }],

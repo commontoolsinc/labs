@@ -21,7 +21,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { fromURI } from "./uri-utils.ts";
+import { fromURI, toURI } from "./uri-utils.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 
@@ -52,6 +52,45 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
   return (typeof hash === "string"
     ? FabricHash.fromString(hashStringForEntityAddress(hash))
     : hash) as EntityId;
+}
+
+/**
+ * The id string naming the entity `address` addresses: the id a read through
+ * {@link entityIdFrom} would reach, where the address is one this runtime can
+ * address, and `address` itself where it is not.
+ *
+ * It is what puts a lookup and a read on one document. An index keyed on the
+ * stored id — `entityIdExists`, which `packages/cli` asks on a `cd` and
+ * `packages/fuse` asks per path lookup — has to be asked in that spelling,
+ * while an address reaches those callers in whichever spelling a person or a
+ * directory name carried. So the answer is composed from the seam a read uses
+ * rather than recognized again here: {@link entityIdFrom} decides what the
+ * string addresses and `toURI` spells the result, which is the pair
+ * `Runtime.getCellFromEntityId` puts in front of every read.
+ *
+ * An address the pair refuses comes back untouched, and that is the case worth
+ * stating, because the refusal is not an error here. An id under a scheme
+ * belonging to some other subject — a `cid:` schema document, a `data:` URI —
+ * is already an id and needs no second one; a kinded `computed:` id names an
+ * entity of its own; and a string that addresses nothing has nothing to
+ * normalize. Scheming any of those would build a *different* id that nothing
+ * holds, and a lookup would then answer a confident `false` about a document
+ * that is there.
+ *
+ * A spelling `FabricHash` would respell — a padded `fid1:AA==` — comes back as
+ * the id its canonical form names, for the same reason: that is the document a
+ * read of it would reach.
+ */
+export function idStringForEntityAddress(address: string): string {
+  try {
+    return toURI(entityIdFrom(address));
+  } catch {
+    // Not an address this runtime can turn into an id, so it is either an id
+    // already or nothing — either way the caller's own string is what a lookup
+    // should be asked about. `entityIdFrom` throws for both, and neither is a
+    // failure to report.
+    return address;
+  }
 }
 
 /**

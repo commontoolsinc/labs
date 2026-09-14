@@ -17,6 +17,16 @@ Add a line for each new document to the index below.
 
 ## Writes, storage, and sync
 
+- [`collection-indexes.md`](collection-indexes.md) — reactive grouping,
+  unique-key lookup, membership ownership, and work limits
+- [`collection-aggregates.md`](collection-aggregates.md) — named incremental
+  aggregates, their numeric contracts, public type surface, and update costs
+- [`read-accounting.md`](read-accounting.md) — opt-in reactive action read
+  counters, execution boundaries, and per-step pattern-test reports
+- [`view-scoped-client-replication.md`](view-scoped-client-replication.md) —
+  visible renderer demand, server-observed input selection, and guarded local
+  previews
+
 - [`collaborative-fields.md`](collaborative-fields.md) — operation-based fields,
   CodeMirror's opt-in editor path, retained cursors and reset behavior, and
   offline inspection
@@ -89,6 +99,7 @@ Add a line for each new document to the index below.
 
 ## Patterns, components, and hosts
 
+- [`server-pattern-lifecycle.md`](server-pattern-lifecycle.md) — the upload, instantiate, and setsrc verbs as calls the space's serving runtime executes under server execution: the route, the writer authority it needs, the wave cycle a verb runs in, the direct commit a source update's setup transaction makes outside that wave, and what `cf` still does in its own process
 - [`invoking-handlers-outside-a-pattern.md`](invoking-handlers-outside-a-pattern.md)
   — calling a handler stream from `RuntimeProcessor`, or from anywhere else
   outside a pattern body
@@ -109,6 +120,9 @@ Add a line for each new document to the index below.
 
 - [`logger-internals.md`](logger-internals.md) — the TypeScript side of the
   structured logging system: creating a logger, severity, timing, and flags
+- [`cfc-denial-reporting.md`](cfc-denial-reporting.md) — how each Contextual
+  Flow Control gate says what it turned away, what may be said at warning level
+  and what reaches only debug, and how often a gate reports
 - [`llm-testing.md`](llm-testing.md) — testing patterns and server routes that
   call a language model, covering the test-environment guard, the mocks, and
   the conversation fixtures

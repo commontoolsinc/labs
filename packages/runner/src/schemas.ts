@@ -245,11 +245,31 @@ export const nameSchema = internSchema(
 
 export type NameSchema = Schema<typeof nameSchema>;
 
+/** Piece chrome and the opaque UI tip; mounted renderers own deeper reads. */
+export const viewPieceSchema = internSchema({
+  type: "object",
+  properties: {
+    [NAME]: { type: "string" },
+    [UI]: { type: "unknown", asCell: ["cell"] },
+  },
+});
+
+// The renderer schema placed under a property: its `$defs` move to the
+// wrapper's root, which is where its `#/$defs/<name>` refs point once it
+// sits below another root, and its `$id` stays off the wrapper, which is
+// one document with the wrapper's identity.
+const {
+  $defs: rendererVDOMDefinitions,
+  $id: _rendererVDOMId,
+  ...rendererVDOMRoot
+} = rendererVDOMSchema;
+
 export const uiSchema = internSchema(
   {
     type: "object",
-    properties: { [UI]: rendererVDOMSchema },
+    properties: { [UI]: rendererVDOMRoot },
     required: [UI],
+    $defs: rendererVDOMDefinitions,
   },
 );
 

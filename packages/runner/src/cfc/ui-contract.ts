@@ -10,6 +10,10 @@ import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
@@ -42,17 +46,27 @@ export type UiContractEntry = {
   path: string[];
   contract: UiContract;
   schema?: JSONSchema;
+
+  /** The schema document that resolves local references inside `.schema`. */
+  root?: JSONSchema;
 };
 
 const uiContractEntry = (
   path: string[],
   contract: UiContract,
   schema?: JSONSchema,
+  root?: JSONSchema,
 ): UiContractEntry => {
   const entry: UiContractEntry = { path, contract };
   if (schema !== undefined) {
     Object.defineProperty(entry, "schema", {
       value: schema,
+      enumerable: false,
+    });
+  }
+  if (root !== undefined) {
+    Object.defineProperty(entry, "root", {
+      value: root,
       enumerable: false,
     });
   }
@@ -145,7 +159,14 @@ const trustRequirementsFromContract = (
   };
 };
 
-const resolveLocalSchemaRef = (
+// Follow a `$ref` of any form the runtime resolves — a local pointer, an
+// embedded schema, or an external `cid:` document — one chain at a time. The
+// resolver guards the chain; `seenRefs`, the refs this branch of the walk has
+// followed, guards the descent, where a recursive document reaches its own
+// ref again below the body it resolved to. The schema comes back as it is
+// where it carries no ref, where the ref closes a cycle, or where it resolves
+// to nothing.
+const followSchemaRef = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
   seenRefs: Set<string>,
@@ -154,26 +175,58 @@ const resolveLocalSchemaRef = (
     return schema;
   }
   const ref = schema.$ref;
-  if (!ref.startsWith("#/") || seenRefs.has(ref)) {
-    return schema;
-  }
+  if (seenRefs.has(ref)) return schema;
   seenRefs.add(ref);
-
-  if (!isObjectOrArray(root)) {
-    return schema;
-  }
-
-  return ContextualFlowControl.resolveSchemaRefs(schema, root) ?? schema;
+  return ContextualFlowControl.resolveSchemaRefs(
+    schema,
+    isObjectOrArray(root) ? root : schema,
+  ) ?? schema;
 };
+
+// The seen refs to carry below a resolution. A resolution that enters another
+// document — its root is not the one the ref was read in — leaves the local
+// pointers followed so far behind: each named a definition of the document
+// being left, and the same pointer in the new document is another ref. An
+// embedded or external ref names its document wherever it sits, and stays.
+const seenRefsBelow = (
+  seenRefs: Set<string>,
+  root: JSONSchema | undefined,
+  resolvedRoot: JSONSchema,
+): Set<string> =>
+  resolvedRoot === root
+    ? seenRefs
+    : new Set([...seenRefs].filter((ref) => !ref.startsWith("#")));
+
+// The root a resolved ref's target resolves against: its own document where
+// the ref's chain ended in another one — a definition body that is an
+// external ref — and otherwise the document the ref site belongs to.
+const resolvedRootFor = (
+  schema: JSONSchema,
+  resolved: JSONSchema,
+  root: JSONSchema | undefined,
+): JSONSchema =>
+  cfcSchemaResolvedRoot(
+    resolved,
+    resolveCfcSchemaRefRoot(schema, root ?? schema),
+  );
 
 const uiContractFromSchemaInternal = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
   seenRefs: Set<string>,
 ): UiContract | undefined => {
-  const resolvedSchema = resolveLocalSchemaRef(schema, root, seenRefs);
-  if (resolvedSchema !== schema) {
-    return uiContractFromSchemaInternal(resolvedSchema, root, seenRefs);
+  const resolvedSchema = followSchemaRef(schema, root, seenRefs);
+  if (resolvedSchema !== schema && schema !== undefined) {
+    const resolvedRoot = resolvedRootFor(
+      schema,
+      resolvedSchema ?? schema,
+      root,
+    );
+    return uiContractFromSchemaInternal(
+      resolvedSchema,
+      resolvedRoot,
+      seenRefsBelow(seenRefs, root, resolvedRoot),
+    );
   }
   if (
     !isObjectOrArray(resolvedSchema) || !isObjectOrArray(resolvedSchema.ifc) ||
@@ -218,22 +271,25 @@ const uiContractsFromSchemaInternal = (
   seenRefs: Set<string>,
 ): UiContractEntry[] => {
   const branchRefs = new Set(seenRefs);
-  const resolvedSchema = resolveLocalSchemaRef(schema, root, branchRefs);
-  if (resolvedSchema !== schema) {
+  const resolvedSchema = followSchemaRef(schema, root, branchRefs);
+  if (resolvedSchema !== schema && schema !== undefined) {
+    const resolvedRoot = resolvedRootFor(
+      schema,
+      resolvedSchema ?? schema,
+      root,
+    );
     return uiContractsFromSchemaInternal(
       resolvedSchema,
-      root,
+      resolvedRoot,
       path,
-      branchRefs,
+      seenRefsBelow(branchRefs, root, resolvedRoot),
     );
   }
   if (!isObjectOrArray(resolvedSchema)) {
     return [];
   }
 
-  const childRoot = isObjectOrArray(resolvedSchema.$defs)
-    ? resolvedSchema
-    : root;
+  const childRoot = root ?? resolvedSchema;
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,
@@ -241,7 +297,9 @@ const uiContractsFromSchemaInternal = (
     new Set(),
   );
   if (contract !== undefined) {
-    entries.push(uiContractEntry([...path], contract, resolvedSchema));
+    entries.push(
+      uiContractEntry([...path], contract, resolvedSchema, childRoot),
+    );
   }
 
   const hasProperties = isObjectOrArray(resolvedSchema.properties);

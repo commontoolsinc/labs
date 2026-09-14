@@ -3,7 +3,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue, JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { SessionSync } from "@commonfabric/memory/v2";
+import {
+  encodeMemoryBoundary,
+  type SessionSync,
+  type ViewPlan,
+} from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
@@ -120,13 +124,27 @@ describe("schema-doc-sync", () => {
   });
 
   it("leaves a forged schema document unregistered on arrival, with resolution closed", async () => {
-    const claimed = internSchemaAsTaggedHashString({
+    const claimedSchema = {
       type: "object",
       properties: { forgedSyncTarget: { type: "string" } },
+    } as const;
+    const claimed = internSchemaAsTaggedHashString(claimedSchema);
+    await writeDocs({ [`cid:${claimed}`]: claimedSchema as FabricValue });
+    // The commit boundary admits nothing under an id its content does not
+    // hash to, so a forgery reaches storage only out of band — direct
+    // database manipulation, as genuine corruption would.
+    const engine = await server.engineForSpace(space);
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({
+      data: encodeMemoryBoundary({
+        value: { type: "string", title: "forged sync content" },
+      }),
+      id: `cid:${claimed}`,
     });
-    await writeDocs({
-      [`cid:${claimed}`]: { type: "string", title: "forged sync content" },
-    });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: `cid:${claimed}` });
 
     const result = await readerStorage.open(space).sync(
       `cid:${claimed}` as URI,
@@ -355,7 +373,7 @@ describe("schema-doc-sync", () => {
       [`cid:${leafHash}`]: { type: "number", title: "forged dep" },
     });
     expect(String(result.error?.message)).toContain(
-      "whose included content does not verify",
+      "whose content does not hash to its id",
     );
   });
 
@@ -580,16 +598,118 @@ describe("schema-doc-sync", () => {
       removes: [],
     };
     const replica = provider.replica as SpaceReplica;
-    // The frame is malformed on purpose, so it declares itself a frame only
-    // where it is handed over.
+    const plan: ViewPlan = {
+      id: "quarantined-view",
+      revision: 0,
+      generation: 1,
+      eligibleActions: ["preview"],
+      pieces: [],
+    };
+    replica.accessForTestingOnly.applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+      viewPlans: [plan],
+    }, "integrate");
+    const plans: (readonly ViewPlan[])[] = [];
+    const covered: string[] = [];
+    let initial = true;
+    const cancelThrowingPlan = replica.subscribeViewPlans(() => {
+      if (initial) {
+        initial = false;
+        return;
+      }
+      throw new Error("Plan observer failed");
+    });
+    const cancelPlan = replica.subscribeViewPlans((value) => plans.push(value));
+    const cancelThrowingCoverage = replica.subscribeLocalCoverage(() => {
+      throw new Error("Coverage observer failed");
+    });
+    const cancelCoverage = replica.subscribeLocalCoverage((addresses) =>
+      covered.push(...addresses.map((address) => address.id))
+    );
+    try {
+      // The frame is malformed on purpose, so it declares itself a frame only
+      // where it is handed over.
+      replica.accessForTestingOnly.applySessionSync(
+        frame as unknown as SessionSync,
+        "integrate",
+      );
+      expect(replica.getDocument("of:frame-innocent-sibling")).toEqual({
+        value: { fine: true },
+      });
+      expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
+      expect(plans).toEqual([[plan], [{ ...plan, eligibleActions: [] }]]);
+      expect(covered).toContain("of:frame-innocent-sibling");
+      expect(covered).not.toContain("of:frame-carrier");
+    } finally {
+      cancelCoverage();
+      cancelThrowingCoverage();
+      cancelPlan();
+      cancelThrowingPlan();
+    }
+  });
+
+  it("quarantines a doc delivered with malformed `schema` metadata, applying the rest of the frame", () => {
+    // A `cid:` reference outside a single root `$ref` is a form the commit
+    // boundary refuses, so a frame carrying one models state that predates
+    // the enforcement or was written out of band. Arrival treats it as the
+    // broken-ref case above: that document is quarantined, its innocent
+    // sibling applies, and a well-formed reference-form member is embedded
+    // as an obligation and resolves against the closure the frame carries.
+    const described = {
+      type: "string",
+      title: "meta-frame-described",
+    } as const;
+    const describedHash = internSchemaAsTaggedHashString(described);
+    const provider = readerStorage.open(space);
+    const frame = {
+      type: "sync",
+      fromSeq: 810_000,
+      toSeq: 810_001,
+      upserts: [
+        {
+          branch: "",
+          id: `cid:${describedHash}`,
+          scope: "space",
+          seq: 1,
+          doc: { value: described },
+        },
+        {
+          branch: "",
+          id: "of:meta-frame-well-formed",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: { fine: true },
+            schema: { $ref: `cid:${describedHash}` },
+          },
+        },
+        {
+          branch: "",
+          id: "of:meta-frame-hybrid",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: { fine: false },
+            schema: { $ref: `cid:${describedHash}`, title: "sibling" },
+          },
+        },
+      ],
+      removes: [],
+    };
+    const replica = provider.replica as SpaceReplica;
     replica.accessForTestingOnly.applySessionSync(
       frame as unknown as SessionSync,
       "integrate",
     );
-    expect(replica.getDocument("of:frame-innocent-sibling")).toEqual({
+    expect(replica.getDocument("of:meta-frame-well-formed")).toEqual({
       value: { fine: true },
+      schema: { $ref: `cid:${describedHash}` },
     });
-    expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
+    expect(replica.getDocument("of:meta-frame-hybrid")).toBeUndefined();
   });
 
   it("heals a quarantined doc when a later frame carries the cid sibling (the full-evaluation shape)", () => {

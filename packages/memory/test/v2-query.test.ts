@@ -1428,6 +1428,87 @@ Deno.test("memory v2 schema-closure assembly fails loudly on a corrupted depende
   }
 });
 
+Deno.test("memory v2 schema-closure assembly fails loudly on malformed `schema` metadata", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-schema-meta-malformed";
+  try {
+    const resultSchema = { type: "string", title: "meta-malformed" } as const;
+    const resultHash = internSchemaAsTaggedHashString(resultSchema);
+    applyCommit(engine, {
+      sessionId: "session:meta-malformed-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: `cid:${resultHash}`,
+            value: { value: resultSchema },
+          },
+          {
+            op: "set",
+            id: "of:meta-malformed-carrier",
+            value: {
+              value: { described: true },
+              schema: { $ref: `cid:${resultHash}` },
+            },
+          },
+        ],
+      },
+    });
+    const query = {
+      roots: [{
+        id: "of:meta-malformed-carrier",
+        selector: { path: [], schema: false },
+      }],
+    };
+    const tracked = trackGraph(space, engine, query);
+    assert(tracked.state.entities.has(`${space}/space/cid:${resultHash}`));
+
+    // The commit boundary refuses the member's third form, so only
+    // out-of-band tampering can store one: the carrier's stored member is
+    // rewritten to a root reference carrying a sibling keyword.
+    const hybrid = encodeMemoryBoundary({
+      value: { described: true },
+      schema: { $ref: `cid:${resultHash}`, title: "sibling" },
+    });
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({ data: hybrid, id: "of:meta-malformed-carrier" });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: "of:meta-malformed-carrier" });
+
+    // A refresh over the tampered carrier fails loudly, and so does a
+    // fresh query: assembly never delivers a document whose schema no
+    // reader can resolve.
+    assertThrows(
+      () =>
+        refreshTrackedGraph(
+          space,
+          engine,
+          tracked.state,
+          new Set([toDirtyKey("of:meta-malformed-carrier")]),
+        ),
+      Error,
+      "malformed schema metadata",
+    );
+    assertThrows(
+      () =>
+        trackGraph(space, engine, query, undefined, {
+          sessionId: "session:meta-malformed-fresh",
+        }),
+      Error,
+      "malformed schema metadata",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 extendTrackedGraph delivers the schema closure a new root introduces", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-extend-closure";
@@ -2002,10 +2083,11 @@ Deno.test("memory v2 selector validation meets a shared dependency once and reje
       },
     } as const;
     const rootHash = internSchemaAsTaggedHashString(root);
-    const forgedTarget = internSchemaAsTaggedHashString({
+    const forgedClaim = {
       type: "string",
       title: "selector-forged-claim",
-    });
+    } as const;
+    const forgedTarget = internSchemaAsTaggedHashString(forgedClaim);
     applyCommit(engine, {
       sessionId: "session:selector-diamond-writer",
       invocation: invocationFor(1),
@@ -2023,17 +2105,29 @@ Deno.test("memory v2 selector validation meets a shared dependency once and reje
             id: "of:selector-diamond-doc",
             value: { value: { a: {}, b: {} } },
           },
-          // An unreferenced forged install is admitted (the boundary cannot
-          // name its class) — the selector validation below must still
-          // reject a reference to it.
           {
             op: "set",
             id: `cid:${forgedTarget}`,
-            value: { value: { type: "number", title: "not-the-claim" } },
+            value: { value: forgedClaim },
           },
         ],
       },
     });
+    // The commit API admits nothing under an id its content does not hash
+    // to, so a forged document reaches storage only out of band — direct
+    // database manipulation, as genuine corruption would — and the selector
+    // validation below must still reject a reference to it.
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({
+      data: encodeMemoryBoundary({
+        value: { type: "number", title: "not-the-claim" },
+      }),
+      id: `cid:${forgedTarget}`,
+    });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: `cid:${forgedTarget}` });
     // The diamond walk meets the shared dependency once and validates the
     // whole closure from the space's own storage.
     const tracked = trackGraph(space, engine, {

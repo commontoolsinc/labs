@@ -30,6 +30,7 @@
 import type { CellScope } from "@commonfabric/api";
 import {
   type CommitPrecondition,
+  type ConfirmedRead,
   type DerivedWriteAnnotation,
   type Operation,
   resolveScopeKey,
@@ -57,6 +58,10 @@ import type {
 import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
+import {
+  getTransactionReadActivities,
+  hasPendingWriteElision,
+} from "../storage/transaction-inspection.ts";
 
 const logger = getLogger("wave-accumulator", {
   enabled: true,
@@ -340,18 +345,34 @@ export function waveRunContextOf(
 // caller whose side effects must wait for durability (the pattern swap's
 // teardown + reinstantiation, §3e) awaits this instead. Attached by the
 // accumulator at seal, same side-table mechanism as the run context.
+type WaveSettlement = Result<
+  Unit,
+  StorageTransactionRejected & {
+    /** This run read a contribution whose optimistic state was withdrawn. */
+    readDependencyWithdrawn?: true;
+  }
+>;
+
 const waveSettlements = new WeakMap<
   IExtendedStorageTransaction,
-  Promise<Result<Unit, StorageTransactionRejected>>
+  Promise<WaveSettlement>
 >();
 
+const requiresWaveAcceptance = new WeakSet<IStorageTransaction>();
+
+/** Enrolls local state changes in wave acceptance even without storage writes. */
+export function requireWaveAcceptance(tx: IExtendedStorageTransaction): void {
+  requiresWaveAcceptance.add(tx.tx);
+}
+
 /** The sealed tx's wave settlement: resolves ok when every sealed space
- * PROMOTED (the wave commit accepted the contribution), error when any
+ * promoted or its write-free publication was accepted, error when any
  * withdrew (conflict drop, requeue, abort, abandon). Undefined for a tx
- * that did not seal into a wave (the OFF arm) or sealed nothing. */
+ * outside a wave or with neither sealed writes, opted-in local state, nor a
+ * derivation's pending-output elision obligation. */
 export function waveSettlementOf(
   tx: IExtendedStorageTransaction,
-): Promise<Result<Unit, StorageTransactionRejected>> | undefined {
+): Promise<WaveSettlement> | undefined {
   return waveSettlements.get(tx);
 }
 
@@ -418,6 +439,13 @@ export interface WaveSpaceCommit {
   operations: Operation[];
 
   preconditions: CommitPrecondition[];
+
+  /** The read set the store validates as it does a client commit's — a
+   * read whose document moved past its seq at its path refuses the whole
+   * batch. A wave's batch carries none, its concurrency check being the
+   * per-doc re-verification above; the serving loop's direct commit
+   * carries its transaction's own reads. */
+  confirmedReads?: ConfirmedRead[];
 
   /** Owning contribution index per precondition — home batch only; lets a
    * reported precondition failure resolve per write class. */
@@ -551,6 +579,8 @@ export interface WaveLease {
 
 /** One sealed action run held by the accumulator. */
 interface WaveContribution {
+  /** Set only by the closure that invalidates reads of withdrawn state. */
+  readDependencyWithdrawn?: true;
   index: number;
   context: WaveRunContext;
 
@@ -567,6 +597,12 @@ interface WaveContribution {
    * spaces) — over-dropping a derivation is sound, committing one
    * derived from withdrawn state is not (§3d). */
   readOnlyReadKeys: Set<string>;
+
+  /** Verdict for a publication obligation with no replica writes. */
+  emptySettlement?: {
+    promise: Promise<Result<Unit, StorageTransactionRejected>>;
+    resolve: (result: Result<Unit, StorageTransactionRejected>) => void;
+  };
 
   /** Cross-space event appends this run emitted (serving-loop.md §5,
    * FP1): folded into the home batch's durable rows iff the
@@ -781,6 +817,19 @@ export class WaveAccumulator
   implements TransactionSealDestination, ITransactionSealSink {
   readonly #space: MemorySpace;
   readonly #basisSeq: number;
+
+  /**
+   * The serving loop's own direct commits landed while this wave was open
+   * ({@link noteOwnCommit}), each with the doc instances it wrote and the
+   * number of contributions sealed before it. A contribution sealed after
+   * one read the replica with that commit applied, so a doc it writes that
+   * sits exactly at the commit's seq is not a conflict for it.
+   */
+  readonly #ownCommits: Array<{
+    seq: number;
+    keys: Set<string>;
+    sealedBefore: number;
+  }> = [];
   readonly #scopeKeyIdentity: ScopeKeyIdentity;
   readonly #replicaFor: (space: MemorySpace) => ISpaceReplica;
   readonly #lease: WaveLease | undefined;
@@ -852,6 +901,11 @@ export class WaveAccumulator
    * A post-seal enqueue on the same tx is refused — it could no longer
    * ride this wave's transaction. */
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
+
+  /** Transactions holding staged appends no seal has taken yet: the
+   * source of `hasUnsealedAppends`, which reads their status so one that
+   * aborted before sealing stops counting. */
+  readonly #txsWithStagedAppends = new Set<IExtendedStorageTransaction>();
 
   readonly #sealedTxs = new WeakSet<object>();
   readonly #onUnstampedSeal: (() => void) | undefined;
@@ -977,6 +1031,29 @@ export class WaveAccumulator
     return this.#contributions.length;
   }
 
+  /**
+   * Record a direct commit of the serving loop's own that landed at `seq`
+   * and is applied to the replica, while this wave is open, writing `docs`
+   * (docs/features/server-pattern-lifecycle.md). The commit step then
+   * treats a doc in `docs` sitting at exactly `seq` as observed, not
+   * conflicting, for a contribution sealed from now on that read the doc at
+   * `seq` or later and read no doc in `docs` earlier than `seq`. A
+   * contribution sealed earlier, one with no read of the doc to show it
+   * saw the commit, or one that read any of `docs` before the commit
+   * reached the replica keeps the ordinary conflict, since its write may
+   * rest on state the commit replaced.
+   */
+  noteOwnCommit(
+    seq: number,
+    docs: ReadonlyArray<{ id: string; scopeKey: ScopeKey }>,
+  ): void {
+    this.#ownCommits.push({
+      seq,
+      keys: new Set(docs.map((doc) => docInstanceKey(doc.id, doc.scopeKey))),
+      sealedBefore: this.#contributions.length,
+    });
+  }
+
   /** Contributions whose run kind is anything but the loop's own
    * "bookkeeping" stamps — the wave carried real derivation/handler
    * CONTENT whose commit seq can enter a client read basis. S1 (RULED
@@ -1006,6 +1083,20 @@ export class WaveAccumulator
    * appends never actually ride). */
   get hasOutboundAppends(): boolean {
     return this.#contributions.some((c) => c.outboundAppends.length > 0);
+  }
+
+  /** Whether an append is staged by a transaction that can still seal.
+   * Such an append rides the transaction's contribution once it seals,
+   * so a wave holding one is not empty even with no contribution. A
+   * transaction that is done or failed without sealing no longer counts:
+   * its appends can never ride. */
+  get hasUnsealedAppends(): boolean {
+    for (const tx of this.#txsWithStagedAppends) {
+      const status = tx.tx.status().status;
+      if (status === "ready" || status === "pending") return true;
+      this.#txsWithStagedAppends.delete(tx);
+    }
+    return false;
   }
 
   /** The FOREIGN spaces sealed contributions target (protocol.md §2b's
@@ -1052,6 +1143,12 @@ export class WaveAccumulator
         },
       };
     }
+    // The seal takes the transaction's staged appends here, whatever its
+    // outcome: a refused or failed seal is as terminal for them as an
+    // accepted one, since the transaction seals once, so none of them can
+    // keep the wave counted as holding work.
+    const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
+    this.#txsWithStagedAppends.delete(tx);
     const context = waveRunContextOf(tx);
     // seal() runs one tx at a time: sealInto hands spaces back through
     // sealSpaceCommit below, and actions run serially per space
@@ -1120,7 +1217,18 @@ export class WaveAccumulator
       // result write have run.
       discoveredScope,
     };
+    const localAcceptance = requiresWaveAcceptance.has(inner) ||
+      (context?.kind === "derivation" && hasPendingWriteElision(tx));
     try {
+      // Closing releases the transaction's activity; write-free publication
+      // obligations need its read identities after the storage no-op has closed.
+      const localReads = localAcceptance
+        ? [...getTransactionReadActivities(tx)].map(({ space, id, scope }) => ({
+          space,
+          id,
+          scope,
+        }))
+        : [];
       const result = await inner.sealInto(this);
       const assembly = this.#assembly;
       if (result.error) {
@@ -1133,12 +1241,14 @@ export class WaveAccumulator
         }
         return result;
       }
-      // A transaction with nothing to seal (read-only, or all-no-op)
-      // AND no staged appends contributes nothing — same as commit's
-      // empty-transaction fast path — and needs no run context: the §3d
-      // refusal below guards CONSEQUENCES entering the wave (writes and
-      // staged appends alike), and a serving runtime's read probes
-      // (piece structure loads, pattern-identity reads) commit nothing.
+      // A transaction with nothing to seal (read-only, or all-no-op),
+      // no staged appends, and no publication obligation contributes nothing,
+      // like commit's empty-transaction fast path, and needs no run context.
+      // A derivation reusing a pending output carries an acceptance obligation
+      // even when the equal-value write produces no storage operation. The §3d
+      // refusal below guards consequences entering the wave: writes, staged
+      // appends, and write-free publication. A serving runtime's ordinary read
+      // probes (piece structure loads, pattern-identity reads) commit nothing.
       // A tx that sealed NOTHING but STAGED APPENDS — the Phase-3
       // pure-forwarding handler, whose only consequence is a
       // cross-space emit — MINTS a zero-write contribution below (the
@@ -1147,8 +1257,10 @@ export class WaveAccumulator
       // (its cascadesCross/consequenceOf folds run for every committed
       // contribution), and dropping the entry here lost the appends
       // silently.
-      const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
-      if (assembly.spaces.length === 0 && pendingAppends.length === 0) {
+      if (
+        assembly.spaces.length === 0 && pendingAppends.length === 0 &&
+        !localAcceptance
+      ) {
         return result;
       }
       if (context === undefined) {
@@ -1178,23 +1290,39 @@ export class WaveAccumulator
             "(serving-loop.md §3d, RULED 2026-08-05)",
         );
       }
+      const emptySettlement = assembly.spaces.length === 0 && localAcceptance
+        ? Promise.withResolvers<Result<Unit, StorageTransactionRejected>>()
+        : undefined;
+      if (emptySettlement !== undefined) {
+        // A storage no-op has no sealSpaceReads handoff. Its publication
+        // obligation still depends on the same reads as a written contribution.
+        for (const read of localReads) {
+          this.sealSpaceReads(read.space, [read]);
+        }
+      }
       this.#sealedTxs.add(tx);
-      this.#contributions.push({
+      const contribution: WaveContribution = {
         index: this.#contributions.length,
         context,
         spaces: assembly.spaces,
         readOnlyReadKeys: assembly.readOnlyReadKeys,
+        ...(emptySettlement === undefined ? {} : { emptySettlement }),
         // Copied: a (refused) post-seal enqueue must not be able to
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
         discoveredScope: assembly.discoveredScope,
-      });
+      };
+      this.#contributions.push(contribution);
       waveSettlements.set(
         tx,
-        Promise.all(
+        (emptySettlement?.promise ?? Promise.all(
           assembly.spaces.map((space) => space.sealed.settled),
-        ).then((settled) =>
+        ).then((settled): Result<Unit, StorageTransactionRejected> =>
           settled.find((outcome) => outcome.error !== undefined) ?? { ok: {} }
+        )).then((outcome): WaveSettlement =>
+          outcome.error !== undefined && contribution.readDependencyWithdrawn
+            ? { error: { ...outcome.error, readDependencyWithdrawn: true } }
+            : outcome
         ),
       );
       return result;
@@ -1331,6 +1459,7 @@ export class WaveAccumulator
       this.#pendingAppendsByTx.set(tx, pending);
     }
     pending.push(entry);
+    this.#txsWithStagedAppends.add(tx);
   }
 
   /**
@@ -1343,9 +1472,12 @@ export class WaveAccumulator
   async settled(): Promise<void> {
     await Promise.all(
       this.#contributions.flatMap((contribution) =>
-        contribution.spaces.map((space) =>
-          space.sealed.settled.then(() => undefined, () => undefined)
-        )
+        [
+          ...contribution.spaces.map((space) => space.sealed.settled),
+          ...(contribution.emptySettlement === undefined
+            ? []
+            : [contribution.emptySettlement.promise]),
+        ].map((settlement) => settlement.then(() => undefined, () => undefined))
       ),
     );
   }
@@ -1518,6 +1650,14 @@ export class WaveAccumulator
     message: string,
     cause?: "contribution-dropped" | "wave-abandoned",
   ): void {
+    contribution.emptySettlement?.resolve({
+      error: {
+        name: "StoreError",
+        message,
+        cause: new Error(message),
+        ...(cause === undefined ? {} : { waveWithdrawalCause: cause }),
+      },
+    });
     for (const space of contribution.spaces) {
       space.resolveVerdict({
         withdrawn: { message, ...(cause !== undefined ? { cause } : {}) },
@@ -1686,6 +1826,42 @@ export class WaveAccumulator
       if ((heads.get(key) ?? 0) > this.#basisSeq) conflicted.add(key);
     }
 
+    /** The head a contribution observed on a conflicted doc through one of
+     * the loop's own direct commits, or `undefined` when the doc moved for
+     * some other reason, the contribution was sealed before the commit,
+     * none of its reads of the doc shows it saw the commit, or a read of
+     * any doc the commit wrote predates it. */
+    const observedOwnCommit = (
+      key: string,
+      contribution: WaveContribution,
+    ): number | undefined => {
+      const head = heads.get(key);
+      const own = this.#ownCommits.find((candidate) =>
+        candidate.seq === head && candidate.keys.has(key) &&
+        contribution.index >= candidate.sealedBefore
+      );
+      if (own === undefined) return undefined;
+      const home = this.#homeSealed(contribution);
+      if (home === undefined) return undefined;
+      const { confirmed, pending } = home.sealed.commit.reads;
+      let observed = false;
+      for (
+        const { read, seq } of [
+          ...confirmed.map((read) => ({ read, seq: read.seq })),
+          ...pending.map((read) => ({ read, seq: read.basisSeq ?? 0 })),
+        ]
+      ) {
+        const readKey = docInstanceKey(
+          read.id,
+          this.#scopeKeyFor(read.scope, contribution.context),
+        );
+        if (!own.keys.has(readKey)) continue;
+        if (seq < own.seq) return undefined;
+        if (readKey === key) observed = true;
+      }
+      return observed ? head : undefined;
+    };
+
     const resolveConflicts = async (): Promise<void> => {
       for (const contribution of this.#contributions) {
         if (
@@ -1701,6 +1877,15 @@ export class WaveAccumulator
             droppedDocs[contribution.index].has(key) ||
             rebasedDocs[contribution.index].has(key)
           ) {
+            continue;
+          }
+          const observed = observedOwnCommit(key, contribution);
+          if (observed !== undefined) {
+            // The doc moved by a direct commit this contribution read at
+            // or after: its write stands, and the sink re-verifies the doc
+            // still sits exactly there.
+            rebasedDocs[contribution.index].add(key);
+            rebasedHeads.set(key, observed);
             continue;
           }
           if (contribution.context.kind === "derivation") {
@@ -1913,6 +2098,9 @@ export class WaveAccumulator
               requeued.add(idx);
             }
           } else {
+            if (readWithdrawn && contribution.context.kind === "derivation") {
+              contribution.readDependencyWithdrawn = true;
+            }
             droppedWhole.add(idx);
             outcome.dependencyDroppedWrites += this.#homeOpCount(
               contribution,
@@ -2954,6 +3142,10 @@ export class WaveAccumulator
     orphanRefused: ReadonlySet<number> = new Set(),
   ): void {
     this.#reportRequeuedEvents(outcome, (idx) => requeued.has(idx));
+    const acceptedBySpace = new Map<
+      MemorySpace,
+      Array<{ contribution: SealedSpaceContribution; seq: number }>
+    >();
     for (const contribution of this.#contributions) {
       const idx = contribution.index;
       const context = contribution.context;
@@ -2977,9 +3169,12 @@ export class WaveAccumulator
             "emitter write this wave withdrew, so no entry exists behind " +
             "this run and nothing re-emits it (events.md §4 — one " +
             "durable entry, one completed run; stage C build W3, (α3))"
-          : "pure derivation dropped: derived from a withdrawn " +
-            "contribution; its own reads re-run it when fresh state " +
-            "lands (serving-loop.md §3d)";
+          : contribution.readDependencyWithdrawn
+          ? "pure derivation dropped: a read depended on a withdrawn " +
+            "contribution; the current scheduled instance re-arms after " +
+            "rollback (serving-loop.md §3d)"
+          : "contribution dropped from the wave commit " +
+            "(serving-loop.md §3d)";
         this.#warnDropped(contribution, message);
         this.#withdraw(contribution, message, "contribution-dropped");
         continue;
@@ -3014,6 +3209,7 @@ export class WaveAccumulator
         continue;
       }
       outcome.dispositions[idx] = { kind: "committed" };
+      contribution.emptySettlement?.resolve({ ok: {} });
       if (
         context.kind === "event-handler" && context.eventId !== undefined &&
         // One entry per EVENT: Phase 4's served navigateTo makes an
@@ -3028,7 +3224,18 @@ export class WaveAccumulator
         const seq = space.space === this.#space ? homeSeq : foreignSeqs.get(
           this.#foreignBatchKeyFor(space.space, context),
         ) ?? homeSeq;
-        space.resolveVerdict({ committed: { seq } });
+        const accepted = acceptedBySpace.get(space.space) ?? [];
+        accepted.push({ contribution: space, seq });
+        acceptedBySpace.set(space.space, accepted);
+      }
+    }
+    // Foreign batches group by actor and grant, so their server order can
+    // differ from contribution order. Each replica promotes accepted
+    // batches in server order, preserving seal order within one batch.
+    for (const accepted of acceptedBySpace.values()) {
+      accepted.sort((a, b) => a.seq - b.seq);
+      for (const { contribution, seq } of accepted) {
+        contribution.resolveVerdict({ committed: { seq } });
       }
     }
   }

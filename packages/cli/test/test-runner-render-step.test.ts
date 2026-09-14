@@ -3,6 +3,7 @@
  */
 
 import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { runTests } from "../lib/test-runner.ts";
@@ -88,6 +89,13 @@ describe(
       expect(result.passed).toBe(1);
     });
 
+    it("demands rendered children without evaluating unrelated VNode metadata", async () => {
+      const result = await withCoverage("bounded-root-render.test.tsx");
+      expect(result.lateHitCount).toBeGreaterThan(0);
+      expect(result.afterRenderHitCount).toBe(0);
+      expect(result.passed).toBe(1);
+    });
+
     it("accepts primitive VDOM roots", async () => {
       const { failed, passed } = await runTests(
         fixture("primitive-render.test.tsx"),
@@ -128,14 +136,21 @@ describe(
     });
 
     it("reports invalid VDOM content as a harness error", async () => {
+      const output: string[] = [];
+      using _log = stub(console, "log", (...args: unknown[]) => {
+        output.push(args.map(String).join(" "));
+      });
       const { failed, results } = await runTests(
         fixture("invalid-render.test.tsx"),
-        { root: FIXTURES },
+        { root: FIXTURES, verbose: true, statsThreshold: 0 },
       );
       expect(failed).toBe(1);
       expect(results[0]!.error ?? "").toContain(
         "VDOM materialization failed: Invalid VDOM content",
       );
+      expect(
+        output.some((line) => line.includes("Read cost (render_1):")),
+      ).toBe(true);
     });
 
     it("uses the same primitive in multi-user workers", async () => {

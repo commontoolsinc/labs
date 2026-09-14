@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { detectCallKind } from "./call-kind.ts";
-import { isSyntheticNode } from "./utils.ts";
+import { recoverAuthoredPosition } from "./utils.ts";
 
 /**
  * Check if a declaration is at module scope (top-level of source file).
@@ -69,52 +69,39 @@ export function isFunctionDeclaration(
 }
 
 /**
- * Check if a declaration is within a specific function's scope using node identity.
- *
- * IMPORTANT LIMITATION: This function may not work correctly when comparing
- * synthetic nodes (created by transformers) to source nodes, because:
- * - Symbol.getDeclarations() returns nodes from the original AST
- * - The `func` parameter may be from a transformed AST
- * - Synthetic nodes have pos=-1, so position-based comparison fails
- *
- * This is acceptable for current usage because collectCaptures is called on
- * source nodes before creating synthetic nodes. If this changes in the future,
- * we'll need to add a WeakMap to track synthetic→source node relationships.
- *
- * @param decl - The declaration to check
- * @param func - The function to check against
- * @returns true if decl is within func's scope (but stops at nested function boundaries)
+ * Checks whether a declaration belongs to a function's local scope.
+ * Parameter comparisons follow authored lineage through transformed clones;
+ * distinct same-named bindings remain separate declarations.
  */
 export function isDeclaredWithinFunction(
   decl: ts.Declaration,
   func: ts.FunctionLikeDeclaration,
 ): boolean {
-  // SPECIAL CASE: For parameters, check directly in the parameters array
-  // The visitor reuses parameter objects, so we can use simple object identity.
-  // This avoids broken parent chains when func is a synthetic/transformed node.
+  // Parameter parents may belong to the source tree while the callback is cloned.
   if (ts.isParameter(decl)) {
-    return func.parameters.includes(decl);
+    const original = ts.getOriginalNode(decl);
+    if (
+      func.parameters.some((parameter) =>
+        ts.getOriginalNode(parameter) === original
+      )
+    ) return true;
   }
 
-  // For other declarations, walk up the tree from the declaration
+  const functionRange = recoverAuthoredPosition(func);
+  const functionSource = func.getSourceFile();
   let current: ts.Node | undefined = decl;
   while (current) {
-    // Found our callback function - try multiple matching strategies:
-    // 1. Object identity (works if nodes haven't been cloned)
-    if (current === func) {
-      return true;
-    }
+    if (current === func) return true;
 
-    // 2. Position-based comparison (works for source nodes that have been cloned during transformation)
-    //    The type checker returns declarations from the original AST, but func may be from a
-    //    transformed AST. If both are source nodes, they'll have matching positions.
-    //    Skip synthetic nodes (pos=-1) as they won't match source positions.
+    // Rebuilt callbacks retain authored ranges through their source maps.
+    const currentRange = recoverAuthoredPosition(current);
+    const currentSource = current.getSourceFile();
     if (
-      !isSyntheticNode(current) &&
-      !isSyntheticNode(func) &&
-      current.pos === func.pos &&
-      current.end === func.end &&
-      current.kind === func.kind
+      functionRange && currentRange &&
+      currentRange.pos === functionRange.pos &&
+      currentRange.end === functionRange.end &&
+      current.kind === func.kind &&
+      (!functionSource || !currentSource || functionSource === currentSource)
     ) {
       return true;
     }

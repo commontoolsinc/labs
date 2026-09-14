@@ -134,24 +134,19 @@ export function qualifyCommonFabricTypeRefs(
     return matches.length === 1 ? matches[0] : undefined;
   };
 
-  // For a TypeReference Type, get its Nth type argument. Different
-  // TypeScript versions expose this via slightly different shapes; try the
-  // public ones first.
+  // Pair a printed alias with its own arguments before consulting the
+  // arguments of the reference it instantiates.
   const getTypeArgumentAt = (
     type: ts.Type | undefined,
     index: number,
   ): ts.Type | undefined => {
     if (!type) return undefined;
+    // Printed aliases carry their own arguments, which can differ from the
+    // arguments of the reference they instantiate.
+    if (type.aliasTypeArguments) return type.aliasTypeArguments[index];
     const asReference = type as ts.TypeReference;
     if (asReference.typeArguments) {
       return asReference.typeArguments[index];
-    }
-    // Alias-resolved generics expose aliasTypeArguments.
-    const aliased = (type as unknown as {
-      aliasTypeArguments?: readonly ts.Type[];
-    }).aliasTypeArguments;
-    if (aliased) {
-      return aliased[index];
     }
     return undefined;
   };

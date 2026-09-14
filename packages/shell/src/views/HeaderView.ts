@@ -27,7 +27,7 @@ import {
   iconStar,
   iconThemeToggle,
 } from "../components/icons.ts";
-import { type PieceItem } from "../components/PieceList.ts";
+import type { PieceItem } from "../components/PieceList.ts";
 import { getEffectiveTheme, toggleTheme } from "../lib/theme-preference.ts";
 
 type ConnectionStatus =

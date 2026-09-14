@@ -50,91 +50,27 @@ Deno.test("Rewrite policy: JSX logical lowering matrix", () => {
   );
 });
 
-Deno.test("Rewrite policy: map rewrite matrix", () => {
-  // Pattern context rewrites all reactive receiver kinds except plain arrays.
-  assertEquals(
-    shouldRewriteCollectionMethod("pattern", "map", "plain"),
-    false,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod("pattern", "map", "opaque_autounwrapped"),
-    true,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "pattern",
-      "map",
-      "celllike_requires_rewrite",
-    ),
-    true,
-  );
-
-  // Compute context rewrites only cell-like receivers.
-  assertEquals(
-    shouldRewriteCollectionMethod("compute", "map", "plain"),
-    false,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod("compute", "map", "opaque_autounwrapped"),
-    false,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "compute",
-      "map",
-      "celllike_requires_rewrite",
-    ),
-    true,
-  );
-
-  // Neutral context never rewrites.
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "neutral",
-      "map",
-      "celllike_requires_rewrite",
-    ),
-    false,
-  );
-  // filter and flatMap follow the same rewrite policy as map.
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "pattern",
-      "filter",
-      "celllike_requires_rewrite",
-    ),
-    true,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "pattern",
-      "flatMap",
-      "celllike_requires_rewrite",
-    ),
-    true,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "pattern",
-      "filter",
-      "plain",
-    ),
-    false,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "compute",
-      "filter",
-      "opaque_autounwrapped",
-    ),
-    false,
-  );
-  assertEquals(
-    shouldRewriteCollectionMethod(
-      "neutral",
-      "flatMap",
-      "celllike_requires_rewrite",
-    ),
-    false,
-  );
+Deno.test("Rewrite policy: collection rewrite matrix", () => {
+  for (
+    const method of ["map", "filter", "flatMap", "count", "minBy", "maxBy"]
+  ) {
+    for (const context of ["pattern", "compute", "neutral"] as const) {
+      for (
+        const receiver of [
+          "plain",
+          "opaque_autounwrapped",
+          "celllike_requires_rewrite",
+        ] as const
+      ) {
+        const expected = context === "pattern"
+          ? receiver !== "plain"
+          : context === "compute" && receiver === "celllike_requires_rewrite";
+        assertEquals(
+          shouldRewriteCollectionMethod(context, method, receiver),
+          expected,
+          `${context}/${method}/${receiver}`,
+        );
+      }
+    }
+  }
 });

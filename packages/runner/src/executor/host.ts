@@ -33,6 +33,9 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
 import {
+  LIFECYCLE_VERB_SPACE_PARKED,
+  type LifecycleVerb,
+  type RuntimeFactoryContext,
   SpaceServer,
   type SpaceServerOptions,
   type SpaceServerPolicy,
@@ -43,6 +46,23 @@ import {
   registerServingLoopStatsProvider,
   type ServingLoopStats,
 } from "./stats.ts";
+
+export type { LifecycleVerb } from "./space-server.ts";
+
+/**
+ * Thrown by {@link ExecutorHost.runLifecycleVerb} when this process cannot
+ * serve the space the verb names: the host is closed, or another process
+ * holds the space's execution lease.
+ */
+export class SpaceNotServedError extends Error {
+  constructor(space: MemorySpace) {
+    super(
+      `space ${space} is not served by this process (host closed, or ` +
+        "its execution lease is held elsewhere)",
+    );
+    this.name = "SpaceNotServedError";
+  }
+}
 
 const logger = getLogger("executor-host", { enabled: true, level: "warn" });
 
@@ -77,8 +97,14 @@ export type ExecutorHostOptions = {
 
   /** Build a serving runtime for one space over the loopback plane. The
    * factory owns auth and runtime options; it MUST pass
-   * `experimental: { serverExecution: true }`. */
-  createRuntime: (space: MemorySpace) => Promise<{
+   * `experimental: { serverExecution: true }`. `context` is what the
+   * SpaceServer hands its factory (see SpaceServerOptions.createRuntime):
+   * a factory that reads the home space before returning installs
+   * `context.storeReadThrough` on its storage manager first. */
+  createRuntime: (
+    space: MemorySpace,
+    context: RuntimeFactoryContext,
+  ) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
   }>;
@@ -100,7 +126,10 @@ export type ExecutorHostOptions = {
 export class ExecutorHost {
   readonly #options: ExecutorHostOptions;
   readonly #spaces = new Map<string, SpaceServer>();
-  readonly #activating = new Map<string, Promise<void>>();
+  readonly #activating = new Map<string, {
+    promise: Promise<void>;
+    warmNotices: AdmittedCommitNotice[];
+  }>();
 
   /** Records admitted while a space's activation is still in flight
    * (before its SpaceServer registers): buffered here, drained into the
@@ -127,8 +156,8 @@ export class ExecutorHost {
    * contiguity). */
   readonly #sinkLocalSeq = { value: 0 };
 
-  /** Consecutive `loop-failed` parks per space (the re-activation
-   * backoff's streak). Incremented at each failure park, cleared by a
+  /** Consecutive loop failures or initialization lease losses per space.
+   * This backoff streak is incremented at each failure park, cleared by a
    * successfully committed wave — real served progress, not merely a
    * runtime that got built (every crash-loop tenure builds one). */
   readonly #failureParkStreaks = new Map<string, number>();
@@ -214,6 +243,7 @@ export class ExecutorHost {
       memo: { ...this.#stats.memo },
       outbox: { ...this.#stats.outbox },
       lease: { ...this.#stats.lease },
+      lifecycleVerbs: { ...this.#stats.lifecycleVerbs },
       activeSpaces,
       watermarkLag,
     };
@@ -221,6 +251,51 @@ export class ExecutorHost {
 
   spaceServer(space: MemorySpace): SpaceServer | undefined {
     return this.#spaces.get(space);
+  }
+
+  /**
+   * Run a pattern-lifecycle verb on `space`'s serving runtime and
+   * resolve with its receipt once the verb's writes are durable
+   * (docs/features/server-pattern-lifecycle.md). A verb request is an
+   * activation trigger of its own: the requester holds no session on
+   * the space, so the ACTIVE criteria the session and admission hooks
+   * consult do not apply. A verb the space parked under before running
+   * is queued once more on the successor tenure.
+   *
+   * Throws {@link SpaceNotServedError} when this process cannot serve the
+   * space — the host is closed, or another process holds the space's lease.
+   */
+  async runLifecycleVerb<T>(
+    space: MemorySpace,
+    verb: LifecycleVerb<T>,
+  ): Promise<T> {
+    for (let attempt = 0;; attempt += 1) {
+      const standing = this.#spaces.get(space);
+      if (
+        standing !== undefined && !standing.active &&
+        !this.#activating.has(space)
+      ) {
+        // A park in progress: its lease releases only once it completes,
+        // and an activation before that would fail to acquire.
+        await standing.whenParked;
+      }
+      await this.#activate(space, []);
+      const server = this.#spaces.get(space);
+      if (server === undefined || !server.active) {
+        throw new SpaceNotServedError(space);
+      }
+      try {
+        return await server.runLifecycleVerb(verb);
+      } catch (error) {
+        if (
+          attempt === 0 && error instanceof Error &&
+          error.message === LIFECYCLE_VERB_SPACE_PARKED
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 
   #onCommitAdmitted(notice: AdmittedCommitNotice): void {
@@ -268,7 +343,16 @@ export class ExecutorHost {
       // (#activate joins the in-flight activation without merging its
       // pending list — the #6191 review's P1).
       existing.enqueueCommit(notice);
-      if (!existing.active && !this.#activating.has(notice.space)) {
+      const activation = this.#activating.get(notice.space);
+      if (
+        !existing.active && activation !== undefined && notice.warm === true
+      ) {
+        // A warm request is a one-shot activation obligation. Retain it
+        // with the initialization that owns the feed, so failed setup
+        // carries the request into its successor.
+        activation.warmNotices.push(notice);
+      }
+      if (!existing.active && activation === undefined) {
         if (notice.warm === true) {
           // Only in the true parking window (no successor in flight):
           // once a successor is activating, the enqueue above already
@@ -418,24 +502,41 @@ export class ExecutorHost {
     // commit-admitted hooks race, and a second concurrent activation
     // would double-build runtimes against one lease.
     const inFlight = this.#activating.get(space);
-    if (inFlight !== undefined) return inFlight;
-    const activation = this.#activateInner(space, pending).finally(() => {
-      this.#activating.delete(space);
-    });
+    if (inFlight !== undefined) return inFlight.promise;
+    const warmNotices = pending.filter((notice) => notice.warm === true);
+    const activation = {
+      warmNotices,
+      promise: this.#activateInner(space, pending, warmNotices).finally(() => {
+        if (this.#activating.get(space) === activation) {
+          this.#activating.delete(space);
+        }
+      }).then((retry) => {
+        if (retry !== undefined) {
+          this.#reactivateAfterPark(
+            retry,
+            space,
+            this.#pendingNotices.get(space)?.some((notice) =>
+              notice.warm === true
+            ),
+          );
+        }
+      }),
+    };
     this.#activating.set(space, activation);
-    return activation;
+    return activation.promise;
   }
 
   async #activateInner(
     space: MemorySpace,
     pending: AdmittedCommitNotice[],
-  ): Promise<void> {
+    consumedWarm: AdmittedCommitNotice[],
+  ): Promise<SpaceServer | undefined> {
     if (this.#closed || this.#spaces.get(space)?.active) return;
     const streak = this.#failureParkStreaks.get(space) ?? 0;
     if (streak > 0) {
       // Failure-park backoff: the space's last tenure(s) died in
-      // `loop-failed` parks. Delay this rebuild; admissions arriving
-      // meanwhile buffer into #pendingNotices behind this #activating
+      // loop failures or initialization lease losses. Delay this rebuild;
+      // admissions meanwhile buffer into #pendingNotices behind this #activating
       // entry (never dropped, never additional activations).
       const delayMs = failureParkBackoffDelayMs(streak, this.#options.policy);
       this.#stats.reactivationBackoffs += 1;
@@ -450,7 +551,6 @@ export class ExecutorHost {
     // drained buffer appends at drain time): re-buffered by the failure
     // arms below — see #rebufferConsumedWarm. Collected from the start
     // so an early throw (the engine open) loses nothing either.
-    const consumedWarm = pending.filter((notice) => notice.warm === true);
     try {
       const engine = await this.#options.server.engineForSpace(space);
       // The sink's session key IS the DR1 holder, whose process-instance
@@ -461,12 +561,13 @@ export class ExecutorHost {
       // (see #sinkLocalSeq: a home sink's foreign provisioning batches
       // land in other spaces' engines under this same session).
       const localSeqRef = this.#sinkLocalSeq;
+      let lostInitializationLease = false;
       const server = new SpaceServer({
         space,
         server: this.#options.server,
         engine,
         serviceIdentity: this.#options.serviceIdentity,
-        createRuntime: () => this.#options.createRuntime(space),
+        createRuntime: (context) => this.#options.createRuntime(space, context),
         localSeqRef,
         stats: this.#stats,
         policy: this.#options.policy,
@@ -479,12 +580,13 @@ export class ExecutorHost {
           }
           : {}),
         onParked: (reason) => {
-          // The backoff streak: a `loop-failed` park extends it; an
-          // idle park (a healthy tenure winding down) clears it. Parks
+          // Loop failure and initialization lease loss extend the backoff
+          // streak; an idle park clears it. Other parks
           // that say nothing about the space's health — lease loss,
           // host close — leave it alone; a committed wave (below) is
           // what clears it on the serving path.
-          if (reason === "loop-failed") {
+          lostInitializationLease = reason === "activation-lease-lost";
+          if (reason === "loop-failed" || lostInitializationLease) {
             this.#failureParkStreaks.set(
               space,
               (this.#failureParkStreaks.get(space) ?? 0) + 1,
@@ -527,7 +629,7 @@ export class ExecutorHost {
       if (!activated) {
         this.#spaces.delete(space);
         this.#rebufferConsumedWarm(space, consumedWarm);
-        return;
+        return lostInitializationLease ? server : undefined;
       }
       if (this.#closed) {
         // close() ran while this activation was in flight (it awaits us,
@@ -602,10 +704,21 @@ export class ExecutorHost {
     // here makes close() cover it. The loop re-checks because a chained
     // re-activation may have been in flight when the snapshot was taken.
     while (this.#activating.size > 0) {
-      await Promise.allSettled([...this.#activating.values()]);
+      await Promise.allSettled(
+        [...this.#activating.values()].map(({ promise }) => promise),
+      );
     }
+    // A server already parking on its own — a lost lease, a failed loop
+    // — has park() return at once, so its completion is awaited through
+    // whenParked: close() must not return while a tenure's runtime is
+    // still being disposed against a memory server the caller closes
+    // next. The park's own dispose deadline bounds this wait; a dispose
+    // it abandons is the crash-equivalent path the park logs and counts.
     await Promise.all(
-      [...this.#spaces.values()].map((server) => server.park("host-closed")),
+      [...this.#spaces.values()].map(async (server) => {
+        await server.park("host-closed");
+        await server.whenParked;
+      }),
     );
     this.#spaces.clear();
     this.#pendingNotices.clear();

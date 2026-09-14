@@ -1047,6 +1047,7 @@ export class CiJobHistoryCollector {
   #snapshotRevisions = new Map<string, number>();
   #progressById = new Map<string, CiJobProgressRecord>();
   #progressByKey = new Map<string, CiJobProgressRecord>();
+  #newestProgress: CiJobProgressRecord | null = null;
   #progressSequence = 0;
   #refreshedAt = new Map<string, { at: number; revision: number }>();
   #refreshFailureAt = new Map<CiHistorySourceKey, number>();
@@ -1123,6 +1124,7 @@ export class CiJobHistoryCollector {
     };
     this.#progressByKey.set(key, record);
     this.#progressById.set(state.id, record);
+    this.#newestProgress = record;
     this.#trimProgressRecords(record);
     return record;
   }
@@ -1151,11 +1153,15 @@ export class CiJobHistoryCollector {
 
   #trimProgressRecords(preserve: CiJobProgressRecord): void {
     if (this.#progressByKey.size <= PROGRESS_RECORD_MAX) return;
+    // The record created most recently is exempt. Its progress id may have
+    // been handed to a caller that has not opened the progress stream yet,
+    // and that stream answers `unknown progress id` for a record this loop
+    // has taken.
     for (const [key, record] of this.#progressByKey) {
       if (this.#progressByKey.size <= PROGRESS_RECORD_MAX) break;
       const terminal = record.state.phase === "complete" ||
         record.state.phase === "error";
-      if (record !== preserve && terminal) {
+      if (record !== preserve && record !== this.#newestProgress && terminal) {
         this.#progressByKey.delete(key);
         this.#progressById.delete(record.state.id);
       }

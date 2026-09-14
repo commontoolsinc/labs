@@ -98,12 +98,13 @@ export interface IdentityState {
   flakesByDay: Record<string, number>;
 
   /**
-   * The ninetieth percentile of the day's measured durations, in
-   * milliseconds, and how many executions it was taken over. A day is
-   * the unit because keeping every duration would make the state object
-   * grow with the number of runs rather than with the number of tests.
+   * The day's slowest passing durations, in milliseconds, and how many
+   * passed. A day is the unit because keeping every duration would make
+   * the state object grow with the number of runs rather than with the
+   * number of tests, and the slowest of them are what a percentile
+   * inside the slowest tenth is read from.
    */
-  costByDay: Record<string, { p90: number; count: number }>;
+  costByDay: Record<string, DaySamples>;
 
   /** The outcome of the most recent `main` run this identity appeared in. */
   lastMainOutcome?: "pass" | "fail" | "skip";
@@ -144,19 +145,6 @@ export function daysBetween(earlier: string, later: string): number {
   const from = Date.parse(`${earlier}T00:00:00Z`);
   const to = Date.parse(`${later}T00:00:00Z`);
   return Math.round((to - from) / 86_400_000);
-}
-
-/**
- * The ninetieth percentile of a list of durations, by nearest rank. The
- * ninetieth rather than the maximum, because one unlucky runner should
- * not permanently inflate an estimate, and rather than the mean, because
- * a cost model that under-estimates blows the time budget.
- */
-export function percentile90(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.ceil(0.9 * sorted.length);
-  return sorted[Math.max(0, rank - 1)]!;
 }
 
 function addSource(state: IdentityState, source: string): void {
@@ -674,43 +662,94 @@ export function sampledPercentile90(samples: DaySamples): number {
   return samples.slowest[Math.max(0, index)] ?? 0;
 }
 
+/** One list of a day's durations, as the day's bounded sample of them. */
+export function samplesOf(durationsMs: readonly number[]): DaySamples {
+  const samples = emptySamples();
+  for (const durationMs of durationsMs) sampleDuration(samples, durationMs);
+  return samples;
+}
+
 /**
- * Folds a batch of one day's durations into that day's cost.
+ * Two parts of one day read as a whole: the slowest of the union, and the
+ * count of both.
+ *
+ * This is the same sample one accumulation of the whole day would have
+ * kept. A duration either part dropped already had `COST_SAMPLE_CAP`
+ * larger durations above it in that part alone, so the union holds at
+ * least that many above it too and it falls outside the cap either way.
+ */
+export function mergeSamples(a: DaySamples, b: DaySamples): DaySamples {
+  return {
+    slowest: [...a.slowest, ...b.slowest]
+      .sort((x, y) => x - y)
+      .slice(-COST_SAMPLE_CAP),
+    count: a.count + b.count,
+  };
+}
+
+/**
+ * Folds a batch of one day's durations into that day's sample.
  *
  * A day is read across as many runs as it takes for its objects to
- * arrive, so this is given part of a day at a time and has to combine
- * rather than replace: a later batch of two fast executions would
- * otherwise overwrite a morning of slow ones and understate what the
- * identity costs, which is the direction that overruns a lane.
- *
- * What it keeps is the higher percentile and the summed count. Two
- * percentiles cannot be averaged into the percentile of their union
- * without the samples behind them, and of the two answers available the
- * larger is the one a time budget survives.
+ * arrive, so this is given part of a day at a time and combines rather
+ * than replaces. Combining the samples rather than a figure taken from
+ * them is what makes the day's cost a percentile of the day: a batch
+ * carrying one execution contributes one duration, where a percentile of
+ * that batch would be that one duration standing for every execution the
+ * day holds.
  */
 export function sealDay(
   state: IdentityState,
   day: string,
-  durationsMs: readonly number[] | DaySamples,
+  batch: DaySamples,
 ): void {
-  // The only writer of a day's cost, so what is already there is another
-  // sealing of the same day from an earlier run and can be combined with
-  // this one. Nothing writes a provisional value alongside it: a running
-  // maximum kept as the fold went would be merged here as though it were
-  // a percentile, and its count added to a count that already includes
+  // The only writer of a day's sample, so what is already there is
+  // another sealing of the same day from an earlier run and can be
+  // combined with this one. Nothing writes a provisional value alongside
+  // it, whose count would then be added to a count that already includes
   // it.
-  const batch = Array.isArray(durationsMs)
-    ? { p90: percentile90(durationsMs), count: durationsMs.length }
-    : {
-      p90: sampledPercentile90(durationsMs as DaySamples),
-      count: (durationsMs as DaySamples).count,
-    };
   if (batch.count === 0) return;
-  const known = state.costByDay[day];
-  state.costByDay[day] = known === undefined ? batch : {
-    p90: Math.max(known.p90, batch.p90),
-    count: known.count + batch.count,
-  };
+  state.costByDay[day] = mergeSamples(
+    state.costByDay[day] ?? emptySamples(),
+    batch,
+  );
+}
+
+/** A day as an older state wrote it: the percentile rather than the samples. */
+interface StoredPercentile {
+  p90: number;
+  count: number;
+}
+
+/**
+ * Reads a state's stored days forward. A day carrying a percentile and a
+ * count is read as a day of that many executions standing at that
+ * percentile, capped the way any day's sample is capped. It gives the
+ * same cost back, and a later part of the same day merges into it
+ * against the whole day's weight: one execution standing for the day
+ * would be outweighed by the first part to arrive after it, which is
+ * how a day of slow runs would come to report a fast one.
+ */
+export function readCostsForward(state: IdentityState): void {
+  const days = state.costByDay ?? {};
+  state.costByDay = days;
+  // A stored day is one shape or the other, which the state's own
+  // declared type cannot say.
+  const read: Record<string, DaySamples | StoredPercentile> = days;
+  for (const [day, held] of Object.entries(read)) {
+    if ("slowest" in held) continue;
+    // A day whose stored figures are not numbers is read as a day with
+    // nothing in it, which is what a day this cannot make sense of is
+    // worth. Ending the read of the whole state is not.
+    days[day] = Number.isInteger(held.count) && held.count > 0 &&
+        Number.isFinite(held.p90)
+      ? {
+        slowest: new Array(Math.min(held.count, COST_SAMPLE_CAP))
+          .fill(held.p90),
+        count: held.count,
+      }
+      : emptySamples();
+  }
 }
 
 /** Ages a state's per-day counters, dropping days past their windows. */
@@ -865,9 +904,10 @@ export function flakeCounts(
  */
 export function costSeconds(state: IdentityState, today: string): number {
   let worst = 0;
-  for (const [day, sample] of Object.entries(state.costByDay)) {
+  for (const [day, samples] of Object.entries(state.costByDay)) {
     if (daysBetween(day, today) > COST_WINDOW_DAYS) continue;
-    if (sample.p90 > worst) worst = sample.p90;
+    const p90 = sampledPercentile90(samples);
+    if (p90 > worst) worst = p90;
   }
   return worst / 1000;
 }

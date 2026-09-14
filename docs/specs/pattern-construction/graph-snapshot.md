@@ -127,7 +127,7 @@ type NodeFactoryDescriptor =
 > **Note:** This describes future implementation work after Phase 1 type
 > unification is complete.
 
-1. When `Runner.#startWithTx()` iterates nodes during lift/handler execution,
+1. When `Runner.#startCore()` iterates nodes during lift/handler execution,
    instrument each instantiation to record:
    - The resolved module descriptor, including implementation reference
    - Normalized input links (already resolved since cells have concrete causes

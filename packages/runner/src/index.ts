@@ -79,6 +79,7 @@ export {
   type EntityId,
   entityIdFrom,
   getEntityId,
+  idStringForEntityAddress,
 } from "./create-ref.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
 export type {
@@ -89,6 +90,7 @@ export type {
 } from "./scheduler.ts";
 export type {
   ChangeGroup,
+  EventAppendDeliveryOutcome,
   IExtendedStorageTransaction,
   IOperationStorageCapability,
   MemorySpace,
@@ -231,6 +233,7 @@ export {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
   setPatternRepository,
   setPatternSource,
   setPieceReconciliation,
@@ -313,6 +316,7 @@ export {
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {
+  type ActionReadStats,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,
@@ -348,6 +352,11 @@ export {
   parseCellPath,
   resolveCellPath,
 } from "./piece-helpers.ts";
+export {
+  readResultSchemaMeta,
+  resultSchemaMetaSpelling,
+  writeResultSchemaMeta,
+} from "./result-schema-meta.ts";
 export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";
 export {

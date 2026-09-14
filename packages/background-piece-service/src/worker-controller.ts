@@ -1,3 +1,9 @@
+/**
+ * The main-thread side of a space's worker: spawns it, hands it requests over
+ * the protocol in `worker-ipc.ts`, matches its responses to them, and reports
+ * its terminal errors as events.
+ */
+
 import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { Cell } from "@commonfabric/runner";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
@@ -9,23 +15,56 @@ import {
   WorkerIPCMessageType,
 } from "./worker-ipc.ts";
 
+/**
+ * How long a request may run before it fails, absent a `timeoutMs` option: a
+ * minute.
+ */
 const DEFAULT_TASK_TIMEOUT = 60_000;
 
+/** Lifecycle states of a worker controller. */
 export enum WorkerState {
+  /** Constructed; the worker has not yet announced itself ready. */
   Uninitialized = "uninitialized",
+
+  /** The `Initialize` request is in flight. */
   Initializing = "initializing",
+
+  /** Initialized; `runPiece()` may be called. */
   Ready = "ready",
+
+  /** `shutdown()` is in progress. */
   Terminating = "terminating",
+
+  /** Shut down; the worker is terminated. */
   Terminated = "terminated",
+
+  /**
+   * Initialization failed, or the worker reported an error and was
+   * terminated.
+   */
   Error = "error",
 }
 
+/** Options for constructing a `WorkerController`. */
 export interface WorkerOptions {
+  /** DID of the space the worker serves. */
   did: string;
+
+  /** URL of the toolshed the worker's runtime talks to. */
   toolshedUrl: string;
+
+  /** Identity the worker runs as. */
   identity: Identity;
+
+  /**
+   * How long a request may run before it fails, in milliseconds; a minute by
+   * default.
+   */
   timeoutMs?: number;
+
+  /** Experimental runtime options to forward to the worker. */
   experimental?: {
+    /** Whether the runtime uses the modern cell representation. */
     modernCellRep?: boolean;
   };
 }
@@ -46,15 +85,29 @@ export class WorkerControllerErrorEvent extends Event {
   }
 }
 
+/** A request in flight. */
 interface Task {
+  /** The request's message id. */
   msgId: number;
+
+  /** When the request was sent, as a `performance.now()` value. */
   startTime: number;
+
+  /** Kind of the request. */
   type: WorkerIPCMessageType;
+
+  /** Settled by the worker's response, or by timeout or shutdown. */
   deferred: Deferred;
 }
 
 /**
- * @event error A terminal error occurred in the worker.
+ * Controller of one space's worker. Constructing one spawns the worker;
+ * initialization starts on its own once the worker announces itself ready,
+ * and `ready` settles when that finishes. Each request carries a message id,
+ * and fails on its own timeout when the worker does not answer in time.
+ *
+ * @event error A terminal error occurred in the worker, which has been
+ *   terminated; the event is a `WorkerControllerErrorEvent`.
  */
 export class WorkerController extends EventTarget {
   #worker: Worker;
@@ -77,6 +130,10 @@ export class WorkerController extends EventTarget {
 
   #state = WorkerState.Uninitialized;
 
+  /**
+   * Constructs an instance and spawns the worker for the space `options`
+   * names.
+   */
   constructor(options: WorkerOptions) {
     super();
     this.#did = options.did;
@@ -112,11 +169,25 @@ export class WorkerController extends EventTarget {
     };
   }
 
-  /** Promise that settles when the worker is initialized or has failed to. */
-  get initializeResolve(): Promise<void> {
+  /**
+   * Settles when the worker's initialization finishes: resolved once the
+   * worker is ready, rejected with the error that stopped it, or with the
+   * request's timeout when the worker dies mid-initialization. A worker that
+   * dies before announcing itself ready never starts initialization, and
+   * leaves this pending.
+   */
+  get ready(): Promise<void> {
     return this.#initializeDeferred.promise;
   }
 
+  /**
+   * Sends the worker its `Initialize` request, carrying this controller's
+   * space, toolshed, identity, and experimental options. Called once the
+   * worker announces itself ready.
+   *
+   * @throws If the controller is not uninitialized. Also if the request
+   *   fails, which leaves the controller in the `Error` state.
+   */
   async startInitialize() {
     if (this.#state !== WorkerState.Uninitialized) {
       throw new Error("Worker is not uninitialized.");
@@ -136,6 +207,12 @@ export class WorkerController extends EventTarget {
     }
   }
 
+  /**
+   * Runs the piece `bg` names in the worker, resolving when the run finishes.
+   *
+   * @throws If the worker is not ready, or if the run fails, times out, or
+   *   is cut off by `shutdown()`.
+   */
   async runPiece(
     bg: Cell<BGPieceEntry>,
   ): Promise<void> {
@@ -147,6 +224,12 @@ export class WorkerController extends EventTarget {
     });
   }
 
+  /**
+   * Shuts the worker down: rejects every request in flight, asks the worker
+   * to clean up, and terminates it, terminating even when the cleanup fails.
+   *
+   * @throws If a shutdown is already under way or done.
+   */
   async shutdown() {
     if (
       this.#state === WorkerState.Terminating ||
@@ -172,6 +255,7 @@ export class WorkerController extends EventTarget {
     this.#state = WorkerState.Terminated;
   }
 
+  /** Returns whether the worker is initialized and accepting runs. */
   isReady(): boolean {
     return this.#state === WorkerState.Ready;
   }
@@ -256,6 +340,10 @@ export class WorkerController extends EventTarget {
     this.#pending.delete(response.msgId);
   };
 
+  /**
+   * Handler for the worker's `error` event, which terminates the worker and
+   * re-dispatches the error as this controller's own `error` event.
+   */
   #onWorkerError = (err: ErrorEvent) => {
     console.error(`${this.#did}: Worker error:`, err);
     // If not prevented, error is rethrown in this context.
@@ -268,6 +356,7 @@ export class WorkerController extends EventTarget {
     this.dispatchEvent(new WorkerControllerErrorEvent(err));
   };
 
+  /** Logs how `task` ended, at warning level when it failed with `error`. */
   #logTaskResults(task: Task, error?: string) {
     const errorMessage = error ? `: ${error}` : "";
     const state = error ? "failed" : "completed";

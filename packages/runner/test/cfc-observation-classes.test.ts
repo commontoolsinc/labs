@@ -99,14 +99,18 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     return id;
   };
 
-  const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
-  };
+  type StoredDocument = {
+    value?: unknown;
+    cfc?: { labelMap?: { entries: StoredEntry[] } };
+  } | undefined;
+
+  const storedDocument = (id: string): StoredDocument =>
+    (storageManager!.open(space).replica as unknown as {
+      getDocument(id: string): StoredDocument;
+    }).getDocument(id);
+
+  const entriesOf = (id: string): StoredEntry[] =>
+    storedDocument(id)?.cfc?.labelMap?.entries ?? [];
 
   const derivedConfidentiality = (id: string): unknown[] | undefined =>
     entriesOf(id).find((e) => e.origin === "derived")?.label.confidentiality;
@@ -158,7 +162,11 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
       tx.prepareCfc();
     }
     expect((await tx.commit()).ok).toBeDefined();
-    return derivedConfidentiality(out.getAsNormalizedFullLink().id);
+    const outId = out.getAsNormalizedFullLink().id;
+    // The stored value pins the document the join is read from, so a caller
+    // finding no join is finding a document with no derived entry.
+    expect(storedDocument(outId)?.value).toEqual({ copied: true });
+    return derivedConfidentiality(outId);
   };
 
   it("value reads: legacy covering join is byte-identical; link-origin entries stay excluded", async () => {

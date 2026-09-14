@@ -387,6 +387,8 @@ function getSymbolTypeAtSource(
 function isNullishTypeNode(node: ts.TypeNode): boolean {
   return node.kind === ts.SyntaxKind.UndefinedKeyword ||
     node.kind === ts.SyntaxKind.NullKeyword ||
+    (ts.isLiteralTypeNode(node) &&
+      node.literal.kind === ts.SyntaxKind.NullKeyword) ||
     node.kind === ts.SyntaxKind.VoidKeyword;
 }
 
@@ -825,6 +827,32 @@ function buildShrunkTypeNodeFromType(
       typeRegistry,
       typeToNodeFlags,
     );
+  }
+
+  // Normalized cell paths address the stored value. Preserve the wrapper so
+  // a value field named after a cell method resolves against the inner type.
+  if (isCellLikeType(type, checker)) {
+    const node = typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      typeToNodeFlags,
+    );
+    if (
+      node && (ts.isUnionTypeNode(node) ||
+        (ts.isTypeReferenceNode(node) && isCellLikeTypeNode(node) &&
+          node.typeArguments?.length))
+    ) {
+      return buildShrunkTypeNodeFromTypeNode(
+        node,
+        normalized,
+        factory,
+        checker,
+        typeRegistry,
+        normalizedFullShapePaths,
+      );
+    }
+    return node;
   }
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
@@ -2376,8 +2404,39 @@ function extractCellLikeInnerTypeNode(
   node: ts.TypeNode,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.TypeNode | undefined {
+  // A nullable cell handle keeps its value alternatives inside the inferred
+  // capability wrapper. Read the narrowed syntax before consulting cached types.
+  if (ts.isUnionTypeNode(node)) {
+    const members: ts.TypeNode[] = [];
+    let hasCell = false;
+    for (const member of node.types) {
+      if (isNullishTypeNode(member)) {
+        members.push(member);
+        continue;
+      }
+      const memberType = getTypeFromTypeNodeWithFallback(
+        member,
+        checker,
+        typeRegistry,
+      );
+      if (preservedWrapperFor(member, memberType, checker)) return undefined;
+      const inner = extractCellLikeInnerTypeNode(
+        member,
+        checker,
+        sourceFile,
+        factory,
+        typeRegistry,
+      );
+      if (!inner) return undefined;
+      hasCell = true;
+      members.push(inner);
+    }
+    return hasCell ? factory.createUnionTypeNode(members) : undefined;
+  }
+
   const semanticType = getTypeFromTypeNodeWithFallback(
     node,
     checker,
@@ -2565,6 +2624,7 @@ function applyCellCapabilityPathsToTypeNode(
       updated,
       checker,
       sourceFile,
+      factory,
       typeRegistry,
     );
     if (inner) {

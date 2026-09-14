@@ -107,11 +107,12 @@ Waits split into two groups with different primitives.
   answers only while neither the host nor that control is disabled;
   `clickCfButtonsConcurrently` does the same for a group. `clickNthCfButton`
   takes the `index`-th match of a selector that already resolves to the buttons
-  themselves. `clickTrustedAction` takes the first enabled match of a
-  `data-ui-action` value. The note-button helpers take the first enabled
-  button matching a text or a title. `submitViaEnter` focuses a field and
-  presses Enter rather than clicking, and settles around resolving that field
-  the same way.
+  themselves and waits for that match and its wrapped control to become enabled,
+  counting disabled matches when locating the index. `clickTrustedAction` takes
+  the first enabled match of a `data-ui-action` value. The note-button helpers
+  take the first enabled button matching a text or a title. `submitViaEnter`
+  focuses a field and presses Enter rather than clicking, and settles around
+  resolving that field the same way.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -891,6 +892,23 @@ boundary the test can await without adding one to production code.
   unbounded wait there would hang a run instead of failing it. The failure names
   elapsed milliseconds and the poll count, which is what separates a predicate
   that never came true from one the test never got to evaluate.
+
+  One class of that state does have a reporter after all: an engine row the
+  serving loop writes that also fans out to a flag-ON client — the served
+  intent landing in the firing session's effects instance is the canonical
+  case — reaches that client's storage-notification relay, the same relay the
+  effects channel consumes. `wait-on-delivery.ts` beside `wait-until.ts` wakes
+  on those deliveries and re-reads an engine predicate on each, subscribing
+  before its first check so an arrival cannot slip between the two; the engine
+  holds any such state before delivering it, which is what makes an engine
+  predicate safe to re-check on the client's wake. Its deadline is the same
+  kind of stuck-condition net, and crossing it proves only that the predicate
+  did not come true within the window — no fixed bound can tell a stuck wait
+  from one delayed past it. Its width, generous headroom over any healthy
+  arrival observed, is what keeps a crossing pointing at a stuck wait rather
+  than at contention stretching a passing run — the reading a deadline close
+  to the healthy latency cannot support. The bounded poll stays for the rest:
+  the watermark, the stats counters, and engine rows nothing delivers.
 
 ### A pull that drives its own loading
 

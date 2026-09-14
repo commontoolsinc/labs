@@ -8,8 +8,14 @@
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
-import { action, assert, type Default, TESTS, Writable } from "commonfabric";
-import { pattern } from "commonfabric";
+import {
+  action,
+  assert,
+  type Default,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import Topics, { type TopicDemand } from "./main.tsx";
 import Topic, { type TopicComment, type TopicLink } from "./topic.tsx";
 

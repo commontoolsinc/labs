@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 import {
@@ -239,17 +240,20 @@ describe("CFC commit preparation", () => {
   });
 
   it("leaves a transaction that writes a labeled `cid:` document unprepared", async () => {
-    // The other half: a `cid:` document sits on an unverified write path any
-    // same-space principal can reach, so its stored label map is out of the
-    // flow derivation on every channel. The same write on an ordinary
-    // document is what relevance looks like when the probe does see it.
+    // The other half: the commit boundary verifies a `cid:` document's
+    // VALUE against its id and never its envelope, so any same-space
+    // principal can install one carrying whatever label map it likes, and
+    // that map is out of the flow derivation on every channel. The same
+    // write on an ordinary document is what relevance looks like when the
+    // probe does see it.
 
     const { runtime, dispose } = makeRuntime();
     try {
       const seed = runtime.edit();
       const plainId = runtime.getCell(space, "commit-prep-plain")
         .getAsNormalizedFullLink().id;
-      const cidId = "cid:commit-preparation-poison" as URI;
+      // `seedLabeledDoc` writes `{ note: "labeled" }` as the value.
+      const cidId = `cid:${taggedHashStringOf({ note: "labeled" })}` as URI;
       seedLabeledDoc(seed, plainId);
       seedLabeledDoc(seed, cidId);
       expect((await seed.commit()).error).toBeUndefined();

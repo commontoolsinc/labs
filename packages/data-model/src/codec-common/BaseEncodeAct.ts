@@ -1,7 +1,8 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
-import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
+import { isFabricSpecialObject } from "@/type-check.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,
@@ -123,7 +124,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
     // At this point, we know `value` can't be encoded. We just need to figure
     // out the right error message.
 
-    if (value instanceof FabricSpecialObject) {
+    if (isFabricSpecialObject(value)) {
       throw new Error(
         `No codec registered for \`FabricSpecialObject\` subclass ${
           backtickQuote(value.constructor.name)

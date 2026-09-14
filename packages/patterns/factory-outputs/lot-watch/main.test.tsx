@@ -23,9 +23,8 @@
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
-import LotWatch from "./main.tsx";
+import LotWatch, { classifyPlate, plateKey } from "./main.tsx";
 import type { KnownVehicle, PlateGroup, Sighting } from "./main.tsx";
-import { classifyPlate, plateKey } from "./main.tsx";
 
 // groupSightingsByPlate is not exported; inline the same logic here so we can
 // test the grouping contract without modifying main.tsx.

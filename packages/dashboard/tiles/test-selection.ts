@@ -1,13 +1,20 @@
 /**
  * Reports what the newest selection manifest would have a pull request
- * run: what share of the corpus fits five lanes. It goes amber when the
- * manifest has gone stale, because selection quality decays with it, and
- * red when a lane's projected work is past the bound the whole design
- * rests on, which is the one condition the sub line gives up its share
- * for.
+ * run: what share of the corpus fits five lanes.
+ *
+ * It goes amber on either of two counts. The manifest has gone stale, and
+ * selection quality decays with it. Or the corpus holds a test that costs
+ * more on its own than a whole lane's budget, which no packing can place,
+ * so a pull request runs it only where its own diff makes it mandatory.
+ * It goes red when a lane's projected work is past the bound the whole
+ * design rests on.
+ *
+ * Two of those three want the sub line, and the red one takes it first.
+ * Staleness wants the header facet instead, so it competes for neither.
  *
  * The packing itself — every lane, what each holds, and what each is
- * projected to spend — is a page away.
+ * projected to spend — is a page away, along with every test no lane can
+ * hold and what each was measured at.
  *
  * Following the dashboard's values (README.md): it reports on the system.
  */
@@ -68,17 +75,26 @@ async function selectionView(
     ? 0
     : Math.max(...manifest.lanes.map((lane) => lane.projectedSeconds));
   const over = fullest > budget;
+  const unplaceable = manifest.unschedulable.length;
   const stale = ageHours > MANIFEST_STALE_HOURS;
-  const status: Status = over ? "bad" : stale ? "warn" : "good";
+  const status: Status = over
+    ? "bad"
+    : unplaceable > 0 || stale
+    ? "warn"
+    : "good";
   const badge = `${compactSpan(age)} old`;
   return {
     label: "test selection",
     status,
     value: `${share.toFixed(0)}%`,
-    // A lane past its budget is what the tile turned red for, so it takes
-    // the line the corpus share otherwise holds.
+    // The condition the tile is colored for takes this line, worst
+    // first, and the corpus count holds it while neither has.
     sub: over
       ? `fullest lane ${fullest.toFixed(0)}s of ${budget}s`
+      : unplaceable > 0
+      ? `${groupDigits(unplaceable)} test${
+        unplaceable === 1 ? "" : "s"
+      } too long for any lane`
       : `${groupDigits(selected)} of ${groupDigits(known)} tests`,
     aside: stale
       ? `<span class="hfacet" title="${badge}">${badge}</span>`

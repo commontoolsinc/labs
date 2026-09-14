@@ -32,6 +32,7 @@ import {
   open,
   read,
 } from "../v2/engine.ts";
+import type { FabricValue } from "@commonfabric/data-model";
 import {
   type ClientCommit,
   type EntityDocument,
@@ -107,7 +108,16 @@ interface AcceptedRecord {
   seq: number;
   sessionId: string;
   commit: ClientCommit;
+
+  /** Operation indexes the engine elided: they wrote no revision. */
+  elidedOpIndexes: readonly number[];
 }
+
+/** The operations of an accepted commit that reached durable history. */
+const durableOperations = (record: AcceptedRecord) =>
+  record.commit.operations.filter((_, index) =>
+    !record.elidedOpIndexes.includes(index)
+  );
 
 //
 // One schedule
@@ -128,6 +138,12 @@ interface ScheduleStats {
 
   /** The same, for the ones it rejected. */
   sparseRejects: number;
+
+  /** Commits the engine accepted with every operation elided: the identity
+   * escape of 03-commit-model.md §3.6.1, reachable only through a staleness
+   * refusal. The generator writes values an entity already holds often
+   * enough for the run-wide total to reach the vacuity floor. */
+  identityElisions: number;
 }
 
 const runSchedule = async (seed: number): Promise<ScheduleStats> => {
@@ -144,6 +160,7 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
     pendingReadAccepts: 0,
     sparseAccepts: 0,
     sparseRejects: 0,
+    identityElisions: 0,
   };
 
   const ctx = (step: number, extra: Record<string, unknown> = {}) =>
@@ -154,14 +171,17 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
     commit: ClientCommit,
     step: number,
   ) => {
-    const naive = naiveAdmit(history, session.sessionId, commit);
+    const naive = naiveAdmit(history, session.sessionId, commit, values);
     let engineSeq: number | null = null;
+    let elidedOpIndexes: readonly number[] = [];
     try {
-      engineSeq = applyCommit(engine, {
+      const verdict = applyCommit(engine, {
         sessionId: session.sessionId,
         principal: session.principal,
         commit,
-      }).seq;
+      });
+      engineSeq = verdict.seq;
+      elidedOpIndexes = verdict.elidedOpIndexes ?? [];
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
     }
@@ -172,9 +192,26 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       );
     }
     if (engineSeq !== null) {
-      naiveRecord(history, session.sessionId, commit, engineSeq);
+      naiveRecord(
+        history,
+        session.sessionId,
+        commit,
+        engineSeq,
+        elidedOpIndexes,
+      );
       naiveApply(values, commit.operations);
-      accepted.push({ seq: engineSeq, sessionId: session.sessionId, commit });
+      accepted.push({
+        seq: engineSeq,
+        sessionId: session.sessionId,
+        commit,
+        elidedOpIndexes,
+      });
+      if (
+        commit.operations.length > 0 &&
+        elidedOpIndexes.length === commit.operations.length
+      ) {
+        stats.identityElisions++;
+      }
       headSeq = engineSeq;
     }
     return engineSeq;
@@ -206,10 +243,34 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       const id = pick(rng, ENTITIES);
       let sparseThisStep = false;
 
-      // Writes: whole-doc set, key replace, or array append.
+      // Writes: whole-doc set, key replace, or array append — or, one step
+      // in five, a write of what the entity already durably holds (a set of
+      // its document, or a replace of a leaf with that leaf's value), which
+      // is what the identity escape admits when the read beside it is
+      // stale. The naive store is the durable value at generation time.
       const operations: ClientCommit["operations"] = [];
       const roll = rng();
-      if (roll < 0.15) {
+      const durable = values.get(id) as { value: Record<string, unknown> };
+      if (chance(rng, 0.2)) {
+        if (chance(rng, 0.5)) {
+          operations.push({ op: "set", id, value: doc(durable.value) });
+        } else {
+          const leaf = pick(rng, KEY_LEAVES);
+          const current = leaf.slice(1).reduce(
+            (node, key) => (node as Record<string, unknown>)[key],
+            durable.value as unknown,
+          ) as FabricValue;
+          operations.push({
+            op: "patch",
+            id,
+            patches: [{
+              op: "replace",
+              path: `/${leaf.join("/")}`,
+              value: current,
+            }],
+          });
+        }
+      } else if (roll < 0.15) {
         operations.push({
           op: "set",
           id,
@@ -321,11 +382,19 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
     // INV-1 (confirmed reads): re-scan the accepted history with the exact
     // overlap test — the in-process twin of the state-inspector oracle.
     for (const record of accepted) {
+      // An identity commit's observation may be stale by construction: the
+      // deviation 09-invariants.md records under INV-1. Its reads are not
+      // held to coherence; its elided operations are already absent from
+      // every other record's durable-write scan.
+      if (
+        record.commit.operations.length > 0 &&
+        record.elidedOpIndexes.length === record.commit.operations.length
+      ) continue;
       for (const rd of record.commit.reads.confirmed) {
         for (const other of accepted) {
           if (other.seq <= rd.seq || other.seq >= record.seq) continue;
           if (other.sessionId === record.sessionId) continue;
-          const hit = toNaiveOps(other.commit.operations).some((op) =>
+          const hit = toNaiveOps(durableOperations(other)).some((op) =>
             op.id === rd.id &&
             (op.kind === "set" ||
               op.leafPaths.some((leaf) => naivePathsOverlap(leaf, rd.path)))
@@ -357,7 +426,7 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
             other.sessionId === record.sessionId &&
             named.includes(other.commit.localSeq)
           ) continue;
-          const hit = toNaiveOps(other.commit.operations).some((op) =>
+          const hit = toNaiveOps(durableOperations(other)).some((op) =>
             op.id === rd.id &&
             (op.kind === "set" ||
               op.leafPaths.some((leaf) => naivePathsOverlap(leaf, rd.path)))
@@ -387,6 +456,7 @@ Deno.test("memory v2 differential: engine admission refines the naive model acro
     pendingReadAccepts: 0,
     sparseAccepts: 0,
     sparseRejects: 0,
+    identityElisions: 0,
   };
   for (let seed = 1; seed <= 100; seed++) {
     const stats = await runSchedule(seed);
@@ -395,6 +465,7 @@ Deno.test("memory v2 differential: engine admission refines the naive model acro
     totals.pendingReadAccepts += stats.pendingReadAccepts;
     totals.sparseAccepts += stats.sparseAccepts;
     totals.sparseRejects += stats.sparseRejects;
+    totals.identityElisions += stats.identityElisions;
   }
   // Schedule-shape sanity (deterministic, seeds are fixed): the generator
   // must keep exercising rejections, accepted pending-stack reads, and both
@@ -405,7 +476,8 @@ Deno.test("memory v2 differential: engine admission refines the naive model acro
   // "low" from quietly becoming "never".
   if (
     totals.rejected < 50 || totals.pendingReadAccepts < 50 ||
-    totals.sparseAccepts < 5 || totals.sparseRejects < 5
+    totals.sparseAccepts < 5 || totals.sparseRejects < 5 ||
+    totals.identityElisions < 5
   ) {
     throw new Error(
       `degenerate schedule mix: ${JSON.stringify(totals)} — retune generator`,

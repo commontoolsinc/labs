@@ -1,7 +1,8 @@
 # Array-method callback pipeline
 
 _Reference doc for the transformer pipeline as it processes reactive
-`arr.map((elem) => …)` (and `filter` / `flatMap`) callbacks._
+`arr.map((elem) => …)` and `filter` / `flatMap` callbacks, plus `count` /
+`minBy` / `maxBy` callbacks on explicit array-valued cells._
 
 ## Pipeline order
 

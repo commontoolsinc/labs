@@ -338,6 +338,10 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       };
       const entries =
         replica.getDocument(persistedId)?.cfc?.labelMap?.entries ?? [];
+      // The re-derived link entry is there, carrying the source label, so the
+      // integrity check below runs over a label map that was written.
+      expect(entries.map((e) => e.path)).toEqual([["field"]]);
+      expect(entries[0].label.confidentiality).toEqual(["source-root"]);
       const allIntegrity = entries.flatMap((e) => e.label.integrity ?? []);
       expect(
         allIntegrity.some((a) => a?.type?.endsWith("/InjectionSafe")),

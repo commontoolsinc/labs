@@ -460,7 +460,17 @@ if [[ "$CF_HARNESS" == "true" ]]; then
             curl -s -o /dev/null -w "%{http_code}" --max-time 2 \
                 "http://127.0.0.1:$CONSOLE_PORT/api/health" 2>/dev/null
         )" == "200" ]]; then
-            echo "  cf-harness console is ready."
+            # A console left over from an earlier launch answers this health
+            # check too, out of its own code and its own store. What makes the
+            # 200 this launch's is the pid listening on the port being the
+            # child started above, or one of its descendants.
+            console_holder=$(foreign_port_holder "$CONSOLE_PORT" "$CONSOLE_PID")
+            if [[ -n "$console_holder" ]]; then
+                console_unavailable "port $CONSOLE_PORT is held by pid \
+$console_holder, not the console this launch started"
+            else
+                echo "  cf-harness console is ready."
+            fi
             break
         fi
         sleep 1

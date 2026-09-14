@@ -1,3 +1,4 @@
+import { normalizeCellScope } from "../scope.ts";
 import type {
   Activity,
   IMemorySpaceAddress,
@@ -5,7 +6,6 @@ import type {
   StorageTransactionRejected,
   TransactionReactivityLog,
 } from "./interface.ts";
-import { normalizeCellScope } from "../scope.ts";
 
 const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
@@ -69,6 +69,16 @@ export const allowMutableTransactionRead: Metadata = {
 
 export const internalVerifierRead: Metadata = {
   [internalVerifierReadMarker]: true,
+};
+
+/**
+ * A pending output reused by a write still needs its publication accepted.
+ * The shared identity selects this commit-only read for wave acceptance and
+ * foreign-space handoff without classifying ordinary verifier probes as writes.
+ */
+export const pendingWriteElisionRead: Metadata = {
+  ...ignoreReadForScheduling,
+  ...internalVerifierRead,
 };
 
 /**
@@ -169,7 +179,8 @@ export function takeCoverageWaits(tx: object): Promise<void>[] {
 const uiInputBlindWriteTxs = new WeakSet<object>();
 const durableReadTxs = new WeakSet<object>();
 
-function* blindWriteTxChain(tx: object): Generator<object> {
+/** Iterates a transaction and its wrappers once each. */
+export function* transactionLayers(tx: object): Generator<object> {
   let current: object | undefined = tx;
   const seen = new Set<object>();
   while (current && !seen.has(current)) {
@@ -194,10 +205,10 @@ function* blindWriteTxChain(tx: object): Generator<object> {
  * layers.
  */
 export function markUiInputBlindWriteTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) uiInputBlindWriteTxs.add(layer);
+  for (const layer of transactionLayers(tx)) uiInputBlindWriteTxs.add(layer);
 }
 export function unmarkUiInputBlindWriteTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) uiInputBlindWriteTxs.delete(layer);
+  for (const layer of transactionLayers(tx)) uiInputBlindWriteTxs.delete(layer);
 }
 export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
@@ -209,11 +220,11 @@ export function isUiInputBlindWriteTx(tx: object): boolean {
  * which cannot be named by a commit sent to the server.
  */
 export function markDurableReadTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) durableReadTxs.add(layer);
+  for (const layer of transactionLayers(tx)) durableReadTxs.add(layer);
 }
 
 export function isDurableReadTx(tx: object): boolean {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     if (durableReadTxs.has(layer)) return true;
   }
   return false;
@@ -241,10 +252,10 @@ const lazyMaterializationTxs = new WeakSet<object>();
  * as the marks above, so a wrapper and the transaction it wraps read alike.
  */
 export function markLazyMaterializationTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) lazyMaterializationTxs.add(layer);
+  for (const layer of transactionLayers(tx)) lazyMaterializationTxs.add(layer);
 }
 export function unmarkLazyMaterializationTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     lazyMaterializationTxs.delete(layer);
   }
 }
@@ -252,7 +263,7 @@ export function isLazyMaterializationTx(tx: object): boolean {
   // Walk the chain rather than testing the object: a wrapper built over a
   // transaction that was marked earlier has never been marked itself, and must
   // still report the mark of what it wraps.
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     if (lazyMaterializationTxs.has(layer)) return true;
   }
   return false;
@@ -266,13 +277,13 @@ export function isLazyMaterializationTx(tx: object): boolean {
 const schemaRefusals = new WeakMap<object, unknown>();
 
 export function noteSchemaRefusalTx(tx: object, refusal: unknown): void {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     if (!schemaRefusals.has(layer)) schemaRefusals.set(layer, refusal);
   }
 }
 
 export function takeSchemaRefusalTx(tx: object): unknown {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     const refusal = schemaRefusals.get(layer);
     if (refusal !== undefined) return refusal;
   }
@@ -283,7 +294,7 @@ export function takeSchemaRefusalTx(tx: object): unknown {
 // a mismatch it asked for is the one clearing it, and a different refusal held
 // on the same transaction is somebody else's and still owed to the runner.
 export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     if (schemaRefusals.get(layer) === refusal) schemaRefusals.delete(layer);
   }
 }
@@ -298,7 +309,7 @@ export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
 const rendererInputTxs = new WeakSet<object>();
 
 export function markRendererInputTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) rendererInputTxs.add(layer);
+  for (const layer of transactionLayers(tx)) rendererInputTxs.add(layer);
 }
 export function isRendererInputTx(tx: object): boolean {
   return rendererInputTxs.has(tx);
@@ -329,14 +340,14 @@ export function setBlindStructuralTarget(
   tx: object,
   target: BlindStructuralTarget,
 ): void {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     blindStructuralTargets.set(layer, target);
   }
 }
 export function getBlindStructuralTarget(
   tx: object,
 ): BlindStructuralTarget | undefined {
-  for (const layer of blindWriteTxChain(tx)) {
+  for (const layer of transactionLayers(tx)) {
     const target = blindStructuralTargets.get(layer);
     if (target !== undefined) return target;
   }
@@ -455,23 +466,24 @@ export function reactivityLogFromActivities(
   };
   for (const activity of activities) {
     if ("read" in activity && activity.read) {
-      if (isReadIgnoredForScheduling(activity.read.meta)) {
-        continue;
-      }
+      const ignored = isReadIgnoredForScheduling(activity.read.meta);
+      const attempted = isReadMarkedAsAttemptedWrite(activity.read.meta);
+      if (ignored && !attempted) continue;
       const address: IMemorySpaceAddress = {
         space: activity.read.space,
         scope: normalizeCellScope(activity.read.scope),
         id: activity.read.id,
         path: [...activity.read.path],
       };
+      if (attempted) {
+        log.attemptedWrites ??= [];
+        log.attemptedWrites.push(address);
+      }
+      if (ignored) continue;
       if (activity.read.nonRecursive === true) {
         log.shallowReads.push(address);
       } else {
         log.reads.push(address);
-      }
-      if (isReadMarkedAsAttemptedWrite(activity.read.meta)) {
-        log.attemptedWrites ??= [];
-        log.attemptedWrites.push(address);
       }
       continue;
     }

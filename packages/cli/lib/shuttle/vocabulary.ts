@@ -374,9 +374,15 @@ export type Verb = (
 ) => Outcome | Promise<Outcome>;
 
 /**
- * Helper for {@link get}, which is where `operand` points, read from where
- * shuttle stands and settling nothing, `verb` naming the verb whose line the
- * operand was written on.
+ * Where `operand` points, read from where shuttle stands and settling
+ * nothing, `verb` naming the verb whose line the operand was written on.
+ *
+ * This is the one door every reading verb aims through, and a line that wrote
+ * no operand comes through it too: an absent operand is where shuttle stands,
+ * which is the same answer for each of them and so is given once here rather
+ * than by each verb reading the place for itself. What a verb still decides
+ * is what it does with the answer — `get` reads the cell, `ls` lists it, and
+ * {@link receiver} narrows it to a piece.
  *
  * The verb reaches the place's reading rather than anything here: an operand
  * every verb aims through is refused in the name of the one that wrote it
@@ -384,10 +390,13 @@ export type Verb = (
  */
 export async function aimed(
   shuttle: Shuttle,
-  operand: string,
+  operand: string | undefined,
   verb: string,
   deps: VerbDeps,
 ): Promise<Aiming> {
+  if (operand === undefined) {
+    return { kind: "place", place: shuttle.place.place, input: false };
+  }
   const aim = shuttle.place.aim(operand, verb);
   const at = await reading(shuttle, aim.move, verb, deps);
   return at.kind === "refused" ? at : { ...at, input: aim.input };

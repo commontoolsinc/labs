@@ -1,7 +1,7 @@
 // platform-linux.ts — Linux FUSE v3 low-level API implementation.
 //
-// Struct layouts are for Linux x86_64. All offset values should be verified
-// by compiling and running verify-structs.c on the target platform.
+// The offsets here are confirmed by compiling and running verify-structs.c,
+// which reads the headers of the architecture it is built on.
 
 import {
   COMMON_SYMBOLS,
@@ -54,37 +54,52 @@ const LINUX_SYMBOLS = {
 
 type LinuxLib = Deno.DynamicLibrary<typeof LINUX_SYMBOLS>;
 
-// struct stat (Linux x86_64, 144 bytes):
+// struct stat (Linux):
 //   dev_t st_dev       @ 0   (u64)
 //   ino_t st_ino       @ 8   (u64)
-//   nlink_t st_nlink   @ 16  (u64)  — note: u64 on Linux, u16 on macOS
-//   mode_t st_mode     @ 24  (u32)  — note: u32 on Linux, u16 on macOS
-//   uid_t st_uid       @ 28  (u32)
-//   gid_t st_gid       @ 32  (u32)
-//   ...padding...      @ 36  (u32)
-//   dev_t st_rdev      @ 40  (u64)
+//   ...the block below, which moves...
 //   off_t st_size      @ 48  (i64)
+//   st_atim @ 72, st_mtim @ 88, st_ctim @ 104 (struct timespec, 16 each)
 //
-// NOTE: These offsets are initial best-guesses for x86_64.
-// Run verify-structs.c to confirm exact values.
+// glibc gives `st_nlink` eight bytes on x86_64 and four on arm64, which moves
+// `st_mode`, `st_uid` and `st_gid` and makes the whole struct shorter.
+// Everything from `st_size` on sits in the same place on both.
 
-const STAT_SIZE = 144;
+/** Where the members that move sit, and how long the struct is. */
+export const STAT_BY_ARCH = {
+  x86_64: { size: 144, nlink: 16, nlinkBytes: 8, mode: 24, uid: 28, gid: 32 },
+  aarch64: { size: 128, nlink: 20, nlinkBytes: 4, mode: 16, uid: 24, gid: 28 },
+} as const;
+
+/**
+ * The layout for the architecture this is running on. verify-structs.c reads
+ * the headers of whichever architecture it is compiled on, so the harness
+ * confirms this table wherever it runs.
+ */
+export const STAT_LAYOUT = STAT_BY_ARCH[Deno.build.arch];
+
+const STAT_SIZE = STAT_LAYOUT.size;
 const STAT_ST_SIZE_OFFSET = 48;
-// struct timespec members (Linux x86_64):
-//   st_atim @ 72 (tv_sec @ 72, tv_nsec @ 80)
-//   st_mtim @ 88 (tv_sec @ 88, tv_nsec @ 96)
-//   st_ctim @ 104 (tv_sec @ 104, tv_nsec @ 112)
 const STAT_ST_MTIM_OFFSET = 88;
 
-function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
+/** Fill a `struct stat` as `stat` places the members that move. */
+export function writeStatWith(
+  stat: typeof STAT_LAYOUT,
+  buf: ArrayBuffer,
+  opts: StatOpts,
+): void {
   const view = new DataView(buf);
   new Uint8Array(buf).fill(0);
   view.setBigUint64(8, opts.ino, true); // st_ino @ 8
-  view.setBigUint64(16, BigInt(opts.nlink), true); // st_nlink @ 16 (u64)
-  view.setUint32(24, opts.mode, true); // st_mode @ 24 (u32)
-  view.setUint32(28, opts.uid ?? 0, true); // st_uid @ 28
-  view.setUint32(32, opts.gid ?? 0, true); // st_gid @ 32
-  view.setBigInt64(48, BigInt(opts.size), true); // st_size @ 48
+  if (stat.nlinkBytes === 8) {
+    view.setBigUint64(stat.nlink, BigInt(opts.nlink), true);
+  } else {
+    view.setUint32(stat.nlink, opts.nlink, true);
+  }
+  view.setUint32(stat.mode, opts.mode, true);
+  view.setUint32(stat.uid, opts.uid ?? 0, true);
+  view.setUint32(stat.gid, opts.gid ?? 0, true);
+  view.setBigInt64(STAT_ST_SIZE_OFFSET, BigInt(opts.size), true);
   const { sec, nsec } = msToTimespec(opts.mtime);
   for (const secOffset of [72, 88, 104]) { // st_atim/st_mtim/st_ctim
     view.setBigInt64(secOffset, sec, true);
@@ -92,14 +107,18 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   }
 }
 
+function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
+  writeStatWith(STAT_LAYOUT, buf, opts);
+}
+
 //
 // fuse_entry_param
 //
-// Layout: ino(u64) + generation(u64) + stat(144) + attr_timeout(f64) + entry_timeout(f64)
-// = 8 + 8 + 144 + 8 + 8 = 176 bytes (same total as macOS)
+// Layout: ino(u64) + generation(u64) + stat + attr_timeout(f64) +
+// entry_timeout(f64), so its size follows the architecture's struct stat.
 //
 
-const ENTRY_PARAM_SIZE = 176;
+const ENTRY_PARAM_SIZE = 16 + STAT_SIZE + 16;
 const writeEntryParam = makeWriteEntryParam(
   writeStat,
   STAT_SIZE,

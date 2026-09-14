@@ -110,9 +110,9 @@ import {
   type HarnessPatternIndexClientFactory,
 } from "./pattern-index/client.ts";
 import {
-  createPatternIndexPublicationLedger,
-  type PatternIndexPublicationLedger,
-} from "./pattern-index/publish-ledger.ts";
+  createPatternIndexLedger,
+  type PatternIndexLedger,
+} from "./pattern-index/ledger.ts";
 import {
   cacheHarnessSkillsShAcquisitionClientFactory,
   createHarnessSkillsShAcquisitionClientFactory,
@@ -124,8 +124,12 @@ import {
   type HarnessSkillsShSearchClientFactory,
 } from "./skills-sh/search-client.ts";
 import type { HandleValueResolutionContext } from "./tools/handle-values.ts";
-import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
+import type {
+  HarnessConnectorGrantSpec,
+  HarnessWellKnownGrant,
+} from "./contracts/well-known-grants.ts";
 import {
+  checkRecordedWellKnownGrant,
   mintWellKnownGrants,
   resolveWellKnownGrantRefs,
 } from "./well-known-grants.ts";
@@ -370,6 +374,14 @@ export interface CreateHarnessEngineOptions
   inputCells?: readonly HarnessInputCellSpec[];
 
   /**
+   * Connector handles to grant at run start, beside the fixed well-known
+   * grants; see `establishWellKnownGrants`. The console resolves these off
+   * the loom instance it was launched against, so every run on that console
+   * holds them without a caller attaching anything.
+   */
+  connectorGrants?: readonly HarnessConnectorGrantSpec[];
+
+  /**
    * Published patterns to resolve against the index at run start; see
    * `establishPatternRefs`. Requires a pattern index — the ids name entries
    * it holds.
@@ -512,9 +524,10 @@ export class CfHarnessEngine {
     HarnessSkillsShAcquisitionClientFactory;
   #docsCorpus?: Promise<HarnessDocsCorpus>;
   #exploreQueryRunner?: HarnessExploreQueryRunner;
-  #patternIndexPublications?: PatternIndexPublicationLedger;
+  #patternIndexLedger?: PatternIndexLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
+  readonly #connectorGrants: readonly HarnessConnectorGrantSpec[];
   readonly #patternRefs: readonly HarnessPatternRefSpec[];
   readonly #spaceDbPath?: string;
   readonly #hostMounts: readonly HostSandboxMount[];
@@ -721,6 +734,7 @@ export class CfHarnessEngine {
         );
     this.#taskText = options.taskText;
     this.#inputCells = options.inputCells ?? [];
+    this.#connectorGrants = options.connectorGrants ?? [];
     this.#patternRefs = options.patternRefs ?? [];
     this.#spaceDbPath = options.spaceDbPath;
     const sandboxConfig = options.sandboxRuntime === undefined
@@ -1012,6 +1026,16 @@ export class CfHarnessEngine {
   }
 
   /**
+   * The connector handles this run's console was launched against. A
+   * delegating parent hands them to the child engine, so a child's grants
+   * resolve from the configuration the parent's resolved from rather than
+   * from a second reading of the records behind it.
+   */
+  get connectorGrants(): readonly HarnessConnectorGrantSpec[] {
+    return this.#connectorGrants;
+  }
+
+  /**
    * Whether the run can reach the pattern index — either an injected factory
    * or `patternIndex` connection config. The prompt loop offers
    * `search_patterns` and `record_feedback` exactly when this holds.
@@ -1046,22 +1070,25 @@ export class CfHarnessEngine {
    * duplicates were being produced at. Created on first use and only when the
    * run can reach an index at all.
    */
-  get patternIndexPublications(): PatternIndexPublicationLedger | undefined {
+  get patternIndexLedger(): PatternIndexLedger | undefined {
     const factory = this.#patternIndexClientFactory;
     if (factory === undefined) return undefined;
-    this.#patternIndexPublications ??= createPatternIndexPublicationLedger(
+    this.#patternIndexLedger ??= createPatternIndexLedger(
       factory,
     );
-    return this.#patternIndexPublications;
+    return this.#patternIndexLedger;
   }
 
   /**
-   * Sends everything this session's ledger still holds. Called once, when the
-   * session's prompt loop finishes; a session that never reaches it publishes
-   * nothing, which `publish-ledger.ts` states as the cost it is.
+   * Sends everything this session's ledger still holds and waits for every
+   * write it has made. Called once, when the session's prompt loop finishes.
+   * A session that never reaches it keeps whatever the ledger already sent —
+   * a displaced iteration, a dependency, a report — and loses the entries
+   * still held, which `ledger.ts` states as the cost it is, along with
+   * whichever writes were in flight.
    */
-  async flushPatternIndexPublications(): Promise<void> {
-    await this.#patternIndexPublications?.flush();
+  async flushPatternIndexLedger(): Promise<void> {
+    await this.#patternIndexLedger?.flush();
   }
 
   /**
@@ -1380,12 +1407,19 @@ export class CfHarnessEngine {
 
   /**
    * Establishes the run's well-known grants: seeds the handle table with a
-   * token for each reference every Fabric-configured run is entitled to
-   * hold, records the grants in run state, and returns them. Establishing
-   * the Fabric session is the cost of resolving the references, so this
-   * connects eagerly — callers invoke it only on runs configured for a
-   * session. Idempotent across resume: grants already recorded are returned
+   * token for each reference every run on this console is entitled to hold —
+   * the space's piece registry, and the connector handles the run was
+   * configured with — records the grants in run state, and returns them.
+   * Establishing the Fabric session is the cost of resolving the references,
+   * so this connects eagerly — callers invoke it only on runs configured for
+   * a session. Idempotent across resume: grants already recorded are returned
    * as they stand, without connecting again.
+   *
+   * Called for a session's own run and never for a delegated child, which
+   * receives only the handles its brief names (spec §5, `AH-CFC-12`): a child
+   * engine carries `connectorGrants` so its configuration matches its
+   * parent's, and calling this there would hand every child references no
+   * brief asked for.
    *
    * A run without a session factory has nothing to grant and answers `[]`.
    * A session that cannot be established propagates its failure — the caller
@@ -1393,13 +1427,23 @@ export class CfHarnessEngine {
    */
   async establishWellKnownGrants(): Promise<HarnessWellKnownGrant[]> {
     if (this.#runState.wellKnownGrants !== undefined) {
-      return structuredClone(this.#runState.wellKnownGrants);
+      // Checked on the way out of the record, not only on the way in: a
+      // resumed run reads these from a file this process did not write, and a
+      // connector grant's name reaches model-facing text.
+      const recorded = structuredClone(this.#runState.wellKnownGrants);
+      for (const grant of recorded) {
+        checkRecordedWellKnownGrant(grant);
+      }
+      return recorded;
     }
     if (this.#fabricSessionFactory === undefined) {
       return [];
     }
     const session = await this.#fabricSessionFactory();
-    const refs = await resolveWellKnownGrantRefs(session);
+    const refs = await resolveWellKnownGrantRefs(
+      session,
+      this.#connectorGrants,
+    );
     const minted = await mintWellKnownGrants(
       this.handleTable,
       this.#runState.runId,
@@ -2239,7 +2283,7 @@ export class CfHarnessEngine {
           getPatternIndexClient: this.#patternIndexClientFactory,
           patternIndexPublishEnabled: this.patternIndexPublishEnabled,
           patternIndexPublishDiscoverable: this.patternIndexPublishDiscoverable,
-          patternIndexPublications: this.patternIndexPublications,
+          patternIndexLedger: this.patternIndexLedger,
         }
         : {}),
       ...(this.docsCorpusAvailable

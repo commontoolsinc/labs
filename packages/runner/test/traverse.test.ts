@@ -36,6 +36,7 @@ import {
   mergeAnyOfBranchSchemas,
   mergeAnyOfMatches,
   PointerCycleTracker,
+  schemaAcceptsType,
   type SchemaMemo,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
@@ -544,8 +545,8 @@ describe("SchemaObjectTraverser array traversal", () => {
     expect(error).toBeDefined();
   });
 
-  it("rejects populated array when items is false and no prefixItems (B3)", () => {
-    // CT-1562 / B3: companion to the test above, with the same `items: false`
+  it("rejects populated array when items is false and no prefixItems", () => {
+    // Companion to the test above, with the same `items: false`
     // constraint but without `prefixItems`. The traverser rejects a populated
     // array against it.
 
@@ -584,7 +585,7 @@ describe("SchemaObjectTraverser array traversal", () => {
     expect(error).toBeDefined();
   });
 
-  it("accepts empty array when items is false (B3 baseline)", () => {
+  it("accepts empty array when items is false", () => {
     // `items: false` without `prefixItems` means "this array allows no items at
     // all, only `[]` matches."
 
@@ -1041,9 +1042,9 @@ describe("SchemaObjectTraverser FabricSpecialObject type handling", () => {
     };
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
 
-    // The structural shape the schema-generator emits for these types today
-    // (CT-1836): own props can never satisfy it — `length` lives on the
-    // prototype. A leaf is not property-walked, so it must not matter.
+    // The structural shape the schema-generator emits for these types: own
+    // props can never satisfy it — `length` lives on the prototype. A leaf is
+    // not property-walked, so it must not matter.
     const schema = {
       type: "object",
       properties: { length: { type: "number" } },
@@ -2070,7 +2071,7 @@ describe("canBranchMatch", () => {
   });
 
   it("accepts empty array against items: false (only empty arrays match)", () => {
-    // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
+    // `items: false` on an array schema means "no items allowed"
     // (only the empty array `[]` matches). canBranchMatch checks
     // `type === "array"` but ignores `items: false`, so a populated array still
     // passes this fast-reject check. This case pins the empty-array half, which
@@ -2122,17 +2123,12 @@ describe("SchemaObjectTraverser number/integer type pruning", () => {
 });
 
 describe("mergeAnyOfMatches", () => {
-  // CT-1562 / B2: when an anyOf produces multiple successful matches and all
-  // of them are arrays, the current `Object.assign({}, ...arrays)` merge
-  // strips array-ness, returning `{ "0": …, "1": … }` instead of `[…, …]`.
-  // Arrays satisfy `isObjectOrArray` (typeof [] === "object" && [] !== null), so
-  // the object-merge branch fires erroneously.
-  //
-  // The existing object-merge semantic is intentional for object branches
-  // (different anyOf branches contributing disjoint property sets); it
-  // doesn't apply to arrays.
-  //
-  // These tests are RED until B2 is fixed.
+  // When an anyOf produces multiple successful matches, object matches merge
+  // by property union (different anyOf branches contributing disjoint
+  // property sets), and array matches keep their array-ness. Arrays satisfy
+  // `isObjectOrArray` (typeof [] === "object" && [] !== null), so a merge that
+  // did not tell them apart would run them through the object branch and
+  // return `{ "0": …, "1": … }` instead of `[…, …]`.
 
   it("returns undefined when matches is empty", () => {
     expect(mergeAnyOfMatches([])).toBe(undefined);
@@ -2150,18 +2146,17 @@ describe("mergeAnyOfMatches", () => {
     expect(mergeAnyOfMatches([a, b])).toEqual({ name: "Alice", age: 30 });
   });
 
-  it("preserves array-ness when all matches are arrays (B2, currently fails)", () => {
+  it("preserves array-ness when all matches are arrays", () => {
     // Both branches of an anyOf produce arrays. The merge must return an
     // array, not an Object.assign'd plain object.
     const result = mergeAnyOfMatches([[1, 2], [3, 4]]);
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it("preserves array-ness when one branch is empty and one is populated (B2 CT-1562 shape, currently fails)", () => {
-    // This is the precise shape CT-1562 hits: one branch returns [] (the
-    // `{items: false}` branch in the Default<[]> anyOf) and the other
-    // returns the populated array. Both are arrays; merging them as objects
-    // produces `{"0": …, "1": …}` which has no `.map`.
+  it("preserves array-ness when one branch is empty and one is populated", () => {
+    // The `Default<[]>` anyOf shape: one branch (`{items: false}`) returns []
+    // and the other returns the populated array. Both are arrays; merged as
+    // objects they would produce `{"0": …, "1": …}`, which has no `.map`.
     const result = mergeAnyOfMatches([[], [{ name: "alpha" }, {
       name: "beta",
     }]]);
@@ -3697,13 +3692,11 @@ describe("sparse array preservation in traverseArrayWithSchema", () => {
 });
 
 describe("MapSetStringToPathSelectors assumes pre-interned inputs", () => {
-  // Per the contract simplification: as of Dan's intermediate PR,
-  // MSP's hash fn no longer interns or freezes its input. Callers
-  // must hand in an already-interned selector (via
-  // `internPathSelector`) for the `hashOfModernInternal` WeakMap
-  // cache to retain the hash. These tests verify the post-contract
-  // behavior: correctness of dedup under pre-interned inputs, plus
-  // the no-op behavior when `hashValues` is false.
+  // MSP's hash fn neither interns nor freezes its input. Callers must
+  // hand in an already-interned selector (via `internPathSelector`)
+  // for the `hashOfModernInternal` WeakMap cache to retain the hash.
+  // These tests verify correctness of dedup under pre-interned inputs,
+  // plus the no-op behavior when `hashValues` is false.
 
   // Content-unique title guarantees no prior interning has seen the
   // exact schema in this test file or in imported modules.
@@ -3773,10 +3766,10 @@ describe("schemaTrackerCoversSelector", () => {
 
   it("canonicalizes a frozen-but-non-interned selector before lookup", () => {
     // A frozen selector whose schema is frozen yet NOT the canonical interned
-    // instance. The old fast path keyed off `Object.isFrozen()` and treated
-    // this as already-interned, so it skipped canonicalization entirely. The
-    // lookup must instead operate on an interned selector, which means the
-    // schema gets interned as a side effect.
+    // instance. A fast path keyed off `Object.isFrozen()` would treat this as
+    // already-interned and skip canonicalization entirely. The lookup must
+    // operate on an interned selector, which means the schema gets interned
+    // as a side effect.
     const schema = Object.freeze(uniqueSchema()) as JSONSchema;
     const selector = Object.freeze({
       path: Object.freeze(["value", "x"]),
@@ -4324,8 +4317,8 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
 
 describe("MapSet size and totalValues", () => {
   // Both getters exist only to fill in the slow-traverse report, so nothing
-  // else in the runtime reads them. Covering them here keeps them off the
-  // machine-speed-dependent path that report used to sit on.
+  // else in the runtime reads them. Covering them here gives them a test that
+  // does not depend on machine speed.
 
   it("counts keys and values in the reference-equality mode", () => {
     const mapSet = new MapSet<string, string>();
@@ -4574,9 +4567,9 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
     // Most-visited first. Target `i` was linked `i + 1` times, so the two
     // least-visited targets are the ones the cap dropped. (These links
     // are unscoped, so the coverage memo deliberately does not skip
-    // their re-walks — the stage-E neutrality guard in
-    // isLinkedDocumentCovered preserves the pre-re-keying behavior, and
-    // this assertion doubles as its regression test.)
+    // their re-walks — the neutrality guard in isLinkedDocumentCovered
+    // keeps unscoped links being re-walked, and this assertion pins that
+    // behavior.)
     const counts = listed.map((entry) => Number(entry.split("=")[1]));
     expect(counts).toEqual([...counts].sort((a, b) => b - a));
     expect(counts).not.toContain(1);
@@ -4683,5 +4676,29 @@ describe("SchemaObjectTraverser schema memo keys", () => {
 
     expect(large.idLength).toBeGreaterThan(small.idLength * 3);
     expect(perVisit(large)).toBeLessThan(perVisit(small) * 1.1);
+  });
+});
+
+describe("schemaAcceptsType()", () => {
+  it("returns `true` when a union arm's `$ref` names a definition only the union declares", () => {
+    expect(schemaAcceptsType({
+      $defs: { Name: { type: "string" } },
+      anyOf: [{ $ref: "#/$defs/Name" }],
+    }, "string")).toBe(true);
+  });
+
+  it("returns `false` when a union arm's own `$defs` define its `$ref` as the type but the union's define it otherwise", () => {
+    // `#/$defs/Name` names the union's definition: the arm sits in the
+    // union's document, and its own `$defs` is inert there.
+    expect(schemaAcceptsType({
+      $defs: { Name: { type: "number" } },
+      anyOf: [{ $ref: "#/$defs/Name", $defs: { Name: { type: "string" } } }],
+    }, "string")).toBe(false);
+  });
+
+  it("returns `true` when the union declares no `$defs` and the arm resolves as the document it is", () => {
+    expect(schemaAcceptsType({
+      anyOf: [{ $ref: "#/$defs/Name", $defs: { Name: { type: "string" } } }],
+    }, "string")).toBe(true);
   });
 });

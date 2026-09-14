@@ -15,6 +15,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 
 // A pattern update must not leave durable state the new version's argument
 // schema cannot read. `packages/piece/src/schema-compatibility.ts` waives one
@@ -42,7 +43,7 @@ import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 // default-root apply, `cf piece setsrc` — was recognized as a change already
 // and needed nothing here.
 //
-// The cold-link cases are the CT-1917 counterweight and belong in the same
+// The cold-link cases are the counterweight and belong in the same
 // file: this validation only stays correct while "a slot I cannot read right
 // now" keeps being distinguished from "a slot holding a plain value of the
 // wrong type". Tightening one of these breaks the other, so a reader changing
@@ -369,16 +370,15 @@ describe("pattern update validates the stored argument", () => {
   });
 
   it("does not half-swap a RUNNING piece whose stored argument is fine", async () => {
-    // The counterweight to the running-piece refusal above, and a regression
-    // guard: validating on that path must not become STAGING on it.
+    // The counterweight to the running-piece refusal above, and its bound:
+    // validating on that path must not become STAGING on it.
     //
     // `applySetupState` installs the incoming version's argument schema,
     // internal manifest and result projection — but only the pattern watcher
     // can cancel the live nodes and instantiate the new ones. Staging here
     // would leave the piece's projection reading as V2 while its nodes still
     // drive V1's cells, and would stamp the completion marker forward, erasing
-    // the mismatch a later repair needs to see. Measured before the fix: the
-    // live value moved to the new version's without its graph ever running.
+    // the mismatch a later repair needs to see.
     //
     // The two versions differ in WHICH cell backs `tag`, so a staged-but-not-
     // instantiated projection is visible as a value change.
@@ -489,7 +489,7 @@ describe("pattern update validates the stored argument", () => {
         .getMetaRaw("schema"),
       "the candidate's result schema was staged over a piece still running " +
         "the previous version's nodes",
-    ).toEqual(v1.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(v1.resultSchema!));
   });
 
   /**
@@ -556,10 +556,10 @@ describe("pattern update validates the stored argument", () => {
   };
 
   it("defers a COLD LINK slot on the in-place validation path", async () => {
-    // CT-1917 on the running-reuse route. The in-place check is a second
-    // validation site, and it only stays correct while it defers what the
-    // re-stage defers — otherwise every running piece whose argument slot links
-    // into a doc that has not synced starts refusing its own repair.
+    // The cold-link deferral on the running-reuse route. The in-place check is
+    // a second validation site, and it only stays correct while it defers what
+    // the re-stage defers — otherwise every running piece whose argument slot
+    // links into a doc that has not synced starts refusing its own repair.
     const { cell, v2 } = await runningWithStaleMarker(
       "in-place-cold-link",
       { count: 1 },
@@ -577,7 +577,7 @@ describe("pattern update validates the stored argument", () => {
       await repairInPlace(cell, v2),
       "a slot whose link cannot be dereferenced right now was refused on the " +
         "in-place path, which fails the repair of every running piece whose " +
-        "argument links into a doc that has not synced (CT-1917)",
+        "argument links into a doc that has not synced",
     ).toBeUndefined();
   });
 
@@ -608,7 +608,7 @@ describe("pattern update validates the stored argument", () => {
       await repairInPlace(cell, v2),
       "an argument doc that reads nothing right now was treated as invalid on " +
         "the in-place path, so a nested piece under an unsynced host cannot " +
-        "be repaired (CT-1917)",
+        "be repaired",
     ).toBeUndefined();
   });
 
@@ -770,7 +770,7 @@ describe("pattern update validates the stored argument", () => {
       "the candidate's result schema was written over a MARKERLESS running " +
         "piece — 'not staged by another version' was read as 'staged by this " +
         "one', and an absent marker proves neither",
-    ).toEqual(v1.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(v1.resultSchema!));
   });
 
   it("still repairs a missing result schema on a piece running THIS version", async () => {
@@ -827,7 +827,7 @@ describe("pattern update validates the stored argument", () => {
       "a piece running THIS version no longer has its missing result schema " +
         "repaired — the reuse path suppresses the write for the stale-marker " +
         "case and took the same-version case with it",
-    ).toEqual(pattern.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(pattern.resultSchema!));
 
     // The same repair on the OTHER reuse branch. A caller may re-run a running
     // piece WITH an argument (`PiecesController.runWithPattern` does), and that
@@ -853,7 +853,7 @@ describe("pattern update validates the stored argument", () => {
       meta(cell),
       "the supplied-argument reuse branch returns without repairing the " +
         "result schema, so a piece re-run with an argument stays untyped",
-    ).toEqual(pattern.resultSchema);
+    ).toEqual(resultSchemaMetaSpelling(pattern.resultSchema!));
   });
 
   it("does not classify a failure that merely mentions the refusal", () => {
@@ -897,14 +897,14 @@ describe("pattern update validates the stored argument", () => {
   });
 
   it("rolls forward when a stored slot holds a link that reads COLD", async () => {
-    // CT-1917 on the roll-forward route, and the differential that pins WHERE
-    // the line falls: same candidate as the refusal case above, same slot, same
-    // schema — the only difference is that `count` holds a LINK rather than a
-    // plain value. A link to a doc that is absent (or simply not loaded this
-    // session, the ordinary client cold state) must not read as "invalid", or
-    // every not-yet-synced nested argument becomes a failed update; the
-    // vintage's own instantiation wrote exactly this link. Refuse the plain
-    // value, defer the unreadable link.
+    // The cold-link deferral on the roll-forward route, and the differential
+    // that pins WHERE the line falls: same candidate as the refusal case above,
+    // same slot, same schema — the only difference is that `count` holds a
+    // LINK rather than a plain value. A link to a doc that is absent (or
+    // simply not loaded this session, the ordinary client cold state) must not
+    // read as "invalid", or every not-yet-synced nested argument becomes a
+    // failed update; the vintage's own instantiation wrote exactly this link.
+    // Refuse the plain value, defer the unreadable link.
     const absent = rt.getCell<number>(space, "roll-forward-cold-target");
     const { cell } = await setupVintage(
       openArgument("v1"),
@@ -918,7 +918,7 @@ describe("pattern update validates the stored argument", () => {
       error,
       "an argument slot whose link cannot be dereferenced right now was " +
         "treated as invalid, which would fail every update over a doc that " +
-        "has not synced (CT-1917)",
+        "has not synced",
     ).toBeUndefined();
     await cell.pull();
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");

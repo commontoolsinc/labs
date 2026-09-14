@@ -346,7 +346,8 @@ logical path past what that field declares. That is over-taint, so reads stay
 protected, and giving the envelope seam its own path space is the fix. Shares
 the meta-seam predicate with the schema write-policy requirement (#6077).
 
-A second narrowing follows the same rule over a document rather than a path.
+A second narrowing follows the same rule over a document rather than a path,
+and covers two id classes.
 A computed cell is the derived internal cell the runtime materializes to hold
 a derivation's result, addressed under its own URI scheme
 (`computed:fid1:<hash>`). No author declares a store policy on one — a
@@ -367,7 +368,51 @@ it: that route declares out of one piece's flow join and is keyed on that
 piece's own nodes, while an entries document is keyed on the stream, is
 written by every party that can reach the stream, and outlives all of them.
 
-Both id classes are outside the check at every rung, through the same
+A third narrowing covers the program-text half of the §18.6.2 exclusion the
+paragraph above names, and it is the one place where the shape the spec
+states and the shape the runtime implements come apart. A compilation-cache
+record holds one module for the compiler — the `cid:` document its bytes
+live in, its import identities, and the predecessor identities its writer
+authority descends from. The cache addresses it by the cause
+`pattern:<identity>`, or `compileCache:<runtimeVersion>/<identity>` for the
+compiled set, whose `<identity>` is the module's content-derived Merkle
+identity; the entity id that cause mints is an ordinary `of:fid1:<hash>`. No
+pattern names the record and the only schemas describing its fields are the
+cache's own, which declare integrity alone. Because the id is that ordinary
+shape, no predicate over id strings can recognize the class: the write side
+names each document instead, under an authorized whole-document marker the
+measurement reads off the transaction.
+
+Where the two come apart is the write side. §18.6.2 mirrors its read
+exclusion to "the write-side rule that the same addresses are not value-
+write targets", which would leave a cache document unstamped as well as
+unmeasured. The runtime keeps it as a stamp target and skips the ceiling
+alone, which is what the two narrowings above do and what §4 of the
+enforcement matrix states at length. Safety invariant 9 is what keeps the
+stamp rather than a preference. The delegation metadata holds module
+identities, and §17.7 says holding one grants no access to the artifact it
+names, so the content written there is public. Which identity appears is the
+other question: a transaction that read a labeled value and chose a
+successor by it writes that choice into the record, and §8.11.3 puts a
+decision's label on every downstream output whatever the output's own
+content is. Unstamping the record would drop exactly that. The bytes are
+unaffected either way, being in a `cid:` document that already takes
+§18.6.2's route on both sides, so the divergence covers the compiler's
+bookkeeping and nothing else. Its cost is that a later reader of that field
+consumes the clause, which is a recorded residual rather than a claim that
+the two shapes agree. For a join the target's own space produced the two
+differ only in what is labeled: neither refuses. They part on a join that
+drew a clause from elsewhere, which the skip is scoped away from, so the
+implemented shape measures the cache write and can refuse it at strict where
+§18.6.2's shape, having no write target there at all, would not.
+
+Route 2 is not open to this class, on the keying ground an entries document
+is off it for — a cache document is keyed on module content, every piece in
+the space running that module addresses it, and it outlives all of them —
+and on a second: route 2 leaves a `declared` entry per measured path, which
+§8.12.1 does not let back, on a document nothing collects.
+
+All three are outside the check at every rung, through the same
 predicate the meta seam uses, and the skip is scoped to a join the target's
 own space produced: the join records the space each contributing document
 lived in, and a target whose join drew a clause from elsewhere is measured
@@ -376,9 +421,14 @@ holds for the direction it was written for, while work over its own space's
 data proceeds — within one space a computed cell shares a replica set with
 its source, and an entries document with the document holding its stream.
 
-Two id classes is what this is, rather than a rule about documents the
-runtime mints: the document anchoring splits out of a value has an id derived
-from its parent's, which no author named either, and it is measured.
+An enumeration is what this is, rather than a rule about documents the
+runtime mints. The document anchoring splits out of a value has an id
+derived from its parent's, which no author named either, and it is measured
+— except where its parent is itself outside the check by the marker, which
+carries down to it, because it holds part of the value the marker names. The
+compilation cache reaches that carry today only through the general rule:
+its own records are written raw, with their import edges inline, so the
+cache itself anchors nothing.
 
 Nothing is laundered here either. The join still lands on the exempt
 document as its `derived` component, so a later read of it is tainted and a
@@ -402,7 +452,7 @@ refuses a clause a policy evaluation would have discharged. A residual stands wh
 computed document, from a schema-carrying write: it stops being a write
 ceiling there, and stays a read floor.
 
-A third narrowing does not skip the measurement but answers it. The runtime
+A fourth narrowing does not skip the measurement but answers it. The runtime
 materializes documents to hold a piece's MACHINERY rather than data an author
 named: a piece's argument, result and internal documents, minted by the runner
 from the piece's result cause; the state documents a builtin mints from its own

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -125,6 +126,74 @@ describe("data URI sync", () => {
     await dataCell.sync();
 
     expect(synced).toContainEqual({ id: linkedId, scope: "user" });
+  });
+
+  it("loads immutable inputs under each requested user's full session identity", async () => {
+    const alice = await Identity.fromPassphrase("immutable sync Alice");
+    const bob = await Identity.fromPassphrase("immutable sync Bob");
+    const identities = [
+      { principal: alice.did(), sessionId: "Alice first" },
+      { principal: alice.did(), sessionId: "Alice second" },
+      { principal: bob.did(), sessionId: "Bob first" },
+    ];
+    const userCell = runtime.getCell(
+      space,
+      "user-input",
+      undefined,
+      tx,
+      "user",
+    );
+    const sessionCell = runtime.getCell(
+      space,
+      "session-input",
+      undefined,
+      tx,
+      "session",
+    );
+    const inputs = runtime.getImmutableCell(space, { userCell, sessionCell });
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync;
+    const requests: Array<{ id: string; scope?: string; instance?: string }> =
+      [];
+    provider.sync = (id, _selector, scope, instance) => {
+      expect(storageManager.pendingLoadAddresses()).toContainEqual({
+        space,
+        scope,
+        id,
+        scopeKey: instance,
+      });
+      requests.push({ id, scope, instance });
+      return Promise.resolve({ ok: {} });
+    };
+    try {
+      for (const identity of identities) {
+        await storageManager.syncCell(inputs, { scopeKeyIdentity: identity });
+        // An identical request shares the completed naming work.
+        await storageManager.syncCell(inputs, {
+          scopeKeyIdentity: { ...identity },
+        });
+      }
+      const expected = identities.flatMap((identity) => [
+        {
+          id: userCell.getAsNormalizedFullLink().id,
+          scope: "user",
+          instance: resolveScopeKey("user", identity),
+        },
+        {
+          id: sessionCell.getAsNormalizedFullLink().id,
+          scope: "session",
+          instance: resolveScopeKey("session", identity),
+        },
+      ]);
+      expect(requests).toHaveLength(expected.length);
+      expect(requests).toEqual(expect.arrayContaining(expected));
+      expect(requests.filter((request) =>
+        request.scope === "user" &&
+        request.instance === resolveScopeKey("user", identities[0])
+      )).toHaveLength(2);
+    } finally {
+      provider.sync = originalSync;
+    }
   });
 
   it("sync on a data: URI cell with multiple links syncs all of them", async () => {
@@ -429,6 +498,51 @@ describe("data URI sync", () => {
       await otherRuntime.dispose();
       await otherStorageManager.close();
     }
+  });
+
+  it("syncs a linked cell under the reader's schema, not the link's", async () => {
+    const linkedCell = runtime.getCell(
+      space,
+      "linked-target-under-reader-schema",
+      undefined,
+      tx,
+    );
+    linkedCell.set({ name: "Ada", extra: { big: true } });
+    const linkedId = linkedCell.getAsNormalizedFullLink().id;
+    const wide = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        extra: { type: "object", properties: { big: { type: "boolean" } } },
+      },
+    } as const;
+    const narrow = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const;
+
+    // The link carries the wide schema; the reader asks for the narrow one.
+    const dataCell = runtime.getImmutableCell(
+      space,
+      { ref: linkedCell.asSchema(wide).getAsLink({ includeSchema: true }) },
+      undefined,
+      tx,
+    );
+
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const schemasByTarget = new Map<string, unknown>();
+    provider.sync = (id: any, selector?: any, scope?: any) => {
+      schemasByTarget.set(id, selector?.schema);
+      return originalSync(id, selector, scope);
+    };
+
+    await dataCell.asSchema({
+      type: "object",
+      properties: { ref: narrow },
+    }).sync();
+
+    expect(schemasByTarget.get(linkedId)).toEqual(narrow);
   });
 });
 

@@ -176,8 +176,9 @@ return {
 };
 ```
 
-The step runs the target through the same worker reconciler implementation used
-by the renderer, discards the generated DOM operations, waits for recursively
+The step initially pulls the target through the renderer's VDOM schema, validates
+the root value, and mounts the same worker reconciler implementation used by the
+renderer. It discards the generated DOM operations, waits for recursively
 discovered VDOM cells to settle, and immediately unmounts. It is transparent
 to assertion counts, honors `skip: true`, and is supported in both single- and
 multi-user tests.

@@ -4,17 +4,16 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 // Bring lift's schema-bearing, type-materializing overloads into scope. They live
-// in `@commonfabric/api/schema` (CT-1625) — the facade module that augments
+// in `@commonfabric/api/schema` — the facade module that augments
 // LiftFunction. The lift materialization test below is compile-time only and
 // declares a locally-typed `lift` (the facade `lift` is `declare const`, no
 // runtime value). (handler still materializes via its module.ts overloads.)
-import type { LiftFunction } from "@commonfabric/api";
+import type { AsCellType, LiftFunction, ReadonlyCell } from "@commonfabric/api";
 
 import { handler } from "../src/builder/module.ts";
 
 import "@commonfabric/api/schema";
 
-import type { AsCellType, ReadonlyCell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, Runtime, type Stream } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -36,8 +35,8 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// Compile-time-only handle to lift's schema-augmented facade type (CT-1625). The
-// runtime `lift` is `declare const` (no JS), and the materialization test uses this
+// Compile-time-only handle to lift's schema-augmented facade type. The runtime
+// `lift` is `declare const` (no JS), and the materialization test uses this
 // purely for type-checking, never calling it at runtime.
 declare const lift: LiftFunction;
 
@@ -664,7 +663,7 @@ describe("Schema-to-TS Type Conversion", () => {
   });
 
   it("should correctly infer types when using lift with JSON schema", () => {
-    // CT-1625: lift's schema-bearing overloads are now FUNCTION-FIRST and live in
+    // lift's schema-bearing overloads are FUNCTION-FIRST and live in
     // `commonfabric/schema` (api/schema.ts), where the callback's input type is
     // MATERIALIZED from the supplied JSONSchema via Schema<> — same split as
     // pattern()/handler(). `api/index.ts` only carries the schema-light callback-

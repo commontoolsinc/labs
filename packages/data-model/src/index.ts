@@ -1,38 +1,30 @@
-// Re-export everything from `interface.ts`, which declares the types and the
-// base class.
 export {
-  type CompactDebugStringOptions,
-  type DebugValueOptions,
-  type FabricArray,
-  type FabricContainerValue,
-  type FabricConvertibleValue,
+  deepFreeze,
+  isDeepFrozen,
+  isValidDeepFrozenFabricValue,
+} from "./deep-freeze.ts";
+
+export { fabricAwareEqual } from "./fabricAwareEqual.ts";
+
+export type * from "./interface.ts";
+
+export {
   FabricInstance,
-  type FabricNativeObject,
-  type FabricPlainObject,
   FabricPrimitive,
   FabricSpecialObject,
-  type FabricValue,
-  type FabricValueLayer,
-  type FromNativeErrorOptions,
-  type MutableFabricArrayLayer,
-  type MutableFabricContainerValueLayer,
-  type MutableFabricPlainObjectLayer,
-  type MutableFabricValueLayer,
-  type NonNullableFabricValue,
 } from "./interface.ts";
 
 export {
-  cloneForMutation,
-  CloneForMutationError,
-  type CloneForMutationErrorKind,
-  type CloneForMutationOptions,
-  type CloneForMutationResult,
-  cloneIfNecessary,
-  type CloneOptions,
-  cloneWithoutValueAtPath,
-  cloneWithValueAtPath,
-  shallowMutableClone,
-} from "./value-clone.ts";
+  fabricFromNativeValue,
+  isValidFabricConvertibleValue,
+  nativeFromFabricValue,
+  shallowCleanArray,
+  shallowCleanPlainObject,
+  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromNativeValue,
+} from "./native-conversion.ts";
+
+export { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 export {
   isFabricArray,
@@ -40,6 +32,7 @@ export {
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isFabricSpecialObject,
   isKeyableObjectNotArray,
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
@@ -55,26 +48,17 @@ export {
 } from "./validity-check.ts";
 
 export {
-  fabricFromNativeValue,
-  isValidFabricConvertibleValue,
-  nativeFromFabricValue,
-  shallowCleanArray,
-  shallowCleanPlainObject,
-  shallowFabricFromNativeObjectElseUndefined,
-  shallowFabricFromNativeValue,
-} from "./native-conversion.ts";
-
-export { fabricAwareEqual } from "./fabricAwareEqual.ts";
-
-export { refuseFabricInstance } from "./refuseFabricInstance.ts";
-
-export { valueEqual } from "./valueEqual.ts";
-
-export {
-  deepFreeze,
-  isDeepFrozen,
-  isValidDeepFrozenFabricValue,
-} from "./deep-freeze.ts";
+  cloneForMutation,
+  CloneForMutationError,
+  type CloneForMutationErrorKind,
+  type CloneForMutationOptions,
+  type CloneForMutationResult,
+  cloneIfNecessary,
+  type CloneOptions,
+  cloneWithoutValueAtPath,
+  cloneWithValueAtPath,
+  shallowMutableClone,
+} from "./value-clone.ts";
 
 export {
   toCompactDebugString,
@@ -87,10 +71,14 @@ export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
 export {
   FABRIC_PRIMITIVE_VALUE_TAGS,
+  FABRIC_VALUE_TAGS,
   type FabricPrimitiveValueTag,
+  type FabricValueTag,
   JS_TYPE_VALUE_TAGS,
   jsTagFromValue,
   type JsTypeValueTag,
+  PRIMITIVE_VALUE_TAGS,
+  type PrimitiveValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
@@ -99,3 +87,5 @@ export {
   VALUE_TAGS,
   type ValueTag,
 } from "./value-tags.ts";
+
+export { valueEqual } from "./valueEqual.ts";

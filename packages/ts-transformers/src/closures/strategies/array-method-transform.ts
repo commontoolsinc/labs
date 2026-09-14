@@ -7,7 +7,9 @@ import {
   preserveLineage,
   preserveSourceMapRange,
   registerSyntheticCallType,
+  setParentPointers,
   typeToTypeNodeWithRegistry,
+  visitEachChildWithJsx,
 } from "../../ast/mod.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -15,6 +17,7 @@ import {
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
+import { createReactiveWrapperForExpression } from "../../transformers/expression-rewrite/rewrite-helpers.ts";
 import { unwrapExpression } from "../../utils/expression.ts";
 import {
   cloneKeyExpression,
@@ -178,33 +181,6 @@ function createPatternCallWithParams(
       return { ...info, keyExpression };
     });
 
-  const bodyForRewrite = options.rewriteTransformedBody
-    ? options.rewriteTransformedBody(transformedBody, context)
-    : transformedBody;
-
-  const rewrittenBody = rewriteCallbackBody(
-    bodyForRewrite,
-    {
-      bindingName: elementAnalysis.bindingName,
-      elementIdentifier: elementAnalysis.elementIdentifier,
-      destructureStatement: elementAnalysis.destructureStatement,
-      computedAliases: visitedAliases,
-    },
-    context,
-  );
-
-  const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
-  context.markAsArrayMethodCallback(newCallback);
-
-  const callbackParamTypeNode = createArrayMethodCallbackSchema(
-    methodCall,
-    elemParam,
-    indexParam,
-    arrayParam,
-    filteredCaptureTree,
-    context,
-  );
-
   const { checker } = context;
   const typeRegistry = context.state.typeRegistry;
   let resultTypeNode: ts.TypeNode | undefined;
@@ -242,6 +218,56 @@ function createPatternCallWithParams(
       }
     }
   }
+
+  const family = classifyArrayMethodCall(methodCall)?.family;
+  if ((family === "groupBy" || family === "keyBy") && resultTypeNode) {
+    resultTypeNode = factory.createTypeLiteralNode([
+      factory.createPropertySignature(
+        undefined,
+        "isCell",
+        undefined,
+        factory.createKeywordTypeNode(ts.SyntaxKind.BooleanKeyword),
+      ),
+      factory.createPropertySignature(
+        undefined,
+        "value",
+        undefined,
+        resultTypeNode,
+      ),
+    ]);
+  }
+
+  const selectorFamily = classifyArrayMethodCall(methodCall)?.family;
+  const bodyWithKeyValues =
+    selectorFamily === "groupBy" || selectorFamily === "keyBy"
+      ? tagSelectorReturns(transformedBody, context, "evaluate", resultTypeNode)
+      : transformedBody;
+  const bodyForRewrite = options.rewriteTransformedBody
+    ? options.rewriteTransformedBody(bodyWithKeyValues, context)
+    : bodyWithKeyValues;
+
+  const rewrittenBody = rewriteCallbackBody(
+    bodyForRewrite,
+    {
+      bindingName: elementAnalysis.bindingName,
+      elementIdentifier: elementAnalysis.elementIdentifier,
+      destructureStatement: elementAnalysis.destructureStatement,
+      computedAliases: visitedAliases,
+    },
+    context,
+  );
+
+  const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
+  context.markAsArrayMethodCallback(newCallback);
+
+  const callbackParamTypeNode = createArrayMethodCallbackSchema(
+    methodCall,
+    elemParam,
+    indexParam,
+    arrayParam,
+    filteredCaptureTree,
+    context,
+  );
 
   const typeArgs = [callbackParamTypeNode];
   if (resultTypeNode) {
@@ -313,6 +339,75 @@ function createPatternCallWithParams(
 }
 
 /**
+ * Tags selector returns and builds their reactive evaluation wrappers.
+ * Evaluation preserves primitive values and Cell identities across the selector
+ * pattern's serialization boundary.
+ */
+function tagSelectorReturns(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+  phase: "tag" | "evaluate" = "tag",
+  resultTypeNode?: ts.TypeNode,
+): ts.ConciseBody {
+  const tag = (value: ts.Expression) => {
+    if (phase === "evaluate") {
+      if (!ts.isCallExpression(value) || value.arguments.length !== 1) {
+        throw new Error("Expected a tagged collection selector return");
+      }
+      const analysis = context.getDataFlowAnalyzer()(value.arguments[0]!);
+      const reads = context.getRelevantDataFlowsFromAnalysis(analysis);
+      return createReactiveWrapperForExpression(value, reads, context, {
+        allowDirectExpressionWrap: true,
+        preferInputBoundWrapper: true,
+        resultTypeNode,
+      }) ?? value;
+    }
+    const call = context.cfHelpers.createHelperCall(
+      "tagCollectionKey",
+      value,
+      undefined,
+      [value],
+    );
+    setParentPointers(call, value.parent);
+    return call;
+  };
+  if (!ts.isBlock(body)) return tag(body);
+  const visitor: ts.Visitor = (node) => {
+    if (ts.isFunctionLike(node)) return node;
+    if (ts.isReturnStatement(node)) {
+      return context.factory.updateReturnStatement(
+        node,
+        tag(
+          node.expression ??
+            context.factory.createVoidExpression(
+              context.factory.createNumericLiteral(0),
+            ),
+        ),
+      );
+    }
+    return visitEachChildWithJsx(node, visitor, context.tsContext);
+  };
+  const rewritten = ts.visitNode(body, visitor, ts.isBlock)!;
+  const last = rewritten.statements.at(-1);
+  if (
+    phase === "tag" &&
+    (!last || (!ts.isReturnStatement(last) && !ts.isThrowStatement(last)))
+  ) {
+    return context.factory.updateBlock(rewritten, [
+      ...rewritten.statements,
+      context.factory.createReturnStatement(
+        tag(
+          context.factory.createVoidExpression(
+            context.factory.createNumericLiteral(0),
+          ),
+        ),
+      ),
+    ]);
+  }
+  return rewritten;
+}
+
+/**
  * Transform an array method callback for Reactive arrays.
  * Always transforms to use pattern + the WithPattern variant, even with no
  * captures, to ensure callback parameters become opaque.
@@ -336,10 +431,11 @@ export function transformArrayMethodCallback(
   const indexParam = originalParams[1];
   const arrayParam = originalParams[2];
 
-  const transformedBody = ts.visitNode(
-    callback.body,
-    visitor,
-  ) as ts.ConciseBody;
+  const family = classifyArrayMethodCall(methodCall)?.family;
+  const body = family === "groupBy" || family === "keyBy"
+    ? tagSelectorReturns(callback.body, context)
+    : callback.body;
+  const transformedBody = ts.visitNode(body, visitor) as ts.ConciseBody;
 
   return createPatternCallWithParams(
     methodCall,

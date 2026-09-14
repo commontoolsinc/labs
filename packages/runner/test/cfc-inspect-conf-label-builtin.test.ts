@@ -113,6 +113,23 @@ const storedConfidentialityOf = (
   }
 };
 
+const storedValueOf = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  runtime: Runtime,
+  result: Cell<any>,
+): unknown => {
+  const rtx = runtime.edit();
+  try {
+    const link = result.withTx(rtx).resolveAsCell()
+      .getAsNormalizedFullLink();
+    return (storageManager.open(link.space).replica as unknown as {
+      getDocument(id: string): { value?: unknown } | undefined;
+    }).getDocument(link.id)?.value;
+  } finally {
+    rtx.commit();
+  }
+};
+
 describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -409,7 +426,11 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       // protected metadata.
       expect(value).toEqual({ status: "notAvailable" });
 
-      // And nothing protected landed on the result doc.
+      // And nothing protected landed on the result doc. The stored value
+      // pins that document, so an empty confidentiality list is its own.
+      expect(storedValueOf(storageManager, runtime, result)).toEqual({
+        status: "notAvailable",
+      });
       const confidentiality = storedConfidentialityOf(runtime, result);
       expect(confidentiality).toEqual([]);
     });

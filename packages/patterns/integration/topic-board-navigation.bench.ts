@@ -33,20 +33,24 @@ import { env } from "@commonfabric/integration";
 import type { Identity } from "@commonfabric/identity";
 import {
   crossrefTargets,
+  parseTopicBoardDemand,
   seedIdentity,
   seedTopicBoardOutOfProcess,
   type TopicBoardFixture,
   topicTitle,
 } from "./topic-board-fixture.ts";
+import { describeThrown } from "../../integration/describe-thrown.ts";
 import { BoardSession } from "./topic-board-session.ts";
+import { collectBrowserLoadSummary } from "./cfc-browser-helpers.ts";
+
+const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
 
 /**
  * The dashboard keys a chart series on this file, the group, and the
- * benchmark's name, so all three stay put. The size of the board is a fourth
- * thing the numbers depend on and the series cannot express: changing it starts
- * the timeline over at a new scale, as renaming a benchmark would.
+ * benchmark's name. The authoring demand is part of the workload and belongs
+ * in the group so index and full-result workloads have separate series.
  */
-const GROUP = "topic board";
+const GROUP = `topic board (${DEMAND} demand)`;
 
 const DEFAULT_TOPIC_COUNT = 30;
 
@@ -88,13 +92,14 @@ const note = (message: string): void => {
 
 const seedingStartedAt = performance.now();
 note(
-  `seeding ${TOPIC_COUNT} topics into space ${env.SPACE_NAME} at ${env.API_URL}`,
+  `seeding ${TOPIC_COUNT} topics with ${DEMAND} demand into space ${env.SPACE_NAME} at ${env.API_URL}`,
 );
 const fixture: TopicBoardFixture = await seedTopicBoardOutOfProcess({
   apiUrl: new URL(env.API_URL),
   spaceName: env.SPACE_NAME,
   passphrase: PASSPHRASE,
   topicCount: TOPIC_COUNT,
+  demand: DEMAND,
 });
 const identity: Identity = await seedIdentity(PASSPHRASE);
 note(
@@ -154,11 +159,36 @@ function segment<Reached>(
     warmup: WARMUP,
   }, async (b) => {
     const navigation = await BoardSession.open({ fixture, identity });
+    let startedAt = performance.now();
+    let phase = "setup";
     try {
       const reached = await reach(navigation);
+      phase = "measurement";
+      startedAt = performance.now();
       b.start();
       await measure(navigation, reached);
       b.end();
+    } catch (error) {
+      const failure = {
+        name,
+        phase,
+        elapsedMs: performance.now() - startedAt,
+        error: describeThrown(error),
+      };
+      let diagnostics: unknown;
+      try {
+        diagnostics = await collectBrowserLoadSummary(navigation.page, name, {
+          includeWorker: false,
+        });
+      } catch (diagnosticError) {
+        diagnostics = { unavailable: describeThrown(diagnosticError) };
+      }
+      await Deno.stderr.write(new TextEncoder().encode(
+        `[topic-board-navigation] failed attempt ${
+          JSON.stringify({ ...failure, diagnostics })
+        }\n`,
+      ));
+      throw error;
     } finally {
       await navigation.close();
     }

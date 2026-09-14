@@ -645,7 +645,8 @@ export const MyPattern = pattern<Input, Output>((props) => {
 #### 4.3.3 Pattern-Based Inner-Scope Forms
 
 The `pattern(...)` forms created for `mapWithPattern(...)`,
-`filterWithPattern(...)`, `flatMapWithPattern(...)`, and `patternTool(...)`
+`filterWithPattern(...)`, `flatMapWithPattern(...)`,
+`groupByWithPattern(...)`, `keyByWithPattern(...)`, and `patternTool(...)`
 remain inner-scope constructs in this phase. They already carry their captures
 explicitly and are not the target of the module-hoisting rule above.
 
@@ -661,7 +662,8 @@ export const MyPattern = pattern<Input, Output>((props) => {
 For reactive collection methods, the current transformation remains:
 
 - detect a reactive receiver
-- rewrite `.map()` / `.filter()` / `.flatMap()` to the corresponding
+- rewrite `.map()` / `.filter()` / `.flatMap()` / `.groupBy()` / `.keyBy()`
+  to the corresponding
   `*WithPattern(...)` form
 - keep the generated `pattern(...)` callback inline with explicit params/captures
 

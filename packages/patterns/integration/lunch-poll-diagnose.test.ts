@@ -19,6 +19,7 @@ import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   casesFromConfig,
   compactActionSite,
+  describeCase,
   matrixConfigFromArgs,
   runCase,
   voterIdentity,
@@ -31,6 +32,7 @@ describe("lunch-poll-diagnose", () => {
       optionCounts: [14],
       userCounts: [1],
       voteRounds: 3,
+      voters: undefined,
     });
 
     expect(() => matrixConfigFromArgs(["--production", "--quick"]))
@@ -42,20 +44,55 @@ describe("lunch-poll-diagnose", () => {
       "--options=2,4",
       "--users=3",
       "--rounds=5",
+      "--voters=2",
     ])).toEqual({
       program: "previous.tsx",
       optionCounts: [2, 4],
       userCounts: [3],
       voteRounds: 5,
+      voters: 2,
     });
+
+    expect(() => matrixConfigFromArgs(["--voters=0"]))
+      .toThrow("--voters must be an integer >= 1");
+
+    const tooManyVoters = ["--users=2", "--voters=3"];
+    expect(() =>
+      casesFromConfig(matrixConfigFromArgs(tooManyVoters), tooManyVoters)
+    ).toThrow("--voters=3 exceeds the 2 users of 1x2");
+    const tooManyVotersForCase = ["--cases=1x2", "--voters=3"];
+    expect(() =>
+      casesFromConfig(
+        matrixConfigFromArgs(tooManyVotersForCase),
+        tooManyVotersForCase,
+      )
+    ).toThrow("--voters=3 exceeds the 2 users of 1x2");
+
+    expect(describeCase({ optionCount: 14, userCount: 2, voteRounds: 3 }))
+      .toBe("14 options x 2 users, rounds=3");
+    expect(describeCase({
+      optionCount: 14,
+      userCount: 2,
+      voteRounds: 3,
+      voters: 1,
+    })).toBe("14 options x 2 users, rounds=3, voters=1");
 
     const explicitArgs = ["--production", "--rounds=2", "--cases=2x3,4x5"];
     expect(
       casesFromConfig(matrixConfigFromArgs(explicitArgs), explicitArgs),
     ).toEqual([
-      { optionCount: 2, userCount: 3, voteRounds: 2 },
-      { optionCount: 4, userCount: 5, voteRounds: 2 },
+      { optionCount: 2, userCount: 3, voteRounds: 2, voters: undefined },
+      { optionCount: 4, userCount: 5, voteRounds: 2, voters: undefined },
     ]);
+  });
+
+  it("refuses a case with more voters than users before opening a harness", async () => {
+    await expect(
+      runCase({ optionCount: 1, userCount: 2, voteRounds: 0, voters: 3 }),
+    ).rejects.toThrow("--voters=3 exceeds the 2 users of 1x2");
+    await expect(
+      runCase({ optionCount: 1, userCount: 2, voteRounds: 0, voters: 0 }),
+    ).rejects.toThrow("--voters must be an integer >= 1; got 0");
   });
 
   it("measures a poll two voters joined, filled, and voted in", async () => {

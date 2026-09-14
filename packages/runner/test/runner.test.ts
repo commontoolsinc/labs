@@ -5,6 +5,8 @@ import { stub } from "@std/testing/mock";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -18,6 +20,9 @@ import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
+import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 import {
   areNormalizedLinksSame,
   getDerivedInternalCell,
@@ -38,6 +43,7 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
+  SEALING_SOURCE_UPDATE_REFUSAL,
 } from "../src/runner.ts";
 import {
   type ICommitNotification,
@@ -80,6 +86,28 @@ function setupTrusted(
     argument as never,
     resultCell as never,
   );
+}
+
+/**
+ * A second session on the fixture's loopback server: it reads the space as
+ * storage holds it, not as this runtime's replica does.
+ */
+async function openRemoteSession(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): Promise<
+  { client: MemoryV2Client.Client; session: MemoryV2Client.SpaceSession }
+> {
+  const candidate = storageManager as unknown as {
+    server?: () => MemoryV2Server;
+  };
+  if (typeof candidate.server !== "function") {
+    throw new Error("the receipt fixture needs an emulated storage manager");
+  }
+  const client = await MemoryV2Client.connect({
+    transport: MemoryV2Client.loopback(candidate.server()),
+  });
+  const session = await client.mount(space, {}, testSessionOpenAuthFactory);
+  return { client, session };
 }
 
 async function compileReceiptPattern(
@@ -392,7 +420,9 @@ describe("runPattern", () => {
     const argumentLink = getMetaLink(resultCell, "argument");
 
     expect(resultCellLink.scope).toBe("user");
-    expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
+    expect(resultCell.getMetaRaw("schema")).toEqual(
+      resultSchemaMetaSpelling(resultSchema),
+    );
     expect(argumentLink).toBeDefined();
     expect(argumentLink!.path).toEqual([]);
     expect(argumentLink!.space).toBe(space);
@@ -1915,6 +1945,26 @@ describe("setup/start", () => {
       receiptSourceSnapshot(runtime, resultCell).pattern,
     );
     expect(result.cell.get()).toEqual({ marker: "v2" });
+
+    // The seq is the commit's own position in the space's log: read there,
+    // the document already carries the receipt's pointer, and read one seq
+    // earlier it still carries the pointer the setup replaced.
+    expect(result.commit.space).toBe(space);
+    const remote = await openRemoteSession(storageManager);
+    try {
+      const id = resultCell.getAsNormalizedFullLink().id;
+      const pointerAt = async (seq: number) =>
+        (await remote.session.queryGraph({
+          roots: [{ id, selector: { path: [], schema: false } }],
+          atSeq: seq,
+        }))
+          .entities.find((entity) => entity.id === id)?.document
+          ?.patternIdentity;
+      expect(await pointerAt(result.commit.seq)).toEqual(result.commit.pattern);
+      expect(await pointerAt(result.commit.seq - 1)).toEqual(previous);
+    } finally {
+      await remote.client.close();
+    }
   });
 
   it("runSyncedWithCommit carries its receipt through post-commit failures", async () => {
@@ -1967,8 +2017,41 @@ describe("setup/start", () => {
       expect(failure.commit.pattern).toEqual(
         receiptSourceSnapshot(runtime, resultCell).pattern,
       );
+      expect(failure.commit.space).toBe(space);
+      expect(failure.commit.seq).toBeGreaterThan(0);
     } finally {
       runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
+    }
+  });
+
+  it("runSyncedWithCommit refuses a receipt when the accepted commit reports no seq", async () => {
+    // The seq is recorded at the verdict, so a resolved commit without one is
+    // the type's edge — and a receipt that names no commit is refused loudly
+    // there rather than issued.
+
+    const resultCell = runtime.getCell(space, "runSynced receipt without seq");
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(resultCell, initialPattern, {});
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+    const committedSeq = ExtendedStorageTransaction.prototype.committedSeq;
+    ExtendedStorageTransaction.prototype.committedSeq = () => undefined;
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell,
+        nextPattern,
+        {},
+        { expectedPatternIdentity: previous, pieceSourceTransition },
+      )).rejects.toThrow(
+        "the pattern setup committed without recording its store seq",
+      );
+    } finally {
+      ExtendedStorageTransaction.prototype.committedSeq = committedSeq;
     }
   });
 
@@ -1996,6 +2079,40 @@ describe("setup/start", () => {
       // the zero-write setup this exact fixture produces.
       { expectedPatternIdentity: previous } as never,
     )).rejects.toThrow("requires a fresh source transition");
+  });
+
+  it("runSynced refuses a run without a pattern", async () => {
+    const resultCell = runtime.getCell(space, "runSynced without a pattern");
+
+    await expect(runtime.runSynced(
+      resultCell,
+      // JavaScript callers can omit the required TypeScript argument; the
+      // runtime boundary must still refuse by name rather than failing on
+      // the first read of the missing pattern.
+      undefined as never,
+      {},
+    )).rejects.toThrow("requires a pattern");
+  });
+
+  it("runSyncedWithCommit refuses a run without a pattern", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit without a pattern",
+    );
+    const transition = unreachableReceiptSourceTransition();
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      // JavaScript callers can omit the required TypeScript argument; the
+      // runtime boundary must still refuse by name rather than failing on
+      // the first read of the missing pattern.
+      undefined as never,
+      {},
+      {
+        expectedPatternIdentity: transition.expected.pattern,
+        pieceSourceTransition: transition,
+      },
+    )).rejects.toThrow("requires a pattern");
   });
 
   it("runSyncedWithCommit refuses a source revision ID already in history", async () => {
@@ -2150,6 +2267,225 @@ describe("setup/start", () => {
       serving.clearSealDestination();
       await serving.dispose();
       await servingStorage.close();
+    }
+  });
+
+  it("runSynced refuses source-update authority while sealing without requesting a receipt", async () => {
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const resultCell = serving.getCell(
+        space,
+        "source authority while sealing",
+      );
+      const initial = await compileReceiptPattern(serving, "v1");
+      const candidate = await compileReceiptPattern(serving, "v2");
+      await serving.runSynced(resultCell, initial, {});
+      const before = receiptSourceSnapshot(serving, resultCell);
+      const transition = await receiptSourceTransition(serving, resultCell);
+      const sealed: IExtendedStorageTransaction[] = [];
+      serving.installSealDestination({
+        seal: (tx: IExtendedStorageTransaction) => {
+          sealed.push(tx);
+          return tx.commit();
+        },
+      });
+
+      await expect(serving.runSynced(resultCell, candidate, {}, {
+        expectedPatternIdentity: before.pattern,
+        pieceSourceTransition: transition,
+      })).rejects.toThrow(SEALING_SOURCE_UPDATE_REFUSAL);
+      expect(sealed).toEqual([]);
+      expect(receiptSourceSnapshot(serving, resultCell)).toEqual(before);
+      expect(resultCell.get()).toEqual({ marker: "v1" });
+      const successor = serving.patternManager.getArtifactEntryRef(candidate)!;
+      const tx = serving.edit();
+      try {
+        expect(
+          tx.getCfcState().moduleDelegations.get(space)?.get(
+            successor.identity,
+          ),
+        )
+          .toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit issues a receipt while sealing when the caller asks for a direct commit", async () => {
+    // A direct commit is the serving loop's own commit to the store, made
+    // outside the wave, so its verdict is the store's and a receipt minted
+    // from it claims nothing a withdrawal can undo. The runner's part is to
+    // stamp the request and lift the refusal; the routing is the seal
+    // destination's.
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const resultCell = serving.getCell(
+        space,
+        "runSyncedWithCommit direct commit while sealing",
+      );
+      const initial = await compileReceiptPattern(serving, "v1");
+      const candidate = await compileReceiptPattern(serving, "v2");
+      await serving.runSynced(resultCell, initial, {});
+      const before = receiptSourceSnapshot(serving, resultCell);
+      const transition = await receiptSourceTransition(serving, resultCell);
+      const stamped: Array<{
+        tx: IExtendedStorageTransaction;
+        actionId: string;
+        directCommit?: boolean;
+      }> = [];
+      const sealed: IExtendedStorageTransaction[] = [];
+      serving.installSealDestination({
+        // The double commits the inner transaction to the store, which is
+        // what the serving loop's direct commit does.
+        seal: (tx: IExtendedStorageTransaction) => {
+          sealed.push(tx);
+          return tx.tx.commit();
+        },
+      }, {
+        runStamper: (tx, info) => {
+          stamped.push({
+            tx,
+            actionId: info.actionId,
+            ...(info.directCommit === undefined
+              ? {}
+              : { directCommit: info.directCommit }),
+          });
+        },
+      });
+
+      const result = await serving.runSyncedWithCommit(
+        resultCell,
+        candidate,
+        {},
+        {
+          expectedPatternIdentity: before.pattern,
+          pieceSourceTransition: transition,
+          directCommit: true,
+          cfcTrustSnapshot: serving.trustSnapshotForPrincipal(
+            "did:key:requester",
+          ),
+        },
+      );
+      const successor = serving.patternManager.getArtifactEntryRef(candidate)!;
+      expect(result.commit.pattern).toEqual(successor);
+      // The setup transaction reached the destination stamped as a direct
+      // commit and carrying the requester's trust snapshot; the swap the
+      // pointer write triggers stamps its own.
+      const setup = stamped.find((stamp) => stamp.directCommit === true);
+      expect(setup?.actionId).toBe(`piece-run-synced/${resultCell.sourceURI}`);
+      expect(sealed).toContain(setup?.tx);
+      expect(setup?.tx.getCfcState().trustSnapshot?.actingPrincipal).toBe(
+        "did:key:requester",
+      );
+      expect(receiptSourceSnapshot(serving, resultCell).pattern).toEqual(
+        successor,
+      );
+      // The update's authority registered from the committed transaction.
+      expect(
+        serving.grantsModuleDelegation(
+          space,
+          successor.identity,
+          before.pattern.identity,
+        ),
+      ).toBe(true);
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
+  it("runSyncedWithCommit leaves the piece unstarted when `start` is `false`", async () => {
+    const resultCell = runtime.getCell(space, "runSyncedWithCommit no start");
+    const initial = await compileReceiptPattern(runtime, "v1");
+    const second = await compileReceiptPattern(runtime, "v2");
+    const third = await compileReceiptPattern(runtime, "v3");
+    await runtime.runSynced(resultCell, initial, {});
+    const started: unknown[] = [];
+    using _start = stub(runtime.runner, "start", (cell) => {
+      started.push(cell);
+      return Promise.resolve(true);
+    });
+
+    const unstarted = await runtime.runSyncedWithCommit(
+      resultCell,
+      second,
+      {},
+      {
+        expectedPatternIdentity: receiptSourceSnapshot(runtime, resultCell)
+          .pattern,
+        pieceSourceTransition: await receiptSourceTransition(
+          runtime,
+          resultCell,
+        ),
+        start: false,
+      },
+    );
+    expect(unstarted.commit.pattern).toEqual(
+      runtime.patternManager.getArtifactEntryRef(second),
+    );
+    expect(receiptSourceSnapshot(runtime, resultCell).pattern).toEqual(
+      unstarted.commit.pattern,
+    );
+    expect(started).toEqual([]);
+
+    // Absent, the option keeps the start.
+    await runtime.runSyncedWithCommit(resultCell, third, {}, {
+      expectedPatternIdentity: unstarted.commit.pattern,
+      pieceSourceTransition: await receiptSourceTransition(
+        runtime,
+        resultCell,
+      ),
+    });
+    expect(started).toHaveLength(1);
+  });
+
+  it("runSynced refuses to grant update authority in a caller-owned transaction", async () => {
+    const resultCell = runtime.getCell(space, "bound source authority");
+    const initial = await compileReceiptPattern(runtime, "v1");
+    const candidate = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(resultCell, initial, {});
+    const before = receiptSourceSnapshot(runtime, resultCell);
+    const transition = await receiptSourceTransition(runtime, resultCell);
+    const tx = runtime.edit();
+    try {
+      await expect(runtime.runSynced(resultCell.withTx(tx), candidate, {}, {
+        expectedPatternIdentity: before.pattern,
+        pieceSourceTransition: transition,
+      })).rejects.toThrow(
+        "source update authority requires an owned setup transaction",
+      );
+      expect(receiptSourceSnapshot(runtime, resultCell)).toEqual(before);
+    } finally {
+      tx.abort();
+    }
+    const successor = runtime.patternManager.getArtifactEntryRef(candidate)!;
+    const storedTx = runtime.edit();
+    try {
+      expect(
+        storedTx.getCfcState().moduleDelegations.get(space)?.get(
+          successor.identity,
+        ),
+      ).toBeUndefined();
+    } finally {
+      storedTx.abort();
     }
   });
 
@@ -3098,7 +3434,7 @@ describe("runner utils", () => {
       }
     });
 
-    it("uses nested child-local definitions for defaults", () => {
+    it("reads a nested ref's default from the document's map, not the subtree's own `$defs`", () => {
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -3116,7 +3452,7 @@ describe("runner utils", () => {
       };
 
       expect(extractDefaultValues(schema)).toEqual({
-        nested: { value: "local" },
+        nested: { value: 1 },
       });
     });
 
@@ -3696,27 +4032,32 @@ describe("runner utils", () => {
       });
     });
 
-    it("validates nested defaults against child-local definitions", () => {
-      const value = mergeSchemaDefaults<Record<string, unknown>>(
+    it("validates a nested default against the document's definition, not the subtree's own `$defs`", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+            $defs: { Value: { type: "string" } },
+          },
+        },
+        $defs: { Value: { type: "number" } },
+      };
+
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
         { nested: {} },
         { nested: { value: "local" } },
-        {
-          type: "object",
-          properties: {
-            nested: {
-              type: "object",
-              properties: { value: { $ref: "#/$defs/Value" } },
-              $defs: { Value: { type: "string" } },
-            },
-          },
-          $defs: { Value: { type: "number" } },
-        },
-      );
-
-      expect(value).toEqual({ nested: { value: "local" } });
+        schema,
+      )).toEqual({ nested: {} });
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        { nested: {} },
+        { nested: { value: 2 } },
+        schema,
+      )).toEqual({ nested: { value: 2 } });
     });
 
-    it("keeps definition-body defaults in their child-local scope", () => {
+    it("reads a definition body's default from the document's map, not the body's own `$defs`", () => {
       const schema: JSONSchema = {
         type: "object",
         properties: { item: { $ref: "#/$defs/Entry" } },
@@ -3734,7 +4075,7 @@ describe("runner utils", () => {
       };
 
       expect(extractDefaultValues(schema)).toEqual({
-        item: { value: "local" },
+        item: { value: 1 },
       });
     });
 

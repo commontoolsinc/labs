@@ -54,6 +54,17 @@ so they pass through admission again; document contents do not need migration.
 The [protocol specification](../../docs/specs/memory-v2/04-protocol.md)
 describes the terminal refusal and its reconnect behavior.
 
+## Client queries during reconnect
+
+`Client.restoreConnection()` waits for the transport handshake and restoration
+of existing space sessions. A connected transport can still be restoring its
+sessions. Ordinary graph, operation-field, entity, and SQLite queries wait for
+that restoration before constructing their request with the active session ID.
+Event-attention requests and SQLite source registration use the same boundary. A
+session closed or permanently refused during restoration fails the request with
+its session error. This boundary does not guarantee completion across a
+subsequent transport failure during request issuance.
+
 ## Layout
 
 - `v2.ts` — the protocol vocabulary: documents, operations, commits, queries,

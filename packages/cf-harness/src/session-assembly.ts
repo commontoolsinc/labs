@@ -33,6 +33,7 @@ import type { HarnessChatPolicy } from "./contracts/interactive-chat.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
 import type { HarnessPatternRefSpec } from "./contracts/pattern-refs.ts";
+import type { HarnessConnectorGrantSpec } from "./contracts/well-known-grants.ts";
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
@@ -127,6 +128,12 @@ export interface HarnessSessionConfig {
 
   /** Cells the operator passes in by reference, named for the model. */
   inputCells: readonly HarnessInputCellSpec[];
+
+  /**
+   * Connector handles every session on this console is granted, named by the
+   * CFC class the loom instance behind it declares for each.
+   */
+  connectorGrants: readonly HarnessConnectorGrantSpec[];
 
   /** Published patterns the caller attaches to the task by index id. */
   patternRefs: readonly HarnessPatternRefSpec[];
@@ -272,6 +279,9 @@ export const harnessSessionEngineOptions = (
     ...(config.skillsSh !== undefined ? { skillsSh: config.skillsSh } : {}),
     ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
     ...(config.inputCells.length > 0 ? { inputCells: config.inputCells } : {}),
+    ...(config.connectorGrants.length > 0
+      ? { connectorGrants: config.connectorGrants }
+      : {}),
     ...(config.patternRefs.length > 0
       ? { patternRefs: config.patternRefs }
       : {}),

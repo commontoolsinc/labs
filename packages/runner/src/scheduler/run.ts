@@ -1,8 +1,14 @@
-import { getLogger } from "@commonfabric/utils/logger";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import { getAuthoredDebugSource } from "../harness/authored-debug-source.ts";
+import { startReadStats } from "../read-stats.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { waveSettlementOf } from "../executor/wave.ts";
+import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -10,13 +16,24 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import {
+  localReadsReady,
+  releaseLocalReadBasis,
+  requireLocalReadCondition,
+  usesLocalReads,
+  validateLocalReadBasis,
+} from "../storage/local-read-policy.ts";
+import {
   isConflictRejection,
   isPermanentRejection,
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
-import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import type {
+  ActionReadStats,
+  NonIdempotentReport,
+  SchedulerActionInfo,
+} from "../telemetry.ts";
+import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_RETRIES_FOR_REACTIVE,
@@ -27,20 +44,10 @@ import {
   type DiagnosisRecord,
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
-import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
-import { RetryImmediately } from "./retry-immediately.ts";
 import {
   getSchedulerActionName,
   toActionRunTraceAddress,
 } from "./diagnostics.ts";
-import { txToReactivityLog } from "./reactivity.ts";
-import { type ActionTimingState, recordActionTime } from "./timing.ts";
-import type { NodeRegistry } from "./node-record.ts";
-import {
-  type MarkInvalidOptions,
-  restoreInvalidCauses,
-  takeInvalidCauses,
-} from "./invalidation.ts";
 import {
   dirtyFanOutKey,
   type FanOutInstance,
@@ -54,6 +61,16 @@ import {
   newFanOutNodeState,
   pruneFanOutInstances,
 } from "./fan-out.ts";
+import {
+  addInvalidCause,
+  type MarkInvalidOptions,
+  restoreInvalidCauses,
+  takeInvalidCauses,
+} from "./invalidation.ts";
+import type { NodeRegistry } from "./node-record.ts";
+import { txToReactivityLog } from "./reactivity.ts";
+import { RetryImmediately } from "./retry-immediately.ts";
+import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -61,7 +78,6 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "./types.ts";
-import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -116,7 +132,11 @@ export function invokeReactiveAction(state: {
     state.setExecutingAction(args.action, args.actionId);
     logger.timeStart("scheduler", "run", "action");
     return Promise.resolve(
-      state.runtime.harness.invoke(() => args.action(args.tx)),
+      state.runtime.harness.invoke(() => {
+        state.runtime.scheduler.prepareViewAction(args.tx, args.action);
+        state.runtime.scheduler.beginViewAction(args.action);
+        return args.action(args.tx);
+      }),
     )
       .then((actionResult) => {
         logger.timeEndDetailed(measureDetail, "scheduler", "run", "action");
@@ -181,19 +201,27 @@ export function watchReactiveActionCommit(state: {
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
-  readonly markInvalid: (action: Action) => void;
+  readonly markInvalid: (
+    action: Action,
+    options?: MarkInvalidOptions,
+  ) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
   readonly reportTerminalRejection?: (error: Error) => void;
+  readonly handleUnavailable?: () => boolean;
+  readonly onSuccess?: () => void;
 }): Promise<void> {
   const handleResult = async (error: unknown): Promise<void> => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
+      state.onSuccess?.();
       return;
     }
+
+    if (state.handleUnavailable?.()) return;
 
     logger.info(
       "schedule-run-error",
@@ -259,7 +287,8 @@ export function watchReactiveActionCommit(state: {
       state.resubscribe(state.action, state.log);
       const readyToRetry =
         (error as { readyToRetry?: () => unknown }).readyToRetry;
-      if (typeof readyToRetry === "function") {
+      const waitedForCatchUp = typeof readyToRetry === "function";
+      if (waitedForCatchUp) {
         // The readiness gate rejects by design when the session is closed,
         // revoked, or replaced while we wait — an expected control-flow signal,
         // not an error. Swallow it and re-queue anyway: the action stays live
@@ -275,7 +304,20 @@ export function watchReactiveActionCommit(state: {
           );
         }
       }
-      state.markInvalid(state.action);
+      // A re-run that waited on the catch-up gate is the scheduler's own,
+      // not a fresh input change: the wait was its delay, and the refused
+      // run left nothing durable behind. So it is queued past the node's
+      // freshness gates — `retry` skips the trailing-debounce re-arm and
+      // releases an armed debounce or throttle readiness (§8.3; the
+      // convergence backoff stays). Held behind its debounce, the retry would
+      // be a deferred re-run of an "already-ran" computation, which is not
+      // idle work and gets its expiry wake only from a live demander; a
+      // one-shot `pull()` has none once it resolves, so the refused first
+      // output would stand in for the answer. A local inconsistency waited
+      // on nothing, so its re-run
+      // keeps the debounce: that is the spacing between it and the local
+      // writer it raced (an interval `#now` tick's own write, for one).
+      state.markInvalid(state.action, { retry: waitedForCatchUp });
       state.pending.add(state.action);
       state.queueExecution();
       return;
@@ -430,6 +472,8 @@ export interface SchedulerActionRunState {
   readonly runtime: Runtime;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
+  readonly getReadStatsEnabled: () => boolean;
+  readonly getReadAttemptAccountingEnabled: () => boolean;
   readonly retries: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
@@ -462,6 +506,8 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markInvalid: (action: Action, options?: MarkInvalidOptions) => void;
+  readonly isDisposed?: () => boolean;
+  readonly parkLocalRead?: (action: Action, log: ReactivityLog) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -471,6 +517,8 @@ export async function runSchedulerAction(
   state: SchedulerActionRunState,
   action: Action,
 ): Promise<any> {
+  const readStatsEnabled = state.getReadStatsEnabled();
+  const readAttemptsEnabled = state.getReadAttemptAccountingEnabled();
   logger.timeStart("scheduler", "run");
   const actionId = state.getActionId(action);
   state.runtime.telemetry.submit({
@@ -487,8 +535,11 @@ export async function runSchedulerAction(
   if (runningPromise) await runningPromise;
 
   const record = state.nodes.get(action);
+  const registrationToken = record?.registrationToken;
   const invalidCauses = record ? takeInvalidCauses(record) : undefined;
   if (record) {
+    record.cancelLocalReadWake?.();
+    record.cancelLocalReadWake = undefined;
     state.nodes.setStatus(action, "clean");
   }
 
@@ -590,20 +641,57 @@ export async function runSchedulerAction(
         }
         : {}),
     });
+    const finishReads = readStatsEnabled
+      ? startReadStats(
+        tx,
+        readAttemptsEnabled
+          ? (reads) =>
+            state.runtime.telemetry.submit({
+              type: "scheduler.read-attempt",
+              kind: "reactive",
+              actionId,
+              reads,
+            })
+          : undefined,
+      )
+      : undefined;
     const actionStartTime = performance.now();
 
     let result: any;
+    let succeeded = false;
     return new Promise((resolve) => {
       let committedLog: ReactivityLog | undefined;
       let retryImmediately = false;
       const finalizeAction = (error?: unknown) => {
+        const actionEndTime = performance.now();
+        let reads: ActionReadStats | undefined;
+        if (finishReads) {
+          let dependencies = 0;
+          try {
+            const log = txToReactivityLog(tx);
+            dependencies = sortAndCompactPaths(log.reads).length +
+              sortAndCompactPaths(log.shallowReads, false).length;
+          } finally {
+            reads = finishReads(dependencies);
+          }
+        }
         finalizeSchedulerAction(state, {
           action,
           actionId,
+          registrationToken,
           tx,
           actionStartTime,
+          actionEndTime,
+          reads,
+          registrationIsCurrent: () =>
+            state.isDisposed?.() !== true &&
+            record !== undefined &&
+            record.registrationToken === registrationToken &&
+            (state.nodes.effects.has(action) ||
+              state.nodes.computations.has(action)),
           invalidCauses: causes,
           result,
+          succeeded,
           error,
           resolve: (value) =>
             resolve({ result: value, log: committedLog, retryImmediately }),
@@ -637,6 +725,7 @@ export async function runSchedulerAction(
       })
         .then((invocation) => {
           if (invocation.ok) {
+            succeeded = true;
             result = invocation.result;
             finalizeAction();
           } else {
@@ -773,28 +862,106 @@ interface FanOutRunArgs {
   readonly deferInstance: () => void;
 }
 
+/** Disposes unavailable work and parks its still-live registration. */
+function parkUnavailableRun(state: SchedulerActionRunState, args: {
+  action: Action;
+  tx: IExtendedStorageTransaction;
+  registrationIsCurrent: () => boolean;
+  resolve: (value: unknown) => void;
+}): boolean {
+  if (usesLocalReads(args.tx) && !args.registrationIsCurrent()) {
+    if (args.tx.status().status === "ready") {
+      args.tx.abort("local action registration retired");
+    }
+    releaseLocalReadBasis(args.tx);
+    args.resolve(undefined);
+    return true;
+  }
+  const unavailable = validateLocalReadBasis(args.tx);
+  if (unavailable !== undefined) {
+    const attempted = txToReactivityLog(args.tx);
+    const log = {
+      reads: [...attempted.reads, unavailable.address],
+      shallowReads: attempted.shallowReads,
+      writes: [],
+    };
+    if (args.tx.status().status === "ready") args.tx.abort(unavailable);
+    if (!args.registrationIsCurrent()) {
+      releaseLocalReadBasis(args.tx);
+      args.resolve(undefined);
+      return true;
+    }
+    state.pending.delete(args.action);
+    state.parkLocalRead?.(args.action, log);
+    state.nodes.setStatus(args.action, "unavailable");
+    // Subscribe first, then recheck: delivery may have arrived during an await
+    // after the failed read and before its wake subscription was installed.
+    if (localReadsReady(args.tx)) {
+      state.markInvalid(args.action);
+      state.queueExecution();
+    }
+    releaseLocalReadBasis(args.tx);
+    args.resolve(undefined);
+    return true;
+  }
+
+  return false;
+}
+
 function finalizeSchedulerAction(
   state: SchedulerActionRunState,
   args: {
     readonly action: Action;
     readonly actionId: string;
+    readonly registrationToken: object | undefined;
     readonly tx: IExtendedStorageTransaction;
     readonly actionStartTime: number;
+    readonly actionEndTime: number;
+    readonly reads?: ActionReadStats;
+    readonly registrationIsCurrent: () => boolean;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
+    readonly succeeded: boolean;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
     readonly fanOutRun?: FanOutRunArgs;
   },
 ): void {
+  if (parkUnavailableRun(state, args)) return;
+  if (usesLocalReads(args.tx)) {
+    const log = txToReactivityLog(args.tx);
+    const address = log.reads[0] ?? log.shallowReads[0] ?? log.writes[0];
+    if (address !== undefined) {
+      requireLocalReadCondition(
+        args.tx.tx,
+        address,
+        args.registrationIsCurrent,
+      );
+    }
+  }
+
   // Record action execution time for cycle-aware scheduling
-  const elapsed = performance.now() - args.actionStartTime;
-  recordActionTime(state.actionTimingState, args.action, elapsed);
+  const elapsed = args.actionEndTime - args.actionStartTime;
+  recordActionTime(
+    state.actionTimingState,
+    args.action,
+    elapsed,
+    args.actionEndTime,
+    args.reads,
+  );
   state.runtime.telemetry.submit({
     type: "scheduler.run.complete",
     actionId: args.actionId,
     actionInfo: state.getActionTelemetryInfo(args.action),
     durationMs: elapsed,
+    ...(args.reads
+      ? {
+        reads: args.reads,
+        src: getAuthoredDebugSource(
+          (args.action as Partial<TelemetryAnnotations>).module?.implementation,
+        )?.src,
+      }
+      : {}),
     ...(args.error !== undefined
       ? { error: args.error instanceof Error ? args.error.message : "error" }
       : {}),
@@ -944,9 +1111,13 @@ function finalizeReactiveActionCommit(
   args: {
     readonly action: Action;
     readonly actionId: string;
+    readonly registrationToken: object | undefined;
+    readonly registrationIsCurrent: () => boolean;
     readonly tx: IExtendedStorageTransaction;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
+    readonly succeeded: boolean;
+    readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
     readonly fanOutRun?: FanOutRunArgs;
   },
@@ -971,6 +1142,7 @@ function finalizeReactiveActionCommit(
   }, {
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
+      if (validateLocalReadBasis(args.tx) !== undefined) return;
       warnOnWriteSurfaceViolations(state, args, log);
       hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
       if (args.fanOutRun !== undefined) {
@@ -992,6 +1164,7 @@ function finalizeReactiveActionCommit(
       }
     },
   });
+  if (parkUnavailableRun(state, args)) return;
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
   }
@@ -1010,8 +1183,16 @@ function finalizeReactiveActionCommit(
     state.runtime.trackAsyncWork(args.tx.postCommitEffectsSettled());
   }
   const committedLog = log;
+  state.runtime.scheduler.recordViewActionOutcome(
+    args.action,
+    args.tx,
+    committedLog,
+    args.succeeded,
+    commitPromise,
+    args.error,
+  );
   const fanOutRun = args.fanOutRun;
-  const handled = watchReactiveActionCommit({
+  const commitState: Parameters<typeof watchReactiveActionCommit>[0] = {
     action: args.action,
     tx: args.tx,
     log: committedLog,
@@ -1019,6 +1200,7 @@ function finalizeReactiveActionCommit(
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
+    onSuccess: () => state.runtime.scheduler.noteViewActionCurrent(args.action),
     // A fanned-out instance's retry paths (a conflict, a refused seal —
     // the early-emit guard's fail-closed refusal among them) re-arm THAT
     // instance: its key is dirtied, its siblings stay current, and the
@@ -1029,14 +1211,16 @@ function finalizeReactiveActionCommit(
     resubscribe: fanOutRun === undefined
       ? state.resubscribe
       : (target) => state.resubscribe(target, fanOutUnionLog(fanOutRun.state)),
-    markInvalid: fanOutRun === undefined ? state.markInvalid : (target) => {
-      dirtyFanOutKey(
-        fanOutRun.state,
-        keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
-          fanOutRun.instance.key,
-      );
-      state.markInvalid(target, { fanOutInstances: "keep" });
-    },
+    markInvalid: fanOutRun === undefined
+      ? state.markInvalid
+      : (target, options) => {
+        dirtyFanOutKey(
+          fanOutRun.state,
+          keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+            fanOutRun.instance.key,
+        );
+        state.markInvalid(target, { ...options, fanOutInstances: "keep" });
+      },
     queueExecution: state.queueExecution,
     getActionId: state.getActionId,
     restoreInvalidCauses: () => {
@@ -1049,8 +1233,10 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    handleUnavailable: () => parkUnavailableRun(state, args),
     reportTerminalRejection: (error) => state.handleError(error, args.action),
-  });
+  };
+  const handled = watchReactiveActionCommit(commitState);
   // The barrier entry commit() registered settles with the commit promise,
   // but the disposition above — a conflict's catch-up-then-requeue in
   // particular — runs afterwards. Register the handled chain too, so
@@ -1080,6 +1266,65 @@ function finalizeReactiveActionCommit(
       logger.timeEnd("scheduler", "run", "resubscribe");
     }
   }
+  const node = state.nodes.get(args.action);
+  const instanceRecord = fanOutRun === undefined
+    ? undefined
+    : fanOutRun.state.instances.get(
+      keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+        fanOutRun.instance.key,
+    );
+  const owner = fanOutRun === undefined ? node : instanceRecord;
+  const registrationToken = args.registrationToken;
+  // Sealing is not durable acceptance. A withdrawn contribution can have read
+  // an unchanged field through another contribution's pending document; rolling
+  // that document back produces no value change at the field to wake its reader.
+  // Observe the rollback separately from the pending-commit barrier: the serving
+  // loop must finish that barrier before it can commit the wave being observed.
+  void commitPromise.then(async ({ error }) => {
+    if (
+      error !== undefined || owner === undefined || node === undefined ||
+      node.registrationToken !== registrationToken
+    ) return;
+    const settlement = waveSettlementOf(args.tx);
+    if (settlement === undefined) return;
+    // A run with no contribution has no new publication. Only another sealed
+    // contribution can supersede this run's recovery obligation, even if a
+    // no-op refreshed reads.
+    const token = {};
+    owner.pendingWaveRun = token;
+    const outcome = await settlement;
+    if (owner.pendingWaveRun !== token) return;
+    delete owner.pendingWaveRun;
+    if (
+      node.registrationToken !== registrationToken ||
+      outcome.error?.readDependencyWithdrawn !== true ||
+      (outcome.error as { waveWithdrawalCause?: string } | undefined)
+          ?.waveWithdrawalCause !== "contribution-dropped" ||
+      (!state.nodes.isEffect(args.action) &&
+        !state.nodes.isComputation(args.action))
+    ) return;
+    const record = state.nodes.get(args.action);
+    const current = fanOutRun === undefined
+      ? record === node
+      : record?.fanOut === fanOutRun.state &&
+        fanOutRun.state.instances.get(
+            keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+              fanOutRun.instance.key,
+          ) === instanceRecord;
+    if (!current || record === undefined) return;
+    for (const cause of args.invalidCauses ?? []) {
+      addInvalidCause(record, cause);
+    }
+    commitState.markInvalid(args.action, { retry: true });
+    state.pending.add(args.action);
+    state.queueExecution();
+  }).catch((error) => {
+    logger.error(
+      "wave-withdrawal-rearm-failed",
+      "Could not re-arm a withdrawn reactive run",
+      error,
+    );
+  });
   args.resolve(args.result);
 }
 

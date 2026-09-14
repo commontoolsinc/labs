@@ -7,8 +7,10 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
+  type CellScope,
   commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
@@ -20,14 +22,6 @@ import {
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
-import {
-  getContentAddressedSchemasConfig,
-  setContentAddressedSchemasConfig,
-} from "./schema-doc-config.ts";
-import {
-  getReaderSchemaPrecedenceConfig,
-  setReaderSchemaPrecedenceConfig,
-} from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
   type AsyncLocalStore,
@@ -35,23 +29,10 @@ import {
 } from "@commonfabric/utils/async-local-store";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
-import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
-import { sameAcl } from "@commonfabric/memory/acl";
-import type {
-  ACL,
-  ChangeGroup,
-  CommitError,
-  DID,
-  IExtendedStorageTransaction,
-  IStorageManager,
-  IStorageProvider,
-  MemorySpace,
-  TransactionSealDestination,
-  UnexaminedAbsence,
-  URI,
-} from "./storage/interface.ts";
 import type {
   AnyCell,
   Frame,
@@ -69,32 +50,6 @@ import {
   isCell,
   schemaCellScope,
 } from "./cell.ts";
-import { createRef, EntityId } from "./create-ref.ts";
-import {
-  type EventIntentOutcome,
-  SpeculationOverlayDestination,
-  stampSpeculationRunContext,
-} from "./speculation/overlay-destination.ts";
-import { EffectsChannel } from "./speculation/effects-channel.ts";
-import { waveRunContextOf } from "./executor/wave.ts";
-import { Action, Scheduler } from "./scheduler.ts";
-import { entityKey } from "./scheduler/keys.ts";
-import {
-  type CommitBackpressurePolicy,
-  resolveCommitBackpressure,
-} from "./scheduler/backpressure.ts";
-import { Engine } from "./harness/index.ts";
-import {
-  CellLink,
-  inlineExternalSchemaRefsInValue,
-  isCellLink,
-  isNormalizedFullLink,
-  isSigilLink,
-  type NormalizedFullLink,
-  NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
-import { addressKey } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
   buildCfcReadCeiling,
@@ -126,41 +81,6 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import type { ConsoleMethod } from "./harness/console.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
-import type { ConsoleMessage } from "./interface.ts";
-import { ModuleRegistry } from "./module.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import { PatternManager } from "./pattern-manager.ts";
-import { SourceReconciler } from "./source-reconciler.ts";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
-import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import {
-  type PieceSourceTransition,
-  Runner,
-  type RunSyncedCommitResult,
-  type RunSyncedOptions,
-  type RunSyncedWithCommitOptions,
-} from "./runner.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  markRendererInputTx,
-  markUiInputBlindWriteTx,
-  setBlindStructuralTarget,
-  unmarkUiInputBlindWriteTx,
-} from "./storage/reactivity-log.ts";
-import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
-import { toURI } from "./uri-utils.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import {
-  getWriteStackTrace,
-  setWriteStackTraceMatchers,
-  type WriteStackTraceEntry,
-  type WriteStackTraceMatcher,
-} from "./storage/write-stack-trace.ts";
 import {
   runtimeOwnedStoreOwnerKey,
   RuntimeOwnedStores,
@@ -169,12 +89,98 @@ import {
   type RuntimeWritePolicyAuthorization,
   runtimeWritePolicyAuthorized,
 } from "./cfc/types.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
+import { Engine } from "./harness/index.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type { ConsoleMessage } from "./interface.ts";
+import { addressKey } from "./link-types.ts";
+import {
+  CellLink,
+  inlineExternalSchemaRefsInValue,
+  isCellLink,
+  isNormalizedFullLink,
+  isSigilLink,
+  type NormalizedFullLink,
+  NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { ModuleRegistry } from "./module.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import {
+  PatternManager,
+  type PreparedSourceUpdate,
+} from "./pattern-manager.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
+import {
+  getReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "./reader-schema-precedence-config.ts";
+import {
+  type PieceSourceTransition,
+  Runner,
+  type RunSyncedCommitResult,
+  type RunSyncedOptions,
+  type RunSyncedWithCommitOptions,
+} from "./runner.ts";
+import { Action, Scheduler } from "./scheduler.ts";
+import {
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
+import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
+import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
+import { SourceReconciler } from "./source-reconciler.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { EffectsChannel } from "./speculation/effects-channel.ts";
+import {
+  type EventIntentOutcome,
+  SpeculationOverlayDestination,
+  stampSpeculationRunContext,
+} from "./speculation/overlay-destination.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import type {
+  ACL,
+  ChangeGroup,
+  CommitError,
+  DID,
+  IExtendedStorageTransaction,
+  IStorageManager,
+  IStorageProvider,
+  MemorySpace,
+  TransactionSealDestination,
+  UnexaminedAbsence,
+  URI,
+} from "./storage/interface.ts";
+import {
+  markRendererInputTx,
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "./storage/reactivity-log.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
+import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
+import {
+  getWriteStackTrace,
+  setWriteStackTraceMatchers,
+  type WriteStackTraceEntry,
+  type WriteStackTraceMatcher,
+} from "./storage/write-stack-trace.ts";
 import { type NonIdempotentReport, RuntimeTelemetry } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+import { toURI } from "./uri-utils.ts";
+import { ViewReplicationClient } from "./view-replication-client.ts";
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -260,13 +266,14 @@ export interface ExperimentalOptions {
   modernCellRep?: boolean | undefined;
 
   /**
-   * Link writers replace inline schemas with references to
+   * Schema writers replace inline schemas with references to
    * content-addressed schema documents
    * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
-   * writers stamp references, and selectors externalize opportunistically
-   * when their closure is already persisted in the target space. Gates
-   * emission only; readers and the server accept both forms
-   * unconditionally. Defaults to off.
+   * writers and `$alias` bindings stamp references, a result document's
+   * `schema` metadata takes the same reference form, and selectors
+   * externalize opportunistically when their closure is already persisted
+   * in the target space. Gates emission only; readers and the server
+   * accept both forms unconditionally. Defaults to on.
    */
   contentAddressedSchemas?: boolean | undefined;
 
@@ -328,6 +335,12 @@ export interface ExperimentalOptions {
    * unlike v1's SERVER_PRIMARY_EXECUTION so archived docs never alias it.
    */
   serverExecution?: boolean | undefined;
+
+  /** Global default for server-selected view replication. Defaults to off. */
+  viewScopedReplication?: boolean | undefined;
+
+  /** Web client override; an explicit value takes precedence over the default. */
+  webViewScopedReplication?: boolean | undefined;
 }
 
 /**
@@ -413,6 +426,16 @@ export type ServerRunInfo = {
    * pattern-swap setup write today; the loop's own watermark write uses
    * it directly. */
   kind: "derivation" | "event-handler" | "bookkeeping";
+
+  /**
+   * The transaction commits to the store on its own, ahead of the wave the
+   * serving loop would otherwise seal it into, so its `commit()` result is
+   * the store's verdict and nothing the wave later decides can withdraw it
+   * (docs/features/server-pattern-lifecycle.md). Only a `bookkeeping` run
+   * asks for this; off the serving posture the stamp is inert and the
+   * transaction commits as it would anyway.
+   */
+  directCommit?: boolean;
 
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
@@ -528,6 +551,9 @@ export interface RuntimeOptions {
 
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+
+  /** Client class opting into view replication; only web is supported. */
+  clientClass?: "web";
 
   /**
    * Server-execution v2 (serving-loop.md §3): mark THIS runtime as the
@@ -785,6 +811,14 @@ export interface CfcRuntimeStats {
   flowLabelProbesComputed: number;
 
   flowLabelProbeMemoHits: number;
+
+  /** Dereference traces recorded, and the largest set any one transaction
+   * held. `probeBelongsToDereference` scans a document's traces once per read
+   * activity, so the maximum is what decides that scan's cost. Measurement
+   * only. */
+  dereferenceTracesRecorded: number;
+
+  dereferenceTracesMax: number;
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -828,6 +862,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcRelevantTx: 0,
   flowLabelProbesComputed: 0,
   flowLabelProbeMemoHits: 0,
+  dereferenceTracesRecorded: 0,
+  dereferenceTracesMax: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -1086,6 +1122,11 @@ export class Runtime {
    */
   #explicitServerExecution: boolean | undefined;
 
+  /** Client class whose replication override applies to this runtime. */
+  #clientClass: RuntimeOptions["clientClass"];
+
+  #viewReplication?: ViewReplicationClient;
+
   /**
    * The enabler release for an explicitly-_enabled_ runtime. The count itself
    * lives with the flag (`memory/v2.ts`, shared with the `ExecutorHost`):
@@ -1183,7 +1224,31 @@ export class Runtime {
     }
   }
 
-  #moduleDelegationSnapshot(): Map<
+  /**
+   * Whether the delegations registered for `space` let module `identity`
+   * exercise the writer authority of `predecessor`, directly or through a
+   * chain of predecessors — the relation a transaction's snapshot carries.
+   */
+  grantsModuleDelegation(
+    space: MemorySpace,
+    identity: string,
+    predecessor: string,
+  ): boolean {
+    const spaceDelegations = this.#moduleDelegations.get(space);
+    if (spaceDelegations === undefined) return false;
+    const visited = new Set<string>();
+    const pending = [...(spaceDelegations.get(identity) ?? [])];
+    while (pending.length > 0) {
+      const next = pending.pop()!;
+      if (next === predecessor) return true;
+      if (visited.has(next)) continue;
+      visited.add(next);
+      pending.push(...(spaceDelegations.get(next) ?? []));
+    }
+    return false;
+  }
+
+  #moduleDelegationSnapshot(sourceUpdate?: PreparedSourceUpdate): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>
   > {
@@ -1191,7 +1256,24 @@ export class Runtime {
       MemorySpace,
       ReadonlyMap<string, readonly string[]>
     >();
-    for (const [space, spaceDelegations] of this.#moduleDelegations) {
+    const delegations = new Map(this.#moduleDelegations);
+    if (sourceUpdate !== undefined) {
+      const proposal = this.patternManager.sourceUpdateDelegations(
+        sourceUpdate,
+      );
+      const combined = new Map(delegations.get(proposal.space));
+      for (const [identity, predecessors] of proposal.delegations) {
+        combined.set(
+          identity,
+          new Set([
+            ...(combined.get(identity) ?? []),
+            ...predecessors,
+          ]),
+        );
+      }
+      delegations.set(proposal.space, combined);
+    }
+    for (const [space, spaceDelegations] of delegations) {
       const spaceSnapshot = new Map<string, readonly string[]>();
       for (const identity of spaceDelegations.keys()) {
         const inherited = new Set<string>();
@@ -1434,6 +1516,7 @@ export class Runtime {
           "would silently bypass the custom provider for acting runs.",
       );
     }
+    this.#clientClass = options.clientClass;
     this.experimental = {
       modernCellRep: undefined,
       commitPreconditions: undefined,
@@ -1759,15 +1842,11 @@ export class Runtime {
   asyncWorkObserver: ((work: Promise<unknown>) => void) | undefined;
 
   /**
-   * Serving-loop observer of effect-memo hits (server-execution v2
-   * stage G, serving-loop.md §4's hit rule / §7's `memo.hits`): the
-   * effectful builtins report an evaluation that resolved from the
-   * stored request hash — no effect fired. Installed by the
-   * SpaceServer on the serving runtime; undefined everywhere else (the
-   * OFF arm pays one optional call).
+   * Observer of memo hits and completions whose request has been superseded.
+   * The serving loop uses these events for its memo and outbox counters.
    */
   effectMemoObserver:
-    | ((event: { kind: "hit"; id: string }) => void)
+    | ((event: { kind: "hit" | "superseded"; id: string }) => void)
     | undefined;
 
   /**
@@ -2023,6 +2102,7 @@ export class Runtime {
   }
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
+    this.#viewReplication?.dispose();
     try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or
@@ -2172,7 +2252,10 @@ export class Runtime {
    * multiple spaces but writing only to one space.
    */
   edit(
-    options: { changeGroup?: ChangeGroup } = {},
+    options: {
+      changeGroup?: ChangeGroup;
+      sourceUpdate?: PreparedSourceUpdate;
+    } = {},
   ): IExtendedStorageTransaction {
     const tx = this.storageManager.edit();
     if (options.changeGroup !== undefined) {
@@ -2206,6 +2289,12 @@ export class Runtime {
       onFlowLabelProbe: (outcome) => {
         if (outcome === "memo") this.#cfcStats.flowLabelProbeMemoHits += 1;
         else this.#cfcStats.flowLabelProbesComputed += 1;
+      },
+      onDereferenceTrace: (held) => {
+        this.#cfcStats.dereferenceTracesRecorded += 1;
+        if (held > this.#cfcStats.dereferenceTracesMax) {
+          this.#cfcStats.dereferenceTracesMax = held;
+        }
       },
       onPreparedTx: () => {
         this.#cfcStats.cfcPreparedTx += 1;
@@ -2269,7 +2358,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
-    wrapped.setCfcModuleDelegations(this.#moduleDelegationSnapshot());
+    wrapped.setCfcModuleDelegations(
+      this.#moduleDelegationSnapshot(options.sourceUpdate),
+    );
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
@@ -2313,6 +2404,19 @@ export class Runtime {
     if (this.servingPosture) return undefined;
     this.#speculationOverlay ??= new SpeculationOverlayDestination(this);
     return this.#speculationOverlay;
+  }
+
+  /** Renderer demand and local preview eligibility owned by this runtime. */
+  get viewReplication(): ViewReplicationClient {
+    return this.#viewReplication ??= new ViewReplicationClient(this);
+  }
+
+  /** Whether this client requests view replication, subject to session support. */
+  get viewScopedReplicationRequested(): boolean {
+    return this.#clientClass === "web" &&
+      this.experimental.serverExecution === true && !this.servingPosture &&
+      (this.experimental.webViewScopedReplication ??
+        this.experimental.viewScopedReplication ?? false);
   }
 
   /** DIAGNOSTIC (tests): the lazily-created speculation overlay, if this
@@ -2677,6 +2781,7 @@ export class Runtime {
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries: number = DEFAULT_MAX_RETRIES,
+    options: { sourceUpdate?: PreparedSourceUpdate } = {},
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
@@ -2691,7 +2796,8 @@ export class Runtime {
       },
     });
     if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
-    const tx = this.edit();
+    const tx = this.edit(options);
+    this.scheduler.beginReadAttempt(tx, "editWithRetry");
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
       .deferRunnerStartUntilCommit = true;
@@ -2717,7 +2823,12 @@ export class Runtime {
         tx.abort("editWithRetry stopped because the runtime is disposing");
         return Promise.resolve(teardownResult());
       }
-      this.prepareTxForCommit(tx);
+      try {
+        this.prepareTxForCommit(tx);
+      } catch (error) {
+        if (tx.status().status === "ready") tx.abort(error);
+        throw error;
+      }
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {
@@ -2726,7 +2837,7 @@ export class Runtime {
               this.#writeTeardown.signal,
             );
             if (this.#tearingDownWrites) return teardownResult();
-            return this.editWithRetry<T>(fn, maxRetries - 1);
+            return this.editWithRetry<T>(fn, maxRetries - 1, options);
           } else {
             return { error };
           }
@@ -2777,7 +2888,7 @@ export class Runtime {
           `editWithRetry re-run: ${present} document(s) read as absent ` +
             "are present; the action re-runs against them",
         );
-        return this.editWithRetry<T>(fn, maxRetries - 1);
+        return this.editWithRetry<T>(fn, maxRetries - 1, options);
       }
       return commitPrepared();
     });
@@ -2880,9 +2991,11 @@ export class Runtime {
    * this replica never READ does not arrive with it — and a conflicted blind
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So the named doc is pulled
-   * too, and the retry's write carries its true version instead of
-   * re-asserting seq 0.
+   * docs the serving side was materializing). So every document named by the
+   * rejection is pulled concurrently in its scope, and the retry's writes
+   * carry their true versions instead of re-asserting seq 0. Entries without
+   * scope use the default space instance. If no array entry names a usable
+   * address, the singular conflict supplies the recovery target.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2921,24 +3034,48 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const conflict = (error as {
-      conflict?: { space?: MemorySpace; of?: string };
-    })?.conflict;
-    if (
-      conflict?.space !== undefined &&
-      typeof conflict.of === "string" &&
-      conflict.of !== "of:unknown"
-    ) {
+    type ConflictAddress = { space: MemorySpace; of: URI; scope?: CellScope };
+    const isPullableConflict = (value: unknown): value is ConflictAddress => {
+      const conflict = value as Partial<ConflictAddress> | null | undefined;
+      return typeof conflict?.space === "string" &&
+        typeof conflict.of === "string" && conflict.of !== "of:unknown" &&
+        (conflict.scope === undefined || isCellScope(conflict.scope));
+    };
+    const rejection = error as { conflict?: unknown; conflicts?: unknown };
+    const listedConflicts = Array.isArray(rejection?.conflicts)
+      ? rejection.conflicts.filter(isPullableConflict)
+      : [];
+    const conflicts = listedConflicts.length > 0
+      ? listedConflicts
+      : isPullableConflict(rejection?.conflict)
+      ? [rejection.conflict]
+      : [];
+    const pulls: Promise<unknown>[] = [];
+    const seen = new Set<string>();
+    for (const conflict of conflicts) {
+      const key = entityNameKey({
+        space: conflict.space,
+        id: conflict.of,
+        scope: conflict.scope,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await waitUnlessTeardown(
-          this.storageManager.open(conflict.space).sync(
-            conflict.of as unknown as URI,
-            { path: [], schema: false },
-          ),
+        pulls.push(
+          Promise.resolve(
+            this.storageManager.open(conflict.space).sync(
+              conflict.of,
+              { path: [], schema: false },
+              conflict.scope,
+            ),
+          ).catch(() => undefined),
         );
       } catch {
-        // Pull failed — the retry's commit decides.
+        // A synchronous pull failure leaves the retry's commit to decide.
       }
+    }
+    if (pulls.length > 0) {
+      await waitUnlessTeardown(Promise.all(pulls));
     }
   }
 

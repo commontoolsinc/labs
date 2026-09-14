@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 import { SKIP_LIST_VARIABLE } from "@commonfabric/test-support/records";
 import { loadUnitSuites } from "./unit.ts";
 import type { Suite } from "./suite.ts";
+import { EXCLUDED_FROM_COVERAGE_GATE } from "../test-selection/policy.ts";
 
 /** A workspace holding the members a case describes. */
 async function workspace(
@@ -308,8 +309,8 @@ describe("running a member that cannot be handed a subset", () => {
     expect(made.length).toBe(2);
     expect(made.some((i) => i.command.includes("browser-test"))).toBe(true);
     // Each member's profiles go somewhere of their own, which is what
-    // lets the per-package figures be added up afterwards.
-    expect(made[0]!.env?.DENO_COVERAGE_DIR).toBe("/cov/bakery");
+    // keeps one measured set's number out of another's.
+    expect(made[0]!.env?.DENO_COVERAGE_DIR).toBe("/cov/packages__bakery");
   });
 
   it("locates a browser record on the half that produced it", async () => {
@@ -392,5 +393,224 @@ describe("what the unit suites decline to claim", () => {
     expect(
       suite.locate({ test: { k: "browser", s: "bakery", n: "bakes" } }),
     ).toEqual({ level: "unit", unit: "packages/bakery#browser-test" });
+  });
+});
+
+describe("the measured sets a unit suite declares", () => {
+  it("gives a member one set over its own files", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/*.test.ts" },
+        files: ["test/glaze.test.ts", "test/proof.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured).toEqual([{
+      member: "packages/bakery",
+      reachedBy: ["packages/bakery/"],
+      units: [
+        "packages/bakery/test/glaze.test.ts",
+        "packages/bakery/test/proof.test.ts",
+      ],
+    }]);
+  });
+
+  it("gives a member whose task runs whole a set over that one unit", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno run -A test/run-tests.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured?.[0]?.units).toEqual(["packages/bakery"]);
+  });
+
+  it("covers a member added to the workspace with no other edit", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/glaze.test.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+      "./packages/cellar": {
+        tasks: { test: "deno test test/rack.test.ts" },
+        files: ["test/rack.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured?.map((set) => set.member))
+      .toEqual(["packages/bakery", "packages/cellar"]);
+  });
+
+  it("covers a member at whatever depth it sits", async () => {
+    const root = await workspace({
+      "./packages/connectors/github": {
+        tasks: { test: "deno test test/issue.test.ts" },
+        files: ["test/issue.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured?.[0]?.member).toBe("packages/connectors/github");
+  });
+
+  it("leaves a nested member's tree out of the outer member's reach", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/shape.test.ts" },
+        files: ["test/shape.test.ts"],
+      },
+      "./packages/bakery/cellar": {
+        tasks: { test: "deno test test/rack.test.ts" },
+        files: ["test/rack.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const outer = suite.measured?.find((set) =>
+      set.member === "packages/bakery"
+    );
+    expect(outer?.reachedBy).toEqual([
+      "packages/bakery/",
+      "!packages/bakery/cellar/",
+    ]);
+  });
+
+  it("leaves a member on the exclusion list without a set", async () => {
+    const excluded = [...EXCLUDED_FROM_COVERAGE_GATE.keys()]
+      .find((member) => !member.includes("/", "packages/".length))!;
+    const root = await workspace({
+      [`./${excluded}`]: {
+        tasks: { test: "deno test test/one.test.ts" },
+        files: ["test/one.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured).toBeUndefined();
+  });
+
+  it("leaves a member outside packages/ without a set", async () => {
+    const root = await workspace({
+      "./tools/bakery": {
+        tasks: { test: "deno test test/one.test.ts" },
+        files: ["test/one.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured).toBeUndefined();
+  });
+
+  it("measures a member's Deno-only half and never its browser unit", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          "deno-test": "deno test test/glaze.test.ts",
+          "browser-test": "deno run -A ../deno-web-test/cli.ts oven.test.ts",
+          test: "deno task deno-test && deno task browser-test",
+        },
+        files: ["test/glaze.test.ts", "oven.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.units).toContain("packages/bakery#browser-test");
+    expect(suite.measured?.[0]?.units)
+      .toEqual(["packages/bakery/test/glaze.test.ts"]);
+  });
+
+  it("leaves a member with only a browser half without a set", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          "browser-test": "deno run -A ../deno-web-test/cli.ts oven.test.ts",
+        },
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.measured).toBeUndefined();
+  });
+});
+
+describe("where a unit suite writes its coverage profiles", () => {
+  it("names a directory for the member, under the batch's directory", async () => {
+    const root = await workspace({
+      "./packages/connectors/github": {
+        tasks: { test: "deno test test/issue.test.ts" },
+        files: ["test/issue.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const [invocation] = await suite.command(
+      [{ unit: "packages/connectors/github/test/issue.test.ts", skip: [] }],
+      {
+        root,
+        outputDir: "/out",
+        spoolDir: "/spool",
+        coverageDir: "/cov",
+      },
+    );
+    expect(invocation?.env?.DENO_COVERAGE_DIR)
+      .toBe("/cov/packages__connectors__github");
+  });
+
+  it("writes nothing for a member the run is not measuring", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/glaze.test.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const [invocation] = await suite.command(
+      [{ unit: "packages/bakery/test/glaze.test.ts", skip: [] }],
+      {
+        root,
+        outputDir: "/out",
+        spoolDir: "/spool",
+        coverageDir: "/cov",
+        measuredMembers: new Set(["packages/cellar"]),
+      },
+    );
+    expect(invocation?.env?.DENO_COVERAGE_DIR).toBeUndefined();
+  });
+
+  it("keeps the browser half out of the member's measured directory", async () => {
+    // The browser unit is not one of the set's units, so what it reached
+    // must not move the set's number: a lane that happened to select it
+    // would otherwise measure something a lane that did not would miss.
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          "deno-test": "deno test test/glaze.test.ts",
+          "browser-test": "deno run -A ../deno-web-test/cli.ts oven.test.ts",
+          test: "deno task deno-test && deno task browser-test",
+        },
+        files: ["test/glaze.test.ts", "oven.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const made = await suite.command(
+      [
+        { unit: "packages/bakery/test/glaze.test.ts", skip: [] },
+        { unit: "packages/bakery#browser-test", skip: [] },
+      ],
+      { root, outputDir: "/out", spoolDir: "/spool", coverageDir: "/cov" },
+    );
+    const browser = made.find((one) => one.command.includes("browser-test"))!;
+    const deno = made.find((one) => !one.command.includes("browser-test"))!;
+    expect(deno.env?.DENO_COVERAGE_DIR).toBe("/cov/packages__bakery");
+    expect(browser.env?.DENO_COVERAGE_DIR).toBeUndefined();
+  });
+
+  it("writes nothing at all where the batch is not being measured", async () => {
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: { test: "deno test test/glaze.test.ts" },
+        files: ["test/glaze.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    const [invocation] = await suite.command(
+      [{ unit: "packages/bakery/test/glaze.test.ts", skip: [] }],
+      { root, outputDir: "/out", spoolDir: "/spool" },
+    );
+    expect(invocation?.env?.DENO_COVERAGE_DIR).toBeUndefined();
   });
 });

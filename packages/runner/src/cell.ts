@@ -1,4 +1,12 @@
-import type { ReadonlyCell } from "@commonfabric/api";
+import type {
+  AnyBrandedCell,
+  CollectionIndexData,
+  CollectionIndexKey,
+  CollectionIndexKeyEntry,
+  GroupIndex,
+  KeyIndex,
+  ReadonlyCell,
+} from "@commonfabric/api";
 import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
@@ -7,10 +15,10 @@ import {
   fabricFromNativeValue,
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
+  isFabricSpecialObject,
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -30,6 +38,7 @@ import {
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import {
+  type ScopeKeyIdentity,
   type SqliteDbRef,
   type SqliteParamsWire,
   streamEntriesDocId,
@@ -48,8 +57,10 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toCell } from "./back-to-cell.ts";
-import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
-import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
+import {
+  collectionKeyBucket,
+  resolveCollectionKey,
+} from "./builtins/collection-index-key.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import {
@@ -80,6 +91,7 @@ import {
   type Stream,
   type StripDefaultBrand,
 } from "./builder/types.ts";
+import type { AggregateOperation } from "./builtins/aggregate.ts";
 import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
@@ -109,6 +121,7 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import {
   isRendererTrustedEvent,
@@ -120,6 +133,7 @@ import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
 } from "./data-uri.ts";
+import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -131,13 +145,13 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { type MetaField, type RawMetaWriteAuthorization } from "./meta-seam.ts";
 import {
   type CellResult,
   createQueryResultProxy,
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { type MetaField, type RawMetaWriteAuthorization } from "./meta-seam.ts";
 import type { Runtime } from "./runtime.ts";
 import {
   type Action,
@@ -158,6 +172,7 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   createChildCellTransaction,
@@ -165,10 +180,12 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
+  EventAppendDeliveryOutcome,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
+import { usesLocalReads } from "./storage/local-read-policy.ts";
 import {
   allowMutableTransactionRead,
   internalVerifierRead,
@@ -207,9 +224,28 @@ export type RawCellReadOptions = IReadOptions & {
 };
 
 // Shared factory instances for all cells
+let aggregateFactory: NodeFactory<any, any> | undefined;
+
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+
+/** Builds one named aggregate node with its scalar result schema. */
+function createAggregate<T>(
+  list: unknown,
+  operation: AggregateOperation,
+  elements?: unknown,
+): Reactive<T> {
+  aggregateFactory ??= createNodeFactory({
+    type: "ref",
+    implementation: "aggregate",
+  });
+  const result = aggregateFactory({ list, operation, elements });
+  if (operation !== "minBy" && operation !== "maxBy") {
+    result.setSchema(schemaCarryingLinkIfc(result, { type: "number" }));
+  }
+  return result;
+}
 
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
@@ -221,7 +257,15 @@ let flatMapFactory: NodeFactory<any, any> | undefined;
  * use the `*WithPattern` variant explicitly.
  */
 function throwOpFunctionFormMessage(
-  method: "map" | "filter" | "flatMap",
+  method:
+    | "map"
+    | "filter"
+    | "flatMap"
+    | "count"
+    | "minBy"
+    | "maxBy"
+    | "groupBy"
+    | "keyBy",
 ): string {
   return `Reactive.${method}(fn) is no longer supported: an inline pattern has ` +
     `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
@@ -344,6 +388,19 @@ export type StreamSendOptions = {
   eventId?: string;
   session?: string;
   runtimeInjectedEventKeys?: readonly string[];
+
+  /**
+   * Fires once the sender's own authored act is durable, ahead of the
+   * commit callback: under server execution that act is the event append
+   * (events.md §1), and the handling the server runs for it settles the
+   * commit callback later; otherwise the act is the handling's own
+   * commit, and the two fire together. A caller that only needs its event
+   * on the record waits here and not for the handling.
+   */
+  onAppended?: (
+    delivery: EventAppendDeliveryOutcome,
+    tx: IExtendedStorageTransaction,
+  ) => void;
 };
 
 // The mint registry backing `runtimeInjectedEventKeys` (see
@@ -648,6 +705,23 @@ export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
 export type { MemorySpace } from "@commonfabric/memory/interface";
 
+const arrayOnlyMethodNames = [
+  "groupBy",
+  "groupByWithPattern",
+  "keyBy",
+  "keyByWithPattern",
+  "count",
+  "countWithPattern",
+  "sum",
+  "min",
+  "max",
+  "minBy",
+  "minByWithPattern",
+  "maxBy",
+  "maxByWithPattern",
+] as const;
+const arrayOnlyMethods: ReadonlySet<string> = new Set(arrayOnlyMethodNames);
+
 // The names a `Reactive` forwards as METHODS of the cell it proxies. Every
 // other string reads as data navigation, so a name here shadows a data key
 // spelled the same way -- which is why `query` and `exec` are gated below.
@@ -660,6 +734,9 @@ const cellMethods = new Set<
   | "flatMapWithPattern"
   | "exec"
   | "query"
+  | "lookup"
+  | "keys"
+  | "keyEntries"
 >([
   "get",
   "sample",
@@ -678,6 +755,7 @@ const cellMethods = new Set<
   "key",
   "map",
   "mapWithPattern",
+  ...arrayOnlyMethodNames,
   "reduce",
   "findIndex",
   "filter",
@@ -709,7 +787,30 @@ const cellMethods = new Set<
   "setSelfRef",
   "exec",
   "query",
+  "lookup",
+  "keys",
+  "keyEntries",
 ]);
+
+/**
+ * `schema` for `result`, carrying the whole `ifc` its link schema already
+ * declares. A node factory labels the cell it mints from that node's inputs,
+ * and a built-in stamping its own shape onto the same link composes that
+ * label back in. CFC §8.5.4.3 puts a collection coordinator's source label on
+ * its structural writes, and §8.17.1 puts the join of a count's or a sum's
+ * contributors on the scalar it produces.
+ */
+function schemaCarryingLinkIfc(
+  result: { export(): { schema?: JSONSchema } },
+  schema: JSONSchema,
+): JSONSchema {
+  const existing = result.export().schema;
+  const ifc = isObjectNotArray(existing) ? existing.ifc : undefined;
+  return ifc === undefined ? schema : internSchema({
+    ...ContextualFlowControl.toSchemaObj(schema),
+    ifc,
+  });
+}
 
 // The schema for one element of an array schema, suitable for a standalone
 // element cell. The array's items schema is often a `$ref` into the array
@@ -737,14 +838,9 @@ export function elementSchemaFor(
       index < prefixItems.length
     ? prefixItems[index]
     : arraySchema.items;
-  if (!isObjectNotArray(covering)) {
-    return covering as JSONSchema | undefined;
-  }
-  const defs = arraySchema.$defs;
-  if (defs && !("$defs" in covering)) {
-    return { ...covering, $defs: defs } as JSONSchema;
-  }
-  return covering as JSONSchema;
+  return covering === undefined
+    ? undefined
+    : cfcSchemaWithInheritedDefs(covering, arraySchema.$defs);
 }
 
 /** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
@@ -895,6 +991,18 @@ export function markCellDocumentSynced(cell: Cell<any>): void {
   cell[markDocumentSynced]();
 }
 
+/** Loads a document for a captured resolution identity without retaining a transaction. */
+export function syncCellForIdentity<T>(
+  cell: Cell<T>,
+  identity: ScopeKeyIdentity | undefined,
+): Promise<Cell<T>> {
+  if (identity === undefined) return cell.sync();
+  markCellDocumentSynced(cell);
+  return cell.runtime.storageManager.syncCell(cell, {
+    scopeKeyIdentity: identity,
+  });
+}
+
 /**
  * Shared container for entity ID and cause information across sibling cells.
  * When cells are created via .asSchema(), .withTx(), they share the same
@@ -931,6 +1039,13 @@ export class CellImpl<T extends FabricValue>
    */
   #causeContainer: CauseContainer;
 
+  /**
+   * The frame on top of the stack when this cell was constructed. A runtime
+   * keeps a frame on the stack from its construction until its disposal, so a
+   * cell has no frame only when it is built after the runtime it came from was
+   * disposed, as deriving one with `key()` from a cell that already has a full
+   * link does.
+   */
   #frame: Frame | undefined;
 
   #kind: CellKind;
@@ -1122,14 +1237,6 @@ export class CellImpl<T extends FabricValue>
 
     // Otherwise, let's attempt to derive the id:
 
-    // We must be in a frame context to derive the id.
-    if (!this.#frame) {
-      throw new Error(
-        "Cannot create cell link - no frame context\n" +
-          "help: create cells inside pattern/handler/lift, or use .for(cause) for explicit identity",
-      );
-    }
-
     const space = this.#_link.space ?? this.#causeContainer.space ??
       this.#frame?.space;
 
@@ -1144,7 +1251,7 @@ export class CellImpl<T extends FabricValue>
     // Used passed in cause (via .for()), for events fall back to per-frame
     // counter.
     const cause = this.#causeContainer.cause ??
-      (this.#frame.inHandler
+      (this.#frame?.inHandler
         ? { count: this.#frame.generatedIdCounter++ }
         : undefined);
 
@@ -1156,7 +1263,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, this.#frame.cause));
+    const id = toURI(createRef({ frame: cause }, this.#frame?.cause));
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
@@ -1754,10 +1861,13 @@ export class CellImpl<T extends FabricValue>
           // present an error-status view of the tx; only a delivered
           // append whose handling consequenced (or a bare teardown,
           // reported as such) passes the tx through untouched.
-          if (onCommit !== undefined) {
+          const onAppended = sendOptions?.onAppended;
+          if (onCommit !== undefined || onAppended !== undefined) {
             const callerOnCommit = onCommit;
             onCommit = (echoTx: IExtendedStorageTransaction) => {
               void outcome.then(async (delivery) => {
+                onAppended?.(delivery, echoTx);
+                if (callerOnCommit === undefined) return;
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
@@ -2050,11 +2160,44 @@ export class CellImpl<T extends FabricValue>
       // wave-stamped emission paths above intercept first and carry the
       // same actor explicitly, as the entry's `firedAt`; this carriage
       // covers the remaining in-process queueEvent shapes.)
+      // Off server execution the handling's commit is the sender's own
+      // authored act, so `onAppended` fires with the commit callback, and
+      // reports what the commit did: delivered when it landed, and when
+      // it collided on the handling's receipt — a retry of the same
+      // invocation, which settles on the original outcome — and refused,
+      // with the reason, when the handling threw or its commit was
+      // rejected. Under server execution the wrapper above fires the hook
+      // off the append itself.
+      const appendedWithCommit = sendOptions?.onAppended;
+      const settleCallback = firedEventId === undefined &&
+          appendedWithCommit !== undefined
+        ? (tx: IExtendedStorageTransaction) => {
+          const status = tx.status();
+          const deduplicated = status.status === "error" &&
+            "precondition" in status.error &&
+            status.error.precondition === "receipt-exists";
+          appendedWithCommit(
+            status.status === "error" && !deduplicated
+              ? {
+                delivered: false,
+                refused: status.error instanceof Error
+                  ? status.error.message
+                  : String(
+                    (status.error as { message?: unknown }).message ??
+                      status.error,
+                  ),
+              }
+              : { delivered: true },
+            tx,
+          );
+          onCommit?.(tx);
+        }
+        : onCommit;
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
         event,
         undefined,
-        onCommit,
+        settleCallback,
         false,
         {
           // Under events-down the COMMITTED append's id is the one the
@@ -2449,16 +2592,11 @@ export class CellImpl<T extends FabricValue>
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by content, mirroring the server's keyless dedup. Under a frame, the
-    // content comparison runs against a fabric-normalized COPY of the candidate
-    // (a native `Date` must match its stored `FabricEpochNsec` form); the
-    // original candidate -- not the copy -- is what an accepted add writes, so
-    // no identity the write path relies on is disturbed. A frameless
-    // `addUnique` compares the raw candidate: the write boundary that would
-    // normalize it runs only under a frame, and a raw comparison also tolerates
-    // annotation-carrying values (e.g. `get()` results) that the strict
-    // conversion rejects.
-    const normalizeForComparison = this.#frame !== undefined;
+    // by content, mirroring the server's keyless dedup. The content comparison
+    // runs against a fabric-normalized COPY of the candidate (a native `Date`
+    // must match its stored `FabricEpochNsec` form); the original candidate --
+    // not the copy -- is what an accepted add writes, so no identity the write
+    // path relies on is disturbed.
     const alreadyPresent = (candidate: FabricValue) => {
       if (isCell(candidate)) {
         return existing.some((element) =>
@@ -2484,9 +2622,9 @@ export class CellImpl<T extends FabricValue>
       // compare as themselves -- the write boundary passes them through
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
-      const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(flattenBuilderArtifacts(candidate))
-        : candidate;
+      const comparable = isCellLink(candidate)
+        ? candidate
+        : fabricFromNativeValue(flattenBuilderArtifacts(candidate));
       return existing.some((element) => valueEqual(element, comparable));
     };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
@@ -2748,8 +2886,7 @@ export class CellImpl<T extends FabricValue>
       return true;
     }
 
-    return ref instanceof FabricSpecialObject &&
-      element instanceof FabricSpecialObject &&
+    return isFabricSpecialObject(ref) && isFabricSpecialObject(element) &&
       valueEqual(element, ref);
   }
 
@@ -2998,6 +3135,9 @@ export class CellImpl<T extends FabricValue>
    * still race the deferred sync.
    */
   sync(): Promise<Cell<T>> {
+    if (usesLocalReads(this.tx)) {
+      return Promise.resolve(this as unknown as Cell<T>);
+    }
     this.#synced = true;
     logger.info("sync", this.#link);
     // The runner's explicit-instance read (server-execution v2 stage A —
@@ -3056,8 +3196,7 @@ export class CellImpl<T extends FabricValue>
       readTx,
       readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
     );
-    const nonReactiveTx = createNonReactiveTransaction(readTx);
-    link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
+    link = maybeConvertArrayPathToDataURILink(readTx, link);
     return createCell(
       this.runtime,
       link,
@@ -3345,8 +3484,14 @@ export class CellImpl<T extends FabricValue>
     name?: unknown;
     external?: unknown;
   } {
+    // Exporting a cell is a step in building a pattern, and the builder checks
+    // the exported frame against the one it is building under.
     if (!this.#frame) {
-      throw new Error("Cannot export cell: no frame context.");
+      throw new Error(
+        "Cannot export a cell with no frame\n" +
+          "help: this cell was built after the runtime it came from was " +
+          "disposed, so it cannot take part in building a pattern",
+      );
     }
     return {
       cell: this.#causeContainer.cell,
@@ -3425,9 +3570,25 @@ export class CellImpl<T extends FabricValue>
           // Check if this is a method on the cell. `query`/`exec` are gated to
           // SqliteDb cells so they don't shadow same-named data fields.
           const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          const isIndexOnlyMethod = prop === "lookup" || prop === "keys" ||
+            prop === "keyEntries";
+          // Array-only method names remain ordinary data fields on non-array refs,
+          // including schemaless builder objects. Callable projections cannot
+          // be persisted as data because their method/value meaning is ambiguous.
+          const arrayMethodSchema = typeof prop === "string" &&
+              arrayOnlyMethods.has(prop)
+            ? resolveSchema(self.schema)
+            : undefined;
+          const isArrayMethodReceiver = arrayMethodSchema &&
+            typeof arrayMethodSchema === "object" &&
+            arrayMethodSchema.type === "array";
           if (
             cellMethods.has(prop as keyof ICell<T>) &&
-            (!isSqliteOnlyMethod || cellKind === "sqlite")
+            (!isSqliteOnlyMethod || cellKind === "sqlite") &&
+            (!isIndexOnlyMethod ||
+              (self as unknown as Cell<{ kind?: string }>).key("kind").get() ===
+                "collection-index") &&
+            (!arrayOnlyMethods.has(String(prop)) || isArrayMethodReceiver)
           ) {
             return nestedCell.getAsReactiveProxy(
               (self as unknown as Record<
@@ -3537,8 +3698,205 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchema(op.resultSchema));
+    result.setSchema(
+      schemaCarryingLinkIfc(result, listResultSchema(op.resultSchema)),
+    );
     return result;
+  }
+
+  /** @inheritDoc */
+  groupBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    _selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T> {
+    throw new Error(throwOpFunctionFormMessage("groupBy"));
+  }
+
+  /** @inheritDoc */
+  groupByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T> {
+    const keys = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createNodeFactory({
+      type: "ref",
+      implementation: "collectionIndex",
+    })({
+      list: keys,
+      elements: this,
+      mode: "group",
+    }) as GroupIndex<K, T extends Array<infer U> ? U : T>;
+  }
+
+  /** @inheritDoc */
+  keyBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    _selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T> {
+    throw new Error(throwOpFunctionFormMessage("keyBy"));
+  }
+
+  /** @inheritDoc */
+  keyByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T> {
+    const keys = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createNodeFactory({
+      type: "ref",
+      implementation: "collectionIndex",
+    })({
+      list: keys,
+      elements: this,
+      mode: "key",
+    }) as KeyIndex<K, T extends Array<infer U> ? U : T>;
+  }
+
+  /** Reads one index bucket while retaining dependencies on key resolution. */
+  lookup(
+    key: CollectionIndexKey | null | undefined,
+  ): T extends CollectionIndexData<CollectionIndexKey, infer V> ? V : unknown {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("lookup requires a collection index");
+    }
+    const resolved = resolveCollectionKey(
+      this.runtime,
+      this.runtime.readTx(this.tx),
+      key,
+    );
+    const value = resolved
+      ? index.key("buckets").key(collectionKeyBucket(resolved.identity)).get()
+      : undefined;
+    return (value === undefined
+      ? (index.key("mode").get() === "group" ? [] : undefined)
+      : value) as T extends CollectionIndexData<CollectionIndexKey, infer V> ? V
+        : unknown;
+  }
+
+  /** Reads occupied-key enumeration separately from bucket lookup. */
+  keys(): T extends CollectionIndexData<infer K, unknown> ? K[] : unknown[] {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("keys requires a collection index");
+    }
+    return index.key("keys").get() as T extends
+      CollectionIndexData<infer K, unknown> ? K[] : unknown[];
+  }
+
+  /** Reads tagged key enumeration separately from bucket lookup. */
+  keyEntries(): T extends CollectionIndexData<infer K, unknown>
+    ? CollectionIndexKeyEntry<K>[]
+    : unknown[] {
+    const index = this as unknown as Cell<
+      CollectionIndexData<CollectionIndexKey, unknown>
+    >;
+    if (index.key("kind").get() !== "collection-index") {
+      throw new Error("keyEntries requires a collection index");
+    }
+    return index.key("keyEntries").get() as T extends
+      CollectionIndexData<infer K, unknown> ? CollectionIndexKeyEntry<K>[]
+      : unknown[];
+  }
+
+  /** @inheritDoc */
+  count(
+    this: AnyBrandedCell<unknown[]>,
+    predicate?: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<boolean>,
+  ): Reactive<number> {
+    if (predicate !== undefined) {
+      throw new Error(throwOpFunctionFormMessage("count"));
+    }
+    return createAggregate(this, "count");
+  }
+
+  /** @inheritDoc */
+  sum(this: AnyBrandedCell<number[]>): Reactive<number> {
+    return createAggregate(this, "sum");
+  }
+
+  /** @inheritDoc */
+  min(this: AnyBrandedCell<number[]>): Reactive<number> {
+    return createAggregate(this, "min");
+  }
+
+  /** @inheritDoc */
+  max(this: AnyBrandedCell<number[]>): Reactive<number> {
+    return createAggregate(this, "max");
+  }
+
+  /** @inheritDoc */
+  countWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
+    params: Record<string, any>,
+  ): Reactive<number> {
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createAggregate(scores, "countTruthy", this);
+  }
+
+  /** @inheritDoc */
+  minBy(
+    this: AnyBrandedCell<unknown[]>,
+    _score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    throw new Error(throwOpFunctionFormMessage("minBy"));
+  }
+
+  /** @inheritDoc */
+  minByWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createAggregate(scores, "minBy", this);
+  }
+
+  /** @inheritDoc */
+  maxBy(
+    this: AnyBrandedCell<unknown[]>,
+    _score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    throw new Error(throwOpFunctionFormMessage("maxBy"));
+  }
+
+  /** @inheritDoc */
+  maxByWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined> {
+    const scores = CellImpl.prototype.mapWithPattern.call(this, op, params);
+    return createAggregate(scores, "maxBy", this);
   }
 
   /**
@@ -3627,7 +3985,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchema());
+    result.setSchema(schemaCarryingLinkIfc(result, listResultSchema()));
     return result;
   }
 
@@ -3667,7 +4025,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    result.setSchema(listResultSchema());
+    result.setSchema(schemaCarryingLinkIfc(result, listResultSchema()));
     return result;
   }
 
@@ -3855,8 +4213,8 @@ function sinkHelper(
 
 /**
  * Deeply traverse a value to access all properties.
- * This is used by pull() to ensure all nested values are read,
- * which registers them as dependencies for pull-based scheduling.
+ * Sinks, pulls, and rendered-property queries share this traversal to register
+ * the dependencies behind schema-free values.
  * Works with query result proxies which trigger reads on property access.
  *
  * TODO(danfuzz): A `FabricInstance` passes the `typeof` gate but has no
@@ -3867,7 +4225,10 @@ function sinkHelper(
  * never re-fires on its change. A `FabricPrimitive` ends the walk too, which
  * is correct — it is a leaf.
  */
-function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+export function deepTraverse(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): void {
   if (value === null || value === undefined) return;
   if (typeof value !== "object") return;
 
@@ -3961,6 +4322,10 @@ function maybeConvertArrayPathToDataURILink(
     path: candidate.path,
   };
 
+  // The snapshot identity depends on this inline element's content. A reader
+  // must resolve it again when the mutable source changes.
+  tx.readValueOrThrow(baseLink);
+
   return {
     ...link,
     id: dataUriFromValueWithResolvedLinks(candidate.value, baseLink),
@@ -3986,7 +4351,7 @@ function containsCycle(value: unknown): boolean {
   const walk = (node: unknown): boolean => {
     if (
       node === null || typeof node !== "object" || isCell(node) ||
-      isCellLink(node) || node instanceof FabricSpecialObject
+      isCellLink(node) || isFabricSpecialObject(node)
     ) {
       return false;
     }

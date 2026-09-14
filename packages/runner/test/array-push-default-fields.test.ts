@@ -1,8 +1,6 @@
 /**
- * Test for CT-1173: Array persistence bug with Default<> wrapped fields
- *
- * This test specifically checks whether objects with many Default<>-like
- * fields maintain their values correctly when pushed to arrays.
+ * Objects with many `Default<>`-like fields keep their values when pushed to
+ * arrays.
  */
 
 import { expect } from "@std/expect";
@@ -34,7 +32,7 @@ interface Person {
   createdAt: number;
 }
 
-describe("CT-1173: array push with complex objects", () => {
+describe("array push with complex objects", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -71,7 +69,7 @@ describe("CT-1173: array push with complex objects", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame);
+    const pushed = pushFrame(frame);
 
     try {
       // Push first person (Alice)
@@ -122,7 +120,7 @@ describe("CT-1173: array push with complex objects", () => {
         createdAt: 3000,
       });
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
 
     // Read back via get()
@@ -175,7 +173,7 @@ describe("CT-1173: array push with complex objects", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame1);
+    const pushed1 = pushFrame(frame1);
     try {
       // Minted inside the frame: `Cell.push` anchors from the frame its cell was
       // constructed in, which is what makes the counter reset below observable.
@@ -195,7 +193,7 @@ describe("CT-1173: array push with complex objects", () => {
           createdAt: 1000,
         });
     } finally {
-      popFrame();
+      popFrame(pushed1);
     }
 
     // Second frame - push Bob (simulating a separate handler call)
@@ -207,7 +205,7 @@ describe("CT-1173: array push with complex objects", () => {
       generatedIdCounter: 0, // NOTE: Counter resets!
       inHandler: true,
     };
-    pushFrame(frame2);
+    const pushed2 = pushFrame(frame2);
     try {
       runtime.getCell<Person[]>(space, "test-separate-pushes", undefined, tx)
         .push({
@@ -225,7 +223,7 @@ describe("CT-1173: array push with complex objects", () => {
           createdAt: 2000,
         });
     } finally {
-      popFrame();
+      popFrame(pushed2);
     }
 
     const items = arrayCell.get();

@@ -3,11 +3,13 @@ import {
   cloneIfNecessary,
   hashStringOf,
   isKeyableObjectOrArray,
+  taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { aclDocId, sameAcl } from "@commonfabric/memory/acl";
 import type { ACL, Entity } from "@commonfabric/memory/interface";
 import {
@@ -38,6 +40,7 @@ import {
   type EventAttentionResolveResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  isScopeKey,
   type OperationFieldQuery,
   type OperationFieldSnapshot,
   type PatchOp,
@@ -47,16 +50,19 @@ import {
   type ScopeKeyIdentity,
   type SessionHolding,
   type SessionSync,
+  type SessionSyncUpsert,
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
+  type ViewInterest,
+  type ViewPlan,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -65,30 +71,41 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
-import type { JSONSchema } from "../builder/types.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
-import {
-  acquireSchemaRegistryLease,
-  lookupSchemaDocument,
-  registerSchemaDocument,
-} from "../schema-registry.ts";
-import { isSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
-import { normalizeCellScope } from "../scope.ts";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  schemaMetaRefHashes,
+} from "../schema-decompose.ts";
+import {
+  acquireSchemaRegistryLease,
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../schema-registry.ts";
+import { isSubschema } from "../schema-walk.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
-import { recordCommitLocalSeq } from "./commit-identity.ts";
+import { combineOptionalSchema } from "../traverse.ts";
+import { recordCommitLocalSeq, recordCommitSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
+import {
+  type EventAppendOutcome,
+  type EventAppendPacing,
+  EventAppendQueue,
+  type EventAppendQueueStore,
+  memoryEventAppendQueueStore,
+  type QueuedEventAppend,
+} from "./event-append-queue.ts";
 import {
   IMemoryAddress,
   IMergedChanges,
@@ -113,25 +130,13 @@ import {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  StoreReadThrough,
   toReplicaLoadFailureError,
   TransactionCommitOptions,
   UnexaminedAbsence,
   Unit,
+  type ViewInterestLease,
 } from "./interface.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
-import {
-  type EventAppendOutcome,
-  type EventAppendPacing,
-  EventAppendQueue,
-  type EventAppendQueueStore,
-  memoryEventAppendQueueStore,
-  type QueuedEventAppend,
-} from "./event-append-queue.ts";
-import {
-  getDirectTransactionMergeableOpAddresses,
-  getDirectTransactionReadActivities,
-  getTransactionWriteAttempts,
-} from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
   isDurableReadTx,
@@ -143,7 +148,13 @@ import {
   notifyCommitRejected,
   recordCoverageWait,
 } from "./reactivity-log.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+  getTransactionWriteAttempts,
+} from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   createStorageAddressResolver,
@@ -303,7 +314,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 
 /**
  * Identity of one data-URI pull: the URI, the schema it was read against, the
- * path into it, and where it lives.
+ * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
  * carries its whole value in its id, so the id is the one part that varies
@@ -316,6 +327,7 @@ export function dataURISyncKey(identity: {
   path: readonly string[];
   space: MemorySpace;
   scope: CellScope | undefined;
+  scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
     identity.id,
@@ -323,6 +335,7 @@ export function dataURISyncKey(identity: {
     [...identity.path],
     identity.space,
     normalizeCellScope(identity.scope),
+    identity.scopeKeyIdentity,
   ]);
 }
 
@@ -368,6 +381,69 @@ const toExplicitDocument = (value: FabricValue): EntityDocument => {
   return value as EntityDocument;
 };
 
+/**
+ * The document operations of a native commit, with every root an explicit
+ * document: the shape the replica applies as pending state.
+ */
+const documentOperationsOf = (
+  transaction: NativeStorageCommit,
+): NativeCommitOperation[] =>
+  transaction.operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) =>
+      operation.op === "delete"
+        ? {
+          op: "delete" as const,
+          id: operation.id,
+          scope: operation.scope,
+        }
+        : operation.op === "patch"
+        ? {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+          value: toExplicitDocument(operation.value),
+        }
+        : {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        }
+    );
+
+/**
+ * The operations a commit hands the store: cell operations first, a patch
+ * carrying its patches alone, and folded SQLite operations last.
+ */
+const storeOperationsOf = (
+  operations: readonly NativeCommitOperation[],
+  sqliteOps: readonly SqliteOperation[],
+): ClientCommit["operations"] => [
+  ...operations.map((operation) => {
+    switch (operation.op) {
+      case "delete":
+        return operation;
+      case "patch":
+        return {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+        };
+      case "set":
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: operation.value,
+        };
+    }
+  }),
+  ...sqliteOps,
+];
+
 type CachedTransactionValue =
   | FabricValue
   | typeof UNCACHED_TRANSACTION_VALUE
@@ -379,24 +455,39 @@ type MaterializedVersion = {
 };
 
 type PendingVersion =
-  | {
-    localSeq: number;
-    op: "set";
-    value: EntityDocument;
+  & {
+    /** A sealed verdict already accepted this operation at the store seq. */
+    acceptedSeq?: number;
   }
-  | {
-    localSeq: number;
-    op: "patch";
-    patches: PatchOp[];
-    value: EntityDocument;
-  }
-  | {
-    localSeq: number;
-    op: "delete";
-  };
+  & (
+    | {
+      localSeq: number;
+      op: "set";
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "patch";
+      patches: PatchOp[];
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "delete";
+    }
+  );
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
+
+  /** Partial local promotion of a wave whose contributions share one seq.
+   * An authoritative frame replaces this record, so same-seq delivery is
+   * never replayed. Entries remain only while an earlier pending contribution
+   * could require reconstructing their local order. */
+  localWavePromotion?: {
+    base: EntityDocument | undefined;
+    entries: PendingVersion[];
+  };
 
   /**
    * The class of the covering commit — the commit whose write produced
@@ -554,6 +645,35 @@ const applyPendingVersion = (
   }
 };
 
+/** Whether the confirmed view covers an accepted operation. */
+const isCoveredPendingVersion = (
+  confirmed: ConfirmedVersion,
+  pending: PendingVersion,
+): boolean =>
+  confirmed.localWavePromotion === undefined &&
+  pending.acceptedSeq !== undefined && pending.acceptedSeq <= confirmed.seq;
+
+/** Folds pending and locally accepted wave contributions in sealing order. */
+const materializePendingVersions = (
+  confirmed: ConfirmedVersion,
+  pending: readonly PendingVersion[],
+  logContext: PendingPatchLogContext,
+): EntityDocument | undefined => {
+  const promotion = confirmed.localWavePromotion;
+  const interleaved = promotion !== undefined && promotion.entries.length > 0;
+  const entries = interleaved
+    ? [...promotion.entries, ...pending].sort((left, right) =>
+      left.localSeq - right.localSeq
+    )
+    : pending;
+  let value = interleaved ? promotion.base : confirmed.value;
+  for (const entry of entries) {
+    if (isCoveredPendingVersion(confirmed, entry)) continue;
+    value = applyPendingVersion(value, entry, logContext);
+  }
+  return value;
+};
+
 const ensurePendingMaterializationCache = (
   record: DocumentRecord,
 ): PendingMaterializationCache => {
@@ -577,6 +697,19 @@ const materializedVersionThroughPending = (
   if (pendingCount <= 0) {
     return record.confirmed;
   }
+  if (record.confirmed.localWavePromotion?.entries.length) {
+    // A later verdict can settle before an earlier pending contribution.
+    // Reconstruct their sealing order until that unresolved prefix retires;
+    // the ordinary prefix cache assumes all confirmed operations precede it.
+    return {
+      value: materializePendingVersions(
+        record.confirmed,
+        record.pending.slice(0, pendingCount),
+        logContext,
+      ),
+      transactionValue: UNCACHED_TRANSACTION_VALUE,
+    };
+  }
 
   const cache = ensurePendingMaterializationCache(record);
   while (cache.prefixes.length < pendingCount) {
@@ -585,10 +718,15 @@ const materializedVersionThroughPending = (
       ? record.confirmed
       : cache.prefixes[nextIndex - 1]!;
     const pending = record.pending[nextIndex]!;
+    const covered = isCoveredPendingVersion(record.confirmed, pending);
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending, logContext),
-      transactionValue: UNCACHED_TRANSACTION_VALUE,
+      value: covered
+        ? base.value
+        : applyPendingVersion(base.value, pending, logContext),
+      transactionValue: covered
+        ? base.transactionValue
+        : UNCACHED_TRANSACTION_VALUE,
     });
   }
   return cache.prefixes[pendingCount - 1]!;
@@ -743,47 +881,76 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
 const localSeqKey = (localSeq: number | number[]): string =>
   Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
+/**
+ * Orders paths segment by segment, a shorter path ahead of one it prefixes.
+ * That puts an ancestor directly ahead of every path below it, which is what
+ * lets `compactRecursiveReads()` drop the descendants in one pass.
+ */
+const compareSegments = (
+  left: readonly string[],
+  right: readonly string[],
+): number => {
+  const limit = Math.min(left.length, right.length);
+  for (let index = 0; index < limit; index++) {
+    if (left[index] !== right[index]) {
+      return left[index] < right[index] ? -1 : 1;
+    }
+  }
+  return left.length - right.length;
+};
+
+const isPathPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * Helper for `compactCommitReads()`, which keeps the reads of one dependency
+ * group that no other read of the group covers. A recursive read at a path
+ * covers every path below it, so a read under another is dropped. Sorts
+ * `reads` in place and returns the survivors in that order.
+ */
+const compactRecursiveReads = <Read extends { path: readonly string[] }>(
+  reads: Read[],
+): Read[] => {
+  if (reads.length < 2) return reads;
+  reads.sort((left, right) => compareSegments(left.path, right.path));
+  const kept: Read[] = [];
+  let covering: readonly string[] | undefined;
+  for (const read of reads) {
+    if (covering !== undefined && isPathPrefix(covering, read.path)) continue;
+    kept.push(read);
+    covering = read.path;
+  }
+  return kept;
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
-  space: MemorySpace,
   reads: Read[],
 ): Read[] => {
-  const sorted = [...reads].sort((left, right) => {
-    const leftScope = normalizeCellScope(left.scope);
-    const rightScope = normalizeCellScope(right.scope);
-    if (leftScope !== rightScope) {
-      return leftScope < rightScope ? -1 : 1;
+  const dependencyKeys = new Map<number | number[], string>();
+  const dependencyKeyFor = (localSeq: number | number[]): string => {
+    let key = dependencyKeys.get(localSeq);
+    if (key === undefined) {
+      key = localSeqKey(localSeq);
+      dependencyKeys.set(localSeq, key);
     }
+    return key;
+  };
 
-    if (left.id !== right.id) {
-      return left.id < right.id ? -1 : 1;
-    }
-
-    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
-      return left.seq - right.seq;
-    }
-
-    if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
-      if (leftKey !== rightKey) {
-        return leftKey < rightKey ? -1 : 1;
-      }
-    }
-
-    if (left.nonRecursive !== right.nonRecursive) {
-      return left.nonRecursive === true ? 1 : -1;
-    }
-
-    return comparePath(left.path, right.path);
-  });
-
+  // Grouping reads the input in whatever order it arrives: a recursive read
+  // displaces a shallow one at its path whichever comes first, and two reads
+  // equal in every grouped field are interchangeable, so the order the groups
+  // settle in decides nothing. The sort at the end is the one that orders.
   const grouped = new Map<string, {
     recursiveByPath: Map<string, Read>;
     nonRecursiveByPath: Map<string, Read>;
   }>();
-  for (const candidate of sorted) {
+  for (const candidate of reads) {
     // The dependency key carries every admission-relevant field — seq for
     // confirmed reads, the layer set AND basisSeq for pending reads — so
     // reads with divergent bases never merge: ancestor-path compaction
@@ -794,7 +961,7 @@ const compactCommitReads = <
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
-        localSeqKey(candidate.localSeq)
+        dependencyKeyFor(candidate.localSeq)
       }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
@@ -818,22 +985,10 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const compactedRecursive = sortAndCompactPaths(
-      [...group.recursiveByPath.values()].map((read) => ({
-        space,
-        id: read.id,
-        scope: read.scope,
-        type: DOCUMENT_MIME,
-        path: read.path,
-      })),
+    compacted.push(
+      ...compactRecursiveReads([...group.recursiveByPath.values()]),
+      ...group.nonRecursiveByPath.values(),
     );
-    for (const address of compactedRecursive) {
-      const read = group.recursiveByPath.get(address.path.join("\0"));
-      if (read) {
-        compacted.push(read);
-      }
-    }
-    compacted.push(...group.nonRecursiveByPath.values());
   }
 
   return compacted.toSorted((left, right) => {
@@ -852,8 +1007,8 @@ const compactCommitReads = <
     }
 
     if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = localSeqKey(left.localSeq);
-      const rightKey = localSeqKey(right.localSeq);
+      const leftKey = dependencyKeyFor(left.localSeq);
+      const rightKey = dependencyKeyFor(right.localSeq);
       if (leftKey !== rightKey) {
         return leftKey < rightKey ? -1 : 1;
       }
@@ -906,6 +1061,41 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
   };
 };
 
+/**
+ * The selector schema a link target is asked for. Where the reader's schema
+ * takes a handle at the link (`asCell` at its root, or at the root of an
+ * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
+ * selector describes the document's value the way the handle's reads do and
+ * the serving replica holds the document as a value it keeps current rather
+ * than as a reference it delivered once. Inner boundaries stay, as they do
+ * on the handle's own schema, and a schema that takes no handle is asked for
+ * as it is.
+ */
+function selectorSchemaForLink(
+  schema: JSONSchema | undefined,
+): JSONSchema | false {
+  if (!isObjectOrArray(schema)) return schema ?? false;
+  const unwrapped = unwrapOuterHandle(schema);
+  const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
+    const list = unwrapped[key];
+    if (!Array.isArray(list)) return {};
+    return {
+      [key]: list.map((branch) =>
+        isObjectOrArray(branch) ? unwrapOuterHandle(branch) : branch
+      ),
+    };
+  };
+  return { ...unwrapped, ...branches("anyOf"), ...branches("oneOf") };
+}
+
+/** `schema` with its outermost `asCell` boundary removed, if it has one. */
+function unwrapOuterHandle(schema: JSONSchemaObj): JSONSchemaObj {
+  if (schema.asCell === undefined) return schema;
+  const { asCell: _asCell, ...inner } = schema;
+  const values = ContextualFlowControl.getAsCellValues(schema);
+  return values.length > 1 ? { ...inner, asCell: values.slice(1) } : inner;
+}
+
 export class StorageManager implements IStorageManager {
   readonly id: string;
   readonly as: Signer;
@@ -922,6 +1112,12 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+
+  /** The store read-throughs installed per space (see
+   * IStorageManager.installStoreReadThrough); a provider resolves its
+   * replica's through this map, so a replica built after the install and
+   * a replacement replica both see it. */
+  readonly #storeReadThroughs = new Map<MemorySpace, StoreReadThrough>();
 
   /**
    * Schema-registry retention lease: held for the manager's open lifetime,
@@ -1168,7 +1364,14 @@ export class StorageManager implements IStorageManager {
       },
       registerPendingLoad: (address) => this.#registerPendingLoad(address),
       collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
-        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
+        this.#collectLinkedCellSyncs(
+          value,
+          base,
+          schema,
+          promises,
+          seen,
+          undefined,
+        ),
     };
   }
 
@@ -1448,12 +1651,30 @@ export class StorageManager implements IStorageManager {
     this.#providers.get(space)?.noteAclChanged();
   }
 
-  isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
+  isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
     // Already-open replicas only: creating a provider is a session-level
     // side effect no elision probe should carry. A space this manager has
     // not opened answers false, and false stages.
-    return this.#providers.get(space)?.replica.isSchemaDocPersisted(hash) ??
+    return this.#providers.get(space)?.replica.isContentAddressedDocPersisted(
+      hash,
+    ) ??
       false;
+  }
+
+  /** @inheritDoc */
+  installStoreReadThrough(space: MemorySpace, read: StoreReadThrough): void {
+    this.#storeReadThroughs.set(space, read);
+  }
+
+  /** @inheritDoc */
+  integrateStoreWrites(
+    space: MemorySpace,
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number {
+    // Already-open replicas only, like isContentAddressedDocPersisted: a
+    // space this manager has not opened holds nothing to refresh.
+    return this.#providers.get(space)?.replica.integrateStoreWrites(writes) ??
+      0;
   }
 
   open(space: MemorySpace): IStorageProvider {
@@ -1479,6 +1700,7 @@ export class StorageManager implements IStorageManager {
         // providers refuse (see Options.servingHomeSpace).
         refuseForeignScopedReads: this.#servingHomeSpace !== undefined &&
           this.#servingHomeSpace !== space,
+        storeReadThrough: () => this.#storeReadThroughs.get(space),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -2227,7 +2449,14 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(cell, space, id, schema, scope);
+      return this.#syncDataURICell(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        { ...(options?.scopeKeyIdentity ?? this.scopeKeyIdentity()) },
+      );
     }
 
     const provider = this.open(space);
@@ -2356,7 +2585,12 @@ export class StorageManager implements IStorageManager {
    * resolved error counted as the load's failure and logged.
    */
   #trackPendingProviderSync(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
     const releaseLoad = this.#registerPendingLoad(address);
@@ -2407,6 +2641,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
     const cacheKey = dataURISyncKey({
       id,
@@ -2414,10 +2649,18 @@ export class StorageManager implements IStorageManager {
       path: cell.path.map(String),
       space,
       scope,
+      scopeKeyIdentity: identity,
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(cell, space, id, schema, scope);
+      work = this.#syncDataURILinkTargets(
+        cell,
+        space,
+        id,
+        schema,
+        scope,
+        identity,
+      );
       this.#dataURISyncs.set(cacheKey, work);
     }
     await work;
@@ -2430,6 +2673,7 @@ export class StorageManager implements IStorageManager {
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
+    identity: ScopeKeyIdentity,
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
@@ -2452,6 +2696,7 @@ export class StorageManager implements IStorageManager {
       schema,
       promises,
       new Set(),
+      identity,
     );
     if (promises.length > 0) {
       await Promise.all(promises);
@@ -2460,8 +2705,14 @@ export class StorageManager implements IStorageManager {
 
   /**
    * Walks `value` for cell links and pushes a pending provider sync of each
-   * linked document onto `promises`, under the schema that the link's place
-   * in `schema` selects. `seen` holds the objects already walked.
+   * linked document onto `promises`, under the schema a read at the link's
+   * place in `schema` would cross it with: the reader's sub-schema, which the
+   * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
+   * through `#syncLinkTarget`, which crosses a link into a data-URI document
+   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * `identity` names that principal's instance of each scoped target
+   * (server-execution v2 stage A), as `syncCell` does for a stored
+   * document.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -2469,6 +2720,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     promises: Promise<unknown>[],
     seen: Set<unknown>,
+    identity?: ScopeKeyIdentity,
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -2480,22 +2732,15 @@ export class StorageManager implements IStorageManager {
 
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
-      if (link.id && !hasDataUriScheme(link.id)) {
-        const space = link.space ?? base.space!;
-        const scope = normalizeCellScope(
-          link.scope as CellScope | undefined,
-        );
-        promises.push(
-          this.#trackPendingProviderSync(
-            { space, scope, id: link.id },
-            () =>
-              this.open(space).sync(link.id!, {
-                path: link.path.map((segment) => segment.toString()),
-                schema: link.schema ?? schema ?? false,
-              }, scope),
-          ),
-        );
-      }
+      if (link.id === undefined) return;
+      this.#syncLinkTarget(
+        { ...link, id: link.id },
+        base,
+        combineOptionalSchema(schema, link.schema),
+        promises,
+        seen,
+        identity,
+      );
       return;
     }
 
@@ -2511,6 +2756,7 @@ export class StorageManager implements IStorageManager {
           itemSchema,
           promises,
           seen,
+          identity,
         );
       }
       return;
@@ -2538,9 +2784,102 @@ export class StorageManager implements IStorageManager {
           childSchema,
           promises,
           seen,
+          identity,
         );
       }
     }
+  }
+
+  /**
+   * Syncs the document `link` names under `schema`, the schema a read
+   * crosses the link with. A link into a data-URI document is walked
+   * locally instead: the walk descends the link's path through the
+   * document's value, and a link it meets on the way is followed with the
+   * rest of the path appended, so a stand-in holding a caller's cell at
+   * `def` reaches the store for a binding of `def.next` as the read does.
+   * The reader's schema describes the value at the end of the path, so a
+   * link met earlier contributes its own schema narrowed to the rest of the
+   * path, the way `Cell.key()` narrows a schema it walks past.
+   */
+  #syncLinkTarget(
+    link: NormalizedLink & { id: URI },
+    base: NormalizedLink,
+    schema: JSONSchema | undefined,
+    promises: Promise<unknown>[],
+    seen: Set<unknown>,
+    identity: ScopeKeyIdentity | undefined,
+  ): void {
+    const space = link.space ?? base.space!;
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    if (hasDataUriScheme(link.id)) {
+      const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
+      const segments = link.path.map((segment) => segment.toString());
+      let target: unknown = valueFromDataUri(link.id);
+      for (let i = 0; i < segments.length; i++) {
+        if (isPrimitiveCellLink(target)) {
+          const inner = parseLinkPrimitive(target, dataBase);
+          if (inner.id === undefined) return;
+          const remaining = segments.slice(i);
+          const innerSchema = inner.schema === undefined
+            ? undefined
+            : ContextualFlowControl.getSchemaAtPath(inner.schema, remaining);
+          this.#syncLinkTarget(
+            {
+              ...inner,
+              id: inner.id,
+              path: [...inner.path, ...remaining],
+            },
+            dataBase,
+            combineOptionalSchema(schema, innerSchema),
+            promises,
+            seen,
+            identity,
+          );
+          return;
+        }
+        // TODO(danfuzz): the descent stops at a `FabricSpecialObject`, so a
+        // path through a `FabricInstance` held in the document ends here and
+        // the link past it is never synced.
+        if (!isKeyableObjectOrArray(target)) return;
+        target = (target as Record<string, unknown>)[segments[i]];
+      }
+      this.#collectLinkedCellSyncs(
+        target,
+        dataBase,
+        schema,
+        promises,
+        seen,
+        identity,
+      );
+      return;
+    }
+    const instance = this.#foreignInstanceKey(scope, identity);
+    promises.push(
+      this.#trackPendingProviderSync(
+        {
+          space,
+          scope,
+          id: link.id,
+          ...(instance !== undefined ? { scopeKey: instance } : {}),
+        },
+        () =>
+          this.open(space).sync(
+            link.id,
+            {
+              path: link.path.map((segment) => segment.toString()),
+              // A reader that takes a handle at the link asks for the
+              // document under the handle's own schema, the wrapper removed:
+              // a selector carrying the wrapper, or none, describes a
+              // reference, which the serving replica delivers once and
+              // never keeps current, while the handle's reads want the
+              // value as it changes.
+              schema: selectorSchemaForLink(schema),
+            },
+            scope,
+            instance,
+          ),
+      ),
+    );
   }
 
   //
@@ -2616,6 +2955,12 @@ type ProviderOptions = {
    * the silent-empty-instance trap. Space-scope foreign reads (the
    * §2b free-read row) are unaffected. */
   refuseForeignScopedReads?: boolean;
+
+  /** The manager's store read-through for this space, resolved at each
+   * use so an install after the replica was built still takes effect
+   * (see IStorageManager.installStoreReadThrough). Absent or resolving
+   * to `undefined`: every load goes over the session. */
+  storeReadThrough?: () => StoreReadThrough | undefined;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -2702,7 +3047,7 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     // ids, and session-resume replay all see one selector form.
     const normalizedSelector = externalizeSyncSelector(
       normalizeSyncSelector(selector),
-      (hash) => this.replica.isSchemaDocPersisted(hash),
+      (hash) => this.replica.isContentAddressedDocPersisted(hash),
     );
     // Replay requests are per (doc, instance): an instance-named load
     // (stage A) must replay as that instance on a replacement replica.
@@ -3257,6 +3602,30 @@ export class SpaceReplica
   );
   #watchedIds = new Set<string>();
 
+  /** The store read-through this replica serves misses from (see
+   * ProviderOptions.storeReadThrough). */
+  readonly #storeReadThrough: () => StoreReadThrough | undefined;
+
+  /**
+   * Depth of frame integrations in progress (`#applySessionSync()`). A
+   * read made while a frame integrates — the differential checkout's
+   * snapshot through `get()`, the arrived-cfc hydration's `getDocument()`
+   * — must not start a store read-through, which would integrate a
+   * second frame from inside the first; a nonzero depth turns the
+   * read-through off for that read.
+   */
+  #frameApplyDepth = 0;
+
+  /**
+   * The instances (doc keys) the store read-through has read and found
+   * nothing at. No record stands for such an instance — a session's pull
+   * that delivered nothing leaves none either, and a transaction's read
+   * of it stays an unexamined absence for commit to reconcile — but the
+   * store is not asked again until the feed reports a write to it
+   * (`integrateStoreWrites()`), which reads it once more.
+   */
+  readonly #storeAbsences = new Set<string>();
+
   /**
    * The last `SessionSync` snapshot _absorbed_ for each watched key — its
    * address as the frame named it and the seq and deletedness it carried — kept
@@ -3452,6 +3821,18 @@ export class SpaceReplica
     ) => Promise<Result<Unit, PullError>>)
     | undefined;
 
+  #viewPlans: readonly ViewPlan[] = [];
+  #viewCapabilitySession: MemoryV2Client.SpaceSession | undefined;
+  #cancelViewCapabilityLost: Cancel | undefined;
+  #viewOwnerVersion = 0;
+  #viewOwnerRetired: (() => void) | undefined;
+  #viewRevision = 0;
+  #viewPlanObservers = new Set<(plans: readonly ViewPlan[]) => void>();
+
+  #localCoverageObservers = new Set<
+    (addresses: readonly LocalDocAddress[]) => void
+  >();
+
   #settings: IRemoteStorageProviderSettings;
 
   constructor(options: SpaceReplicaOptions) {
@@ -3466,6 +3847,7 @@ export class SpaceReplica
     this.#eventAppendQueueStore = options.eventAppendQueueStore;
     this.#eventAppendPacing = options.eventAppendPacing;
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
+    this.#storeReadThrough = options.storeReadThrough ?? (() => undefined);
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
     // predecessor replica's intents in the manager-shared store must
     // discharge WITHOUT waiting for a fresh fire. The constructor's
@@ -3655,12 +4037,44 @@ export class SpaceReplica
   }
 
   get(entry: IMemoryAddress): Revision<State> | undefined {
+    this.#readThroughOnMiss(
+      entry.id as URI,
+      entry.scope,
+      undefined,
+      entry.scopeKey,
+    );
     return this.#getState(
       entry.id as URI,
       entry.scope,
       undefined,
       entry.scopeKey,
     );
+  }
+
+  /**
+   * Re-reads every listed instance this replica holds a record for
+   * through the installed store read-through and integrates the results
+   * as one inbound frame (see IStorageManager.integrateStoreWrites).
+   * Returns how many were refreshed. An instance the replica has never
+   * read is left alone: nothing depends on it, and its first read serves
+   * it from the store anyway.
+   */
+  integrateStoreWrites(
+    writes: readonly { id: string; scopeKey: ScopeKey }[],
+  ): number {
+    const read = this.#storeReadThrough();
+    if (read === undefined || writes.length === 0) return 0;
+    const upserts: SessionSyncUpsert[] = [];
+    for (const write of writes) {
+      const id = write.id as URI;
+      const key = docKey(id, write.scopeKey);
+      if (!this.#docs.has(key) && !this.#storeAbsences.has(key)) continue;
+      const upsert = read({ id, scopeKey: write.scopeKey });
+      if (upsert !== undefined) upserts.push(upsert);
+    }
+    if (upserts.length === 0) return 0;
+    this.#integrateReadThrough(upserts, "integrate");
+    return upserts.length;
   }
 
   async sync(
@@ -4203,11 +4617,132 @@ export class SpaceReplica
     );
   }
 
+  /** @inheritDoc */
+  subscribeLocalCoverage(
+    observer: (addresses: readonly LocalDocAddress[]) => void,
+  ): () => void {
+    this.#localCoverageObservers.add(observer);
+    return () => this.#localCoverageObservers.delete(observer);
+  }
+
+  /** Negotiates view delivery on this replica's authenticated session. */
+  async supportsViewReplication(): Promise<boolean> {
+    const { client, session } = await this.#memoizedSessionHandle();
+    if (this.#viewCapabilitySession !== session) {
+      this.#cancelViewCapabilityLost?.();
+      this.#viewCapabilitySession = session;
+      this.#cancelViewCapabilityLost = session.subscribeViewCapabilityLost(() =>
+        this.#publishViewPlans([])
+      );
+    }
+    return client.serverFlags?.viewScopedReplicationV1 === true;
+  }
+
+  /** Whether the current connection retains the negotiated view protocol. */
+  viewReplicationSupported(): boolean {
+    return this.#sessionClient?.serverFlags?.viewScopedReplicationV1 === true;
+  }
+
+  /** Waits for session authentication and watch restoration after reconnect. */
+  async whenSessionRestored(): Promise<void> {
+    const { session } = await this.#memoizedSessionHandle();
+    await session.whenRestored();
+  }
+
+  /** @inheritDoc */
+  acquireViewInterests(onReplaced: () => void): ViewInterestLease {
+    const previous = this.#viewOwnerRetired;
+    const version = ++this.#viewOwnerVersion;
+    this.#viewOwnerRetired = onReplaced;
+    previous?.();
+    const isCurrent = () => !this.#closed && this.#viewOwnerVersion === version;
+    return {
+      isCurrent,
+      nextRevision: () => {
+        if (!isCurrent()) throw new Error("View interest owner has retired");
+        return this.#viewRevision++;
+      },
+      set: (views) => this.setViewInterests(views, isCurrent),
+      release: () => {
+        if (!isCurrent()) return;
+        this.#viewOwnerRetired = undefined;
+        const releasedVersion = ++this.#viewOwnerVersion;
+        void this.setViewInterests(
+          [],
+          () => this.#viewOwnerVersion === releasedVersion,
+        ).catch(() => {});
+      },
+    };
+  }
+
+  /** Replaces renderer demand while preserving ordinary watch ownership. */
+  async setViewInterests(
+    views: ViewInterest[],
+    isCurrent: () => boolean = () => true,
+  ): Promise<boolean> {
+    if (!isCurrent() || this.#closed) return false;
+    const { client, session } = await this.#memoizedSessionHandle();
+    if (!isCurrent() || this.#closed) return false;
+    if (
+      views.length > 0 && client.serverFlags?.viewScopedReplicationV1 !== true
+    ) return false;
+    await session.viewSetSync(views, ({ view, precedingSyncs, sync }) => {
+      if (this.#closed) return;
+      this.#watchView = view;
+      for (const frame of [...precedingSyncs, sync]) {
+        this.#applySessionSync(
+          isCurrent() ? frame : { ...frame, viewPlans: undefined },
+          "integrate",
+        );
+      }
+      this.#consumeWatchView(view);
+    });
+    return !this.#closed && isCurrent();
+  }
+
+  /** Observes complete eligibility snapshots after their input documents arrive. */
+  subscribeViewPlans(
+    observer: (plans: readonly ViewPlan[]) => void,
+  ): () => void {
+    this.#viewPlanObservers.add(observer);
+    observer(this.#viewPlans);
+    return () => this.#viewPlanObservers.delete(observer);
+  }
+
+  #publishViewPlans(plans: readonly ViewPlan[]): void {
+    this.#viewPlans = plans;
+    for (const observer of this.#viewPlanObservers) {
+      try {
+        observer(plans);
+      } catch (error) {
+        logger.error(
+          "view-plan-observer-error",
+          "View plan observer failed",
+          error,
+        );
+      }
+    }
+  }
+
+  /** @inheritDoc */
+  hasLocalDocumentCoverage(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const key = this.#docKeyOf({ id, scope }, identity);
+    const record = this.#docs.get(key);
+    return this.#delivered.has(key) ||
+      (record?.confirmed.seq ?? 0) > 0 ||
+      record?.pending.some((entry) => entry.op !== "patch") === true;
+  }
+
   getDocument(
     uri: URI,
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
+    this.#readThroughOnMiss(uri, scope, identity);
     return this.#visibleDocument(uri, scope, identity);
   }
 
@@ -4222,6 +4757,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
+    this.#readThroughOnMiss(uri, scope, identity);
     const record = this.#docs.get(
       docKey(uri, this.instanceKey(scope, identity)),
     );
@@ -4241,25 +4777,28 @@ export class SpaceReplica
     // array, not a prefix, so the prefix materialization cache does not
     // apply; a doc carrying speculation is a bounded transient (the
     // overlay destination retires it), so this stays a cold path.
-    let value = record.confirmed.value;
-    for (const entry of record.pending) {
-      if (this.#speculativeLocalSeqs.has(entry.localSeq)) {
-        continue;
-      }
-      value = applyPendingVersion(value, entry, {
+    return materializePendingVersions(
+      record.confirmed,
+      record.pending.filter((entry) =>
+        !this.#speculativeLocalSeqs.has(entry.localSeq)
+      ),
+      {
         space: this.#space,
         id: uri,
         scope,
-      });
-    }
-    return value;
+      },
+    );
   }
 
   /** Whether an optimistic local write for this doc is still pending — not
    *  yet promoted into the confirmed mirror (a parked accept keeps it
    *  pending until its marker arrives; CT-1927). */
-  hasPendingWrite(id: URI, scope?: CellScope): boolean {
-    const record = this.#docs.get(this.#docKeyOf({ id, scope }));
+  hasPendingWrite(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
     return record !== undefined && record.pending.length > 0;
   }
 
@@ -4432,6 +4971,16 @@ export class SpaceReplica
   }
 
   async close(): Promise<void> {
+    this.#localCoverageObservers.clear();
+    this.#viewPlanObservers.clear();
+    this.#cancelViewCapabilityLost?.();
+    this.#cancelViewCapabilityLost = undefined;
+    this.#viewCapabilitySession = undefined;
+    this.#viewPlans = [];
+    const retireViewOwner = this.#viewOwnerRetired;
+    this.#viewOwnerRetired = undefined;
+    this.#viewOwnerVersion++;
+    retireViewOwner?.();
     this.#closed = true;
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
@@ -4597,6 +5146,16 @@ export class SpaceReplica
   }
 
   closeNow(): void {
+    this.#localCoverageObservers.clear();
+    this.#viewPlanObservers.clear();
+    this.#cancelViewCapabilityLost?.();
+    this.#cancelViewCapabilityLost = undefined;
+    this.#viewCapabilitySession = undefined;
+    this.#viewPlans = [];
+    const retireViewOwner = this.#viewOwnerRetired;
+    this.#viewOwnerRetired = undefined;
+    this.#viewOwnerVersion++;
+    retireViewOwner?.();
     this.#closed = true;
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
@@ -4648,6 +5207,16 @@ export class SpaceReplica
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     if (entries.length === 0) {
+      return { ok: {} };
+    }
+    // A store read-through answers the pull in place: the roots are read
+    // from the store, and no watch reaches the session — the documents a
+    // selector's schema would have crossed to are read on first access
+    // instead, and a later commit touching a held document reaches the
+    // replica through `integrateStoreWrites()`.
+    const readThrough = this.#storeReadThrough();
+    if (readThrough !== undefined) {
+      this.#pullFromStore(readThrough, entries);
       return { ok: {} };
     }
     // The owed session remount, consumed BEFORE the watch-selector tracker
@@ -4832,31 +5401,7 @@ export class SpaceReplica
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => documentOperationsOf(transaction),
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
@@ -4904,41 +5449,51 @@ export class SpaceReplica
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
-    options?: { readonly speculative?: boolean },
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
+    },
   ): SealedNativeCommit {
-    const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? {
-            op: "delete" as const,
-            id: operation.id,
-            scope: operation.scope,
-          }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            scope: operation.scope,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            scope: operation.scope,
-            value: toExplicitDocument(operation.value),
-          }
-      );
     return this.#sealOperations(
-      operations,
+      documentOperationsOf(transaction),
       source,
-      preconditions,
+      activeCommitPreconditions(transaction.preconditions),
       transaction.sqliteOps ?? [],
       verdict,
       options,
     );
+  }
+
+  /**
+   * The operations, preconditions, and read set `transaction` hands the
+   * store, as {@link sealNative} builds them into a sealed commit, without
+   * applying anything here: for a committer that commits to the store
+   * ahead of sealing the same transaction into this replica, which needs
+   * the store's shape before the replica has seen the writes. The reads
+   * are `source`'s, against this replica's records for `identity`'s
+   * instances as they stand, so a pending read names the durable basis
+   * beneath the layers it saw; handed back to {@link sealNative} as its
+   * `reads`, they are the one snapshot both the store and the seal rest
+   * on.
+   */
+  storeCommitOf(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
+  } {
+    return {
+      operations: storeOperationsOf(
+        documentOperationsOf(transaction),
+        transaction.sqliteOps ?? [],
+      ),
+      preconditions: activeCommitPreconditions(transaction.preconditions),
+      reads: this.#buildReads(source, this.#nextLocalSeq, identity),
+    };
   }
 
   #sealOperations(
@@ -4950,6 +5505,7 @@ export class SpaceReplica
     options?: {
       readonly speculative?: boolean;
       readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
@@ -4965,33 +5521,11 @@ export class SpaceReplica
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.#buildReads(source, localSeq, identity),
+      reads: options?.reads ?? this.#buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
-      operations: [
-        ...operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
-        ...sqliteOps,
-      ],
+      operations: storeOperationsOf(operations, sqliteOps),
       ...(preconditions.length > 0
         ? { preconditions: [...preconditions] }
         : {}),
@@ -5073,6 +5607,58 @@ export class SpaceReplica
     return { localSeq, commit, settled };
   }
 
+  /** Records accepted sealed operations before their promotion continuation. */
+  #noteSealedReceipt(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    seq: number,
+    identity?: ScopeKeyIdentity,
+  ): void {
+    const touched = this.#touchedOf(operations, identity);
+    const changed = touched.filter(({ id, scope, scopeKey }) => {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      return record.confirmed.localWavePromotion === undefined &&
+        record.confirmed.seq >= seq &&
+        record.pending.some((entry) => entry.localSeq === localSeq);
+    });
+    const shouldNotifySubscribers = changed.length > 0 &&
+      this.#hasNotificationSubscribers();
+    const shouldNotifySinks = changed.length > 0 &&
+      this.#hasSinkSubscribers(changed);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        changed.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    // The confirmed view can advance between receipt and settlement, or
+    // already cover the receipt. Covered operations are present in that value;
+    // partial local wave promotions still need their pending contributions.
+    for (const { id, scope, scopeKey } of touched) {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      for (const entry of record.pending) {
+        if (entry.localSeq === localSeq) entry.acceptedSeq = seq;
+      }
+      record.materialized = undefined;
+    }
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        });
+        if (shouldNotifySinks) this.#notifySinks(changes);
+      }
+    } else if (shouldNotifySinks) {
+      this.#notifySinksForIds(changed);
+    }
+  }
+
   async #settleSealedCommit(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -5097,7 +5683,19 @@ export class SpaceReplica
     try {
       const outcome = await Promise.race([
         verdict.then(
-          (v) => ({ verdict: v }),
+          (v) => {
+            if (
+              "committed" in v && inFlight.localRejectionValue === undefined
+            ) {
+              this.#noteSealedReceipt(
+                localSeq,
+                operations,
+                v.committed.seq,
+                identity,
+              );
+            }
+            return { verdict: v };
+          },
           // The accumulator's contract is to resolve every verdict; a
           // rejection is a wave-machinery bug, mapped to a withdrawal so
           // the pending writes still roll back instead of stranding.
@@ -5200,6 +5798,9 @@ export class SpaceReplica
       // The cover class: a sealed native commit is the co-hosted
       // executor's wave commit (speculative seals resolve withdrawn and
       // never reach here) — the wave admission class, derived.
+      if (source !== undefined) {
+        recordCommitSeq(source, this.#space, v.committed.seq);
+      }
       this.#confirmPending(
         localSeq,
         operations,
@@ -5553,29 +6154,7 @@ export class SpaceReplica
         reads: this.#buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
+        operations: storeOperationsOf(operations, sqliteOps),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
@@ -5977,6 +6556,7 @@ export class SpaceReplica
             operations,
             applied,
             resolveAtVerdict,
+            source,
           );
           // Tx-sourced commits ALWAYS record the coverage wait: the inner
           // settlement promise carries commit callbacks and the
@@ -6031,6 +6611,7 @@ export class SpaceReplica
           operations,
           outcome.applied,
           resolveAtVerdict,
+          source,
         );
         // Same rule as the direct-await branch above: tx-sourced commits
         // always record; only the direct path honors the verdict opt-out.
@@ -6497,6 +7078,13 @@ export class SpaceReplica
     // nonRecursive read at this parent (emitted after the loop).
     const structuralTarget = getBlindStructuralTarget(source);
 
+    // Pending bases belong to a document instance and the speculative-layer
+    // policy. Every path read in this synchronous build shares that same stack.
+    const pendingLayersByDocument = [
+      new Map<string, number[]>(),
+      new Map<string, number[]>(),
+    ];
+
     // Emit one commit read for `id`, baselined against the most recent in-flight
     // local version of that doc below this commit's localSeq if one exists, else
     // the confirmed seq (or an explicit `confirmedSeq` override, e.g. a read that
@@ -6555,9 +7143,8 @@ export class SpaceReplica
       confirmedSeq?: number,
       excludeSpeculativeLayers = false,
     ) => {
-      const record = this.#docs.get(
-        docKey(id, this.instanceKey(scope, identity)),
-      );
+      const recordKey = docKey(id, this.instanceKey(scope, identity));
+      const record = this.#docs.get(recordKey);
       // The read's materialized view sat on EVERY lower pending layer, not
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
@@ -6569,17 +7156,24 @@ export class SpaceReplica
       // servers base staleness at the highest element only — a lower-layer
       // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
-      const layers = [
-        ...new Set(
-          record?.pending
-            .filter((version) => version.localSeq < localSeq)
-            .filter((version) =>
-              !excludeSpeculativeLayers ||
-              !this.#speculativeLocalSeqs.has(version.localSeq)
-            )
-            .map((version) => version.localSeq) ?? [],
-        ),
-      ].sort((left, right) => left - right);
+      const layersByDocument = pendingLayersByDocument[
+        excludeSpeculativeLayers ? 1 : 0
+      ];
+      let layers = layersByDocument.get(recordKey);
+      if (layers === undefined) {
+        layers = [
+          ...new Set(
+            record?.pending
+              .filter((version) => version.localSeq < localSeq)
+              .filter((version) =>
+                !excludeSpeculativeLayers ||
+                !this.#speculativeLocalSeqs.has(version.localSeq)
+              )
+              .map((version) => version.localSeq) ?? [],
+          ),
+        ].sort((left, right) => left - right);
+        layersByDocument.set(recordKey, layers);
+      }
       const shape = nonRecursive ? { nonRecursive: true } : {};
       if (layers.length > 0) {
         pending.push({
@@ -6658,8 +7252,8 @@ export class SpaceReplica
     // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
     // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(this.#space, confirmed),
-      pending: compactCommitReads(this.#space, pending),
+      confirmed: compactCommitReads(confirmed),
+      pending: compactCommitReads(pending),
     };
   }
 
@@ -6667,10 +7261,15 @@ export class SpaceReplica
    * Validates the read-side delivery guarantee over a whole frame BEFORE
    * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
    * registers the frame's schema documents: every schema ref a delivered
-   * document embeds — a registered schema document's own refs, or a link
-   * schema anywhere in an ordinary document's value — must reach a
+   * document embeds — a registered schema document's own refs, a link
+   * schema anywhere in an ordinary document's value, or the reserved
+   * `schema` metadata member any document carries (`cid:` documents
+   * included; content addressing hashes `.value` alone) — must reach a
    * VERIFIED schema document delivered by this frame (the prospective
-   * overlay) or already stored.
+   * overlay) or already stored. A `schema` member in the malformed form
+   * — a `cid:` reference outside a single root `$ref` — quarantines its
+   * document outright: the commit boundary refuses that form, so it can
+   * only predate the enforcement or come from out-of-band writing.
    *
    * A violated guarantee QUARANTINES the offending document — the caller
    * applies the frame without it, and this replica keeps whatever it
@@ -6740,6 +7339,26 @@ export class SpaceReplica
     for (const remove of sync.removes) {
       if (typeof remove.id === "string") deletedInFrame.add(remove.id);
     }
+    // The `schema` metadata member, read the same way on every document.
+    // Returns whether the document survives; a malformed member is
+    // quarantined here, before any obligation of its own is recorded.
+    const embedSchemaMeta = (id: string, doc: unknown): boolean => {
+      const form = classifySchemaMeta(doc);
+      if (form.kind === "malformed") {
+        quarantined.add(id);
+        overlay.delete(id);
+        logger.error("schema-doc-quarantine", () => [
+          `Document ${id} was delivered with malformed schema metadata ` +
+          `(${form.reason}). The commit boundary refuses this form, so ` +
+          `the stored document predates that enforcement or was written ` +
+          `out of band. The document is quarantined; this replica keeps ` +
+          `its previous state for it.`,
+        ]);
+        return false;
+      }
+      for (const hash of schemaMetaRefHashes(form)) embed(hash, id);
+      return true;
+    };
     for (const upsert of sync.upserts) {
       const id = upsert.id;
       if (typeof id !== "string") continue;
@@ -6751,6 +7370,7 @@ export class SpaceReplica
       if (!isObjectNotArray(doc)) continue;
       overlay.set(id, doc);
       deletedInFrame.delete(id);
+      if (!embedSchemaMeta(id, doc)) continue;
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
@@ -6786,8 +7406,9 @@ export class SpaceReplica
           continue;
         }
       }
-      // Link positions only — an `$alias`-shaped record in an arriving
-      // document is plain data, never a delivery obligation.
+      // Link positions — the `schema` metadata member was embedded above.
+      // An `$alias`-shaped record in an arriving document is plain data,
+      // never a delivery obligation.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
@@ -6844,7 +7465,8 @@ export class SpaceReplica
 
   /**
    * Whether this replica holds SERVER-CONFIRMED verified content for
-   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * `cid:<hash>` — the emission gate for selector references and the
+   * elision seam for staged content-addressed documents: a confirmed
    * document arrived by delivery or by an acknowledged commit, so the
    * space's server holds it, and content addressing means it can never
    * change. The confirmed layer specifically: a pending local write is
@@ -6854,13 +7476,13 @@ export class SpaceReplica
    * relies on the provisional route not changing after observable reads
    * (CT-2046 tracks enforcing that broadly).
    */
-  isSchemaDocPersisted(hash: string): boolean {
+  isContentAddressedDocPersisted(hash: string): boolean {
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
     const doc = record?.confirmed.value;
     if (!isObjectNotArray(doc)) return false;
-    const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    const value = doc.value;
+    // A content-addressed document's value must hash to the id it sits under.
+    return taggedHashStringOf(value) === hash;
   }
 
   /**
@@ -6890,6 +7512,23 @@ export class SpaceReplica
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    // No read during a frame's integration — the differential checkout's
+    // snapshot, the arrived-cfc hydration — starts a store read-through:
+    // that would integrate a second frame from inside this one.
+    this.#frameApplyDepth += 1;
+    try {
+      this.#applySessionSyncFrame(sync, type);
+    } finally {
+      this.#frameApplyDepth -= 1;
+    }
+  }
+
+  /** Helper for `#applySessionSync()`, which carries the integration
+   * itself. */
+  #applySessionSyncFrame(
+    sync: SessionSync,
+    type: "pull" | "integrate",
+  ): void {
     for (const delivery of sync.operationFields ?? []) {
       for (const callback of this.#operationSinks.get(delivery.watchId) ?? []) {
         try {
@@ -6903,6 +7542,7 @@ export class SpaceReplica
       sync.upserts.length === 0 &&
       sync.removes.length === 0
     ) {
+      if (sync.viewPlans !== undefined) this.#publishViewPlans(sync.viewPlans);
       this.#noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
@@ -6914,8 +7554,13 @@ export class SpaceReplica
     // applies.
     const quarantined = this.#validateArrivedSchemaDocuments(sync);
     if (quarantined.size > 0) {
+      const suspendedPlans = (sync.viewPlans ?? this.#viewPlans).map((
+        plan,
+      ) => ({ ...plan, eligibleActions: [] }));
+      this.#publishViewPlans(suspendedPlans);
       sync = {
         ...sync,
+        ...(sync.viewPlans === undefined ? {} : { viewPlans: suspendedPlans }),
         upserts: sync.upserts.filter((upsert) =>
           typeof upsert.id !== "string" || !quarantined.has(upsert.id)
         ),
@@ -6938,6 +7583,20 @@ export class SpaceReplica
         ...(remove.scopeKey !== undefined ? { scopeKey: remove.scopeKey } : {}),
       })),
     ];
+
+    const coverageChanges = this.#localCoverageObservers.size === 0
+      ? []
+      : touched.filter((address) => {
+        const key = this.#docKeyOf(address);
+        return !this.#delivered.has(key) ||
+          sync.removes.some((remove) =>
+            this.#docKeyOf({
+              id: remove.id as URI,
+              scope: remove.scope,
+              scopeKey: remove.scopeKey,
+            }) === key
+          );
+      });
 
     const shouldNotifySubscribers = this.#hasNotificationSubscribers();
     const shouldNotifySinks = this.#hasSinkSubscribers(touched);
@@ -7087,6 +7746,8 @@ export class SpaceReplica
       }
     }
 
+    if (sync.viewPlans !== undefined) this.#publishViewPlans(sync.viewPlans);
+
     // Parked accepts apply BEFORE the differential compare: when the frame
     // authoritatively covers a doc the session itself wrote (mixed
     // provenance), the integrated base already CONTAINS the parked write,
@@ -7126,6 +7787,19 @@ export class SpaceReplica
           "speculationArrivalObserver threw during frame integration",
           error,
         ]);
+      }
+    }
+    if (coverageChanges.length > 0) {
+      for (const observer of this.#localCoverageObservers) {
+        try {
+          observer(coverageChanges);
+        } catch (error) {
+          logger.error(
+            "local-coverage-observer-error",
+            "Local coverage observer failed",
+            error,
+          );
+        }
       }
     }
     this.#hydrateArrivedCfcSchemaRefs(sync);
@@ -7593,11 +8267,17 @@ export class SpaceReplica
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
     resolveAtVerdict = false,
+    source?: IStorageTransaction,
   ): Promise<void> {
     // The retirement floor's ack record (speculation.md §4): known at
     // VERDICT time, before any parking — a parked promotion changes when
     // the value becomes visible, not that the origin acked.
     this.#ackedSeqsByLocalSeq.set(localSeq, applied.seq);
+    // The same seq, on the transaction that produced the commit: its caller
+    // can name the commit after the bounded record above has forgotten it.
+    if (source !== undefined) {
+      recordCommitSeq(source, this.#space, applied.seq);
+    }
     if (
       this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS
     ) {
@@ -7777,7 +8457,37 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      if (record.confirmed.seq < applied.seq) {
+      const previousWave = record.confirmed.seq === applied.seq
+        ? previousConfirmed.localWavePromotion
+        : undefined;
+      if (
+        coverClass === "derived" &&
+        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+      ) {
+        // One wave can accept several local contributions to this document.
+        // Their shared seq covers all of them only after each has promoted.
+        const base = previousWave ? previousWave.base : previousConfirmed.value;
+        const entries = [
+          ...(previousWave?.entries ?? []),
+          ...pendingIndexes.map((index) => record.pending[index]),
+        ].sort((left, right) => left.localSeq - right.localSeq);
+        let value = base;
+        for (const entry of entries) {
+          value = applyPendingVersion(value, entry, {
+            space: this.#space,
+            id,
+            scope,
+          });
+        }
+        promoted = confirmedVersion(applied.seq, value, coverClass);
+        const lastApplied = entries.at(-1)!.localSeq;
+        const earlierPending = record.pending.some((entry) =>
+          entry.localSeq !== localSeq && entry.localSeq < lastApplied
+        );
+        promoted.localWavePromotion = earlierPending
+          ? { base, entries }
+          : { base: value, entries: [] };
+      } else if (record.confirmed.seq < applied.seq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -7885,6 +8595,17 @@ export class SpaceReplica
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      const promotion = record.confirmed.localWavePromotion;
+      const lastApplied = promotion?.entries.at(-1)?.localSeq;
+      if (
+        promotion && lastApplied !== undefined &&
+        !record.pending.some((entry) => entry.localSeq < lastApplied)
+      ) {
+        record.confirmed.localWavePromotion = {
+          base: record.confirmed.value,
+          entries: [],
+        };
+      }
       if (
         record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
       ) {
@@ -7938,6 +8659,176 @@ export class SpaceReplica
       return undefined;
     }
     return transactionValueForVersion(visible.version);
+  }
+
+  /**
+   * Helper for the read entry points, which serves an instance this
+   * replica holds no record for from the store read-through, when one is
+   * installed. A record already present — confirmed content or a pending
+   * own write — is left as it is, and so is an absence the store reported
+   * earlier: `integrateStoreWrites()` is what moves either. A scope the
+   * identity cannot resolve keys by name, which no store address
+   * matches, so it is not served here either.
+   */
+  #readThroughOnMiss(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): void {
+    if (this.#frameApplyDepth > 0) return;
+    const read = this.#storeReadThrough();
+    if (read === undefined) return;
+    const instance = this.instanceKey(scope, identity, explicit);
+    if (!isScopeKey(instance)) return;
+    const key = docKey(id, instance);
+    if (this.#docs.has(key) || this.#storeAbsences.has(key)) return;
+    const upsert = read({ id, scopeKey: instance });
+    if (upsert === undefined) return;
+    this.#integrateReadThrough([upsert], "integrate");
+  }
+
+  /**
+   * Helper for `pull()`, which reads every root this replica does not
+   * hold from the store read-through and integrates the results as one
+   * `pull` frame, the notification a first load owes its subscribers. A
+   * root already held, or read absent earlier, is not read again: the
+   * feed's refresh (`integrateStoreWrites()`) is what moves a held
+   * record, the way a session's watch moves a covered selector, and a
+   * re-sync of one is answered from the replica.
+   */
+  #pullFromStore(
+    read: StoreReadThrough,
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
+  ): void {
+    const upserts: SessionSyncUpsert[] = [];
+    for (const [address] of entries) {
+      const id = address.id as URI;
+      // A scope the identity cannot resolve keys by its name, which names
+      // no store row: the store would read the name as the space scope and
+      // hand back the wrong document, so such an entry is not read.
+      const instance = this.instanceKey(
+        address.scope,
+        undefined,
+        address.scopeKey,
+      );
+      if (!isScopeKey(instance)) continue;
+      const key = docKey(id, instance);
+      if (this.#docs.has(key) || this.#storeAbsences.has(key)) continue;
+      const upsert = read({ id, scopeKey: instance });
+      if (upsert !== undefined) upserts.push(upsert);
+    }
+    if (upserts.length === 0) return;
+    this.#integrateReadThrough(upserts, "pull");
+  }
+
+  /**
+   * Helper for the read-through paths, which integrates store reads as an
+   * inbound frame through the ordinary session-sync apply step, so the
+   * confirmed records, the delivered set, the shadow bookkeeping, and the
+   * change notifications all take exactly the shape a pushed frame gives
+   * them. An address the store holds nothing at — a `deleted` entry at
+   * seq 0, which no session frame ever carries — is kept out of the
+   * frame and remembered in `#storeAbsences` instead; a document read
+   * present clears that memory. A read at the seq of the last delivery
+   * this replica absorbed for the instance is kept out of the frame too:
+   * the content under a delivered seq cannot differ, so integrating it
+   * again would only re-validate and re-notify what the replica holds.
+   * The confirmed seq is not that judge: a commit of the replica's own
+   * write promotes its record to the commit's seq with the value it
+   * materialized locally, and the store's document at that seq may hold
+   * more — content the engine merged in beside a mergeable write — so
+   * the first read at a seq no delivery has reached integrates.
+   */
+  #integrateReadThrough(
+    upserts: SessionSyncUpsert[],
+    type: "pull" | "integrate",
+  ): void {
+    // Whether a read moves the replica at all; the absence memory is kept
+    // as a side effect.
+    const moves = (upsert: SessionSyncUpsert): boolean => {
+      const key = docKey(
+        upsert.id as URI,
+        this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+      );
+      if (upsert.deleted === true && upsert.seq === 0) {
+        this.#storeAbsences.add(key);
+        return false;
+      }
+      this.#storeAbsences.delete(key);
+      const delivered = this.#delivered.get(key);
+      return delivered === undefined || delivered.seq !== upsert.seq ||
+        delivered.deleted !== (upsert.deleted === true);
+    };
+    const roots = upserts.filter(moves);
+    if (roots.length === 0) return;
+    const read = this.#storeReadThrough();
+    const frame = read === undefined
+      ? roots
+      : this.#withSchemaDependencies(read, roots).filter(moves);
+    const seqs = frame.map((upsert) => upsert.seq);
+    this.#applySessionSync({
+      type: "sync",
+      fromSeq: Math.min(...seqs),
+      toSeq: Math.max(...seqs),
+      upserts: frame,
+      removes: [],
+    }, type);
+  }
+
+  /**
+   * Helper for `#integrateReadThrough()`, which completes a frame of store
+   * reads with the schema documents they reference: every `cid:` hash in a
+   * document's link positions and in its `schema` metadata member, and in
+   * a schema document's own refs, that this replica does not already hold
+   * verified is read from the store and added to the frame, to a fixpoint.
+   * The delivery guarantee the frame validator enforces is that a
+   * document's refs resolve within the delivered set; a session's server
+   * walks those references for it, and this is the same chase for a frame
+   * read directly. A malformed metadata member names nothing here; the
+   * validator quarantines the document for it.
+   */
+  #withSchemaDependencies(
+    read: StoreReadThrough,
+    upserts: SessionSyncUpsert[],
+  ): SessionSyncUpsert[] {
+    const frame = [...upserts];
+    const inFrame = new Set(frame.map((upsert) => upsert.id));
+    for (let index = 0; index < frame.length; index++) {
+      const upsert = frame[index]!;
+      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
+      const metadata = classifySchemaMeta(upsert.doc);
+      // Leave malformed metadata in the frame for per-document quarantine.
+      if (metadata.kind === "malformed") continue;
+      const hashes = new Set(schemaMetaRefHashes(metadata));
+      if (upsert.id.startsWith("cid:")) {
+        const value = (upsert.doc as { value?: unknown }).value;
+        if (isSubschema(value)) {
+          for (const hash of collectExternalSchemaRefHashes(value)) {
+            hashes.add(hash);
+          }
+        }
+      } else {
+        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
+          for (
+            const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+          ) {
+            hashes.add(hash);
+          }
+          return schema;
+        });
+      }
+      for (const hash of hashes) {
+        const id = `cid:${hash}` as URI;
+        if (inFrame.has(id) || this.isContentAddressedDocPersisted(hash)) {
+          continue;
+        }
+        inFrame.add(id);
+        const dependency = read({ id, scopeKey: "space" as ScopeKey });
+        if (dependency !== undefined) frame.push(dependency);
+      }
+    }
+    return frame;
   }
 
   #getState(
@@ -8066,6 +8957,7 @@ export class SpaceReplica
           // authoritative reinstall sync that follows replaces — never
           // double-applies — their contribution.
           resolved.session.onSessionReplaced = () => {
+            this.#publishViewPlans([]);
             this.#applyParkedAcceptsNow();
             // A replaced session rejected its outstanding commits; queued
             // event intents re-submit under fresh localSeqs (the target's
@@ -8194,12 +9086,38 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Scoped descriptors cross current protocol boundaries structurally.
+    // Message-only errors retain default-scope recovery for every named read.
+    const toConflicts = (details: unknown): IConflictError["conflict"][] => {
+      const { of, scope } = (details ?? {}) as {
+        of?: unknown;
+        scope?: unknown;
+      };
+      return typeof of === "string"
+        ? [{
+          space,
+          the: DOCUMENT_MIME,
+          of: of as Entity,
+          ...(isCellScope(scope) ? { scope } : {}),
+        }]
+        : [];
+    };
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    let conflicts = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap(toConflicts)
+      : [];
+    if (conflicts.length === 0) {
+      conflicts = toConflicts((error as { conflict?: unknown })?.conflict);
+    }
+    if (conflicts.length === 0) {
+      conflicts = toConflicts(error);
+    }
+    if (conflicts.length === 0) {
+      conflicts = Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => toConflicts({ of: match[1] })[0],
+      );
+    }
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8208,16 +9126,14 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
-      // placeholder.
-      conflict: {
+      // The singular descriptor remains the first conflict for consumers of
+      // the legacy interface. `the` remains a placeholder.
+      conflict: conflicts[0] ?? {
         space,
         the: DOCUMENT_MIME,
-        of: ((typeof staleReadOf === "string" ? staleReadOf : undefined) ??
-          firstOperationId ?? "of:unknown") as Entity,
+        of: (firstOperationId ?? "of:unknown") as Entity,
       },
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark

@@ -1,6 +1,7 @@
 import { normalize } from "@std/path/posix";
 
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
+import { type FabricValue, taggedHashStringOf } from "@commonfabric/data-model";
 import type {
   BuilderSourceSitesV1,
   PatternCoverageSpan,
@@ -13,9 +14,14 @@ import type { JSONSchema } from "../builder/types.ts";
 import { type Cell, isCell } from "../cell.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
 import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  runtimeWritePolicyAuthorization,
+} from "../cfc/types.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
+import { createSigilLinkFromParsedLink, parseLink } from "../link-utils.ts";
 import { snapshotQueryResult } from "../query-result-proxy.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
@@ -28,6 +34,7 @@ import {
   deriveModuleRecordFields,
   SOURCE_ROOT_SPECIFIER,
 } from "../sandbox/module-record-compiler.ts";
+import type { SigilLink } from "../sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -49,11 +56,15 @@ const logger = getLogger("cell-cache");
  *  - **Compiled set** `compileCache:<runtimeVersion>/<identity>` — verified
  *    compiled JS, keyed by `(runtimeVersion, identity)`.
  *
- * Each document records its `code`, authored `filename`, and the resolved
- * internal `imports` (`{ specifier, identity }`) — the identity is what the
- * document's sigil link points at (`sourceDocKey`/`compiledDocKey` of the
- * dependency). This module owns the pure key/identity/verification logic; the
- * cell read/write + link wiring layer builds on it.
+ * Each document records its authored `filename` and the resolved internal
+ * `imports` (`{ specifier, identity }`) — the identity is what the document's
+ * sigil link points at (`sourceDocKey`/`compiledDocKey` of the dependency) —
+ * and its `code` as a link to the content-addressed `cid:` document holding
+ * the string, so identical module text is one document however many records
+ * name it. A record may instead hold the string inline, and reads accept
+ * both. This module owns the pure
+ * key/identity/verification logic; the cell read/write + link wiring layer
+ * builds on it.
  */
 
 /** A resolved internal import edge of a cached module. */
@@ -191,9 +202,11 @@ const validDelegatedModuleIdentities = (
  * Each successor inherits both its direct predecessor and that predecessor's
  * cumulative delegation list, preserving update chains across a cold reload.
  */
-export function deriveModuleDelegations(
+export function deriveModuleDelegations<
+  Module extends Pick<CacheableModule, "identity" | "filename">,
+>(
   previous: ReadonlyMap<string, SourceDoc>,
-  next: readonly CacheableModule[],
+  next: readonly Module[],
 ): Map<string, ReadonlySet<string>> {
   const previousByName = new Map<
     string,
@@ -688,12 +701,14 @@ export function verifySourceDocs(
  * carries a sigil **link** to the dependency's cell (so the storage layer
  * follows it and loads the closure), plus the module's own `identity` for
  * read-side keying. The stored identity is not trusted — {@link verifySourceDocs}
- * recomputes it.
+ * recomputes it. `code` is stored as a link to the code document and read
+ * back through the schema as the string that document holds; a record may
+ * instead store the string itself.
  */
 interface StoredSourceDoc {
   kind: "source";
   identity: string;
-  code: string;
+  code: string | SigilLink;
   filename: string;
   imports: { specifier: string; link: unknown }[];
   delegatedModuleIdentities?: string[];
@@ -744,7 +759,10 @@ export const SOURCE_DOC_SCHEMA = {
  * Flat source-document write schema. Only delegation metadata receives the
  * runtime-minted compiler attestation: source code/imports remain
  * self-verifying through their content identity, while annotations remain
- * independently mutable.
+ * independently mutable. `code` is admitted as whatever is stored — the link
+ * to the code document — since a write schema is also the value condition
+ * CFC prepare checks the written record against; the read schema is the one
+ * that declares the string a read resolves the link to.
  */
 function sourceDocWriteSchema(): JSONSchema {
   return {
@@ -752,7 +770,7 @@ function sourceDocWriteSchema(): JSONSchema {
     properties: {
       kind: { type: "string" },
       identity: { type: "string" },
-      code: { type: "string" },
+      code: true,
       filename: { type: "string" },
       imports: {
         type: "array",
@@ -774,6 +792,115 @@ function sourceDocWriteSchema(): JSONSchema {
   };
 }
 
+/**
+ * Stages the code document holding `code` in `space` and returns the link a
+ * record stores in its `code` field. The document is installed in the same
+ * transaction as the record, so a committed record never names a document
+ * the space does not hold.
+ */
+function codeLink(
+  space: MemorySpace,
+  code: string,
+  tx: IExtendedStorageTransaction,
+): SigilLink {
+  const id = tx.stageContentAddressedDocument(space, code);
+  return createSigilLinkFromParsedLink({ id, path: [], space });
+}
+
+/**
+ * Whether a record's `code` reads as the string its storage names. A string
+ * stored inline is itself; a link verifies only when the code document it
+ * names is the one the string hashes to, so a document that reached this
+ * replica holding other content is refused. A reading that is not a string
+ * — the code document absent from the replica — verifies nothing.
+ */
+export function codeFieldVerifies(
+  cell: Cell<unknown>,
+  code: unknown,
+): code is string {
+  if (typeof code !== "string") return false;
+  const stored = (cell.getRaw() as { code?: unknown } | undefined)?.code;
+  if (typeof stored === "string") return stored === code;
+  return parseLink(stored, cell)?.id === `cid:${taggedHashStringOf(code)}`;
+}
+
+/**
+ * Name `doc` to the §8.12.4 writer-fit measurement as a store no pattern
+ * declares a policy on.
+ *
+ * A cache document holds the compiler's own record of a module: the `cid:`
+ * document its bytes live in, its filename, the identities of its imports, and
+ * the predecessor identities its writer authority descends from. No pattern
+ * names it and no pattern-authored schema describes a field on it — the
+ * schemas that do are the cache's own, further down this file, and they
+ * declare integrity alone. That, not the content addressing, is what leaves
+ * the ceiling empty: §17.1 makes content-addressing under the causal path an
+ * implementation detail that does not change IFC semantics. What the content
+ * address does decide is the id shape, which is why the class is named here
+ * rather than enumerated in `isUndeclarableIdClass` (`cfc/prepare.ts`): the id
+ * the cache's cause mints is an ordinary `of:fid1:<hash>`, so there is nothing
+ * for a predicate over id strings to recognize.
+ *
+ * Spec §18.6.2 names the class — "program/source text
+ * loaded to execute the handler", beside the `cid:` schema documents — and
+ * calls both public infrastructure. The bytes themselves already take that
+ * route: a `cid:` document is outside the flow join on both sides, so what
+ * remains on the record is the compiler's bookkeeping.
+ *
+ * Without the marker, any transaction that both reads labeled data and reaches
+ * a cache write is refused at `enforce-strict` — which a piece's source
+ * transition does by construction, because it stages a module's delegation
+ * union on the same transaction that moves the piece's source pointer.
+ *
+ * A cache document is not on §8.12.5's route 2, whose declaration would be the
+ * other answer. Route 2 declares one piece's flow join as the store's policy,
+ * so it wants a store keyed on that piece's own nodes. A cache document is
+ * keyed on module content: every piece in the space running that module
+ * addresses it, and it outlives all of them. What route 2 leaves behind is
+ * also permanent — a `declared` entry per measured path, which §8.12.1 does
+ * not let back, on a document nothing collects — where the flow stamp this
+ * keeps is a per-value component §8.12.8 replaces on overwrite.
+ *
+ * The write stays a flow stamp target, which is where this stops short of
+ * §18.6.2's write-side mirror — that section says the same addresses are not
+ * value-write targets at all, which would leave the record unstamped too.
+ * Safety invariant 9 is why it does not go that far. The delegation metadata
+ * holds module identities, and §17.7 says holding one grants no access to the
+ * artifact it names, so the content written here is public. WHICH identity
+ * appears is the other question: a transaction that read a labeled value and
+ * chose a successor by it writes that choice here, and §8.11.3 puts a
+ * decision's label on every downstream output whatever the output's own
+ * content is. That is the router attack at one bit per update, so the stamp
+ * stays and the ceiling is what the marker skips. The module's bytes are
+ * unaffected either way, being in a `cid:` document of their own.
+ *
+ * Every write to a cache record goes through here, whichever field it touches.
+ * The claim is about the document, so a write site that skipped it would leave
+ * the same refusal waiting for whichever transaction first reaches that site
+ * carrying a join. `anchorValueAsEntity` carries the claim down the same way
+ * it carries a runtime-owned store's, because a document anchored out of a
+ * marked value holds part of that value at an id derived from it; the cache's
+ * own records are written raw, with their import edges inline, so nothing
+ * here anchors.
+ */
+export function recordUndeclarablePolicyStore(
+  tx: IExtendedStorageTransaction,
+  doc: Cell<unknown>,
+): void {
+  const link = doc.getAsNormalizedFullLink();
+  tx.recordCfcWritePolicyInput({
+    kind: "structural-provenance",
+    target: {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: [...link.path],
+    },
+    claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+    sources: [],
+  }, runtimeWritePolicyAuthorization);
+}
+
 /** Attribute cache-document writes to the trusted compiler builtin. */
 function withCompileCacheBuiltin<T>(
   tx: IExtendedStorageTransaction,
@@ -790,43 +917,6 @@ function withCompileCacheBuiltin<T>(
     tx.setCfcImplementationIdentity(priorIdentity);
   }
 }
-
-/**
- * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
- * source/compiled doc's `imports` array holds LIVE links to per-edge element
- * docs (the cell layer hoists each `{specifier, link}` element into its own
- * derived doc); the element doc's own `link` field is a *quoted* link — data,
- * not a traversal edge — so this schema pulls exactly the doc plus its edge
- * element docs and stops. A schema-less `sync()` normalizes to the rejecting
- * selector and delivers only the root, leaving the element docs unknown to
- * the replica — then the re-write touches them blind and the engine reveals
- * the conflicts one per commit attempt (the CT-1824 loop; the write-back's
- * retry budget converges it, one round per edge doc). With the element docs
- * client-known up front, the re-write diffs against true state and commits
- * on the first attempt. Recursion is deliberately omitted: the write-target
- * pre-sync enumerates every module doc itself, so each doc only needs its
- * own edges — nothing beyond the write set loads (the lazy-by-default
- * posture for code docs is untouched).
- */
-export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
-  type: "object",
-  properties: {
-    delegatedModuleIdentities: {
-      type: "array",
-      items: { type: "string" },
-    },
-    imports: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          specifier: { type: "string" },
-          link: true,
-        },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
 
 /**
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
@@ -867,6 +957,7 @@ export function writeSourceDocs(
         undefined,
         tx,
       );
+      recordUndeclarablePolicyStore(tx, baseCell);
       // Preserve product annotations on the entry doc only. Annotations are
       // only written there; reading every dependency doc here turns unrelated
       // stale cache cells into writeback conflict preconditions.
@@ -884,30 +975,54 @@ export function writeSourceDocs(
       const cell = delegatedModuleIdentities.length > 0
         ? baseCell.asSchema(sourceDocWriteSchema())
         : baseCell;
-      cell.set({
-        kind: "source",
-        identity,
-        code: doc.code,
-        filename: doc.filename,
-        imports: doc.imports.map((imp) => ({
-          specifier: imp.specifier,
-          link: runtime.getCell(
-            space,
-            sourceDocKey(imp.identity),
-            undefined,
-            tx,
-          ).getAsLink(),
-        })),
-        ...(delegatedModuleIdentities.length > 0
-          ? { delegatedModuleIdentities }
-          : {}),
-        ...(isObjectOrArray(existingAnnotations)
-          ? { annotations: existingAnnotations }
-          : {}),
-      } as StoredSourceDoc);
+      writeCacheRecord(
+        cell,
+        {
+          kind: "source",
+          identity,
+          code: codeLink(space, doc.code, tx),
+          filename: doc.filename,
+          imports: doc.imports.map((imp) => ({
+            specifier: imp.specifier,
+            link: runtime.getCell(
+              space,
+              sourceDocKey(imp.identity),
+              undefined,
+              tx,
+            ).getAsLink(),
+          })),
+          ...(delegatedModuleIdentities.length > 0
+            ? { delegatedModuleIdentities }
+            : {}),
+          ...(isObjectOrArray(existingAnnotations)
+            ? { annotations: existingAnnotations }
+            : {}),
+        } satisfies StoredSourceDoc,
+      );
     }
   });
   return effectiveModuleDelegations;
+}
+
+/**
+ * Writes a cache record whole, and only when the stored record differs.
+ *
+ * The write is raw: each `imports` element is stored inline in the record,
+ * and the write touches no document but the record's own, so a write of the
+ * same record from any session lands on that one document, and an unchanged
+ * record is not written at all. The diff walk is not usable here, because it
+ * anchors every plain object in an array into a document of its own, named
+ * by the ambient frame's counter and cause; a second session writing the
+ * same record names the documents the first session minted, without having
+ * read them, and its commit is refused as stale. A stored record whose
+ * elements sit in documents of their own differs from the one written and is
+ * rewritten whole; those element documents are left untouched.
+ */
+function writeCacheRecord(
+  cell: Cell<unknown>,
+  record: StoredSourceDoc | StoredCompiledDoc,
+): void {
+  cell.setRawUntyped(record as unknown as FabricValue, true);
 }
 
 /**
@@ -966,6 +1081,10 @@ export function readLoadedSourceClosure(
   while (queue.length > 0) {
     const { doc, cell } = queue.shift()!;
     if (out.has(doc.identity)) continue;
+    // A document whose code does not verify is left out, and the closure
+    // then fails its identity verification exactly as a missing document
+    // does, so the caller recompiles.
+    if (!codeFieldVerifies(cell, doc.code)) continue;
     const imports: ModuleImportRef[] = [];
     const childDocs: { doc: StoredSourceDoc; cell: Cell<unknown> }[] = [];
     for (const imp of doc.imports ?? []) {
@@ -1016,8 +1135,6 @@ export function readLoadedSourceClosure(
 }
 
 function verifyLoadedSourceClosure(
-  runtime: Runtime,
-  space: MemorySpace,
   entryIdentity: string,
   closure: Map<string, SourceDoc> | undefined,
   runtimeFingerprint: string,
@@ -1048,10 +1165,6 @@ function verifyLoadedSourceClosure(
     ]);
     return undefined;
   }
-  runtime.registerModuleDelegations(
-    space,
-    moduleDelegationsFromDocs(closure),
-  );
   return closure;
 }
 
@@ -1076,8 +1189,6 @@ export function readVerifiedSourceClosure(
   runtimeFingerprint = "",
 ): Map<string, SourceDoc> | undefined {
   return verifyLoadedSourceClosure(
-    runtime,
-    space,
     entryIdentity,
     readLoadedSourceClosure(runtime, space, entryIdentity, tx),
     runtimeFingerprint,
@@ -1107,23 +1218,36 @@ export async function loadVerifiedSourceClosure(
   // scans, recompiles) — this is the shared entry those flows funnel through,
   // so load the deferred compiler stack here, once.
   await prepareSourceClosureVerification();
-  return verifyLoadedSourceClosure(
-    runtime,
-    space,
+  const verified = verifyLoadedSourceClosure(
     entryIdentity,
     closure,
     runtimeFingerprint,
   );
+  // A transaction with writes may expose staged grants. Only a read of durable
+  // metadata can publish authority independently of the transaction's verdict.
+  if (verified !== undefined && !tx.hasWrites()) {
+    runtime.registerModuleDelegations(
+      space,
+      moduleDelegationsFromDocs(verified),
+    );
+  }
+  return verified;
 }
 
 //
 // Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC
 //
 
+// The write-side property set. `code` is admitted as whatever is stored —
+// the link to the code document — because the write schema doubles as the
+// value condition CFC prepare checks the written record against before it
+// persists the root integrity label; a `string` condition would fail on the
+// link and drop the label. The read schema below declares the string a read
+// resolves the link to.
 const compiledDocProperties = {
   kind: { type: "string" },
   identity: { type: "string" },
-  code: { type: "string" },
+  code: true,
   filename: { type: "string" },
   sourceMap: {},
   exportNames: { type: "array", items: { type: "string" } },
@@ -1211,7 +1335,10 @@ export function compiledDocWriteSchema(): JSONSchema {
 interface StoredCompiledDoc {
   kind: "compiled" | "data";
   identity: string;
-  code: string;
+
+  /** A link to the code document, or the string itself. */
+  code: string | SigilLink;
+
   filename: string;
   sourceMap?: unknown;
   exportNames?: readonly string[];
@@ -1223,6 +1350,9 @@ interface StoredCompiledDoc {
   delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
 }
+
+/** A stored compiled document whose `code` has been read and verified. */
+type VerifiedCompiledDoc = Omit<StoredCompiledDoc, "code"> & { code: string };
 
 /**
  * The coverage spans stored as scalar JSON on a compiled document, parsed and
@@ -1318,7 +1448,7 @@ function cellCarriesIntegrity(
 function effectiveModuleDelegationsForWrite(
   runtime: Runtime,
   space: MemorySpace,
-  modules: readonly CacheableModule[],
+  modules: readonly Pick<CacheableModule, "identity">[],
   tx: IExtendedStorageTransaction,
   requested: ModuleDelegationMap,
   targets: {
@@ -1385,6 +1515,69 @@ function effectiveModuleDelegationsForWrite(
 }
 
 /**
+ * Stage a source update's delegation union on its durable artifacts. The source
+ * transition owns this transaction; the returned union becomes runtime authority
+ * only after that transaction commits. Compiled bodies stay in bounded cache
+ * writes while these field updates share the source pointer's atomic boundary.
+ */
+export function stageModuleDelegations(
+  runtime: Runtime,
+  space: MemorySpace,
+  requested: ModuleDelegationMap,
+  runtimeVersion: string | undefined,
+  tx: IExtendedStorageTransaction,
+): ModuleDelegationMap {
+  const modules = [...requested.keys()].map((identity) => ({ identity }));
+  const effective = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    requested,
+    { source: true, compiledRuntimeVersion: runtimeVersion },
+  );
+  withCompileCacheBuiltin(tx, () => {
+    for (const [identity, predecessors] of effective) {
+      const source = runtime.getCell<StoredSourceDoc>(
+        space,
+        sourceDocKey(identity),
+        undefined,
+        tx,
+      );
+      if (source.get()?.identity !== identity) {
+        throw new Error(`source update artifact ${identity} is unavailable`);
+      }
+      recordUndeclarablePolicyStore(tx, source);
+      source.asSchema(sourceDocWriteSchema()).key("delegatedModuleIdentities")
+        .set([...predecessors]);
+      if (runtimeVersion !== undefined) {
+        const compiled = runtime.getCell<StoredCompiledDoc>(
+          space,
+          compiledDocKey(runtimeVersion, identity),
+          undefined,
+          tx,
+        );
+        // Source-only recovery is valid; a compiled record, when present, must
+        // retain the compiler's attestation before its metadata can be extended.
+        if (compiled.get() !== undefined) {
+          if (!cellCarriesIntegrity(compiled, COMPILED_INTEGRITY_ATOM, tx)) {
+            throw new Error(
+              `compiled source update artifact ${identity} is untrusted`,
+            );
+          }
+          recordUndeclarablePolicyStore(tx, compiled);
+          compiled.asSchema(compiledDocWriteSchema()).key(
+            "delegatedModuleIdentities",
+          )
+            .set([...predecessors]);
+        }
+      }
+    }
+  });
+  return effective;
+}
+
+/**
  * Write every emitted module's compiled body as a
  * `compileCache:<runtimeVersion>/<identity>` cell into `space`, stamped with the
  * compiler integrity atom, imports linked to dependency compiled cells (the
@@ -1427,6 +1620,7 @@ export function writeCompiledDocs(
         schema,
         tx,
       );
+      recordUndeclarablePolicyStore(tx, cell);
       // Fix B: derive the record surface from the compiled body once, here, so
       // the boot-time record build reads it instead of re-parsing per load. A
       // data entry has no record surface and its bytes are not JavaScript, so
@@ -1450,10 +1644,10 @@ export function writeCompiledDocs(
       if (policyManifests !== undefined) {
         runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
-      cell.set({
+      writeCacheRecord(cell, {
         kind: module.isData ? "data" : "compiled",
         identity: module.identity,
-        code: module.js,
+        code: codeLink(space, module.js, tx),
         filename: module.filename,
         ...(derived === undefined ? {} : {
           exportNames: derived.exportNames,
@@ -1688,10 +1882,12 @@ export async function loadCompiledClosure(
   // single sync (below) has already transitively loaded the whole closure.
   const verifiedDoc = (
     cell: Cell<unknown>,
-  ): StoredCompiledDoc | undefined => {
+  ): VerifiedCompiledDoc | undefined => {
     if (!cellCarriesIntegrity(cell, atom, tx)) return undefined;
     const doc = cell.get() as StoredCompiledDoc | undefined;
     if (!doc || typeof doc.identity !== "string") return undefined;
+    if (!codeFieldVerifies(cell, doc.code)) return undefined;
+    const code = doc.code;
     const policyManifests: unknown[] = [];
     try {
       for (const input of doc.policyManifests ?? []) {
@@ -1731,13 +1927,14 @@ export async function loadCompiledClosure(
       return undefined;
     }
     if (doc.policyManifests === undefined && sourceMap === undefined) {
-      return doc;
+      return { ...doc, code };
     }
     if (doc.policyManifests !== undefined) {
       runtime.registerCfcPolicyManifests(undefined, policyManifests);
     }
     return {
       ...doc,
+      code,
       ...(sourceMap === undefined ? {} : { sourceMap }),
       ...(doc.policyManifests === undefined ? {} : { policyManifests }),
     };
@@ -1754,7 +1951,7 @@ export async function loadCompiledClosure(
   const entryDoc = verifiedDoc(entryCell);
   if (entryDoc === undefined) return out;
 
-  const queue: { doc: StoredCompiledDoc }[] = [{ doc: entryDoc }];
+  const queue: { doc: VerifiedCompiledDoc }[] = [{ doc: entryDoc }];
   while (queue.length > 0) {
     const { doc } = queue.shift()!;
     if (visited.has(doc.identity)) continue;
@@ -1822,6 +2019,8 @@ export async function loadCompiledClosure(
       imports,
     });
   }
-  runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
+  if (!tx.hasWrites()) {
+    runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
+  }
   return out;
 }

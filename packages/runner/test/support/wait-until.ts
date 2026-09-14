@@ -5,9 +5,11 @@
  *
  * The deadline is a stuck-condition backstop, not a bound on how long the
  * awaited work may legitimately take, and a caller sizes it for that: crossing
- * it says the state never arrived, never that it arrived slowly. Which suites
- * wait this way rather than on an event, and why, is recorded under "Where the
- * polling `waitFor` stays" in `docs/development/waiting-in-tests.md`.
+ * it proves only that the predicate did not come true within the window — a
+ * fixed bound cannot tell a stuck wait from one delayed past it; the width
+ * just makes the stuck reading the likely one. Which suites wait this way
+ * rather than on an event, and why, is recorded under "Where the polling
+ * `waitFor` stays" in `docs/development/waiting-in-tests.md`.
  */
 export const waitUntil = async (
   predicate: () => boolean | Promise<boolean>,

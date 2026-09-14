@@ -14,10 +14,9 @@ import { assertEquals } from "@std/assert";
 // Import the actual Cell implementation to create test cells
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
-import type { Cell } from "@commonfabric/runner";
+import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import type { IExtendedStorageTransaction } from "../../runner/src/storage/interface.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";

@@ -1,4 +1,6 @@
 import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import {
   listRunnerTests,
   selectRunnerTestFiles,
@@ -6,6 +8,47 @@ import {
 import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
 const TOTAL_SHARDS = 8;
+
+describe("listRunnerTests", () => {
+  it("includes nested tests with distinct relative paths in exactly one shard", async () => {
+    const directory = await Deno.makeTempDir({ prefix: "runner-discovery-" });
+    try {
+      await Deno.mkdir(`${directory}/executor/nested`, { recursive: true });
+      for (
+        const name of [
+          "event.test.ts",
+          "executor/event.test.ts",
+          "executor/nested/event.test.ts",
+          "executor/helper.ts",
+        ]
+      ) {
+        await Deno.writeTextFile(`${directory}/${name}`, "");
+      }
+      await Deno.symlink(
+        `${directory}/event.test.ts`,
+        `${directory}/alias.test.ts`,
+      );
+      const files = await listRunnerTests(directory);
+      const expected = [
+        "event.test.ts",
+        "executor/event.test.ts",
+        "executor/nested/event.test.ts",
+      ];
+      expect(files.map((file) => file.name)).toEqual(expected);
+      const selected = Array.from(
+        { length: TOTAL_SHARDS },
+        (_, offset) =>
+          selectRunnerTestFiles(files, {
+            index: offset + 1,
+            total: TOTAL_SHARDS,
+          }),
+      ).flat().sort();
+      expect(selected).toEqual(expected);
+    } finally {
+      await Deno.remove(directory, { recursive: true });
+    }
+  });
+});
 
 Deno.test("runner test weighting spreads expensive files across shards", () => {
   const files = ["a", "b", "c", "d", "e", "f"].map((name) => ({

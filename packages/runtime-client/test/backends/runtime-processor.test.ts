@@ -35,7 +35,9 @@ import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
+  CompilerStackLoadError,
   entityIdFrom,
+  parseLink,
   popFrame,
   pushFrame,
   Runtime,
@@ -52,10 +54,8 @@ import {
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
-
-import { parseLink } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
-import { CompilerStackLoadError } from "@commonfabric/runner";
+
 import {
   type CellRef,
   type CfcLabelView,
@@ -160,7 +160,7 @@ const createRuntime = (
 const fid = (seed: string) => taggedHashStringOf(seed);
 
 describe("runtime-processor", () => {
-  describe("renderConfidentialityResolverFor (H3b)", () => {
+  describe("renderConfidentialityResolverFor", () => {
     it("returns undefined when no ceiling is configured", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
@@ -290,10 +290,10 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("resolves a cross-space Space label the space's ACL grants (§4.9.3)", async () => {
-      // §4.9.3 membership lookup: the helper wires a runtime-backed provider that
-      // reads each space's ACL doc. A space whose declared ACL grants the acting
-      // user READ resolves; one that does not (no ACL / residency only) blocks.
+    it("resolves a cross-space Space label the space's ACL grants", async () => {
+      // The helper wires a runtime-backed membership provider that reads each
+      // space's ACL doc. A space whose declared ACL grants the acting user READ
+      // resolves; one that does not (no ACL / residency only) blocks.
 
       const { runtime, storageManager } = createRuntime();
       const grantedSpace = "did:key:z6MkGrantedSpaceForRenderTest";
@@ -348,7 +348,7 @@ describe("runtime-processor", () => {
     });
   });
 
-  describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
+  describe("renderMembershipProviderFor", () => {
     it("returns undefined when no ceiling is configured", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
@@ -1057,12 +1057,17 @@ describe("runtime-processor", () => {
       "space"
     ];
 
+    /**
+     * A cell over `ref`. `resultSchema` is the `schema` meta of its document
+     * and `linkedSchema` the schema the links along its path carry, which
+     * `asSchemaFromLinks()` adopts; a cell reached through `key()` keeps both.
+     */
     function mockCell(ref: CellRef, options: {
       raw?: unknown;
-      schemaCell?: unknown;
-      onPull?: () => void;
       patternLink?: unknown;
       patternIdentity?: unknown;
+      resultSchema?: unknown;
+      linkedSchema?: CellRef["schema"];
       onSync?: () => void;
     } = {}) {
       return {
@@ -1070,20 +1075,28 @@ describe("runtime-processor", () => {
           options.onSync?.();
           return Promise.resolve();
         },
-        pull: () => {
-          options.onPull?.();
-          return Promise.resolve(options.raw);
-        },
         getRaw: () => options.raw,
         getMetaRaw: (metaField: string) =>
           metaField === "patternIdentity"
             ? options.patternIdentity
             : metaField === "pattern"
             ? options.patternLink
+            : metaField === "schema"
+            ? options.resultSchema
             : undefined,
         getAsLink: () => cellRefToSigilLink(ref),
         getAsNormalizedFullLink: () => ref,
-        asSchemaFromLinks: () => options.schemaCell,
+        key: (...keys: string[]) =>
+          mockCell({ ...ref, path: [...ref.path, ...keys] }, options),
+        asSchemaFromLinks: () =>
+          mockCell(
+            options.linkedSchema === undefined
+              ? ref
+              : { ...ref, schema: options.linkedSchema },
+            options,
+          ),
+        asSchema: (schema: CellRef["schema"]) =>
+          mockCell({ ...ref, schema }, options),
       };
     }
 
@@ -1151,19 +1164,45 @@ describe("runtime-processor", () => {
       expect(managerCalls.map(([, runIt]) => runIt)).toEqual([true, true]);
     });
 
-    it("renders slug redirects to output cells directly", async () => {
+    /**
+     * A runtime resolving a redirect into a document: `landing` for the
+     * document's root, `target` for the cell the redirect names inside it.
+     * Which of the two the handler syncs is what the cases below pin.
+     */
+    function runtimeLandingIn(
+      slugCell: unknown,
+      landing: { ref: CellRef; cell: unknown },
+      target: unknown,
+    ) {
+      return {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: (link: CellRef) =>
+          link.path.length === 0 && link.id === landing.ref.id
+            ? landing.cell
+            : target,
+      };
+    }
+
+    it("returns a cell inside a document that is no piece, syncing that document's root alone", async () => {
       const targetRef: CellRef = {
         id: "of:fid1-sub-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["capture"],
       };
+      const landingRef: CellRef = { ...targetRef, path: [] };
       const slugRef: CellRef = {
         id: "of:fid1-slug-doc" as CellRef["id"],
         space,
         scope: "space",
         path: [],
       };
+      let landingSynced = false;
+      const landingCell = mockCell(landingRef, {
+        onSync: () => {
+          landingSynced = true;
+        },
+      });
       let targetSynced = false;
       const targetCell = mockCell(targetRef, {
         onSync: () => {
@@ -1180,10 +1219,11 @@ describe("runtime-processor", () => {
         },
       };
       const processor = buildProcessor({
-        runtime: {
-          getCellFromEntityId: () => slugCell,
-          getCellFromLink: () => targetCell,
-        },
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
         cc: pieces,
         space,
       });
@@ -1195,50 +1235,51 @@ describe("runtime-processor", () => {
         runIt: true,
       });
 
-      expect(targetSynced).toBe(true);
+      expect(landingSynced).toBe(true);
+      expect(targetSynced).toBe(false);
       expect(result.piece.cell).toMatchObject(targetRef);
+      expect(result.piece.cell.schema).toBeUndefined();
     });
 
-    it("renders slug redirects to nested output cells directly", async () => {
+    it("returns a cell inside a piece under the piece's result schema at its path when its links carry none, syncing the piece's root alone", async () => {
       const targetRef: CellRef = {
         id: "of:fid1-parent-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["activityTab"],
       };
+      const landingRef: CellRef = { ...targetRef, path: [] };
       const slugRef: CellRef = {
         id: "of:fid1-slug-doc" as CellRef["id"],
         space,
         scope: "space",
         path: [],
       };
-      const schemaRef: CellRef = {
-        ...targetRef,
-        schema: {
-          type: "object",
-          properties: {
-            "$NAME": { type: "string" },
-            "$UI": { type: "object" },
-          },
-          required: ["$NAME", "$UI"],
+      const activityTabSchema = {
+        type: "object",
+        properties: {
+          "$NAME": { type: "string" },
+          "$UI": { type: "object" },
+        },
+        required: ["$NAME", "$UI"],
+      };
+      const resultSchema = {
+        type: "object",
+        properties: {
+          activityTab: activityTabSchema,
+          other: { type: "string" },
         },
       };
-      // If we don't have a pattern identity, the processor won't pull the cell and
-      // thus won't pull the schema, so include the current piece marker.
-      const patternIdentity = {
-        identity: "pattern-identity",
-        symbol: "default",
-      };
-      let schemaPulled = false;
-      const schemaCell = mockCell(schemaRef, {
-        onPull: () => {
-          schemaPulled = true;
+      let landingSynced = false;
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema,
+        onSync: () => {
+          landingSynced = true;
         },
       });
       let targetSynced = false;
       const targetCell = mockCell(targetRef, {
-        schemaCell,
-        patternIdentity,
         onSync: () => {
           targetSynced = true;
         },
@@ -1253,10 +1294,11 @@ describe("runtime-processor", () => {
         },
       };
       const processor = buildProcessor({
-        runtime: {
-          getCellFromEntityId: () => slugCell,
-          getCellFromLink: () => targetCell,
-        },
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
         cc: pieces,
         space,
       });
@@ -1268,9 +1310,119 @@ describe("runtime-processor", () => {
         runIt: true,
       });
 
-      expect(targetSynced).toBe(true);
-      expect(schemaPulled).toBe(true);
-      expect(result.piece.cell).toMatchObject(schemaRef);
+      expect(landingSynced).toBe(true);
+      expect(targetSynced).toBe(false);
+      expect(result.piece.cell).toMatchObject({
+        ...targetRef,
+        schema: activityTabSchema,
+      });
+    });
+
+    it("returns a cell inside a piece under the schema the links along its path carry, over the result schema at that path", async () => {
+      // What a stored link on the path says it is read under wins, as it
+      // does for a piece cell `getPieceCell()` resolves: the result schema
+      // is what the piece declared, and the link is what is there.
+      const targetRef: CellRef = {
+        id: "of:fid1-parent-piece" as CellRef["id"],
+        space,
+        scope: "space",
+        path: ["activityTab"],
+      };
+      const landingRef: CellRef = { ...targetRef, path: [] };
+      const slugRef: CellRef = {
+        id: "of:fid1-slug-doc" as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const linkedSchema: NonNullable<CellRef["schema"]> = {
+        type: "object",
+        properties: { entries: { type: "array" } },
+      };
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema: {
+          type: "object",
+          properties: { activityTab: { type: "object" } },
+        },
+        linkedSchema,
+      });
+      const targetCell = mockCell(targetRef);
+      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+      const processor = buildProcessor({
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
+        cc: { getSpace: () => space },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
+
+      expect(result.piece.cell).toMatchObject({
+        ...targetRef,
+        schema: linkedSchema,
+      });
+    });
+
+    it("returns a cell inside a piece under the schema the redirect carries when the links along its path carry none", async () => {
+      const redirectSchema: NonNullable<CellRef["schema"]> = {
+        type: "object",
+        properties: { entries: { type: "array" } },
+      };
+      const targetRef: CellRef = {
+        id: "of:fid1-parent-piece" as CellRef["id"],
+        space,
+        scope: "space",
+        path: ["activityTab"],
+        schema: redirectSchema,
+      };
+      const landingRef: CellRef = {
+        id: targetRef.id,
+        space,
+        scope: "space",
+        path: [],
+      };
+      const slugRef: CellRef = {
+        id: "of:fid1-slug-doc" as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const landingCell = mockCell(landingRef, {
+        patternIdentity: { identity: "pattern-identity", symbol: "default" },
+        resultSchema: {
+          type: "object",
+          properties: { activityTab: { type: "object" } },
+        },
+      });
+      const targetCell = mockCell(targetRef);
+      const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+      const processor = buildProcessor({
+        runtime: runtimeLandingIn(
+          slugCell,
+          { ref: landingRef, cell: landingCell },
+          targetCell,
+        ),
+        cc: { getSpace: () => space },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
+
+      expect(result.piece.cell).toMatchObject(targetRef);
     });
 
     it("loads slug redirects to piece cells through the pieces controller", async () => {
@@ -1916,9 +2068,9 @@ describe("runtime-processor", () => {
       });
 
       it("returns a value nested as deep as a reader of plain data needs", () => {
-        // The limit sits above what the old walk reached, because the rendering
-        // spends levels of its own on an instance's tag and a query result's
-        // ref. Plain data is legible past where it used to stop.
+        // The rendering spends levels of its own on an instance's tag and a
+        // query result's ref, so the limit sits high enough that plain data
+        // this deep still comes through whole.
 
         const deep = { l1: { l2: { l3: { l4: { l5: { l6: "leaf" } } } } } };
         expect(toConsoleDebugValue(deep)).toEqual(deep);
@@ -2221,9 +2373,9 @@ describe("runtime-processor", () => {
         globalThis.fetch = originalFetch;
       }
 
-      // The handler no longer decodes, so the ceding that `BaseRequest`'s
-      // ownership rule turns on happens at the envelope rather than here: the
-      // bytes arrive already decoded and are handed on as they are.
+      // The handler does not decode: the ceding that `BaseRequest`'s ownership
+      // rule turns on happens at the envelope rather than here, so the bytes
+      // arrive already decoded and are handed on as they are.
 
       expect(requestedUrl).toBe(
         "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2493,16 +2645,16 @@ describe("runtime-processor", () => {
       >;
     }
 
-    it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
+    it('fails closed on the raw `meta: "cfc"` seam', () => {
       const ref: CellRef = {
         id: "of:cfc-raw-meta-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
         scope: "space",
         path: [],
       };
-      // The raw envelope this seam used to return verbatim — Caveat.source and
-      // friends, unredacted. If the handler ever reaches getMetaRaw for "cfc"
-      // again, this is what would leak.
+      // The raw envelope behind the cell, with its `Caveat.source` unredacted.
+      // A handler that reached `getMetaRaw()` for `cfc` would hand this back
+      // verbatim, which is what the assertion below rules out.
       const rawEnvelope = {
         version: 1,
         schemaHash: "test-schema",
@@ -2529,8 +2681,8 @@ describe("runtime-processor", () => {
         },
       });
 
-      // "cfc" is no longer a MetaField, but the wire is untyped JSON — a request
-      // that still sends it must get an error, never the raw metadata.
+      // `cfc` is not a `MetaField`, but the wire is untyped JSON — a request
+      // that sends it must get an error, never the raw metadata.
       expect(() =>
         processor.handleCellGet({
           type: RequestType.CellGet,
@@ -2590,7 +2742,7 @@ describe("runtime-processor", () => {
       });
     });
 
-    it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    it("redacts `Caveat.source` from the introspection response", async () => {
       const ref: CellRef = {
         id: "of:cfc-caveat-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -2643,7 +2795,7 @@ describe("runtime-processor", () => {
       expect("source" in atom).toBe(false);
     });
 
-    it("redacts Caveat.source in the label views carried by cells inside handleCellGet values", async () => {
+    it("redacts `Caveat.source` in the label views carried by cells inside `handleCellGet()` values", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({
         apiUrl: new URL("https://toolshed.test"),
@@ -2684,7 +2836,7 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("returns the read cell's schema-bearing ref when includeRef is set", () => {
+    it("returns the read cell's schema-bearing ref when `includeRef` is set", () => {
       const ref: CellRef = {
         id: "of:include-ref-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -2823,7 +2975,7 @@ describe("runtime-processor", () => {
       expect(atom.source).toBe("did:key:alice");
     });
 
-    it("redacts Caveat.source in the label views carried by cells inside subscription updates", async () => {
+    it("redacts `Caveat.source` in the label views carried by cells inside subscription updates", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({
         apiUrl: new URL("https://toolshed.test"),
@@ -2885,7 +3037,7 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("redacts Caveat.source in label views on response cell refs", () => {
+    it("redacts `Caveat.source` in label views on response cell refs", () => {
       const sourceRef: CellRef = {
         id: "of:cfc-ref-view-source" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3139,7 +3291,7 @@ describe("runtime-processor", () => {
       expect(sourceSynced).toBe(false);
     });
 
-    it("reads the cell's own stored label without syncing (caller owns liveness)", () => {
+    it("reads the cell's own stored label without syncing", () => {
       const ref: CellRef = {
         id: "of:cfc-label-pure-read" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3191,13 +3343,14 @@ describe("runtime-processor", () => {
           }],
         },
       });
-      // No sync: the label is read from the current store. A not-yet-loaded doc
-      // would yield an empty label that self-heals when the reactive caller's
-      // subscription delivers it.
+      // No sync: keeping the cell live is the caller's job, and the label is
+      // read from the current store. A not-yet-loaded doc would yield an empty
+      // label that self-heals when the reactive caller's subscription delivers
+      // it.
       expect(synced).toBe(false);
     });
 
-    it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {
+    it("ignores schema-bearing `anyOf` refs when reading nested stored labels", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
         const pieceSchema = {
@@ -3245,6 +3398,10 @@ describe("runtime-processor", () => {
             },
           },
         } as const;
+        // The piece schema placed under a property of the root: its `$defs`
+        // move to the root, which is where its `#/$defs/<name>` refs point
+        // once it sits below another root.
+        const { $defs: pieceDefinitions, ...pieceBody } = pieceSchema;
         const rootSchema = {
           type: "object",
           properties: {
@@ -3253,13 +3410,14 @@ describe("runtime-processor", () => {
               items: {
                 type: "object",
                 properties: {
-                  piece: pieceSchema,
+                  piece: pieceBody,
                 },
                 required: ["piece"],
               },
             },
           },
           required: ["messages"],
+          $defs: pieceDefinitions,
         } as const;
 
         const root = runtime.getCell(
@@ -4197,13 +4355,12 @@ describe("runtime-processor", () => {
 
   describe("runtime-client CellRef conversion", () => {
     it("does not forward an inbound label view into worker sigil links", () => {
-      // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
-      // CellRef is a main-thread display artifact — round-tripped through
-      // CellHandle.deserialize and back — and must not re-enter the worker as
-      // label state. Forwarding it onto the written sigil link previously fed
-      // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
-      // persisted as link-origin labels; the worker now re-derives those from
-      // its own stored source metadata instead.
+      // A `cfcLabelView` riding an inbound `CellRef` is a main-thread display
+      // artifact — round-tripped through `CellHandle.deserialize()` and back —
+      // and must not re-enter the worker as label state. Forwarded onto the
+      // written sigil link, it would feed `recordLinkWritePolicyInput()`, whose
+      // entries `prepareBoundaryCommit()` persists as link-origin labels; the
+      // worker derives those from its own stored source metadata instead.
 
       const cfcLabelView: CfcLabelView = {
         version: 1,
@@ -4356,7 +4513,16 @@ describe("runtime-processor", () => {
 
   describe("RuntimeProcessor.getLoggerCounts", () => {
     // The handler reads process-global logger state, so each case raises its own
-    // flag and clears it again rather than leaving one for the next.
+    // flag and clears it again rather than leaving one for the next. It also
+    // reads the runtime's CFC counters, which travel in the same response so a
+    // client comparing them against the timings has both from one moment —
+    // hence the stand-in below, the only runtime member this handler touches.
+
+    const cfcStats = { cfcRelevantTx: 7 };
+
+    function processorWithStats() {
+      return buildProcessor({ runtime: { getCfcStats: () => cfcStats } });
+    }
 
     function withFlag(
       metadata: Record<string, unknown>,
@@ -4372,7 +4538,7 @@ describe("runtime-processor", () => {
     }
 
     it("carries a raised flag's metadata through to the response", () => {
-      const processor = buildProcessor();
+      const processor = processorWithStats();
 
       withFlag({ a: 1 }, () => {
         const response = processor.getLoggerCounts({
@@ -4380,6 +4546,7 @@ describe("runtime-processor", () => {
         });
 
         expect(Object.keys(response).sort()).toEqual([
+          "cfc",
           "counts",
           "flags",
           "metadata",
@@ -4388,6 +4555,7 @@ describe("runtime-processor", () => {
         expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
           a: 1,
         });
+        expect(response.cfc).toEqual(cfcStats);
       });
     });
 
@@ -4395,7 +4563,7 @@ describe("runtime-processor", () => {
       // The assertion is wired into the handler, not merely available beside it:
       // a `Date` raised anywhere in the process stops this read.
 
-      const processor = buildProcessor();
+      const processor = processorWithStats();
 
       withFlag({ when: new Date(0) }, () => {
         expect(() =>
@@ -4906,7 +5074,7 @@ describe("runtime-processor", () => {
     });
   });
 
-  describe("worker/host server-execution posture agreement (review 2026-08-11 m7)", () => {
+  describe("worker/host server-execution posture agreement", () => {
     it("threads the host's declared serverExecution flag through the params mapper verbatim", () => {
       const params = browserWorkerParamsFromInitializationData(
         {
@@ -4925,7 +5093,7 @@ describe("runtime-processor", () => {
       expect(params.experimental).toEqual({ serverExecution: true });
     });
 
-    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default (OFF-arm-neutral)", () => {
+    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default", () => {
       assertServerExecutionPostureAgreement(
         { serverExecution: true },
         { experimental: { serverExecution: true } },
@@ -4940,7 +5108,7 @@ describe("runtime-processor", () => {
       );
     });
 
-    it("refuses LOUDLY when the host declared ON but the worker resolved OFF (the silent F10 revert, now surfaced)", () => {
+    it("refuses LOUDLY when the host declared ON but the worker resolved OFF", () => {
       expect(() =>
         assertServerExecutionPostureAgreement(
           { serverExecution: true },
@@ -5146,10 +5314,11 @@ describe("runtime-processor", () => {
         expect(processor.accessForTestingOnly.getSpaceCtx(homeSpace)).toBe(
           processor.accessForTestingOnly.cc,
         );
+        // A JavaScript caller that omits the space: `undefined as never`
+        // hands the guard the value such a call arrives with, past the `DID`
+        // the signature requires.
         expect(() =>
-          (processor.accessForTestingOnly.getSpaceCtx as (
-            s?: string,
-          ) => unknown)()
+          processor.accessForTestingOnly.getSpaceCtx(undefined as never)
         ).toThrow("name a space");
       } finally {
         await runtime.dispose();
@@ -5225,7 +5394,7 @@ describe("runtime-processor", () => {
         // handler must await idleWithPendingCommits() — which includes in-flight
         // commit durability — rather than runtime.idle() (reactive quiescence
         // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
-        // regression to runtime.idle() throws here.
+        // handler that reached for runtime.idle() would throw here.
 
         let calls = 0;
         const fake = buildProcessor({
@@ -6616,6 +6785,46 @@ describe("runtime-processor", () => {
         const link = cell.getAsNormalizedFullLink() as unknown as CellRef;
         return { runtime, processor, link };
       }
+
+      it("cancels view registration that completes after its mount was removed", async () => {
+        const { runtime, link } = await mountState();
+        const registered = Promise.withResolvers<() => void>();
+        let cancellations = 0;
+        const processor = buildProcessor({
+          runtime: {
+            getCellFromLink: runtime.getCellFromLink.bind(runtime),
+            viewScopedReplicationRequested: true,
+            viewReplication: { mount: () => registered.promise },
+          },
+        });
+        const { client, posted } = testClient(1);
+        const mounting = processor.handleVDomMount({
+          type: RequestType.VDomMount,
+          mountId: 37,
+          cell: link,
+        }, client);
+        try {
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(1);
+          processor.handleVDomUnmount({
+            type: RequestType.VDomUnmount,
+            mountId: 37,
+          }, client);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(0);
+          registered.resolve(() => cancellations++);
+          await mounting;
+          expect(cancellations).toBe(1);
+          expect(
+            posted.filter((message) =>
+              message.type === NotificationType.VDomBatch
+            ),
+          ).toEqual([]);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(0);
+        } finally {
+          registered.resolve(() => {});
+          await mounting;
+          await runtime.dispose();
+        }
+      });
 
       it("keeps one client's mount when another mounts under the same mount id", async () => {
         const { runtime, processor, link } = await mountState();

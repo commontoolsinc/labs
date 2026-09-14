@@ -33,8 +33,13 @@
 
 export type ServingLoopStats = {
   activeSpaces: number;
+
+  /** Completed wave closures, including effect-only and aborted outcomes. */
   waves: number;
+
+  /** Exhausted cycles, including zero-delta cycles that close no wave. */
   wavesBudgetExhausted: number;
+
   supersededWrites: number;
   authoredSeen: number;
   effectAcks: number;
@@ -116,6 +121,18 @@ export type ServingLoopStats = {
    * not a failure — W catches up the wave after the shadow clears — but
    * a count that grows without settling flags a wedged marker channel. */
   watermarkClamped: number;
+
+  /** Engine reads the store read-through performed for serving
+   * replicas (`SpaceServerPolicy.storeReadThrough`): misses served on
+   * first access, roots read for a `sync()`, and the re-reads
+   * `storeRefreshes` counts. Zero while the posture is off. */
+  storeReads: number;
+
+  /** Held documents re-read from the engine because an admitted commit
+   * on the feed wrote them (`IStorageManager.integrateStoreWrites`), the
+   * read-through posture's replacement for a session watch's delivery.
+   * Counted per document, not per commit. */
+  storeRefreshes: number;
 
   /** Write-carrying transactions REFUSED at the wave's seal because no
    * run context was stamped (serving-loop.md §3d, RULED 2026-08-05).
@@ -228,9 +245,10 @@ export type ServingLoopStats = {
    * the reconcile itself is the O(rows) map work — W1 review MINOR-3);
    * `pushGrowthWakes` / `watchWakes` count NOTIFIES (the push-time
    * `demandChanged` and the `session.watch.set` / `.add` notifies) BEFORE
-   * the 300 ms-grace coalescing — a burst is several notifies but one
-   * pass, so these exceed the actual demand-pass wake count (W1 review
-   * NIT-5); the service (loopback) session's notifies are dropped (they
+   * the 300 ms grace coalesces them into a pending callback. A callback
+   * can lead to multiple passes, and input cycles can run a pass before
+   * it fires; notification and pass counts have different boundaries.
+   * The service (loopback) session's notifies are dropped (they
    * are the serving graph's own reads, MINOR-4). `demandArrivals` is the
    * pre-existing top-level `servingLoop.demandArrivals` counter (the
    * root-level arrival re-arm's count), not duplicated here. */
@@ -300,8 +318,9 @@ export type ServingLoopStats = {
        * when promoted. */
       growthWaves?: number;
 
-      /** ms from the growth WAKE to its landing (the demand-wake grace +
-       * derive); present only when promoted and a wake time was seen. */
+      /** ms from the growth notification to its attributed landing.
+       * Includes intervening scheduling and derivation; input-driven work
+       * can bypass the grace timer. Present when a wake time was seen. */
       graceMs?: number;
 
       /** performance.now() of the growth landing; present only when
@@ -368,6 +387,21 @@ export type ServingLoopStats = {
      * order-preserved — the §5 pattern the queued class has) is the
      * register's owed follow-up on the OW45 row. */
     preQueueDeferralStuck: number;
+
+    /** Ordered publication/response barriers attempted for lagging event views. */
+    visibilityBarriers: number;
+
+    /** Event identities visible at the recomputed index after a barrier. */
+    visibilityRecoveries: number;
+
+    /** Drain passes stopped by an event view still missing its stored identity. */
+    visibilityDeferrals: number;
+
+    /** Deferral backstops scheduled across all transient drain outcomes. */
+    deferredRescansArmed: number;
+
+    /** Deferral backstops that fired during an active serving tenure. */
+    deferredRescansFired: number;
 
     /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
      * completed-run sentence: LT1 same-space in-process copies (`served
@@ -503,6 +537,9 @@ export type ServingLoopStats = {
      * cap or an egress-rate token. Growth under load is the budget
      * WORKING (the runaway degrades its own space), not a failure. */
     budgetDeferrals: number;
+
+    /** Completions that wrote nothing because their request was superseded. */
+    superseded: number;
   };
   lease: { held: number; lost: number };
 
@@ -539,6 +576,19 @@ export type ServingLoopStats = {
      * cannot spin the wave loop. */
     failures: number;
   };
+
+  /**
+   * Pattern-lifecycle verbs the serving loop ran on a requester's behalf
+   * (docs/features/server-pattern-lifecycle.md): an `upload`,
+   * `instantiate`, or `setsrc` request routed to the space's serving
+   * runtime. `runs` counts verbs whose run step completed, any outcome;
+   * `failures` those whose run threw, or whose durable confirmation after
+   * the wave commit failed.
+   */
+  lifecycleVerbs: {
+    runs: number;
+    failures: number;
+  };
 };
 
 export const emptyServingLoopStats = (): ServingLoopStats => ({
@@ -557,6 +607,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   structureLoadTerminal: 0,
   structureLoadRearmed: 0,
   watermarkClamped: 0,
+  storeReads: 0,
+  storeRefreshes: 0,
   unstampedSealRefusals: 0,
   servedIntentSealFailures: 0,
   parkDisposeTimeouts: 0,
@@ -593,6 +645,11 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     skippedIdempotent: 0,
     drainInFlightSkips: 0,
     preQueueDeferralStuck: 0,
+    visibilityBarriers: 0,
+    visibilityRecoveries: 0,
+    visibilityDeferrals: 0,
+    deferredRescansArmed: 0,
+    deferredRescansFired: 0,
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
@@ -616,7 +673,13 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     dropped: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
-  outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
+  outbox: {
+    queued: 0,
+    completed: 0,
+    failed: 0,
+    budgetDeferrals: 0,
+    superseded: 0,
+  },
   lease: { held: 0, lost: 0 },
   rootEnsure: {
     runs: 0,
@@ -624,6 +687,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     skippedNoOwner: 0,
     failures: 0,
   },
+  lifecycleVerbs: { runs: 0, failures: 0 },
 });
 
 type ActiveDeliveryCheckpointStat = {

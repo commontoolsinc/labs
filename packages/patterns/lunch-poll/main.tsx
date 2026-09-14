@@ -39,7 +39,7 @@
  * everyone's current vote in the entry's `votes` list — the option title is
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
- * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
+ * those embedded snapshots via a plain `computed`.
  * Live voting stays on the in-cell `votes` array. Each history entry — and each
  * embedded vote — carries a frozen display name plus the profile cell of whoever
  * it refers to, so attribution stays correct through renames and roster
@@ -74,6 +74,7 @@ import {
   entityRefToString,
   equals,
   getEntityId,
+  type GroupIndex,
   handler,
   NAME,
   pattern,
@@ -1044,51 +1045,28 @@ const memoByVoter = <T,>(
     compute,
   );
 
-/** A vote as the tally holds it: read off the reactive list once. */
-type VoteRecord = Pick<Vote, "voter" | "voteType">;
+/** Maintains linked vote groups for per-option tally consumers. */
+const indexVotesByOption = pattern<
+  { votes: Cell<Vote[]> },
+  { index: GroupIndex<string, Vote> }
+>(
+  ({ votes }) => ({ index: votes.groupBy((vote) => vote.optionId) }),
+);
 
-/**
- * Reads each vote off the poll's list once and groups the records by option.
- *
- * Every element and property read on a reactive list is a runtime call — a
- * link resolved and a labeled view built — so the tally takes its votes from
- * this one pass rather than scanning the list once per option and again per
- * color.
- */
-const groupVotesByOption = (
-  votes: readonly Vote[],
-): Map<string, VoteRecord[]> => {
-  const byOption = new Map<string, VoteRecord[]>();
-  for (const vote of votes) {
-    const voter = vote.voter;
-    const optionId = vote.optionId;
-    const record: VoteRecord = {
-      voteType: vote.voteType,
-      ...(voter === undefined ? {} : { voter }),
-    };
-    const group = byOption.get(optionId);
-    if (group === undefined) {
-      byOption.set(optionId, [record]);
-    } else {
-      group.push(record);
-    }
-  }
-  return byOption;
-};
-
-const tallyOptions = (
-  options: readonly Option[],
+/** Tallies one option from its maintained vote group. */
+const tallyOption = (
+  option: Option,
   votes: readonly Vote[],
   users: readonly User[],
   // The union the call site actually has: inside a `computed` the viewer's
   // profile arrives unwrapped, and `equals` compares either form. Narrowing
   // to the cell alone would only push a cast to the caller.
   viewer: LunchProfile | LunchProfileCell | undefined,
-): OptionTally[] => {
-  // A vote carries its voter's identity, so the display name and swatch colour
+): OptionTally => {
+  // A vote carries its voter's identity, so the display name and swatch color
   // are looked up from the roster by comparison. A voter who has left the
   // roster still tallies; they just render without a name. The roster is read
-  // once, and each voter is compared once however many votes they cast.
+  // once per option, and repeated voters share identity comparisons.
   const roster = users.map((u) => {
     const profile = u.profile;
     return {
@@ -1109,40 +1087,27 @@ const tallyOptions = (
   const viewerIs = memoByVoter((voter) => equals(voter, viewer));
   const isSelf = (voter: LunchProfileCell | undefined): boolean =>
     viewer !== undefined && voter !== undefined && viewerIs(voter);
-  const byOption = groupVotesByOption(votes);
-  const tallies = options.map((option): OptionTally => {
-    const optionVotes = byOption.get(option.id) ?? [];
-    let green = 0;
-    let yellow = 0;
-    let red = 0;
-    for (const v of optionVotes) {
-      if (v.voteType === "green") green++;
-      else if (v.voteType === "yellow") yellow++;
-      else if (v.voteType === "red") red++;
-    }
+  let green = 0;
+  let yellow = 0;
+  let red = 0;
+  const voters = votes.map((v) => {
+    const voteType = v.voteType;
+    const voter = v.voter;
+    if (voteType === "green") green++;
+    else if (voteType === "yellow") yellow++;
+    else if (voteType === "red") red++;
+    const entry = rosterOf(voter);
+    const name = entry?.name ?? "";
     return {
-      option,
-      green,
-      yellow,
-      red,
-      voters: optionVotes.map((v) => {
-        const entry = rosterOf(v.voter);
-        const name = entry?.name ?? "";
-        return {
-          name,
-          voteType: v.voteType,
-          color: entry?.color ?? "#888",
-          initials: initialsByName.get(name) ??
-            getInitials(name, participantNames),
-          isSelf: isSelf(v.voter),
-        };
-      }),
+      name,
+      voteType,
+      color: entry?.color ?? "#888",
+      initials: initialsByName.get(name) ??
+        getInitials(name, participantNames),
+      isSelf: isSelf(voter),
     };
   });
-  return [...tallies].sort((a, b) => {
-    if (a.red !== b.red) return a.red - b.red;
-    return b.green - a.green;
-  });
+  return { option, green, yellow, red, voters };
 };
 
 // 📊 Lunch stats: per-place visit count + green/yellow/red tallies, derived from
@@ -1437,11 +1402,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const optionCount = options.length;
     const voteCount = votes.length;
     // Current-day filter: the UI only shows votes cast on the current day
-    // (local calendar), per the shared tick. Derived at top level so every
-    // remote voter's vote entity resolves (same reason `ranked` is computed
-    // here, not per-option — see the swatch comment below). While `#now/300`
-    // is still resolving the day key reads "" and the current-day vote set is
-    // empty.
+    // (local calendar), per the shared tick. While `#now/300` is still
+    // resolving, the day key reads "" and the current-day vote set is empty.
     const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
     const todaysVotes = computed(() => {
       if (!nowTick) return EMPTY_VOTES;
@@ -1451,28 +1413,27 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       );
     });
     const todayVoteCount = computed(() => todaysVotes.length);
-    // The "Recently eaten" card: the 8 most-recent visits (newest first),
-    // derived straight from the `visits` array. An array-shaped computed (not a
-    // lift-returned VNode) is what lets the card keep its plain-JSX `.map(...)`
-    // with interactive onClick delete buttons — those must NOT live inside a
-    // lift (they'd mis-lower as "$event in inputs" / a non-idempotent write).
-    const recentVisits = computed(() =>
-      [...visits].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8)
+    // The visit log newest first, sorted once for every reader below.
+    const newestFirstVisits = computed(() =>
+      [...visits].sort((a, b) => b.wentAt - a.wentAt)
     );
+    // The "Recently eaten" card: the 8 most-recent visits. An array-shaped
+    // computed (not a lift-returned VNode) is what lets the card keep its
+    // plain-JSX `.map(...)` with interactive onClick delete buttons — those
+    // must NOT live inside a lift (they'd mis-lower as "$event in inputs" / a
+    // non-idempotent write).
+    const recentVisits = computed(() => newestFirstVisits.slice(0, 8));
     // Total visit count + "is there any history?" — derived directly from the
     // array, so they always agree (no two queries settling independently).
     const historyCount = visits.length;
     const hasHistory = computed(() => visits.length > 0);
-    const mostRecentTitle = computed(() => {
-      const sorted = [...visits].sort((a, b) => b.wentAt - a.wentAt);
-      return sorted[0]?.title ?? "";
-    });
+    const mostRecentTitle = computed(() => newestFirstVisits[0]?.title ?? "");
     // 📊 Lunch stats — per-place visit + green/yellow/red tallies from the
     // embedded vote snapshots (see summarizePlaces for the per-place scoping).
-    const placeStats = computed(() => summarizePlaces([...visits]));
+    const placeStats = computed(() => summarizePlaces(visits));
     // Total embedded vote snapshots across all visits.
     const voteHistoryCount = computed(() =>
-      [...visits].reduce((n, v) => n + v.votes.length, 0)
+      visits.reduce((n, v) => n + v.votes.length, 0)
     );
     // The viewer's display name, resolved from their STORED roster entry so a
     // The viewer's own roster entry as a 0-or-1 array: the header chip renders
@@ -1496,7 +1457,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     );
     // Rank from today's votes only — the tallies, swatches, and top choice all
     // reflect the current day.
-    const ranked = tallyOptions(options, todaysVotes, users, viewerProfileCell);
+    const votesByOption = indexVotesByOption({ votes: todaysVotes });
+    const optionTallies = options.map((option) => {
+      const optionVotes = votesByOption.index.lookup(option.id);
+      return computed(() =>
+        tallyOption(option, optionVotes, users, viewerProfileCell)
+      );
+    });
+    const ranked = computed(() =>
+      [...optionTallies].sort((a, b) => (a.red - b.red) || (b.green - a.green))
+    );
 
     const topChoice = todayVoteCount > 0 && ranked.length > 0
       ? ranked[0]
@@ -1793,88 +1763,66 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           gap: "4px",
                         }}
                       >
-                        {
-                          /* Build every row's swatches in ONE top-level
-                            `computed` over the resolved `ranked` tally, with
-                            plain JS maps. Two reasons this shape, not a reactive
-                            `ranked.map(...)`/subpattern or an inline
-                            `votes.filter(...)`:
-                            1. Votes are links to separate entities; the
-                               top-level `tallyOptions` call resolves every
-                               voter's entity (including remote ones on another
-                               replica), so reading `ranked` here sees them,
-                               whereas a `votes.filter` in a nested map sees only
-                               the votes a replica has materialized locally.
-                            2. A reactive map / subpattern re-renders its per-item
-                               swatches unreliably when a remote vote updates a
-                               row's voters; a single `computed` re-runs as a
-                               whole when `ranked` changes (like the count above),
-                               so the swatches track cross-replica votes
-                               reliably. `ranked` is pre-sorted, so this also
-                               gives the row order with no `order` CSS hack. */
-                        }
-                        {computed(() =>
-                          ranked.map((tally) => (
+                        {ranked.map((tally) => (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              padding: "6px 10px",
+                              backgroundColor: "white",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                flex: 1,
+                                fontSize: "13px",
+                                fontWeight: 500,
+                                color: "#111827",
+                              }}
+                            >
+                              {tally.option.title}
+                            </div>
                             <div
                               style={{
                                 display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                                padding: "6px 10px",
-                                backgroundColor: "white",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: "6px",
+                                gap: "4px",
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
                               }}
                             >
-                              <div
-                                style={{
-                                  flex: 1,
-                                  fontSize: "13px",
-                                  fontWeight: 500,
-                                  color: "#111827",
-                                }}
-                              >
-                                {tally.option.title}
-                              </div>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "4px",
-                                  flexWrap: "wrap",
-                                  justifyContent: "flex-end",
-                                }}
-                              >
-                                {tally.voters.map((voter) => (
-                                  <span
-                                    title={voter.name}
-                                    role="img"
-                                    aria-label={`${voter.name}: ${voter.voteType} vote`}
-                                    data-vote-swatch-name={voter.name}
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      minWidth: "22px",
-                                      height: "22px",
-                                      padding: "0 6px",
-                                      borderRadius: "9999px",
-                                      backgroundColor:
-                                        VOTE_SWATCH[voter.voteType],
-                                      color: "white",
-                                      fontSize: "11px",
-                                      fontWeight: 700,
-                                      boxShadow: voter.isSelf
-                                        ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                        : "none",
-                                    }}
-                                  >
-                                    {voter.initials}
-                                  </span>
-                                ))}
-                              </div>
+                              {tally.voters.map((voter) => (
+                                <span
+                                  title={voter.name}
+                                  role="img"
+                                  aria-label={`${voter.name}: ${voter.voteType} vote`}
+                                  data-vote-swatch-name={voter.name}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    minWidth: "22px",
+                                    height: "22px",
+                                    padding: "0 6px",
+                                    borderRadius: "9999px",
+                                    backgroundColor:
+                                      VOTE_SWATCH[voter.voteType],
+                                    color: "white",
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    boxShadow: voter.isSelf
+                                      ? "0 0 0 2px white, 0 0 0 3px #111827"
+                                      : "none",
+                                  }}
+                                >
+                                  {voter.initials}
+                                </span>
+                              ))}
                             </div>
-                          ))
-                        )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )

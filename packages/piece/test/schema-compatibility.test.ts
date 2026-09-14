@@ -6,6 +6,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  DEFAULT_INERT_SUBSCHEMA_KEYS,
   schemasHaveSameContract,
 } from "../src/schema-compatibility.ts";
 
@@ -40,6 +41,16 @@ const oldPattern = pattern(
     required: ["doubled"],
   },
 );
+
+/** An object whose `maxProperties` a second merged member would break. */
+const boundedObject: JSONSchema = {
+  type: "object",
+  maxProperties: 1,
+  properties: {
+    a: { type: "number", default: 0 },
+    b: { type: "number" },
+  },
+};
 
 describe("piece schema compatibility", () => {
   describe("schemasHaveSameContract()", () => {
@@ -1604,6 +1615,123 @@ describe("piece schema compatibility", () => {
     );
   });
 
+  it("refuses a target default written under `allOf`", () => {
+    // Reading a value through an `allOf` reads it through each branch merged
+    // with the rest of the schema. A default inside a branch is therefore
+    // merged into the value the read returns. The reads themselves are in
+    // `schema-compatibility-default-reach.test.ts`.
+
+    const branchHoldsBoth: JSONSchema = { allOf: [boundedObject] };
+    expect(() => assertSchemaSubset(branchHoldsBoth, branchHoldsBoth))
+      .toThrow(/not stable under default insertion/);
+
+    const branchBelowAProperty: JSONSchema = {
+      type: "object",
+      properties: { item: { allOf: [boundedObject] } },
+    };
+    expect(() => assertSchemaSubset(branchBelowAProperty, branchBelowAProperty))
+      .toThrow(/not stable under default insertion/);
+
+    const constraintAboveTheBranch: JSONSchema = {
+      type: "object",
+      maxProperties: 1,
+      allOf: [{
+        type: "object",
+        properties: {
+          a: { type: "number", default: 0 },
+          b: { type: "number" },
+        },
+      }],
+    };
+    expect(() =>
+      assertSchemaSubset(constraintAboveTheBranch, constraintAboveTheBranch)
+    ).toThrow(/not stable under default insertion/);
+  });
+
+  it("refuses a default under `allOf` that no constraint above it can break", () => {
+    // What the case above costs. `allOf` is not one of the keywords the walk
+    // treats as stable under default insertion, so reaching an `allOf` marks
+    // everything below it unstable and refuses every default there. Nothing in
+    // this target is unsafe. Its only constraint is an element count, and
+    // merging a member into an element leaves that count as it was. The same
+    // schema written without the `allOf` wrapper is accepted.
+
+    const elements: JSONSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { a: { type: "number", default: 0 } },
+      },
+    };
+    const wrapped: JSONSchema = {
+      type: "array",
+      maxItems: 1,
+      allOf: [elements],
+    };
+    expect(() => assertSchemaSubset(wrapped, wrapped))
+      .toThrow(/not stable under default insertion/);
+
+    const unwrapped: JSONSchema = { ...elements, maxItems: 1 };
+    expect(() => assertSchemaSubset(unwrapped, unwrapped)).not.toThrow();
+  });
+
+  it("accepts a target default under a default-inert keyword", () => {
+    // Where the walk above stops. Each case writes a default under one of the
+    // keywords the walk does not follow, below the same constraint on the whole
+    // value. No default under any of them is ever merged into a value, so the
+    // link proof stands. Two cases carry a default the others do not: `not`
+    // describes the values the schema rejects, and `propertyNames` constrains
+    // names rather than values.
+
+    const inertKeywordTargets: Record<string, JSONSchema> = {
+      not: { not: { type: "number", default: 5 } },
+      propertyNames: {
+        type: "object",
+        propertyNames: { type: "string", default: "a" },
+      },
+      contentSchema: { type: "string", contentSchema: boundedObject },
+      $defs: { $defs: { Unreferenced: boundedObject }, type: "object" },
+      definitions: {
+        definitions: { Unreferenced: boundedObject },
+        type: "object",
+      },
+      if: { if: boundedObject, type: "object" },
+      then: { if: { type: "object" }, then: boundedObject },
+      else: { if: { type: "string" }, else: boundedObject },
+      dependentSchemas: {
+        type: "object",
+        dependentSchemas: { b: boundedObject },
+      },
+      contains: { type: "array", contains: boundedObject },
+      unevaluatedProperties: {
+        type: "object",
+        unevaluatedProperties: boundedObject,
+      },
+      unevaluatedItems: { type: "array", unevaluatedItems: boundedObject },
+    };
+    expect(Object.keys(inertKeywordTargets).sort())
+      .toEqual([...DEFAULT_INERT_SUBSCHEMA_KEYS].sort());
+
+    for (const [keyword, inert] of Object.entries(inertKeywordTargets)) {
+      const target: JSONSchema = {
+        type: "object",
+        properties: { item: inert },
+      };
+      expect(() => assertSchemaSubset(target, target), keyword).not.toThrow();
+    }
+
+    // A `$defs` body a `$ref` names is one a value can take. The walk resolves
+    // every `$ref` it passes, so the same definition is refused once something
+    // references it.
+    const namedDefinition: JSONSchema = {
+      type: "object",
+      $defs: { Referenced: boundedObject },
+      properties: { item: { $ref: "#/$defs/Referenced" } },
+    };
+    expect(() => assertSchemaSubset(namedDefinition, namedDefinition))
+      .toThrow(/not stable under default insertion/);
+  });
+
   it("rejects changed migration defaults below default-unstable constraints", () => {
     const resultSchema: JSONSchema = {
       type: "object",
@@ -1731,62 +1859,139 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
-  it("rejects narrowing through nested child-local definitions", () => {
-    const argumentWithLocalValue = (value: JSONSchema) =>
-      pattern(
-        {
-          type: "object",
-          properties: {
-            nested: {
-              type: "object",
-              properties: { value: { $ref: "#/$defs/Value" } },
-              $defs: { Value: value },
-            },
-          },
-          $defs: { Value: { type: "number" } },
-        },
-        oldPattern.resultSchema,
-      );
-
-    const previous = argumentWithLocalValue({
-      type: ["number", "string"],
-    });
-    const narrowed = argumentWithLocalValue({ type: "number" });
-    const widened = argumentWithLocalValue({
-      type: ["number", "string", "undefined"],
-    });
-
-    expect(() => assertPatternSchemasBackwardCompatible(previous, narrowed))
-      .toThrow(/argument\.nested\.value/);
-    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
-      .not.toThrow();
-  });
-
-  it("does not borrow an outer default for a referenced definition body", () => {
-    const previous = pattern(
-      { type: "object", properties: {} },
-      oldPattern.resultSchema,
-    );
-    const candidate = pattern(
+  const argumentWithNestedValue = (
+    value: JSONSchema,
+    rootDefinitions?: Record<string, JSONSchema>,
+  ) =>
+    pattern(
       {
         type: "object",
-        properties: { item: { $ref: "#/$defs/Entry" } },
-        required: ["item"],
-        $defs: {
-          Entry: {
+        properties: {
+          nested: {
             type: "object",
             properties: { value: { $ref: "#/$defs/Value" } },
-            required: ["value"],
-            $defs: { Value: { type: "string" } },
+            $defs: { Value: value },
           },
-          Value: { type: "number", default: 1 },
         },
+        ...(rootDefinitions !== undefined && { $defs: rootDefinitions }),
+      },
+      oldPattern.resultSchema,
+    );
+  const argumentWithRootValue = (value: JSONSchema) =>
+    pattern(
+      {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+          },
+        },
+        $defs: { Value: value },
       },
       oldPattern.resultSchema,
     );
 
-    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
-      .toThrow(/argument\.item.*no default/);
+  it("rejects a candidate argument schema whose ref only a nested `$defs` could satisfy", () => {
+    // The candidate's root declares no `$defs`, so `#/$defs/Value` names
+    // nothing and the schema is invalid, whatever the nested map defines.
+    const previous = argumentWithRootValue({ type: ["number", "string"] });
+    const widened = argumentWithNestedValue({
+      type: ["number", "string", "undefined"],
+    });
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
+      .toThrow(/candidate argument has an invalid schema/);
+  });
+
+  it("refuses every replacement of a stored schema whose ref only a nested `$defs` could satisfy", () => {
+    // The stored root declares no `$defs`, so its `#/$defs/Value` names
+    // nothing whatever the nested map defines. The previous side is invalid
+    // as stored, and a replacement laid out properly is refused the same as
+    // any other; the override is the path past a stored schema known to be
+    // broken.
+    const previous = argumentWithNestedValue({
+      type: ["number", "string"],
+    });
+    const same = argumentWithRootValue({ type: ["number", "string"] });
+    const widened = argumentWithRootValue({
+      type: ["number", "string", "undefined"],
+    });
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, same))
+      .toThrow(/previous argument has an invalid schema/);
+    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
+      .toThrow(/previous argument has an invalid schema/);
+  });
+
+  it("reads a stored nested `$defs` as inert beside the root's definition", () => {
+    // The stored root declares `Value` as a number, so the nested ref names
+    // that number and the nested map beside it says nothing. A candidate
+    // widening the root's definition is accepted; one replacing it with a
+    // type the number does not fit is refused.
+    const rootDefinitions: Record<string, JSONSchema> = {
+      Value: { type: "number" },
+    };
+    const previous = argumentWithNestedValue(
+      { type: ["number", "string"] },
+      rootDefinitions,
+    );
+    const widened = argumentWithRootValue({ type: ["number", "string"] });
+    const replaced = argumentWithRootValue({ type: "string" });
+    // The candidate's nested map is inert too: its root widens the number,
+    // and the string the nested map declares beside it does not narrow.
+    const widenedBesideInert = argumentWithNestedValue(
+      { type: "string" },
+      { Value: { type: ["number", "string"] } },
+    );
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
+      .not.toThrow();
+    expect(() => assertPatternSchemasBackwardCompatible(previous, replaced))
+      .toThrow(/argument\.nested\.value/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previous, widenedBesideInert)
+    ).not.toThrow();
+  });
+
+  it("reads a referenced definition body's refs against the document's map, default included", () => {
+    const previous = pattern(
+      { type: "object", properties: {} },
+      oldPattern.resultSchema,
+    );
+    const candidateWithRootValue = (value: JSONSchema) =>
+      pattern(
+        {
+          type: "object",
+          properties: { item: { $ref: "#/$defs/Entry" } },
+          required: ["item"],
+          $defs: {
+            Entry: {
+              type: "object",
+              properties: { value: { $ref: "#/$defs/Value" } },
+              required: ["value"],
+              $defs: { Value: { type: "string" } },
+            },
+            Value: value,
+          },
+        },
+        oldPattern.resultSchema,
+      );
+
+    // The root's `Value` is the one named, so its default satisfies the new
+    // required property; the `$defs` on `Entry` is inert.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        previous,
+        candidateWithRootValue({ type: "number", default: 1 }),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        previous,
+        candidateWithRootValue({ type: "number" }),
+      )
+    ).toThrow(/argument\.item.*no default/);
   });
 
   it("keeps embedded ref roots while comparing unchanged native schemas", () => {
@@ -2167,9 +2372,14 @@ describe("piece schema compatibility", () => {
     for (const target of targets) {
       expect(() => assertSchemaSubset(true, target)).not.toThrow();
       expect(() => assertSchemaSubset(target, true)).not.toThrow();
+      // A target carrying `$defs` is a document of its own; placed under a
+      // wrapper, its definitions move to the wrapper's root, where its
+      // `#/$defs/<name>` refs point.
+      const { $defs, ...body } = target;
       const targetRoot: JSONSchema = {
         type: "object",
-        additionalProperties: target,
+        additionalProperties: body,
+        ...($defs !== undefined && { $defs }),
       };
       expect(() =>
         assertSchemaSubset(
@@ -2409,6 +2619,202 @@ describe("piece schema compatibility", () => {
       }
     });
   }
+
+  describe("semantic extensions on union nodes", () => {
+    const a: JSONSchema = {
+      type: "object",
+      properties: { a: { type: "string" } },
+    };
+    const b: JSONSchema = {
+      type: "object",
+      properties: { b: { type: "number" } },
+    };
+    const extensions = [
+      { asCell: ["cell"] },
+      { ifc: { confidentiality: ["secret"] } },
+      { readOnly: true },
+      { scope: "session" },
+      { writeOnly: true },
+    ] satisfies Exclude<JSONSchema, boolean>[];
+
+    for (const extension of extensions) {
+      const key = Object.keys(extension)[0];
+      const single: JSONSchema = { ...a, ...extension };
+      const union: JSONSchema = { anyOf: [a, b], ...extension };
+
+      describe(key, () => {
+        it("accepts argument widening from a single type to `anyOf`", () => {
+          expect(() =>
+            assertPatternSchemasBackwardCompatible(
+              pattern(single, true),
+              pattern(union, true),
+            )
+          ).not.toThrow();
+        });
+
+        it("accepts result narrowing from `anyOf` to a single type", () => {
+          expect(() =>
+            assertPatternSchemasBackwardCompatible(
+              pattern(true, union),
+              pattern(true, single),
+            )
+          ).not.toThrow();
+        });
+
+        it("accepts a single-type producer for a union demand", () => {
+          expect(() => assertSchemaSubset(single, union)).not.toThrow();
+        });
+
+        it("refuses a union producer for a single-type demand", () => {
+          expect(() => assertSchemaSubset(union, single)).toThrow(
+            /schema alternative accepted previously/,
+          );
+        });
+
+        it("refuses argument narrowing from `anyOf` to a single type", () => {
+          expect(() =>
+            assertPatternSchemasBackwardCompatible(
+              pattern(union, true),
+              pattern(single, true),
+            )
+          ).toThrow(/schema alternative accepted previously/);
+        });
+
+        it("refuses result widening from a single type to `anyOf`", () => {
+          expect(() =>
+            assertPatternSchemasBackwardCompatible(
+              pattern(true, single),
+              pattern(true, union),
+            )
+          ).toThrow(/schema alternative accepted previously/);
+        });
+
+        for (const role of ["argument", "result"] as const) {
+          for (const change of ["adding", "removing"] as const) {
+            it(`refuses ${change} the extension between two \`anyOf\` ${role} nodes`, () => {
+              const bare: JSONSchema = { anyOf: [a, b] };
+              const previous = change === "adding" ? bare : union;
+              const candidate = change === "adding" ? union : bare;
+              expect(() =>
+                assertPatternSchemasBackwardCompatible(
+                  role === "argument"
+                    ? pattern(previous, true)
+                    : pattern(true, previous),
+                  role === "argument"
+                    ? pattern(candidate, true)
+                    : pattern(true, candidate),
+                )
+              ).toThrow(`${role}: ${key} changed`);
+            });
+          }
+        }
+      });
+    }
+
+    it("refuses changes to extensions on descendant properties", () => {
+      const withHandle: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { value: { type: "string", asCell: ["cell"] } },
+            required: ["value"],
+          },
+          { type: "null" },
+        ],
+        asCell: ["opaque"],
+      };
+      const withoutHandle: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { value: { type: "string" } },
+            required: ["value"],
+          },
+          { type: "null" },
+        ],
+        asCell: ["opaque"],
+      };
+      expect(() => assertSchemaSubset(withHandle, withoutHandle)).toThrow();
+      expect(() => assertSchemaSubset(withoutHandle, withHandle)).toThrow();
+    });
+
+    it("accepts a `type` list and `anyOf` as equivalent union contracts", () => {
+      const list: JSONSchema = {
+        type: ["string", "undefined"],
+        asCell: ["cell"],
+      };
+      const branches: JSONSchema = {
+        anyOf: [{ type: "string" }, { type: "undefined" }],
+        asCell: ["cell"],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(list, branches),
+          pattern(branches, list),
+        )
+      ).not.toThrow();
+    });
+
+    it("accepts optional opaque cells with a referenced payload", () => {
+      // The generator represents `Cell<Doc | undefined>` as an `anyOf` of
+      // `undefined` and a reference, beside `asCell: ["opaque"]`.
+
+      const defs = {
+        $defs: {
+          Doc: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      } satisfies Exclude<JSONSchema, boolean>;
+      const doc: JSONSchema = {
+        $ref: "#/$defs/Doc",
+        asCell: ["opaque"],
+        ...defs,
+      };
+      const optionalDoc: JSONSchema = {
+        anyOf: [{ type: "undefined" }, { $ref: "#/$defs/Doc" }],
+        asCell: ["opaque"],
+        ...defs,
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(doc, optionalDoc),
+          pattern(optionalDoc, doc),
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertSchemaSubset(doc, optionalDoc, "value", {
+          sourceRoot: doc,
+          targetRoot: optionalDoc,
+        })
+      ).not.toThrow();
+    });
+
+    it("refuses a changed or missing capability across single and union nodes", () => {
+      const cell: JSONSchema = { ...a, asCell: ["cell"] };
+      for (
+        const changed of [
+          { anyOf: [a, b] },
+          { anyOf: [a, b], asCell: ["readonly"] },
+        ] satisfies JSONSchema[]
+      ) {
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(cell, true),
+            pattern(changed, true),
+          )
+        ).toThrow(/asCell changed/);
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(changed, true),
+            pattern(cell, true),
+          )
+        ).toThrow(/asCell changed/);
+      }
+    });
+  });
 
   it("rejects unresolved references and terminates on recursive references", () => {
     const unresolved = pattern(

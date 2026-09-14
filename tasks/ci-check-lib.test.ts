@@ -7,6 +7,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import {
+  acceptedCoverageDebt,
   acceptsCoverageDebt,
   aggregateCacheStates,
   type Artifact,
@@ -20,6 +21,7 @@ import {
   coverageGroupsForChangedFiles,
   coverageMetricForGroup,
   coverageMetricGroupName,
+  coverageMetricMeasuredSet,
   downloadAndExtractArtifact,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
@@ -31,9 +33,8 @@ import {
   githubPatch,
   githubPost,
   isNotFound,
+  measuredSetCoverageMetric,
   newestArtifactsByName,
-  ownTestsCoverageMember,
-  ownTestsCoverageMetric,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
@@ -297,7 +298,7 @@ Deno.test("baseline override parser rejects a total in place of an increment", (
         "ACCEPT_COVERAGE_DEBT: packages/runner = 123 lines",
       ),
     Error,
-    "<source group> +N lines",
+    "<source group or workspace member> +N lines",
   );
 });
 
@@ -308,24 +309,57 @@ Deno.test("baseline override parser rejects a metric name in place of a group", 
         "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines +7 lines",
       ),
     Error,
-    "<source group> +N lines",
+    "<source group or workspace member> +N lines",
   );
 });
 
-Deno.test("baseline override parser rejects a name no source group could have", () => {
-  assertThrows(
-    () =>
-      parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: packages/a/b/c +7 lines"),
-    Error,
-    "name a coverage source group",
-  );
-
-  // Only `packages` splits into a second level, so a path below any other
-  // top-level directory names nothing the collection rolls a file up to.
+Deno.test("baseline override parser rejects a name nothing could measure", () => {
+  // Only `packages` splits below its top level, so a path below any other
+  // top-level directory names neither a source group nor a member.
   assertThrows(
     () => parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: tasks/foo +7 lines"),
     Error,
     "name a coverage source group",
+  );
+});
+
+Deno.test("two acceptances of one name are refused", () => {
+  // The author meant one number and would be given the other, with
+  // nothing saying which.
+  assertThrows(
+    () =>
+      acceptedCoverageDebt(
+        "ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n" +
+          "ACCEPT_COVERAGE_DEBT: packages/runner +3 lines",
+      ),
+    Error,
+    "Two ACCEPT_COVERAGE_DEBT acceptances",
+  );
+  // A merged body cannot be rewritten, so the larger stands there.
+  assertEquals(
+    acceptedCoverageDebt(
+      "ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n" +
+        "ACCEPT_COVERAGE_DEBT: packages/runner +3 lines",
+      true,
+    ).get("packages/runner"),
+    12,
+  );
+});
+
+Deno.test("a workspace member deeper than a group is not one of this ratchet's", () => {
+  // The coverage gate reads it, and this ratchet measures nothing for it,
+  // so taking it as a group would fail the run for an acceptance that
+  // names no group.
+  const overrides = parseBaselineOverrides(
+    "ACCEPT_COVERAGE_DEBT: packages/connectors/github +7 lines",
+  );
+  assertEquals(overrides.metrics.size, 0);
+  assertEquals(
+    acceptedCoverageDebt(
+      "ACCEPT_COVERAGE_DEBT: packages/connectors/github +7 lines",
+    )
+      .get("packages/connectors/github"),
+    7,
   );
 });
 
@@ -1197,19 +1231,34 @@ Deno.test("isNotFound tells a thing that is not there from an interface that cou
   assertEquals(isNotFound("404"), false);
 });
 
-Deno.test("a covered package's own-tests metric is not one of its source groups", () => {
-  const metric = ownTestsCoverageMetric("packages/memory");
-  assertEquals(ownTestsCoverageMember(metric), "packages/memory");
+Deno.test("a measured set's metric is not one of its member's source groups", () => {
+  const metric = measuredSetCoverageMetric("workspace-unit/packages/memory");
+  assertEquals(
+    coverageMetricMeasuredSet(metric),
+    "workspace-unit/packages/memory",
+  );
   // The two carry the same package name, and reading one as the other
   // would ratchet a figure the gate has no opinion about.
   assertEquals(coverageMetricGroupName(metric), null);
   assertEquals(
-    ownTestsCoverageMember(coverageMetricForGroup("packages/memory")),
+    coverageMetricMeasuredSet(coverageMetricForGroup("packages/memory")),
     null,
   );
   assertEquals(
     coverageMetricGroupName(coverageMetricForGroup("packages/memory")),
     "packages/memory",
+  );
+});
+
+Deno.test("two suites over one member are two metrics", () => {
+  const unit = measuredSetCoverageMetric("workspace-unit/packages/memory");
+  const integration = measuredSetCoverageMetric(
+    "memory-integration/packages/memory",
+  );
+  assertEquals(unit === integration, false);
+  assertEquals(
+    coverageMetricMeasuredSet(integration),
+    "memory-integration/packages/memory",
   );
 });
 

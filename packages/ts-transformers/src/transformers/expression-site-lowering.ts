@@ -312,6 +312,26 @@ export function rewriteExpressionSite(
     return result;
   }
 
+  // A rewritten receiver can establish collection ownership. Register its
+  // callback before visiting the body so local predicates read reactive values.
+  if (ts.isCallExpression(result) && ts.isCallExpression(expression)) {
+    const callback = expression.arguments[0];
+    if (callback && isFunctionLikeExpression(unwrapExpression(callback))) {
+      const withCallback = context.factory.updateCallExpression(
+        result,
+        result.expression,
+        result.typeArguments,
+        [callback, ...result.arguments.slice(1)],
+      );
+      const rewrittenArrayMethod = rewriteLateArrayMethodCallbackCall(
+        withCallback,
+        context,
+        visit,
+      );
+      if (rewrittenArrayMethod) return rewrittenArrayMethod;
+    }
+  }
+
   return visitEachChildWithJsx(
     result,
     visit,
@@ -500,6 +520,13 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   const analyze = context.getDataFlowAnalyzer();
 
   const visit: ts.Visitor = (node) => {
+    if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      context.isSyntheticComputeCallback(node)
+    ) {
+      return node;
+    }
+
     if (ts.isVariableDeclaration(node)) {
       if (
         node.initializer && isFunctionLikeExpression(node.initializer)

@@ -11,17 +11,16 @@ const spaceA = signer.did();
 const spaceB = (await Identity.fromPassphrase("inspace child target B")).did();
 const spaceC = (await Identity.fromPassphrase("inspace child target C")).did();
 
-// CT-1687: a handler that materializes a child piece in ANOTHER space via
+// A handler that materializes a child piece in ANOTHER space via
 // `Child.inSpace(...)({...})` (the multi-profile flow: profile-create.tsx pushes
 // `ProfileHome.inSpace(name)({initialName})` onto the home `profiles` list) must
 // leave the child independently loadable FROM ITS OWN SPACE. A fresh runtime
 // navigating to the child piece (the shell's piece view) loads pattern artifacts
-// from `resultCell.space` — the child space — where, before the fix, neither the
-// pattern meta (program) nor the content-addressed source/compiled closures were
-// ever persisted: `savePattern` deduped on patternId alone and the sub-pattern
-// object carries no program, and the compile-cache write-back only targets the
-// space the parent bundle compiled into. Symptom: "Pattern <id> has no stored
-// source" → "Failed to load piece"; profiles uneditable.
+// from `resultCell.space` — the child space — so both the pattern meta
+// (program) and the content-addressed source/compiled closures must be
+// persisted there, not only in the space the parent bundle compiled into.
+// Without them the load fails with "Pattern <id> has no stored source" →
+// "Failed to load piece", and profiles are uneditable.
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -62,7 +61,7 @@ const childLinkListSchema = {
   // deno-lint-ignore no-explicit-any
 } as any;
 
-describe("inSpace child piece reload from its own space (CT-1687)", () => {
+describe("inSpace child piece reload from its own space", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const newRuntime = () =>
@@ -120,7 +119,7 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
       await rt1.storageManager.synced();
 
       // Session 2: a fresh runtime loads the child piece from ITS OWN space —
-      // the shell's navigate-to-piece path. Before the fix this rejects with
+      // the shell's navigate-to-piece path, which must not reject with
       // "Pattern <id> has no stored source".
       const childCell = rt2.getCellFromLink(childLink);
       await childCell.sync();

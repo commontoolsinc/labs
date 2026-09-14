@@ -58,6 +58,20 @@ async function runScript(
   }
 }
 
+/**
+ * Run a bash snippet with the local dev scripts' shared port utilities
+ * sourced, and return what it printed.
+ */
+async function runWithPortUtils(script: string): Promise<string> {
+  const { stdout } = await new Deno.Command("bash", {
+    args: ["-c", `source scripts/common/port-utils.sh\n${script}`],
+    cwd: repoRoot,
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  return new TextDecoder().decode(stdout).trim();
+}
+
 describe("local-dev-scripts", () => {
   describe("start-local-dev.sh", () => {
     it("names the server and the port an offset makes unreachable", async () => {
@@ -111,6 +125,56 @@ describe("local-dev-scripts", () => {
       expect(code).toBe(PORT_UNREACHABLE_EXIT);
       expect(stderr).toContain("inspector port 10080");
       expect(stdout).not.toContain("Stopping local dev servers");
+    });
+  });
+
+  describe("port-utils.sh", () => {
+    describe("foreign_port_holder()", () => {
+      // Each case listens on a port here, so the pid the utility has to find
+      // is one the test already knows: this process.
+
+      it("returns nothing for a port the given pid listens on", async () => {
+        const listener = Deno.listen({ port: 0 });
+        try {
+          expect(
+            await runWithPortUtils(
+              `foreign_port_holder ${listener.addr.port} ${Deno.pid}`,
+            ),
+          ).toBe("");
+        } finally {
+          listener.close();
+        }
+      });
+
+      it("returns nothing for a port a descendant of the given pid listens on", async () => {
+        // `Deno.ppid` is the process that spawned this one, so the
+        // listener below is a descendant of it rather than the pid itself.
+        const listener = Deno.listen({ port: 0 });
+        try {
+          expect(
+            await runWithPortUtils(
+              `foreign_port_holder ${listener.addr.port} ${Deno.ppid}`,
+            ),
+          ).toBe("");
+        } finally {
+          listener.close();
+        }
+      });
+
+      it("returns the listening pid for a port held outside the given pid's tree", async () => {
+        // `$$` is the bash the snippet runs in, a child of this process and so
+        // an ancestor of nothing that listens here.
+        const listener = Deno.listen({ port: 0 });
+        try {
+          expect(
+            await runWithPortUtils(
+              `foreign_port_holder ${listener.addr.port} $$`,
+            ),
+          ).toBe(String(Deno.pid));
+        } finally {
+          listener.close();
+        }
+      });
     });
   });
 });

@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Logger } from "@commonfabric/utils/logger";
 
 import type { Cell } from "../cell.ts";
@@ -58,6 +59,10 @@ import type { Runtime } from "../runtime.ts";
  * `settled(Infinity)` before it tears anything down, so the store a reader is
  * handed afterwards carries whatever the seed wrote. A caller does not register
  * the returned promise; this function registers the chain.
+ *
+ * `scopeKeyIdentity` carries the deferring run's viewing identity through the
+ * asynchronous pull and each seed attempt, so scoped containers initialize the
+ * instance whose absence caused the deferral.
  */
 export function seedResultContainerWhenPullSettles(
   runtime: Runtime,
@@ -66,14 +71,17 @@ export function seedResultContainerWhenPullSettles(
   pull: Promise<unknown>,
   logger: Logger,
   seedActionId: string,
+  identity?: ScopeKeyIdentity,
 ): Promise<void> {
   const seedIfStillAbsent = (): Promise<void> => {
     if (!stillHeld()) return Promise.resolve();
     return runtime.editWithRetry((seedTx) => {
       if (!stillHeld()) return;
+      if (identity !== undefined) seedTx.tx.scopeKeyIdentity = identity;
       runtime.stampServerRun(seedTx, {
         actionId: seedActionId,
         kind: "bookkeeping",
+        scopeKeyIdentity: identity,
       });
       const scoped = container.withTx(seedTx);
       if (scoped.getRaw() === undefined) scoped.set([]);

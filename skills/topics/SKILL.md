@@ -48,10 +48,15 @@ reference edge and take no `agentName`.
 
 ## What holds throughout
 
-- The running piece is authoritative, and the deployment is routinely dozens of
-  commits behind the checkout. Read the board's `piece verbs` listing before
-  mutating, and the commit its `/api/meta` reports before recording one or
-  reading a verb's behavior as a defect.
+- Reading Topics starts with the projected board `index` in
+  `references/reading.md`. `piece describe` documents a piece's readable fields
+  and operations; `piece verbs` lists operations to call. A verb listing says
+  nothing about how much readable data the piece holds.
+- The running piece is authoritative. Estuary is the Topics production
+  deployment and routinely trails the checkout; commit distance alone does not
+  establish incompatibility or explain a failure. Discover the piece's contract
+  before mutating. Its pinned pattern reference and the server commit reported
+  by `/api/meta` identify different things; `references/verbs.md` covers both.
 - Discovery is bounded: survey the projected `index`, expand one Topic at a
   time, and take an emitted `$link` unchanged.
 - A call's envelope, or its absence, is an observation and not proof of durable
@@ -69,8 +74,8 @@ reference edge and take no `agentName`.
 
 | Read                               | When you are                                                                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `references/verbs.md`              | orienting: the discovery commands and their costs, the deployment gap, the declared contract, retraction and by-reference verbs               |
 | `references/reading.md`            | surveying the board or reading a Topic: the index, addresses and how to compare them, durable inputs against stepped results                  |
+| `references/verbs.md`              | discovering fields and operations, choosing a verb, identifying the deployed contract, retraction and by-reference verbs                      |
 | `references/naming.md`             | citing or resolving a Topic by its number, `top/42`, and what the deployment carries                                                          |
 | `references/mutating.md`           | creating a Topic and recovering its address, the observation asymmetry, the Topic verbs, references between Topics, the editorial conventions |
 | `references/pattern-updates.md`    | changing pattern source: `setsrc` rehearsal, `--root`, team authorization                                                                     |

@@ -1,12 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { CompilerStackLoadError } from "@commonfabric/runner";
+
 import { NotificationType, RuntimeErrorCode } from "@/protocol/mod.ts";
 import {
   postContextualRuntimeError,
   postRuntimeError,
 } from "@/backends/runtime-error.ts";
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 
 describe("runtime error notifications", () => {
   it("classifies compiler-load failures in contextual and renderer errors", () => {
@@ -47,6 +48,10 @@ describe("runtime error notifications", () => {
         type: NotificationType.ErrorReport,
         message: "Failed to load the compiler stack",
         code: RuntimeErrorCode.CompilerStackLoadFailed,
+        pieceId: "piece-1",
+        space: "did:key:space-1",
+        patternId: "pattern-1",
+        spellId: "spell-1",
         stackTrace: compilerError.stack,
       });
 

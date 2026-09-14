@@ -2,13 +2,13 @@ import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  compileWithEntryBody,
   Engine,
   joinedBodies,
   Runtime,
   signer,
   StorageManager,
 } from "./engine-test-support.ts";
-import { compileWithEntryBody } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 describe("Engine in SES mode", () => {
   let runtime: Runtime;

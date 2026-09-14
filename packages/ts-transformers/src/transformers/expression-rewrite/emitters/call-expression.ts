@@ -8,6 +8,7 @@ import {
   isSyntheticNode,
 } from "../../../ast/mod.ts";
 import { getCellKind } from "../../cell-type.ts";
+import { unwrapParentheses } from "../../../utils/expression.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import { createLiftAppliedCall } from "../../builtins/lift-applied.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
@@ -31,10 +32,10 @@ function getZeroArgInlineIifeCallee(
     return undefined;
   }
 
-  let callee: ts.Expression = expression.expression;
-  while (ts.isParenthesizedExpression(callee)) {
-    callee = callee.expression;
-  }
+  // Parentheses only: a callee under a type assertion is not recognized as an
+  // inline IIFE — the assertion re-types the call, and the general call
+  // lowering handles it.
+  const callee = unwrapParentheses(expression.expression);
 
   return ts.isArrowFunction(callee) || ts.isFunctionExpression(callee)
     ? callee

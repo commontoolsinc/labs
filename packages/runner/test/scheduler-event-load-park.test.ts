@@ -200,22 +200,10 @@ describe("event dispatch parks on in-flight closure loads", () => {
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
 
     // The preflight runs the never-ran computation first. On the following
-    // pass it registers the load park; observe that explicit barrier instead
-    // of assuming a fixed amount of wall-clock time is enough.
-    await Promise.race([
-      loadParkObserved,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `load park was not reached (computations=${computationRuns}, handlers=${handlerRuns})`,
-              ),
-            ),
-          2_000,
-        )
-      ),
-    ]);
+    // pass it registers the load park; that is the barrier awaited here,
+    // with no deadline. A park that never comes lets the event loop
+    // quiesce, and Deno fails the pending wait, naming the test.
+    await loadParkObserved;
     expect(computationRuns).toBeGreaterThanOrEqual(1);
     expect(handlerRuns, "handler must not dispatch while the load is in flight")
       .toBe(0);
@@ -840,16 +828,8 @@ describe("event dispatch parks on in-flight closure loads", () => {
     release();
     await loadInFlight;
 
-    const timedOut = Symbol("timeout");
-    let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<typeof timedOut>((resolve) => {
-      timer = setTimeout(() => resolve(timedOut), 500);
-    });
-    const outcome = await Promise.race([
-      settled.then(() => "settled" as const),
-      timeout,
-    ]);
-    clearTimeout(timer!);
-    expect(outcome).toBe("settled");
+    // No deadline: a `loadsSettled` that never resolves leaves this wait
+    // pending, and Deno fails the test on it.
+    await settled;
   });
 });

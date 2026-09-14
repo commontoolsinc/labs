@@ -269,6 +269,54 @@ describe("list-result-container-seed", () => {
       expect(logger.reportedError(0)).toBe(rejection);
     });
 
+    it("retains each deferred seed's identity when pulls settle in reverse order", async () => {
+      const firstIdentity = { ...runtime.scopeKeyIdentity };
+      const other = await Identity.fromPassphrase("other deferred seed owner");
+      const secondIdentity = { ...firstIdentity, principal: other.did() };
+      const identities = [firstIdentity, secondIdentity];
+      const pulls = identities.map(() => Promise.withResolvers<void>());
+      const containers = identities.map((_, index) =>
+        newContainer(`identity-seed-${index}`)
+      );
+      const stamped: ServerRunInfo[] = [];
+      const transactionIdentities: unknown[] = [];
+      const stamp = runtime.stampServerRun.bind(runtime);
+      (runtime as any).stampServerRun = (
+        tx: IExtendedStorageTransaction,
+        info: ServerRunInfo,
+      ) => {
+        transactionIdentities.push(tx.tx.scopeKeyIdentity);
+        stamped.push(info);
+        stamp(tx, info);
+      };
+      const pending = identities.map((identity, index) =>
+        seedResultContainerWhenPullSettles(
+          runtime,
+          containers[index],
+          () => true,
+          pulls[index].promise,
+          logger,
+          `identity-seed-${index}`,
+          identity,
+        )
+      );
+      expect(stamped).toEqual([]);
+      pulls[1].resolve();
+      await pending[1];
+      expect(valueOf(containers[0])).toBeUndefined();
+      expect(valueOf(containers[1])).toEqual([]);
+      pulls[0].resolve();
+      await pending[0];
+      expect(valueOf(containers[0])).toEqual([]);
+      expect(transactionIdentities).toEqual([secondIdentity, firstIdentity]);
+      expect(stamped).toEqual([1, 0].map((index) => ({
+        actionId: `identity-seed-${index}`,
+        kind: "bookkeeping",
+        scopeKeyIdentity: identities[index],
+      })));
+      expect(logger.warnings).toEqual([]);
+    });
+
     it("stamps every seed attempt's transaction as sanctioned bookkeeping", async () => {
       const container = newContainer("stamped-seed");
       // The seed transaction is minted outside any scheduler run, so nothing
@@ -305,6 +353,47 @@ describe("list-result-container-seed", () => {
         { actionId: "filter/resume-seed/of:stamped-seed", kind: "bookkeeping" },
       ]);
       expect(valueOf(container)).toEqual([]);
+      expect(logger.warnings).toEqual([]);
+    });
+
+    it("carries the viewing identity into every deferred seed attempt", async () => {
+      const container = newContainer("viewing-instance-seed");
+      const identity = {
+        principal: (await Identity.fromPassphrase("list seed viewer")).did(),
+        sessionId: "viewer-session",
+      };
+      const commits = refuseFirstCommit({
+        name: "ConflictError",
+        message: "stale confirmed read: of:test at seq 0 conflicted with seq 9",
+        readyToRetry: () => Promise.resolve(),
+      });
+      const stamped: ServerRunInfo[] = [];
+      const transactionIdentities:
+        IExtendedStorageTransaction["tx"]["scopeKeyIdentity"][] = [];
+      const stamp = runtime.stampServerRun.bind(runtime);
+      runtime.stampServerRun = (tx, info) => {
+        transactionIdentities.push(tx.tx.scopeKeyIdentity);
+        stamped.push(info);
+        stamp(tx, info);
+      };
+      const pull = Promise.withResolvers<void>();
+      const seeded = seedResultContainerWhenPullSettles(
+        runtime,
+        container,
+        () => true,
+        pull.promise,
+        logger,
+        "map/resume-seed/viewing-instance",
+        identity,
+      );
+      pull.resolve();
+      await seeded;
+      expect(commits()).toBe(2);
+      expect(transactionIdentities).toEqual([identity, identity]);
+      expect(stamped.map((info) => info.scopeKeyIdentity)).toEqual([
+        identity,
+        identity,
+      ]);
       expect(logger.warnings).toEqual([]);
     });
   });

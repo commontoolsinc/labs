@@ -14,6 +14,7 @@ import {
 import {
   FLAKY_SECTION_ID,
   testSelectionPage,
+  UNSCHEDULABLE_SECTION_ID,
 } from "./test-selection-page.ts";
 import {
   FLAKE_EXCLUSION_FALLBACK,
@@ -147,6 +148,7 @@ describe("test-selection-page", () => {
       expect(page).toContain("Too long for any lane · 1");
       expect(page).toContain("900s");
       expect(page).toContain("acl.sh");
+      expect(page).toContain(`id="${UNSCHEDULABLE_SECTION_ID}"`);
     });
 
     it("marks the lane whose projected work is past its budget", () => {

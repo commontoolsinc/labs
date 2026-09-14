@@ -245,6 +245,10 @@ export type {
   CfcPrepareInstrumentation,
   StoredCfcEnvelope,
 } from "./prepare.ts";
+export {
+  reportCfcDenial,
+  resetCfcDenialAnnouncements,
+} from "./denial-report.ts";
 export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
@@ -342,12 +346,14 @@ export {
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {
-  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
+  cfcSchemaResolvedRoot,
   cfcSchemaToObject,
+  cfcSchemaWithInheritedDefs,
   findCfcSchemaRefs,
+  hoistCfcSchemaDefs,
   isEmbeddedCfcSchemaRef,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,

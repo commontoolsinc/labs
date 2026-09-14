@@ -418,4 +418,10 @@ export class CodexAppServerDriver implements AgentDriver {
       unsupported(`unsupported Codex config option: ${key}`),
     );
   }
+
+  startSession(): Promise<CommandExecutionResult> {
+    return Promise.resolve(
+      unsupported("Codex sessions are started by the Codex app, not here"),
+    );
+  }
 }

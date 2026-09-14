@@ -271,6 +271,18 @@ module's name is a route only for a program compiled over HTTP, and an author
 controls it either way, so a filename that looks like a route is not a claim
 about anything a host serves.
 
+Opening a missing runtime-supplied piece revalidates the deployment's advertised
+identity. Resolved source may be shared within a reconciler for the same
+destination space, full source URL, and advertised identity. Retention is bounded
+by entry count and source string size. Every caller still compiles and verifies
+that identity in its destination space, including source-closure persistence on
+a compiler cache hit. Compilation or identity failure retires the source used by
+that attempt so a later open can retry. Disposal cancels pending source work and
+prevents an open still syncing or compiling from supplying a pattern. Existing
+pieces continue to reconcile their own recorded origins independently of this
+source sharing. Registry changes continue to invalidate compiled sidecar
+surfaces; retained source contains no compiled patterns or schema references.
+
 A piece that pattern code instantiates — a nested pattern, a piece a handler
 creates with `inSpace` — is detached, and stays detached until its owner points
 it somewhere. The code it runs is a module of the instantiating program, so what
@@ -615,9 +627,15 @@ caller compiles and verifies the candidate and runs these structural
 comparisons. Descriptions, titles, examples, and listing annotations do not
 change a contract, including inside defaulted unions. Defaults, reference
 targets, value constraints, and capability and CFC metadata remain part of the
-proof. The unconstrained schemas `true`, `{}`, and `{ type: "unknown" }`
-accept the same values; constraints beside `type: "unknown"` still apply.
-Adding an optional `unknown` read to an open producer contract is compatible,
+proof. Capability and CFC metadata are compared once, on the node that carries
+them, whatever spelling that node's alternatives take: one member type, a
+`type` list, or `anyOf` branches. Adding or removing a semantic extension on
+one of two `anyOf` nodes is incompatible in either the argument or result
+contract, subject to the same CFC metadata normalization as other nodes.
+
+The unconstrained schemas `true`, `{}`, and `{ type: "unknown" }` accept the
+same values; constraints beside `type: "unknown"` still apply. Adding an
+optional `unknown` read to an open producer contract is compatible,
 while adding an optional typed read requires the producer to guarantee that
 type whenever the property is present.
 

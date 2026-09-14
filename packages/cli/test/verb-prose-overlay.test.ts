@@ -180,11 +180,10 @@ describe("verb prose", () => {
         expect(result.properties.meow.description).toBe("How loud.");
       });
 
-      it("resolves a nested reference in the scope that declares it", () => {
-        // `Outer` carries `$defs` of its own, and its `pet` names a `Cat`
-        // declared there — a different `Cat` from the one at the event root.
-        // Resolving in the root scope finds the root's, whose `meow` says
-        // nothing: the prose is lost, and a WRONG document answered.
+      it("resolves a nested reference against the document root, not the definition's own `$defs`", () => {
+        // `Outer` carries `$defs` of its own, but its `pet` names the `Cat`
+        // at the event root: `#/$defs/Cat` is a root pointer, and the `$defs`
+        // below the root's map is inert.
         const result = fold(
           object({ pet: object({ meow: { type: "string" } }) }),
           {
@@ -192,17 +191,17 @@ describe("verb prose", () => {
             $defs: {
               Outer: object({ pet: { $ref: "#/$defs/Cat" } }, {
                 $defs: {
-                  Cat: object({
-                    meow: { type: "string", description: "The inner cat." },
-                  }),
+                  Cat: object({ meow: { type: "string" } }),
                 },
               }),
-              Cat: object({ meow: { type: "string" } }),
+              Cat: object({
+                meow: { type: "string", description: "The root cat." },
+              }),
             },
           } as unknown as JSONSchema,
         );
         expect(result.properties.pet.properties.meow.description)
-          .toBe("The inner cat.");
+          .toBe("The root cat.");
       });
 
       it("finds a property's prose in whichever declared arm declares it", () => {
@@ -723,12 +722,10 @@ describe("verb prose", () => {
       expect(declaredVerbProse(pattern).size).toBe(0);
     });
 
-    it("resolves a property reference in the definition's OWN scope", () => {
-      // A `$defs` closure is local. The definition the root names may carry
-      // definitions of its own, and a property reference inside it names
-      // those — resolving at the outer root finds nothing, or a same-named
-      // definition belonging to someone else. Both roots here declare `Ev`,
-      // and only the inner one is correct for a property of `Item`.
+    it("resolves a property reference against the document root, not the definition's own `$defs`", () => {
+      // `#/$defs/Ev` names the root's definition. The `$defs` the named
+      // definition carries of its own is inert below the root's map, so the
+      // property of `Item` reads the outer `Ev`.
       const pattern = {
         resultSchema: {
           $ref: "#/$defs/Item",
@@ -754,7 +751,7 @@ describe("verb prose", () => {
       const eventSchema = declaredVerbProse(pattern).get("act")
         ?.eventSchema as Record<string, unknown> | undefined;
       const props = eventSchema?.properties as Record<string, unknown>;
-      expect(Object.keys(props)).toEqual(["inner"]);
+      expect(Object.keys(props)).toEqual(["outer"]);
     });
   });
 });

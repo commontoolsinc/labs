@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+import {
+  PIECE_SOURCE_MOVED,
+  Runtime,
+  type RuntimeProgram,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -9,7 +13,6 @@ import {
   PieceSourceChangedError,
   pinnedSourceMoved,
 } from "../../src/ops/piece-controller.ts";
-import { PIECE_SOURCE_MOVED } from "@commonfabric/runner";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece controller edit");

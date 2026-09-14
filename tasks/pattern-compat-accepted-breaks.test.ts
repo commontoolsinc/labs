@@ -70,12 +70,21 @@ describe("pattern-compat-accepted-breaks", () => {
       // A finding is forgiven only when every path it blames is one the entry
       // named, and the proof spells a path as its role followed by the schema
       // pointer. A path under any other name forgives nothing.
+      //
+      // The role alone is one of those spellings. `schemaSubsetIssue` starts
+      // at `"argument"` or `"result"` and appends `.<property>` on the way
+      // down, so an issue found at the root of a schema — `ifc` on the schema
+      // itself, rather than on any field of it — is reported as the bare role.
+      // Requiring the dot would reject the only name that forgives such a
+      // finding, and the entry would then forgive nothing while looking as
+      // though it did.
 
+      const roles = ["argument", "result"];
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
         expect(accepted.paths.length).toBeGreaterThan(0);
         for (const path of accepted.paths) {
           expect(
-            path.startsWith("argument.") || path.startsWith("result."),
+            roles.some((role) => path === role || path.startsWith(`${role}.`)),
             `${accepted.pattern} names path ${path}`,
           ).toBe(true);
         }

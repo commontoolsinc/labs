@@ -1048,12 +1048,38 @@ describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
     ).toContain("requires integrity");
   });
 
-  it("resolves a local reference against an inline child scope's own $defs", () => {
-    // `envelope` DECLARES its own `$defs`: the local reference under it
-    // resolves against envelope, not the event root. Losing that scope
-    // fails closed — a valid schema reads as unresolvable and the tool
-    // goes unusable — so the pin is that the walk reaches the floor and
-    // refuses the literal for the floor's own reason.
+  it("resolves a local reference under a nested object against the event root's $defs", () => {
+    // The reference sits two levels down; it names the root's definition,
+    // and the `$defs` that `envelope` declares of its own is inert below the
+    // root, so the walk reaches the floor and refuses the literal for the
+    // floor's own reason rather than reading the schema as unresolvable.
+    const eventSchema = {
+      type: "object",
+      $defs: {
+        Floored: {
+          type: "object",
+          ifc: { requiredIntegrity: [KERNEL_ATOM] },
+        },
+      },
+      properties: {
+        envelope: {
+          type: "object",
+          $defs: { Unrelated: { type: "string" } },
+          properties: {
+            recipient: { $ref: "#/$defs/Floored" },
+          },
+        },
+      },
+    } as JSONSchema;
+    const failure = gate(eventSchema, { envelope: { recipient: {} } });
+    expect(failure).toContain("requires integrity");
+    expect(failure).not.toContain("cannot resolve");
+  });
+
+  it("refuses a local reference that only a nested object's own $defs could satisfy (fail closed)", () => {
+    // The event root declares no `$defs`, so `#/$defs/Floored` names nothing
+    // whatever `envelope` declares below it; the walk refuses rather than
+    // reading a definition the document does not hold.
     const eventSchema = {
       type: "object",
       properties: {
@@ -1071,9 +1097,9 @@ describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
         },
       },
     } as JSONSchema;
-    const failure = gate(eventSchema, { envelope: { recipient: {} } });
-    expect(failure).toContain("requires integrity");
-    expect(failure).not.toContain("cannot resolve");
+    expect(gate(eventSchema, { envelope: { recipient: {} } })).toContain(
+      "cannot resolve",
+    );
   });
 
   it("refuses a local reference it cannot resolve (fail closed)", () => {

@@ -16,17 +16,24 @@ type StoredEntry = {
   origin?: string;
 };
 
+type StoredDocument = {
+  value?: unknown;
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
+} | undefined;
+
+const storedDocument = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  id: string,
+): StoredDocument =>
+  (storageManager.open(signer.did()).replica as unknown as {
+    getDocument(id: string): StoredDocument;
+  }).getDocument(id);
+
 const replicaEntries = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
   id: string,
-): StoredEntry[] => {
-  const replica = storageManager.open(signer.did()).replica as unknown as {
-    getDocument(id: string): {
-      cfc?: { labelMap?: { entries: StoredEntry[] } };
-    } | undefined;
-  };
-  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
-};
+): StoredEntry[] =>
+  storedDocument(storageManager, id)?.cfc?.labelMap?.entries ?? [];
 
 const newRuntime = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
@@ -109,9 +116,20 @@ describe("CFC flow-join read scope", () => {
       );
       derived.set({ doubled: amount * 2 });
       const derivedId = derived.getAsNormalizedFullLink().id;
+      const sourceId = source.getAsNormalizedFullLink().id;
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
 
+      // The sibling that was not read carries the atom the derived document
+      // must not pick up, and the stored value pins the derived document the
+      // entries below are read from.
+      expect(
+        replicaEntries(storageManager, sourceId)
+          .flatMap((e) => e.label.confidentiality ?? []),
+      ).toContainEqual("secret");
+      expect(storedDocument(storageManager, derivedId)?.value).toEqual({
+        doubled: 24,
+      });
       const flowEntry = replicaEntries(storageManager, derivedId)
         .find((e) => e.origin === "derived");
       expect(flowEntry?.label.confidentiality ?? []).not.toContainEqual(

@@ -1,20 +1,25 @@
+import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
-import type { Cancel } from "../cancel.ts";
+
 import { getTopFrame } from "../builder/pattern.ts";
+import type { Cancel } from "../cancel.ts";
+import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
+  toMemorySpaceAddress,
 } from "../link-utils.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
+import { startReadStats } from "../read-stats.ts";
 import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
@@ -24,6 +29,13 @@ import type {
   MemorySpace,
   StorageNotification,
 } from "../storage/interface.ts";
+import { ReplicaLoadFailureError } from "../storage/interface.ts";
+import {
+  recordLocalReadWake,
+  requireLocalReadCondition,
+  restrictToLocalReads,
+  usesLocalReads,
+} from "../storage/local-read-policy.ts";
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
@@ -37,6 +49,7 @@ import type {
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
+import type { ViewExecutionNode } from "../view-replication.ts";
 import {
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
@@ -47,6 +60,7 @@ import {
   applyPullExecuteContinuation,
   type ExecuteContinuationState,
 } from "./continuation.ts";
+import { CooperativeYield } from "./cooperative-yield.ts";
 import {
   collectDirectWritersForLog,
   type DependencyGraphState,
@@ -74,39 +88,22 @@ import {
   recordTriggerTrace as recordTriggerTraceState,
   type SchedulerActionIdentityState,
 } from "./diagnostics.ts";
-import { keyAtRatchet } from "./fan-out.ts";
-import { SchedulerMaterializers } from "./materializers.ts";
-import {
-  CELL_GROUP_PREFIX,
-  type DeliverFn,
-  holdShapedCell,
-  holdShapedEvent,
-  shaperInstanceGroupKey,
-  shouldShapeDelivery,
-  WakeShaper,
-} from "./wake-shaping.ts";
-import { SchedulerWriteIndex } from "./scheduling-writes.ts";
-import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
-import {
-  SchedulerTriggerIndex,
-  SchedulerTriggerSubscriptions,
-  type TriggerSubscriptionState,
-} from "./trigger-index.ts";
 import {
   collectInvalidUpstreamForLog as collectInvalidUpstreamForLogState,
   collectPendingLoadParkKeys as collectPendingLoadParkKeysState,
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
-import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  eventHandlerImplementations,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
+  selectEventImplementation,
 } from "./events.ts";
 import {
   buildPullInitialSeeds,
@@ -120,27 +117,24 @@ import {
   type SettlingTracker,
   summarizeNonSettlingWindow,
 } from "./execution.ts";
-import {
-  collectPullIterationSeeds as collectPullIterationSeedsState,
-  runPullSchedulerSettleLoop,
-} from "./settle.ts";
-import { CooperativeYield } from "./cooperative-yield.ts";
-import {
-  type DirtyPullRunnableState,
-  type DirtyPullRunnableStateWithDebounce,
-  hasIdleBlockingDeferredPullWork as hasIdleBlockingDeferredPullWorkState,
-  hasRunnablePullWork as hasRunnablePullWorkState,
-  type PendingPullRunnableState,
-  type PullSchedulingState,
-} from "./work-oracle.ts";
+import { keyAtRatchet } from "./fan-out.ts";
 import { SchedulerGates } from "./gates.ts";
+import {
+  buildSchedulerGraphSnapshot,
+  type SchedulerGraphSnapshotState,
+} from "./graph-snapshot.ts";
 import {
   markInvalid as markInvalidRecord,
   type MarkInvalidOptions,
   processStorageNotification,
   type StorageNotificationState,
 } from "./invalidation.ts";
+import { entityKey, entityNameKey } from "./keys.ts";
+import { SpeculationLineage } from "./lineage.ts";
+import { SchedulerMaterializers } from "./materializers.ts";
+import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
 import {
+  resolveRegistrationSurface,
   resubscribePullSchedulerAction,
   type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
@@ -148,16 +142,24 @@ import {
   subscribePullSchedulerAction,
   unsubscribeSchedulerAction,
 } from "./registration.ts";
+import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
-  buildSchedulerGraphSnapshot,
-  type SchedulerGraphSnapshotState,
-} from "./graph-snapshot.ts";
-import { entityKey, entityNameKey } from "./keys.ts";
-import { SpeculationLineage } from "./lineage.ts";
+  readsOverlapWrites,
+  SchedulerWriteIndex,
+} from "./scheduling-writes.ts";
+import {
+  collectPullIterationSeeds as collectPullIterationSeedsState,
+  runPullSchedulerSettleLoop,
+} from "./settle.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
 } from "./timing.ts";
+import {
+  SchedulerTriggerIndex,
+  SchedulerTriggerSubscriptions,
+  type TriggerSubscriptionState,
+} from "./trigger-index.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -174,7 +176,23 @@ import type {
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
-import { ReplicaLoadFailureError } from "../storage/interface.ts";
+import {
+  CELL_GROUP_PREFIX,
+  type DeliverFn,
+  holdShapedCell,
+  holdShapedEvent,
+  shaperInstanceGroupKey,
+  shouldShapeDelivery,
+  WakeShaper,
+} from "./wake-shaping.ts";
+import {
+  type DirtyPullRunnableState,
+  type DirtyPullRunnableStateWithDebounce,
+  hasIdleBlockingDeferredPullWork as hasIdleBlockingDeferredPullWorkState,
+  hasRunnablePullWork as hasRunnablePullWorkState,
+  type PendingPullRunnableState,
+  type PullSchedulingState,
+} from "./work-oracle.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -186,6 +204,12 @@ type FilterStatsState = { filtered: number; executed: number };
 
 type SchedulerRegistrationInput = ReactivityLog;
 type SchedulerRegisterOptions = {
+  /** Request initial currency from the server plan for this bound source. */
+  adoptViewIdentity?: string;
+
+  /** Skips provisional parent demand; requires declared outputs and a computation. */
+  deferUntilDemand?: boolean;
+
   isEffect?: boolean;
   debounce?: number;
   noDebounce?: boolean;
@@ -275,6 +299,19 @@ export class Scheduler {
 
   readonly #pending = new Set<Action>();
   #dependencies = new WeakMap<Action, ReactivityLog>();
+  #viewConsumers = new Map<MemorySpace, Set<string>>();
+  #viewOutcomes = new WeakMap<
+    Action,
+    Map<string, {
+      log?: ReactivityLog;
+      settled: boolean;
+      confirmed: boolean;
+      registration: object;
+      error?: ViewExecutionNode["error"];
+    }>
+  >();
+  #viewRunning = new WeakSet<Action>();
+  #viewHandlerLogs = new WeakMap<EventHandler, Map<string, ReactivityLog>>();
   readonly #cancels = new WeakMap<Action, Cancel>();
 
   /**
@@ -312,6 +349,9 @@ export class Scheduler {
   readonly #actionStats = new BoundedKeyMap<string, ActionStats>(
     MAX_ACTION_STATS,
   );
+
+  #collectReadStats = false;
+  #readAttemptAccountingEnabled = false;
 
   #actionTimingState: ActionTimingState = {
     actionStats: this.#actionStats,
@@ -687,9 +727,12 @@ export class Scheduler {
   /**
    * Subscribes an action to run when its dependencies change.
    *
-   * The action will be scheduled to run immediately. After running, the
-   * scheduler automatically re-subscribes using the reactivity log from the
-   * run.
+   * Computations run when demanded. A live parent provisionally demands a new
+   * child unless `deferUntilDemand` is set with a declared write surface.
+   * A matching settled view basis establishes initial currency and wake
+   * dependencies without running the computation.
+   * Effects and idempotency diagnostics retain their execution policy. After
+   * running, the scheduler re-subscribes using the recorded reactivity log.
    *
    * @param action The action to subscribe
    * @param dependencies Optional callback or immediate ReactivityLog for
@@ -708,6 +751,14 @@ export class Scheduler {
       dependenciesOrOptions,
       maybeOptions,
     );
+    if (options.deferUntilDemand) {
+      if (options.isEffect || this.#nodes.isKnownEffect(action)) {
+        throw new Error("`deferUntilDemand` requires a computation");
+      }
+      if (resolveRegistrationSurface(action, dependencies).length === 0) {
+        throw new Error("`deferUntilDemand` requires a declared write surface");
+      }
+    }
     // Tag the action with its owning pattern instance so pattern readers
     // always carry a pieceId (used to group shaped cell-flip wakes by
     // instance and to distinguish pattern readers from internal machinery —
@@ -715,7 +766,16 @@ export class Scheduler {
     if (options.observationIdentity) {
       this.#setActionObservationIdentity(action, options.observationIdentity);
     }
+    const initialDependencies = options.adoptViewIdentity === undefined ||
+        options.isEffect === true || this.#nodes.get(action) !== undefined
+      ? undefined
+      : this.#initialViewDependencies(action, options.adoptViewIdentity);
     const subscribeOptions = {
+      initialViewState: initialDependencies === undefined ? undefined : {
+        dependencies: initialDependencies,
+        identity: options.adoptViewIdentity!,
+      },
+      deferUntilDemand: options.deferUntilDemand,
       isEffect: options.isEffect,
       debounce: options.debounce,
       noDebounce: options.noDebounce,
@@ -1101,15 +1161,20 @@ export class Scheduler {
    * root. Every NARROWED node whose demand roots intersect `rootIds` is
    * marked invalid and queued, with its per-instance record KEPT: only
    * the arriving principal's instances are not clean, so only those run
-   * (B7 — the siblings stay current). A node that has not narrowed needs
-   * nothing (its one output is shared); a node that never ran will run
-   * for everyone when demanded. Returns the number of nodes re-armed.
+   * (B7 — the siblings stay current). A node that ran with demanders and
+   * did not narrow needs nothing (its one output is shared). A node that
+   * ran with NO demander reachable — the wave-level fallback, before the
+   * first demand reached its roots — has no fan-out record and no known
+   * scope, so it re-arms too: its next run is the probe that learns
+   * whether it narrows for the arriving principal. A node that never ran
+   * has no fan-out record either and is left alone: whether it runs is the
+   * pull scheduler's demand decision, and its first run is that probe
+   * whenever it comes. Returns the number of nodes re-armed.
    */
   invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??
@@ -1118,6 +1183,9 @@ export class Scheduler {
           : undefined);
       if (demandRootIds === undefined) continue;
       if (!demandRootIds.some((id) => roots.has(id))) continue;
+      if (record.fanOut === undefined) {
+        if (record.status === "never-ran") continue;
+      } else if (!record.fanOut.narrowed) continue;
       this.#markActionInvalid(record.action, undefined, {
         fanOutInstances: "keep",
       });
@@ -1656,6 +1724,11 @@ export class Scheduler {
     this.#errorHandlers.add(fn);
   }
 
+  /** Reports an action's asynchronous failure through the ordinary error handlers. */
+  reportError(error: Error, action: Action): void {
+    this.#handleError(error, action);
+  }
+
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
     this.#eventPreflightTelemetryEnabled = enabled;
   }
@@ -1806,6 +1879,371 @@ export class Scheduler {
     return this.#dependents.get(action) ?? new Set();
   }
 
+  /** Applies negotiated eligibility, replica coverage, and local producer currency. */
+  prepareViewAction(
+    tx: IExtendedStorageTransaction,
+    action: Action | EventHandler,
+  ): void {
+    const metadata = action as Partial<TelemetryAnnotations>;
+    const piece = metadata.viewPiece;
+    const id = metadata.viewNodeId;
+    if (piece === undefined || id === undefined) return;
+    if (
+      metadata.viewLocalOnly !== true &&
+      (!this.runtime.viewScopedReplicationRequested ||
+        !this.runtime.viewReplication.active(piece.space))
+    ) return;
+    const views = this.runtime.viewReplication;
+    const generation = views.version(piece.space);
+    const producers = new Map([...this.#nodes.nodes()].flatMap((node) => {
+      const annotated = node.action as Partial<TelemetryAnnotations>;
+      return annotated.viewPiece?.space === piece.space &&
+          annotated.viewNodeId !== undefined
+        ? [[annotated.viewNodeId, node] as const]
+        : [];
+    }));
+    if (!usesLocalReads(tx)) {
+      restrictToLocalReads(tx.tx, () => {
+        const producerCurrent = views.createProducerCheck(
+          piece.space,
+          (candidate) =>
+            this.#viewActionCurrent(producers.get(candidate)?.action),
+          (dependency) => recordLocalReadWake(tx, dependency),
+        );
+        return (address) => {
+          if (
+            views.version(piece.space) !== generation ||
+            !views.eligible(piece.space, id) || !views.permits(address)
+          ) return false;
+          for (const producer of views.producers(address)) {
+            if (producer === id) continue;
+            if (!producerCurrent(producer)) return false;
+          }
+          const writers = this.#writeIndex.writersByEntity.get(
+            entityNameKey(address),
+          );
+          for (const writer of writers ?? []) {
+            if (writer === action) continue;
+            const writerId =
+              (writer as Partial<TelemetryAnnotations>).viewNodeId;
+            if (writerId === undefined) continue;
+            const node = this.#nodes.get(writer);
+            if (
+              !this.#viewActionCurrent(node?.action) &&
+              readsOverlapWrites(
+                [address],
+                [],
+                this.getMightWrite(writer) ?? [],
+              ) &&
+              !producerCurrent(writerId)
+            ) return false;
+          }
+          return true;
+        };
+      });
+    }
+    requireLocalReadCondition(
+      tx.tx,
+      toMemorySpaceAddress(piece),
+      () =>
+        views.version(piece.space) === generation &&
+        views.eligible(piece.space, id) && views.pieceCurrent(piece),
+    );
+  }
+
+  /** A local producer is current only after a successful completed attempt. */
+  #viewActionCurrent(action: Action | undefined): boolean {
+    if (action === undefined || this.#viewRunning.has(action)) return false;
+    const node = this.#nodes.get(action);
+    const outcome = this.#viewOutcomes.get(action)?.get("*");
+    return node?.status === "clean" && outcome?.settled === true &&
+      outcome.registration === node.registrationToken;
+  }
+
+  /** Collects server currency only for negotiated view computations. */
+  #initialViewDependencies(
+    action: Action,
+    identity: string,
+  ): ReactivityLog | undefined {
+    const { viewPiece, viewNodeId, viewLocalOnly } = action as Partial<
+      TelemetryAnnotations
+    >;
+    if (
+      !this.runtime.viewScopedReplicationRequested || viewLocalOnly !== true ||
+      viewPiece === undefined || viewNodeId === undefined
+    ) return undefined;
+    return this.runtime.viewReplication.initialViewDependencies(
+      viewPiece,
+      viewNodeId,
+      identity,
+    );
+  }
+
+  /** Rechecks adopted evidence and parked work when plans or coverage change. */
+  wakeViewReplication(
+    space: MemorySpace,
+    { parked = true }: { parked?: boolean } = {},
+  ): void {
+    for (const node of this.#nodes.nodes()) {
+      const metadata = node.action as Partial<TelemetryAnnotations>;
+      if (metadata.viewPiece?.space !== space) continue;
+      if (node.adoptedViewIdentity !== undefined) {
+        const log = this.#initialViewDependencies(
+          node.action,
+          node.adoptedViewIdentity,
+        );
+        if (log !== undefined) {
+          const writes = sortAndCompactPaths([
+            ...resolveRegistrationSurface(node.action, log),
+            ...log.writes,
+          ]);
+          this.#writeIndex.setSurface(node.action, writes);
+          for (const dependent of [...this.getDependents(node.action)]) {
+            const dependencies = this.#dependencies.get(dependent);
+            if (dependencies !== undefined) {
+              updateDependentEdgesForLog(
+                this.#dependencyGraphState,
+                dependent,
+                dependencies,
+              );
+            }
+          }
+          registerDependentsForWriterSurface(
+            this.#dependencyGraphState,
+            node.action,
+            writes,
+          );
+          this.resubscribe(node.action, log);
+          continue;
+        }
+      } else if (!parked || node.status !== "unavailable") continue;
+      this.#markActionInvalid(node.action);
+      this.#pending.add(node.action);
+    }
+    this.queueExecution();
+  }
+
+  /** Wakes blocked consumers even when a successful producer kept the same value. */
+  noteViewActionCurrent(action: Action): void {
+    if (
+      !this.runtime.viewScopedReplicationRequested ||
+      this.#nodes.get(action)?.status !== "clean"
+    ) return;
+    let woke = false;
+    for (const dependent of this.getDependents(action)) {
+      if (this.#nodes.get(dependent)?.status !== "unavailable") continue;
+      this.#markActionInvalid(dependent);
+      this.#pending.add(dependent);
+      woke = true;
+    }
+    if (woke) this.queueExecution();
+  }
+
+  /** Revokes authority evidence while the next invocation is unresolved. */
+  beginViewAction(action: Action): void {
+    const node = this.#nodes.get(action);
+    if (node !== undefined) node.adoptedViewIdentity = undefined;
+    const metadata = action as Partial<TelemetryAnnotations>;
+    if (
+      metadata.viewNodeId !== undefined &&
+      (this.runtime.servingPosture ||
+        this.runtime.viewScopedReplicationRequested ||
+        (metadata.viewPiece !== undefined &&
+          this.#viewConsumers.has(metadata.viewPiece.space)))
+    ) this.#viewRunning.add(action);
+  }
+
+  /** Records authored outcomes after their transaction and wave become durable. */
+  recordViewActionOutcome(
+    action: Action,
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+    succeeded: boolean,
+    commit: ReturnType<IExtendedStorageTransaction["commit"]>,
+    failure?: unknown,
+  ): void {
+    if (!this.#viewRunning.delete(action)) return;
+    const node = this.#nodes.get(action);
+    if (
+      node === undefined ||
+      (action as Partial<TelemetryAnnotations>).viewNodeId === undefined
+    ) return;
+    const identity = waveRunContextOf(tx)?.scopeKeyIdentity ??
+      this.runtime.scopeKeyIdentity;
+    const key = node.fanOut === undefined
+      ? "*"
+      : keyAtRatchet(node.fanOut, identity);
+    if (key === undefined) return;
+    let outcomes = this.#viewOutcomes.get(action);
+    if (outcomes === undefined) {
+      this.#viewOutcomes.set(action, outcomes = new Map());
+    }
+    const metadata = action as Partial<TelemetryAnnotations>;
+    const error = succeeded
+      ? undefined
+      : failure instanceof Error
+      ? failure as ErrorWithContext
+      : new Error(String(failure)) as ErrorWithContext;
+    const outcome = {
+      log,
+      settled: false,
+      confirmed: false,
+      registration: node.registrationToken,
+      ...(error !== undefined && metadata.viewPiece !== undefined
+        ? {
+          error: {
+            nodeId: metadata.viewNodeId!,
+            pieceId: metadata.viewPiece.id,
+            message: error.message,
+            ...(error.stack === undefined ? {} : { stack: error.stack }),
+            ...(error.patternId === undefined
+              ? {}
+              : { patternId: error.patternId }),
+            ...(error.spellId === undefined ? {} : { spellId: error.spellId }),
+          },
+        }
+        : {}),
+    };
+    outcomes.set(key, outcome);
+    void commit.then(async (result) => {
+      if (result.error !== undefined) return;
+      const settlement = waveSettlementOf(tx);
+      if (settlement !== undefined && (await settlement).error !== undefined) {
+        return;
+      }
+      if (
+        outcomes.get(key) === outcome &&
+        node.registrationToken === outcome.registration
+      ) {
+        outcome.confirmed = true;
+        outcome.settled = succeeded;
+      }
+    }).catch(() => {});
+  }
+
+  /** Retains observations only for sessions with live renderer demand. */
+  setViewConsumers(
+    space: MemorySpace,
+    identities: readonly ScopeKeyIdentity[],
+  ): void {
+    const keys = new Set(
+      identities.map((identity) =>
+        `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`
+      ),
+    );
+    if (keys.size === 0) this.#viewConsumers.delete(space);
+    else this.#viewConsumers.set(space, keys);
+    for (const [, registered] of this.#eventHandlers) {
+      for (const handler of eventHandlerImplementations(registered)) {
+        if (
+          (handler as Partial<TelemetryAnnotations>).viewPiece?.space !== space
+        ) continue;
+        const logs = this.#viewHandlerLogs.get(handler);
+        for (const key of logs?.keys() ?? []) {
+          if (!keys.has(key)) logs!.delete(key);
+        }
+      }
+    }
+  }
+
+  /** Records handler reads until publication prunes inactive viewing identities. */
+  recordViewHandlerLog(
+    handler: EventHandler,
+    identity: ScopeKeyIdentity,
+    log: ReactivityLog,
+  ): void {
+    const space = (handler as Partial<TelemetryAnnotations>).viewPiece?.space;
+    const key = `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`;
+    if (space === undefined) return;
+    let logs = this.#viewHandlerLogs.get(handler);
+    if (logs === undefined) {
+      this.#viewHandlerLogs.set(handler, logs = new Map());
+    }
+    logs.set(key, log);
+  }
+
+  /**
+   * Observed reads for a viewing session; per-instance logs never cross identities.
+   * Logs and write surfaces are replaced when observations change. Callers retain
+   * those identities to detect changes and must not mutate the returned records.
+   */
+  viewExecutionNodes(
+    space: MemorySpace,
+    identity: ScopeKeyIdentity,
+  ): ViewExecutionNode[] {
+    const result: ViewExecutionNode[] = [];
+    for (const node of this.#nodes.nodes()) {
+      const annotated = node.action as Partial<TelemetryAnnotations>;
+      if (
+        annotated.viewPiece?.space !== space ||
+        annotated.viewNodeId === undefined
+      ) continue;
+      const instanceKey = node.fanOut === undefined
+        ? undefined
+        : keyAtRatchet(node.fanOut, identity);
+      const outcome = this.#viewOutcomes.get(node.action)?.get(
+        instanceKey ?? "*",
+      );
+      const log = node.fanOut === undefined
+        ? outcome?.log ?? this.#dependencies.get(node.action)
+        : instanceKey === undefined
+        ? undefined
+        : node.fanOut.instances.get(instanceKey)?.log;
+      if (log === undefined) continue;
+      const outcomeCurrent = !this.#viewRunning.has(node.action) &&
+        outcome?.registration === node.registrationToken &&
+        node.status === "clean" &&
+        (node.fanOut === undefined ||
+          (instanceKey !== undefined && node.fanOut.clean.has(instanceKey)));
+      result.push({
+        id: annotated.viewNodeId,
+        piece: annotated.viewPiece,
+        kind: annotated.module?.type === "javascript"
+          ? "computation"
+          : "boundary",
+        current: outcomeCurrent && outcome?.settled === true,
+        ...(outcomeCurrent && outcome?.confirmed && outcome.error !== undefined
+          ? { error: outcome.error }
+          : {}),
+        log,
+        writes: this.getMightWrite(node.action) ?? log.writes,
+      });
+    }
+    let selectionTx: IExtendedStorageTransaction | undefined;
+    try {
+      for (const [stream, registered] of this.#eventHandlers) {
+        if (stream.space !== space) continue;
+        if (selectionTx === undefined) {
+          selectionTx = this.runtime.readTx();
+          selectionTx.tx.scopeKeyIdentity = identity;
+        }
+        const handler = selectEventImplementation(registered, selectionTx);
+        if (handler === undefined) continue;
+        const annotated = handler as Partial<TelemetryAnnotations>;
+        if (
+          annotated.viewPiece?.space !== space ||
+          annotated.viewNodeId === undefined
+        ) continue;
+        const log = this.#viewHandlerLogs.get(handler)?.get(
+          `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`,
+        );
+        if (log === undefined) continue;
+        result.push({
+          id: annotated.viewNodeId,
+          piece: annotated.viewPiece,
+          kind: "handler",
+          stream,
+          log,
+          writes: log.writes,
+        });
+      }
+    } finally {
+      selectionTx?.clearReadOnly?.();
+      selectionTx?.abort("view handler selection complete");
+    }
+    return result;
+  }
+
   /**
    * Returns a snapshot of the current dependency graph for visualization.
    * Uses getActionId for the identifier (includes code location).
@@ -1851,6 +2289,37 @@ export class Scheduler {
   resetFilterStats(): void {
     this.#filterStats.filtered = 0;
     this.#filterStats.executed = 0;
+  }
+
+  /** Enables or disables per-action read accounting for subsequent runs. */
+  setReadStatsEnabled(
+    enabled: boolean,
+    options: { attempts?: boolean } = {},
+  ): void {
+    this.#collectReadStats = enabled;
+    this.#readAttemptAccountingEnabled = enabled && options.attempts === true;
+  }
+
+  /** Starts opt-in accounting for a transaction outside a reactive body. */
+  beginReadAttempt(
+    tx: IExtendedStorageTransaction,
+    kind:
+      | "event"
+      | "presync"
+      | "preflight"
+      | "initialization"
+      | "editWithRetry",
+    actionId?: string,
+  ): void {
+    if (!this.#readAttemptAccountingEnabled) return;
+    startReadStats(tx, (reads) => {
+      this.runtime.telemetry.submit({
+        type: "scheduler.read-attempt",
+        kind,
+        actionId,
+        reads,
+      });
+    });
   }
 
   /**
@@ -1994,6 +2463,10 @@ export class Scheduler {
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
+    for (const record of this.#nodes.nodes()) {
+      record.cancelLocalReadWake?.();
+      record.cancelLocalReadWake = undefined;
+    }
     this.#gates.cancelWake();
     if (this.#pendingQueueTaskTimer !== null) {
       clearTimeout(this.#pendingQueueTaskTimer);
@@ -2761,11 +3234,48 @@ export class Scheduler {
     };
   }
 
+  /** Helper for an unavailable run, which retains reads and its prior writes. */
+  #parkLocalRead(action: Action, attempted: ReactivityLog): void {
+    const previous = this.#dependencies.get(action);
+    const log = {
+      reads: [...(previous?.reads ?? []), ...attempted.reads],
+      shallowReads: [
+        ...(previous?.shallowReads ?? []),
+        ...attempted.shallowReads,
+      ],
+      writes: previous?.writes ?? [],
+    };
+    this.resubscribe(action, log);
+    const record = this.#nodes.get(action);
+    if (record === undefined) return;
+    const cancels: (() => void)[] = [];
+    for (const space of new Set(log.reads.map((read) => read.space))) {
+      const replica = this.runtime.storageManager.open(space).replica;
+      const cancel = replica.subscribeLocalCoverage?.((addresses) => {
+        if (
+          !log.reads.some((read) =>
+            read.space === space &&
+            addresses.some((address) =>
+              address.id === read.id &&
+              (address.scope ?? "space") === (read.scope ?? "space")
+            )
+          )
+        ) return;
+        this.#markActionInvalid(action);
+        this.queueExecution();
+      });
+      if (cancel !== undefined) cancels.push(cancel);
+    }
+    record.cancelLocalReadWake = () => cancels.forEach((cancel) => cancel());
+  }
+
   #createActionRunState(): SchedulerActionRunState {
     return {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
+      getReadStatsEnabled: () => this.#collectReadStats,
+      getReadAttemptAccountingEnabled: () => this.#readAttemptAccountingEnabled,
       retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
       pending: this.#pending,
@@ -2798,6 +3308,8 @@ export class Scheduler {
       resubscribe: (target, log) => this.resubscribe(target, log),
       markInvalid: (target, options) =>
         this.#markActionInvalid(target, undefined, options),
+      isDisposed: () => this.#disposed,
+      parkLocalRead: (target, log) => this.#parkLocalRead(target, log),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.#executingAction = target;
@@ -2902,10 +3414,17 @@ export class Scheduler {
     const record = this.#nodes.get(action);
     if (!record) return;
     markInvalidRecord(this.#nodes, action, cause, options);
-    // Trailing computation debounce re-arms on every invalidation (§8.1:
-    // debounceReadyAt resets while gated). Arming here — in the one
-    // invalid-setter — covers every path (channel, registration, retry), so
-    // gate QUERIES stay side-effect-free.
+    // A scheduler-owed retry (`options.retry`: a refused run re-queued after
+    // its catch-up) is not an input change — it runs past the node's
+    // freshness gates, and any armed readiness is released (§8.3).
+    if (options?.retry) {
+      this.#gates.releaseForRetry(action);
+      return;
+    }
+    // Trailing computation debounce re-arms on every other invalidation
+    // (§8.1: debounceReadyAt resets while gated). Arming here — in the one
+    // invalid-setter — covers every path (channel, registration), so gate
+    // QUERIES stay side-effect-free.
     if (record.kind === "computation") {
       this.#gates.onInvalidated(
         record,
@@ -3005,6 +3524,10 @@ export class Scheduler {
       ]),
     );
     this.#headEventLoadPark = { eventId: event.id, keys, generations };
+    logger.debug("event-load-park", () => [
+      `event ${event.id} parks on ${keys.length} loading document(s)`,
+      keys,
+    ]);
     const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
       Promise.resolve();
     settled.then(

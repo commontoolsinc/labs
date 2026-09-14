@@ -43,11 +43,7 @@ import {
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { toJSONMethod } from "./json-member.ts";
-import {
-  applyArgumentIfcToResult,
-  applyInputIfcToOutput,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
+import { connectInputAndOutputs } from "./node-utils.ts";
 import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
 import { reactive } from "./reactive.ts";
 import {
@@ -184,8 +180,6 @@ export function pattern<T, R>(
       inputs as Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
     );
 
-    applyInputIfcToOutput(inputs, outputs);
-
     result = factoryFromPattern<T, R>(
       argumentSchema,
       resultSchema,
@@ -302,8 +296,6 @@ function factoryFromPattern<T, R>(
     });
   inputs = collectCellsAndNodes(inputs);
   outputs = collectCellsAndNodes(outputs);
-
-  applyInputIfcToOutput(inputs, outputs);
 
   // Fill in reasonable names for all cells, where possible:
 
@@ -569,8 +561,14 @@ function factoryFromPattern<T, R>(
 
   const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
 
-  const resultSchema =
-    applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
+  // The schema the author declared, as declared. A pattern's result carries
+  // its argument's confidentiality edge by edge: a result field aliasing an
+  // argument cell carries that cell's own label through the link machinery,
+  // and a field fed by a lift or a handler carries the join that module makes
+  // onto its own result. A join at this schema's root persists as a label
+  // covering the whole result document, `$UI` among its fields, which denies a
+  // piece's entire view at the display ceiling.
+  const resultSchema = resultSchemaArg ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
     const module = withAliasBindings(
@@ -1222,25 +1220,16 @@ export function pushFrameFromCause(
   return frame;
 }
 
-export function popFrame(frame?: Frame): void {
-  if (!frame) {
-    frames.pop();
-    return;
-  }
-
-  // If frame is at top, pop normally
-  if (getTopFrame() === frame) {
-    frames.pop();
-    return;
-  }
-
-  // Frame not at top - this can happen during navigation when a new runtime
-  // is created before the old one finishes disposing. Find and remove it.
+/**
+ * Removes `frame` from the stack, wherever on it the frame sits: disposing one
+ * runtime while another has pushed a frame over it removes one from the middle.
+ * A frame that is no longer on the stack is left alone.
+ */
+export function popFrame(frame: Frame): void {
   const index = frames.indexOf(frame);
   if (index !== -1) {
     frames.splice(index, 1);
   }
-  // If frame not found, it was already removed - that's fine
 }
 
 export function getTopFrame(): Frame | undefined {

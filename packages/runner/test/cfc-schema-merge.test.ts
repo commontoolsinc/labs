@@ -58,6 +58,52 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
   });
 
+  describe("definitions through a merge", () => {
+    // The merged envelope is one document: both sides' `$defs` land on its
+    // root, and a name the two define differently is renamed apart on the
+    // candidate's side so each side's refs keep naming their own definition.
+
+    it("carries both sides' definitions onto the merged root", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: { rows: { $ref: "#/$defs/Row" } },
+        $defs: { Row: { type: "string" } },
+      }, {
+        type: "object",
+        properties: { count: { $ref: "#/$defs/Count" } },
+        $defs: { Count: { type: "number" } },
+      }) as JSONSchemaObj;
+      expect(merged.$defs).toEqual({
+        Row: { type: "string" },
+        Count: { type: "number" },
+      });
+      expect(merged.properties).toEqual({
+        rows: { $ref: "#/$defs/Row" },
+        count: { $ref: "#/$defs/Count" },
+      });
+    });
+
+    it("renames a name the two sides define differently", () => {
+      const merged = mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: { rows: { $ref: "#/$defs/Entry" } },
+        $defs: { Entry: { type: "string" } },
+      }, {
+        type: "object",
+        properties: { count: { $ref: "#/$defs/Entry" } },
+        $defs: { Entry: { type: "number" } },
+      }) as JSONSchemaObj;
+      expect(merged.$defs).toEqual({
+        Entry: { type: "string" },
+        __cfc_hoisted_0_Entry: { type: "number" },
+      });
+      expect(merged.properties).toEqual({
+        rows: { $ref: "#/$defs/Entry" },
+        count: { $ref: "#/$defs/__cfc_hoisted_0_Entry" },
+      });
+    });
+  });
+
   it("allows additive required fields when a default preserves old documents", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
@@ -413,8 +459,8 @@ describe("mergeCfcSchemaEnvelopes", () => {
   });
 
   it("merges tuple (prefixItems) slots slot-wise", () => {
-    // CT-1895: the {...left, ...right} spread let one side's prefixItems
-    // win wholesale, dropping the other side's slot ifc/defaults.
+    // A `{...left, ...right}` spread would let one side's prefixItems win
+    // wholesale, dropping the other side's slot ifc/defaults.
     const merged = mergeCfcSchemaEnvelopes({
       type: "array",
       prefixItems: [
@@ -524,11 +570,9 @@ describe("mergeCfcSchemaEnvelopes", () => {
   });
 
   it('keeps a property legitimately named "__proto__" through the merge', () => {
-    // Regression pin for a PR #4969 review claim that did NOT reproduce:
-    // in V8/Deno a computed store with a "__proto__" key creates an own
-    // data property (verified by probe), so the merge preserves this valid
-    // JSON key end-to-end. Pinned so an engine or refactor change that
-    // breaks the assumption is caught.
+    // In V8/Deno a computed store with a "__proto__" key creates an own data
+    // property, so the merge preserves this valid JSON key end-to-end. Pinned
+    // so an engine or refactor change that breaks the assumption is caught.
     const left = {
       type: "object",
       properties: JSON.parse(
@@ -835,7 +879,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
 
     it("still admits a genuinely value-disjoint scalar pair beside the numeric fix (RULING 5)", () => {
-      // The fix excludes ONLY the integer/number pair; every other cross-type
+      // Only the integer/number pair is excluded; every other cross-type
       // pair stays genuinely disjoint and admits. `string` vs `number` is such
       // a pair (a value is never both), so a single `number` carrier with a
       // `string` sibling still MERGES.
@@ -898,8 +942,8 @@ describe("mergeCfcSchemaEnvelopes", () => {
   });
 
   it("rejects divergent ifc branches nested under a tuple slot", () => {
-    // CT-1895: the guard's recursion visited only properties and items, so
-    // a divergent-ifc shape under a prefixItems slot escaped it.
+    // The guard's recursion visits prefixItems slots as well as properties
+    // and items, so a divergent-ifc shape under a slot cannot escape it.
     const withTupleBranches = {
       type: "array",
       prefixItems: [{
@@ -947,9 +991,9 @@ describe("mergeCfcSchemaEnvelopes", () => {
     // (claim stays unstamped). The binding (file + path) is identical; only the
     // provenance stamp differs. The merge must keep the stamped claim rather
     // than reject the commit — the same tolerance prepare's
-    // schemasEqualIgnoringWriterStamp applies elsewhere (regression:
-    // "writeAuthorizedBy must remain stable at /elements" on every profile
-    // element write, CT-1698).
+    // schemasEqualIgnoringWriterStamp applies elsewhere; without it every
+    // profile element write fails with "writeAuthorizedBy must remain stable
+    // at /elements".
     const unstamped = {
       __ctWriterIdentityOf: {
         file: "/system/profile-home.tsx",
@@ -1178,9 +1222,10 @@ describe("mergeCfcSchemaEnvelopes", () => {
 });
 
 describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
-  // CT-1895: the merge-skip decision judged envelopes "covered" via the items
-  // branch while their tuple slots differed, dropping the candidate's slot info
-  // instead of merging it (fail-open: coverage=true skips the merge).
+  // The merge-skip decision must not judge envelopes "covered" via the items
+  // branch while their tuple slots differ: coverage=true skips the merge, so
+  // that would drop the candidate's slot info instead of merging it
+  // (fail-open).
 
   it("covers a candidate that declares nothing", () => {
     // `true` and the empty object schema carry no label, no policy claim and
@@ -1291,7 +1336,7 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(true);
   });
 
-  it("fails closed on differing tuple arities (PR #4969 review)", () => {
+  it("fails closed on differing tuple arities", () => {
     // With differing arities, the candidate's `items` claims positions the
     // stored side covers with slots — the shared items branch cannot
     // compare those, so coverage must fail closed and merge.
@@ -1309,9 +1354,8 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
   });
 
   it("does not judge a candidate additionalProperties claim covered via properties alone", () => {
-    // PR #4969 review: the properties branch early-returned without
-    // comparing rest claims, so a candidate map-value claim was dropped
-    // instead of merged.
+    // The properties branch must compare rest claims rather than return
+    // early, or a candidate map-value claim is dropped instead of merged.
     const stored = {
       type: "object",
       properties: { a: { type: "string" } },
@@ -1361,11 +1405,10 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
   });
 
   it("stored-only named properties must cover the candidate rest claim", () => {
-    // PR #4969 review round 2: the candidate rest claim governs every key
-    // absent from the CANDIDATE's properties — including stored-NAMED keys.
-    // An unlabeled stored `b` does not cover a confidential rest claim, so
-    // coverage must fail closed and merge (the earlier version of this test
-    // pinned the fail-open behavior).
+    // The candidate rest claim governs every key absent from the
+    // CANDIDATE's properties — including stored-NAMED keys. An unlabeled
+    // stored `b` does not cover a confidential rest claim, so coverage must
+    // fail closed and merge.
     const stored = {
       type: "object",
       properties: { a: { type: "string" }, b: { type: "number" } },

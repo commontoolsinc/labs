@@ -450,7 +450,20 @@ Deno.test("getWithPatternHoistablePatternCall returns the bare pattern call argu
     throw new Error("Expected call expression initializer");
   }
 
-  const hoistable = getWithPatternHoistablePatternCall(expression, checker);
+  assertEquals(
+    getWithPatternHoistablePatternCall(expression, checker),
+    undefined,
+  );
+  const synthetic = ts.factory.updateCallExpression(
+    expression,
+    ts.factory.createPropertyAccessExpression(
+      ts.factory.createIdentifier("items"),
+      "mapWithPattern",
+    ),
+    expression.typeArguments,
+    expression.arguments,
+  );
+  const hoistable = getWithPatternHoistablePatternCall(synthetic, checker);
   assertEquals(hoistable?.getText(), "make.pattern(() => 1)");
 });
 

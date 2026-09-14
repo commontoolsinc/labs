@@ -40,6 +40,8 @@ import {
   formatExternalSchemaRef,
   parseExternalSchemaRef,
   recomposeSchema,
+  recomposeSchemaRefs,
+  SCHEMA_META_MEMBER,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
 import {
@@ -108,6 +110,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { isPrefix, PathPrefixIndex } from "./path-prefix-index.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type CfcRefusalDetail,
@@ -133,6 +136,11 @@ import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  cfcSchemaResolvedRoot,
+  hoistCfcSchemaDefs,
+  resolveCfcSchemaRefRoot,
+} from "./schema-refs.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -171,15 +179,6 @@ const INTERNAL_VERIFIER_META = {
 const LINK_SOURCE_SCHEMA_META = {
   ...internalVerifierRead,
 };
-
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
@@ -1720,12 +1719,18 @@ const rebindWriteAuthorizedByClaimsInner = (
   return changed ? next : value;
 };
 
+// The schema placed below the path segments is a document of its own, so its
+// `$defs` move to the envelope's root, which is where its `#/$defs/<name>`
+// refs point once it sits below another root.
 const schemaEnvelopeForTargetPath = (
   schema: JSONSchema,
   path: readonly string[],
 ): JSONSchema => {
-  let envelope = schema;
-  for (const segment of [...canonicalizeLogicalPath(path)].reverse()) {
+  const segments = canonicalizeLogicalPath(path);
+  if (segments.length === 0) return schema;
+  const { fragments: [body], definitions } = hoistCfcSchemaDefs([schema]);
+  let envelope = body;
+  for (const segment of [...segments].reverse()) {
     envelope = segment === "*"
       ? {
         type: "array",
@@ -1738,7 +1743,10 @@ const schemaEnvelopeForTargetPath = (
         },
       };
   }
-  return envelope;
+  return definitions === undefined ? envelope : {
+    ...(envelope as Record<string, unknown>),
+    $defs: definitions,
+  } as JSONSchema;
 };
 
 // The reserved CFC document namespaces: the durable policy manifests a
@@ -1970,6 +1978,12 @@ const isMetaSeamPath = (
  * id derived from its parent's, which no author named either, and it is
  * measured. Adding a class here means arguing that case on its own.
  *
+ * A class is enumerable here only while its ids say which class they are. A
+ * document at a plain `of:fid1:<hash>` id looks like every other document, so
+ * a third class of that shape is named by the runtime as it writes it instead
+ * — `CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE`, which the compilation
+ * cache records for its own documents.
+ *
  * The entries document's half is a prefix inside the `of:` scheme rather than
  * a scheme of its own, so the id shape alone does not say who wrote it. Two
  * gates compose over one instead: this one skips the ceiling, and the memory
@@ -1985,12 +1999,14 @@ const isUndeclarableIdClass = (id: string): boolean =>
  * Whether a schema could have declared a store policy for a write at `path`
  * on `id` — the surfaces the §8.12.4 writer-fit measurement quantifies over.
  *
- * Two things are outside it. The raw meta seam is one, per {@link
+ * Three things are outside it. The raw meta seam is one, per {@link
  * isMetaSeamPath}: no value schema describes the document-root siblings of
- * `value`. The two id classes of {@link isUndeclarableIdClass} are the other.
- * A pattern declares policy on the data it names, and it names none of them.
+ * `value`. The two id classes of {@link isUndeclarableIdClass} are the second.
+ * The third is `markedUndeclarable`, a document the runtime named as it wrote
+ * it, for a class whose ids carry no shape of their own. A pattern declares
+ * policy on the data it names, and it names none of the three.
  *
- * Both stay flow stamp targets: the join lands on them as the `derived`
+ * All three stay flow stamp targets: the join lands on them as the `derived`
  * component, so a later read of one is tainted and a later egress of one is
  * gated on that label. The residency clause is part of the ceiling this
  * skips, so a derivation's result may land in a space whose name none of the
@@ -2001,10 +2017,11 @@ const isUndeclarableIdClass = (id: string): boolean =>
 const isDeclarablePolicyPath = (
   id: string,
   joinIsLocal: boolean,
+  markedUndeclarable: boolean,
   metaOnlyByPath: ReadonlyMap<string, boolean> | undefined,
   path: readonly string[],
 ): boolean =>
-  (!isUndeclarableIdClass(id) || !joinIsLocal) &&
+  ((!isUndeclarableIdClass(id) && !markedUndeclarable) || !joinIsLocal) &&
   !isMetaSeamPath(metaOnlyByPath, path);
 
 // S16 flow labels (default transition): one conservative confidentiality join
@@ -2125,7 +2142,7 @@ const forEachFlowObservation = (
   // read arrives via the ordinary reads of the target document. Recognize
   // them by the recorded trace sources: a probe at-or-below a followed
   // slot's path in the same document belongs to that dereference.
-  let traceSourcesByDoc: Map<string, (readonly string[])[]> | undefined;
+  let traceSourcesByDoc: Map<string, PathPrefixIndex> | undefined;
   const probeBelongsToDereference = (
     space: MemorySpace,
     id: URI,
@@ -2142,15 +2159,14 @@ const forEachFlowObservation = (
         });
         let sources = traceSourcesByDoc.get(key);
         if (sources === undefined) {
-          sources = [];
+          sources = new PathPrefixIndex();
           traceSourcesByDoc.set(key, sources);
         }
-        sources.push(canonicalizeLogicalPath(trace.source.path));
+        sources.add(canonicalizeLogicalPath(trace.source.path));
       }
     }
     const sources = traceSourcesByDoc.get(targetKey({ space, id, scope }));
-    return sources !== undefined &&
-      sources.some((source) => isPrefix(source, logicalPath));
+    return sources !== undefined && sources.hasPrefixOf(logicalPath);
   };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) {
@@ -2182,15 +2198,22 @@ const forEachFlowObservation = (
     const space = read.space;
     const id = read.id as URI;
     const scope = normalizeCellScope(read.scope);
-    const coveredByTrace = probeBelongsToDereference(
-      space,
-      id,
-      scope,
-      logicalPath,
-    );
+    // Computed on demand rather than for every read: `flowLabelWorkExists`
+    // consumes observations without ever reading `coveredByTrace`, and it is
+    // the caller that runs on every reactive action commit. Only a
+    // link-resolution probe needs the answer here, and only `deriveFlowJoin`
+    // asks for it afterwards. Memoized so the two cannot disagree.
+    let coveredByTraceMemo: boolean | undefined;
+    const coveredByTrace = (): boolean =>
+      coveredByTraceMemo ??= probeBelongsToDereference(
+        space,
+        id,
+        scope,
+        logicalPath,
+      );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (coveredByTrace) {
+      if (coveredByTrace()) {
         continue;
       }
       shape = "followRef";
@@ -2216,7 +2239,9 @@ const forEachFlowObservation = (
         {
           shape,
           nonRecursive: read.nonRecursive,
-          coveredByTrace,
+          get coveredByTrace() {
+            return coveredByTrace();
+          },
           machinery: isMachineryRead(read.meta),
         },
       )
@@ -3361,7 +3386,7 @@ const policySchemaMatchesValue = (
   if (typeof schema === "boolean") {
     return schema;
   }
-  const schemaRoot = schema.$defs !== undefined ? schema : root;
+  const schemaRoot = root;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(
       schema,
@@ -3376,7 +3401,14 @@ const policySchemaMatchesValue = (
     if (resolved === undefined || resolved === schema) {
       throw new UnevaluablePolicyRefError(schema.$ref);
     }
-    return policySchemaMatchesValue(resolved, value, schemaRoot);
+    return policySchemaMatchesValue(
+      resolved,
+      value,
+      cfcSchemaResolvedRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      ),
+    );
   }
   if (
     schema.const !== undefined && !fabricAwareEqual(schema.const, value)
@@ -4362,7 +4394,13 @@ const verifyTrustedEventRequirements = (
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
     if (
-      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+        entry.root,
+      )
     ) {
       continue;
     }
@@ -4887,6 +4925,15 @@ const rootLabelFromSchema = (
  * is computed by later actions), but this is the same author-declared shape a
  * pending schema input carries, so the link-label derivation below trusts it
  * the same way; stored CFC metadata still takes precedence when present.
+ *
+ * The meta is stored in the link spelling — inline, or a `{ "$ref": "cid:…" }`
+ * reference whose closure the writer installed with it — and is returned in
+ * the inline form every consumer walks, its members resolved through
+ * `loadSchemaDocument` exactly as an envelope root's are: space-first with
+ * content verification, the registry supplying what the space does not hold
+ * (a same-transaction setup registered the closure when it stamped the
+ * reference). A member that neither supplies is a broken closure, and the
+ * read fails loudly rather than deriving a label from a schema it cannot see.
  */
 const setupResultSchemaFor = (
   tx: IExtendedStorageTransaction,
@@ -4904,13 +4951,16 @@ const setupResultSchemaFor = (
     id: source.id as URI,
     scope: source.scope,
     type: "application/json",
-    path: ["schema"],
+    path: [SCHEMA_META_MEMBER],
   }, {
     meta: LINK_SOURCE_SCHEMA_META,
   });
-  return schema === undefined || schema === null
-    ? undefined
-    : schema as JSONSchema;
+  if (schema === undefined || schema === null) return undefined;
+  return recomposeSchemaRefs(schema as JSONSchema, (hash) => {
+    const document = loadSchemaDocument(tx, source.space, hash);
+    registerSchemaDocument(hash, document);
+    return document;
+  });
 };
 
 // `sourceMetadata` is returned alongside the derived label so the persist
@@ -6194,7 +6244,7 @@ export const prepareBoundaryCommit = (
     // The schema write-policy requirement quantifies over the paths a
     // schema could describe. A raw meta-seam write is not one, so demanding
     // a policy input for it rejects every meta write on a labeled document —
-    // slug assignment, the pattern updater's identity swap, setup over an
+    // slug assignment, a pointer repair's identity swap, setup over an
     // existing piece, and the source-lifecycle transitions. These paths stay
     // flow-label targets: the write above still carries the transaction's
     // join onto the document, so nothing is laundered by skipping them here.
@@ -7273,10 +7323,11 @@ export const prepareBoundaryCommit = (
         }
       }
       // Writer-fit measures the surfaces a schema could have declared a
-      // policy at, which leaves out the raw meta seam and two id classes
-      // alike (`isDeclarablePolicyPath`). The measurement is skipped on both
-      // at every rung, so neither raises a strict reject nor a
-      // persist-and-flag diagnostic.
+      // policy at, which leaves out the raw meta seam, two id classes, and a
+      // document the runtime marked as undeclarable alike
+      // (`isDeclarablePolicyPath`). The measurement is skipped on all three at
+      // every rung, so none raises a strict reject nor a persist-and-flag
+      // diagnostic.
       //
       // A ceiling can still resolve at a meta path, from a document-root
       // declared entry by longest prefix. The skip is unconditional anyway:
@@ -7290,10 +7341,20 @@ export const prepareBoundaryCommit = (
       // what that field declares — over-taint, which leaves the declared
       // entry untouched and reads protected.
       if (flowConfidentiality.length > 0) {
+        // The third arm of the declarability question, asked per target the
+        // way the id classes are: whether the runtime named this document as
+        // one no schema declares a policy on. Marked as the write was made,
+        // on this transaction, which is the only one that measures it.
+        const markedUndeclarable = tx.isUndeclarablePolicyStore(
+          target.space,
+          id,
+          runtimeWritePolicyAuthorization,
+        );
         const measuredPaths = derivedStampPaths.filter((path) =>
           isDeclarablePolicyPath(
             id,
             flowJoinIsLocal,
+            markedUndeclarable,
             flowTarget?.metaOnlyByPath,
             path,
           )

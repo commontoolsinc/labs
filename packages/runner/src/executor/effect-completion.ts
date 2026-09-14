@@ -34,6 +34,11 @@
 //   reads as "inputs changed" and destroys the just-served value (the
 //   completion-visibility wedge, F2).
 
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
+
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Cell } from "../cell.ts";
 
@@ -41,7 +46,8 @@ const effectCompletionKeys = new WeakMap<object, string>();
 
 /**
  * The per-target effect key: `<builtin>:<inputHash>` widened by the
- * requesting node's result-cell identity (entity id + scope). This is
+ * requesting node's result-cell identity (entity id + scope). With an
+ * explicit identity, the scope resolves to its user or session instance. This is
  * the OUTBOX in-flight/dedupe key and the completion-routing key — the
  * `idempotencyKey` the builtins enqueue with, and the key every
  * `markEffectCompletion` of that request must use.
@@ -72,10 +78,15 @@ const effectCompletionKeys = new WeakMap<object, string>();
 export function effectTargetKey(
   base: string,
   targetCell: Cell<unknown>,
+  identity?: ScopeKeyIdentity,
 ): string {
   const link = targetCell.getAsNormalizedFullLink();
   const scope = link.scope !== undefined && link.scope !== "space"
-    ? `:${String(link.scope)}`
+    ? `:${
+      identity === undefined
+        ? String(link.scope)
+        : resolveScopeKey(link.scope, identity)
+    }`
     : "";
   return `${base}@${link.id}${scope}`;
 }

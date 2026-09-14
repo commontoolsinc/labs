@@ -13,11 +13,16 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
-import { cfcSchemaChildRoot } from "./cfc/schema-refs.ts";
+import {
+  cfcSchemaResolvedRoot,
+  resolveCfcSchemaRefRoot,
+} from "./cfc/schema-refs.ts";
+import { isEmbeddedCfcSchemaRef } from "./embedded-schemas.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
+import { readResultSchemaMeta } from "./result-schema-meta.ts";
 import type { Runtime } from "./runtime.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type {
@@ -162,12 +167,16 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   if (structural !== schema) {
     structuralRoot = structural;
   } else {
-    // A schema declaring its own `$defs` opens a scope: local references
-    // under it resolve against IT, not the inherited document — the same
-    // child-root rule the CFC schema walkers apply.
-    structuralRoot = cfcSchemaChildRoot(structural, root ?? structural);
+    // A local reference resolves against the document root, the rule every
+    // CFC schema walker applies; a `$defs` below that root is inert. An
+    // embedded reference (the renderer's vnode schema among them) is a
+    // document of its own, and the root moves into it.
+    structuralRoot = root ?? structural;
     const ref = (structural as { $ref?: unknown }).$ref;
-    if (typeof ref === "string" && ref.startsWith("#")) {
+    if (
+      typeof ref === "string" &&
+      (ref.startsWith("#") || isEmbeddedCfcSchemaRef(ref))
+    ) {
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         structural as Parameters<
           typeof ContextualFlowControl.resolveSchemaRefs
@@ -175,10 +184,13 @@ export function schemaWithScopedLinkRequiredsRelaxed(
         structuralRoot,
       );
       if (!isObjectOrArray(resolved)) return schema;
+      structuralRoot = cfcSchemaResolvedRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(structural, structuralRoot),
+      );
       structural = resolved;
     }
   }
-  structuralRoot = cfcSchemaChildRoot(structural, structuralRoot);
 
   // One read tx per derivation, honoring the cell's own bound transaction so
   // the chain walk sees the same (possibly uncommitted) state getRaw() does.
@@ -311,12 +323,18 @@ export function cellWithScopedLinkRequiredsRelaxed<T>(
   return relaxed === schema ? cell : cell.asSchema<T>(relaxed);
 }
 
+/**
+ * `cell` typed by its document's durable `schema` metadata (the result
+ * schema its piece's setup wrote, in the inline form
+ * `readResultSchemaMeta` supplies), narrowed to the cell's path. A cell
+ * that already carries a schema keeps it.
+ */
 export function getResultCellWithSourceSchema<T = unknown>(
   cell: Cell<T>,
 ): Cell<T> {
   const link = cell.getAsNormalizedFullLink();
   if (link.schema === undefined) {
-    const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
+    const resultSchema = readResultSchemaMeta(cell);
     if (resultSchema !== undefined) {
       const schema = ContextualFlowControl.schemaAtPath(
         resultSchema,
@@ -340,7 +358,6 @@ export async function compileAndSavePattern(
   patternSrc: string | RuntimeProgram,
   options: {
     space: MemorySpace;
-    previousEntryIdentity?: string;
   },
 ): Promise<Pattern> {
   if (typeof patternSrc === "string") {
@@ -354,9 +371,6 @@ export async function compileAndSavePattern(
   // subsequent loads (CT-1623).
   const pattern = await runtime.patternManager.compilePattern(patternSrc, {
     space: options.space,
-    ...(options.previousEntryIdentity === undefined
-      ? {}
-      : { previousEntryIdentity: options.previousEntryIdentity }),
   });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");

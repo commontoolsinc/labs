@@ -45,8 +45,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * Pattern-visible declarations for the fabric value type system, and for the
  * options of the debug renderers over it, in the form that `@commonfabric/api`
  * re-exports to patterns. Everything here is an interface, a type, or a
- * `declare const`, except for the one brand-key constant, so the module's only
- * runtime footprint is that constant.
+ * `declare const`, except for the three brand-key constants, so the module's
+ * only runtime footprint is those constants.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -56,8 +56,8 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * so a declaration that no implementation meets stops the build. That check
  * runs one way only: a public member an implementation gains without a
  * declaration here is simply unreachable from a pattern, and no gate reports
- * it. `interface.ts` asserts both directions for the three base classes, whose
- * protocol carries no symbol-keyed members to hold apart.
+ * it. `api-agreement.ts` asserts both directions for the three base classes,
+ * whose protocol carries no symbol-keyed members to hold apart.
  *
  * Every concrete `FabricPrimitive` subclass needs an instanceof-capable
  * declaration here, that being an interface, a constructor interface, and a
@@ -76,6 +76,125 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * from `interface.ts`.
  */
 
+//
+// `FabricValue` and the types defined directly from it
+//
+
+/**
+ * The full set of values that the fabric data layer can represent. This is the
+ * strongly-typed "middle layer" of the three-layer architecture:
+ *
+ *     JavaScript "wild west" (`unknown`)
+ *       <-> `FabricValue`
+ *       <-> serialized (various forms)
+ *
+ * `FabricValue` is a union consisting of all JS primitive types, plus a handful
+ * of object shapes; it does _not_ include the JS `function` type. Some parts of
+ * the union impose contractual restrictions that are not enforceable via the
+ * TypeScript type system, some (but not all) of which are enforced by runtime
+ * validity checks. Notable details:
+ *
+ * * `number` -- All numbers are considered members of `FabricValue`, including
+ *   `-0` and the non-finite numbers. Furthermore, from the perspective of the
+ *   data model, `0` and `-0` are distinct, and `NaN` is equal to itself. (This
+ *   policy informs how such values interact with sets and maps.)
+ *
+ * * `symbol` -- Only **registry-interned** symbols are considered valid
+ *   `FabricValue`s, that is, only symbols for which `Symbol.keyFor()` returns
+ *   a string.
+ *
+ * * Non-null `object`s in general -- Objects are only valid if:
+ *   * They have no synthetic properties (getters, setters).
+ *   * They have no own-symbol properties.
+ *   * They do not have the "forbidden" own-string properties `constructor` or
+ *     `__proto__`.
+ *
+ * * arrays, type `FabricArray` -- In addition to the restrictions above, arrays
+ *   are only considered valid if they are direct instances of `Array`, and have
+ *   the named property `length` along with only properties that are valid array
+ *   indices whose numeric values are less than `length`. Arrays with holes
+ *   _are_ valid.
+ *
+ * * plain objects, type `FabricPlainObject` -- In addition to the restrictions
+ *   above, plain objects are only considered valid if they have the prototype
+ *   `Object.prototype` and no non-enumerable own properties.
+ *
+ * * extensions to JS primitive types, type `FabricPrimitive` -- This is one of
+ *   two non-builtin `object` types that can be considered valid. They are meant
+ *   to be as equivalent as can be made to a built-in JS primitive type. All
+ *   valid `FabricPrimitive` classes are defined directly by the data model.
+ *   (That is, it is a closed set.)
+ *
+ * * extensions to JS container types, type `FabricInstance` -- This is the
+ *   other non-builtin `object` type that can be considered valid. It represents
+ *   a family of container types, to complement plain objects and arrays with
+ *   other possible shapes. The type and associated classes are designed so that
+ *   it will eventually be possible for code outside the data model to define
+ *   new concrete `FabricInstance` classes, but as of this writing it is not a
+ *   fully-implemented facility.
+ *
+ * From a typesystem perspective, all `FabricValue`s are immutable (deeply
+ * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
+ * expose arbitrary methods which can cause a change of instance state including
+ * changing the set of outgoing references from the instance. This is an
+ * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
+ * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
+ *
+ * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
+ * state truthfully and permanently. In particular, a `FabricPlainObject` or
+ * `FabricArray` is data-only: it must not expose an own accessor
+ * (getter/setter) whose result can contradict, or change after, the value's
+ * frozen state -- once a `FabricValue` graph is deeply frozen, its contents are
+ * fixed. (For a `FabricInstance`, the analogous obligation is on its
+ * `[IS_DEEP_FROZEN]` report; see `BaseFabricInstance`.) The rest of the system
+ * -- the data model in general and `isDeepFrozen()` specifically, but also the
+ * entire codebase that _uses_ the data model -- relies on this to cache
+ * deep-frozen proofs by root identity without re-validating; a value that
+ * violates it can corrupt data-model invariants, as any broken contract can.
+ */
+export type FabricValue =
+  | bigint
+  | boolean
+  | null
+  | number
+  | string
+  | symbol
+  | undefined
+  | FabricPrimitive
+  | FabricContainerValue;
+
+/**
+ * The container types that are part of `FabricValue`. Note that
+ * `FabricSpecialObject` is a combination of a container type
+ * (`FabricInstance`) and a non-container type (`FabricPrimitive`), and the
+ * latter is _not_ part of this type.
+ */
+export type FabricContainerValue =
+  | FabricArray
+  | FabricInstance
+  | FabricPlainObject;
+
+/** Read-only array of `FabricValue`s. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
+
+/**
+ * Read-only object/record of `FabricValue`s.
+ *
+ * **Note:** The names `__proto__` and `constructor` are refused at the
+ * boundaries where values enter or leave storage, so `FabricPlainObject` is
+ * contractually forbidden from defining one, even though there is no way to say
+ * that requirement in TypeScript.
+ */
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
+
+/** A `FabricValue` other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
+
+//
+// `FabricSpecialObject` and its two direct subclasses
+//
+
 /**
  * The nominal brand key declared on `FabricSpecialObject`. It exists only in
  * the type system — a runtime instance never carries the key; `instanceof
@@ -86,8 +205,21 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 
 /**
- * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
- * single `instanceof` check for any fabric-system value type.
+ * Common base class for `FabricInstance` and `FabricPrimitive`, which are the
+ * only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
+ * differ along one axis: whether the data model treats an instance as a
+ * primitive. A `FabricPrimitive` is treated the way a built-in `string` or
+ * `number` is; a `FabricInstance` is treated the way an `object` is. What
+ * follows from that, and what a caller sees of it, is that a `FabricInstance`
+ * may hold and expose arbitrary outgoing `FabricValue` references, and a
+ * `FabricPrimitive` may not. Enables a single `instanceof` check for any
+ * value known to be a `FabricValue`.
+ *
+ * As part of the overall `FabricValue` contract, no concrete instance of this
+ * class exposes any enumerable own property; all interaction with an instance
+ * is via its concrete class's instance members, and in particular an
+ * object-spread (`{ ...instance }`) on an instance always yields an empty
+ * object (`{}`).
  *
  * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
  * runtime existence — see the canonical declaration in
@@ -107,13 +239,56 @@ export declare const FabricSpecialObject:
   & (abstract new (...args: any) => FabricSpecialObject);
 
 /**
- * Abstract base class for values that participate in the fabric protocol.
- *
- * An instance holds all of its state privately and makes it reachable only
- * through members, so it has no own properties at all. A structural view of
- * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
+ * The nominal brand key declared on `FabricPrimitive`. As with
+ * `FABRIC_SPECIAL_OBJECT_BRAND`, a runtime instance never carries the key, so
+ * a schema derived from the type leaves it out.
+ */
+export const FABRIC_PRIMITIVE_BRAND = "@commonfabric/FabricPrimitive";
+
+/**
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as primitives. An instance is always frozen, passes through the
+ * native conversions unchanged, and holds no arbitrary outgoing `FabricValue`
+ * reference. `FabricSpecialObject` says how this differs from
+ * `FabricInstance`.
+ */
+export interface FabricPrimitive extends FabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
+   * in the type system. The `FabricSpecialObject` brand alone leaves this
+   * type structurally empty, which would make every `FabricInstance` a
+   * `FabricPrimitive` as well; this member is what refuses that. It exists
+   * only in the type system, as that brand does. `FABRIC_PRIMITIVE_BRAND` is
+   * the key.
+   */
+  readonly "@commonfabric/FabricPrimitive": true;
+}
+
+export interface FabricPrimitiveConstructor {
+  prototype: FabricPrimitive;
+}
+
+export declare const FabricPrimitive:
+  & FabricPrimitiveConstructor
+  & (abstract new (...args: any) => FabricPrimitive);
+
+/**
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as non-primitives. An instance may hold and expose arbitrary
+ * outgoing `FabricValue` references, and is mutable until frozen.
+ * `FabricSpecialObject` says how this differs from `FabricPrimitive`.
  */
 export interface FabricInstance extends FabricSpecialObject {
+  /**
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`. It
+   * exists only in the type system, as the `FabricSpecialObject` brand does,
+   * and is `never` here: an instance of this type holds only `FabricValue`s,
+   * which is what makes it a `FabricInstancePlus<never>`, and what keeps a
+   * `FabricInstancePlus` of any other `PlusType` from being taken for one.
+   * `FABRIC_INSTANCE_PLUS_BRAND` is the key.
+   */
+  readonly "@commonfabric/FabricInstancePlus"?: never;
+
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
@@ -136,31 +311,88 @@ export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
 
-/** Abstract base class for `FabricPrimitive` types. */
-export interface FabricPrimitive extends FabricSpecialObject {}
-
-export interface FabricPrimitiveConstructor {
-  prototype: FabricPrimitive;
-}
-
-export declare const FabricPrimitive:
-  & FabricPrimitiveConstructor
-  & (abstract new (...args: any) => FabricPrimitive);
+//
+// `FabricValuePlus` and related types
+//
 
 /**
- * Temporal type representing nanoseconds from the POSIX Epoch.
- * Wraps a `bigint` value.
+ * The nominal brand key declared on `FabricInstance` and `FabricInstancePlus`,
+ * whose type in a declaration is the `PlusType` the instance may hold. As with
+ * `FABRIC_SPECIAL_OBJECT_BRAND`, a runtime instance never carries the key, so
+ * a schema derived from either type leaves it out.
  */
-export interface FabricEpochNsec extends FabricPrimitive {
-  readonly value: bigint;
+export const FABRIC_INSTANCE_PLUS_BRAND = "@commonfabric/FabricInstancePlus";
+
+/**
+ * Type which is equivalent to `FabricValue`, except that it is compatible with
+ * one additional type, the `PlusType`: This type is a union of `FabricValue`,
+ * `PlusType`, and the containers -- arrays, plain objects, and instances --
+ * whose contents may recursively include this type.
+ *
+ * **Note:** `FabricValuePlus<never>` is the same type as `FabricValue` itself.
+ */
+export type FabricValuePlus<PlusType> =
+  | FabricValue
+  | PlusType
+  | FabricContainerValuePlus<PlusType>;
+
+/**
+ * The container types that are part of `FabricValuePlus`.
+ */
+export type FabricContainerValuePlus<PlusType> =
+  | FabricArrayPlus<PlusType>
+  | FabricInstancePlus<PlusType>
+  | FabricPlainObjectPlus<PlusType>;
+
+/** Read-only array of `FabricValuePlus`es. */
+export interface FabricArrayPlus<PlusType>
+  extends ReadonlyArray<FabricValuePlus<PlusType>> {}
+
+/** Read-only object/record of `FabricValuePlus`es. */
+export interface FabricPlainObjectPlus<PlusType>
+  extends Readonly<Record<string, FabricValuePlus<PlusType>>> {}
+
+/**
+ * Like `FabricInstance`, except that the instance may hold `PlusType` values
+ * where a `FabricInstance` holds only `FabricValue`s. A `FabricInstance` is a
+ * `FabricInstancePlus<never>`, and is assignable to this type at any
+ * `PlusType`; the reverse holds only at `never`.
+ */
+export interface FabricInstancePlus<PlusType> extends FabricSpecialObject {
+  /**
+   * The nominal brand that carries `PlusType`. It exists only in the type
+   * system; the same-named member of `FabricInstance` says how.
+   */
+  readonly "@commonfabric/FabricInstancePlus"?: PlusType;
+
+  /** Like `FabricInstance.deepClone()`, but returning this type. */
+  deepClone(frozen: boolean): FabricInstancePlus<PlusType>;
+
+  /** Like `FabricInstance.shallowClone()`, but returning this type. */
+  shallowClone(frozen: boolean): FabricInstancePlus<PlusType>;
 }
 
-export interface FabricEpochNsecConstructor {
-  new (value: bigint): FabricEpochNsec;
-  prototype: FabricEpochNsec;
+//
+// Concrete `FabricPrimitive` classes
+//
+
+/**
+ * An immutable, frozen sequence of bytes. Read the bytes with `slice()`,
+ * `sliceBuffer()`, or `copyInto()`.
+ */
+export interface FabricBytes extends FabricPrimitive {
+  readonly length: number;
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
+  sliceBuffer(start?: number, end?: number): ArrayBuffer;
+  copyInto(target: Uint8Array, offset?: number, length?: number): number;
 }
 
-export declare const FabricEpochNsec: FabricEpochNsecConstructor;
+export interface FabricBytesConstructor {
+  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
+  prototype: FabricBytes;
+}
+
+export declare const FabricBytes: FabricBytesConstructor;
 
 /**
  * Temporal type representing a particular day, as a count of days from the
@@ -178,9 +410,22 @@ export interface FabricEpochDayConstructor {
 export declare const FabricEpochDay: FabricEpochDayConstructor;
 
 /**
+ * Temporal type representing nanoseconds from the POSIX Epoch.
+ * Wraps a `bigint` value.
+ */
+export interface FabricEpochNsec extends FabricPrimitive {
+  readonly value: bigint;
+}
+
+export interface FabricEpochNsecConstructor {
+  new (value: bigint): FabricEpochNsec;
+  prototype: FabricEpochNsec;
+}
+
+export declare const FabricEpochNsec: FabricEpochNsecConstructor;
+
+/**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
- * Extends `FabricPrimitive` -- treated like a primitive in the fabric type
- * system (always frozen, passes through conversion unchanged).
  */
 export interface FabricHash extends FabricPrimitive {
   readonly tag: string;
@@ -202,77 +447,7 @@ export interface FabricHashConstructor {
 export declare const FabricHash: FabricHashConstructor;
 
 /**
- * The modern, object-shaped form of a link reference, wrapping the link's
- * addressing payload (a `FabricPlainObject`: its addressing fields plus an optional
- * `schema`). Extends `FabricInstance` (not `FabricPrimitive`): the payload is an
- * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
- * link is a small object graph, not a leaf.
- */
-export interface FabricLink extends FabricInstance {
-  readonly payload: FabricPlainObject;
-}
-
-export interface FabricLinkConstructor {
-  new (payload: FabricPlainObject): FabricLink;
-  prototype: FabricLink;
-}
-
-export declare const FabricLink: FabricLinkConstructor;
-
-/**
- * An immutable, frozen sequence of bytes. Extends `FabricPrimitive` --
- * treated like a primitive in the fabric type system (always frozen, passes
- * through conversion unchanged). Read the bytes with `slice()`,
- * `sliceBuffer()`, or `copyInto()`.
- */
-export interface FabricBytes extends FabricPrimitive {
-  readonly length: number;
-  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
-  sliceBuffer(start?: number, end?: number): ArrayBuffer;
-  copyInto(target: Uint8Array, offset?: number, length?: number): number;
-}
-
-export interface FabricBytesConstructor {
-  new (bytes: Uint8Array | ArrayBufferLike, transfer?: boolean): FabricBytes;
-  prototype: FabricBytes;
-}
-
-export declare const FabricBytes: FabricBytesConstructor;
-
-/**
- * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
- * primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
- *
- * The pattern is held as a flavor / source / flags triple rather than as a
- * native `RegExp`, so that flavors with no native representation can still be
- * carried. `value` reconstitutes a native `RegExp` where one exists.
- */
-export interface FabricRegExp extends FabricPrimitive {
-  readonly source: string;
-  readonly flags: string;
-  readonly flavor: string;
-
-  /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
-   * call so the internal instance is never aliased out. Throws for a flavor
-   * with no native `RegExp` representation.
-   */
-  readonly value: RegExp;
-}
-
-export interface FabricRegExpConstructor {
-  new (regex: RegExp): FabricRegExp;
-  new (flavor: string, source: string, flags: string): FabricRegExp;
-  prototype: FabricRegExp;
-}
-
-export declare const FabricRegExp: FabricRegExpConstructor;
-
-/**
- * An immutable asymmetric key pair. Extends `FabricPrimitive` -- treated like
- * a primitive in the fabric type system (always frozen, passes through
- * conversion unchanged).
+ * An immutable asymmetric key pair.
  *
  * An instance either holds handles -- two `CryptoKey`s, whose material this
  * realm may have no way to reach -- or holds material, the two keys as bytes.
@@ -317,6 +492,38 @@ export interface FabricKeyPairConstructor {
 export declare const FabricKeyPair: FabricKeyPairConstructor;
 
 /**
+ * An immutable regular expression.
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
+//
+// Concrete `FabricInstance` classes
+//
+
+/**
  * Structured state for constructing a `FabricError`. The fixed-schema slots
  * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
  * whose keys must not collide with the slot names.
@@ -345,10 +552,7 @@ export type FabricErrorState = {
 };
 
 /**
- * An error carried as a `FabricValue`. Extends `FabricInstance` (not
- * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
- * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
- * rather than a leaf.
+ * An error carried as a `FabricValue`.
  *
  * Like every `FabricInstance` it is mutable until frozen, and every mutator --
  * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
@@ -393,95 +597,32 @@ export interface FabricErrorConstructor {
 
 export declare const FabricError: FabricErrorConstructor;
 
+/**
+ * The modern, object-shaped form of a link reference, wrapping the link's
+ * addressing payload (a `FabricPlainObject`: its addressing fields plus an
+ * optional `schema`). Extends `FabricInstance` because the payload is an
+ * outgoing reference (it may carry an arbitrary-`FabricValue` `schema`), so a
+ * link is a small object graph, not a leaf.
+ */
+export interface FabricLink extends FabricInstance {
+  readonly payload: FabricPlainObject;
+}
+
+export interface FabricLinkConstructor {
+  new (payload: FabricPlainObject): FabricLink;
+  prototype: FabricLink;
+}
+
+export declare const FabricLink: FabricLinkConstructor;
+
 // TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
 // declarations above. Both need substantial rework before they are useful, and
 // declaring them here would imply a utility they do not yet have. Their
 // absence is a decision, not an oversight; revisit once that rework lands.
 
-/**
- * The full set of values that the fabric storage layer can represent. This is
- * the strongly-typed "middle layer" of the three-layer architecture:
- *
- *     JavaScript "wild west" (`unknown`)
- *       <-> `FabricValue`
- *       <-> serialized (`Uint8Array`)
- *
- * Most native JS object types enter the fabric layer via wrapper classes that
- * extend `FabricInstance`; other special values extend `FabricPrimitive`. Both
- * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
- * The non-object values (`bigint` and the other scalars) are direct members of
- * the union instead, not routed through that arm. Some native types are
- * converted to `FabricPrimitive`s during conversion.
- *
- * `undefined` is preserved.
- *
- * `symbol` values are restricted at runtime to **registry-interned** symbols --
- * those for which `Symbol.keyFor(s)` returns a string. These are portable
- * across realms and processes via their registry key. Unique symbols
- * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
- * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
- * runtime one, and it is the same gate at every point a symbol is admitted or
- * refused: `Symbol.keyFor(value) !== undefined`.
- *
- * From a typesystem perspective, all `FabricValue`s are immutable (deeply
- * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
- * expose arbitrary methods which can cause a change of instance state including
- * changing the set of outgoing references from the instance. This is an
- * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
- * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
- *
- * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
- * state truthfully and permanently. In particular, a `FabricPlainObject` or
- * `FabricArray` is data-only: it must not expose an own accessor
- * (getter/setter) whose result can contradict, or change after, the value's
- * frozen state -- once a `FabricValue` graph is deeply frozen, its contents are
- * fixed. (For a `FabricInstance`, the analogous obligation is on its
- * `[IS_DEEP_FROZEN]` report; see `BaseFabricInstance`.) The rest of the system
- * -- the data model in general and `isDeepFrozen()` specifically, but also the
- * entire codebase that _uses_ the data model -- relies on this to cache
- * deep-frozen proofs by root identity without re-validating; a value that
- * violates it can corrupt data-model invariants, as any broken contract can.
- */
-export type FabricValue =
-  | bigint
-  | boolean
-  | null
-  | number
-  | string
-  | symbol
-  | undefined
-  | FabricArray
-  | FabricPlainObject
-  | FabricSpecialObject;
-
-/**
- * The container types that are part of `FabricValue`. Note that
- * `FabricSpecialObject` is a combination of container and non-container.
- */
-export type FabricContainerValue =
-  | FabricArray
-  | FabricInstance // One of the two direct subclasses of `FabricSpecialObject`.
-  | FabricPlainObject;
-
-/** A `FabricValue` other than `null` or `undefined`. */
-export type NonNullableFabricValue = NonNullable<FabricValue>;
-
-/** Read-only array of `FabricValue`s. */
-export interface FabricArray extends ReadonlyArray<FabricValue> {}
-
-/**
- * Object/record of `FabricValue`s.
- *
- * The names `__proto__` and `constructor` are refused at the boundaries where
- * values enter or leave storage, so no `FabricPlainObject` carries one. The
- * type cannot say as much -- a string index signature admits every string --
- * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
- * loops are unguarded and rely on it: they rebuild records by assignment,
- * which for `__proto__` would repoint the copy's prototype rather than
- * creating a property.
- */
-export interface FabricPlainObject
-  extends Readonly<Record<string, FabricValue>> {}
+//
+// Debug-rendering option types
+//
 
 /**
  * Options accepted by `toStructuredDebugValue()`, and by the debug-string
@@ -578,24 +719,24 @@ export interface CompactDebugStringOptions extends DebugValueOptions {
  * A value that can appear in an in-memory fabric execution graph.
  *
  * Unlike a {@link FabricValue}, a `FabricExecValue` may contain functions and
- * therefore is not necessarily durable or serializable. Its arrays and plain
- * objects recursively contain only other execution values.
+ * therefore is not necessarily durable or serializable: it is
+ * `FabricValuePlus` at {@link FabricExecFunction}, so a function may sit at
+ * the top or inside any container.
  */
-export type FabricExecValue =
-  | FabricValue
-  | FabricExecFunction
-  | FabricExecArray
-  | FabricExecPlainObject;
+export type FabricExecValue = FabricValuePlus<FabricExecFunction>;
 
 /** A callable leaf in a {@link FabricExecValue} graph. */
 export type FabricExecFunction = (...args: any[]) => any;
 
 /** Read-only array of fabric execution values. */
-export interface FabricExecArray extends ReadonlyArray<FabricExecValue> {}
+export type FabricExecArray = FabricArrayPlus<FabricExecFunction>;
 
-/** Read-only plain object whose string-keyed values are execution values. */
-export interface FabricExecPlainObject
-  extends Readonly<Record<string, FabricExecValue>> {}
+/**
+ * Read-only plain object whose string-keyed values are execution values.
+ * `Pattern` and `Module` extend it, and the schema generator recognizes that
+ * base by this name.
+ */
+export type FabricExecPlainObject = FabricPlainObjectPlus<FabricExecFunction>;
 
 //
 // Runtime Constants
@@ -1387,6 +1528,73 @@ export interface IEquatable {
   equalLinks(other: AnyCell<any> | object | undefined): boolean;
 }
 
+/** Primitive or Cell identity accepted by a collection index. */
+export type CollectionIndexKey =
+  | string
+  | number
+  | boolean
+  | AnyBrandedCell<unknown>;
+
+/** Occupied key with an explicit distinction between value and Cell identity. */
+export type CollectionIndexKeyEntry<K extends CollectionIndexKey> = K extends
+  AnyBrandedCell<unknown> ? { kind: "cell"; cell: K }
+  : { kind: "value"; value: K };
+
+/** Stored descriptor whose buckets are addressed independently by keyed lookup. */
+export interface CollectionIndexData<K extends CollectionIndexKey, V> {
+  /** Descriptor marker used to recognize an index receiver. */
+  readonly kind: "collection-index";
+
+  /** Missing-key behavior: an empty group or an absent unique match. */
+  readonly mode: "group" | "key";
+
+  /** Occupied keys in deterministic typed-key order. */
+  readonly keys: K[];
+
+  /** Occupied keys with explicit primitive and Cell identity tags. */
+  readonly keyEntries: CollectionIndexKeyEntry<K>[];
+
+  /** Per-key results addressed by the index's internal typed-key encoding. */
+  readonly buckets: Record<string, V>;
+}
+
+/** Read-only index handle with a single stored-payload type for schema extraction. */
+export interface CollectionIndexHandle<
+  T extends CollectionIndexData<CollectionIndexKey, unknown>,
+> extends BrandedCell<T, "readonly">, IAnyCell<T> {
+  /**
+   * Resolves one key without observing occupied-key enumeration. A Cell key
+   * identifies the Cell; read its value explicitly to use a primitive key.
+   */
+  lookup(
+    key: T["keys"][number] | null | undefined,
+  ): Reactive<T["buckets"][string]>;
+
+  /**
+   * Enumerates occupied keys in deterministic typed-key order.
+   * Use `keyEntries()` for indexes mixing primitive values and Cell identities.
+   */
+  keys(): Reactive<T["keys"]>;
+
+  /** Enumerates occupied primitive values and Cell identities with explicit tags. */
+  keyEntries(): Reactive<T["keyEntries"]>;
+}
+
+/** Index whose missing-key lookup yields an empty group. */
+export type GroupIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
+  CollectionIndexData<K, T[]>
+>;
+
+/** Index whose missing-key lookup yields undefined. */
+export type KeyIndex<K extends CollectionIndexKey, T> = CollectionIndexHandle<
+  CollectionIndexData<K, T | undefined>
+>;
+
+/** @internal Preserves an index selector's key kind before result serialization. */
+export declare function tagCollectionKey<T>(
+  value: T,
+): { isCell: boolean; value: T };
+
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
  * direct helpers mirror supported Array methods and return Reactive results.
@@ -1394,6 +1602,48 @@ export interface IEquatable {
  * operations.
  */
 export interface IDerivable<T> {
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys use `keyEntries()` for tagged enumeration.
+   */
+  groupBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** @internal Receives the compiler's tagged per-element selector pattern. */
+  groupByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): GroupIndex<K, T extends Array<infer U> ? U : T>;
+
+  /**
+   * Builds a reactive index while retaining original source occurrences.
+   * Mixed primitive/Cell keys use `keyEntries()` for tagged enumeration.
+   */
+  keyBy<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    selector: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+    ) => K | null | undefined,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T>;
+
+  /** @internal Receives the compiler's tagged per-element selector pattern. */
+  keyByWithPattern<K extends CollectionIndexKey>(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<
+      T extends Array<infer U> ? U : T,
+      { isCell: boolean; value: K | null | undefined }
+    >,
+    params: Record<string, unknown>,
+  ): KeyIndex<K, T extends Array<infer U> ? U : T>;
+
   map<S>(
     this: IsThisObject,
     fn: (
@@ -1407,6 +1657,57 @@ export interface IDerivable<T> {
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): Reactive<S[]>;
+  /** Counts array members, or members whose predicate is truthy. Empty input returns zero. */
+  count(
+    this: AnyBrandedCell<unknown[]>,
+    predicate?: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<boolean>,
+  ): Reactive<number>;
+  /** Counts a per-element predicate pattern's truthy results. */
+  countWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, boolean>,
+    params: Record<string, any>,
+  ): Reactive<number>;
+  /** Sums numeric members exactly and rounds once to binary64. Empty input returns positive zero. */
+  sum(this: AnyBrandedCell<number[]>): Reactive<number>;
+  /** Selects the smallest number. Empty input returns positive infinity; NaN propagates. */
+  min(this: AnyBrandedCell<number[]>): Reactive<number>;
+  /** Selects the largest number. Empty input returns negative infinity; NaN propagates. */
+  max(this: AnyBrandedCell<number[]>): Reactive<number>;
+  /** Selects an element by numeric score, breaking ties by stable identity. Empty input returns undefined. */
+  minBy(
+    this: AnyBrandedCell<unknown[]>,
+    score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
+  /** Selects an element using a per-element score pattern. */
+  minByWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
+  /** Selects an element by numeric score, breaking ties by stable identity. Empty input returns undefined. */
+  maxBy(
+    this: AnyBrandedCell<unknown[]>,
+    score: (
+      element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
+      index: Reactive<number>,
+      array: Reactive<T>,
+    ) => FactoryInput<number>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
+  /** Selects an element using a per-element score pattern. */
+  maxByWithPattern(
+    this: AnyBrandedCell<unknown[]>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, number>,
+    params: Record<string, any>,
+  ): Reactive<(T extends Array<infer U> ? U : T) | undefined>;
   reduce<S>(
     this: IsThisObject,
     fn: (
@@ -3017,6 +3318,8 @@ type TestStepKey =
 type OnlyTestStep<Own extends TestStepKey, Fields> =
   & Fields
   & { skip?: boolean }
+  & (Own extends "label" | "await" ? { readBudget?: never }
+    : { readBudget?: { total?: number; perRun?: number } })
   & { [Other in Exclude<TestStepKey, Own>]?: never };
 
 /**
@@ -3038,7 +3341,10 @@ type OnlyTestStep<Own extends TestStepKey, Fields> =
  *   announces reaching `label`, and another participant blocks on `await`
  *   until that marker is announced. They are inert in a single-user test.
  *
- * `skip` omits the step.
+ * `skip` omits the step. Single-user tests with a module-level `readBudgets`
+ * export may set `readBudget` on executable steps. Its `total` ceiling limits
+ * completed transaction-attempt proxy accesses; `perRun` limits the largest
+ * reactive body. A step declaration replaces the module's default step limits.
  */
 export type TestStep =
   | OnlyTestStep<"assertion", { assertion: Reactive<AssertRecord> }>

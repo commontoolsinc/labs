@@ -71,18 +71,37 @@ describe("setsrc commit receipt", () => {
 
     const durable = getPatternIdentityRef(piece.getCell());
     const revision = getPieceSourceRevisions(piece.getCell()).at(-1);
-    expect(receipt).toEqual({
+    const { seq, ...named } = receipt;
+    expect(named).toEqual({
       status: "committed",
       ref: durable,
       revisionId: revision?.revisionId,
       detachedOrigin: null,
+      space: pieces.getSpace(),
       refresh: { status: "completed" },
     });
+    expect(Number.isInteger(seq)).toBe(true);
+    expect(seq).toBeGreaterThan(0);
     expect(receipt.ref.identity).not.toBe(before?.identity);
     expect(revision?.pattern).toEqual(receipt.ref);
     expect(
       (piece.getCell().getAsQueryResult() as { marker?: string }).marker,
     ).toBe("v2");
+  });
+
+  it("orders two updates by the seq their space accepted them at", async () => {
+    // The seq is the receipt's own position in the space's commit log, so
+    // two receipts for one piece order each other without reading the piece.
+
+    const piece = await pieces.create(markedProgram("v1"), { input: {} });
+    await runtime.idle();
+
+    const first = await piece.setPattern(markedProgram("v2"));
+    const second = await piece.setPattern(markedProgram("v3"));
+
+    expect(second.space).toBe(first.space);
+    expect(second.seq).toBeGreaterThan(first.seq);
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(second.ref);
   });
 
   it("performs no additional cell synchronization after the update operation returns its receipt", async () => {

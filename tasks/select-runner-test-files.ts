@@ -1,5 +1,9 @@
 #!/usr/bin/env -S deno run --allow-read
 
+/** Discovers runner tests and assigns files to weighted CI shards. */
+
+import { fromFileUrl, relative } from "@std/path";
+import { collectTestFiles } from "./run-sharded-test-files.ts";
 import { parseShard } from "./shard-utils.ts";
 import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
 import { assignWeightedShards } from "./weighted-shards.ts";
@@ -22,18 +26,14 @@ export function selectRunnerTestFiles(
     .sort();
 }
 
-export async function listRunnerTests(): Promise<{ name: string }[]> {
-  const testDir = new URL("../packages/runner/test/", import.meta.url);
-  const files: { name: string }[] = [];
-
-  for await (const entry of Deno.readDir(testDir)) {
-    if (entry.isFile && entry.name.endsWith(".test.ts")) {
-      files.push({ name: entry.name });
-    }
-  }
-
-  files.sort((a, b) => a.name.localeCompare(b.name));
-  return files;
+/** Lists package test modules by their path relative to the test directory. */
+export async function listRunnerTests(
+  testDir = fromFileUrl(new URL("../packages/runner/test/", import.meta.url)),
+): Promise<{ name: string }[]> {
+  return (await collectTestFiles(testDir))
+    .filter((file) => /\.test\.tsx?$/.test(file))
+    .map((file) => ({ name: relative(testDir, file).replaceAll("\\", "/") }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 if (import.meta.main) {

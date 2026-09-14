@@ -45,6 +45,7 @@ import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
+import { resolveExternalCfcSchemaRefAsDocument } from "./cfc/schema-refs.ts";
 import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
@@ -578,14 +579,16 @@ function recursiveStripAsCellFromSchema(
   // document the strip leaves untouched keeps the reference verbatim, and
   // one it changes re-externalizes to the sanitized closure, so only the
   // target moves. Siblings stay on the node and strip in the walk below.
-  // External references are hash-based, so document-to-document recursion
-  // cannot cycle; an unresolvable reference passes through unchanged, as
-  // at the root.
+  // A member of a cyclic group sanitizes as its body carrying the group's
+  // `$defs`, so the group's cycles are local refs the walk below handles and
+  // the whole group re-externalizes with it. External references are
+  // hash-based, so document-to-document recursion cannot cycle; an
+  // unresolvable reference passes through unchanged, as at the root.
   const nestedRef = (schema as { $ref?: unknown }).$ref;
   if (typeof nestedRef === "string" && isExternalSchemaRef(nestedRef)) {
     const bare = internSchema({ $ref: nestedRef }) as JSONSchemaObj;
-    const resolved = resolveExternalRootRefForStructure(bare);
-    if (resolved !== bare && isObjectNotArray(resolved)) {
+    const resolved = resolveExternalCfcSchemaRefAsDocument(nestedRef);
+    if (resolved !== undefined && isObjectNotArray(resolved)) {
       const sanitizedDoc = sanitizeSchemaForLinks(
         resolved,
         context.keepAsCell,

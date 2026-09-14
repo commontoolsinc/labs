@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
+import { resolveCfcSchemaRefs } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { getResultCellWithSourceSchema } from "../../runner/src/piece-helpers.ts";
 import { listPieceCallables } from "../lib/piece.ts";
@@ -193,6 +194,56 @@ describe("listPieceCallables against a live piece", () => {
     expect(listing.verbs[0].inputSchema).toMatchObject({
       properties: { title: { type: "string" } },
     });
+  });
+
+  it("returns a resolvable author schema for a compiled anonymous event", async () => {
+    // The compiler puts `Author` in the result root's `$defs`, while the
+    // anonymous event carries a reference to it in a nested property.
+
+    const listing = await listLivePiece(
+      {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            'import { action, cell, pattern, Stream } from "commonfabric";',
+            "",
+            "interface Author { name: string }",
+            "interface Out { add: Stream<{ author: Author }> }",
+            "",
+            "export default pattern<Record<string, never>, Out>(() => {",
+            "  const names = cell<string[]>([]);",
+            "  const add = action((event: { author: Author }) => {",
+            "    names.push(event.author.name);",
+            "  });",
+            "  return { add };",
+            "});",
+          ].join("\n"),
+        }],
+      },
+      "piece-verbs-live-inline-event",
+      "listing-live-inline-event",
+    );
+
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["add"]);
+    const event = listing.verbs[0].inputSchema;
+    expect(event).toMatchObject({
+      type: "object",
+      properties: { author: { $ref: expect.any(String) } },
+      required: ["author"],
+    });
+    if (typeof event !== "object") throw new Error("Expected an event schema");
+    const author = event.properties?.author;
+    if (typeof author !== "object") {
+      throw new Error("Expected an author schema");
+    }
+    expect(resolveCfcSchemaRefs(author, event)).toMatchObject(
+      {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    );
   });
 
   it("lists a verb the pattern's declared result type omits", async () => {

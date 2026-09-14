@@ -47,6 +47,9 @@ const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
 const OTHER_HANDLE = "of:fid1:qrstuvwxyz012345";
 
+/** The spelling a piece reports its own id as, which carries no scheme. */
+const BARE_HANDLE = "fid1:abcdefghijklmnop";
+
 const CONFIG: SpaceConfig = {
   apiUrl: "https://toolshed.example/",
   space: SPACE,
@@ -110,7 +113,9 @@ function slugIndex(rows: SlugSummary[]): ListingDeps {
 }
 
 /** Helper for the cases below, which stands `rows` in for the space's pieces. */
-function spacePieces(rows: { id: string; error?: string }[]): ListingDeps {
+function spacePieces(
+  rows: { id: string; name?: string; error?: string }[],
+): ListingDeps {
   return { ...READS_NOTHING, listPieces: () => Promise.resolve(rows) };
 }
 
@@ -270,6 +275,48 @@ describe("listing", () => {
           spacePieces([{ id: HANDLE }]),
         );
         expect(listing.rows[0].operand).toBe(HANDLE);
+      });
+
+      it("returns a piece row carrying as its operand the bare hash it was listed under", async () => {
+        // A piece reports its own id with no entity scheme, so that is the
+        // spelling this facet is handed and the one a row hands back. The
+        // case is the row a real listing mints, where the ones around it are
+        // written in the `of:` spelling the rest of this file uses.
+
+        const listing = await list(
+          inFacet("pieces"),
+          spacePieces([{ id: BARE_HANDLE }]),
+        );
+        expect(listing.rows[0].operand).toBe(BARE_HANDLE);
+      });
+
+      it("returns a piece row carrying the name the read found for it", async () => {
+        // The name is what the piece calls itself and the id is what reaches
+        // it, so the row carries both: the operand is the id whether a name
+        // was found or not, which is what keeps the row one `cd` takes back.
+
+        const listing = await list(
+          inFacet("pieces"),
+          spacePieces([{ id: HANDLE, name: "Thermostat" }]),
+        );
+        expect(listing.rows).toEqual([{
+          name: HANDLE,
+          kind: "piece",
+          operand: HANDLE,
+          ownName: "Thermostat",
+        }]);
+      });
+
+      it("returns a piece row carrying no name where the read found none", async () => {
+        const listing = await list(
+          inFacet("pieces"),
+          spacePieces([{ id: HANDLE }]),
+        );
+        expect(listing.rows).toEqual([{
+          name: HANDLE,
+          kind: "piece",
+          operand: HANDLE,
+        }]);
       });
 
       it("returns the row of a piece that would not load, carrying its error", async () => {
@@ -571,6 +618,29 @@ describe("listing", () => {
     it("returns a callable row annotated as callable, after its name", () => {
       expect(lines({ rows: [row("add-reply", "callable")] }))
         .toEqual(["%1 add-reply <callable>"]);
+    });
+
+    it("returns a row's own name as a marker, after the operand", () => {
+      // The operand keeps the column a reader copies out of, and the name
+      // stands beside it as shuttle's own words about the row. A name written
+      // in the operand's place would be a spelling `cd` does not take, printed
+      // where every other row prints one it does.
+
+      expect(lines({
+        rows: [row(HANDLE, "piece", { ownName: "Thermostat" })],
+      })).toEqual([`%1 ${HANDLE} <Thermostat>`]);
+    });
+
+    it("returns a name holding an acted-on character shown as its glyph", () => {
+      // A name is a value a read served rather than one this module made, so
+      // it answers to the one-line rule an error answers to: the break stays
+      // one row, and the escape prints as the glyph naming it.
+
+      const line = lines({
+        rows: [row(HANDLE, "piece", { ownName: "two\nlines\u001b[31m" })],
+      })[0];
+      expect(line).toBe(`%1 ${HANDLE} <two lines␛[31m>`);
+      expect(/\p{Cc}/u.test(line)).toBe(false);
     });
 
     it("returns no annotation on a row of any other kind", () => {

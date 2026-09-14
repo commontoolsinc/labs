@@ -45,14 +45,21 @@ export const clientKey = (
 /**
  * Mount ahead of the work being protected — and, where the route authenticates,
  * ahead of that too, so an unauthenticated flood is bounded before it costs a
- * signature verification.
+ * signature verification. A route whose refusals carry a stable code passes
+ * the code its 429 should name.
  */
 export function rateLimit(
   limiter: RateLimiter,
+  options: { code?: string } = {},
 ): MiddlewareHandler<AppBindings> {
   return async (c, next) => {
     if (!limiter.take(clientKey(c))) {
-      return c.json({ error: "Too many requests" }, 429);
+      return c.json(
+        options.code === undefined
+          ? { error: "Too many requests" }
+          : { error: "Too many requests", code: options.code },
+        429,
+      );
     }
     await next();
   };

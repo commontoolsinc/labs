@@ -43,6 +43,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import { scopedArgumentInitializationTargets } from "../src/data-updating.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -266,9 +267,11 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
   const standUp = async (options: {
     names: { arg: string; result: string };
     pattern?: string;
+    userScopedNote?: boolean;
     clients: Identity[];
+    policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"];
   }) => {
-    host = newHost();
+    host = newHost(options.policy);
     const alice = openClient(aliceSigner);
     const engine = await server.engineForSpace(space);
     const compiled = await alice.patternManager.compilePattern({
@@ -292,7 +295,20 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     await aliceResult.sync();
     {
       const seed = alice.edit();
-      aliceArg.withTx(seed).set({ n: 1 });
+      aliceArg.withTx(seed).set({
+        n: 1,
+        ...(options.userScopedNote
+          ? {
+            note: alice.getCell(
+              space,
+              options.names.arg,
+              undefined,
+              undefined,
+              "user",
+            ).key("note"),
+          }
+          : {}),
+      });
       expect((await seed.commit()).error).toBeUndefined();
     }
     {
@@ -357,13 +373,46 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       await runtime.storageManager.synced();
     };
     const writeNote = async (runtime: Runtime, value: string) => {
-      const arg = typedArg(runtime);
+      await typedArg(runtime).sync();
+      // The ragged fixture authors only this actor's user-to-session hop.
+      // A write from space scope would reestablish the shared declaration.
+      const arg = options.userScopedNote
+        ? runtime.getCell<{ draft: string; note: string; n: number }>(
+          space,
+          options.names.arg,
+          compiled.argumentSchema,
+          undefined,
+          "user",
+        )
+        : typedArg(runtime);
       await arg.sync();
       const tx = runtime.edit();
       arg.key("note").withTx(tx).set(value);
       expect((await tx.commit()).error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
+    };
+    const initialSharedNote = (
+      Engine.read(engine, { id: argId, scopeKey: "space" } as never)?.value as
+        | { note?: unknown }
+        | undefined
+    )?.note;
+    const expectExplicitUserNote = () => {
+      expect(
+        (Engine.read(engine, { id: argId, scopeKey: "space" } as never)
+          ?.value as { note?: unknown } | undefined)?.note,
+      ).toEqual(initialSharedNote);
+      const tx = alice.edit();
+      try {
+        expect(scopedArgumentInitializationTargets(
+          alice,
+          tx,
+          aliceArg.getAsNormalizedFullLink(),
+          compiled.argumentSchema,
+        )).toEqual([]);
+      } finally {
+        tx.abort();
+      }
     };
     const userKey = (signer: Identity) =>
       resolveScopeKey("user", { principal: signer.did() });
@@ -376,6 +425,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       watchRoot,
       writeDraft,
       writeNote,
+      expectExplicitUserNote,
       userKey,
       serviceUserKey: resolveScopeKey("user", {
         principal: serviceSigner.did(),
@@ -387,6 +437,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
   it("(a) two users watching ONLY the space root of a piece with a per-user derivation get TWO server-side instances with their OWN values, attributed to the user alone; the service identity ran no demanded work (the arbitration)", async () => {
     const setup = await standUp({
       names: { arg: "fo-a-arg", result: "fo-a-result" },
+      pattern: FAN_OUT_PATTERN.replace(
+        "note?: PerSession<Draft>",
+        "note?: PerUser<Draft>",
+      ),
       clients: [aliceSigner, bobSigner],
     });
     const { engine, clients } = setup;
@@ -511,6 +565,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
   it("(c) RAGGED: a node user-scoped for Alice and session-scoped for Bob — Bob's instance per session, Alice's per user, both correct, no session-keyed rows for Alice (S4)", async () => {
     const setup = await standUp({
       names: { arg: "fo-c-arg", result: "fo-c-result" },
+      userScopedNote: true,
       clients: [aliceSigner, bobSigner],
     });
     const { engine, clients } = setup;
@@ -518,18 +573,22 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     const bob = clients.get(bobSigner.did())!;
     const aliceKey = setup.userKey(aliceSigner);
     const bobKey = setup.userKey(bobSigner);
-    // Alice writes a per-user draft; Bob writes a per-SESSION note. The
-    // `noteEcho` node then reads session state for Bob (his note is a
-    // session doc) and — through the never-written note slot's redirect
-    // chain — for Alice too once Bob's write narrowed the slot: the
-    // slot's space redirect points via user to session (the eager
-    // via-user hop), so Alice's read of it discovers `session` as well.
-    // The RAGGED shape lives on the `echo` node: Alice's draft narrows
-    // it to user; Bob's session note does not touch it. Bob's session
-    // instances of `noteEcho` hold his note; Alice's session instances
-    // hold nothing.
+    // The supplied note reference starts at user scope, so Alice's absent
+    // note stays at user scope under the PerSession follow cap. Bob's write
+    // from user scope installs only his own session hop. The noteEcho node then
+    // reads user state for Alice and session state for Bob.
+    const noteScope = (runtime: Runtime) =>
+      runtime.getCellFromLink({
+        space,
+        id: setup.argId,
+        path: ["note"],
+        scope: "space",
+      }).resolveAsCell().getAsNormalizedFullLink().scope;
+    expect(noteScope(alice)).toBe("user");
     await setup.writeDraft(alice, "A");
     await setup.writeNote(bob, "N");
+    expect(noteScope(alice)).toBe("user");
+    expect(noteScope(bob)).toBe("session");
     await waitUntil(
       () => instanceHolds(engine, aliceKey, '"echo:A"'),
       "alice's user instance of echo",
@@ -586,13 +645,80 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         `session:${encodeURIComponent(bobSigner.did())}:`,
       )
     );
-    // (A pre-fix shape made THIS assertion flake: Bob's session
-    // narrowing wrote the session redirect at the SHARED space slot
-    // when Alice's user narrowing had already put the user redirect
-    // there — pattern-binding.ts's ragged fix keeps the second hop in
-    // Bob's own user slot.)
+    setup.expectExplicitUserNote();
     expect(
       aliceSessionRuns.map((e) => [e.actionId, e.instanceKey]),
+    ).toEqual([]);
+    setup.cancel();
+  });
+
+  it("(c) RAGGED under the store read-through posture: the run that discovers session depth for Bob serves his session instance at the moved ratchet, and his next session-scoped write re-runs it session-keyed; Alice never runs per session", async () => {
+    // The serving replica reads at the engine's head, so the run that
+    // discovers Bob's session depth already read his note: no input
+    // lands mid-run, and no re-run at the session key follows the
+    // discovery. Over a session the same shape re-runs session-keyed
+    // once frames arriving mid-run dirty it — a re-run, not a serving
+    // difference: the store truths below are identical, and a later
+    // session-scoped write of Bob's re-runs his session instance under
+    // its own key here as well.
+    const setup = await standUp({
+      names: { arg: "fo-c-rt-arg", result: "fo-c-rt-result" },
+      userScopedNote: true,
+      clients: [aliceSigner, bobSigner],
+      policy: { storeReadThrough: true },
+    });
+    const { engine, clients } = setup;
+    const alice = clients.get(aliceSigner.did())!;
+    const bob = clients.get(bobSigner.did())!;
+    const aliceKey = setup.userKey(aliceSigner);
+    const bobKey = setup.userKey(bobSigner);
+    const bobSessionPrefix = `session:${encodeURIComponent(bobSigner.did())}:`;
+    const bobSessionHolds = (value: string) =>
+      (engine.database.prepare(
+        `SELECT DISTINCT scope_key FROM head WHERE scope_key LIKE :prefix AND op != 'delete'`,
+      ).all({ prefix: `${bobSessionPrefix}%` }) as Array<
+        { scope_key: string }
+      >).some((row) => instanceHolds(engine, row.scope_key, value));
+    await setup.writeDraft(alice, "A");
+    await setup.writeNote(bob, "N");
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"echo:A"'),
+      "alice's user instance of echo",
+    );
+    await waitUntil(
+      () => bobSessionHolds('"note:N"'),
+      "bob's session instance of noteEcho",
+    );
+    expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
+    await waitUntil(
+      () =>
+        [...basisKeys(engine)].some((key) => key.startsWith(bobSessionPrefix)),
+      "bob's session basis key",
+    );
+    const keys = basisKeys(engine);
+    expect(keys.has(aliceKey)).toBe(true);
+    expect(keys.has("space")).toBe(true);
+    expect(keys.has(setup.serviceUserKey)).toBe(false);
+    expect(host!.stats().storeReads).toBeGreaterThan(0);
+
+    // Bob's second note is a session-scoped input change: the feed
+    // refreshes his held session instance, and the node re-runs for
+    // him under his session key.
+    await setup.writeNote(bob, "N2");
+    await waitUntil(
+      () => bobSessionHolds('"note:N2"'),
+      "bob's session instance to re-derive from his second note",
+    );
+    setup.expectExplicitUserNote();
+    const trace = servingRuntime!.scheduler.getActionRunTrace();
+    const sessionRuns = trace.filter((entry) =>
+      entry.instanceKey?.startsWith("session:")
+    );
+    expect(sessionRuns.length).toBeGreaterThan(0);
+    expect(
+      sessionRuns.filter((entry) =>
+        !entry.instanceKey!.startsWith(bobSessionPrefix)
+      ).map((e) => [e.actionId, e.instanceKey]),
     ).toEqual([]);
     setup.cancel();
   });

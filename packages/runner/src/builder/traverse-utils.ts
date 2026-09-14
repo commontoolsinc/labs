@@ -1,7 +1,7 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   FabricInstance,
-  FabricSpecialObject,
+  isFabricSpecialObject,
   refuseFabricInstance,
 } from "@commonfabric/data-model";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
@@ -63,7 +63,7 @@ export function traverseValue(
     !isReactive(value) &&
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
-    !((value as object) instanceof FabricSpecialObject) &&
+    !isFabricSpecialObject(value) &&
     (isObjectOrArray(value) || isPattern(value))
   ) {
     if (Array.isArray(value)) {

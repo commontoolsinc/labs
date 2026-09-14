@@ -1,7 +1,9 @@
 import type { GithubClient } from "@commonfabric/github-connector/client";
 import type { GithubFabricTarget } from "@commonfabric/github-connector/fabric";
-import type { GithubPullRequestCollection } from "@commonfabric/github-connector/types";
-import type { GithubPullRequest } from "@commonfabric/github-connector/types";
+import type {
+  GithubPullRequest,
+  GithubPullRequestCollection,
+} from "@commonfabric/github-connector/types";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { GithubHost } from "../src/host.ts";

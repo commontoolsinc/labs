@@ -17,11 +17,11 @@
 // trails main), and SHA distance is not interface distance — most commits
 // touch nothing wire-visible, so on a success the mismatch was evidence of
 // nothing. That direction therefore prints nothing at connection time: the
-// note is held, and appears only when the process ends with a nonzero exit
-// code, where it is diagnostic context for a failure that actually happened
-// rather than a prophecy on every command. cf being OLDER than the server is
-// the dangerous direction: the server speaks a protocol this cf predates,
-// and commands will likely fail in confusing ways — that warns immediately
+// note is held for a nonzero exit unless a caller suppresses it for an
+// explained failure. It supplies version context, not a diagnosis: commit
+// distance alone does not establish incompatibility. cf being OLDER than the
+// server is the dangerous direction: the server speaks a protocol this cf
+// predates, and commands will likely fail in confusing ways — that warns immediately
 // and loudly. Diverged and unorderable pairs (including every compiled
 // binary, which carries no history to order by) also warn immediately,
 // because cf-behind cannot be ruled out. Direction is proven by git ancestry
@@ -88,9 +88,9 @@ export function addProcessUnloadListener(handler: () => void): void {
 }
 
 /**
- * Hold `note` and print it only if the process ends with a nonzero exit
- * code — the one moment the mismatch is evidence of anything. Every CLI path
- * ends in `Deno.exit` (mod.ts funnels thrown errors there), which dispatches
+ * Holds `note` for a nonzero process exit unless the caller suppresses it for
+ * an explained failure. Every CLI path ends in `Deno.exit` (mod.ts funnels
+ * thrown errors there), which dispatches
  * "unload" with `Deno.exitCode` readable, so the hook sees direct
  * `Deno.exit(n)` calls and thrown errors alike.
  */
@@ -107,6 +107,11 @@ export function deferSkewNoteUntilFailureExit(
   addUnloadListener(() => {
     if (pendingSkewNote !== null && exitCode() !== 0) warn(pendingSkewNote);
   });
+}
+
+/** Clears the held version context when a failure has a specific explanation. */
+export function suppressDeferredSkewNote(): void {
+  pendingSkewNote = null;
 }
 
 export interface VersionCheck {
@@ -139,12 +144,14 @@ export function versionMismatchWarning(
       const behind = relation.serverBehindBy !== null
         ? `${relation.serverBehindBy} commit(s) behind`
         : "behind";
-      return `⚠️  A possible cause: cf is newer than the server at ` +
+      return `Version context: cf is newer than the server at ` +
         `${origin} — the server\n` +
-        `    (${serverSha}) is ${behind} this cf (${cliSha}), and the ` +
-        `failure may sit where cf\n` +
-        `    relies on newer behavior. Restart or redeploy the server to ` +
-        `match, or ` + SILENCE_HINT;
+        `    (${serverSha}) is ${behind} this cf (${cliSha}).\n` +
+        `    Commit distance alone does not establish incompatibility or ` +
+        `explain this failure.\n` +
+        `    If this is a local server you control, restarting it from this cf's\n` +
+        `    checkout aligns the versions.\n` +
+        `    ` + SILENCE_HINT;
     }
     case "cli-behind":
       return `⚠️  This cf is OUTDATED: the server at ${origin} runs a ` +

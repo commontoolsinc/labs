@@ -1,7 +1,8 @@
 // platform-darwin.ts — macOS FUSE v2 low-level API implementation.
 //
 // Supports FUSE-T (preferred, no kernel extension) and macFUSE (fallback).
-// Struct layouts are for macOS arm64.
+// macOS lays these structs out the same way on both architectures it runs
+// on, so one set of offsets covers them.
 
 import {
   COMMON_SYMBOLS,
@@ -69,7 +70,7 @@ const DARWIN_SYMBOLS = {
 
 type DarwinLib = Deno.DynamicLibrary<typeof DARWIN_SYMBOLS>;
 
-// struct stat (macOS arm64, 144 bytes):
+// struct stat (macOS, 144 bytes):
 //   dev_t st_dev      @ 0   (i32)
 //   mode_t st_mode    @ 4   (u16)
 //   nlink_t st_nlink  @ 6   (u16)

@@ -51,17 +51,24 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
     return { storageManager, runtime };
   };
 
+  type StoredDocument = {
+    value?: unknown;
+    cfc?: { labelMap?: { entries: StoredEntry[] } };
+  } | undefined;
+
+  const storedDocument = (
+    storageManager: ReturnType<typeof StorageManager.emulate>,
+    id: string,
+  ): StoredDocument =>
+    (storageManager.open(space).replica as unknown as {
+      getDocument(id: string): StoredDocument;
+    }).getDocument(id);
+
   const entriesOf = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
     id: string,
-  ): StoredEntry[] => {
-    const replica = storageManager.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
-  };
+  ): StoredEntry[] =>
+    storedDocument(storageManager, id)?.cfc?.labelMap?.entries ?? [];
 
   const ingestEntries = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
@@ -399,6 +406,11 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
 
       const id =
         runtime.getCell(space, "ingest-c").getAsNormalizedFullLink().id;
+      // The stored value pins the document the marks are read from, so the
+      // empty mark list below is that document's own.
+      expect(storedDocument(storageManager, id)?.value).toEqual({
+        hello: "world",
+      });
       expect(ingestEntries(storageManager, id).length).toBe(0);
     } finally {
       await runtime.dispose();

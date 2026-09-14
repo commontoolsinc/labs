@@ -199,6 +199,51 @@ describe("scheduler run gates", () => {
     expect(queued).toBe(2);
   });
 
+  it("releases debounce and throttle readiness for a scheduler-owed retry, keeping the backoff", () => {
+    const action: Action = function retriedComputation() {};
+    const unknownAction: Action = function neverRegistered() {};
+    const now = performance.now();
+    const stats = new Map<string, ActionStats>([
+      [action.name, actionStats(now)],
+    ]);
+    let queued = 0;
+    const { gates, nodes } = makeGates({ stats, queued: () => queued++ });
+    const node = nodes.register(action, "computation");
+    nodes.setStatus(action, "invalid");
+    gates.setDebounce(action, 30_000);
+    gates.onInvalidated(node, now, {
+      computations: nodes.computations,
+      effects: nodes.effects,
+      isInvalid: () => true,
+      pending: new Set<Action>(),
+      queueExecution: () => {},
+      logDebounce: () => {},
+      shouldDebounceFirstRun: () => false,
+    });
+    gates.setThrottle(action, 30_000);
+    node.gate.backoffUntil = now + 30_000;
+    expect(gates.isEligible(node, now)).toBe(false);
+    const queuedBefore = queued;
+
+    // Unknown action: a no-op. Registered action: both readiness fields go,
+    // the wake is recomputed, the backoff and the policies stay.
+    gates.releaseForRetry(unknownAction);
+    expect(queued).toBe(queuedBefore);
+    gates.releaseForRetry(action);
+    expect(queued).toBe(queuedBefore + 1);
+    expect(gates.hasActiveDebounceTimer(action)).toBe(false);
+    expect(gates.isThrottled(action, now)).toBe(false);
+    expect(gates.eligibleAt(node)).toBe(now + 30_000);
+    expect(gates.getDebounce(action)).toBe(30_000);
+    expect(gates.getThrottle(action)).toBe(30_000);
+
+    // Nothing armed: nothing to recompute.
+    delete node.gate.backoffUntil;
+    gates.releaseForRetry(action);
+    expect(queued).toBe(queuedBefore + 1);
+    expect(gates.isEligible(node, now)).toBe(true);
+  });
+
   it("does not arm wake timers after scheduler disposal", () => {
     let queued = 0;
     const { gates } = makeGates({

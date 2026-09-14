@@ -60,17 +60,14 @@ describe("schema validation over shared graphs", () => {
       .toContain("right: count: value does not match type string");
   });
 
-  it("resolves identical reference text under each local schema root", () => {
-    const child = { count: 1 };
+  it("resolves identical reference text on both sides against the document root", () => {
     const ref: JSONSchema = { $ref: "#/$defs/Entry" };
-    const branch = (type: "number" | "string"): JSONSchema => ({
-      $defs: { Entry: { properties: { count: { type } } } },
-      properties: { child: ref },
-    });
+    const branch: JSONSchema = { properties: { child: ref } };
     expect(validateSchemaValue({
-      properties: { left: branch("number"), right: branch("string") },
-    }, { left: { child }, right: { child } }))
-      .toContain("right: child: count: value does not match type string");
+      properties: { left: branch, right: branch },
+      $defs: { Entry: { properties: { count: { type: "number" } } } },
+    }, { left: { child: { count: 1 } }, right: { child: { count: "1" } } }))
+      .toContain("right: child: count: value does not match type number");
   });
 
   it("preserves a later mismatch after shared values have passed validation", () => {

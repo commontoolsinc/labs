@@ -1,7 +1,13 @@
 /**
  * Host-side acquisition of one skills.sh discovery id from its immutable
  * GitHub commit. The recursive tree is the payload inventory; only after that
- * inventory passes the instructions-only whitelist is `SKILL.md` fetched.
+ * inventory passes the path whitelist are the admitted files fetched.
+ *
+ * A skill is a directory: `SKILL.md` and, where it has them, the scripts its
+ * prose tells a model to run. Both are acquired, at the one pinned commit and
+ * each under the same size cap, and every other path refuses the whole
+ * payload. What the acquired tree is NOT is a registry entry — it stays
+ * host-side, and nothing here writes into the skills root.
  */
 
 import { sha256 } from "@commonfabric/content-hash";
@@ -24,8 +30,35 @@ const GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com";
 const FULL_GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const MAX_TREE_PATH_CHARS = 4_096;
 
-/** Maximum exact byte length admitted for an instructions-only SKILL.md. */
+/** Maximum exact byte length admitted for any one acquired file. */
 export const SKILLS_SH_MAX_SKILL_BYTES = 256 * 1_024;
+
+/**
+ * Most scripts one acquisition admits.
+ *
+ * The size cap bounds a file and this bounds the fetch: without it the number
+ * of requests one acquisition makes is whatever the pinned tree says, which is
+ * the publisher's number rather than ours. A skill that needs more than this
+ * many scripts refuses rather than being acquired in part, on the same ground
+ * every other path refusal here stands on.
+ */
+export const SKILLS_SH_MAX_SCRIPTS = 16;
+
+/** The directory an acquired skill's executable files live under. */
+const SCRIPTS_DIRECTORY = "scripts";
+
+/**
+ * The filenames a script may have: printable ASCII without a path separator,
+ * a control codepoint, or a leading dot.
+ *
+ * An admitted path is not only checked, it is REPORTED — it reaches
+ * `loadedPaths`, the tool output, and the run record, none of which sanitize
+ * on the way out. A name is the publisher's text, so a control codepoint or a
+ * terminal escape in one would cross into an operator's console on the
+ * strength of having been admitted. The refusal is the whitelist's own:
+ * whatever this does not admit refuses the payload rather than being dropped.
+ */
+const SAFE_SCRIPT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export type SkillsShAcquisitionFailureCode =
   | "invalid_pin"
@@ -36,6 +69,7 @@ export type SkillsShAcquisitionFailureCode =
   | "skill_not_found"
   | "skill_ambiguous"
   | "instructions_only"
+  | "too_many_scripts"
   | "skill_too_large"
   | "invalid_skill_text";
 
@@ -66,13 +100,37 @@ export class SkillsShAcquisitionError extends Error {
   }
 }
 
+/**
+ * One script acquired beside a skill's instructions, at the same commit.
+ *
+ * `path` is relative to the skill root, so it is what the skill's own prose
+ * names and what an allowlist entry matches; the digest is over the exact
+ * bytes fetched, as `SKILL.md`'s is.
+ */
+export interface SkillsShAcquiredScript {
+  readonly path: string;
+  readonly sourceUrl: string;
+  readonly text: string;
+  readonly valueDigest: string;
+}
+
 export interface SkillsShAcquiredSkill {
   readonly pin: SkillsShPinnedAddress;
   readonly skillRoot: string;
   readonly sourceUrl: string;
   readonly text: string;
   readonly valueDigest: string;
-  readonly loadedPaths: readonly ["SKILL.md"];
+
+  /**
+   * The skill's scripts, in path order, empty for a skill that ships none.
+   * Held apart from {@link text} because only the instructions are what the
+   * skill handle carries to a model; a script is something to run, and the
+   * run is gated by the operator's allowlist rather than by this fetch.
+   */
+  readonly scripts: readonly SkillsShAcquiredScript[];
+
+  /** Every path this acquisition admitted, `SKILL.md` first. */
+  readonly loadedPaths: readonly string[];
 }
 
 export interface AcquireSkillsShPinnedSkillOptions {
@@ -206,6 +264,28 @@ const candidateRoot = (skillPath: string): string => {
   return slash === -1 ? "" : skillPath.slice(0, slash);
 };
 
+/**
+ * Whether one tree entry is a script this acquisition admits: a regular file
+ * directly under the root's `scripts/`, named by a single path segment.
+ *
+ * Nested directories, symlinks, submodules and unsafe filenames are not
+ * admitted, and each refuses the whole payload rather than being dropped — the
+ * same rule the whitelist has always held, applied to a wider set of paths. A
+ * symlink is the one worth naming: its target is a path the tree does not
+ * vouch for, so admitting it would make the acquired bytes something other
+ * than what the inventory said.
+ */
+const isAdmittedScript = (
+  entry: GithubTreeEntry,
+  relativePath: string,
+): boolean => {
+  if (entry.type !== "blob") return false;
+  if (entry.mode !== "100644" && entry.mode !== "100755") return false;
+  const segments = relativePath.split("/");
+  return segments.length === 2 && segments[0] === SCRIPTS_DIRECTORY &&
+    SAFE_SCRIPT_NAME.test(segments[1] ?? "");
+};
+
 const displayPath = (path: string): string =>
   sanitizeRegistryString(path) || "(unsafe path)";
 
@@ -215,7 +295,10 @@ const encodedTreePath = (path: string): string =>
 const valueDigestOf = (bytes: Uint8Array): string =>
   `sha256:${toUnpaddedBase64url(sha256(bytes))}`;
 
-const readSkillBytes = async (response: Response): Promise<Uint8Array> => {
+const readCappedBytes = async (
+  response: Response,
+  label: string,
+): Promise<Uint8Array> => {
   if (response.body === null) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -233,7 +316,7 @@ const readSkillBytes = async (response: Response): Promise<Uint8Array> => {
         }
         throw acquisitionError(
           "skill_too_large",
-          `the pinned SKILL.md exceeds the ${SKILLS_SH_MAX_SKILL_BYTES}-byte limit`,
+          `the pinned ${label} exceeds the ${SKILLS_SH_MAX_SKILL_BYTES}-byte limit`,
         );
       }
       chunks.push(value);
@@ -252,14 +335,21 @@ const readSkillBytes = async (response: Response): Promise<Uint8Array> => {
 };
 
 /**
- * Fetches the recursive tree and root `SKILL.md` at exactly `pin.commitSha`.
+ * Fetches the recursive tree and every admitted file at exactly
+ * `pin.commitSha`.
  *
  * The whitelist judges the selected candidate root's subtree, not the whole
  * repository: sibling skills and repository-level files outside that root are
- * not part of the acquired payload. Inside that subtree, only root
- * `SKILL.md` is admitted. Any other path refuses the whole payload. Silently
- * dropping a path would make instructions-only true only of the cell and
- * invisible in the record; a skill whose prose references `scripts/foo.py`
+ * not part of the acquired payload. Inside that subtree two things are
+ * admitted — the root `SKILL.md`, and the regular files directly under
+ * `scripts/` whose filenames are printable ASCII without a path separator, a
+ * control codepoint or a leading dot. Any other path refuses the whole
+ * payload, a skill shipping more than {@link SKILLS_SH_MAX_SCRIPTS} scripts
+ * refuses on the inventory before anything is fetched, and each admitted file
+ * is read under {@link SKILLS_SH_MAX_SKILL_BYTES}.
+ *
+ * Silently dropping a path would make what was acquired true of the payload
+ * and invisible in the record; a skill whose prose references `scripts/foo.py`
  * is not that skill without the script, and would instead instruct a model to
  * run something that is not there.
  */
@@ -332,20 +422,39 @@ export const acquireSkillsShPinnedSkill = async (
   const payloadEntries = entries.filter((entry) =>
     root === "" || entry.path.startsWith(rootPrefix)
   );
-  const offendingPaths = payloadEntries
-    .filter((entry) => entry.path !== skillPath)
-    .map((entry) =>
-      displayPath(
-        root === "" ? entry.path : entry.path.slice(rootPrefix.length),
+  const withinRoot = (path: string): string =>
+    root === "" ? path : path.slice(rootPrefix.length);
+  const scriptEntries = payloadEntries.filter((entry) =>
+    isAdmittedScript(entry, withinRoot(entry.path))
+  );
+  const admitted = new Set<string>([
+    skillPath,
+    // The `scripts` directory entry itself is admitted with what it holds: a
+    // tree entry is the listing rather than a payload, and refusing it would
+    // refuse every skill that ships a script at all.
+    ...payloadEntries
+      .filter((entry) =>
+        entry.type === "tree" && withinRoot(entry.path) === SCRIPTS_DIRECTORY
       )
-    );
+      .map((entry) => entry.path),
+    ...scriptEntries.map((entry) => entry.path),
+  ]);
+  const offendingPaths = payloadEntries
+    .filter((entry) => !admitted.has(entry.path))
+    .map((entry) => displayPath(withinRoot(entry.path)));
   if (offendingPaths.length > 0) {
     throw new SkillsShAcquisitionError(
       "instructions_only",
-      `instructions-only acquisition refused ${offendingPaths.length} offending paths: ${
+      `acquisition refused ${offendingPaths.length} paths outside \`SKILL.md\` and \`${SCRIPTS_DIRECTORY}/\`: ${
         offendingPaths.join(", ")
       }`,
       { offendingPaths },
+    );
+  }
+  if (scriptEntries.length > SKILLS_SH_MAX_SCRIPTS) {
+    throw acquisitionError(
+      "too_many_scripts",
+      `the pinned skill ships ${scriptEntries.length} scripts, above the ${SKILLS_SH_MAX_SCRIPTS} one acquisition admits`,
     );
   }
   const sourceUrl =
@@ -357,7 +466,7 @@ export const acquireSkillsShPinnedSkill = async (
     sourceUrl,
     "GitHub raw SKILL.md",
   );
-  const bytes = await readSkillBytes(skillResponse);
+  const bytes = await readCappedBytes(skillResponse, "SKILL.md");
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -374,13 +483,56 @@ export const acquireSkillsShPinnedSkill = async (
     );
   }
 
+  // Fetched after the instructions and in path order, so a partial failure
+  // leaves the same refusal whichever script it was, and the record a
+  // successful acquisition writes lists the payload in one stable order.
+  const scripts: SkillsShAcquiredScript[] = [];
+  for (
+    const entry of [...scriptEntries].sort((left, right) =>
+      left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+    )
+  ) {
+    const relativePath = withinRoot(entry.path);
+    const scriptUrl =
+      `${GITHUB_RAW_BASE_URL}/${pin.owner}/${pin.repo}/${pin.commitSha}/${
+        encodedTreePath(entry.path)
+      }`;
+    const scriptResponse = await fetchResponse(
+      fetch,
+      scriptUrl,
+      `GitHub raw ${displayPath(relativePath)}`,
+    );
+    const scriptBytes = await readCappedBytes(
+      scriptResponse,
+      displayPath(relativePath),
+    );
+    let scriptText: string;
+    try {
+      scriptText = new TextDecoder("utf-8", { fatal: true }).decode(
+        scriptBytes,
+      );
+    } catch {
+      throw acquisitionError(
+        "invalid_skill_text",
+        `the pinned ${displayPath(relativePath)} bytes are not UTF-8`,
+      );
+    }
+    scripts.push({
+      path: relativePath,
+      sourceUrl: scriptUrl,
+      text: scriptText,
+      valueDigest: valueDigestOf(scriptBytes),
+    });
+  }
+
   return {
     pin,
     skillRoot: root === "" ? "." : displayPath(root),
     sourceUrl,
     text,
     valueDigest: valueDigestOf(bytes),
-    loadedPaths: ["SKILL.md"],
+    scripts,
+    loadedPaths: ["SKILL.md", ...scripts.map((script) => script.path)],
   };
 };
 

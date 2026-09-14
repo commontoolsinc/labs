@@ -25,7 +25,19 @@ import {
   setOwnWriteEchoConfig,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
+
+// Content-addressed ids of the schema documents the tests below install.
+const ELIDE_FANOUT_ID = `cid:${
+  internSchemaAsTaggedHashString({ type: "string", title: "fanout" })
+}`;
+const ALL_ELIDED_ID = `cid:${
+  internSchemaAsTaggedHashString({ type: "string", title: "all-elided" })
+}`;
+const DIRECT_ELIDE_ID = `cid:${
+  internSchemaAsTaggedHashString({ type: "string", title: "direct-elide" })
+}`;
 
 const HELLO = {
   type: "hello",
@@ -829,7 +841,7 @@ Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watc
       query: {
         roots: [
           {
-            id: "cid:fid1:elide-fanout",
+            id: ELIDE_FANOUT_ID,
             selector: { path: [], schema: false },
           },
           { id: "of:elide-control", selector: { path: [], schema: false } },
@@ -851,7 +863,7 @@ Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watc
       operations: [
         {
           op: "set",
-          id: "cid:fid1:elide-fanout",
+          id: ELIDE_FANOUT_ID,
           value: { value: { type: "string", title: "fanout" } },
         },
         { op: "set", id: "of:elide-control", value: { value: { round: 1 } } },
@@ -867,7 +879,7 @@ Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watc
     .effect as SessionSync;
   assertEquals(
     first.upserts.map((upsert) => upsert.id).toSorted(),
-    ["cid:fid1:elide-fanout", "of:elide-control"],
+    [ELIDE_FANOUT_ID, "of:elide-control"],
   );
 
   // The identical re-set applies as a no-op, so the observer's next frame
@@ -884,7 +896,7 @@ Deno.test("memory v2 server: an identical cid re-set fans out no novelty to watc
       operations: [
         {
           op: "set",
-          id: "cid:fid1:elide-fanout",
+          id: ELIDE_FANOUT_ID,
           value: { value: { type: "string", title: "fanout" } },
         },
         { op: "set", id: "of:elide-control", value: { value: { round: 2 } } },
@@ -922,7 +934,7 @@ Deno.test("memory v2 server: an all-elided accept still delivers its marker on a
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
-        id: "cid:fid1:all-elided",
+        id: ALL_ELIDED_ID,
         value: { value: { type: "string", title: "all-elided" } },
       }],
     },
@@ -944,7 +956,7 @@ Deno.test("memory v2 server: an all-elided accept still delivers its marker on a
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
-        id: "cid:fid1:all-elided",
+        id: ALL_ELIDED_ID,
         value: { value: { type: "string", title: "all-elided" } },
       }],
     },
@@ -982,7 +994,7 @@ Deno.test("memory v2 server: an identical direct re-write fans out nothing", asy
       kind: "graph",
       query: {
         roots: [{
-          id: "cid:fid1:direct",
+          id: DIRECT_ELIDE_ID,
           selector: { path: [], schema: false },
         }],
       },
@@ -991,7 +1003,7 @@ Deno.test("memory v2 server: an identical direct re-write fans out nothing", asy
   assertResponse(shiftMessage(committerMessages));
 
   // The install — the blob-upload path — delivers its novelty...
-  const installed = await server.writeDocument(space, "cid:fid1:direct", {
+  const installed = await server.writeDocument(space, DIRECT_ELIDE_ID, {
     type: "string",
     title: "direct-elide",
   });
@@ -999,11 +1011,11 @@ Deno.test("memory v2 server: an identical direct re-write fans out nothing", asy
   await server.flushSessions([space]);
   const first = assertEffect(shiftMessage(committerMessages))
     .effect as SessionSync;
-  assertEquals(first.upserts.map((upsert) => upsert.id), ["cid:fid1:direct"]);
+  assertEquals(first.upserts.map((upsert) => upsert.id), [DIRECT_ELIDE_ID]);
 
   // ...and the identical re-write is a proven no-op: it marks nothing
   // dirty and schedules nothing, so the watcher hears nothing.
-  const reWritten = await server.writeDocument(space, "cid:fid1:direct", {
+  const reWritten = await server.writeDocument(space, DIRECT_ELIDE_ID, {
     type: "string",
     title: "direct-elide",
   });

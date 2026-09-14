@@ -32,7 +32,6 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
-import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -46,7 +45,7 @@ import { waitUntil } from "./support/wait-until.ts";
 
 const newSharedServer = () =>
   new MemoryV2Server.Server({
-    sessions: new SessionRegistry({ ttlMs: 600_000 }),
+    sessions: new MemoryV2Server.SessionRegistry({ ttlMs: 600_000 }),
     subscriptionRefreshDelayMs: 0,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })

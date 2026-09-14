@@ -197,7 +197,9 @@ describe("cfc schema sanitization", () => {
     expect(extended.ifc.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
   });
 
-  it("uses child-local definitions while annotating nested refs", () => {
+  it("annotates a nested ref against the document's map, not the subtree's own `$defs`", () => {
+    // `#/$defs/Value` names the root's number, which is injection-safe; the
+    // string under the subtree's own `$defs` is inert below the root's map.
     const annotated = schemaWithInjectionSafeAnnotations({
       type: "object",
       properties: {
@@ -211,10 +213,7 @@ describe("cfc schema sanitization", () => {
     }, [promptRisk]) as any;
     const valueIfc = annotated.properties.nested.properties.value.ifc;
 
-    expect(valueIfc.addIntegrity ?? []).not.toContainEqual(
-      INJECTION_SAFE_ATOM,
-    );
-    expect(valueIfc.confidentiality).toContainEqual(promptRisk);
+    expect(valueIfc.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
   });
 
   it("annotates oneOf, allOf, empty objects, and not schemas", () => {
@@ -589,7 +588,7 @@ describe("cfc schema sanitization", () => {
     })).toBeUndefined();
   });
 
-  it("uses nested child-local definitions for preflight and values", () => {
+  it("resolves a nested ref against the document's map for preflight and values", () => {
     const schema: JSONSchema = {
       type: "object",
       properties: {
@@ -603,11 +602,13 @@ describe("cfc schema sanitization", () => {
     };
 
     expect(validateSchemaDefinition(schema)).toBeUndefined();
-    expect(validateSchemaValue(schema, { nested: { value: "local" } }))
-      .toBeUndefined();
     expect(validateSchemaValue(schema, { nested: { value: 1 } }))
-      .toContain("value does not match type string");
+      .toBeUndefined();
+    expect(validateSchemaValue(schema, { nested: { value: "local" } }))
+      .toContain("value does not match type number");
 
+    // With no map on the root, a ref that only the nested `$defs` could
+    // satisfy names nothing.
     const localOnlyDefinition: JSONSchema = {
       type: "object",
       properties: {
@@ -618,7 +619,11 @@ describe("cfc schema sanitization", () => {
         },
       },
     };
-    expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
+    expect(validateSchemaDefinition(localOnlyDefinition))
+      .toContain("cannot resolve schema reference");
+    expect(
+      validateSchemaValue(localOnlyDefinition, { nested: { value: "local" } }),
+    ).toContain("cannot resolve schema reference");
   });
 
   it("validates `FabricPrimitive` schema types by prototype", () => {
@@ -672,7 +677,7 @@ describe("cfc schema sanitization", () => {
       .toBeUndefined();
   });
 
-  it("keeps referenced definition bodies in their child-local scope", () => {
+  it("resolves a referenced definition body's refs against the document's map", () => {
     const schema: JSONSchema = {
       type: "object",
       properties: { item: { $ref: "#/$defs/Entry" } },
@@ -688,10 +693,10 @@ describe("cfc schema sanitization", () => {
     };
 
     expect(validateSchemaDefinition(schema)).toBeUndefined();
-    expect(validateSchemaValue(schema, { item: { value: "local" } }))
-      .toBeUndefined();
     expect(validateSchemaValue(schema, { item: { value: 1 } }))
-      .toContain("value does not match type string");
+      .toBeUndefined();
+    expect(validateSchemaValue(schema, { item: { value: "local" } }))
+      .toContain("value does not match type number");
   });
 
   it("walks a shared definition map once, not once per ref path", () => {
@@ -1156,20 +1161,17 @@ describe("cfc schema sanitization", () => {
     })).toBeUndefined();
   });
 
-  it("tracks recursive validation separately for each definition root", () => {
+  it("reports a ref that only a subschema's own `$defs` could satisfy as unresolvable", () => {
     const shared = { $ref: "#/$defs/V" } as const;
-    const child = {
-      $defs: { V: { type: "string" } },
-      allOf: [shared],
-    } as const;
     const schema: JSONSchema = {
-      $defs: { V: { allOf: [child] } },
-      allOf: [shared],
+      type: "object",
+      properties: {
+        text: { $defs: { V: { type: "string" } }, allOf: [shared] },
+      },
     };
 
-    expect(validateSchemaDefinition(schema)).toBeUndefined();
-    expect(validateSchemaValue(schema, "x")).toBeUndefined();
-    expect(validateSchemaValue(schema, 1)).toContain("type string");
+    expect(validateSchemaDefinition(schema))
+      .toContain("cannot resolve schema reference");
   });
 
   it("reports malformed referenced schemas and literal payloads", () => {

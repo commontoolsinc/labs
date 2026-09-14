@@ -35,10 +35,13 @@ export type {
 } from "./contracts/input-cells.ts";
 
 /**
- * An input cell's name is model-facing text the operator authors, so it is
- * held to a shape that cannot smuggle structure: word characters and hyphens.
+ * A handle's name is the whole of what a model is told the token stands for,
+ * so it is held to a shape that cannot smuggle structure: word characters and
+ * hyphens. Shared with the connector grants the console launcher resolves,
+ * whose names are read from a loom instance's records rather than authored by
+ * an operator and are held to the same rule for the same reason.
  */
-const INPUT_CELL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+export const HANDLE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 /** A parsed `--input-cell` argument. */
 export interface ParsedInputCellArgument {
@@ -61,9 +64,9 @@ export const checkInputCellSpec = (
   spec: HarnessInputCellSpec,
   space?: MemorySpace,
 ): void => {
-  if (!INPUT_CELL_NAME_PATTERN.test(spec.name)) {
+  if (!HANDLE_NAME_PATTERN.test(spec.name)) {
     throw new Error(
-      `--input-cell name must match ${INPUT_CELL_NAME_PATTERN}, got \`${spec.name}\``,
+      `--input-cell name must match ${HANDLE_NAME_PATTERN}, got \`${spec.name}\``,
     );
   }
   let link;

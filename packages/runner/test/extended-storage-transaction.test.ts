@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -15,9 +16,11 @@ import {
   createNonReactiveTransaction,
   type ExtendedStorageTransaction,
 } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
+  CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
   runtimeWritePolicyAuthorization,
 } from "../src/cfc/types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -51,6 +54,60 @@ describe("extended-storage-transaction", () => {
     tx.markLazyMaterialize(true);
     return { tx, cell: runtime.getCell(space, cause, SCHEMA, tx) };
   };
+
+  describe("content-addressed document staging", () => {
+    const code = "export const staged = 1;";
+    const codeId = `cid:${taggedHashStringOf(code)}`;
+    const stagedIds = (tx: IExtendedStorageTransaction): string[] =>
+      [...(tx.getWriteDetails?.(space) ?? [])].map((write) => write.address.id);
+
+    it("stages a document once however often a transaction asks", () => {
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(tx.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx).filter((id) => id === codeId)).toHaveLength(1);
+      tx.abort?.();
+    });
+
+    it("names a document by the general content hash of any value", () => {
+      const value = { kind: "blob", bytes: [1, 2, 3] };
+      const tx = runtime.edit();
+      expect(tx.stageContentAddressedDocument(space, value)).toBe(
+        `cid:${taggedHashStringOf(value)}`,
+      );
+      tx.abort?.();
+    });
+
+    it("elides a document the server already holds, whatever its value", async () => {
+      // A string, an array, and a number: the elision re-hashes the confirmed
+      // value, so it must recognize every kind of value the seam stages.
+      const values = [code, [1, "two", { three: 3 }], 42];
+      const ids = values.map((value) => `cid:${taggedHashStringOf(value)}`);
+      const install = runtime.edit();
+      for (const value of values) {
+        install.stageContentAddressedDocument(space, value);
+      }
+      expect((await install.commit()).error).toBeUndefined();
+      await storageManager.synced();
+
+      const tx = runtime.edit();
+      values.forEach((value, index) => {
+        expect(tx.stageContentAddressedDocument(space, value)).toBe(
+          ids[index],
+        );
+      });
+      for (const id of ids) expect(stagedIds(tx)).not.toContain(id);
+      tx.abort?.();
+    });
+
+    it("stages through a wrapping transaction into the one it wraps", () => {
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      expect(wrapped.stageContentAddressedDocument(space, code)).toBe(codeId);
+      expect(stagedIds(tx)).toContain(codeId);
+      tx.abort?.();
+    });
+  });
 
   describe("the read-result cache across a batch write", () => {
     it("keeps its entries across a batch holding no writes", () => {
@@ -260,6 +317,79 @@ describe("extended-storage-transaction", () => {
       } finally {
         await tx.commit();
       }
+    });
+  });
+
+  describe("document schema-policy inputs", () => {
+    it("includes later inputs across scopes while excluding other documents", async () => {
+      const otherSpace = (await Identity.fromPassphrase("policy-input-other"))
+        .did();
+      const tx = runtime.edit();
+      const wrapped = createNonReactiveTransaction(tx);
+      const target = {
+        space,
+        id: "of:policy",
+        scope: "space",
+        path: [],
+      } as const;
+      expect(wrapped.getCfcSchemaPolicyInputs(space, target.id)).toEqual([]);
+      const first = { kind: "schema", target, schema: SCHEMA } as const;
+      tx.recordCfcWritePolicyInput(first);
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, id: "of:other" },
+        schema: SCHEMA,
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, space: otherSpace },
+        schema: SCHEMA,
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "custom",
+        target,
+        name: "other-kind",
+        value: null,
+      });
+      const second = {
+        kind: "schema",
+        target: { ...target, scope: "user", path: ["title"] },
+        schema: { type: "string" },
+      } as const;
+      wrapped.recordCfcWritePolicyInput(second);
+      expect(tx.getCfcSchemaPolicyInputs(space, target.id)).toEqual([
+        first,
+        second,
+      ]);
+      expect(wrapped.getCfcSchemaPolicyInputs(space, target.id)).toEqual([
+        first,
+        second,
+      ]);
+      expect(tx.getCfcState().writePolicyInputs).toHaveLength(5);
+      tx.abort();
+      const fresh = runtime.edit();
+      expect(fresh.getCfcSchemaPolicyInputs(space, target.id)).toEqual([]);
+      fresh.abort();
+    });
+
+    it("protects the indexed inputs and their nested schema from mutation", () => {
+      const tx = runtime.edit();
+      const target = {
+        space,
+        id: "of:immutable-policy",
+        scope: "space",
+        path: [],
+      } as const;
+      tx.recordCfcWritePolicyInput({ kind: "schema", target, schema: SCHEMA });
+      const inputs = tx.getCfcSchemaPolicyInputs(space, target.id);
+      expect(() => Reflect.set(inputs, "length", 0)).toThrow("read-only");
+      expect(Reflect.set(inputs[0].target, "id", "of:corrupted")).toBe(false);
+      expect(Reflect.set(SCHEMA.properties.title, "type", "number")).toBe(
+        false,
+      );
+      expect(tx.getCfcSchemaPolicyInputs(space, target.id)).toHaveLength(1);
+      expect(tx.getCfcState().writePolicyInputs).toHaveLength(1);
+      tx.abort();
     });
   });
 
@@ -482,5 +612,175 @@ describe("extended-storage-transaction", () => {
         await tx.commit();
       }
     });
+  });
+
+  describe("the marking of a store no schema declares a policy on", () => {
+    // The §8.12.4 writer-fit measurement quantifies over the paths a schema
+    // could have declared a policy at. Two id classes it reads off the id;
+    // this is the answer for a document whose id says nothing, which the
+    // runtime names as it writes it. The marker lasts for the transaction
+    // that recorded it, with no enrollment beside it, because the
+    // measurement only ever runs over documents that transaction wrote.
+
+    const mark = (
+      tx: ReturnType<Runtime["edit"]>,
+      id: string,
+      { authorized = true, path = [] as readonly string[] } = {},
+    ) =>
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        target: { space, id, scope: "space", path: [...path] },
+        claim: CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+        sources: [],
+      }, authorized ? runtimeWritePolicyAuthorization : undefined);
+
+    it("answers for a document this transaction marked", async () => {
+      const tx = runtime.edit();
+      try {
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+        mark(tx, "of:marked");
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+        // The marker names a document, not the transaction.
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:not-marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("answers `false` to a caller without the runtime's mark", async () => {
+      const tx = runtime.edit();
+      try {
+        mark(tx, "of:unmarked-reader");
+        expect(tx.isUndeclarablePolicyStore(space, "of:unmarked-reader"))
+          .toBe(false);
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:unmarked-reader",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("counts a marker recorded without the runtime's mark for nothing", async () => {
+      // The gate ACTS on this claim, and the recording method is public, so
+      // an input's own fields say only what its recorder wrote.
+      const tx = runtime.edit();
+      try {
+        mark(tx, "of:forged", { authorized: false });
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:forged",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("counts a marker naming a path inside the document for nothing", async () => {
+      // Whether a schema could have declared a policy is a question about the
+      // document, so the marker answers for the whole of one.
+      const tx = runtime.edit();
+      try {
+        mark(tx, "of:partly-marked", { path: ["delegatedModuleIdentities"] });
+        expect(
+          tx.isUndeclarablePolicyStore(
+            space,
+            "of:partly-marked",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("is answered through a wrapper as through what it wraps", async () => {
+      const tx = runtime.edit();
+      const wrapper = createNonReactiveTransaction(tx);
+      try {
+        mark(tx, "of:marked-through-a-wrapper");
+        expect(
+          wrapper.isUndeclarablePolicyStore(
+            space,
+            "of:marked-through-a-wrapper",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(true);
+        expect(
+          wrapper.isUndeclarablePolicyStore(
+            space,
+            "of:marked-through-a-wrapper",
+          ),
+        ).toBe(false);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("does not answer for a store a previous transaction marked", async () => {
+      // The other half of "no enrollment beside it": a marker dies with its
+      // transaction, and nothing carries it forward.
+      const first = runtime.edit();
+      mark(first, "of:marked-earlier");
+      await first.commit();
+
+      const later = runtime.edit();
+      try {
+        expect(
+          later.isUndeclarablePolicyStore(
+            space,
+            "of:marked-earlier",
+            runtimeWritePolicyAuthorization,
+          ),
+        ).toBe(false);
+      } finally {
+        await later.commit();
+      }
+    });
+  });
+
+  it("reports a committed seq through the sample wrapper", async () => {
+    // `Cell.sample()` and `Cell.sink()` hand out this wrapper, and the
+    // accessor is optional on the interface, so a wrapper that dropped it
+    // would compile and answer undefined for a commit the wrapped
+    // transaction knows the seq of.
+
+    const tx = runtime.edit();
+    runtime.getCell(space, "wrapped committed seq", undefined, tx).set({
+      title: "after",
+    });
+    const wrapper = createNonReactiveTransaction(tx);
+    expect(wrapper.committedSeq?.(space)).toBeUndefined();
+
+    await tx.commit();
+
+    const seq = tx.committedSeq?.(space);
+    expect(seq).toBeGreaterThan(0);
+    expect(wrapper.committedSeq?.(space)).toBe(seq);
   });
 });

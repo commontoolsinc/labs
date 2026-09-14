@@ -93,6 +93,115 @@ describe("ESM compile via content-addressed cell cache", () => {
     return result.getAsQueryResult();
   };
 
+  for (const preview of ["compile", "load"]) {
+    for (const filename of ["/main.tsx", "/child.tsx"]) {
+      it(`repairs ${filename} after a ${preview} preview indexes its artifact`, async () => {
+        const program: RuntimeProgram = {
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents:
+              'import { pattern } from "commonfabric"; import Child from "./child.tsx"; export const child = Child; export default pattern<{value: number}>(({value}) => ({value}));',
+          }, {
+            name: "/child.tsx",
+            contents:
+              'import { pattern } from "commonfabric"; export default pattern<{value: number}>(({value}) => ({value}));',
+          }],
+        };
+        const pattern = await runtime.patternManager.compilePattern(program, {
+          space,
+        });
+        const entry = runtime.patternManager.getArtifactEntryRef(pattern)!;
+        const closure = await loadVerifiedSourceClosure(
+          runtime,
+          space,
+          entry.identity,
+          tx,
+        );
+        const identity = [...closure!].find(([, doc]) =>
+          doc.filename === filename
+        )![0];
+        const version = "preview-recovery-next-runtime";
+        const restoreVersion = setCompileCacheRuntimeVersionForTesting(version);
+        const reader = newRuntime();
+        try {
+          if (preview === "compile") {
+            await reader.patternManager.compilePattern(program, {
+              space,
+              persist: false,
+            });
+          } else {
+            await reader.patternManager.loadPatternByIdentity(
+              entry.identity,
+              "default",
+              space,
+              { repairCache: false },
+            );
+          }
+          const readCache = async () => {
+            const readTx = reader.edit();
+            try {
+              return await loadCompiledClosure(reader, space, identity, {
+                runtimeVersion: version,
+              }, readTx);
+            } finally {
+              readTx.abort();
+            }
+          };
+          await reader.patternManager.flushCompileCacheWrites();
+          expect((await readCache()).has(identity)).toBe(false);
+          expect(
+            await reader.patternManager.loadPatternByIdentity(
+              identity,
+              "default",
+              space,
+            ),
+          ).toBeDefined();
+          await reader.patternManager.flushCompileCacheWrites();
+          expect((await readCache()).has(identity)).toBe(true);
+        } finally {
+          restoreVersion();
+          await reader.dispose({ closeStorage: false });
+        }
+      });
+    }
+  }
+
+  it("returns undefined for a missing preview export without scheduling cache repair", async () => {
+    const pattern = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const entry = runtime.patternManager.getArtifactEntryRef(pattern)!;
+    const reader = newRuntime();
+    let writes = 0;
+    reader.patternManager.accessForTestingOnly.compileCacheWriter = () => {
+      writes++;
+      return Promise.resolve();
+    };
+    try {
+      expect(
+        await reader.patternManager.loadPatternByIdentity(
+          entry.identity,
+          "missing",
+          space,
+          { repairCache: false },
+        ),
+      ).toBeUndefined();
+      await reader.patternManager.flushCompileCacheWrites();
+      expect(writes).toBe(0);
+      expect(
+        await reader.patternManager.loadPatternByIdentity(
+          entry.identity,
+          "default",
+          space,
+          { repairCache: false },
+        ),
+      ).toBeDefined();
+    } finally {
+      await reader.dispose({ closeStorage: false });
+    }
+  });
+
   it("cold compile writes back, warm compile is a hit, both run correctly", async () => {
     const pm = runtime.patternManager;
 

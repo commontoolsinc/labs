@@ -9,6 +9,7 @@ import {
   familyIdOf,
   foldTotals,
   importedPatternIdsOf,
+  main,
   measureArtifactRoot,
   type MeasurementTotals,
   measureTranscript,
@@ -23,7 +24,6 @@ import {
   toolOutcomeOf,
   totalsOf,
 } from "../scripts/measure-runs.ts";
-import { main } from "../scripts/measure-runs.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 
 const FIXTURE_ROOT = fromFileUrl(

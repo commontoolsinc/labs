@@ -88,6 +88,31 @@ If a browser command did run inside the agent sandbox, disregard its
 browser-startup failure and rerun it outside the sandbox before interpreting
 the test result.
 
+### Browser process cleanup
+
+The integration browser launcher uses the installed Chrome selected by
+`packages/integration/astral-adapter.ts`; `ASTRAL_BIN_PATH` overrides that
+selection. Chrome launches include `--disable-updater-scheduler` so an
+ephemeral test profile cannot start maintenance of the installed browser.
+Detached updater crash handlers can inherit Chrome's stderr and keep it open
+after the browser exits. Chrome's own crash reporting remains enabled.
+
+Each browser launches in its own Unix process group. `BrowserProcess.close()`
+sends `SIGKILL` to that group, including renderers that outlive the root, and
+waits for root exit and both output streams to reach EOF before profile removal.
+Test callers dispose their page runtimes and collect coverage before closing the
+browser. Process termination does not wait for the browser's event loop to
+handle a signal. An output reader failure is propagated after the browser
+process has been reaped. A browser's exit and its output reaching EOF are
+separate events: inherited descriptors can outlive the process that opened
+them. Detached crash handlers can outlive the group and remain covered by the
+EOF wait. When investigating a teardown stall, capture every holder of the
+pipe, including renderers and detached updater processes, and record assertion
+completion separately from suite and process completion.
+
+Browser tests require macOS or Linux. The launcher rejects other platforms
+before it starts a browser.
+
 ### Focused browser regressions
 
 A package can reserve a `*.browser.test.ts` file for DOM behavior that needs a
@@ -131,6 +156,51 @@ a focused browser regression with a plain Deno unit test for any extracted
 policy or state machine, because code executed inside Chrome does not enter
 Deno's V8 coverage profile.
 
+### Browser row reconnect acceptance
+
+The row browser test can place real reader storage outages around remote color,
+profile, and removal writes. Its normal CI run covers connected readers. The
+reconnect mode requires a local relay and a shell compiled against that relay;
+the independent writer continues to use the toolshed directly.
+
+Start the local servers with offset 89, following
+[the local server procedure](LOCAL_DEV_SERVERS.md):
+
+```bash
+EXPERIMENTAL_SERVER_EXECUTION=false ./scripts/start-local-dev.sh --port-offset 89
+```
+
+This starts toolshed on port 8089 and the ordinary shell on port 5262. The test
+uses the separate relay-connected shell on port 5263 started below. Run this
+relay in another terminal from the repository root:
+
+```bash
+deno run -A packages/patterns/integration/storage-network-gate-server.ts http://127.0.0.1:8089 58848 58849
+```
+
+The relay accepts a loopback API URL, a relay port, and a control port. It binds
+both listeners to loopback. Dedicate the relay to this run; its socket count
+includes every connected reader. Use free ports and substitute them consistently.
+Start a separate shell against the relay in another terminal:
+
+```bash
+TOOLSHED_PORT=58848 SHELL_PORT=5263 EXPERIMENTAL_SERVER_EXECUTION=false deno task --cwd packages/shell dev-local
+```
+
+After the shell reports that it is listening, run the browser test:
+
+```bash
+API_URL=http://127.0.0.1:8089 FRONTEND_URL=http://127.0.0.1:5263/ EXPERIMENTAL_SERVER_EXECUTION=false CF_ROW_RECONNECT_CONTROL_URL=http://127.0.0.1:58849/ CF_ROW_REPRO_ARTIFACT_DIR=/tmp/row-reconnect deno test -A packages/patterns/integration/reactive-vote-rows-browser.test.ts
+```
+
+Each outage asserts that the relay closed live socket endpoints before the
+writer changes data. Requests remain held until the test resumes the relay.
+The four cases cover nested and mapped rows with same-space and cross-space
+profiles, and assert rendered content after reconnect and after later updates.
+Captures include a `reconnect` field in their metadata. These are synthetic
+spaces; testing a live poll requires separate coordination. Stop the relay and
+the extra shell after testing.
+
 ### Running a test under a server-execution posture
 
 `serverExecution`'s first-party default is the constant
@@ -172,11 +242,10 @@ The toolshed log records the same thing, but it accumulates NUL bytes, so
 `grep` can decide it is binary and print nothing rather than the line that is
 there; pass `grep -a` if you read it.
 
-`restart-local-dev.sh` is the reason to check rather than assume. It runs
-`start-local-dev.sh` as a fresh process without the environment it was itself
-given, so restarting to pick up an edit returns the toolshed to the default
-while the posture the reader set appears to still be in place. Stop and start,
-or re-supply the variable to the restart.
+`start-local-dev.sh` and `restart-local-dev.sh` inherit their caller's
+environment. Supply the flags on every start or restart, or export them in the
+calling shell; a variable supplied to an earlier command does not persist for
+the next one.
 
 A posture mismatch does not announce itself. It fails the test, which reads as
 the behavior under test being broken, so a run against a default-posture
@@ -184,12 +253,33 @@ toolshed can report a test as failing at every commit while CI has that test
 green. That is enough to send a bisect to the wrong answer, which is the cost
 worth avoiding here.
 
-None of this reaches a test that opens a browser. The shell's half of the
-posture is a build-time define that the local dev servers do not carry:
-`/api/meta` reports `shellServerExecutionDefine` as null whatever the toolshed
-was started with. That is faithful only to the default role, whose shell follows
-the first-party constant. A browser test on the opposite role needs a binary
-built with the same explicit flag as the server and test process.
+The shell receives these flags through build-time defines in `felt.config.ts`.
+Felt's development server builds with those defines before serving the shell,
+so flags supplied to `deno task integration` reach the server, test processes,
+and browser workers. The runtime-client integration helper also forwards the
+environment-selected flags into its workers. `/api/meta`'s
+`shellServerExecutionDefine` describes a packaged shell build and can be null
+with local dev servers; it does not report the defines in the dev bundle.
+
+The `generated-patterns` and `pattern-tests` targets use in-process, emulated
+stores without a serving host. The integration runner explicitly disables
+`serverExecution` for these two harnesses while preserving the other inherited
+flags. Server-backed targets receive the supplied server-execution setting.
+
+For view-scoped replication, run the complete default integration suite with:
+
+```bash
+EXPERIMENTAL_SERVER_EXECUTION=true \
+EXPERIMENTAL_VIEW_SCOPED_REPLICATION=true deno task integration
+```
+
+The browser regression `shell/integration/view-scoped-replication.test.ts`
+checks the server's published posture and the shell's actual worker
+initialization. Run it through `deno task integration shell view-scoped` to
+test a flag combination, including `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION=false`
+overriding a true global default, or a true web override with the global default
+false. Restart the servers through the integration runner for each combination
+so the browser bundle is rebuilt with that environment.
 
 ### Tests that start Deno
 

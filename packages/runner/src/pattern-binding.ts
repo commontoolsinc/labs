@@ -1,5 +1,3 @@
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   fabricAwareEqual,
   FabricInstance,
@@ -10,16 +8,31 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
+import { getServerExecutionConfig } from "@commonfabric/memory/v2";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isAliasBinding } from "./alias-binding.ts";
+import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import type {
+  Cell,
+  CellScope,
+  DerivedInternalCellDescriptor,
+} from "./builder/types.ts";
 import {
   type FabricExecValue,
   isPattern,
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
-import { type AnyCell } from "./cell.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { type AnyCell, markCellDocumentSynced } from "./cell.ts";
+import {
+  ContextualFlowControl,
+  resolveExternalRootRefForStructure,
+} from "./cfc.ts";
 import { diffAndUpdate } from "./data-updating.ts";
+import { resolveLink } from "./link-resolution.ts";
+import { toMemorySpaceAddress } from "./link-types.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -34,24 +47,13 @@ import {
   sanitizeSchemaForLinks,
   sigilLinkAddressOnly,
 } from "./link-utils.ts";
-import { isAliasBinding } from "./alias-binding.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   internalVerifierRead,
   machineryRead,
 } from "./storage/reactivity-log.ts";
-import {
-  ContextualFlowControl,
-  resolveExternalRootRefForStructure,
-} from "./cfc.ts";
-import type {
-  Cell,
-  CellScope,
-  DerivedInternalCellDescriptor,
-} from "./builder/types.ts";
-import { isCellScope, scopeRank } from "./scope.ts";
-import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 
 /**
  * Longest rendering of a binding an error message carries. A binding can
@@ -427,6 +429,8 @@ function sendValueToBindingInner<T>(
         });
         if (!valueEqual(current, newValue)) {
           tx.writeValueOrThrow(bindingLink, newValue);
+        } else {
+          tx.retainPendingWriteElision?.(toMemorySpaceAddress(bindingLink));
         }
         return;
       }
@@ -503,8 +507,8 @@ function sendValueToBindingInner<T>(
  * to kilobytes against a cause otherwise measured in hundreds of bytes.
  *
  * The reduction is to the address, not away from the schema specifically, so
- * anything else riding a link is left out too -- cfc's `cfcLabelView` being
- * the one that exists today. See `sigilLinkAddressOnly()`.
+ * anything else riding a link is left out too, including `cfcLabelView` and
+ * the `scopeInitialization` declaration. See `sigilLinkAddressOnly()`.
  *
  * So the reduction happens here rather than in the binding itself, and the two
  * trees part company at this call: what the node reads through keeps its
@@ -835,7 +839,10 @@ export function opaqueArgumentKeys(
 export function findAllWriteRedirectCells<T>(
   binding: unknown,
   baseCell: AnyCell<T>,
-  options?: { skipTopLevelKeys?: ReadonlySet<string> },
+  options?: {
+    skipTopLevelKeys?: ReadonlySet<string>;
+    followRedirectChains?: boolean;
+  },
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
@@ -864,12 +871,21 @@ export function findAllWriteRedirectCells<T>(
       const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
+      if (options?.followRedirectChains === false) return;
+      // The probe reads the target's raw value to see whether it is itself a
+      // redirect. The cell keeps the link's schema, which carries the scope
+      // caps resolution honors along the path, but a raw read of a cold
+      // document would kick a sync under that schema, pulling everything the
+      // schema reaches for a read that wants one document, so the probe
+      // reads the replica as it stands and kicks nothing: what a run reads
+      // is named by the pre-sync, not by this walk.
       const linkCell = baseCell.runtime.getCellFromLink(
         link,
         undefined,
         baseCell.tx,
       );
       if (!linkCell) throw new Error("Link cell not found");
+      markCellDocumentSynced(linkCell);
       const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
       // Resolve the next redirect relative to `linkCell` (the cell the chained
       // redirect lives in), not the original `baseCell`: a relative redirect in

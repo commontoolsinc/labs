@@ -7,10 +7,10 @@ import {
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   hashStringOf,
   isDeepFrozen,
+  isFabricSpecialObject,
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
   toIndentedDebugString,
@@ -37,7 +37,9 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { StagedMap } from "@commonfabric/utils/staged-map";
 
+import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
@@ -70,6 +72,7 @@ import type {
 } from "./builder/types.ts";
 import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import type { LastNode } from "./link-resolution.ts";
 import {
@@ -993,6 +996,25 @@ export class MapSet<K, V> {
     throw new Error("MapSet structural copy requires matching hashing modes");
   }
 
+  /** Stages per-key containers while retaining the canonical value identity. */
+  protected stageStateFrom(other: MapSet<K, V>): {
+    commit: () => void;
+    changedKeys: () => Iterable<K>;
+  } {
+    const staged = other.#hashMap !== undefined
+      ? new StagedMap(other.#hashMap, (values) => new Map(values))
+      : new StagedMap(other.#setMap!, (values) => new Set(values));
+    if (other.#hashMap !== undefined) {
+      this.#hashMap = staged as StagedMap<K, Map<string, V>>;
+    } else {
+      this.#setMap = staged as StagedMap<K, Set<V>>;
+    }
+    return {
+      commit: () => staged.commit(),
+      changedKeys: () => staged.changedKeys(),
+    };
+  }
+
   /**
    * iterable
    */
@@ -1089,8 +1111,8 @@ export class MapSetStringToPathSelectors extends MapSet<
   /**
    * A structural copy: per-key container copies of the base map and the
    * permissive index. Cloning through `add()` would re-hash every selector
-   * and re-derive the index; this keeps a full-state clone (`extend`
-   * staging) at plain container-copy cost.
+   * and re-derive the index. Independent evaluation-cache states use these
+   * copies; temporary additive evaluation uses `stage()`.
    */
   clone(): MapSetStringToPathSelectors {
     const cloned = new MapSetStringToPathSelectors(this.isHashing());
@@ -1099,6 +1121,33 @@ export class MapSetStringToPathSelectors extends MapSet<
       cloned.#trueSchemaIndex.set(key, new Set(values));
     }
     return cloned;
+  }
+
+  /**
+   * Stages selector changes for synchronous evaluation under exclusive access
+   * to this tracker. Discard on failure; commit only after all evaluation
+   * succeeds. Neither the stage nor its mutable containers may escape.
+   */
+  stage(): {
+    value: MapSetStringToPathSelectors;
+    commit: () => void;
+    changedKeys: () => Iterable<string>;
+  } {
+    const value = new MapSetStringToPathSelectors(this.isHashing());
+    const entries = value.stageStateFrom(this);
+    const index = new StagedMap(
+      this.#trueSchemaIndex,
+      (values) => new Set(values),
+    );
+    value.#trueSchemaIndex = index;
+    return {
+      value,
+      commit: () => {
+        entries.commit();
+        index.commit();
+      },
+      changedKeys: entries.changedKeys,
+    };
   }
 }
 
@@ -2477,6 +2526,7 @@ function followPointer(
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
   // We use a nonRecursive read, since we may not need everything at the target.
+  if (readStatsActive) recordLinkResolution(tx);
   const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
@@ -3909,7 +3959,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               // construction (removable with the other brand exemptions
               // once the generator skips the brand — see
               // opaqueLeafMissesRequired's doc comment).
-              if (doc.value instanceof FabricSpecialObject) {
+              if (isFabricSpecialObject(doc.value)) {
                 if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
                 if (
                   !(req in (doc.value as unknown as Record<string, unknown>))
@@ -4384,7 +4434,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         : fail(TRAVERSE_FAILURES.invalidArray);
     }
 
-    if (doc.value instanceof FabricSpecialObject) {
+    if (isFabricSpecialObject(doc.value)) {
       // A `FabricPrimitive` is an opaque leaf; see the value-type dispatch's
       // arm (the plan compiles from the same schema family, so the same
       // posture applies here).
@@ -4490,6 +4540,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
     const target = this.#plainArrayItemLinkTarget(doc, selector);
     if (target === undefined) return undefined;
+    if (readStatsActive) recordLinkResolution(this.tx);
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined) {
       if (error.name !== "NotFoundError" || error.path.length !== 0) {
@@ -4718,6 +4769,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
             this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
           }
           const preparedTarget = preparedPlainLinks?.targets[batchIndex];
+          if (readStatsActive && preparedTarget !== undefined) {
+            recordLinkResolution(this.tx);
+          }
           const preparedResult = preparedTarget === undefined
             ? undefined
             : this.tx.read(preparedTarget, READ_NON_RECURSIVE);
@@ -5325,7 +5379,7 @@ export function canBranchMatch(
         // runtime existence and is satisfied by construction (removable
         // with the other brand exemptions once the generator skips the
         // brand — see opaqueLeafMissesRequired's doc comment).
-        if (value instanceof FabricSpecialObject) {
+        if (isFabricSpecialObject(value)) {
           if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(req as string in value)) return false;
           continue;
@@ -5574,6 +5628,7 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
+    if (readStatsActive) recordLinkResolution(tx);
     // This extra hop bypasses followPointer, so it carries the crossing
     // seam itself.
     markIfcBearingLinkCrossing(
@@ -5678,7 +5733,7 @@ function schemaTypeValidity(
     let match: TypeValidity.True | TypeValidity.Unknown | undefined;
     for (const option of schemaObj.allOf) {
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       // ignore undefined result (unknown type), but if any option returns
@@ -5705,7 +5760,7 @@ function schemaTypeValidity(
         break;
       }
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       if (valid === TypeValidity.False) {
@@ -5732,7 +5787,7 @@ function schemaTypeValidity(
         break;
       }
       const valid = schemaTypeValidity(
-        schemaWithDefs(schemaObj, option),
+        cfcSchemaWithInheritedDefs(option, schemaObj.$defs),
         valueType,
       );
       if (valid === TypeValidity.False) {
@@ -5794,15 +5849,4 @@ export function schemaAcceptsType(
   valueType: JSONSchemaTypes,
 ): boolean {
   return schemaTypeValidity(schema, valueType) !== TypeValidity.False;
-}
-
-function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
-  // We need to preserve any parent $defs in the branch
-  if (!parent.$defs || !isObjectOrArray(option)) {
-    return option;
-  }
-  return {
-    ...option,
-    $defs: parent.$defs,
-  };
 }
