@@ -22,8 +22,12 @@ new spaces use DID URLs and Home stores editable display labels.
   display name, user DID, account DID, or provider hostname.
 - Equal labels do not imply equal spaces. Renaming a label does not change a
   space DID.
-- The bootstrap private key has one job: authorize the genesis transaction. It
-  is destroyed after durable ownership has been established.
+- The bootstrap private key has one job: sign the genesis transaction. It is
+  destroyed as soon as that signed transaction has been handed to the
+  conditional durable-recording attempt, regardless of its outcome. An
+  allocation exists only if the stable control document confirms that signed
+  transaction. Recovery replays an accepted transaction and never recovers the
+  key.
 - The genesis transaction is the first valid state for the new DID. It assigns
   the creating user as owner before ordinary writes are accepted.
 - Repeating a completed create request returns the original result. Repeating a
@@ -87,8 +91,10 @@ new spaces use DID URLs and Home stores editable display labels.
   [shared-profile specification](../specs/shared-profile-space.md#profile-space-identity)
   are migration consumers of the explicit create-and-open split.
 - [Toolshed storage configuration](../development/CONFIGURATION.md#memory-store)
-  does not provide the private allocation record or pending-key protection.
-  The implementation adds that control storage explicitly.
+  already provides the shared Common Memory route used by every Toolshed
+  process. The implementation stores provider-private coordination documents
+  through that route; it does not add a database, queue, cache, key service, or
+  other runtime dependency.
 - Earlier `ct-space`
   [recovery](https://github.com/commontoolsinc/labs/blob/850bca9aed74c22773de5caa2b0b81c98713e646/docs/access-recovery.md)
   and
@@ -122,6 +128,10 @@ new spaces use DID URLs and Home stores editable display labels.
   supported space DID method.
 - Define an idempotency key for one user create action. It must survive client
   resubmission and server-process changes without becoming part of the DID.
+- Define an append-only control-namespace catalog in existing deployment
+  configuration. A creation intent binds its target ASP's current namespace
+  version before the creator signs it. New versions may add or replace shards;
+  old versions and their shard DIDs remain addressable for idempotent replay.
 - Define the `spaces` field on the ordinary Home space root. Define the stable
   cause and schema for one ordinary Home-space creation-record document. Confirm
   that a single Home-space transaction can complete that document while
@@ -135,18 +145,33 @@ new spaces use DID URLs and Home stores editable display labels.
   ordinary Home-space ACL would otherwise authorize the writer.
 - Identify the configured Home operator recovery identity and define the signed
   evidence it may use when a permanently unavailable target ASP has been fenced
-  and its authoritative control database recovered.
-- Confirm that every production toolshed process shares the durable create
-  request store and space storage. Creation must not depend on process-local
-  state.
+  and its authoritative provider control shard recovered.
+- Confirm that every production Toolshed process uses the same authoritative
+  Common Memory route for provider-private control shards and ordinary space
+  storage. Confirm that the route's existing transaction acceptance and
+  failover rules admit only one authoritative history for each shard. Creation
+  must not depend on process-local state.
+- Load-test each append-only namespace's fixed set of provider-private control
+  shards and choose enough shards for the expected creation rate. Record their
+  DIDs and immutable hash-to-shard mapping in the existing catalog.
+- Confirm that existing server-side execution can resume one durably addressed
+  creation event after a process exits, without broadcasting the whole backlog
+  to every Toolshed process. The event carries only a provider-private control
+  document link. It does not carry key material or a request body.
+- Confirm server-side execution's current failure, consequence, and watermark
+  semantics. Define a durable deferred marker and monotonically increasing
+  continuation generation in the control-document schema. An explicit wake can
+  append the next generation without a timer, sleep, or retry loop.
 
 ## Changes to make
 
 - Add one space-creation operation shared by every caller.
   - Accept a creator-authorized creation intent containing the creator DID, an
     opaque idempotency key, the authenticated Home ASP origin, the target public
-    ASP origin, and an optional initial display label. Obtain the Home ASP from
-    the authenticated session rather than a free-form caller field.
+    ASP origin, the target's control-namespace version, and an optional initial
+    display label. Obtain the Home ASP from the authenticated session rather
+    than a free-form caller field. Accept only a namespace version advertised by
+    that target.
   - Before allocating a DID, verify that the intent authorizes one Home
     registration for the result bound to that creator, idempotency key, and
     target ASP. This authority cannot write any other Home data.
@@ -161,13 +186,15 @@ new spaces use DID URLs and Home stores editable display labels.
     creator the owner capability in the ACL representation used by ordinary
     authorization.
   - Sign only that genesis transaction with the space private key.
-  - Record the request before submitting genesis. Never report success before
+  - Atomically record the accepted DID and complete signed genesis transaction
+    before submitting genesis. Destroy the private key immediately after handing
+    that allocation transaction to Common Memory, whatever response the commit
+    attempt returns. Never persist the private key or report success before
     durable state can reproduce the result.
   - Treat Home registration as part of this operation. Do not expose a second
     caller-managed "add to Home" operation for newly created spaces.
-  - Destroy every in-memory and serialized copy of the private key after
-    genesis commits. Do not return it to the shell, store it in Home, or place
-    it in logs.
+  - Keep the private key in memory only. Do not return it to the shell, store it
+    in Home, or place it in logs.
   - Obtain the normalized storage origin from the target ASP's authenticated
     creation result. Keep it distinct from the public ASP origin used in browser
     URLs.
@@ -176,50 +203,100 @@ new spaces use DID URLs and Home stores editable display labels.
     committed.
 
 - Make creation safe across parallel toolshed processes.
-  - Store create-request ownership and results in a toolshed-private PostgreSQL
-    control table shared by every process for the ASP.
-  - Use a unique database constraint on creator DID plus idempotency key so two
-    frontend processes cannot generate two accepted results for one action.
-  - Store the authorized creation intent in an `intent-recorded` row before
+  - Add no new persistence, database, queue, cache, or cryptographic dependency.
+    Store coordination as ordinary provider-private Fabric documents through
+    the ASP's existing Common Memory route, and use existing Fabric
+    transactions, content authorization, and background execution for
+    consistency and recovery.
+  - Provision each catalogued namespace as a fixed set of provider-owned
+    control spaces. Select one with a stable hash of namespace version,
+    normalized target public ASP origin, creator DID, and idempotency key.
+    Address one creation document within it by a domain-separated hash of the
+    same canonically encoded tuple. The control spaces are inaccessible to
+    users. An immutable mapping within each version distributes load without
+    making process identity part of request routing. Adding a version scales
+    future creation without remapping an existing request.
+  - Treat the creation document's stable Fabric address as the uniqueness
+    boundary. Two frontend processes carrying the same signed creation intent
+    therefore contend on the same document even when they receive the requests
+    independently. A different namespace version for the same target origin,
+    creator DID, and idempotency key conflicts with the existing Home creation
+    record and is rejected before allocation. The same idempotency key at a
+    different target origin selects a different document.
+  - Store the authorized creation intent in `intent-recorded` state before
     contacting Home. Change it to `home-authorized` only after observing the
-    matching Home creation record. A later conditional transaction changes it
-    to `allocated` and stores the DID and encrypted pending private key. Encrypt
-    pending key data with an authenticated-encryption key supplied as a
-    deployment secret.
-  - If concurrent processes generate candidates for one `home-authorized` row,
-    accept only the key stored by the conditional transition. Destroy every
-    losing candidate without publishing its DID or genesis transaction.
+    matching Home creation record. A later conditional Fabric transaction
+    changes it to `allocated` and stores the DID and complete signed genesis
+    transaction. Never store private key material in Fabric, another persistent
+    store, a background event, or a log.
+  - If concurrent processes generate candidates for one `home-authorized`
+    document, accept only the DID and signed genesis transaction stored by the
+    winning conditional Fabric transaction. Destroy every candidate private key
+    immediately after handing its complete signed transaction to the conditional
+    commit attempt, regardless of whether the response is success, rejection,
+    or indeterminate. Resolve an indeterminate response by the submitted Fabric
+    transaction identity and then reload the stable control document. Do not
+    publish a losing DID or signed transaction.
   - Use explicit `intent-recorded`, `home-authorized`, `allocated`,
     `genesis-committed`, `complete`, `rejected`, `abandoning`, `abandoned`, and
     `inconsistent` states. A process that receives the same request returns its
     completed result, resumes its unfinished state, or reports its terminal
     state. It cannot replace an accepted allocation. `Abandoning` remains
     unfinished until Home records the matching terminal state.
-  - Ensure a losing concurrent process reads the durable request. It returns a
-    completed result or resumes the recorded allocation. It must not publish an
-    unused key or genesis transaction.
-  - After observing committed genesis, delete the encrypted pending key and mark
-    the genesis step complete in one control-database transaction. If a process
-    exits between those actions, a later request observes genesis and performs
-    the deletion. The key has no post-genesis authority while it awaits
-    deletion. Do not mark the overall request complete until Home registration
-    has committed.
-  - Fence a failed database or storage writer before another writer accepts the
-    same request.
-  - Treat unfinished control rows as durable work. Process them when they are
-    committed and when a toolshed process starts, so recovery does not depend on
-    the original frontend process.
+  - Enforce immutable intent fields, immutable accepted DID and genesis data,
+    and the exact state-transition graph with content authorization on the
+    provider control space. Permit a handler to set the deferred marker without
+    changing its creation state, and permit an authorized wake to clear that
+    marker while incrementing the continuation generation exactly once.
+    Conditional transactions resolve concurrency; content authorization rejects
+    an illegal transition even from a stale or defective Toolshed process
+    holding the service authority.
+  - Ensure a losing concurrent process reads the durable document. It returns
+    a completed result or resumes the recorded allocation. It must not publish
+    an unused key or genesis transaction.
+  - Submit the recorded signed genesis transaction idempotently. After observing
+    committed genesis, retain that immutable transaction, add the matching
+    committed genesis reference, and mark the genesis step complete in one
+    control-shard transaction. The signed transaction contains no private key
+    and authorizes nothing except the already committed genesis.
+  - Schedule one durable server-side creation event for each continuation state.
+    Derive its event identity from the control-document address and expected
+    state and continuation generation. Atomically schedule the successor event
+    with the state transition that makes it necessary. A handler whose expected
+    state or generation is no longer current is a no-op. Let the existing
+    server-side executor assign and resume each event across Toolshed processes.
+    Do not add an application work index, startup scan, queue, lease, timer, or
+    retry loop.
+  - On a transient external failure, consume the current event while atomically
+    setting the control document's deferred marker. This advances the existing
+    executor watermark, so the failed creation cannot block unrelated work in
+    the shard. Resubmission of the identical creation request or the Home ASP
+    named by the intent may explicitly wake the document. A wake clears the
+    marker, increments its continuation generation, and appends the newly
+    addressed event in one transaction. Permanent or protocol failures make the
+    plan's corresponding terminal state transition.
+  - Make each external step idempotent under that durable event identity.
+    Repeated genesis submission carries the identical signed transaction, and
+    repeated Home completion addresses the identical creation record and
+    transaction. Use conditional Fabric transactions for every control-state
+    transition. A redundant invocation reloads the document and resumes or
+    returns its durable state without multiplying the backlog across processes.
+  - Rely on the same authoritative Common Memory transaction acceptance that
+    protects ordinary Fabric spaces; do not create a second application-level
+    consensus or fencing system. Production routing must not expose two
+    independent writable histories for one control shard. Existing storage
+    failover must fence the old authority before the replacement serves it.
   - Expose a durable creation-state lookup for Home registration. Require the
     matching creator-authorized intent, serve the result from every toolshed
     process, and retain it at the original public ASP origin through completion.
     Return an allocation result only from `genesis-committed` or `complete` and
     include the committed genesis reference. Return no-DID abandonment evidence
     only from `abandoning` or `abandoned`. Do not expose request enumeration.
-  - Use bounded connection pools and request sizes. Apply backpressure when the
-    service is saturated.
-  - Keep decrypted private key material only in the process performing the
-    accepted creation. Do not pass it through queues that persist request
-    bodies.
+  - Bound Toolshed request size and concurrency, and rely on Common Memory and
+    server-side execution's existing backpressure.
+  - Keep private key material only in the process constructing the allocation
+    transaction and only until handing that transaction to Common Memory. Do not
+    pass it through background execution or another process.
 
 - Register every created space using ordinary data in the creator's Home space.
   - Add `spaces` to the existing Home space root. Represent it and each creation
@@ -248,13 +325,13 @@ new spaces use DID URLs and Home stores editable display labels.
     one terminal transition that preserves the intent digest. A `completed`
     transition fills the DID, storage origin, serving-state revision, and
     committed genesis reference obtained through the creation protocol. An
-    `abandoned` transition carries proof that the target's control row moved to
-    `abandoning` while it had no DID. When no record exists, permit the same
-    proof and signed intent to create it directly as `abandoned`. Reject every
-    other replacement and deletion, including an otherwise owner-authorized Home
-    transaction. Permit the configured Home operator recovery identity to supply
-    the separately defined fenced-database evidence when the target ASP is
-    permanently unreachable.
+    `abandoned` transition carries proof that the target's control document
+    moved to `abandoning` while it had no DID. When no record exists, permit the
+    same proof and signed intent to create it directly as `abandoned`. Reject
+    every other replacement and deletion, including an otherwise
+    owner-authorized Home transaction. Permit the configured Home operator
+    recovery identity to supply the separately defined fenced-control-shard
+    evidence when the target ASP is permanently unreachable.
   - Complete the creation-record document and commit the DID-keyed `spaces`
     entry and site-table hint in one normal Home-space transaction. Write the
     presentation and routing entries only during that transition. Replaying the
@@ -280,31 +357,32 @@ new spaces use DID URLs and Home stores editable display labels.
     transaction without retaining the user's private key, reconnecting the
     initiating client, or holding a general-purpose Home-write capability.
   - If a process exits after the Home transaction commits but before updating
-    the control row, a later process observes the matching immutable receipt and
-    marks the request complete. It does not inspect or rewrite the mutable
-    `spaces` and site-table entries.
-  - Mark the control row `rejected` when Home rejects a malformed or unauthorized
-    intent, unsupported protocol, wrong Home ASP, or conflicting creation record
-    before allocation. Return that durable error without processing the row
-    again.
+    the control document, a later process observes the matching immutable
+    receipt and marks the request complete. It does not inspect or rewrite the
+    mutable `spaces` and site-table entries.
+  - Mark the control document `rejected` when Home rejects a malformed or
+    unauthorized intent, unsupported protocol, wrong Home ASP, or conflicting
+    creation record before allocation. Return that durable error without
+    processing the document again.
   - Allow the creator to abandon an `intent-recorded` or `home-authorized`
-    request before allocation. Conditionally move the target control row to
-    `abandoning` only while it has no DID. Have Home fetch that state and move or
-    create the matching creation record as `abandoned`. Only after observing the
-    Home state may the target mark its row `abandoned`. Allocation and
-    abandonment therefore cannot both succeed. A delayed Home-authorization
-    request observes the terminal record and cannot revive it.
+    request before allocation. Conditionally move the target control document
+    to `abandoning` only while it has no DID. Have Home fetch that state and
+    move or create the matching creation record as `abandoned`. Only after
+    observing the Home state may the target mark its document `abandoned`.
+    Allocation and abandonment therefore cannot both succeed. A delayed
+    Home-authorization request observes the terminal record and cannot revive
+    it.
   - Keep a request pending when Home storage is unavailable after genesis. Mark
     it `inconsistent` and surface an operator error for any permanent Home-side
     rejection after allocation. Never allocate a replacement DID. If an ASP is
     permanently unreachable, do not treat absence as proof that allocation did
     not occur. Fence every process and public route that could allocate for that
-    ASP before operator recovery. Recover the authoritative PostgreSQL control
-    state from its surviving quorum or backup. Home may accept operator-signed
-    abandonment evidence only when it identifies that fenced control database,
-    the creator, target origin, idempotency key, last durable revision, and the
-    absence of an allocated DID. Without that evidence, leave the Home record
-    pending.
+    ASP before operator recovery. Recover the authoritative provider control
+    shard from the existing Common Memory backup and recovery path. Home may
+    accept operator-signed abandonment evidence only when it identifies that
+    fenced shard, the creation-document address, creator, target origin,
+    idempotency key, last durable revision, and the absence of an allocated DID.
+    Without that evidence, leave the Home record pending.
   - Let users later remove a `spaces` entry or edit its label without changing
     the space, its ACL, or its site-table hint. A `spaces` entry records a
     space the identity knows about; it is not evidence that the identity still
@@ -435,7 +513,7 @@ new spaces use DID URLs and Home stores editable display labels.
     converted.
 
 - Cut over every process and protocol as one compatibility barrier.
-  - Provision the shared allocation table without enabling new behavior.
+  - Provision the provider-private control shards without enabling new behavior.
   - Stop accepting new space creation, ACL mutations, and ordinary writes
     globally.
   - Drain every old shell session, toolshed process, storage process, background
@@ -477,7 +555,17 @@ new spaces use DID URLs and Home stores editable display labels.
     allocation, after genesis, and after the Home commit. Prove another process
     resumes each request without allocating a new DID or creating duplicate Home
     entries.
-  - Ask Home to complete a record while the target control row is `allocated`.
+  - Disconnect the allocating process after it hands Common Memory the
+    conditional allocation transaction. Prove it destroys the private key
+    without knowing the commit outcome, resolves the submitted transaction
+    identity after reconnecting, and accepts a candidate only when the stable
+    control document contains its signed genesis transaction.
+  - Make Home transiently unavailable. Prove the current event commits its
+    deferred marker and advances the executor watermark, later creations in the
+    shard continue, and an authenticated Home wake schedules exactly one new
+    continuation generation for the original request.
+  - Ask Home to complete a record while the target control document is
+    `allocated`.
     Prove the target withholds a result and Home does not publish the `spaces`
     entry, site-table hint, or completed record before genesis commits.
   - Prove a creation is not reported as successful while its Home registration
@@ -494,22 +582,27 @@ new spaces use DID URLs and Home stores editable display labels.
   - Abandon a Home-authorized request concurrently with allocation. Prove that
     exactly one transition succeeds and that an abandoned request never obtains
     a DID.
-  - Exit after the target commits `abandoning`. Prove startup recovery completes
-    the Home transition before marking the target row `abandoned`.
+  - Exit after the target commits `abandoning`. Prove server-side execution
+    resumes the Home transition before marking the target control document
+    `abandoned`.
   - Abandon an `intent-recorded` request while Home authorization is in flight.
     Prove Home ends in `abandoned` and the delayed authorization cannot revive
     it.
-  - Reject a request before allocation and prove process startup does not resume
-    it as unfinished work.
+  - Reject a request before allocation and prove server-side execution does not
+    resume it as unfinished work.
   - Upgrade and restart an existing standard Home root. Prove its preserved
     result reads and edits `homeSpaceCell.spaces` through the rebound input.
     Prove an existing closed-input custom Home root still receives its original
     argument.
   - Simulate permanent target loss. Prove Home rejects operator abandonment
     without fencing and durable no-allocation evidence, then accepts correctly
-    bound evidence recovered from the fenced target's control database.
+    bound evidence recovered from the fenced target's control shard.
   - Use the same idempotency key at two ASP origins. Prove the two composite
     receipt keys do not conflict and both creations complete.
+  - Add a control-namespace version and direct new creation to its new shard set.
+    Prove an earlier signed intent still resolves through its original namespace
+    while the same creator and idempotency key cannot allocate again under the
+    new version.
   - Forge an allocation response and attempt a cross-origin redirect during
     Home registration. Prove the Home ASP rejects both and accepts the result it
     fetches directly from the intended ASP over authenticated HTTPS.
@@ -519,8 +612,10 @@ new spaces use DID URLs and Home stores editable display labels.
   - Prove the public ASP origin and distinct storage origin are used only for
     browser navigation and storage connections respectively.
   - Prove another identity cannot write without a later delegation.
-  - Prove no bootstrap private key remains in databases, Home cells, logs,
-    queues, browser storage, or returned values.
+  - Prove the bootstrap private key never enters provider control shards, Home
+    cells, Fabric history, logs, background events, browser storage, or returned
+    values. Prove crash recovery uses only the recorded signed genesis
+    transaction.
   - Prove DID URLs work through every production frontend and identify the same
     ASP without a host query parameter.
   - Prove duplicate and renamed Home labels do not affect resolution.
@@ -531,17 +626,18 @@ new spaces use DID URLs and Home stores editable display labels.
     rejected after the cutover marker.
   - Verify every populated legacy space has a concrete owner and no non-Home
     grant to its publicly derivable space DID.
-  - Exercise database and storage failover during creation. Assert that writer
-    fencing prevents two accepted results.
+  - Exercise Common Memory failover during creation. Assert that authoritative
+    transaction acceptance and writer fencing prevent two accepted results.
   - Run repository formatting, lint, documentation-link, unit, integration,
     browser, ACL, background-execution, and migration checks before landing.
 
 ## Result
 
 Every new space has a fresh, unguessable DID backed by random key data. The
-creating user owns it from its first committed state. The bootstrap key is then
-gone. The completed creation is already present in the user's durable Home
-space list, with a completed write-once creation-record document and routing
-supplied by the Home site table. Display labels remain convenient user metadata,
-while browser links use the ASP hostname and space DID prescribed by Common
-Fabric URLs.
+creating user owns it from its first committed state. The bootstrap key is gone
+once its single signed genesis transaction has been handed to the durable
+recording attempt, before that transaction is submitted as genesis. The
+completed creation is already present in the user's durable Home space list,
+with a completed write-once creation-record document and routing supplied by the
+Home site table. Display labels remain convenient user metadata, while browser
+links use the ASP hostname and space DID prescribed by Common Fabric URLs.
