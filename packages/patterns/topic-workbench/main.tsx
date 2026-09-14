@@ -1,3 +1,23 @@
+/**
+ * A per-person lens over ONE topic: the topic's summary, the agent sessions
+ * attached to it, the sessions that look related, the topic's links, and a
+ * composer that starts a new session for the topic.
+ *
+ * It is a piece in the PERSON's own space rather than a change to the topic,
+ * because agent sessions are published owner-confidential by the agents
+ * connector while the topic lives on a shared board. The workbench holds a
+ * reference to the topic and reads the person's connector index; nothing here
+ * writes into the topic.
+ *
+ * Attachments are the workbench's own record, sessions are read from the
+ * connector's complete index, and "start a session" sends the connector a
+ * `start` command through a queue the connector's host binds to this
+ * pattern's own handler. A start is recorded as pending until the index
+ * carries the session it named; only then does it count as attached, since
+ * the queue may not be bound yet or the connector may refuse the start. The
+ * composed shell command stays as the fallback for a person whose host has
+ * no queue for this piece.
+ */
 import {
   action,
   computed,
@@ -20,24 +40,6 @@ import {
   TOPICS_THEME,
   whenLabel,
 } from "../topics/topic.tsx";
-
-// ===== What this is =====
-//
-// A per-person lens over ONE topic: the topic's summary, the agent sessions
-// attached to it, the sessions that look related, the topic's links, and a
-// composer that starts a new session for the topic.
-//
-// It is a piece in the PERSON's own space rather than a change to the topic,
-// because agent sessions are published owner-confidential by the agents
-// connector while the topic lives on a shared board. The workbench holds a
-// reference to the topic and reads the person's connector index; nothing here
-// writes into the topic.
-//
-// Attachments are the workbench's own record, sessions are read from the
-// connector's complete index, and "start a session" sends the connector a
-// `start` command through a queue the connector's host binds to this
-// pattern's own handler. The composed shell command stays as the fallback for
-// a person whose host has no queue for this piece.
 
 // ===== Views of what this reads =====
 
@@ -134,6 +136,19 @@ export interface Attachment {
   attachedAt: number;
 }
 
+/** A start this workbench has sent and the connector has not yet shown as a
+ * session: the command may be waiting on a queue the host has not bound, or
+ * the connector may have refused it. Once the index carries the session, the
+ * start counts as an attachment; until then it shows as starting and can be
+ * dismissed. */
+export interface PendingStart {
+  commandId: string;
+  sourceId: string;
+  nativeSessionId: string;
+  title: string;
+  startedAt: number;
+}
+
 /** A session as the workbench shows it: the index row joined with whether it
  * is attached. Plain values, derived on read. */
 export interface SessionRow {
@@ -188,13 +203,19 @@ export interface WorkbenchInput {
    * the host has linked it; a start sent before then reaches nothing.
    */
   commands?: Writable<CommandValue[] | Default<[]>>;
+  /** Starts sent and not yet confirmed by the index, the workbench's own
+   * record. */
+  pendingStarts?: Writable<PendingStart[] | Default<[]>>;
 }
 
 export interface WorkbenchOutput {
   [NAME]: string;
   [UI]: VNode;
   attached: Attachment[] | Default<[]>;
+  /** The attached sessions, the confirmed starts among them. */
   attachedSessions: SessionRow[];
+  /** Starts the index has not confirmed yet. */
+  pendingStarts: PendingStart[];
   relatedSessions: SessionRow[];
   recentSessions: SessionRow[];
   spawnCommand: string;
@@ -211,7 +232,8 @@ export interface WorkbenchOutput {
   /**
    * Start a session for the topic: sends the connector a `start` command
    * carrying the kickoff prompt, the picked checkout, and the topic's name as
-   * the session title, and attaches the new session at once.
+   * the session title, and records the start as pending until the index
+   * carries the session.
    */
   startSession: Stream<void>;
   // The connector's host reads this field's schema to learn which handler may
@@ -226,8 +248,66 @@ export interface WorkbenchOutput {
 //
 // Module-scope lifts, because the declared parameter is what bounds the read.
 
-const sessionKey = (sourceId: string, nativeSessionId: string): string =>
+export const sessionKey = (sourceId: string, nativeSessionId: string): string =>
   `${sourceId}/${nativeSessionId}`;
+
+/** Whether the index carries a session, not deleted. */
+const indexCarries = (
+  index: SessionIndexView | undefined,
+  sourceId: string,
+  nativeSessionId: string,
+): boolean =>
+  (index?.sessions ?? []).some((s) =>
+    s !== undefined && s.syncStatus !== "deleted" &&
+    s.sourceId === sourceId && s.nativeSessionId === nativeSessionId
+  );
+
+/** The pending starts the index has confirmed, as attachments: the connector
+ * published the session the start named, so it is the person's. */
+export const confirmedStartsOf = lift((
+  { pending, index }: {
+    pending: PendingStart[] | Default<[]>;
+    index?: SessionIndexView;
+  },
+): Attachment[] =>
+  pending.filter((p) => indexCarries(index, p.sourceId, p.nativeSessionId))
+    .map((p) => ({
+      sourceId: p.sourceId,
+      nativeSessionId: p.nativeSessionId,
+      title: p.title,
+      attachedAt: p.startedAt,
+    }))
+);
+
+/** The pending starts the index has not confirmed: still starting, or refused
+ * by the connector, which the person can dismiss. */
+export const unconfirmedStartsOf = lift((
+  { pending, index }: {
+    pending: PendingStart[] | Default<[]>;
+    index?: SessionIndexView;
+  },
+): PendingStart[] =>
+  pending.filter((p) => !indexCarries(index, p.sourceId, p.nativeSessionId))
+);
+
+/** The attachments and the confirmed starts as one list, one per session,
+ * in the order they were attached or started. */
+export const attachmentsOf = lift((
+  { attached, confirmed }: {
+    attached: Attachment[] | Default<[]>;
+    confirmed: Attachment[];
+  },
+): Attachment[] => {
+  const keys = new Set(
+    attached.map((a) => sessionKey(a.sourceId, a.nativeSessionId)),
+  );
+  return [
+    ...attached,
+    ...confirmed.filter((c) =>
+      !keys.has(sessionKey(c.sourceId, c.nativeSessionId))
+    ),
+  ].toSorted((a, b) => a.attachedAt - b.attachedAt);
+});
 
 /** Every session the index holds, newest first, with the fields the rows
  * render. Reads the shallow row and nothing under the manifest. */
@@ -434,15 +514,18 @@ const captionOf = (row: SessionRow): string =>
 
 // ===== Handlers (browser) =====
 
-/** The key an attachment's record lives under: one per session. */
-const attachmentKey = (sourceId: string, nativeSessionId: string): string =>
-  JSON.stringify([sourceId, nativeSessionId]);
+/** The key an attachment's or a pending start's record lives under: one per
+ * session. */
+export const attachmentKey = (
+  sourceId: string,
+  nativeSessionId: string,
+): string => JSON.stringify([sourceId, nativeSessionId]);
 
 /** Records the attachment when none is there and adds it to the list: a
  * keyed record and an add-if-absent membership, so the same person writing
  * from two tabs or a session's own skill do not overwrite each other. True
  * when the record was new. */
-const recordAttachment = (
+export const recordAttachment = (
   attached: Writable<Attachment[] | Default<[]>>,
   attachment: Attachment,
 ): boolean => {
@@ -457,7 +540,7 @@ const recordAttachment = (
 
 /** Drops a session's attachment and clears its record, so a later attach of
  * the same session starts fresh rather than reviving this one. */
-const dropAttachment = (
+export const dropAttachment = (
   attached: Writable<Attachment[] | Default<[]>>,
   sourceId: string,
   nativeSessionId: string,
@@ -466,6 +549,78 @@ const dropAttachment = (
   attached.removeByValue(attached.elementById(key));
   const record: Writable<Attachment | undefined> = attached.elementById(key);
   record.set(undefined);
+};
+
+/** Records a start as pending, keyed by the session it named. */
+export const recordPendingStart = (
+  pending: Writable<PendingStart[] | Default<[]>>,
+  start: PendingStart,
+): void => {
+  const record = pending.elementById(
+    attachmentKey(start.sourceId, start.nativeSessionId),
+  );
+  record.set(start);
+  pending.addUnique(record);
+};
+
+/** Drops a pending start and clears its record: the person dismissed it, or
+ * detached the session it became. */
+export const dropPendingStart = (
+  pending: Writable<PendingStart[] | Default<[]>>,
+  sourceId: string,
+  nativeSessionId: string,
+): void => {
+  const key = attachmentKey(sourceId, nativeSessionId);
+  pending.removeByValue(pending.elementById(key));
+  const record: Writable<PendingStart | undefined> = pending.elementById(key);
+  record.set(undefined);
+};
+
+/** The source a start goes through: the picked one, else the first offered,
+ * and only when it is one that can start; "" otherwise. */
+export const startSourceOf = (
+  picked: string,
+  options: readonly CheckoutOption[],
+  startable: readonly string[],
+): string => {
+  const sourceId = (picked || options[0]?.value || "").trim();
+  return startable.includes(sourceId) ? sourceId : "";
+};
+
+/** A connector `start` command, JSON-encoded as its queue holds it, and the
+ * id it carries. */
+export const startCommandValue = (
+  { ownerDid, idPrefix, sourceId, nativeSessionId, text, cwd, title, mode }: {
+    ownerDid: string;
+    idPrefix: string;
+    sourceId: string;
+    nativeSessionId: string;
+    text: string;
+    cwd: string;
+    title: string;
+    mode?: string;
+  },
+): { id: string; value: CommandValue } => {
+  const createdAt = new Date().toISOString();
+  const id = `${idPrefix}:${createdAt}:${nativeSessionId.slice(0, 8)}`;
+  return {
+    id,
+    value: JSON.stringify({
+      schema: "commonfabric.agent-connector.command",
+      ownerDid,
+      id,
+      createdAt,
+      sourceId,
+      nativeSessionId,
+      type: "start",
+      payload: {
+        text,
+        ...(cwd ? { cwd } : {}),
+        ...(title ? { title } : {}),
+        ...(mode ? { mode } : {}),
+      },
+    }),
+  };
 };
 
 const attachFromRow = handler<void, {
@@ -484,10 +639,22 @@ const attachFromRow = handler<void, {
 
 const detachFromRow = handler<void, {
   attached: Writable<Attachment[] | Default<[]>>;
+  pendingStarts: Writable<PendingStart[] | Default<[]>>;
   sourceId: string;
   nativeSessionId: string;
-}>((_, { attached, sourceId, nativeSessionId }) => {
+}>((_, { attached, pendingStarts, sourceId, nativeSessionId }) => {
+  // A confirmed start is attached through its pending record; detaching
+  // drops whichever record the session has.
   dropAttachment(attached, sourceId, nativeSessionId);
+  dropPendingStart(pendingStarts, sourceId, nativeSessionId);
+});
+
+const dismissStart = handler<void, {
+  pendingStarts: Writable<PendingStart[] | Default<[]>>;
+  sourceId: string;
+  nativeSessionId: string;
+}>((_, { pendingStarts, sourceId, nativeSessionId }) => {
+  dropPendingStart(pendingStarts, sourceId, nativeSessionId);
 });
 
 const useDefaultPrompt = handler<void, {
@@ -507,13 +674,13 @@ const mintSessionId = (): string =>
   });
 
 /**
- * Sends the connector a `start` command and attaches the session it names.
+ * Sends the connector a `start` command and records the start as pending.
  * Exported because the connector's host binds this piece's queue to this
  * handler by name: only a write from here is accepted on that queue.
  */
 export const startSessionCommand = handler<void, {
   commands: Writable<CommandValue[] | Default<[]>>;
-  attached: Writable<Attachment[] | Default<[]>>;
+  pendingStarts: Writable<PendingStart[] | Default<[]>>;
   spawnRoot: Writable<string>;
   spawnSource: Writable<string>;
   sourceOptions: CheckoutOption[];
@@ -522,46 +689,44 @@ export const startSessionCommand = handler<void, {
   shortName: string;
   title: string;
 }>((_, state) => {
-  const sourceId = (state.spawnSource.get() || state.sourceOptions[0]?.value ||
-    "").trim();
-  if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
   // The options are the sources that can start; a picker value naming any
   // other (a source that lost the capability, a stale choice) starts nothing.
-  if (!state.sourceOptions.some((option) => option.value === sourceId)) return;
+  const sourceId = startSourceOf(
+    state.spawnSource.get(),
+    state.sourceOptions,
+    state.sourceOptions.map((option) => option.value),
+  );
+  if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
   const nativeSessionId = mintSessionId();
-  const createdAt = new Date().toISOString();
   const sessionTitle = state.shortName
     ? `topic #${state.shortName}: ${state.title}`
     : state.title;
-  const cwd = state.spawnRoot.get().trim();
-  state.commands.push(JSON.stringify({
-    schema: "commonfabric.agent-connector.command",
+  const command = startCommandValue({
     ownerDid: state.ownerDid,
-    id: `workbench:${createdAt}:${nativeSessionId.slice(0, 8)}`,
-    createdAt,
+    idPrefix: "workbench",
     sourceId,
     nativeSessionId,
-    type: "start",
-    payload: {
-      text: state.kickoff,
-      ...(cwd ? { cwd } : {}),
-      ...(sessionTitle ? { title: sessionTitle } : {}),
-    },
-  }));
-  // Attached now, so the session shows as starting before the index carries
-  // it; the row joins the live index entry when the connector publishes it.
-  recordAttachment(state.attached, {
+    text: state.kickoff,
+    cwd: state.spawnRoot.get().trim(),
+    title: sessionTitle,
+  });
+  state.commands.push(command.value);
+  // Pending, not attached: nothing here knows whether a queue took the
+  // command or the connector accepted it. The start shows as starting until
+  // the index carries the session, and can be dismissed if it never does.
+  recordPendingStart(state.pendingStarts, {
+    commandId: command.id,
     sourceId,
     nativeSessionId,
     title: sessionTitle,
-    attachedAt: Date.now(),
+    startedAt: Date.now(),
   });
 });
 
 // ===== The pattern =====
 
 export default pattern<WorkbenchInput, WorkbenchOutput>(
-  ({ topic, sessions, attached, commands }) => {
+  ({ topic, sessions, attached, commands, pendingStarts }) => {
     const spawnPrompt = new Writable.perSession("");
     const spawnRoot = new Writable.perSession("");
     const spawnSource = new Writable.perSession("");
@@ -574,8 +739,17 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const hasTopic = title.trim().length > 0;
     const hasBody = body.trim().length > 0;
 
-    const rows = sessionRowsOf({ index: sessions, attached });
-    const attachedSessions = attachedRowsOf({ attached, rows });
+    const confirmedStarts = confirmedStartsOf({
+      pending: pendingStarts,
+      index: sessions,
+    });
+    const attachments = attachmentsOf({ attached, confirmed: confirmedStarts });
+    const startingSessions = unconfirmedStartsOf({
+      pending: pendingStarts,
+      index: sessions,
+    });
+    const rows = sessionRowsOf({ index: sessions, attached: attachments });
+    const attachedSessions = attachedRowsOf({ attached: attachments, rows });
     const relatedSessions = relatedRowsOf({ rows, shortName, title });
     const recentSessions = recentRowsOf({ rows, limit: 8 });
     const links = presentLinksOf({ links: topic?.links });
@@ -594,7 +768,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     const spawnCommand = spawnCommandOf({ root: spawnRoot, prompt: kickoff });
     const startSession = startSessionCommand({
       commands,
-      attached,
+      pendingStarts,
       spawnRoot,
       spawnSource,
       sourceOptions,
@@ -605,6 +779,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     });
 
     const hasAttached = attachedSessions.length > 0;
+    const hasStarting = startingSessions.length > 0;
     const hasRelated = relatedSessions.length > 0;
     const hasRecent = recentSessions.length > 0;
     const hasLinks = links.length > 0;
@@ -634,11 +809,10 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
     );
 
     const detach = action<DetachEvent>(({ sourceId, nativeSessionId }) => {
-      dropAttachment(
-        attached,
-        (sourceId ?? "").trim(),
-        (nativeSessionId ?? "").trim(),
-      );
+      const source = (sourceId ?? "").trim();
+      const native = (nativeSessionId ?? "").trim();
+      dropAttachment(attached, source, native);
+      dropPendingStart(pendingStarts, source, native);
     });
 
     return {
@@ -798,6 +972,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                                   data-detach=""
                                   onClick={detachFromRow({
                                     attached,
+                                    pendingStarts,
                                     sourceId: row.sourceId,
                                     nativeSessionId: row.nativeSessionId,
                                   })}
@@ -814,6 +989,54 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                             one.
                           </cf-text>
                         )}
+                      {hasStarting
+                        ? (
+                          <cf-vstack gap="2" data-starting="">
+                            <cf-text variant="caption" tone="muted">
+                              Starting · {startingSessions.length}
+                            </cf-text>
+                            {startingSessions.map((start) => (
+                              <cf-hstack
+                                gap="2"
+                                align="center"
+                                data-starting-row=""
+                              >
+                                <cf-vstack
+                                  gap="0"
+                                  style="flex: 1; min-width: 0;"
+                                >
+                                  <cf-text
+                                    block
+                                    truncate
+                                    style="font-weight: 600;"
+                                  >
+                                    {start.title || "(untitled session)"}
+                                  </cf-text>
+                                  <cf-text
+                                    variant="caption"
+                                    tone="muted"
+                                    truncate
+                                  >
+                                    {`${start.sourceId} · sent to the connector; attaches when the session appears in the index`}
+                                  </cf-text>
+                                </cf-vstack>
+                                <cf-button
+                                  variant="ghost"
+                                  size="sm"
+                                  data-dismiss=""
+                                  onClick={dismissStart({
+                                    pendingStarts,
+                                    sourceId: start.sourceId,
+                                    nativeSessionId: start.nativeSessionId,
+                                  })}
+                                >
+                                  Dismiss
+                                </cf-button>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
+                        )
+                        : null}
                     </cf-vstack>
                   </cf-card>
 
@@ -997,7 +1220,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                         </cf-button>
                         <cf-text variant="caption" tone="muted">
                           {sourceOptions.length > 0
-                            ? "Runs the first turn on this Mac through the connector; the session appears above as it starts."
+                            ? "Runs the first turn on this Mac through the connector; the start shows above as starting until the connector publishes the session, and can be dismissed if it never does."
                             : "No harness the connector runs here can start a session."}
                         </cf-text>
                       </cf-hstack>
@@ -1035,6 +1258,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
       ),
       attached,
       attachedSessions,
+      pendingStarts: startingSessions,
       relatedSessions,
       recentSessions,
       spawnCommand,
