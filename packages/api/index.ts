@@ -3724,3 +3724,6 @@ export type FsProjection =
     content: Record<string, unknown>;
   }
   | { type?: undefined; [key: string]: unknown };
+
+// Cold-cache probe for #7443: this line puts the commit in the compile
+// cache fingerprint so the pattern-test shards run cold. Reverted next.
