@@ -22,6 +22,56 @@ This block is LIVE: the change that moves a stage updates it here.
 | S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed twice and held, awaiting a demand for named Topics rather than a technical answer |
 | S5 — deferred, not scheduled | — |
 
+### What remains, and none of it is built
+
+Every stage above is on main, and a collection that adopts `naming.ts` today
+gets member names end to end: allocation, resolution at the CLI, the shell
+opening `/<space>/top/42`, `#42` in the editor. **That is not the same as the
+work being finished.** Five things are outstanding, each needing execution by
+someone; none is in progress.
+
+1. **Decision 14 — a member takes one input naming its board.** Ruled, and
+   measured buildable: a member declaring a board demand that names only the
+   derived tables reaches exactly what naming those tables directly reaches,
+   a constant `+2 documents` over today's wiring and byte-identical when the
+   element schemas are held equal, flat from a 2-member board to a 40-member
+   one. **Unbuilt.** Until it lands, every collection adopting the namespace
+   pays one `cf piece link` per existing member, per board-to-member input.
+
+2. **A table handed to every member delivers every member's document whole**
+   (#7439). Measured on Topics: a member's declared demand over `boardCrossrefs`
+   or `boardNames` reaches every other member, 90.5% of the frame on a
+   40-member board, scaling in member count and indifferent to how connected
+   the graph is. `unknown` bounds the walk's descent, not its delivery, and the
+   comments beside all three tables say otherwise. The fix is a row-shape
+   change — `asCell` markers of every flavor were measured to change nothing —
+   and it touches the same inputs decision 14 touches, so the two belong in one
+   pass.
+
+3. **S6 item 4 — the production backfill.** Held for want of a demand rather
+   than a technical answer, with the sequence recorded under S6 below. Two
+   things that gated it have since moved: #6969 is fixed, so the deployed board
+   can be pre-flighted; and an optional `unknown` member demand no longer
+   refuses. What still needs an accepted break is the typed `shortName` demand
+   and the compact mention index's removal of `result.mentionable[].body` —
+   see [issue #6969's investigation](../history/development/issue-6969-upgrade-gates-2026-09-09.md).
+
+4. **The `naming` declaration has no reader** (#6986, #6994). Every collection
+   publishes `NamingPolicy`; nothing consumes it. Member resolution applies no
+   grammar, no renderer reads `compact`, and `name` is never set. It is an
+   extension point with nothing extending through it, recorded in the spec's
+   "Deliberately open" rather than claimed as working.
+
+5. **The citation surfaces are partial.** A mention pill shows whatever its
+   destination publishes, whichever collection named it (#6985); a URL naming
+   more than a member is answered as if it named a member (#6993); "Copy
+   reference" yields an address that does not resolve outside the fabric
+   (#6995).
+
+S5 is separately deferred and unscheduled: cross-space personal bindings, the
+compact `<collection>-42` spelling, and prose scanning.
+
+
 ## Decisions, ruled 2026-09-03
 
 Each of these was a question with a recommendation; the recommendation was
