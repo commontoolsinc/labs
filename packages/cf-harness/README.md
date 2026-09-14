@@ -353,14 +353,16 @@ From [packages/cf-harness](.):
   3). One direct batch run under `max-enforcement / enforce-strict` with a
   restricted parent surface (`delegate_task`, `describe_handle`,
   `search_skills`, `acquire_skill`) that runs two arms over one finance-labeled
-  input cell: a real skill acquired from the registry and used by handle, and
-  the malicious [`fixtures/hostile-skills-root/`](fixtures/README.md) skill
-  delivered into a `pattern-author` child. After the run it emits the three
-  receipts — the canary grep over the parent run directory, the release-refusal
-  trace, and the persisted label plus `TransformedBy` on derived data. It reads
-  the identity keyfile from `CF_HARNESS_FABRIC_IDENTITY` and never echoes it;
-  override the toolshed, space, cell, and space-db through the environment
-  variables it documents at the top.
+  input cell: a skill acquired by pin and used by handle, whose one allowlisted
+  script — `scripts/category-budgets.sh`, allowlisted at that pin — the child
+  runs in its sandbox and feeds into `run_pattern`; and the malicious
+  [`fixtures/hostile-skills-root/`](fixtures/README.md) skill delivered into a
+  `pattern-author` child. After the run it emits the four receipts — the canary
+  grep over the parent run directory, the acquired script's blast radius, the
+  release-refusal trace, and the persisted label plus `TransformedBy` on derived
+  data. It reads the identity keyfile from `CF_HARNESS_FABRIC_IDENTITY` and
+  never echoes it; override the toolshed, space, cell, and space-db through the
+  environment variables it documents at the top.
 
 ## CLI Example
 
