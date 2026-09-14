@@ -50,6 +50,39 @@ describe("llm-friendly-ref", () => {
     });
   });
 
+  it("retains pins on rooted and complete references for the caller", () => {
+    const pin = "a".repeat(43);
+    for (const reference of [`/${HANDLE}`, `//${DID}/${HANDLE}`]) {
+      expect(normalizeLLMFriendlyRef(`${reference}@pin=${pin}/a@pin=literal`, {
+        space: DID,
+      })).toEqual({ pieceId: HANDLE, pin, path: ["a@pin=literal"] });
+    }
+  });
+
+  it("inherits caller scope on rooted and complete references", () => {
+    for (const scope of ["space", "user", "session"] as const) {
+      for (const reference of [`/${HANDLE}`, `//${DID}/${HANDLE}`]) {
+        for (const qualifier of ["", "@inherit", "@scope=inherit"]) {
+          expect(normalizeLLMFriendlyRef(`${reference}${qualifier}/items`, {
+            space: DID,
+            scope,
+          })).toEqual({ pieceId: HANDLE, scope, path: ["items"] });
+        }
+        expect(normalizeLLMFriendlyRef(`${reference}@space/items`, {
+          space: DID,
+          scope,
+        })).toEqual({ pieceId: HANDLE, scope: "space", path: ["items"] });
+      }
+    }
+  });
+
+  it("inherits a scope-only context without inventing a space", () => {
+    expect(normalizeLLMFriendlyRef(`/${HANDLE}@inherit`, { scope: "session" }))
+      .toEqual({ pieceId: HANDLE, scope: "session", path: [] });
+    expect(() => normalizeLLMFriendlyRef(`/${HANDLE}@inherit`))
+      .toThrow(/requires a reference context/);
+  });
+
   it("names the piece by slug where a handle is accepted", () => {
     expect(normalizeLLMFriendlyRef("/tracker")).toEqual({
       pieceId: "tracker",
