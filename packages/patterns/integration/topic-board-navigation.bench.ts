@@ -46,11 +46,10 @@ import { collectBrowserLoadSummary } from "./cfc-browser-helpers.ts";
 const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
 
 /**
- * The dashboard keys a chart series on this file, the group, and the
- * benchmark's name. The authoring demand is part of the workload and belongs
- * in the group so index and full-result workloads have separate series.
+ * Stable dashboard group used with this file and the benchmark name to identify
+ * each browser navigation series.
  */
-const GROUP = `topic board (${DEMAND} demand)`;
+const GROUP = "topic board";
 
 const DEFAULT_TOPIC_COUNT = 30;
 
