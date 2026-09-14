@@ -103,11 +103,16 @@ with the same namespace, space, and piece.
 
 ### Resolving the space name
 
-If there is a namespace and a space name, the *actual space name* is formed by
-concatenating an `@`, the namespace, a `/`, and the given space name. This name
-is looked up in the name registry to get the space DID.
+Classify the specified space component before combining it with a namespace. If
+it is a syntactically valid space DID or the empty string, the *actual space
+name* is that value. The namespace selects the secondary server but is not part
+of the actual space name in either case.
 
-Otherwise, the *actual space name* is the same as the specified space name.
+Otherwise, the specified space component must be a valid short name. Its
+*actual space name* is the registered name formed by concatenating an `@`, the
+namespace, a `/`, and that short name when a namespace is present. Without a
+namespace, its actual space name is the short name itself. Any other specified
+space component makes resolution fail.
 
 If the *actual space name* is a DID, the secondary server checks its registry
 for a space-move redirect keyed by that DID. If one exists, the server
@@ -127,9 +132,10 @@ If the *actual space name* is the empty string, it resolves to the DID of the
 user's home space on the *secondary server*. The server then applies the same
 space-DID resolution, including any space-move redirect.
 
-Otherwise, the *actual space name* is a *short name*. The secondary server looks
-up that short name in its registry of short names, and handles it as appropriate
-as described below.
+Otherwise, the *actual space name* is a *registered name*. The secondary server
+looks it up in its name registry and handles it as appropriate as described
+below. Without a namespace it is a short name; with a namespace it has the
+`@namespace/space` form.
 
 Once resolution reaches the terminal ASP, that ASP supplies the resolved space
 DID and the storage origin for that DID in its authenticated HTTPS response to

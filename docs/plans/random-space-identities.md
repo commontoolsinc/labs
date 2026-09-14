@@ -91,10 +91,21 @@ new spaces use DID URLs and Home stores editable display labels.
   [shared-profile specification](../specs/shared-profile-space.md#profile-space-identity)
   are migration consumers of the explicit create-and-open split.
 - [Toolshed storage configuration](../development/CONFIGURATION.md#memory-store)
-  already provides the shared Common Memory route used by every Toolshed
-  process. The implementation stores provider-private coordination documents
-  through that route; it does not add a database, queue, cache, key service, or
-  other runtime dependency.
+  defines the Common Memory server embedded in each Toolshed process. Existing
+  [multi-process host topology](../development/staging-space-copy.md#the-host)
+  uses a shared durable store, and production
+  [storage routing](https://github.com/commontoolsinc/infra/blob/main/ansible/roles/nginx/templates/toolshed.conf.j2)
+  sends every connection for one space DID to one of those servers. The control
+  spaces use that same space-keyed route; they do not assume that the embedded
+  servers share process memory.
+- The server-side execution
+  [per-space lease](../specs/server-side-execution/serving-loop.md#2-the-lease-single-deriver-operationally)
+  already fences competing processes. Creation events reuse that lease instead
+  of introducing a second work-ownership mechanism.
+- The [space name registry plan](space-name-registry.md) cannot use this route
+  because a name lookup happens before its space DID is known and must support
+  deployment-wide indexed queries. Its PostgreSQL authority is independent of
+  this plan and is not a dependency of random space creation.
 - Earlier `ct-space`
   [recovery](https://github.com/commontoolsinc/labs/blob/850bca9aed74c22773de5caa2b0b81c98713e646/docs/access-recovery.md)
   and
@@ -146,11 +157,11 @@ new spaces use DID URLs and Home stores editable display labels.
 - Identify the configured Home operator recovery identity and define the signed
   evidence it may use when a permanently unavailable target ASP has been fenced
   and its authoritative provider control shard recovered.
-- Confirm that every production Toolshed process uses the same authoritative
-  Common Memory route for provider-private control shards and ordinary space
-  storage. Confirm that the route's existing transaction acceptance and
-  failover rules admit only one authoritative history for each shard. Creation
-  must not depend on process-local state.
+- Confirm each production topology's space-keyed storage route, embedded Memory
+  processes, durable store, and restart behavior. Prove that every frontend
+  reaches the same backend for a given control-space DID and that two backends
+  cannot serve independent writable histories for that DID. Creation must not
+  depend on frontend-process state.
 - Load-test each append-only namespace's fixed set of provider-private control
   shards and choose enough shards for the expected creation rate. Record their
   DIDs and immutable hash-to-shard mapping in the existing catalog.
@@ -216,6 +227,12 @@ new spaces use DID URLs and Home stores editable display labels.
     users. An immutable mapping within each version distributes load without
     making process identity part of request routing. Adding a version scales
     future creation without remapping an existing request.
+  - Configure every multi-process ASP's existing internal storage router to send
+    a control-space DID to exactly one embedded Common Memory server, just as it
+    does for an ordinary space DID. Configure every frontend process to reach
+    that router rather than its own embedded server. Keep the durable storage
+    path stable when the assigned process restarts. A single-process deployment
+    uses its one embedded server directly.
   - Treat the creation document's stable Fabric address as the uniqueness
     boundary. Two frontend processes carrying the same signed creation intent
     therefore contend on the same document even when they receive the requests

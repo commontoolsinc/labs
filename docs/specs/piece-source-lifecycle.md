@@ -189,8 +189,11 @@ The Common Fabric name registry can accept a custom string and resolve it before
 the lifecycle operation begins. The registered browser name is not the active
 origin or a repoint target. Whether a revision retains it in a separate optional
 provenance field remains open. The active origin contains only the identifier
-URL. Registry ownership, reassignment, and browser presentation are defined by
-[Common Fabric URLs](fabric-urls.md), not by the retained-source grammar.
+URL. Registry resolution and browser presentation are defined by
+[Common Fabric URLs](fabric-urls.md). Registration ownership and target changes
+are registry concerns whose implementation is defined by the
+[space name registry plan](../plans/space-name-registry.md), not by the
+retained-source grammar.
 
 Classification happens before the origin is stored. An explicit pin on an
 accepted entity-FID URL wins over the target's mutable shape. It normalizes to
