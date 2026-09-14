@@ -21,6 +21,7 @@ import type {
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { skillsShValueDigest } from "../skills-sh/acquisition.ts";
+import { acquiredSkillMountBacks } from "../skills/acquired-skill-mount.ts";
 import { harnessSkillScriptMetadata } from "../skills/registry.ts";
 import {
   isSkillScriptAllowlisted,
@@ -871,6 +872,29 @@ const resolveAcquiredSkillScript = (
         code: "skill_not_activated",
         message: `acquired skill is not activated for this run: ${skillName}`,
       },
+    };
+  }
+  // Holding the bytes is not being able to run them. An acquired script is
+  // addressed by the path its mount puts it at, so a run whose own sandbox
+  // does not carry that mount has nothing to execute — the acquiring parent,
+  // which deliberately never mounts what it acquired, and a child sharing a
+  // handed-in sandbox runtime, which had no configuration to extend. Asked of
+  // the sandbox that would run the script rather than of a configuration
+  // beside it, because the sandbox is what the path resolves in.
+  if (
+    !acquiredSkillMountBacks(
+      context.sandbox.describe().cfc?.mounts,
+      acquired,
+    )
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: "script_not_mounted",
+        message:
+          `this run holds ${skillName} but its sandbox does not mount the skill, so there is nothing at ${acquired.sandboxRoot} to run`,
+      },
+      acquisition: activation.acquisition,
     };
   }
   if (

@@ -112,6 +112,7 @@ export type HarnessSkillScriptExecutionErrorCode =
   | "skill_activations_missing"
   | "skill_not_found"
   | "skill_not_activated"
+  | "script_not_mounted"
   | "script_path_invalid"
   | "script_not_allowlisted"
   | "script_not_indexed"

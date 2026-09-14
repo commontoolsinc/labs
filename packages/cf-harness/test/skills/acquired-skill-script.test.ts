@@ -16,6 +16,7 @@ import type {
   SandboxCommandResult,
   SandboxRuntime,
   SandboxRuntimeDescription,
+  SandboxRuntimeMountDescription,
   SandboxShellRequest,
 } from "../../src/sandbox/types.ts";
 import { runSkillScriptTool } from "../../src/tools/run-skill-script.ts";
@@ -38,12 +39,21 @@ const acquisitionDigest = (text: string): string =>
 
 class RecordingSandboxRuntime implements SandboxRuntime {
   readonly calls: SandboxCommandRequest[] = [];
+  readonly #mounts: readonly SandboxRuntimeMountDescription[];
+
+  constructor(mounts: readonly SandboxRuntimeMountDescription[] = []) {
+    this.#mounts = mounts;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
-      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+      cfc: {
+        runtimeRequested: true,
+        workspaceMountPath: "/workspace",
+        mounts: this.#mounts,
+      },
     };
   }
 
@@ -186,13 +196,24 @@ describe("run_skill_script on an acquired skill's script", () => {
     }],
   });
 
+  // The mount a `delegate_task` child is given for the skill its handle names.
+  // The tool asks the sandbox it is about to run in whether it carries this,
+  // so a fake without it is a run with nothing at `/acquired-skill` to run.
+  const acquiredSkillMount = (): SandboxRuntimeMountDescription => ({
+    kind: "host-bind",
+    name: "acquired-skill",
+    hostPath: hostRoot,
+    sandboxPath: SANDBOX_ROOT,
+    readOnly: true,
+  });
+
   beforeEach(async () => {
     hostRoot = await Deno.makeTempDir({ prefix: "cf-harness-acquired-" });
     await Deno.mkdir(join(hostRoot, "scripts"), { recursive: true });
     await Deno.writeTextFile(join(hostRoot, SCRIPT_PATH), SCRIPT_TEXT);
     scriptDigest = acquisitionDigest(SCRIPT_TEXT);
     executions = [];
-    sandbox = new RecordingSandboxRuntime();
+    sandbox = new RecordingSandboxRuntime([acquiredSkillMount()]);
   });
 
   afterEach(async () => {
@@ -242,6 +263,58 @@ describe("run_skill_script on an acquired skill's script", () => {
     expect(output.status).toBe("error");
     expect(output.error?.code).toBe("skill_not_found");
     expect(sandbox.calls.length).toBe(0);
+  });
+
+  it("refuses a run that holds the skill but whose sandbox does not mount it", async () => {
+    // The parent that acquired the skill, and a child sharing a handed-in
+    // sandbox runtime, both reach this: the bytes exist and the run knows the
+    // pin, but nothing put them at a path the sandbox can address. Without
+    // this, such a run passes every other gate and records `executed` with the
+    // acquisition's full provenance for a script that never ran.
+    const mountless = new RecordingSandboxRuntime();
+    const output = await runSkillScriptTool.invoke(
+      createContext({
+        sandbox: mountless,
+        executions,
+        acquiredSkills: [acquiredSkill()],
+        skillActivations: activationsHoldingTheAcquiredSkill(),
+        allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+      }),
+      { skill: PIN, path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("error");
+    expect(output.error?.code).toBe("script_not_mounted");
+    expect(output.error?.message).toContain(SANDBOX_ROOT);
+    expect(mountless.calls.length).toBe(0);
+    expect(executions.at(-1)?.status).toBe("error");
+  });
+
+  it("refuses a mount that carries another skill's bytes under the same name", async () => {
+    // The name alone is a coincidence rather than a backing: an operator
+    // `--host-mount` called `acquired-skill` over some other directory would
+    // otherwise stand in for the mount the acquisition made.
+    const elsewhere = new RecordingSandboxRuntime([{
+      kind: "host-bind",
+      name: "acquired-skill",
+      hostPath: `${hostRoot}-other`,
+      sandboxPath: SANDBOX_ROOT,
+      readOnly: true,
+    }]);
+    const output = await runSkillScriptTool.invoke(
+      createContext({
+        sandbox: elsewhere,
+        executions,
+        acquiredSkills: [acquiredSkill()],
+        skillActivations: activationsHoldingTheAcquiredSkill(),
+        allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+      }),
+      { skill: PIN, path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("error");
+    expect(output.error?.code).toBe("script_not_mounted");
+    expect(elsewhere.calls.length).toBe(0);
   });
 
   it("refuses when no activation names the pin, however the allowlist reads", async () => {

@@ -12,6 +12,7 @@
 import type {
   DockerRunscSandboxConfig,
   SandboxRuntime,
+  SandboxRuntimeMountDescription,
 } from "../sandbox/types.ts";
 import type {
   HarnessAcquiredSkill,
@@ -184,16 +185,32 @@ export const acquiredSkillScriptSurface = (
  * {@link acquiredSkillScriptSurface} — and a run backed with no such entry
  * receives no tool.
  */
+/**
+ * Whether these mounts are the ones this skill's bytes were put behind.
+ *
+ * The same question {@link acquiredSkillScriptBacking} asks of a run, asked of
+ * one skill against one set of mounts, so that the decision to offer the tool
+ * and the decision to run a script are one predicate rather than two that
+ * agree by inspection. A mount answers for a skill only where it is that
+ * skill's: the host root the acquisition wrote to, at the sandbox root
+ * recorded with it, read-only.
+ */
+export const acquiredSkillMountBacks = (
+  mounts: readonly SandboxRuntimeMountDescription[] | undefined,
+  skill: HarnessAcquiredSkill,
+): boolean =>
+  (mounts ?? []).some((mount) =>
+    mount.kind === "host-bind" &&
+    mount.name === ACQUIRED_SKILL_MOUNT_NAME &&
+    mount.hostPath === skill.hostRoot &&
+    mount.sandboxPath === skill.sandboxRoot &&
+    mount.readOnly
+  );
+
 export const acquiredSkillScriptBacking = (
   ownedSandboxConfig: DockerRunscSandboxConfig | undefined,
   acquiredSkills: readonly HarnessAcquiredSkill[] | undefined,
 ): boolean =>
   (acquiredSkills ?? []).some((skill) =>
-    (ownedSandboxConfig?.additionalMounts ?? []).some((mount) =>
-      mount.kind === "host-bind" &&
-      mount.name === ACQUIRED_SKILL_MOUNT_NAME &&
-      mount.hostPath === skill.hostRoot &&
-      mount.sandboxPath === skill.sandboxRoot &&
-      mount.readOnly
-    )
+    acquiredSkillMountBacks(ownedSandboxConfig?.additionalMounts, skill)
   );
