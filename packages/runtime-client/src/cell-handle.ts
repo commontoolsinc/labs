@@ -5,9 +5,9 @@
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValuePlus,
+  isFabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -951,7 +951,7 @@ export class CellHandle<T = unknown> {
   static #sqliteFabricValue(value: ClientCellValue): FabricValue {
     if (isCellHandle(value)) return value.ref();
     if (value instanceof FabricBytes) return value;
-    if (value instanceof FabricSpecialObject) {
+    if (isFabricSpecialObject(value)) {
       throw new TypeError(
         `SQLite bind values support \`FabricBytes\` but not ` +
           `\`${value.constructor.name}\`.`,

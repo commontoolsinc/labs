@@ -37,7 +37,6 @@ import {
 
 import {
   type FabricConvertibleValue,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
@@ -536,7 +535,7 @@ function isValidFabricConvertibleValueInternal(
 
     case "object": {
       // `FabricSpecialObject` -- already a valid `FabricValue`.
-      if (value instanceof FabricSpecialObject) return true;
+      if (isFabricSpecialObject(value)) return true;
 
       // `FabricNativeObject` types would be wrapped by
       // `fabricFromNativeValue()`.
@@ -623,7 +622,7 @@ export function nativeFromFabricValue(
 
   // Remaining `FabricSpecialObject` values (not `FabricNativeWrapper`) pass
   // through unchanged.
-  if (value instanceof FabricSpecialObject) return value;
+  if (isFabricSpecialObject(value)) return value;
 
   if (value === null || value === undefined || typeof value !== "object") {
     return value;
