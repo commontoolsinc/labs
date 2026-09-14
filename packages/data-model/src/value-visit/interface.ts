@@ -4,7 +4,7 @@
 
 import { type Primitive } from "@commonfabric/utils/types";
 
-import { type PrimitiveValueTag } from "@/value-tags.ts";
+import { type PrimitiveValueTag } from "@/value-tags/interface.ts";
 
 import {
   type FabricArray,

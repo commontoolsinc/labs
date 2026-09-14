@@ -27,7 +27,7 @@ import {
   jsTagFromValue,
   type JsTypeValueTag,
   VALUE_TAGS,
-} from "@/value-tags.ts";
+} from "@/value-tags/index.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 
 /**

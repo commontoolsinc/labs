@@ -32,7 +32,10 @@ import {
   type FabricValueLayer,
 } from "./interface.ts";
 import { isFabricPlainObject, isFabricSpecialObject } from "./type-check.ts";
-import { tagFromNativeBuiltinClassElseNull, VALUE_TAGS } from "./value-tags.ts";
+import {
+  tagFromNativeBuiltinClassElseNull,
+  VALUE_TAGS,
+} from "./value-tags/index.ts";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting

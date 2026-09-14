@@ -17,7 +17,7 @@ import {
   type FabricPlainObject,
   type FabricPrimitive,
 } from "@/interface.ts";
-import { type PrimitiveValueTag } from "@/value-tags.ts";
+import { type PrimitiveValueTag } from "@/value-tags/index.ts";
 import {
   type BaselineVisitResult,
   ContainerIteratingValueVisitor,

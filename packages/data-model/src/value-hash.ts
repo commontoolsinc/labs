@@ -20,7 +20,7 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "./value-tags.ts";
+import { tagFromNativeValueElseNull, VALUE_TAGS } from "./value-tags/index.ts";
 import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
