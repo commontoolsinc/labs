@@ -122,11 +122,13 @@ deno task measure-batch scripts/pattern-index-suite.json \
 defaults to `CF_HARNESS_FABRIC_API_URL`, then to `http://localhost:8000`. Point
 it at the same server the console was started against, or the report describes a
 machine the runs never touched. Add `--expect-git-sha=<sha>` to refuse the batch
-unless that server reports the commit you meant to measure, and `--base` to ask
-ancestry against a branch other than `main`. A commit known to be off that base
-also refuses by default. `--allow-diverged` is the explicit opt-out for a batch
-that intentionally measures such a server; a commit that cannot be checked
-remains a non-fatal `unchecked` reading.
+unless that server reports the commit you meant to measure. `--base` defaults to
+`origin/main`, the remote-tracking ref in the local clone. Run
+`git fetch origin` to refresh it before a measurement, or pass `--base=<ref>` to
+select another base. A commit known to be off that base also refuses by default.
+`--allow-diverged` is the explicit opt-out for a batch that intentionally
+measures such a server; a commit that cannot be checked remains a non-fatal
+`unchecked` reading.
 
 `--cell-spec=<file>` states what this experiment requires of the console, and
 refuses the whole batch before the first task when the console is something
