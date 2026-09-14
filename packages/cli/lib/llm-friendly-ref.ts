@@ -43,6 +43,9 @@ export interface NormalizedLLMFriendlyRef {
 
   scope?: CellScope;
 
+  /** Module identity qualifier, retained for callers to apply their pin policy. */
+  pin?: string;
+
   /**
    * True when the piece segment selected the `#argument` member: the caller
    * selected the piece's arguments cell, the same selection `--input`
@@ -199,11 +202,12 @@ export function splitArgumentSuffix(
  * the reference's space comes back as `embeddedSpace` for the caller to settle
  * through `validateEmbeddedSpaces` once the session has resolved its own.
  *
- * The `#argument` member is returned as `input`.
+ * The `#argument` member is returned as `input`. Scope inherits from the
+ * supplied context; pins are retained for the caller to accept or refuse.
  */
 export function normalizeLLMFriendlyRef(
   ref: string,
-  options: { space?: string } = {},
+  options: { space?: string; scope?: CellScope } = {},
 ): NormalizedLLMFriendlyRef | undefined {
   const trimmed = ref.trimStart();
   if (!isReference(trimmed)) return undefined;
@@ -212,7 +216,11 @@ export function normalizeLLMFriendlyRef(
   try {
     parsed = parseCellReference(
       trimmed,
-      options.space === undefined ? undefined : { space: options.space },
+      options.space !== undefined
+        ? { space: options.space, scope: options.scope }
+        : options.scope !== undefined
+        ? { scope: options.scope }
+        : undefined,
     );
   } catch (error) {
     throw new ValidationError(
@@ -244,7 +252,8 @@ export function normalizeLLMFriendlyRef(
 
   return {
     pieceId,
-    ...(parsed.scope && { scope: parsed.scope as CellScope }),
+    ...(parsed.scope && { scope: parsed.scope }),
+    ...(parsed.pin && { pin: parsed.pin }),
     ...(embeddedSpace !== undefined && { embeddedSpace }),
     ...(parsed.member === "argument" && { input: true }),
     path: parsed.path.map(linkPathSegmentToCellPathSegment),
