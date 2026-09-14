@@ -233,7 +233,9 @@ function shouldSkipInternalProperty(
  * `FabricExecPlainObject` is used as a compile-time constraint on internal
  * execution graph types. Its inherited index signature does not describe
  * authored data accepted by a pattern, so it must not become a JSON Schema
- * `additionalProperties` declaration.
+ * `additionalProperties` declaration. The name is a type alias, so a base
+ * declared through it resolves to the aliased type and carries the alias as
+ * its alias symbol; that is what identifies it.
  */
 function hasFabricExecPlainObjectBase(
   type: ts.Type,
@@ -245,7 +247,8 @@ function hasFabricExecPlainObjectBase(
   if ((objectType.objectFlags & ts.ObjectFlags.Interface) === 0) return false;
 
   return (checker.getBaseTypes(type as ts.InterfaceType) ?? []).some((base) =>
-    base.getSymbol()?.getName() === "FabricExecPlainObject"
+    (base.aliasSymbol ?? base.getSymbol())?.getName() ===
+      "FabricExecPlainObject"
   );
 }
 
