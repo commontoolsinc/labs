@@ -1,8 +1,8 @@
 // A test whose conflict retry can only ride the read-repair backstop. Not a
-// `.test.ts` file: the package task never selects it. The guard pin
-// (`test/conflict-read-repair-backstop-guard.test.ts`) runs it in a
-// subprocess under the package preload and expects it to FAIL — that failure
-// is the whole point of this file.
+// `.test.ts` file: the package task never selects it. The guard's pin
+// (`test/silent-backstop-guard.test.ts`) runs it in a subprocess under the
+// package preload and expects it to FAIL — that failure is the whole point
+// of this file.
 //
 // The shape: a cold replica commits a read of a document another client
 // already wrote, so the server refuses the commit for its stale basis and

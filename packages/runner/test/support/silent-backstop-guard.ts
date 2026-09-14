@@ -88,6 +88,9 @@ export function describeFiredBackstops(
  * `backstops` fires during its body. Install it after the fake clock, so the
  * check runs inside the clock's wrapper — right after the body and before
  * the clock's own post-body settle — where a firing is still this test's.
+ * A body that fails on its own is checked too: a backstop that fired is the
+ * likelier explanation of that failure than anything the body asserts, so
+ * the guard's error leads and carries the body's as its cause.
  */
 export function installSilentBackstopGuard(
   backstops: readonly SilentBackstop[],
@@ -99,15 +102,25 @@ export function installSilentBackstopGuard(
   ): (t: Deno.TestContext) => Promise<void> =>
   async (t: Deno.TestContext) => {
     const before = readBackstopCounts(backstops);
-    await fn(t);
+    let failure: { error: unknown } | undefined;
+    try {
+      await fn(t);
+    } catch (error) {
+      failure = { error };
+    }
     const fired = firedBackstops(
       backstops,
       before,
       readBackstopCounts(backstops),
     );
     if (fired.length > 0) {
-      throw new Error(describeFiredBackstops(fired));
+      throw new Error(
+        describeFiredBackstops(fired) +
+          (failure === undefined ? "" : "\nThe test body failed as well."),
+        failure === undefined ? undefined : { cause: failure.error },
+      );
     }
+    if (failure !== undefined) throw failure.error;
   };
 
   function guardedTest(
