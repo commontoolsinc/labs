@@ -426,10 +426,15 @@ describe("run_skill_script on an acquired skill's script", () => {
     expect(record.resourcePath).toBe(join(hostRoot, SCRIPT_PATH));
   });
 
-  it("labels the invocation with confidentiality alone, never the acquisition's integrity", async () => {
+  it("adds no integrity to the invocation, whatever a trusted caller labeled it", async () => {
     // CT-2302: a non-empty `integrity` array in `cfcInputLabels` makes the
     // sandbox fail to start, so the acquisition's ExternalIngest atom cannot
     // ride the invocation. It rides the output instead.
+    //
+    // The caller's own confidentiality label is passed through — that channel
+    // is trusted harness plumbing, and withholding it would be a different
+    // defect — so what is under test is that the ACQUIRED path contributes no
+    // integrity of its own to what the caller supplied.
     await runSkillScriptTool.invoke(
       createContext({
         sandbox,
@@ -438,13 +443,23 @@ describe("run_skill_script on an acquired skill's script", () => {
         skillActivations: activationsHoldingTheAcquiredSkill(),
         allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
       }),
-      { skill: PIN, path: SCRIPT_PATH },
+      {
+        skill: PIN,
+        path: SCRIPT_PATH,
+        cfcInputLabels: {
+          version: 1,
+          entries: [{
+            path: ["argv"],
+            label: { confidentiality: ["finance"] },
+          }],
+        },
+      },
     );
 
     const labels = sandbox.calls[0]?.cfcInvocationContext?.cfcInputLabels;
-    const integrityAtoms = (labels?.entries ?? []).flatMap((entry) =>
-      entry.label.integrity ?? []
-    );
-    expect(integrityAtoms).toEqual([]);
+    const atoms = (labels?.entries ?? []).map((entry) => entry.label);
+    expect(atoms.flatMap((label) => label.integrity ?? [])).toEqual([]);
+    expect(atoms.flatMap((label) => label.confidentiality ?? []))
+      .toContain("finance");
   });
 });
