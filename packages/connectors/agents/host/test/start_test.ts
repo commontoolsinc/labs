@@ -19,6 +19,12 @@ Deno.test("RunningAgentsHost settles runtime work before disposal", async () => 
     },
   } as unknown as AgentsHost;
   const fabric = {
+    graphRuntime: {
+      dispose: () => {
+        events.push("graph-runtime.dispose");
+        return Promise.resolve();
+      },
+    },
     runtime: {
       settled: (rounds?: number) => {
         events.push(`runtime.settled:${rounds}`);
@@ -57,6 +63,7 @@ Deno.test("RunningAgentsHost settles runtime work before disposal", async () => 
     "host.stop",
     "runtime.settled:Infinity",
     "storage.synced",
+    "graph-runtime.dispose",
     "runtime.dispose",
     "lock.release",
   ]);
@@ -67,6 +74,9 @@ Deno.test("RunningAgentsHost reports every shutdown failure", async () => {
     stop: () => Promise.reject(new Error("host stop failed")),
   } as unknown as AgentsHost;
   const fabric = {
+    graphRuntime: {
+      dispose: () => Promise.reject(new Error("graph dispose failed")),
+    },
     runtime: {
       settled: () => Promise.reject(new Error("settle failed")),
       storageManager: {
@@ -91,7 +101,7 @@ Deno.test("RunningAgentsHost reports every shutdown failure", async () => {
   await assertRejects(
     () => first,
     AggregateError,
-    "host stop failed; settle failed; sync failed; dispose failed; lock release failed",
+    "host stop failed; settle failed; sync failed; graph dispose failed; dispose failed; lock release failed",
   );
 });
 
