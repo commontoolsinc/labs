@@ -146,6 +146,10 @@ import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnosti
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import { isTerminalHarnessRunStatus } from "./run-state.ts";
 import {
+  acquiredSkillForHandle,
+  sandboxConfigWithAcquiredSkill,
+} from "./skills/acquired-skill-mount.ts";
+import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
 } from "./skills/registry.ts";
@@ -4548,37 +4552,19 @@ export class CfHarnessPromptLoop {
       depth: (parentRunState.lineage?.depth ?? 0) + 1,
     };
     // The acquired skill this child may run scripts of: the one its
-    // `skillHandle` names, found by the pin its acquisition records, and no
-    // other. A child holds the scripts of the skill it was given.
-    const childAcquiredSkill = options.resolvedSkill?.acquisition === undefined
-      ? undefined
-      : (this.engine.getRunState().acquiredSkills?.skills ?? []).find(
-        (skill) =>
-          skill.registryId === options.resolvedSkill!.acquisition!.registryId &&
-          skill.commitSha === options.resolvedSkill!.acquisition!.commitSha,
-      );
+    // `skillHandle` names, and no other.
+    const childAcquiredSkill = acquiredSkillForHandle(
+      this.engine.getRunState().acquiredSkills?.skills,
+      options.resolvedSkill?.acquisition,
+    );
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
       sandboxRuntime: this.engine.sandbox,
-      // The acquired skill's directory is mounted READ-ONLY and into this
-      // child's sandbox alone — never the parent's, which is why it sits
-      // outside the parent's mounts to begin with. The parent that planned
-      // the acquisition still cannot read the bytes it acquired, which is the
-      // property the hostile-skill receipt rests on.
-      sandbox: childAcquiredSkill === undefined ? this.engine.config.sandbox : {
-        ...this.engine.config.sandbox!,
-        additionalMounts: [
-          ...(this.engine.config.sandbox?.additionalMounts ?? []),
-          {
-            kind: "host-bind" as const,
-            name: "acquired-skill",
-            hostPath: childAcquiredSkill.hostRoot,
-            sandboxPath: childAcquiredSkill.sandboxRoot,
-            readOnly: true,
-          },
-        ],
-      },
+      sandbox: sandboxConfigWithAcquiredSkill(
+        this.engine.config.sandbox,
+        childAcquiredSkill,
+      ),
       ...(childAcquiredSkill !== undefined
         ? {
           acquiredSkills: {
