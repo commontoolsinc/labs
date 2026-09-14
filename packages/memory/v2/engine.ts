@@ -3772,7 +3772,12 @@ ORDER BY seq, op_index
  * tenure itself advanced while that run was in flight.
  *
  * `holder` absent (a wave driven outside a lease) makes every write an
- * intrusion: nothing identifies a commit as this tenure's.
+ * intrusion: nothing identifies a commit as this tenure's. So does a
+ * derived row carrying no holder, which the class is not supposed to
+ * produce. Both are the exemption failing CLOSED, and the query says so
+ * in SQL rather than leaning on three-valued logic to arrive there: `=`
+ * against a NULL yields UNKNOWN, and a `NOT (...)` over UNKNOWN drops the
+ * row — exempting exactly the writes these two cases must not exempt.
  */
 export const hasIntrusionSince = (
   engine: Engine,
@@ -3788,7 +3793,7 @@ export const hasIntrusionSince = (
 SELECT 1 FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
 WHERE r.branch = :branch AND r.id = :id AND r.scope_key = :scope_key
   AND r.seq > :since_seq
-  AND NOT (c.class = 'derived' AND c.holder = :holder)
+  AND NOT (:holder IS NOT NULL AND c.class = 'derived' AND c.holder IS :holder)
 LIMIT 1
 `).get({
       branch: options.branch ?? DEFAULT_BRANCH,
