@@ -16,9 +16,19 @@ prints one JSON object on stdout:
 ```json
 {
   "currency": "USD",
-  "monthlyBudgets": { "groceries": 600, "dining": 250, "transport": 180 }
+  "monthlyBudgets": {
+    "groceries": 600,
+    "dining": 250,
+    "transport": 180,
+    "utilities": 220,
+    "entertainment": 120
+  }
 }
 ```
+
+That is the whole of it — five categories, and the script prints these exact
+bytes every time. Report on all five rather than on the ones this page happened
+to show first.
 
 The script reads nothing. It holds no transactions, no balance, and no address:
 the budgets are the skill author's own figures, written into the script, and
