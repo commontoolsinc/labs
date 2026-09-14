@@ -117,6 +117,7 @@ describe("multi-user-test completion", () => {
     ]
   ) {
     it(`waits for the ${command} response after three minutes have elapsed`, async () => {
+      using resources = new DisposableStack();
       let time: FakeTime;
       const held = Promise.withResolvers<{
         worker: ControlledWorker;
@@ -140,13 +141,14 @@ describe("multi-user-test completion", () => {
           await time.tickAsync(180_001);
           expect(completed).toBe(false);
         } finally {
-          time.restore();
+          resources.dispose();
           worker.answer(request);
+          await running.catch(() => {});
         }
         const result = await running;
         expect(result.error).toBeUndefined();
         expect(result.results.map(({ passed }) => passed)).toEqual([true]);
-      }, () => time = new FakeTime());
+      }, () => time = resources.use(new FakeTime()));
     });
   }
 

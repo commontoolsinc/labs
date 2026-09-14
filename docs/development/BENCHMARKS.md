@@ -473,6 +473,35 @@ the functional assertions, declared collection sizes, and render windows when
 adjusting a ceiling; a budget failure should lead to attribution of the added
 reads before changing the limit.
 
+## Consumed CFC source collection
+
+`packages/runner/test/cfc-consumed-source-dedup.bench.ts` calls
+`collectConsumedLabel()` over real emulated-storage transaction reads at 128,
+458, 916, 1,832, and 2,668 consumed sources. Each address contributes two
+distinct confidentiality atoms; all addresses share one document and have
+four-segment logical paths. The source count measures provenance entries,
+while the joined confidentiality label contains only two atoms.
+
+The `root label` arm keeps metadata width at one entry. The `field labels`
+arm labels each read path separately, holding reads and resulting source counts
+fixed while increasing label-map width. This pair distinguishes source
+deduplication cost from the collector's per-read metadata work. It does not
+measure pattern compilation, `lift`/`.map()` execution, or browser startup.
+
+Each sample opens a fresh transaction and reads the values outside timing.
+The timed interval contains one collector call, including its verifier reads,
+metadata validation, overlap checks, and atom joins. Untimed checks verify
+read, source, and joined-atom counts; fixture construction and transaction
+cleanup are also outside timing. Exact counts go to stderr, and stdout remains
+the benchmark JSON report:
+
+```sh
+deno bench --no-lock -A --json packages/runner/test/cfc-consumed-source-dedup.bench.ts
+```
+
+The [local measurement report](../history/development/performance/2026-09-14-cfc-consumed-source-dedup.md)
+records an alternating source-count sweep and the limits of that measurement.
+
 ## Scoped snapshot memo reuse
 
 `packages/runner/test/snapshot-memo.bench.ts` measures repeated CFC label-view

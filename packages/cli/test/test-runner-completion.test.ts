@@ -25,6 +25,11 @@ const checkpoints = [
     phase: "step/settle_1/settled",
   },
   {
+    name: "assertion async work",
+    fixture: "async-read/delayed-read.test.tsx",
+    phase: "step/assertion_1/asyncWork",
+  },
+  {
     name: "cleanup",
     fixture: "settle/settle-step.test.tsx",
     phase: "cleanup/runtimeDispose",
@@ -43,6 +48,7 @@ describe("test-runner completion", {
 
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
+      using resources = new DisposableStack();
       let time: FakeTime | undefined;
       let completed = false;
 
@@ -53,7 +59,7 @@ describe("test-runner completion", {
           time === undefined &&
           mark?.startsWith(`cf-test/runTestPattern/${checkpoint.phase}:start#`)
         ) {
-          time = new FakeTime();
+          time = resources.use(new FakeTime());
           entered.resolve();
           return release.promise;
         }
@@ -86,12 +92,22 @@ describe("test-runner completion", {
       // leaving the original promise's result for the assertion below.
       void running.catch(() => {});
       try {
-        await entered.promise;
+        await Promise.race([
+          entered.promise,
+          running.then((result) => {
+            throw new Error(
+              `Run finished (${
+                result.error ?? "passed"
+              }) before holding ${checkpoint.phase}`,
+            );
+          }),
+        ]);
         await time!.tickAsync(180_001);
         expect(completed).toBe(false);
       } finally {
-        time?.restore();
+        resources.dispose();
         release.resolve();
+        await running.catch(() => {});
       }
       const result = await running;
       expect(result.error).toBeUndefined();

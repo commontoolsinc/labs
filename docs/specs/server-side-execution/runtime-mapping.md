@@ -88,7 +88,7 @@ Status legend:
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
 | 37 | Lift/computed returning reactives: `patternFromFrame`, content-hash memo per result document and instance, changed pattern run into the same cell, scoped program groups shared by selecting instances | `runner.ts` (`#writeJavaScriptActionResult`, `#startScopedPrograms`) | builtins §3 | COVERED |
-| 38 | Handler returning reactives: result pattern run under the handler tx with receipt ownership; navigateTo-bearing results deferred to post-commit start | `runner.ts` (`Runner.#handleJavaScriptHandlerResult()`, deferring through `#handlerResultPatternHasNavigateTo()`), one-shot pull (`Runner.#patternNeedsOneShotPull()`) | events §2 (consequences), builtins §3/§4 | GAP |
+| 38 | Handler returning reactives: result pattern run under the handler tx with receipt ownership; navigateTo-bearing results deferred to post-commit start | `runner.ts` (`Runner.#handleJavaScriptHandlerResult()`, deferring through `#handlerResultPatternHasNavigateTo()`) | events §2 (consequences), builtins §3/§4 | GAP |
 | 39 | `compileAndRun`: accepted outbox compilation, stamped readiness completion, child setup in a derivation, client observation and creation callback | `builtins/compile-and-run.ts` | builtins §3 | COVERED; OW28 owns acceptance validation |
 
 ### 1f. Pattern-source updates
@@ -148,20 +148,28 @@ Status legend:
 
 ## 2. Notes on the non-trivial rows
 
-**N2 (eager effects split).** Today one `isEffect` bit covers three
-different things: external-effect built-ins (`llm`, `generateText`,
-`generateObject`, `sqliteQuery` — `registerBuiltins` in
-`builtins/index.ts`), `navigateTo` (`isEffect: true` in
-`builtins/navigate-to.ts`), and render/UI sinks. v2 splits them by
-§3.5 class: effectful built-ins become server-only memoized nodes,
-navigateTo becomes the split contract, render sinks stay client-side.
-The scheduler's effect/computation distinction itself ports unchanged;
-only the *population* of the effect set differs per posture. The
-eager-result one-shot pull after handler commits
-(`Runner.#patternNeedsOneShotPull()`, `EAGER_RESULT_BUILTIN_REFS` in
-`runner.ts`) exists to force network built-ins in fresh result pieces;
-server-side, waves make it redundant — drop it there, keep it in the
-OFF arm.
+**N2 (eager effects split).** The `isEffect` bit means one thing to the
+scheduler: a standing demand root, a node that runs whether or not anything
+reads it. Three kinds of node carry it: `navigateTo` (`isEffect: true` in
+`builtins/navigate-to.ts`), whose whole purpose is the side effect;
+render/UI sinks; and `llmDialog`, which writes its turns into the caller's
+`messages` cell and re-mints the element documents of its `flattenedTools`
+write on every run — a write the idempotency recheck would flag, so the bit
+stays on it until that write is made stable, at which point it is a
+computation with a materializer envelope over `messages` like any other.
+The network built-ins (`llm`, `generateText`, `generateObject`,
+`sqliteQuery`, the `fetch` family, `streamData` — `registerBuiltins` in
+`builtins/index.ts`) are computations: a node nobody reads is a no-op, and
+one a live reader reaches runs when it is read, or once on registration
+under a live parent through provisional demand (scheduler-v2 §5.3). A
+computation whose writes land in captured `Writable` inputs holds demand as
+a materializer (scheduler-v2 §4.3) and needs no special bit. v2 splits the effect population by §3.5 class: the network
+built-ins become server-only memoized nodes, navigateTo becomes the split
+contract, render sinks stay client-side. The scheduler's
+effect/computation distinction itself ports unchanged; only the
+*population* of the effect set differs per posture. That a built-in
+reaches the network is a fact for policy and placement, not for demand,
+and it wants its own declaration rather than the effect bit.
 
 **N4 (materializers).** A materializer is a *computation* whose writes
 land in caller-visible cells (write envelopes registered in

@@ -190,9 +190,10 @@ The `cf test` runner processes the `[TESTS]` array **in order**:
 1. For each item in `[TESTS]`:
    - If it has `action` key: call `.send()`, then `await runtime.idle()`
    - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
-     its `ok` is true, any other value passes when it equals `true`
+     its `ok` is true, any other value passes when it equals `true`. If the
+     first read fails, await the async work it started and read again.
 2. Report pass/fail for each assertion
-3. Handle timeouts (5s default) for stuck tests
+3. Await cleanup before returning the results
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -276,8 +277,9 @@ expense-tracker.test.tsx
 
 The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
 reading aid for the shape of the loop, not a second copy of it: it leaves out
-settling, the retry an assertion gets to let the graph settle, and the
-multi-user paths. Behavior that matters belongs in the code
+settling, the wait an assertion gets for the async work its own read started,
+the retry it gets after an action to let the graph settle, and the multi-user
+paths. Behavior that matters belongs in the code
 and in the prose above — change one of those and this sketch needs the same
 edit, so keep it short enough to be worth having.
 

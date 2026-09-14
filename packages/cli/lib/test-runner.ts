@@ -1131,8 +1131,9 @@ export async function runTestPattern(
   // We can't read it until after compile, so the injected fetch closes over a
   // late-populated `fetchMockEntries` and falls through to the real fetch until
   // (and unless) the test declares mocks. Driving the in-flight fetchJson to
-  // completion is the harness's existing job — a `{ settle: true }` step (or any
-  // action's settle) calls `runtime.settled()`, which awaits the fetch chain.
+  // completion is the harness's existing job — the assertion whose read starts
+  // it, a `{ settle: true }` step, and any action's settle all wait on
+  // `runtime.settled()`, which awaits the fetch chain.
   const realFetch = globalThis.fetch.bind(globalThis);
   let fetchMockEntries: FetchMockEntry[] | undefined;
   const mockFetch = makeMockFetch(() => fetchMockEntries, realFetch);
@@ -1288,8 +1289,9 @@ export async function runTestPattern(
     }
 
     // Read the test's opt-in fetch mocks now (after compile, before the run):
-    // a fetchJson with a non-empty URL fires during the initial settle, so the
-    // entries must be in place before `runtime.run(...)` below. `main` is the
+    // a fetchJson with a non-empty URL fires as soon as something reads its
+    // result, which the pattern's own graph can do during the initial settle,
+    // so the entries must be in place before `runtime.run(...)` below. `main` is the
     // module namespace, so a named `fetchMocks` export is reachable.
     fetchMockEntries = readFetchMocks(main);
     readBudgets = parseReadBudgets(main.readBudgets);
@@ -1576,9 +1578,11 @@ export async function runTestPattern(
 
     // Explicit `{ settle: true }` test step: in addition to the light per-action
     // settle above, wait for ALL in-flight async builtin work — the sqlite query
-    // RPC + result writeback, fetch / llm calls — via `runtime.settled()`. A test
-    // that asserts on an async-builtin result (e.g. a `db.query`) inserts this
-    // before the assertion so it never reads a half-settled `{ pending: true }`.
+    // RPC + result writeback, fetch / llm calls — via `runtime.settled()`. Only
+    // work something has already read is in flight; a built-in nothing has read
+    // yet has not started, and the assertion that first reads it waits for it
+    // on its own. The step is for a point the author names — before an action
+    // that must see the work of an earlier one landed, say.
     const settleFully = async (stepIndex: number): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
@@ -1958,6 +1962,29 @@ export async function runTestPattern(
             ["runTestPattern", "step", assertionName, "evaluate"],
             () => evaluateAssertion(),
           ));
+
+          // An asynchronous built-in — a fetch, a model call, a query — is a
+          // computation that runs when something reads its result, and the
+          // assertion is that reader: its first read of the result is what
+          // starts the request, so that read sees no result yet. Wait for the
+          // work the read started, as any reader of the result would, and read
+          // again. With nothing in flight the wait returns at once, so an
+          // assertion that fails on its own terms fails just as fast.
+          if (!passed) {
+            try {
+              await withPhase(
+                ["runTestPattern", "step", assertionName, "asyncWork"],
+                () => runtime.settled(),
+              );
+              ({ passed, error } = await withPhase(
+                ["runTestPattern", "step", assertionName, "reread", "evaluate"],
+                () => evaluateAssertion(),
+              ));
+            } catch (err) {
+              passed = false;
+              error = err instanceof Error ? err.message : String(err);
+            }
+          }
 
           if (!passed && lastActionIndex !== null) {
             try {
