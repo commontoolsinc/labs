@@ -14,7 +14,12 @@ import {
   WriteAuthorizedBy,
 } from "commonfabric";
 
-import { snippet, TOPICS_THEME, whenLabel } from "../topics/topic.tsx";
+import {
+  isSafeLinkUrl,
+  snippet,
+  TOPICS_THEME,
+  whenLabel,
+} from "../topics/topic.tsx";
 
 // ===== What this is =====
 //
@@ -86,6 +91,20 @@ export interface CheckoutEntry {
 export interface SourceEntry {
   id: string;
   driver: string;
+}
+
+/** The index's source rows to the depth the harness picker reads: the row
+ * and the one capability the workbench acts on, whether the driver can start
+ * a session (the connector publishes each driver's capabilities). Declared
+ * apart from `SessionIndexView`, which is the piece's argument contract: a
+ * typed field added inside that contract's `SourceEntry | undefined`
+ * alternatives is a narrowing the update-compatibility check refuses, while a
+ * lift's own parameter type is what bounds its read. */
+export interface StartableSourcesView {
+  sources?: Array<
+    | { id: string; driver: string; capabilities?: { startSession?: boolean } }
+    | undefined
+  >;
 }
 
 /** A JSON-encoded connector command, as the connector's queues hold them. */
@@ -308,13 +327,16 @@ const presentLinksOf = lift((
   )
 );
 
-/** The connector's sources, as picker options; Claude sources first. */
+/** The connector's sources whose driver can start a session, as picker
+ * options; Claude sources first. A source that cannot start (the Codex and
+ * ACP drivers today) is not offered, since a start through it would queue a
+ * command the connector refuses. */
 const sourceOptionsOf = lift((
-  { index }: { index?: SessionIndexView },
+  { index }: { index?: StartableSourcesView },
 ): CheckoutOption[] =>
   (index?.sources ?? [])
     .flatMap((source) =>
-      source?.id
+      source?.id && source.capabilities?.startSession === true
         ? [{ label: `${source.id}  (${source.driver})`, value: source.id }]
         : []
     )
@@ -372,9 +394,10 @@ const kickoffOf = lift((
   const context = opening
     ? `${name}, "${title}". Its living document begins: ${opening}`
     : `${name}, "${title}".`;
-  const urls = links.filter((l) => l.kind === "pr" && l.url).map((l) =>
-    `- ${l.label ? `${l.label}: ` : ""}${l.url}`
-  );
+  // Only links that are http(s) go into a prompt; a stored link that is not
+  // (written before the topic's guard) renders as text and is not repeated.
+  const urls = links.filter((l) => l.kind === "pr" && isSafeLinkUrl(l.url))
+    .map((l) => `- ${l.label ? `${l.label}: ` : ""}${l.url}`);
   return [
     head,
     `Context:\n- ${context}`,
@@ -411,24 +434,52 @@ const captionOf = (row: SessionRow): string =>
 
 // ===== Handlers (browser) =====
 
+/** The key an attachment's record lives under: one per session. */
+const attachmentKey = (sourceId: string, nativeSessionId: string): string =>
+  JSON.stringify([sourceId, nativeSessionId]);
+
+/** Records the attachment when none is there and adds it to the list: a
+ * keyed record and an add-if-absent membership, so the same person writing
+ * from two tabs or a session's own skill do not overwrite each other. True
+ * when the record was new. */
+const recordAttachment = (
+  attached: Writable<Attachment[] | Default<[]>>,
+  attachment: Attachment,
+): boolean => {
+  const record = attached.elementById(
+    attachmentKey(attachment.sourceId, attachment.nativeSessionId),
+  );
+  const added = record.get() === undefined;
+  if (added) record.set(attachment);
+  attached.addUnique(record);
+  return added;
+};
+
+/** Drops a session's attachment and clears its record, so a later attach of
+ * the same session starts fresh rather than reviving this one. */
+const dropAttachment = (
+  attached: Writable<Attachment[] | Default<[]>>,
+  sourceId: string,
+  nativeSessionId: string,
+): void => {
+  const key = attachmentKey(sourceId, nativeSessionId);
+  attached.removeByValue(attached.elementById(key));
+  const record: Writable<Attachment | undefined> = attached.elementById(key);
+  record.set(undefined);
+};
+
 const attachFromRow = handler<void, {
   attached: Writable<Attachment[] | Default<[]>>;
   sourceId: string;
   nativeSessionId: string;
   title: string;
 }>((_, { attached, sourceId, nativeSessionId, title }) => {
-  // Read-modify-write on purpose: the append depends on the read, so a
-  // mergeable push would sit in the conflict set anyway. This record is one
-  // person's, so whole-value writes carry no contention.
-  const current = attached.get();
-  const present = current.some((a) =>
-    a.sourceId === sourceId && a.nativeSessionId === nativeSessionId
-  );
-  if (present) return;
-  attached.set([
-    ...current,
-    { sourceId, nativeSessionId, title, attachedAt: Date.now() },
-  ]);
+  recordAttachment(attached, {
+    sourceId,
+    nativeSessionId,
+    title,
+    attachedAt: Date.now(),
+  });
 });
 
 const detachFromRow = handler<void, {
@@ -436,11 +487,7 @@ const detachFromRow = handler<void, {
   sourceId: string;
   nativeSessionId: string;
 }>((_, { attached, sourceId, nativeSessionId }) => {
-  attached.set(
-    attached.get().filter((a) =>
-      !(a.sourceId === sourceId && a.nativeSessionId === nativeSessionId)
-    ),
-  );
+  dropAttachment(attached, sourceId, nativeSessionId);
 });
 
 const useDefaultPrompt = handler<void, {
@@ -478,6 +525,9 @@ export const startSessionCommand = handler<void, {
   const sourceId = (state.spawnSource.get() || state.sourceOptions[0]?.value ||
     "").trim();
   if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
+  // The options are the sources that can start; a picker value naming any
+  // other (a source that lost the capability, a stale choice) starts nothing.
+  if (!state.sourceOptions.some((option) => option.value === sourceId)) return;
   const nativeSessionId = mintSessionId();
   const createdAt = new Date().toISOString();
   const sessionTitle = state.shortName
@@ -500,10 +550,12 @@ export const startSessionCommand = handler<void, {
   }));
   // Attached now, so the session shows as starting before the index carries
   // it; the row joins the live index entry when the connector publishes it.
-  state.attached.set([
-    ...state.attached.get(),
-    { sourceId, nativeSessionId, title: sessionTitle, attachedAt: Date.now() },
-  ]);
+  recordAttachment(state.attached, {
+    sourceId,
+    nativeSessionId,
+    title: sessionTitle,
+    attachedAt: Date.now(),
+  });
 });
 
 // ===== The pattern =====
@@ -570,31 +622,22 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
         if (!source || !native) {
           throw new Error("attach: sourceId and nativeSessionId are required");
         }
-        const current = attached.get();
-        const present = current.some((a) =>
-          a.sourceId === source && a.nativeSessionId === native
-        );
         const attachedAt = Date.now();
-        if (present) return { attachedAt, added: false };
-        // Read-modify-write, for the reason the browser handler states.
-        attached.set([
-          ...current,
-          {
-            sourceId: source,
-            nativeSessionId: native,
-            title: (given ?? "").trim(),
-            attachedAt,
-          },
-        ]);
-        return { attachedAt, added: true };
+        const added = recordAttachment(attached, {
+          sourceId: source,
+          nativeSessionId: native,
+          title: (given ?? "").trim(),
+          attachedAt,
+        });
+        return { attachedAt, added };
       },
     );
 
     const detach = action<DetachEvent>(({ sourceId, nativeSessionId }) => {
-      attached.set(
-        attached.get().filter((a) =>
-          !(a.sourceId === sourceId && a.nativeSessionId === nativeSessionId)
-        ),
+      dropAttachment(
+        attached,
+        (sourceId ?? "").trim(),
+        (nativeSessionId ?? "").trim(),
       );
     });
 
@@ -671,14 +714,25 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                                 >
                                   {link.kind}
                                 </cf-badge>
-                                <a
-                                  href={link.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style="color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                                >
-                                  {link.label || link.url}
-                                </a>
+                                {isSafeLinkUrl(link.url)
+                                  ? (
+                                    <a
+                                      href={link.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style="color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                    >
+                                      {link.label || link.url}
+                                    </a>
+                                  )
+                                  : (
+                                    <cf-text
+                                      tone="muted"
+                                      style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                    >
+                                      {link.label || link.url}
+                                    </cf-text>
+                                  )}
                               </cf-hstack>
                             ))}
                           </cf-vstack>
@@ -912,6 +966,7 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                       <cf-hstack gap="2" align="end" style="flex-wrap: wrap;">
                         <cf-field label="Harness" style="flex: 1 1 12rem;">
                           <cf-select
+                            data-harness=""
                             $value={spawnSource}
                             items={sourceOptions}
                           />
@@ -941,8 +996,9 @@ export default pattern<WorkbenchInput, WorkbenchOutput>(
                           Start
                         </cf-button>
                         <cf-text variant="caption" tone="muted">
-                          Runs the first turn on this Mac through the connector;
-                          the session appears above as it starts.
+                          {sourceOptions.length > 0
+                            ? "Runs the first turn on this Mac through the connector; the session appears above as it starts."
+                            : "No harness the connector runs here can start a session."}
                         </cf-text>
                       </cf-hstack>
                       {hasPrompt

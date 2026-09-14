@@ -21,14 +21,17 @@ import {
 import {
   childNodes,
   findNode,
+  findNodeByProp,
   hasExactText,
   hasText,
   propsOf,
+  propValue,
 } from "../test/vnode-helpers.ts";
 import Workbench, {
   type Attachment,
   type CommandValue,
   type SessionIndexView,
+  type StartableSourcesView,
   type TopicView,
 } from "./main.tsx";
 
@@ -94,16 +97,24 @@ export default pattern(() => {
         label: "retracted",
         removedAt: 5,
       },
+      // Stored before the topic's write guard: rendered as text, kept out of
+      // the kickoff.
+      { kind: "pr", url: "javascript:alert(1)", label: "legacy" },
     ],
   });
   // Plain rows stand in for the connector's linked child cells: the pattern
   // reads the same shallow fields either way.
-  const index = new Writable<SessionIndexView>({
+  const index = new Writable<SessionIndexView & StartableSourcesView>({
     schema: "commonfabric.agent-connector.session-index",
     ownerDid: "did:key:owner",
+    // Codex is configured but its driver cannot start a session; Claude can.
     sources: [
-      { id: "codex", driver: "codex-app-server" },
-      { id: "claude", driver: "claude-agent-sdk" },
+      { id: "codex", driver: "codex-app-server", capabilities: {} },
+      {
+        id: "claude",
+        driver: "claude-agent-sdk",
+        capabilities: { startSession: true },
+      },
     ],
     sessions: [
       {
@@ -165,6 +176,21 @@ export default pattern(() => {
     wb.relatedSessions[0]?.nativeSessionId === "aaa"
   );
 
+  // Only a source whose driver can start is offered as a harness, and a
+  // stored link that is not http(s) renders as text with no anchor.
+  const assert_harnesses_and_links = assert(() =>
+    JSON.stringify(
+        propValue(findNodeByProp(wb[UI], "data-harness", ""), "items"),
+      ) === JSON.stringify([
+        { label: "claude  (claude-agent-sdk)", value: "claude" },
+      ]) &&
+    findNode(
+        wb[UI],
+        (node) => propValue(node, "href") === "javascript:alert(1)",
+      ) === undefined &&
+    hasText(wb[UI], "legacy")
+  );
+
   const action_attach = action(() => {
     wb.attach.send({ sourceId: "claude", nativeSessionId: "aaa" });
   });
@@ -219,6 +245,7 @@ export default pattern(() => {
       'Work on topic #7, it\'s time.\n\nContext:\n- Topic #7, "Workbench topic". Its living document begins: The living document, which a session starts from.',
     ) &&
     wb.kickoff.includes("Links:\n- #1: https://github.com/o/r/pull/1") &&
+    !wb.kickoff.includes("javascript:") &&
     wb.spawnCommand.startsWith(
       "cd '/w/labs' && claude 'Work on topic #7, it'\\''s time.",
     )
@@ -250,6 +277,16 @@ export default pattern(() => {
       firstCommand(commands.get())?.nativeSessionId &&
     wb.attachedSessions[1]?.title === "topic #7: Workbench topic" &&
     wb.attachedSessions[1]?.sourceId === "claude"
+  );
+
+  // A start through the Codex source sends nothing: its driver cannot start
+  // a session, so the picker never offered it and the handler refuses it.
+  const action_start_codex = action(() => {
+    wb.spawnSource.set("codex");
+    wb.startSession.send();
+  });
+  const assert_codex_start_refused = assert(() =>
+    commands.get().length === 1 && wb.attachedSessions.length === 2
   );
 
   // The rail's buttons write the same record the verbs do: Attach on a recent
@@ -296,6 +333,7 @@ export default pattern(() => {
     expectRuntimeErrors: 1,
     [TESTS]: [
       { assertion: assert_header },
+      { assertion: assert_harnesses_and_links },
       { render: wb[UI] },
       { action: action_attach },
       { assertion: assert_attached },
@@ -311,6 +349,8 @@ export default pattern(() => {
       { action: action_start },
       { assertion: assert_start_command },
       { assertion: assert_start_attached },
+      { action: action_start_codex },
+      { assertion: assert_codex_start_refused },
       { action: action_click_attach },
       { assertion: assert_clicked_attached },
       { action: action_click_detach },
