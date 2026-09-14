@@ -83,8 +83,10 @@ The target compares snapshot hashes with the previous index. It does not rewrite
 an unchanged session graph. It still refreshes source capabilities, recent
 message previews, and synchronization status in the indexes. A retained session
 keeps its graph and its message previews; its row takes the refreshed source
-capabilities and stays complete. Retention rests on a complete published copy
-being there: a retention nothing complete backs makes the source's inventory
+capabilities and the checkout's current Git context, observed the way a read
+session's is, and stays complete. The manifest inside the graph keeps the Git
+context of its last read. Retention rests on a complete published copy being
+there: a retention nothing complete backs makes the source's inventory
 incomplete, so a session absent from that inventory is not deleted on its word,
 and marks the retained session's row, where there is one, partial as a failed
 read does.

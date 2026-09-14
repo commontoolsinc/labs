@@ -832,6 +832,32 @@ async function pushSessionGraphBatch(
   }
 }
 
+/**
+ * The Git context a row carries after an observation: the observed one, or
+ * the prior row's when the observation failed, or when the worktree is the
+ * prior row's and its details have not resolved yet.
+ */
+function rowGitContext(
+  previousEntry: IndexEntry | undefined,
+  observed: GitContext,
+): GitContext {
+  const preservesPrior = previousEntry !== undefined &&
+    (observed.gitObservationFailed === true ||
+      (observed.gitWorktreeRoot !== null &&
+        observed.gitObservedAt === null &&
+        previousEntry.gitWorktreeRoot === observed.gitWorktreeRoot));
+  return preservesPrior
+    ? {
+      gitRepo: previousEntry!.gitRepo,
+      gitBranch: previousEntry!.gitBranch,
+      gitWorktreeRoot: previousEntry!.gitWorktreeRoot,
+      gitHeadSha: previousEntry!.gitHeadSha,
+      gitRemotes: previousEntry!.gitRemotes,
+      gitObservedAt: previousEntry!.gitObservedAt,
+    }
+    : observed;
+}
+
 export class AgentFabricTarget implements CommandTarget {
   readonly conn: AgentFabricConnection;
   readonly cells: AgentFabricCells;
@@ -1114,27 +1140,11 @@ export class AgentFabricTarget implements CommandTarget {
         currentKeys.add(key);
         if (isSuperseded(key)) continue;
         const previousEntry = entriesByKey.get(key);
-        const observedContext = await gitContext.resolve(
-          snapshot.summary.cwd,
-          cancellableSignal(),
+        const context = rowGitContext(
+          previousEntry,
+          await gitContext.resolve(snapshot.summary.cwd, cancellableSignal()),
         );
         throwIfPublicationCanStop();
-        const preservesPriorGit = previousEntry !== undefined &&
-          (observedContext.gitObservationFailed === true ||
-            (observedContext.gitWorktreeRoot !== null &&
-              observedContext.gitObservedAt === null &&
-              previousEntry.gitWorktreeRoot ===
-                observedContext.gitWorktreeRoot));
-        const context = preservesPriorGit
-          ? {
-            gitRepo: previousEntry!.gitRepo,
-            gitBranch: previousEntry!.gitBranch,
-            gitWorktreeRoot: previousEntry!.gitWorktreeRoot,
-            gitHeadSha: previousEntry!.gitHeadSha,
-            gitRemotes: previousEntry!.gitRemotes,
-            gitObservedAt: previousEntry!.gitObservedAt,
-          }
-          : observedContext;
         const {
           gitHeadSha: _gitHeadSha,
           gitRemotes: _gitRemotes,
@@ -1188,7 +1198,11 @@ export class AgentFabricTarget implements CommandTarget {
         }
       }
       // A retained session keeps the row and graph its last read produced,
-      // taking only the refreshed source capabilities. Retention rests on a
+      // taking the refreshed source capabilities and the checkout's current
+      // Git context, observed the way a read session's is: a branch switch
+      // or a new commit reaches the row (and the checkout index built from
+      // it) without the transcript being read again. The manifest inside the
+      // graph keeps the context of its last read. Retention rests on a
       // complete copy being there; where one is not, the retention is an
       // error like a failed read: the inventory cannot vouch for the session
       // and stops being complete, so nothing absent from it is deleted on its
@@ -1210,9 +1224,20 @@ export class AgentFabricTarget implements CommandTarget {
           });
           continue;
         }
+        const context = rowGitContext(
+          prior,
+          await gitContext.resolve(summary.cwd, cancellableSignal()),
+        );
+        throwIfPublicationCanStop();
         const { deletedAt: _deletedAt, ...rest } = prior;
         entriesByKey.set(key, {
           ...rest,
+          gitRepo: context.gitRepo,
+          gitBranch: context.gitBranch,
+          gitWorktreeRoot: context.gitWorktreeRoot,
+          gitHeadSha: context.gitHeadSha,
+          gitRemotes: context.gitRemotes,
+          gitObservedAt: context.gitObservedAt,
           capabilities: { ...capabilities },
           syncStatus: "complete",
         });

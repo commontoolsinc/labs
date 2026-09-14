@@ -246,7 +246,8 @@ keeps one pending request while a collection is active. Calls that reach
 complete index, then asks every running driver for its complete inventory. A
 listed session is read only when its inventory summary differs from its
 published copy: a session with the same driver, update time, archived state, and
-active state as a complete published row is retained as it is. When the index
+active state as a complete published row is retained: its graph and previews
+stay, and its row takes the checkout's current Git context. When the index
 cannot be read, every listed session is read. The host allocates a target
 observation sequence before those reads. It publishes all successful and partial
 source results together through `AgentFabricTarget.publish()`. The sequence

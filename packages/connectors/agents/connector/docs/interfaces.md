@@ -123,13 +123,15 @@ provider call that does not return on its own.
 
 The optional `retain` predicate sees each inventory summary before the session
 is read. A summary it accepts goes into the result's `retained` list and its
-session is not read; publication keeps that session's row and graph as they are.
-The predicate is the host's claim that the published copy is current, and the
-target checks the claim against the index: a retained session with no complete
-published copy is recorded as an error and makes the source's inventory
-incomplete, and its row, where the index holds one, is marked `partial` as a
-failed read's is. `AgentFabricTarget.publishedSessions()` supplies what a host
-needs to make the claim.
+session is not read; publication keeps that session's graph as it is and its
+row's previews, and refreshes the row's Git context from the checkout the
+summary names, the way a read session's is refreshed. The predicate is the
+host's claim that the published copy is current, and the target checks the claim
+against the index: a retained session with no complete published copy is
+recorded as an error and makes the source's inventory incomplete, and its row,
+where the index holds one, is marked `partial` as a failed read's is.
+`AgentFabricTarget.publishedSessions()` supplies what a host needs to make the
+claim.
 
 The returned `CollectedSource` contains successful snapshots and structured
 errors. Its `complete` field is true only when enumeration completed, every
