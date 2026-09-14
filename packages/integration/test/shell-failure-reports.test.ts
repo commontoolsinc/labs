@@ -211,41 +211,60 @@ describe("shell-failure-reports", () => {
         const add = target.addEventListener.bind(target);
         const remove = target.removeEventListener.bind(target);
         const listeners = new Set<EventListenerOrEventListenerObject>();
+        let subscribed!: () => void;
+        Object.defineProperty(globalThis, "shellReadinessSubscribed", {
+          value: new Promise<void>((resolve) => subscribed = resolve),
+        });
         target.addEventListener = (type, listener, options) => {
-          if (type === "cf-shell-ready" && listener) listeners.add(listener);
           add(type, listener, options);
+          if (type === "cf-shell-ready" && listener) {
+            listeners.add(listener);
+            subscribed();
+          }
         };
         target.removeEventListener = (type, listener, options) => {
           if (type === "cf-shell-ready" && listener) listeners.delete(listener);
           remove(type, listener, options);
         };
-        let published: typeof globalThis.app | undefined;
-        let reads = 0;
-        Object.defineProperty(globalThis, "app", {
-          configurable: true,
-          get() {
-            reads++;
-            if (reads === 1) {
-              queueMicrotask(() => {
-                globalThis.dispatchEvent(new Event("cf-shell-ready"));
-              });
-            } else if (reads === 2) {
-              queueMicrotask(() => {
-                published = {
-                  serialize: () => ({ view: { builtin: "home" } }),
-                } as typeof globalThis.app;
-                globalThis.dispatchEvent(new Event("cf-shell-ready"));
-              });
-            }
-            return published;
-          },
-        });
         Object.defineProperty(globalThis, "shellReadinessListeners", {
           get: () => listeners.size,
         });
       });
 
-      await waitForShellReady(page);
+      const ready = waitForShellReady(page);
+      await Promise.race([
+        ready.then(() => {
+          throw new Error("The shell was reported ready before publication.");
+        }),
+        page.evaluate(async () => {
+          const fixture = globalThis as typeof globalThis & {
+            shellReadinessSubscribed: Promise<void>;
+          };
+          await fixture.shellReadinessSubscribed;
+        }),
+      ]);
+
+      await page.evaluate(() => {
+        globalThis.dispatchEvent(new Event("cf-shell-ready"));
+      });
+      const beforePublication = await page.evaluate(() => {
+        const fixture = globalThis as typeof globalThis & {
+          shellReadinessListeners: number;
+        };
+        return {
+          listeners: fixture.shellReadinessListeners,
+          published: globalThis.app !== undefined,
+        };
+      });
+      expect(beforePublication).toEqual({ listeners: 1, published: false });
+
+      await page.evaluate(() => {
+        globalThis.app = {
+          serialize: () => ({ view: { builtin: "home" } }),
+        } as typeof globalThis.app;
+        globalThis.dispatchEvent(new Event("cf-shell-ready"));
+      });
+      await ready;
 
       const result = await page.evaluate(() => {
         const fixture = globalThis as typeof globalThis & {

@@ -528,6 +528,8 @@ function installWaiter(
   // cell value back into an input sets only the element property. A coarse
   // timer backstop re-evaluates so such waits converge instead of starving
   // until the outer timeout.
+  // TODO(Hixie): Subscribe to cell changes or rendering completion for conditions
+  // without DOM mutations, then remove this polling backstop.
   const backstop = events.length === 0 ? setInterval(evaluate, 500) : undefined;
   // Check immediately; the condition may already hold.
   evaluate();
