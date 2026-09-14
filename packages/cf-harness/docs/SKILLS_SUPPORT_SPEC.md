@@ -543,6 +543,7 @@ Persist these artifacts under the run root:
 ```text
 skill-registry.json
 skill-activations.json
+acquired-skills.json
 ```
 
 `skill-registry.json`:
@@ -560,6 +561,19 @@ skill-activations.json
       "skillPath": "/workspace/labs/skills/pattern-dev/SKILL.md",
       "skillDir": "/workspace/labs/skills/pattern-dev",
       "digest": "sha256:...",
+      "resources": [
+        {
+          "path": "scripts/check.ts",
+          "kind": "script",
+          "resourcePath": "/workspace/labs/skills/pattern-dev/scripts/check.ts",
+          "sandboxResourcePath": "/workspace/skills/pattern-dev/scripts/check.ts",
+          "sizeBytes": 2048,
+          "digest": "sha256:...",
+          "contentKind": "text",
+          "script": { "executable": true, "runtime": "deno" },
+          "diagnostics": []
+        }
+      ],
       "frontmatter": {},
       "diagnostics": []
     }
@@ -567,6 +581,10 @@ skill-activations.json
   "diagnostics": []
 }
 ```
+
+Each script resource carries the `digest` and `sizeBytes` a registry script's
+execution is held to. `run_skill_script` re-reads the file and refuses when
+either has moved.
 
 `skill-activations.json`:
 
@@ -592,6 +610,23 @@ skill-activations.json
       "activatedAt": "...",
       "cfcPromptRole": "context",
       "handleToken": "cfh:a:3kk78"
+    },
+    {
+      "name": "handle:cfh:a:f4ecd",
+      "source": "skill-handle",
+      "runId": "...",
+      "digest": "sha256:...",
+      "activatedAt": "...",
+      "cfcPromptRole": "context",
+      "handleToken": "cfh:a:f4ecd",
+      "acquisition": {
+        "registryId": "owner/repo/slug",
+        "commitSha": "dd93980e2f9a1d4c4d50a6e1a3cbb6e2b7a91f3c",
+        "sourceUrl": "https://raw.githubusercontent.com/owner/repo/dd93980.../skills/slug/SKILL.md",
+        "verification": "git-commit-sha",
+        "valueDigest": "sha256:...",
+        "receivedAt": "..."
+      }
     }
   ]
 }
@@ -601,6 +636,45 @@ The registry path fields (`skillPath`, `skillDir`, `sandboxSkillPath`,
 `sandboxSkillDir`) are absent for a `skill-handle` activation: its text came
 from a cell the delegation's `skillHandle` named, not from a registry directory,
 and `handleToken` plus `digest` carry its provenance instead.
+
+A handle an acquisition minted carries `acquisition` as well, and that is what
+an acquired skill's script is authorized by: the run holds the skill when an
+activation's `acquisition` names the pin, since there is no registry name to
+match.
+
+`acquired-skills.json`, written only by a run that acquired a skill carrying
+scripts:
+
+```json
+{
+  "type": "cf-harness.acquired-skills",
+  "version": 1,
+  "generatedAt": "...",
+  "skills": [
+    {
+      "registryId": "owner/repo/slug",
+      "commitSha": "dd93980e2f9a1d4c4d50a6e1a3cbb6e2b7a91f3c",
+      "pin": "owner/repo/slug@dd93980e2f9a1d4c4d50a6e1a3cbb6e2b7a91f3c",
+      "hostRoot": "<artifactRoot>/.acquired-skills/<runId>/<commitSha>/slug",
+      "sandboxRoot": "/acquired-skill",
+      "scripts": [
+        {
+          "path": "scripts/report.sh",
+          "hostPath": "<hostRoot>/scripts/report.sh",
+          "sandboxPath": "/acquired-skill/scripts/report.sh",
+          "valueDigest": "sha256:...",
+          "sizeBytes": 512
+        }
+      ]
+    }
+  ]
+}
+```
+
+`valueDigest` is the digest taken at acquisition, in the encoding the
+acquisition records, and it stands where a registry script's snapshot digest
+stands: the execution re-reads the file and refuses when it has moved. The
+`hostRoot` sits outside every run root, so no run's own artifacts contain it.
 
 On resume:
 

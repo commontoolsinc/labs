@@ -101,7 +101,7 @@ export const runSkillScriptToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_skill_script",
   title: "Run Skill Script",
   description:
-    "Run an exact allowlisted script bundled under scripts/ in an explicitly configured cf-harness skill. The script must belong to an activated skill and match the run-start skill registry digest.",
+    "Run an exact allowlisted script bundled under scripts/ in a cf-harness skill the run holds. Name a configured skill by its registry name, or a skill this run acquired by its pin, owner/repo/slug@<commit sha>. Either way the skill must be activated for this run and the script must still match the digest it was pinned at: the run-start registry snapshot for a configured skill, the bytes the pinned commit served for an acquired one.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
