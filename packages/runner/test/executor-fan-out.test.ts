@@ -43,6 +43,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import { scopedArgumentInitializationTargets } from "../src/data-updating.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -372,13 +373,46 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       await runtime.storageManager.synced();
     };
     const writeNote = async (runtime: Runtime, value: string) => {
-      const arg = typedArg(runtime);
+      await typedArg(runtime).sync();
+      // The ragged fixture authors only this actor's user-to-session hop.
+      // A write from space scope would reestablish the shared declaration.
+      const arg = options.userScopedNote
+        ? runtime.getCell<{ draft: string; note: string; n: number }>(
+          space,
+          options.names.arg,
+          compiled.argumentSchema,
+          undefined,
+          "user",
+        )
+        : typedArg(runtime);
       await arg.sync();
       const tx = runtime.edit();
       arg.key("note").withTx(tx).set(value);
       expect((await tx.commit()).error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
+    };
+    const initialSharedNote = (
+      Engine.read(engine, { id: argId, scopeKey: "space" } as never)?.value as
+        | { note?: unknown }
+        | undefined
+    )?.note;
+    const expectExplicitUserNote = () => {
+      expect(
+        (Engine.read(engine, { id: argId, scopeKey: "space" } as never)
+          ?.value as { note?: unknown } | undefined)?.note,
+      ).toEqual(initialSharedNote);
+      const tx = alice.edit();
+      try {
+        expect(scopedArgumentInitializationTargets(
+          alice,
+          tx,
+          aliceArg.getAsNormalizedFullLink(),
+          compiled.argumentSchema,
+        )).toEqual([]);
+      } finally {
+        tx.abort();
+      }
     };
     const userKey = (signer: Identity) =>
       resolveScopeKey("user", { principal: signer.did() });
@@ -391,6 +425,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       watchRoot,
       writeDraft,
       writeNote,
+      expectExplicitUserNote,
       userKey,
       serviceUserKey: resolveScopeKey("user", {
         principal: serviceSigner.did(),
@@ -539,8 +574,8 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     const aliceKey = setup.userKey(aliceSigner);
     const bobKey = setup.userKey(bobSigner);
     // The supplied note reference starts at user scope, so Alice's absent
-    // note stays at user scope under the PerSession follow cap. Bob's typed
-    // note write installs his own session hop. The same noteEcho node then
+    // note stays at user scope under the PerSession follow cap. Bob's write
+    // from user scope installs only his own session hop. The noteEcho node then
     // reads user state for Alice and session state for Bob.
     const noteScope = (runtime: Runtime) =>
       runtime.getCellFromLink({
@@ -610,11 +645,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         `session:${encodeURIComponent(bobSigner.did())}:`,
       )
     );
-    // (A pre-fix shape made THIS assertion flake: Bob's session
-    // narrowing wrote the session redirect at the SHARED space slot
-    // when Alice's user narrowing had already put the user redirect
-    // there — pattern-binding.ts's ragged fix keeps the second hop in
-    // Bob's own user slot.)
+    setup.expectExplicitUserNote();
     expect(
       aliceSessionRuns.map((e) => [e.actionId, e.instanceKey]),
     ).toEqual([]);
@@ -632,6 +663,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // its own key here as well.
     const setup = await standUp({
       names: { arg: "fo-c-rt-arg", result: "fo-c-rt-result" },
+      userScopedNote: true,
       clients: [aliceSigner, bobSigner],
       policy: { storeReadThrough: true },
     });
@@ -677,6 +709,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       () => bobSessionHolds('"note:N2"'),
       "bob's session instance to re-derive from his second note",
     );
+    setup.expectExplicitUserNote();
     const trace = servingRuntime!.scheduler.getActionRunTrace();
     const sessionRuns = trace.filter((entry) =>
       entry.instanceKey?.startsWith("session:")

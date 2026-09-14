@@ -10,10 +10,21 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [View-scoped client replication](view-scoped-client-replication.md) tracks
+  rollout, recovery, and adversarial verification of active-view delivery and
+  guarded speculative computation. It separates execution demand from delivery
+  and stages document selection before optional field projections.
+- [Interaction cost in the unified inbox](person-inbox-interaction-cost.md)
+  records the runtime work behind a thread open that cost 1482 ms paced and
+  10.7-19.5 s against five people's data: the per-read prefix scan over a
+  document's dereference-trace sources, the schemaless result pull a child
+  instantiation registers, and the authoring rule that a display cap bounds the
+  render and not the transaction. It carries what was disproved with what
+  landed, and the one item still open — a session that settles at ~800 ms after
+  roughly twenty clicks, which is waiting rather than compute.
 - [Topics computation cost and live upgrade](topics-computation-cost.md)
   sequences shared backlink lookup, incremental mention maintenance, topic
   summaries, measurement gates, and rehearsed upgrades of populated boards.
-
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement
   through lint and new-source admission.
@@ -64,12 +75,26 @@ a record: archive it to `docs/history/plans/` following the procedure in
   optional CI adoption and further fixture hardening.
 - [Lazy materialization fast-follow](lazy-materialization-fast-follow.md)
   owns handler integration, rollout evidence, flag retirement, and renewed
-  measurements after #7155, with independently checkable stages F0–F5.
+  measurements after the computation-cost arc, with independently checkable
+  stages F0–F5.
 - [Lazy cell materialization](lazy-cell-materialization.md) sequences a
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
-
+- [Pre-syncing from node plans](presync-from-node-plans.md) makes one
+  derivation per pattern node serve both instantiation and the pre-sync, so a
+  resume and a fresh start name exactly what each lift, handler, builtin, and
+  nested pattern reads under their declared read schemas, then holds each
+  node's first run on the loads it named instead of on a space-wide timer.
+- [Making pattern computation cost declarable and visible](pattern-computation-cost.md)
+  pairs two repairs to the same gap: the collection algebra has incremental
+  `map`, `filter`, and `flatMap` but no `groupBy`, keyed lookup, join, or
+  incremental `reduce`, so a group-by is written as nested scans over a
+  reactive array; and a scheduler node records how often an action ran but not
+  how much it read, so the cost is invisible until somebody profiles. Carries
+  the access counter, the missing operators, the replication failures that
+  currently push authors off the incremental path, and the authoring guidance
+  that steers them into the expensive construct.
 - [Choosing which tests a pull request runs](pull-request-test-selection.md)
   replaces the sixty-seven pull-request jobs with five, each running a subset
   chosen from what the record store knows about which tests have caught real

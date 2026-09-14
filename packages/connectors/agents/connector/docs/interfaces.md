@@ -31,20 +31,20 @@ normalized or Fabric APIs.
 
 `AgentSourceConfig` describes one logical agent source.
 
-| Field                   | Meaning                                                                                                           |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `id`                    | Stable source identity. Hosts should use a non-empty lowercase value. Commands normalize this value to lowercase. |
-| `driver`                | `claude-agent-sdk`, `codex-app-server`, or `acp`                                                                  |
-| `enabled`               | Host policy flag. `createAgentDriver()` does not filter disabled configurations.                                  |
-| `command`               | Complete provider process command. Required by ACP. Overrides the derived Codex launch command.                   |
-| `cwd`                   | Default working directory for provider processes and provider-owned prompts when supported                        |
-| `env`                   | Environment entries added to provider operations or child processes                                               |
-| `configDir`             | Claude configuration directory, exposed to the SDK as `CLAUDE_CONFIG_DIR`                                         |
-| `codexBin`              | Codex executable used when `command` is absent                                                                    |
-| `codexHome`             | Codex home directory, exposed to the child as `CODEX_HOME`                                                        |
-| `codexTransport`        | `stdio`, `managed`, or `proxy`                                                                                    |
-| `codexSocket`           | Optional socket passed to Codex proxy mode                                                                        |
-| `allowDangerFullAccess` | Explicit permission for Claude bypass mode and unrestricted Codex turns                                           |
+| Field                   | Meaning                                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                    | Stable source identity. Hosts should use a non-empty lowercase value. Commands normalize this value to lowercase.                                                                          |
+| `driver`                | `claude-agent-sdk`, `codex-app-server`, or `acp`                                                                                                                                           |
+| `enabled`               | Host policy flag. `createAgentDriver()` does not filter disabled configurations.                                                                                                           |
+| `command`               | Complete provider process command. Required by ACP. Overrides the derived Codex launch command.                                                                                            |
+| `cwd`                   | Default working directory for provider processes, provider-owned prompts, and started sessions when supported. For Claude it is also the project directory whose sessions the source lists |
+| `env`                   | Environment entries added to provider operations or child processes                                                                                                                        |
+| `configDir`             | Claude configuration directory, exposed to the SDK as `CLAUDE_CONFIG_DIR`                                                                                                                  |
+| `codexBin`              | Codex executable used when `command` is absent                                                                                                                                             |
+| `codexHome`             | Codex home directory, exposed to the child as `CODEX_HOME`                                                                                                                                 |
+| `codexTransport`        | `stdio`, `managed`, or `proxy`                                                                                                                                                             |
+| `codexSocket`           | Optional socket passed to Codex proxy mode                                                                                                                                                 |
+| `allowDangerFullAccess` | Explicit permission for Claude bypass mode and unrestricted Codex turns                                                                                                                    |
 
 `createAgentDriver(config)` selects the class named by `config.driver`. It does
 not start the driver. Each bundled driver trims and lowercases `config.id` when
@@ -66,6 +66,11 @@ interface AgentDriver {
   prompt(
     nativeSessionId: string,
     input: PromptInput,
+    options?: CommandExecutionOptions,
+  ): Promise<CommandExecutionResult>;
+  startSession(
+    nativeSessionId: string,
+    input: StartInput,
     options?: CommandExecutionOptions,
   ): Promise<CommandExecutionResult>;
   cancel(nativeSessionId: string): Promise<CommandExecutionResult>;
@@ -108,12 +113,26 @@ refresh finishes.
 
 ### Collection
 
-`collectSource(driver, signal?)` consumes `listSessions()` until `nextCursor` is
-absent. It records an inventory error for a repeated cursor. It also records an
-error before retaining a page that would raise the inventory above 100,000
-summaries. It then calls `readSession()` once for every retained summary. The
-optional signal is checked before and after every provider call. A host still
-stops the driver to interrupt a provider call that does not return on its own.
+`collectSource(driver, { signal, retain })` consumes `listSessions()` until
+`nextCursor` is absent. It records an inventory error for a repeated cursor, and
+one per session a later page lists again, which it keeps once. It also records
+an error before keeping a page that would raise the listings, repeats included,
+above 100,000. It then calls `readSession()` once for every listed summary the
+`retain` predicate does not accept. The optional signal is checked before and
+after every provider call. A host still stops the driver to interrupt a provider
+call that does not return on its own.
+
+The optional `retain` predicate sees each inventory summary before the session
+is read. A summary it accepts goes into the result's `retained` list and its
+session is not read; publication keeps that session's graph as it is and its
+row's previews, and refreshes the row's Git context from the checkout the
+summary names, the way a read session's is refreshed. The predicate is the
+host's claim that the published copy is current, and the target checks the claim
+against the index: a retained session with no complete published copy is
+recorded as an error and makes the source's inventory incomplete, and its row,
+where the index holds one, is marked `partial` as a failed read's is.
+`AgentFabricTarget.publishedSessions()` supplies what a host needs to make the
+claim.
 
 The returned `CollectedSource` contains successful snapshots and structured
 errors. Its `complete` field is true only when enumeration completed, every
@@ -154,19 +173,21 @@ initial synchronization.
 
 The target exposes these orchestration methods:
 
-| Method                                    | Behavior                                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `beginSessionObservation()`               | Allocates the ordering value that a caller records before it begins a full provider collection.         |
-| `publish(collected, options?)`            | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions. |
-| `publishHealth(value)`                    | Publishes a host-defined health record under the connector-owned health schema.                         |
-| `subscribeCommands(callback)`             | Subscribes after the exact queue has been bound to its owner and verified writer.                       |
-| `pollCommands()`                          | Pulls commands after the exact queue has been bound to its owner and verified writer.                   |
-| `bindCommandCell(cell, writer)`           | Verifies the exact owner-scoped command queue and applies its owner and verified-writer policy.         |
-| `publishReceipt(receipt)`                 | Publishes one durable receipt cell and updates the bounded receipt index.                               |
-| `readReceipt(commandId)`                  | Reads the deterministic individual receipt cell used as the shared command claim.                       |
-| `refreshSession(driver, nativeSessionId)` | Reads and publishes one session without changing untouched session statuses.                            |
-| `commandCellId()`                         | Returns the command cell ID without the `of:` link prefix.                                              |
-| `receiptCellId()`                         | Returns the receipt-index cell ID without the `of:` link prefix.                                        |
+| Method                                      | Behavior                                                                                                                                            |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publishedSessions()`                       | Reads the complete index without transcripts and returns each session's driver, update time, lifecycle state, and status, by key.                   |
+| `beginSessionObservation()`                 | Allocates the ordering value that a caller records before it begins a full provider collection.                                                     |
+| `publish(collected, options?)`              | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions.                                             |
+| `publishHealth(value)`                      | Publishes a host-defined health record under the connector-owned health schema.                                                                     |
+| `subscribeCommands(callback)`               | Subscribes to every bound queue once at least one has been bound to its owner and verified writer; each delivery carries its queue's producer.      |
+| `pollCommands()`                            | Pulls every bound queue's pending commands without their queues, once at least one has been bound; a diagnostic read.                               |
+| `bindCommandCell(cell, writer)`             | Verifies the exact owner-scoped command queue and applies its owner and verified-writer policy.                                                     |
+| `bindProducerCommandCell(producer, writer)` | Creates the deterministic queue for one producer pattern, applies the same policy with that producer's handler as the writer, and returns the cell. |
+| `publishReceipt(receipt)`                   | Publishes one durable receipt cell and updates the bounded receipt index.                                                                           |
+| `readReceipt(commandId, producer?)`         | Reads the deterministic individual receipt cell used as the shared command claim, the producer's when one is named.                                 |
+| `refreshSession(driver, nativeSessionId)`   | Reads and publishes one session without changing untouched session statuses.                                                                        |
+| `commandCellId()`                           | Returns the command cell ID without the `of:` link prefix.                                                                                          |
+| `receiptCellId()`                           | Returns the receipt-index cell ID without the `of:` link prefix.                                                                                    |
 
 The optional `publish()` setting `preserveUntouchedStatus` defaults to false.
 Normal full collections should use the default. A targeted refresh should set it
@@ -220,9 +241,10 @@ durable in every target and the ledger publication marker is clear. A callback
 failure is logged and does not turn a published command receipt back into
 pending work.
 
-The optional command-task failure callback receives command ID, source ID,
-native session ID, and the thrown error as soon as scheduled work fails. It does
-not receive the command payload.
+The optional command-task failure callback receives command ID, the producer
+whose queue delivered it when one did, source ID, native session ID, and the
+thrown error as soon as scheduled work fails. It does not receive the command
+payload.
 
 `recoverUnpublishedReceipts()` changes ledger entries left in flight by a prior
 process to unknown, then publishes every receipt whose publication was not
@@ -241,8 +263,9 @@ prefix.
 version, and `DriverCapabilities`.
 
 The capability booleans describe inventory, reads, prompts, cancellation,
-renaming, modes, and configuration options. `modes` lists accepted mode IDs.
-`configOptions` carries provider-defined option descriptions.
+renaming, modes, and configuration options. `startSession` is present and `true`
+for a driver that can start a session, and absent otherwise. `modes` lists
+accepted mode IDs. `configOptions` carries provider-defined option descriptions.
 
 Unsupported methods still exist on every driver. They return a
 `CommandExecutionResult` with status `unsupported` and a structured error.
@@ -309,15 +332,21 @@ completed. Callers must not treat it as safe to repeat automatically.
 
 The Claude driver calls these SDK operations through `ClaudeSdkAdapter`:
 
-- `listSessions({ limit, offset })`
+- `listSessions({ limit, offset, dir })`
 - `getSessionInfo(sessionId)`
 - `getSessionMessages(sessionId, { includeSystemMessages: true })`
 - `renameSession(sessionId, title)`
 - `query({ prompt, options })`
 
-Inventory pages contain 100 sessions. The cursor is a decimal offset. Message
-objects become native events. Their UUID, type, and message content provide the
-normalized message view.
+Inventory pages contain 100 sessions. The cursor is a decimal offset. A source
+with a configured `cwd` lists that project directory's sessions and, when the
+directory is inside a Git repository, its worktrees'; never its subdirectories',
+which the SDK keys as projects of their own. A source without one lists every
+project directory the SDK knows. Giving a `cwd` to a source that had none
+narrows its inventory, so its first complete collection marks every session it
+published from outside that directory deleted, as it marks any session absent
+from a complete inventory. Message objects become native events. Their UUID,
+type, and message content provide the normalized message view.
 
 The driver reports `active: true` while a prompt started by that connector
 process is running. It snapshots that state when an inventory or session read
@@ -352,6 +381,21 @@ prompt. A prompt submitted after the driver stops fails without calling the SDK.
 
 The final SDK result determines the command status. Cancellation calls
 `interrupt()` only for a query started by this connector instance.
+
+A start runs `query()` with `sessionId` set to the caller-chosen native session
+ID, which must be a UUID, `cwd` set to the directory the start runs in, and
+`title` set to the start's title when it names one, so the session carries its
+title from its first message. A start runs where its source lists: in the
+source's configured `cwd`, and a start naming any other directory fails; a
+source without one runs the start in the directory it names, which is then
+required and made absolute. A start for a session the SDK reports information
+for fails. The driver reads the session information first, so cancellation
+during that lookup behaves as it does for a prompt. The session becomes
+observable, and its first refresh runs, once the SDK has emitted its first
+message. A successful start records the directory for later prompts. A start's
+`mode` is one the driver advertises; it is applied to the first turn and kept
+for later connector-owned prompts, a start that fails keeps no mode, and a mode
+the driver does not advertise makes the start unsupported.
 
 Mode and model settings are kept in process memory per session. They apply to
 connector-owned prompts. `bypassPermissions` is advertised only when
@@ -443,13 +487,14 @@ with an ACP prefix.
 All top-level causes include the destination `spaceDid` and `ownerDid`. The
 remaining fields are fixed:
 
-| Cell                   | Cause field                              |
-| ---------------------- | ---------------------------------------- |
-| Recent session index   | `agentConnector: "recent-session-index"` |
-| Complete session index | `agentConnector: "all-session-index"`    |
-| Health                 | `agentConnector: "health"`               |
-| Commands               | `agentConnector: "commands"`             |
-| Receipt index          | `agentConnector: "receipts"`             |
+| Cell                   | Cause field                                                |
+| ---------------------- | ---------------------------------------------------------- |
+| Recent session index   | `agentConnector: "recent-session-index"`                   |
+| Complete session index | `agentConnector: "all-session-index"`                      |
+| Health                 | `agentConnector: "health"`                                 |
+| Commands               | `agentConnector: "commands"`                               |
+| Producer commands      | `agentConnector: "commands"` and `producer: <producer ID>` |
+| Receipt index          | `agentConnector: "receipts"`                               |
 
 Session, chunk, and individual receipt causes add their durable identities:
 
@@ -753,7 +798,13 @@ interface AgentSessionCommand {
   createdAt: string;
   sourceId: string;
   nativeSessionId: string;
-  type: "prompt" | "cancel" | "rename" | "set-mode" | "set-config-option";
+  type:
+    | "prompt"
+    | "start"
+    | "cancel"
+    | "rename"
+    | "set-mode"
+    | "set-config-option";
   payload: Record<string, unknown>;
   force?: boolean;
   requestedBy?: string;
@@ -766,21 +817,30 @@ not interpret `createdAt` as a date.
 
 Payloads are:
 
-| Type                | Payload                                                     |
-| ------------------- | ----------------------------------------------------------- |
-| `prompt`            | `text` string, at most 128 KiB                              |
-| `cancel`            | Empty object                                                |
-| `rename`            | `title` string, at most 512 characters                      |
-| `set-mode`          | `mode` string, at most 128 characters                       |
-| `set-config-option` | `key` string, at most 256 characters, and arbitrary `value` |
+| Type                | Payload                                                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`            | `text` string, at most 128 KiB                                                                                                                         |
+| `start`             | `text` string, at most 128 KiB; optional `cwd` string; optional `title` string, at most 512 characters; optional `mode` string, at most 128 characters |
+| `cancel`            | Empty object                                                                                                                                           |
+| `rename`            | `title` string, at most 512 characters                                                                                                                 |
+| `set-mode`          | `mode` string, at most 128 characters                                                                                                                  |
+| `set-config-option` | `key` string, at most 256 characters, and arbitrary `value`                                                                                            |
 
-`force` is passed only to `prompt()`. Bundled drivers currently do not change
-their behavior based on it. `requestedBy` is retained on the parsed command but
-is not copied to receipts.
+A `start` names a session that does not exist yet: the sender mints its native
+session ID, and the receipt's `result` repeats that ID beside the directory the
+session runs in. Cancellation admitted after a start is gated the way it is
+after a prompt, and the session is refreshed after the start whether it
+succeeded or failed, as after a prompt, so a start that emitted output before
+failing is not left at its first event.
+
+`force` is passed only to `prompt()` and `startSession()`. Bundled drivers
+currently do not change their behavior based on it. `requestedBy` is retained on
+the parsed command but is not copied to receipts.
 
 The worker rejects a command whose `ownerDid` differs from its configured owner.
-Invalid values are logged and skipped. A command ID already present in the
-ledger or already scheduled in the process is skipped.
+Invalid values are logged and skipped. A command already present in the ledger
+or already scheduled in the process, under its queue-qualified identity, is
+skipped.
 
 Before command processing starts, the host binds the compiled debug handler to
 the deterministic owner-scoped command cell. Binding rejects another cell and
@@ -788,9 +848,21 @@ rejects a populated queue that does not already carry the configured owner's
 confidentiality and integrity labels. The debug pattern receives that protected
 cell as an input; the host never selects a queue from pattern output.
 
+A queue's write policy names exactly one verified handler, so a second pattern
+that sends commands gets a queue of its own: the host binds a producer queue
+under the producer's own cause with that pattern's declared handler as its
+writer, and the worker reads every bound queue, learning each command's queue
+from the subscription. A command's identity is its ID qualified by the queue it
+arrived on, so an ID repeated on another queue names another command with a
+receipt of its own, and a receipt records its `producer`. Within one queue an ID
+names one command: a repeat is the same command delivered again and does not run
+twice, so a producer mints IDs it never reuses. Queues are bound before commands
+are subscribed; binding one while a subscription is live is an error.
+
 ### Receipt
 
-An `AgentSessionCommandReceipt` records command identity, session identity,
+An `AgentSessionCommandReceipt` records command identity, the producer whose
+queue delivered the command (absent for the owner's queue), session identity,
 status, claim and completion times, optional provider operation ID, optional
 error, and optional provider result.
 

@@ -7,13 +7,14 @@ import {
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isFabricSpecialObject,
   isKeyableObjectNotArray,
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
   isWalkableObjectOrArray,
 } from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
-import { FabricSpecialObject } from "@/interface.ts";
+import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
@@ -26,6 +27,36 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 describe("type-check", () => {
+  describe("isFabricSpecialObject()", () => {
+    it("returns `true` for a `FabricPrimitive` and for a `FabricInstance`", () => {
+      expect(isFabricSpecialObject(new FabricBytes(new Uint8Array([1])))).toBe(
+        true,
+      );
+      expect(isFabricSpecialObject(FabricError.fromNativeError(new Error("x"))))
+        .toBe(true);
+    });
+
+    it("returns `false` for a plain object, an array, `null`, and a function", () => {
+      expect(isFabricSpecialObject({})).toBe(false);
+      expect(isFabricSpecialObject([])).toBe(false);
+      expect(isFabricSpecialObject(null)).toBe(false);
+      expect(isFabricSpecialObject(() => 1)).toBe(false);
+    });
+
+    it("narrows an `unknown` to a `FabricValue`", () => {
+      // What this pins is the narrowed type: a value that passes is typed as
+      // one of the two subclasses, which is a `FabricValue`, where the class
+      // itself narrows only to the abstract base.
+      const value: unknown = new FabricBytes(new Uint8Array([1]));
+      if (isFabricSpecialObject(value)) {
+        const asValue: FabricValue = value;
+        expect(asValue).toBe(value);
+      } else {
+        throw new Error("Expected a special object.");
+      }
+    });
+  });
+
   describe("isFabricContainerValue()", () => {
     describe("given a container arm of `FabricValue`", () => {
       it("returns `true` for a plain object", () => {
@@ -303,7 +334,7 @@ describe("type-check", () => {
       });
 
       it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
-        class DirectSpecialObject extends FabricSpecialObject {}
+        class DirectSpecialObject extends BaseFabricSpecialObject {}
 
         expect(isKeyableObjectOrArray(new DirectSpecialObject())).toBe(false);
       });
@@ -373,7 +404,7 @@ describe("type-check", () => {
     });
 
     it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
-      class DirectSpecialObject extends FabricSpecialObject {}
+      class DirectSpecialObject extends BaseFabricSpecialObject {}
 
       expect(isKeyableObjectNotArray(new DirectSpecialObject())).toBe(false);
     });
@@ -434,7 +465,7 @@ describe("type-check", () => {
         // Every special object the refusal above does not claim is carried
         // whole, decided by class rather than by what the subclass declares.
 
-        class DirectSpecialObject extends FabricSpecialObject {}
+        class DirectSpecialObject extends BaseFabricSpecialObject {}
 
         expect(isWalkableObjectOrArray(new DirectSpecialObject())).toBe(false);
       });
@@ -505,7 +536,7 @@ describe("type-check", () => {
     });
 
     it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
-      class DirectSpecialObject extends FabricSpecialObject {}
+      class DirectSpecialObject extends BaseFabricSpecialObject {}
 
       expect(isWalkableObjectNotArray(new DirectSpecialObject())).toBe(false);
     });

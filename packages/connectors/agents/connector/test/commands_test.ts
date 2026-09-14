@@ -72,6 +72,76 @@ Deno.test("command worker claims before execution and deduplicates command ids",
   await Deno.remove(dir, { recursive: true });
 });
 
+Deno.test("command worker keeps the same command ID apart across producer queues", async () => {
+  const dir = await Deno.makeTempDir();
+  const ledger = await CommandLedger.open(`${dir}/ledger.json`);
+  const published: Array<[string | undefined, string]> = [];
+  const target: CommandTarget = {
+    publishReceipt: (receipt) => {
+      published.push([receipt.producer, receipt.status]);
+      return Promise.resolve();
+    },
+    refreshSession: () => Promise.resolve(),
+  };
+  let renameCalls = 0;
+  const driver = {
+    source: {
+      id: "fake:default",
+      driver: "acp",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    },
+    renameSession: () => {
+      renameCalls++;
+      return Promise.resolve({ status: "succeeded" as const });
+    },
+  } as unknown as AgentDriver;
+  const worker = new CommandWorker(
+    new Map([[driver.source.id, driver]]),
+    [target],
+    ledger,
+    "did:key:test-owner",
+  );
+  const command = {
+    schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid: "did:key:test-owner",
+    id: "one",
+    createdAt: "2026-09-13T00:00:00.000Z",
+    sourceId: "fake:default",
+    nativeSessionId: "session-1",
+    type: "rename",
+    payload: { title: "New name" },
+  };
+
+  // The same ID from two producers is two commands, each with its receipt.
+  await worker.handle([command], "workbench");
+  await worker.handle([command], "dashboard");
+  await worker.drain();
+  assertEquals(renameCalls, 2);
+  assertEquals(published, [
+    ["workbench", "in-flight"],
+    ["workbench", "succeeded"],
+    ["dashboard", "in-flight"],
+    ["dashboard", "succeeded"],
+  ]);
+  assertEquals(ledger.get("one", "workbench")?.producer, "workbench");
+  assertEquals(ledger.get("one", "dashboard")?.producer, "dashboard");
+  assertEquals(ledger.get("one"), undefined);
+
+  // The same ID again on one queue is the same command delivered again.
+  await worker.handle([command], "workbench");
+  await worker.drain();
+  assertEquals(renameCalls, 2);
+  await Deno.remove(dir, { recursive: true });
+});
+
 Deno.test("command worker ignores commands for another owner", async () => {
   const dir = await Deno.makeTempDir();
   const ledger = await CommandLedger.open(`${dir}/ledger.json`);
@@ -706,7 +776,7 @@ Deno.test("command ledger validates receipt keys and contents", async () => {
     await assertRejects(
       () => CommandLedger.open(path),
       Error,
-      "command ledger receipt key does not match commandId: stored-key",
+      "command ledger receipt key does not match its identity: stored-key",
     );
 
     await Deno.writeTextFile(
@@ -1295,6 +1365,12 @@ Deno.test("command receipt parsing rejects every malformed boundary field", () =
       { ...receipt, sourceId: " Fake:Default " },
       "sourceId is not normalized",
     ],
+    ["command", { ...receipt, producer: "" }, "producer must be a string"],
+    [
+      "command",
+      { ...receipt, producer: " Workbench " },
+      "producer is not normalized",
+    ],
     [
       "command",
       { ...receipt, providerOperationId: "" },
@@ -1305,6 +1381,10 @@ Deno.test("command receipt parsing rejects every malformed boundary field", () =
   for (const [commandId, value, message] of cases) {
     assertThrows(() => parseCommandReceipt(commandId, value), Error, message);
   }
+  assertEquals(
+    parseCommandReceipt("command", { ...receipt, producer: "workbench" }),
+    { ...receipt, producer: "workbench" },
+  );
 });
 
 Deno.test("command worker covers unavailable sources and control commands", async () => {
@@ -1486,5 +1566,161 @@ Deno.test("command worker persists and reports publication failures", async () =
     assertEquals(failures, ["double-publication-failure"]);
   } finally {
     await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("command worker dispatches `start` with its payload and refreshes the new session", async () => {
+  const dir = await Deno.makeTempDir();
+  const ledger = await CommandLedger.open(`${dir}/ledger.json`);
+  const statuses: string[] = [];
+  const refreshed: string[] = [];
+  const target: CommandTarget = {
+    publishReceipt: (receipt) => {
+      statuses.push(receipt.status);
+      return Promise.resolve();
+    },
+    refreshSession: (_driver, nativeSessionId) => {
+      refreshed.push(nativeSessionId);
+      return Promise.resolve();
+    },
+  };
+  const starts: unknown[] = [];
+  const driver = {
+    source: {
+      id: "claude:labs",
+      driver: "claude-agent-sdk",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        startSession: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    },
+    startSession: async (
+      nativeSessionId: string,
+      input: unknown,
+      options: CommandExecutionOptions,
+    ) => {
+      starts.push({ nativeSessionId, input });
+      options.onCancellationReady?.();
+      await options.onSessionActive?.();
+      return { status: "succeeded" as const, result: { nativeSessionId } };
+    },
+  } as unknown as AgentDriver;
+  const worker = new CommandWorker(
+    new Map([[driver.source.id, driver]]),
+    [target],
+    ledger,
+    "did:key:test-owner",
+  );
+  try {
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "start-1",
+      createdAt: "2026-09-11T00:00:00.000Z",
+      sourceId: "claude:labs",
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      type: "start",
+      payload: {
+        text: "Work on topic #7",
+        cwd: "/work/labs",
+        title: "topic #7",
+      },
+    }]);
+    await worker.drain();
+    assertEquals(starts, [{
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      input: { text: "Work on topic #7", cwd: "/work/labs", title: "topic #7" },
+    }]);
+    assertEquals(statuses, ["in-flight", "succeeded"]);
+    // Once while the session is active, once after the terminal outcome.
+    assertEquals(refreshed, [
+      "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+    ]);
+    assertEquals(ledger.get("start-1")?.result, {
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+    });
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("command worker refreshes the session after a start that failed", async () => {
+  const dir = await Deno.makeTempDir();
+  const ledger = await CommandLedger.open(`${dir}/ledger.json`);
+  const statuses: string[] = [];
+  const refreshed: string[] = [];
+  const target: CommandTarget = {
+    publishReceipt: (receipt) => {
+      statuses.push(receipt.status);
+      return Promise.resolve();
+    },
+    refreshSession: (_driver, nativeSessionId) => {
+      refreshed.push(nativeSessionId);
+      return Promise.resolve();
+    },
+  };
+  const driver = {
+    source: {
+      id: "claude:labs",
+      driver: "claude-agent-sdk",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        startSession: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    },
+    startSession: (
+      _nativeSessionId: string,
+      _input: unknown,
+      options: CommandExecutionOptions,
+    ) => {
+      options.onCancellationReady?.();
+      // The session emitted nothing the connector saw; the start failed.
+      return Promise.resolve({
+        status: "failed" as const,
+        error: {
+          code: "claude-query-failed",
+          message: "spawn failed",
+          retryable: false,
+        },
+      });
+    },
+  } as unknown as AgentDriver;
+  const worker = new CommandWorker(
+    new Map([[driver.source.id, driver]]),
+    [target],
+    ledger,
+    "did:key:test-owner",
+  );
+  try {
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "start-2",
+      createdAt: "2026-09-11T00:00:00.000Z",
+      sourceId: "claude:labs",
+      nativeSessionId: "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab",
+      type: "start",
+      payload: { text: "Work on topic #7" },
+    }]);
+    await worker.drain();
+    assertEquals(statuses, ["in-flight", "failed"]);
+    // Whatever the session holds after a failed start is read, as after a
+    // failed prompt, rather than left until the next complete collection.
+    assertEquals(refreshed, ["6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab"]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
   }
 });

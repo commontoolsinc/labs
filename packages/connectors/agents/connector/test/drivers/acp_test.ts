@@ -12,6 +12,7 @@ import type {
   SetSessionModeRequest,
 } from "@agentclientprotocol/sdk";
 import { AcpDriver, type AcpTransport } from "../../src/drivers/acp.ts";
+import type { AgentDriver } from "../../src/types.ts";
 
 function fakeTransport(
   overrides: Partial<AcpTransport> = {},
@@ -251,6 +252,14 @@ Deno.test("ACP controls are discovered and enforced per session", async () => {
   await driver.readSession("second");
   assertEquals(driver.source.id, "acp:default");
   assertEquals(driver.source.capabilities.modes, ["build", "plan"]);
+  // ACP cannot start a session: the capability is absent, and the
+  // operation says so.
+  assertEquals("startSession" in driver.source.capabilities, false);
+  assertEquals(
+    (await (driver as AgentDriver).startSession("first", { text: "Hi" }))
+      .status,
+    "unsupported",
+  );
   assertEquals(
     (await driver.setMode("first", "build")).status,
     "unsupported",

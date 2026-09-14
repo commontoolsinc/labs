@@ -1,8 +1,9 @@
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
-remains is removing the flag and the eager path for lift arguments, plus the
-handler materialization listed under Stage 5.
+remains is removing the flag and the eager path for lift arguments, and landing
+the synchronous refusal arm of Stage 5; handler materialization is settled
+there.
 
 The remaining execution sequence and acceptance gates are owned by the separate
 [lazy materialization fast-follow](lazy-materialization-fast-follow.md). This
@@ -18,8 +19,8 @@ This plan makes that materialization lazy. A reader gets a proxy that resolves
 each path when it is touched, narrowing the schema as it descends and refusing
 the read when the data no longer matches. A transaction can be flipped into a
 mode where every cell read hands back such a proxy; the runner flips it for the
-transaction that runs a lift, and treats a schema refusal exactly as it treats
-an argument that did not resolve.
+transaction that runs a lift, and treats a schema refusal as it treats an
+argument that did not resolve, with the exception the status line names.
 
 ## Status convention
 
@@ -431,18 +432,32 @@ chain so a wrapper and the transaction it wraps answer alike.
 
 ### Stage 5 — Runner integration
 
-**Done.** The runner marks the action's transaction around argument
-materialization and the body, and unmarks it before the result is written, so
-diffing and the scheduler's own reads keep eager semantics.
+**Done, except a refusal a synchronous body throws.** The runner marks the
+action's transaction around argument materialization and the body, and unmarks
+it before the result is written, so diffing and the scheduler's own reads keep
+eager semantics.
 
-- [x] A refusal — thrown out of the body, or caught inside it and found on the
-      transaction afterwards — writes an undefined result through the ordinary
-      path. Logged at info level as a non-run, not reported as an action error.
+- [x] A refusal caught inside the body and found on the transaction afterwards,
+      or rejected out of an asynchronous body, writes an undefined result
+      through the ordinary path. Logged at info level as a non-run, not reported
+      as an action error. Verified by reading the path; no test in the tree
+      asserts the result for these two arms.
+- [ ] Not landed: a refusal a synchronous body throws writes the same undefined
+      result. Today it reaches the catch before `postRun` is assigned, so the
+      previous result stands;
+      `packages/runner/test/unresolved-input-lift.test.ts` pins this arm and
+      passes only because its case has no previous result to stand. The fix is
+      on the branch `codex/lift-refusal-disposition`, held for a ruling from the
+      Pattern Update State and Baseline Integrity gate's owner.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
-- [ ] Handlers still materialize eagerly. Deliberate for now: the lift path is
-      where the measured cost is, and a handler's argument carries an event
-      payload whose shape the same guard has not been exercised against.
+- [x] Handlers materialize eagerly, by decision rather than by omission. The
+      [fast-follow](lazy-materialization-fast-follow.md) built and measured a
+      lazy bound-context prototype and deferred it: a view narrows the read
+      log a handler's commit is checked against, and its measured win is
+      confined to a shape the collection guidance already steers away from.
+      The [record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+      names the conditions for taking it up again.
 
 ### Stage 6 — Rollout
 
@@ -457,8 +472,8 @@ diffing and the scheduler's own reads keep eager semantics.
       eager read never evaluates, an optional property refused where an eager
       read drops it, and three reads that were answered without being
       registered. None of them was the "argument refused for a missing field"
-      story the earlier note here guessed at — that disposition worked from the
-      start.
+      story the earlier note here guessed at; that disposition was not among
+      them, though it carries the synchronous-throw gap Stage 5 names.
 - [x] Read `.length` off a string. `.length` on a string output lowers to a link
       ending in that segment, and a string's `length` is not a stored path, so
       the store cannot serve the address the link resolves to. Eager traversal
@@ -569,6 +584,6 @@ slipping past a prepared boundary is untested.
   touches. That is the larger win for genuinely huge data and depends on this
   work landing first; it belongs with
   [shaped reads and verb results](shaped-reads-and-verb-results.md).
-- Making **handlers** lazy, unless Stage 5 records the decision to include them.
+- Making **handlers** lazy: Stage 5 records the decision to keep them eager.
 - Replacing the schema-less `createQueryResultProxy`. It remains the view for an
   absent or `true` schema, and the lazy view delegates to it.

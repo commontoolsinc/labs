@@ -63,11 +63,15 @@ layer (Section 8) and represented in `FabricValue` trees as `FabricInstance`
 wrapper classes (Section 1.4).
 
 > **Package note:** The data model implementation lives in
-> `packages/data-model/`. The `FabricValue` types and the base classes
-> (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
-> `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
-> `IS_DEEP_FROZEN`) in `fabric-bases/`, on `BaseFabricInstance` alongside the
-> abstract base that carries them (Section 8.6). The codec vocabulary (the
+> `packages/data-model/`. The `FabricValue` union and the types beside it are
+> declared in `api.ts`, together with the pattern-visible declarations of the
+> special-object classes (`FabricInstance`, `FabricPrimitive`) and their union
+> `FabricSpecialObject`. The classes themselves, the layer types, and the
+> conversion-layer types
+> are declared in `interface.ts`, which also re-exports every type `api.ts`
+> declares. The in-process lifecycle symbols (`DEEP_FREEZE`, `IS_DEEP_FROZEN`)
+> live in `fabric-bases/`, on `BaseFabricInstance` alongside the abstract base
+> that carries them (Section 8.6). The codec vocabulary (the
 > `CODEC` symbol, `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/`
 > (Section 2), and the machinery that acts on it in `codec-common/` -- including
 > `BaseEncodeAct` and `BaseDecodeAct`, which are classes the walk carries rather
@@ -77,10 +81,12 @@ wrapper classes (Section 1.4).
 > **Where a thing is declared is not where it is imported from**, and the
 > modules named here divide on that point. The whole `FabricValue` vocabulary
 > comes from `@commonfabric/data-model`, the package's main entry point: the
-> declarations in `interface.ts`, the conversions in `native-conversion.ts`, the
-> clone helpers in `value-clone.ts`, and the operations a value of any class is
-> subject to -- `deep-freeze.ts`, `value-hash.ts`, `value-debug.ts`, and the tag
-> vocabulary in `value-tags.ts`. None of those is an exported subpath.
+> declarations in `api.ts` and `interface.ts`, the conversions in
+> `native-conversion.ts`, the clone helpers in `value-clone.ts`, and the
+> operations a value of any class is subject to -- `deep-freeze.ts`,
+> `value-hash.ts`, `value-debug.ts`, and the tag vocabulary in `value-tags.ts`.
+> Of those, only `api.ts` is also an exported subpath,
+> `@commonfabric/data-model/api`, which is how `@commonfabric/api` reaches it.
 > `codec-interface/` is internal in the same way, reached through
 > `@commonfabric/data-model/codec-common`, which re-exports it.
 > `codec-common/`, `fabric-bases/` and `fabric-instances/` are exported subpaths
@@ -93,13 +99,18 @@ wrapper classes (Section 1.4).
 > Type declarations visible to patterns are in
 > `packages/data-model/src/api.ts` (the `interface` + `declare const` pattern),
 > which `packages/api/index.ts` re-exports as part of the `commonfabric`
-> surface. They must agree with the `data-model` declarations they mirror —
-> nothing checks that mechanically. `packages/runner/` wires concrete
-> implementations into builder exports.
+> surface. They must agree with the implementations they mirror, and the
+> agreement is asserted at compile time: `api-agreement.ts`, a module nothing
+> imports, asserts that each of the three base classes and its declaration are
+> mutually assignable, and each concrete class asserts beside its own
+> definition that it satisfies its declaration. The second kind of check runs
+> one way only -- a public member an implementation gains without a declaration
+> is unreachable from a pattern, and no gate reports it. `packages/runner/`
+> wires concrete implementations into builder exports.
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/index.ts
+// file: packages/data-model/src/api.ts
 
 /**
  * The complete set of values that can flow through the runtime, be stored
@@ -138,23 +149,23 @@ type FabricValue =
   | { readonly [key: string]: FabricValue };
 ```
 
-Arms (b) and (c) are a deliberate expansion, not a divergence. The
-implementation writes a single `FabricSpecialObject` arm; `FabricPrimitive` and
-`FabricInstance` are its only two subclasses, so naming them separately — and
-naming the `FabricPrimitive` subclasses individually — describes exactly the
-same set while saying more about it. Read the split as this document's
-elaboration of one implementation arm.
+Arm (b) is a deliberate expansion, not a divergence. The implementation writes
+a single `FabricPrimitive` arm, and every concrete `FabricPrimitive` class is
+defined by the data model, so naming those classes individually describes
+exactly the same set while saying more about it. Read the split as this
+document's elaboration of one implementation arm.
 
 Arms (c) and (d) are the **containers** — the values that expose other
 `FabricValue`s for a walk to descend into. The implementation names that set
-`FabricContainerValue`. What divides the two arms is where the contents live,
-not whether there are any: a plain container's contents are its own indices and
-keys, while a `FabricInstance` holds its contents privately and exposes them
-through the protocol of Section 2.3. Arms (a) and (b) are the non-containers. A
-`FabricPrimitive` may hold `FabricValue`s of its own — a `FabricRegExp` its
-source and flags, a `FabricKeyPair` holding material two `FabricBytes` — but
-holds them privately and self-freezes at construction, so it exposes none of
-them and a walk stops there (Section 8.6).
+`FabricContainerValue` and writes it as the union's other arm, so the two arms
+here are that one written out. What divides the two arms is where the contents
+live, not whether there are any: a plain container's contents are its own
+indices and keys, while a `FabricInstance` holds its contents privately and
+exposes them through the protocol of Section 2.3. Arms (a) and (b) are the
+non-containers. A `FabricPrimitive` may hold `FabricValue`s of its own — a
+`FabricRegExp` its source and flags, a `FabricKeyPair` holding material two
+`FabricBytes` — but holds them privately and self-freezes at construction, so it
+exposes none of them and a walk stops there (Section 8.6).
 
 > **Fabric values are deeply read-only, with one intentional hole.** The plain
 > container arms are read-only, and because their element and property types are
@@ -232,7 +243,7 @@ native JS object types that the conversion layer can handle:
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/index.ts
+// file: packages/data-model/src/interface.ts
 
 /**
  * Union of raw native JS object types that the conversion layer can translate
@@ -253,16 +264,17 @@ type FabricNativeObject =
   | Uint8Array;
 
 /**
- * A `FabricValue`, a `FabricNativeObject`, or a deep tree of either — the
- * values that convert to and from fabric form. This is the precondition of
- * `fabricFromNativeValue()`, the result of `nativeFromFabricValue()`, and
- * what `isValidFabricConvertibleValue()` tests for (Section 8).
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+ * that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()` (which fails on anything else), the result of
+ * `nativeFromFabricValue()`, and what `isValidFabricConvertibleValue()` tests
+ * for.
+ *
+ * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+ * Converting a `FabricError` yields an `Error`, so an array of them is an array
+ * of natives, which has no `FabricValue` name.
  */
-type FabricConvertibleValue =
-  | FabricValue
-  | FabricNativeObject
-  | readonly FabricConvertibleValue[]
-  | { readonly [key: string]: FabricConvertibleValue };
+type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
 ```
 
 `Map` and `Set` are named with unconstrained type arguments: their contents are
@@ -284,6 +296,17 @@ and what `isValidFabricConvertibleValue()` tests (Sections 8.3 and 8.4). It is a
 precondition rather than a parameter type: the conversion functions that accept
 arbitrary input declare `unknown` and reject what they cannot convert (Section
 8.2).
+
+`FabricValuePlus<PlusType>` is the general form of that recursion, declared in
+`api.ts`: `FabricValue` with one additional type admitted at the top and inside
+every container, so that `FabricValuePlus<never>` is `FabricValue` itself.
+`FabricConvertibleValue` is `FabricValuePlus<FabricNativeObject>`, and
+`FabricValueLayer` is the same mechanism at a different `PlusType`. The array
+and plain-object arms carry `PlusType` structurally, in their element and value
+types. The instance arm, `FabricInstancePlus<PlusType>`, carries it as a
+type-only brand -- the member keyed by `FABRIC_INSTANCE_PLUS_BRAND`, which
+`FabricInstance` declares at `never` -- because an instance holds its contents
+privately and nothing structural on it can witness what they may include.
 
 Every arm names a specific native class. There is no duck-typed arm: a value
 becomes fabric-representable by being one of these, by implementing the fabric
@@ -362,9 +385,8 @@ content-level identity (see Section 6.3), but it is a `FabricPrimitive`, not a
 The **special primitive** types (`FabricEpochNsec`, `FabricEpochDay`,
 `FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) are **not**
 `FabricInstance`s — they are `FabricPrimitive` subclasses (Section 1.4.6).
-`FabricPrimitive` extends `FabricSpecialObject`, and the `FabricValue` union
-includes `FabricSpecialObject`, so all `FabricPrimitive` subclasses are
-implicitly members of `FabricValue`. They are always-frozen value types that
+`FabricPrimitive` is an arm of the `FabricValue` union, so all
+`FabricPrimitive` subclasses are implicitly members of `FabricValue`. They are always-frozen value types that
 bypass the `freeze` option in conversion functions. Each hosts its own codec for
 wire-format encoding, but bound per wire format — under `[JSON_CODEC]` for JSON
 — rather than under the format-neutral `[CODEC]` a wrapper binds, because a
@@ -457,7 +479,7 @@ Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
 `FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricKeyPair`,
 `FabricRegExp`) are **`FabricPrimitive` subclasses** and do not extend
 `FabricInstance`. They are included in `FabricValue` via the
-`FabricSpecialObject` arm of the union (Section 1.4.6). See Sections 1.4.5
+`FabricPrimitive` arm of the union (Section 1.4.6). See Sections 1.4.5
 through 1.4.11.
 
 | Special Primitive Type | Extends | Wire Tag | Stored Value | Notes |
@@ -853,55 +875,74 @@ export class FabricRegExp extends FabricPrimitive {
 }
 ```
 
-#### 1.4.6 `FabricSpecialObject` and `FabricPrimitive` (Base Classes)
+#### 1.4.6 `FabricPrimitive`, `FabricInstance`, and `FabricSpecialObject`
 
-The fabric type hierarchy uses two abstract base classes that share a common
-root:
+The fabric type hierarchy has two abstract classes, and a type naming either:
 
 ```
-FabricSpecialObject (abstract root)
+BaseFabricSpecialObject (runtime root; an implementation detail)
 ├── FabricInstance (abstract — object-like protocol types)
 └── FabricPrimitive (abstract — immutable special primitives)
+
+FabricSpecialObject = FabricPrimitive | FabricInstance
 ```
 
-**`FabricSpecialObject`** is the common superclass of both branches. It enables
-a single `instanceof FabricSpecialObject` check wherever code needs to recognize
-any fabric-system value without caring which branch it belongs to.
+**`FabricSpecialObject`** is the union of the two classes, which are the only
+two kinds of `FabricValue` beyond the JavaScript built-ins. The two differ along
+one axis: whether the data model treats an instance as a primitive. A
+`FabricPrimitive` is treated the way a built-in `string` or `number` is, and a
+`FabricInstance` the way an `object` is. What follows from that, and what a
+caller sees of it, is that a `FabricInstance` may hold and expose arbitrary
+outgoing `FabricValue` references, and a `FabricPrimitive` may not.
 
-It is **nominal**, not structural: the `@commonfabric/FabricSpecialObject`
-member is a brand that exists only in the type system (`declare` emits no
-runtime member, and nothing reads the key). This matters for what `FabricValue`
-means as a static claim. TypeScript is structurally typed, so were the class
-empty, every object would satisfy `FabricSpecialObject` — and therefore satisfy
-`FabricValue`, since the union includes this type. Annotating a value
-`FabricValue` would then assert nothing at all. The brand is what makes the
-annotation carry information.
+At runtime the two classes extend one memberless root, `BaseFabricSpecialObject`
+in `fabric-bases/`, so that `isFabricSpecialObject()` recognizes either with a
+single `instanceof`, narrowing to the union. The root is not a type a caller
+names, and the data model defines no other subclass of it; an instance of one
+defined elsewhere is not a `FabricValue`.
 
-The brand is a well-known string key rather than a `unique symbol` because
-`interface.ts` is deliberately free of runtime imports, and a `unique symbol`
-would have to be imported as a *value*. `packages/data-model/src/api.ts` declares
-the identical member; the two must agree exactly, since a value branded by one
-would otherwise not satisfy the other.
+Each class is **nominal**, not structural: each declares a brand member that
+exists only in the type system (`declare` emits no runtime member, and nothing
+reads the key), keyed by an interned symbol that `api.ts` exports --
+`FABRIC_PRIMITIVE_BRAND` and `FABRIC_INSTANCE_BRAND`. This matters for what `FabricValue`
+means as a static claim. TypeScript is structurally typed, so were
+`FabricPrimitive` empty, every object would satisfy it — and therefore satisfy
+`FabricValue`, since the union includes it — and were `FabricInstance` only its
+two clone methods, so would every object carrying two methods by those names.
+The brands are what make the annotation carry information.
+
+Each brand is a symbol so that it can never be mistaken for data: a
+symbol-keyed member has no place in a schema, where a string-keyed one has to
+be skipped by name. Each is interned so that every realm and every copy of the
+module agree on its value. `packages/data-model/src/api.ts` declares the
+identical members; the two must agree exactly, since a value branded by one
+would otherwise not satisfy the other, and `api-agreement.ts` stops compiling
+when they stop agreeing.
 
 ```typescript
-// file: packages/data-model/interface.ts
+// Shown at module scope.
+// file: packages/data-model/src/api.ts
 
 /**
- * Abstract base class for all fabric-system value types. This is the common
- * superclass of `FabricInstance` (object-like protocol types)
- * and `FabricPrimitive` (immutable special primitives). It enables a single
- * `instanceof FabricSpecialObject` check wherever code needs to recognize any
- * fabric-system value without caring which branch of the hierarchy it
- * belongs to.
+ * The two kinds of `FabricValue` beyond the JavaScript built-ins, as one type.
+ * The two differ along one axis: whether the data model treats an instance as
+ * a primitive. A `FabricPrimitive` is treated the way a built-in `string` or
+ * `number` is; a `FabricInstance` is treated the way an `object` is. What
+ * follows from that, and what a caller sees of it, is that a `FabricInstance`
+ * may hold and expose arbitrary outgoing `FabricValue` references, and a
+ * `FabricPrimitive` may not. `isFabricSpecialObject()` narrows to this type
+ * with one check.
+ *
+ * As part of the overall `FabricValue` contract, no instance of either class
+ * exposes any enumerable own property; all interaction with an instance is via
+ * its concrete class's instance members, and in particular an object-spread
+ * (`{ ...instance }`) on an instance always yields an empty object (`{}`).
  */
-export abstract class FabricSpecialObject {
-  declare readonly "@commonfabric/FabricSpecialObject": true;
-}
+type FabricSpecialObject = FabricPrimitive | FabricInstance;
 ```
 
 **`FabricPrimitive`** is the abstract base class for non-`FabricInstance` types
-that are included in `FabricValue` via the `FabricSpecialObject` arm of the
-union. It extends `FabricSpecialObject`.
+that form the `FabricPrimitive` arm of `FabricValue`.
 
 - `UnknownValue` and `ProblematicValue` are the `FabricInstance` subtypes
   that preserve a type tag alongside their state (Section 3.2).
@@ -911,37 +952,55 @@ union. It extends `FabricSpecialObject`.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/interface.ts
+// file: packages/data-model/src/interface.ts
+
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
 
 /**
- * Abstract base class for "special primitive" fabric types — values that
- * behave like primitives in the fabric type system but are represented as
- * class instances for type safety and dispatch. Covers temporal types,
- * content IDs, byte sequences, and similar.
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as primitives: values that behave like primitives in the fabric
+ * type system but are represented as class instances for type safety and
+ * dispatch. Covers temporal types, content IDs, byte sequences, and similar.
+ * `FabricSpecialObject` says how this differs from `FabricInstance`.
  *
- * Extends `FabricSpecialObject` so that `instanceof FabricSpecialObject`
- * catches both `FabricPrimitive` and `FabricInstance` subtypes.
+ * This class enables a single `instanceof` check where code needs to handle
+ * any `FabricPrimitive` uniformly.
  *
- * **Always-frozen semantics:** `FabricPrimitive` instances are treated as
- * inherently frozen, like JS primitives (`number`, `string`, `bigint`,
- * etc.). The `freeze` option on conversion functions
- * (`shallowFabricFromNativeValue()`, `fabricFromNativeValue()`, etc.)
- * does not affect them — they are always
- * returned as-is, regardless of the `freeze` setting. This is because
- * their state is immutable by construction (readonly fields, no mutation
- * methods), so freezing is a no-op and thawing is meaningless. Each leaf
- * subclass must call `Object.freeze(this)` at the end of its constructor,
- * after all fields are initialized.
+ * Instances are always frozen (like true primitives, they are immutable), pass
+ * through the native conversions unchanged, and hold no arbitrary outgoing
+ * `FabricValue` reference. `BaseFabricPrimitive` freezes each instance at
+ * construction; a subclass keeps its state in private fields, which the freeze
+ * does not reach.
+ *
+ * See Section 1.4.6 of the formal spec.
  */
-export abstract class FabricPrimitive extends FabricSpecialObject {}
+export abstract class FabricPrimitive extends BaseFabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
+   * and from every other object, in the type system; without it this class is
+   * structurally empty. `declare` emits no runtime member, and nothing ever
+   * reads the key. `api.ts` declares the identical member, and
+   * `api-agreement.ts` stops compiling if the two stop agreeing.
+   */
+  declare readonly [FABRIC_PRIMITIVE_BRAND]: true;
+
+  /** Constructs an instance. */
+  constructor() {
+    super();
+  }
+}
 ```
 
-Subclasses define their own state (e.g., `readonly value: bigint` for temporal
-types, private `#hash: Uint8Array` + private `#tag: string` for content IDs,
-private `#bytes: Uint8Array` for byte sequences). The base class holds no
-state — its purpose is to provide a single `instanceof FabricPrimitive` check
-where code needs to identify these types uniformly (e.g., the conversion
-functions' freeze-bypass logic).
+Subclasses define their own state in private fields behind accessors (e.g., a
+`#value: bigint` under a `value` getter for temporal types, `#hash: Uint8Array`
+and `#tag: string` for content IDs, `#bytes: Uint8Array` for byte sequences).
+The base class holds no state — its purpose is to provide a single
+`instanceof FabricPrimitive` check where code needs to identify these types
+uniformly (e.g., the conversion functions' freeze-bypass logic).
 
 #### 1.4.7 `FabricEpochNsec`
 
@@ -964,9 +1023,15 @@ functions' freeze-bypass logic).
  * codec layer use the same bigint encoding as `BigInt@1`.
  */
 export class FabricEpochNsec extends FabricPrimitive {
-  constructor(readonly value: bigint) {
+  readonly #value: bigint;
+
+  constructor(value: bigint) {
     super();
-    Object.freeze(this);
+    this.#value = value;
+  }
+
+  get value(): bigint {
+    return this.#value;
   }
 }
 ```
@@ -989,9 +1054,15 @@ export class FabricEpochNsec extends FabricPrimitive {
  * The underlying value is a `bigint`.
  */
 export class FabricEpochDay extends FabricPrimitive {
-  constructor(readonly value: bigint) {
+  readonly #value: bigint;
+
+  constructor(value: bigint) {
     super();
-    Object.freeze(this);
+    this.#value = value;
+  }
+
+  get value(): bigint {
+    return this.#value;
   }
 }
 ```
@@ -1650,11 +1721,12 @@ export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol(
 ### 2.3 Instance Protocol
 
 `FabricInstance` is the **pure abstract protocol surface** — the
-`instanceof`-able contract that external code is written against. It
-declares every member of the protocol as `abstract`, including
-`shallowClone()`; it carries no implementations. Shared template-method
-scaffolding lives on a separate abstract base class `BaseFabricInstance`
-(below), which subclasses extend in practice.
+`instanceof`-able contract that external code is written against. It declares
+the two protocol members a caller reaches, `deepClone()` and `shallowClone()`,
+as `abstract`, and carries no implementations. The freeze-protocol members
+`[DEEP_FREEZE]` and `[IS_DEEP_FROZEN]` are declared on a separate abstract base
+class `BaseFabricInstance` (below), which is also where shared template-method
+scaffolding lives and which subclasses extend in practice.
 
 The instance protocol covers in-process lifecycle only — deep freezing and
 cloning. Encoding is **not** an instance concern: it lives on the
@@ -1662,84 +1734,74 @@ class-side `[CODEC]` (Section 2.4).
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/interface.ts
+// file: packages/data-model/src/interface.ts
+
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
 
 /**
- * Abstract base class for values that participate in the fabric protocol.
- * Extends `FabricSpecialObject` — the common root for all fabric-system
- * value types.
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as non-primitives. An instance may hold and expose arbitrary
+ * outgoing `FabricValue` references, and is mutable until frozen.
+ * `FabricSpecialObject` says how this differs from `FabricPrimitive`. See
+ * Section 2.3 of the formal spec.
  *
- * This is the pure abstract protocol — the `instanceof`-able contract that
- * external code is written against. Concrete `FabricInstance` classes
- * extend `BaseFabricInstance` (a subclass of this one) rather than this
- * class directly; `BaseFabricInstance` is where shared template-method
- * scaffolding (such as `shallowClone()`) lives.
+ * This is the pure abstract protocol -- the `instanceof`-able contract that
+ * external code is written against. Concrete `FabricInstance` classes in the
+ * data-model extend `BaseFabricInstance` (a subclass of this one) rather
+ * than this class directly; `BaseFabricInstance` is where shared
+ * template-method scaffolding (such as `shallowClone()`) lives.
  *
  * An instance holds all of its state privately and makes it reachable only
- * through members, so it has no own properties at all. A structural view
- * of one — a spread, `Object.keys()`, a naive walk — therefore sees
- * nothing. Mutable state is exposed as an accessor pair over a private
- * field, whose setter is responsible for honoring the instance's frozen
- * state: `Object.freeze()` bears only on own properties and so cannot
- * enforce that on its own.
+ * through members, so it has no enumerable own properties. A structural view
+ * of one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
+ * Mutable state is exposed as an accessor pair over a private field, whose
+ * setter is responsible for honoring the instance's frozen state:
+ * `Object.freeze()` bears only on own properties and so cannot enforce that
+ * on its own.
  *
- * Subclasses must implement:
- * - `[DEEP_FREEZE](subFreeze)` -- deeply freezes this instance in place.
- * - `[IS_DEEP_FROZEN](subIsDeepFrozen)` -- side-effect-free deep-frozen
- *   check, mirroring `[DEEP_FREEZE]`.
- * - `deepClone(frozen)` -- returns a new deep clone with the requested
- *   frozenness.
- * - `shallowClone(frozen)` -- returns a shallow clone with the requested
- *   frozenness. Concrete subclasses normally inherit this from
- *   `BaseFabricInstance` and instead implement `[SHALLOW_UNFROZEN_CLONE]()`
- *   (see below).
- *
- * Subclasses that participate in encoding also host a static
- * `[CODEC]` getter (the codec protocol; see Section 2.4).
- *
- * The native object wrapper classes (`FabricError`, `FabricMap`,
- * `FabricSet`) extend `BaseFabricInstance`, as do
- * user-defined types (`Cell`, `Stream`) and system types (`UnknownValue`,
- * `ProblematicValue`).
- *
- * Note: `FabricPrimitive` subclasses (`FabricEpochNsec`,
- * `FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricRegExp`) do NOT
- * extend this class — they extend `FabricPrimitive` instead.
+ * Subclasses must implement `deepClone()` and `shallowClone()`; both are
+ * normally inherited from `BaseFabricInstance` as template methods, with the
+ * subclass supplying the symbol-keyed clone core each one calls. The
+ * freeze-protocol members `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are
+ * declared on `BaseFabricInstance`, not here: they are implementation plumbing
+ * and are kept off this pure-protocol class.
  */
-export abstract class FabricInstance extends FabricSpecialObject {
+export abstract class FabricInstance extends BaseFabricSpecialObject {
   /**
-   * Deeply freezes this instance in place: freezes this instance's own
-   * internal slot(s) and recurses into each nested `FabricValue` by calling
-   * the provided `subFreeze` callback on it. Implementations must NOT call
-   * `deepFreeze()` directly -- recursion is handed through the callback so
-   * that the freeze utility's caching and cycle-detection bookkeeping is
-   * preserved and no import cycle is introduced. Returns the (now
-   * deeply-frozen) value; freeze-in-place implementations return `this`.
-   * See Section 8.6.
+   * The nominal brand that tells a `FabricInstance` from any other object with
+   * the two clone methods, in the type system; the runtime root carries no
+   * brand, so this member is what makes the class nominal. `declare` emits no
+   * runtime member, and nothing ever reads the key. `api.ts` declares the
+   * identical member, and `api-agreement.ts` stops compiling if the two stop
+   * agreeing.
    */
-  abstract [DEEP_FREEZE](
-    subFreeze: (value: FabricValue) => FabricValue,
-  ): FabricValue;
+  declare readonly [FABRIC_INSTANCE_BRAND]: true;
 
   /**
-   * Indicates whether this instance is already deeply frozen, without
-   * mutating it. Checks this instance's own internal slot(s) are in
-   * canonical deep-frozen form and recurses into each nested `FabricValue`
-   * via the provided `subIsDeepFrozen` callback, returning the boolean
-   * conjunction. Side-effect-free and must not throw: an instance that is
-   * not in canonical deep-frozen form returns `false`. See Section 8.6.
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
+   * `never` here since an instance of this class holds only `FabricValue`s.
+   * Declared the way the brand above is, and for the same reasons; `api.ts`
+   * declares the identical member.
    */
-  abstract [IS_DEEP_FROZEN](
-    subIsDeepFrozen: (value: FabricValue) => boolean,
-  ): boolean;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
-   * shared structure for any unfrozen data in the original. When `frozen`
-   * is `true`, produces a frozen instance with maximal structural sharing,
-   * including returning `this` if it is already deep-frozen. When `frozen`
-   * is `false`, produces a deeply-mutable instance with no visible shared
-   * reference structure with the original.
+   * shared structure for any unfrozen data in the original. When `frozen ===
+   * true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen ===
+   * false`, produces a deeply-mutable instance with no visible shared reference
+   * structure with the original.
+   *
+   * The concrete template-method implementation lives on `BaseFabricInstance`
+   * (deferring to the `[DEEP_CLONE_CORE]` sibling, mirroring the
+   * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this declaration just
+   * pins the protocol surface so that callers can invoke it through a
+   * `FabricInstance` reference.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 
@@ -1755,22 +1817,82 @@ export abstract class FabricInstance extends FabricSpecialObject {
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
+// file: packages/data-model/src/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
  * subclasses. Concrete `FabricInstance` classes extend this, not
  * `FabricInstance` directly: `FabricInstance` is the pure abstract protocol
- * (the `instanceof`-able contract that external code is written against),
- * while `BaseFabricInstance` is where shared template-method
- * implementations live.
+ * (the `instanceof`-able contract that external code is written against), while
+ * `BaseFabricInstance` is where shared template-method implementations and the
+ * freeze-protocol plumbing (`[DEEP_FREEZE]()`, `[IS_DEEP_FROZEN]()`) live.
  */
 export abstract class BaseFabricInstance extends FabricInstance {
+  //
+  // Subclass contract
+  //
+
+  /**
+   * Deeply freezes this instance in place: freezes this instance's own
+   * internal slot(s) and recurses into each nested `FabricValue` by calling
+   * the provided `subFreeze` callback on it. Implementations must NOT import
+   * or call `deepFreeze()` directly -- recursion is handed through the
+   * callback so that the freeze utility's caching / cycle-detection
+   * bookkeeping is preserved and no import cycle is introduced.
+   *
+   * Returns the (now deeply-frozen) value. Freeze-in-place implementations
+   * return `this`.
+   */
+  abstract [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue;
+
+  /**
+   * Indicates whether this instance is already deeply frozen, without mutating
+   * it. Checks this instance's own internal slot(s) are in canonical
+   * deep-frozen form and recurses into each nested `FabricValue` via the
+   * provided `subIsDeepFrozen` callback, returning the boolean conjunction.
+   * Implementations must NOT import or call the deep-frozen type guard directly
+   * -- recursion is handed through the callback, mirroring `[DEEP_FREEZE]`'s
+   * callback shape and avoiding an import cycle.
+   *
+   * Side-effect-free and must not throw: an instance that is not in canonical
+   * deep-frozen form returns `false`.
+   *
+   * **Deep-frozen honesty (mandatory).** This report must be truthful and
+   * permanent: an implementation must not return `true` unless the instance is,
+   * and will remain, deeply immutable (including its private slots). Once it
+   * reports deep-frozen, that is permanent for the life of the instance. The
+   * rest of the system -- the data model in general and `isDeepFrozen()`
+   * specifically, but also the entire codebase that _uses_ the data model -- is
+   * entitled to rely on this: a deep-frozen proof is cached by root identity
+   * and not re-validated, so an instance that lies here (reports deep-frozen
+   * while still mutable) can corrupt data-model invariants, exactly as any
+   * other broken class contract can. Making this correct is the implementing
+   * class's responsibility, not something the freeze-checking code papers over.
+   */
+  abstract [IS_DEEP_FROZEN](
+    subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean;
+
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
   protected abstract [SHALLOW_UNFROZEN_CLONE](): FabricInstance;
+
+  /**
+   * Returns a new deep clone of this instance, cloning nested `FabricValue`s
+   * to the requested frozenness (see `[DEEP_CLONE_CORE]`'s symbol doc). The
+   * returned instance itself is not yet frozen: the `deepClone()` template
+   * method owns the identity optimization and the final freeze. Called by
+   * `deepClone()` when a fresh instance is needed.
+   */
+  protected abstract [DEEP_CLONE_CORE](frozen: boolean): FabricInstance;
+
+  //
+  // Instance members
+  //
 
   /**
    * Returns a shallow clone of this instance with the requested frozenness.
@@ -1800,20 +1922,21 @@ export abstract class BaseFabricInstance extends FabricInstance {
 > `shallowClone()` be an effectively-final template method (on
 > `BaseFabricInstance`), encapsulating the frozenness-management contract
 > (clone-if-necessary, freeze-if-requested) in one place. Concrete subclasses
-> implement only `[SHALLOW_UNFROZEN_CLONE]()` (the type-specific copy logic)
-> plus the deep-freeze pair; encoding lives on the class's `[CODEC]` (Section
-> 2.4). Brand detection uses `instanceof FabricInstance` directly — no type
-> guard function is needed (see Section 2.6).
+> implement only the two clone cores, `[SHALLOW_UNFROZEN_CLONE]()` and
+> `[DEEP_CLONE_CORE]()` (the type-specific copy logic), plus the deep-freeze
+> pair; encoding lives on the class's `[CODEC]` (Section 2.4). Brand detection
+> uses `instanceof FabricInstance` directly — no type guard function is needed
+> (see Section 2.6).
 
 > **Why a separate `BaseFabricInstance`?** Keeping `FabricInstance` pure
 > abstract (no implementations) gives the protocol surface a clean, minimal
-> definition for external consumers: the api-layer mirror in `packages/api/`
-> exposes `FabricInstance` with its protocol members as abstract declarations,
-> and `BaseFabricInstance` stays an internal implementation detail of the
-> data-model package. External code written against `FabricInstance` is
-> therefore stable against changes to the template-method scaffolding, and the
-> `instanceof FabricInstance` brand check still catches every concrete
-> `FabricInstance` value.
+> definition for external consumers: the pattern-visible declaration in
+> `packages/data-model/src/api.ts`, which `packages/api/` re-exports, exposes
+> `FabricInstance` with just its protocol members, and `BaseFabricInstance`
+> stays an internal implementation detail of the data-model package. External
+> code written against `FabricInstance` is therefore stable against changes to
+> the template-method scaffolding, and the `instanceof FabricInstance` brand
+> check still catches every concrete `FabricInstance` value.
 
 > **An aside on sealing instances.** Nothing in this model requires it, and an
 > implementation is free to skip it, but a JavaScript implementation may want
@@ -3252,11 +3375,14 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), and the tag vocabulary (from `value-tags.ts`); defines `valueEqual()` |
+| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), the tag vocabulary (from `value-tags.ts`), and `valueEqual()` (from `valueEqual.ts`) |
+| `api.ts` | The pattern-visible declarations: the `FabricValue` union and the types beside it, the three base classes and every concrete class as an `interface` plus a `declare const`, and the debug-rendering option types. It has no imports, so that the type module the sandbox is served can inline it; it is also the `./api` export subpath, which `@commonfabric/api` re-exports. |
+| `interface.ts` | The three abstract base classes as classes, the layer types, and the conversion-layer types (`FabricNativeObject`, `FabricConvertibleValue`); re-exports every type `api.ts` declares. Free of runtime imports, so that any module can import it. |
+| `api-agreement.ts` | Asserts that each of the three base classes and its `api.ts` declaration are mutually assignable. Nothing imports it; it exists to be type-checked, and everything in it erases at compile time. |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
-| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDay.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
+| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDay.ts`, `FabricKeyPair.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
 ---
 

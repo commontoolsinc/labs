@@ -601,6 +601,8 @@ describe("sqliteQuery under a runtime read ceiling", () => {
       );
       rt.run(tx, p, {}, cell);
       await tx.commit();
+      // The query runs once a reader demands it.
+      cell.sink(() => {});
       await rt.idle();
       expect(errors.map((e) => String(e))).toEqual([
         expect.stringMatching(/session-scoped/),

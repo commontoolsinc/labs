@@ -2068,9 +2068,9 @@ describe("runtime-processor", () => {
       });
 
       it("returns a value nested as deep as a reader of plain data needs", () => {
-        // The limit sits above what the old walk reached, because the rendering
-        // spends levels of its own on an instance's tag and a query result's
-        // ref. Plain data is legible past where it used to stop.
+        // The rendering spends levels of its own on an instance's tag and a
+        // query result's ref, so the limit sits high enough that plain data
+        // this deep still comes through whole.
 
         const deep = { l1: { l2: { l3: { l4: { l5: { l6: "leaf" } } } } } };
         expect(toConsoleDebugValue(deep)).toEqual(deep);
@@ -2373,9 +2373,9 @@ describe("runtime-processor", () => {
         globalThis.fetch = originalFetch;
       }
 
-      // The handler no longer decodes, so the ceding that `BaseRequest`'s
-      // ownership rule turns on happens at the envelope rather than here: the
-      // bytes arrive already decoded and are handed on as they are.
+      // The handler does not decode: the ceding that `BaseRequest`'s ownership
+      // rule turns on happens at the envelope rather than here, so the bytes
+      // arrive already decoded and are handed on as they are.
 
       expect(requestedUrl).toBe(
         "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2645,16 +2645,16 @@ describe("runtime-processor", () => {
       >;
     }
 
-    it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
+    it('fails closed on the raw `meta: "cfc"` seam', () => {
       const ref: CellRef = {
         id: "of:cfc-raw-meta-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
         scope: "space",
         path: [],
       };
-      // The raw envelope this seam used to return verbatim — Caveat.source and
-      // friends, unredacted. If the handler ever reaches getMetaRaw for "cfc"
-      // again, this is what would leak.
+      // The raw envelope behind the cell, with its `Caveat.source` unredacted.
+      // A handler that reached `getMetaRaw()` for `cfc` would hand this back
+      // verbatim, which is what the assertion below rules out.
       const rawEnvelope = {
         version: 1,
         schemaHash: "test-schema",
@@ -2681,8 +2681,8 @@ describe("runtime-processor", () => {
         },
       });
 
-      // "cfc" is no longer a MetaField, but the wire is untyped JSON — a request
-      // that still sends it must get an error, never the raw metadata.
+      // `cfc` is not a `MetaField`, but the wire is untyped JSON — a request
+      // that sends it must get an error, never the raw metadata.
       expect(() =>
         processor.handleCellGet({
           type: RequestType.CellGet,
@@ -2742,7 +2742,7 @@ describe("runtime-processor", () => {
       });
     });
 
-    it("redacts Caveat.source from the introspection response (audit 28b)", async () => {
+    it("redacts `Caveat.source` from the introspection response", async () => {
       const ref: CellRef = {
         id: "of:cfc-caveat-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -2795,7 +2795,7 @@ describe("runtime-processor", () => {
       expect("source" in atom).toBe(false);
     });
 
-    it("redacts Caveat.source in the label views carried by cells inside handleCellGet values", async () => {
+    it("redacts `Caveat.source` in the label views carried by cells inside `handleCellGet()` values", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({
         apiUrl: new URL("https://toolshed.test"),
@@ -2836,7 +2836,7 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("returns the read cell's schema-bearing ref when includeRef is set", () => {
+    it("returns the read cell's schema-bearing ref when `includeRef` is set", () => {
       const ref: CellRef = {
         id: "of:include-ref-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -2975,7 +2975,7 @@ describe("runtime-processor", () => {
       expect(atom.source).toBe("did:key:alice");
     });
 
-    it("redacts Caveat.source in the label views carried by cells inside subscription updates", async () => {
+    it("redacts `Caveat.source` in the label views carried by cells inside subscription updates", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({
         apiUrl: new URL("https://toolshed.test"),
@@ -3037,7 +3037,7 @@ describe("runtime-processor", () => {
       }
     });
 
-    it("redacts Caveat.source in label views on response cell refs", () => {
+    it("redacts `Caveat.source` in label views on response cell refs", () => {
       const sourceRef: CellRef = {
         id: "of:cfc-ref-view-source" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3291,7 +3291,7 @@ describe("runtime-processor", () => {
       expect(sourceSynced).toBe(false);
     });
 
-    it("reads the cell's own stored label without syncing (caller owns liveness)", () => {
+    it("reads the cell's own stored label without syncing", () => {
       const ref: CellRef = {
         id: "of:cfc-label-pure-read" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3343,13 +3343,14 @@ describe("runtime-processor", () => {
           }],
         },
       });
-      // No sync: the label is read from the current store. A not-yet-loaded doc
-      // would yield an empty label that self-heals when the reactive caller's
-      // subscription delivers it.
+      // No sync: keeping the cell live is the caller's job, and the label is
+      // read from the current store. A not-yet-loaded doc would yield an empty
+      // label that self-heals when the reactive caller's subscription delivers
+      // it.
       expect(synced).toBe(false);
     });
 
-    it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {
+    it("ignores schema-bearing `anyOf` refs when reading nested stored labels", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
         const pieceSchema = {
@@ -4354,13 +4355,12 @@ describe("runtime-processor", () => {
 
   describe("runtime-client CellRef conversion", () => {
     it("does not forward an inbound label view into worker sigil links", () => {
-      // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
-      // CellRef is a main-thread display artifact — round-tripped through
-      // CellHandle.deserialize and back — and must not re-enter the worker as
-      // label state. Forwarding it onto the written sigil link previously fed
-      // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
-      // persisted as link-origin labels; the worker now re-derives those from
-      // its own stored source metadata instead.
+      // A `cfcLabelView` riding an inbound `CellRef` is a main-thread display
+      // artifact — round-tripped through `CellHandle.deserialize()` and back —
+      // and must not re-enter the worker as label state. Forwarded onto the
+      // written sigil link, it would feed `recordLinkWritePolicyInput()`, whose
+      // entries `prepareBoundaryCommit()` persists as link-origin labels; the
+      // worker derives those from its own stored source metadata instead.
 
       const cfcLabelView: CfcLabelView = {
         version: 1,
@@ -4513,7 +4513,16 @@ describe("runtime-processor", () => {
 
   describe("RuntimeProcessor.getLoggerCounts", () => {
     // The handler reads process-global logger state, so each case raises its own
-    // flag and clears it again rather than leaving one for the next.
+    // flag and clears it again rather than leaving one for the next. It also
+    // reads the runtime's CFC counters, which travel in the same response so a
+    // client comparing them against the timings has both from one moment —
+    // hence the stand-in below, the only runtime member this handler touches.
+
+    const cfcStats = { cfcRelevantTx: 7 };
+
+    function processorWithStats() {
+      return buildProcessor({ runtime: { getCfcStats: () => cfcStats } });
+    }
 
     function withFlag(
       metadata: Record<string, unknown>,
@@ -4529,7 +4538,7 @@ describe("runtime-processor", () => {
     }
 
     it("carries a raised flag's metadata through to the response", () => {
-      const processor = buildProcessor();
+      const processor = processorWithStats();
 
       withFlag({ a: 1 }, () => {
         const response = processor.getLoggerCounts({
@@ -4537,6 +4546,7 @@ describe("runtime-processor", () => {
         });
 
         expect(Object.keys(response).sort()).toEqual([
+          "cfc",
           "counts",
           "flags",
           "metadata",
@@ -4545,6 +4555,7 @@ describe("runtime-processor", () => {
         expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
           a: 1,
         });
+        expect(response.cfc).toEqual(cfcStats);
       });
     });
 
@@ -4552,7 +4563,7 @@ describe("runtime-processor", () => {
       // The assertion is wired into the handler, not merely available beside it:
       // a `Date` raised anywhere in the process stops this read.
 
-      const processor = buildProcessor();
+      const processor = processorWithStats();
 
       withFlag({ when: new Date(0) }, () => {
         expect(() =>
@@ -5082,7 +5093,7 @@ describe("runtime-processor", () => {
       expect(params.experimental).toEqual({ serverExecution: true });
     });
 
-    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default (OFF-arm-neutral)", () => {
+    it("agrees silently when postures match — both declared-ON and the undeclared-OFF default", () => {
       assertServerExecutionPostureAgreement(
         { serverExecution: true },
         { experimental: { serverExecution: true } },
@@ -5383,7 +5394,7 @@ describe("runtime-processor", () => {
         // handler must await idleWithPendingCommits() — which includes in-flight
         // commit durability — rather than runtime.idle() (reactive quiescence
         // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
-        // regression to runtime.idle() throws here.
+        // handler that reached for runtime.idle() would throw here.
 
         let calls = 0;
         const fake = buildProcessor({
@@ -6774,6 +6785,46 @@ describe("runtime-processor", () => {
         const link = cell.getAsNormalizedFullLink() as unknown as CellRef;
         return { runtime, processor, link };
       }
+
+      it("cancels view registration that completes after its mount was removed", async () => {
+        const { runtime, link } = await mountState();
+        const registered = Promise.withResolvers<() => void>();
+        let cancellations = 0;
+        const processor = buildProcessor({
+          runtime: {
+            getCellFromLink: runtime.getCellFromLink.bind(runtime),
+            viewScopedReplicationRequested: true,
+            viewReplication: { mount: () => registered.promise },
+          },
+        });
+        const { client, posted } = testClient(1);
+        const mounting = processor.handleVDomMount({
+          type: RequestType.VDomMount,
+          mountId: 37,
+          cell: link,
+        }, client);
+        try {
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(1);
+          processor.handleVDomUnmount({
+            type: RequestType.VDomUnmount,
+            mountId: 37,
+          }, client);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(0);
+          registered.resolve(() => cancellations++);
+          await mounting;
+          expect(cancellations).toBe(1);
+          expect(
+            posted.filter((message) =>
+              message.type === NotificationType.VDomBatch
+            ),
+          ).toEqual([]);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(0);
+        } finally {
+          registered.resolve(() => {});
+          await mounting;
+          await runtime.dispose();
+        }
+      });
 
       it("keeps one client's mount when another mounts under the same mount id", async () => {
         const { runtime, processor, link } = await mountState();

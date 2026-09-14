@@ -15,8 +15,8 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import { commandWriterAuthorization } from "../src/command-authorization.ts";
 import {
-  debugCommandWriterAuthorization,
   defaultDebugPatternLocation,
   deployAgentSessionsDebugView,
   describeAgentFabricTarget,
@@ -34,7 +34,7 @@ import {
 
 Deno.test("debug command authorization resolves local schema definitions", () => {
   assertEquals(
-    debugCommandWriterAuthorization({
+    commandWriterAuthorization({
       resultSchema: {
         type: "object",
         properties: {
@@ -48,6 +48,36 @@ Deno.test("debug command authorization resolves local schema definitions", () =>
       },
     } as never),
     ["verified-writer"],
+  );
+  // A definition named with pointer-escaped characters resolves; a reference
+  // reaching below one definition does not.
+  assertEquals(
+    commandWriterAuthorization({
+      resultSchema: {
+        type: "object",
+        properties: {
+          commandAuthorization: { $ref: "#/$defs/command~1authorization" },
+        },
+        $defs: {
+          "command/authorization": {
+            ifc: { writeAuthorizedBy: ["escaped-writer"] },
+          },
+        },
+      },
+    } as never),
+    ["escaped-writer"],
+  );
+  assertEquals(
+    commandWriterAuthorization({
+      resultSchema: {
+        type: "object",
+        properties: {
+          commandAuthorization: { $ref: "#/$defs/outer/inner" },
+        },
+        $defs: { outer: { inner: { ifc: { writeAuthorizedBy: ["nested"] } } } },
+      },
+    } as never),
+    undefined,
   );
 });
 

@@ -516,12 +516,12 @@ export function getNamedTypeKey(
   // If we are overriding the type, don't return a named type key.
   // This makes it so we include these inline instead of as $defs. The
   // `FabricPrimitive` names are only claimed by NativeTypeFormatter when the
-  // type carries the FabricSpecialObject brand; hoisting classifies the same
+  // type carries the `FabricPrimitive` brand; hoisting classifies the same
   // way, so an unbranded user type sharing a name hoists normally.
   if (NativeTypeFormatter.isNativeType(name)) {
     if (
       !NativeTypeFormatter.isFabricPrimitiveTypeName(name) ||
-      NativeTypeFormatter.declaresFabricSpecialObjectBrand(type)
+      NativeTypeFormatter.declaresFabricPrimitiveBrand(type)
     ) {
       return undefined;
     }

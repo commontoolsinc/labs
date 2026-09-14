@@ -28,6 +28,7 @@ import {
 } from "./reconcile.ts";
 import {
   type AgentSessionCommandReceipt,
+  commandIdentity,
   type CommandTarget,
   parseCommandReceipt,
 } from "./commands.ts";
@@ -54,6 +55,17 @@ export interface AgentFabricCells {
   commands: Cell<unknown>;
   receipts: Cell<unknown>;
 }
+
+/** What the indexes say about one session, read without its transcript. */
+/** What a host reads of a published session to decide retention: the fields
+ * an inventory summary can change, and the row's status. The map it comes in
+ * supplies the identity. */
+export type PublishedSessionState = Readonly<
+  Pick<
+    IndexEntry,
+    "driver" | "updatedAt" | "archived" | "active" | "syncStatus"
+  >
+>;
 
 export interface AgentFabricPublishOptions {
   preserveUntouchedStatus?: boolean;
@@ -220,6 +232,23 @@ export function agentFabricCauses(spaceDid: string, ownerDid: string) {
   } as const;
 }
 
+/**
+ * The cause of the command queue bound to the producer pattern `producerId`,
+ * distinct from the owner's queue that the debug view writes.
+ */
+export function producerCommandsCause(
+  spaceDid: string,
+  ownerDid: string,
+  producerId: string,
+) {
+  return {
+    spaceDid,
+    ownerDid,
+    agentConnector: "commands",
+    producer: producerId,
+  } as const;
+}
+
 function fullLink(cell: Cell<unknown>): CellLink {
   const link = cell.getAsNormalizedFullLink();
   return {
@@ -245,6 +274,11 @@ function isDriverCapabilities(value: unknown): value is DriverCapabilities {
       "setMode",
       "setConfigOption",
     ].every((key) => typeof value[key] === "boolean")
+  ) {
+    return false;
+  }
+  if (
+    value.startSession !== undefined && typeof value.startSession !== "boolean"
   ) {
     return false;
   }
@@ -334,7 +368,7 @@ function validatedReceiptIndexRows(
     throw new Error("command receipt index exceeds 200 rows");
   }
 
-  const commandIds = new Set<string>();
+  const identities = new Set<string>();
   return value.receipts.map((item, index) => {
     if (!isRecord(item) || typeof item.commandId !== "string") {
       throw new Error(
@@ -350,6 +384,7 @@ function validatedReceiptIndexRows(
         commandId,
         sourceId: item.sourceId,
         nativeSessionId: item.nativeSessionId,
+        ...(item.producer === undefined ? {} : { producer: item.producer }),
         status: item.status,
         ...(item.error === undefined ? {} : { error: item.error }),
       },
@@ -368,7 +403,12 @@ function validatedReceiptIndexRows(
     const expectedLink = fullLink(
       conn.runtime.getCell(
         conn.spaceDid,
-        commandReceiptCause(conn.spaceDid, conn.ownerDid, commandId),
+        commandReceiptCause(
+          conn.spaceDid,
+          conn.ownerDid,
+          commandId,
+          receipt.producer,
+        ),
         agentOwnerSchema(conn.ownerDid),
       ),
     );
@@ -377,17 +417,19 @@ function validatedReceiptIndexRows(
         `command receipt index row receipt link is invalid: ${index}`,
       );
     }
-    if (commandIds.has(commandId)) {
+    const identity = commandIdentity(commandId, receipt.producer);
+    if (identities.has(identity)) {
       throw new Error(
         `command receipt index contains a duplicate command: ${commandId}`,
       );
     }
-    commandIds.add(commandId);
+    identities.add(identity);
     return {
       commandId,
       ownerDid: receipt.ownerDid,
       sourceId: receipt.sourceId,
       nativeSessionId: receipt.nativeSessionId,
+      ...(receipt.producer === undefined ? {} : { producer: receipt.producer }),
       status: receipt.status,
       updatedAt: item.updatedAt,
       ...(receipt.error ? { error: receipt.error } : {}),
@@ -788,6 +830,57 @@ async function pushSessionGraphBatch(
   }
 }
 
+/**
+ * The Git context a row carries after an observation: the observed one, or
+ * the prior row's when the observation failed, or when the worktree is the
+ * prior row's and its details have not resolved yet.
+ */
+function rowGitContext(
+  previousEntry: IndexEntry | undefined,
+  observed: GitContext,
+): GitContext {
+  if (
+    previousEntry !== undefined &&
+    (observed.gitObservationFailed === true ||
+      (observed.gitWorktreeRoot !== null &&
+        observed.gitObservedAt === null &&
+        previousEntry.gitWorktreeRoot === observed.gitWorktreeRoot))
+  ) {
+    return {
+      gitRepo: previousEntry.gitRepo,
+      gitBranch: previousEntry.gitBranch,
+      gitWorktreeRoot: previousEntry.gitWorktreeRoot,
+      gitHeadSha: previousEntry.gitHeadSha,
+      gitRemotes: previousEntry.gitRemotes,
+      gitObservedAt: previousEntry.gitObservedAt,
+    };
+  }
+  return observed;
+}
+
+/**
+ * A prior row carried into this publication: its `deletedAt` dropped, its
+ * Git context and source capabilities refreshed. What a session's previews
+ * and completeness become is the caller's difference.
+ */
+function refreshedRow(
+  prior: IndexEntry,
+  context: GitContext,
+  capabilities: DriverCapabilities,
+): IndexEntry {
+  const { deletedAt: _deletedAt, ...rest } = prior;
+  return {
+    ...rest,
+    gitRepo: context.gitRepo,
+    gitBranch: context.gitBranch,
+    gitWorktreeRoot: context.gitWorktreeRoot,
+    gitHeadSha: context.gitHeadSha,
+    gitRemotes: context.gitRemotes,
+    gitObservedAt: context.gitObservedAt,
+    capabilities: { ...capabilities },
+  };
+}
+
 export class AgentFabricTarget implements CommandTarget {
   readonly conn: AgentFabricConnection;
   readonly cells: AgentFabricCells;
@@ -798,6 +891,10 @@ export class AgentFabricTarget implements CommandTarget {
   readonly #latestDescriptorObservationBySource = new Map<string, number>();
   #nextObservationSequence = 1;
   #commandCellBound = false;
+  readonly #producerQueues = new Map<string, Cell<unknown>>();
+  // A subscription covers the queues bound when it began, so binding is
+  // refused while one is live.
+  #commandsSubscribed = false;
   #storageClaimed: boolean;
 
   private constructor(
@@ -857,6 +954,38 @@ export class AgentFabricTarget implements CommandTarget {
     return await this.#mutations.run(() =>
       this.#publish(collected, { ...options, observationSequence })
     );
+  }
+
+  /**
+   * The published state of every session the complete index holds. A host
+   * consults it before a collection to retain sessions whose inventory
+   * summaries show nothing changed.
+   */
+  async publishedSessions(): Promise<
+    ReadonlyMap<string, PublishedSessionState>
+  > {
+    this.#assertStorageClaimed();
+    const index = asIndex(
+      await readStableCellGraphValue(
+        this.conn,
+        this.cells.allIndex,
+        new Map(),
+        { preserveLinkFields: new Set(["manifest"]) },
+      ),
+      this.conn.ownerDid,
+      "all",
+    );
+    const states = new Map<string, PublishedSessionState>();
+    for (const entry of index?.sessions ?? []) {
+      states.set(entry.key, {
+        driver: entry.driver,
+        updatedAt: entry.updatedAt ?? null,
+        archived: typeof entry.archived === "boolean" ? entry.archived : null,
+        active: typeof entry.active === "boolean" ? entry.active : null,
+        syncStatus: entry.syncStatus,
+      });
+    }
+    return states;
   }
 
   beginSessionObservation(): number {
@@ -936,44 +1065,46 @@ export class AgentFabricTarget implements CommandTarget {
       }
     }
     throwIfPublicationCanStop();
-    const entriesByKey = new Map<string, IndexEntry>(
-      [
-        ...(previousRecent?.sessions ?? []),
-        ...(previousAll?.sessions ?? []),
-      ]
-        .map((entry): [string, IndexEntry] => {
-          const restored = {
-            ...entry,
-            gitHeadSha: typeof entry.gitHeadSha === "string"
-              ? entry.gitHeadSha
-              : null,
-            gitRemotes: Array.isArray(entry.gitRemotes) ? entry.gitRemotes : [],
-            gitObservedAt: typeof entry.gitObservedAt === "string"
-              ? entry.gitObservedAt
-              : null,
-            archived: typeof entry.archived === "boolean"
-              ? entry.archived
-              : null,
-            active: typeof entry.active === "boolean" ? entry.active : null,
-            manifest: this.conn.runtime.getCell(
+    const previousEntries = [
+      ...(previousRecent?.sessions ?? []),
+      ...(previousAll?.sessions ?? []),
+    ];
+    // The rows as the previous indexes hold them, kept apart from the working
+    // rows below, which a full publication marks stale until a session is
+    // seen: retention reads a session's prior row and status from here.
+    const priorEntriesByKey: ReadonlyMap<string, IndexEntry> = new Map(
+      previousEntries
+        .map((entry): [string, IndexEntry] => [entry.key, {
+          ...entry,
+          gitHeadSha: typeof entry.gitHeadSha === "string"
+            ? entry.gitHeadSha
+            : null,
+          gitRemotes: Array.isArray(entry.gitRemotes) ? entry.gitRemotes : [],
+          gitObservedAt: typeof entry.gitObservedAt === "string"
+            ? entry.gitObservedAt
+            : null,
+          archived: typeof entry.archived === "boolean" ? entry.archived : null,
+          active: typeof entry.active === "boolean" ? entry.active : null,
+          manifest: this.conn.runtime.getCell(
+            this.conn.spaceDid,
+            sessionCause(
               this.conn.spaceDid,
-              sessionCause(
-                this.conn.spaceDid,
-                this.conn.ownerDid,
-                entry.sourceId,
-                entry.nativeSessionId,
-              ),
-              agentOwnerSchema(this.conn.ownerDid),
+              this.conn.ownerDid,
+              entry.sourceId,
+              entry.nativeSessionId,
             ),
-          };
-          return [
-            entry.key,
-            options.preserveUntouchedStatus || isSuperseded(entry.key) ||
-              isSourceSuperseded(entry.sourceId)
-              ? restored
-              : { ...restored, syncStatus: "stale" },
-          ];
-        }),
+            agentOwnerSchema(this.conn.ownerDid),
+          ),
+        }]),
+    );
+    const entriesByKey = new Map<string, IndexEntry>(
+      [...priorEntriesByKey.values()].map((restored): [string, IndexEntry] => [
+        restored.key,
+        options.preserveUntouchedStatus || isSuperseded(restored.key) ||
+          isSourceSuperseded(restored.sourceId)
+          ? restored
+          : { ...restored, syncStatus: "stale" },
+      ]),
     );
     const sourceRows = new Map<string, Record<string, unknown>>(
       [
@@ -1024,27 +1155,11 @@ export class AgentFabricTarget implements CommandTarget {
         currentKeys.add(key);
         if (isSuperseded(key)) continue;
         const previousEntry = entriesByKey.get(key);
-        const observedContext = await gitContext.resolve(
-          snapshot.summary.cwd,
-          cancellableSignal(),
+        const context = rowGitContext(
+          previousEntry,
+          await gitContext.resolve(snapshot.summary.cwd, cancellableSignal()),
         );
         throwIfPublicationCanStop();
-        const preservesPriorGit = previousEntry !== undefined &&
-          (observedContext.gitObservationFailed === true ||
-            (observedContext.gitWorktreeRoot !== null &&
-              observedContext.gitObservedAt === null &&
-              previousEntry.gitWorktreeRoot ===
-                observedContext.gitWorktreeRoot));
-        const context = preservesPriorGit
-          ? {
-            gitRepo: previousEntry!.gitRepo,
-            gitBranch: previousEntry!.gitBranch,
-            gitWorktreeRoot: previousEntry!.gitWorktreeRoot,
-            gitHeadSha: previousEntry!.gitHeadSha,
-            gitRemotes: previousEntry!.gitRemotes,
-            gitObservedAt: previousEntry!.gitObservedAt,
-          }
-          : observedContext;
         const {
           gitHeadSha: _gitHeadSha,
           gitRemotes: _gitRemotes,
@@ -1066,16 +1181,8 @@ export class AgentFabricTarget implements CommandTarget {
           previousEntry.contentHash === prepared.snapshotHash &&
           previousEntry.driver === driver
         ) {
-          const { deletedAt: _deletedAt, ...rest } = previousEntry;
           entriesByKey.set(prepared.key, {
-            ...rest,
-            gitRepo: prepared.summary.gitRepo ?? null,
-            gitBranch: prepared.summary.gitBranch ?? null,
-            gitWorktreeRoot: prepared.summary.gitWorktreeRoot ?? null,
-            gitHeadSha: context.gitHeadSha,
-            gitRemotes: context.gitRemotes,
-            gitObservedAt: context.gitObservedAt,
-            capabilities: { ...capabilities },
+            ...refreshedRow(previousEntry, context, capabilities),
             recentMessages: recentSessionMessages(
               prepared.normalizedMessages,
             ),
@@ -1097,6 +1204,48 @@ export class AgentFabricTarget implements CommandTarget {
           await flushGraphs();
         }
       }
+      // A retained session keeps the row and graph its last read produced,
+      // taking the refreshed source capabilities and the checkout's current
+      // Git context, observed the way a read session's is: a branch switch
+      // or a new commit reaches the row (and the checkout index built from
+      // it) without the transcript being read again. The manifest inside the
+      // graph keeps the context of its last read. Retention rests on a
+      // complete copy being there; where one is not, the retention is an
+      // error like a failed read: the inventory cannot vouch for the session
+      // and stops being complete, so nothing absent from it is deleted on its
+      // word, and the session's row, where there is one, is marked partial
+      // below with the other errors. A session this publication read has
+      // its outcome already; a retention naming it too is not applied.
+      let sourceComplete = source.complete;
+      const sourceErrors = [...source.errors];
+      let retainedListed = 0;
+      for (const summary of source.retained ?? []) {
+        throwIfPublicationCanStop();
+        const key = sessionKey(source.source.id, summary.nativeSessionId);
+        if (currentKeys.has(key)) continue;
+        currentKeys.add(key);
+        retainedListed++;
+        if (isSuperseded(key)) continue;
+        const prior = priorEntriesByKey.get(key);
+        if (prior === undefined || prior.syncStatus !== "complete") {
+          sourceComplete = false;
+          sourceErrors.push({
+            nativeSessionId: summary.nativeSessionId,
+            message: "retained session has no complete published copy",
+          });
+          continue;
+        }
+        const context = rowGitContext(
+          prior,
+          await gitContext.resolve(summary.cwd, cancellableSignal()),
+        );
+        throwIfPublicationCanStop();
+        entriesByKey.set(key, {
+          ...refreshedRow(prior, context, capabilities),
+          syncStatus: "complete",
+        });
+        observedSessionKeys.add(key);
+      }
       for (const prior of priorForSource) {
         if (currentKeys.has(prior.key)) continue;
         entriesByKey.set(prior.key, {
@@ -1104,7 +1253,7 @@ export class AgentFabricTarget implements CommandTarget {
           capabilities: { ...capabilities },
         });
       }
-      if (source.complete) {
+      if (sourceComplete) {
         observedCompleteSourceIds.add(source.source.id);
         for (const prior of priorForSource) {
           if (!currentKeys.has(prior.key) && !isSuperseded(prior.key)) {
@@ -1118,7 +1267,7 @@ export class AgentFabricTarget implements CommandTarget {
           }
         }
       } else {
-        for (const error of source.errors) {
+        for (const error of sourceErrors) {
           if (!error.nativeSessionId) continue;
           const key = sessionKey(source.source.id, error.nativeSessionId);
           if (isSuperseded(key)) continue;
@@ -1141,9 +1290,9 @@ export class AgentFabricTarget implements CommandTarget {
           id: source.source.id,
           driver,
           capabilities,
-          complete: source.complete,
-          sessionCount: source.sessions.length,
-          errors: source.errors,
+          complete: sourceComplete,
+          sessionCount: source.sessions.length + retainedListed,
+          errors: sourceErrors,
         });
       }
     }
@@ -1287,6 +1436,73 @@ export class AgentFabricTarget implements CommandTarget {
     ) {
       throw new Error("command cell is not the connector's owner-scoped queue");
     }
+    await this.#bindQueue(cell, writerAuthorization, "owner");
+    this.cells.commands = cell;
+    this.#commandCellBound = true;
+  }
+
+  /**
+   * Creates the queue for the producer pattern `producerId`, protects it for
+   * the owner with the producer's verified command-sending handler as its only
+   * writer, and adds it to the queues commands are read from. Returns the
+   * bound cell, which the producer piece receives as its `commands` input.
+   */
+  async bindProducerCommandCell(
+    producerId: string,
+    writerAuthorization: unknown,
+  ): Promise<Cell<unknown>> {
+    this.#assertStorageClaimed();
+    const cell = this.conn.runtime.getCell(
+      this.conn.spaceDid,
+      producerCommandsCause(
+        this.conn.spaceDid,
+        this.conn.ownerDid,
+        producerId,
+      ),
+      agentOwnerSchema(this.conn.ownerDid, false),
+    );
+    if (this.#producerQueues.has(producerId)) {
+      throw new Error(`command producer is already bound: ${producerId}`);
+    }
+    await cell.sync();
+    await this.conn.runtime.storageManager.synced();
+    await this.#bindQueue(cell, writerAuthorization, `producer ${producerId}`);
+    this.#producerQueues.set(producerId, cell);
+    return cell;
+  }
+
+  commandsAreBound(): boolean {
+    this.#assertStorageClaimed();
+    return this.#commandCellBound || this.#producerQueues.size > 0;
+  }
+
+  /** Every bound queue with the producer it belongs to; the owner's has none. */
+  #boundQueues(): Array<{ producer?: string; cell: Cell<unknown> }> {
+    return [
+      ...(this.#commandCellBound ? [{ cell: this.cells.commands }] : []),
+      ...[...this.#producerQueues].map(([producer, cell]) => ({
+        producer,
+        cell,
+      })),
+    ];
+  }
+
+  #assertCommandCellBound(): void {
+    if (!this.#commandCellBound && this.#producerQueues.size === 0) {
+      throw new Error("no command queue has been bound");
+    }
+  }
+
+  async #bindQueue(
+    cell: Cell<unknown>,
+    writerAuthorization: unknown,
+    label: string,
+  ): Promise<void> {
+    if (this.#commandsSubscribed) {
+      throw new Error(
+        `${label} queue cannot be bound while commands are subscribed`,
+      );
+    }
     const authorization = isRecord(writerAuthorization) &&
         isRecord(writerAuthorization.__ctWriterIdentityOf)
       ? writerAuthorization.__ctWriterIdentityOf
@@ -1335,32 +1551,25 @@ export class AgentFabricTarget implements CommandTarget {
     const result = await tx.commit();
     if (result.error) {
       throw new Error(
-        `could not protect the owner command cell: ${result.error.message}`,
+        `could not protect the ${label} command cell: ${result.error.message}`,
         { cause: result.error },
       );
-    }
-    this.cells.commands = cell;
-    this.#commandCellBound = true;
-  }
-
-  commandsAreBound(): boolean {
-    this.#assertStorageClaimed();
-    return this.#commandCellBound;
-  }
-
-  #assertCommandCellBound(): void {
-    if (!this.#commandCellBound) {
-      throw new Error("owner command cell has not been bound");
     }
   }
 
   async readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined> {
     this.#assertStorageClaimed();
     const cell = this.conn.runtime.getCell(
       this.conn.spaceDid,
-      commandReceiptCause(this.conn.spaceDid, this.conn.ownerDid, commandId),
+      commandReceiptCause(
+        this.conn.spaceDid,
+        this.conn.ownerDid,
+        commandId,
+        producer,
+      ),
       agentOwnerSchema(this.conn.ownerDid),
     );
     await cell.sync();
@@ -1411,22 +1620,51 @@ export class AgentFabricTarget implements CommandTarget {
     return receipt;
   }
 
+  /**
+   * Subscribes to every bound queue. The callback receives one queue's
+   * commands at a time with that queue's producer, `undefined` for the
+   * owner's queue, which is what qualifies each command's identity.
+   */
   async subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<Cancel> {
     this.#assertStorageClaimed();
     this.#assertCommandCellBound();
-    return await subscribeStableActions(
-      this.conn,
-      this.cells.commands,
-      callback,
-    );
+    const cancels: Cancel[] = [];
+    try {
+      for (const { producer, cell } of this.#boundQueues()) {
+        cancels.push(
+          await subscribeStableActions(
+            this.conn,
+            cell,
+            (commands) => callback(commands, producer),
+          ),
+        );
+      }
+    } catch (error) {
+      for (const cancel of cancels) cancel();
+      throw error;
+    }
+    this.#commandsSubscribed = true;
+    return () => {
+      this.#commandsSubscribed = false;
+      for (const cancel of cancels) cancel();
+    };
   }
 
+  /**
+   * Every bound queue's pending commands, in binding order and without their
+   * queues: a diagnostic read. The worker learns each command's queue from the
+   * subscription.
+   */
   async pollCommands(): Promise<unknown[]> {
     this.#assertStorageClaimed();
     this.#assertCommandCellBound();
-    return await readStableActions(this.conn, this.cells.commands);
+    const values: unknown[] = [];
+    for (const { cell } of this.#boundQueues()) {
+      values.push(...await readStableActions(this.conn, cell));
+    }
+    return values;
   }
 
   async publishReceipt(
@@ -1454,6 +1692,7 @@ export class AgentFabricTarget implements CommandTarget {
         this.conn.spaceDid,
         this.conn.ownerDid,
         receipt.commandId,
+        receipt.producer,
       ),
       agentOwnerSchema(this.conn.ownerDid),
     );
@@ -1461,6 +1700,9 @@ export class AgentFabricTarget implements CommandTarget {
       receipt,
       childScope(this.conn.spaceDid, this.conn.ownerDid, "command-receipt", {
         commandId: receipt.commandId,
+        ...(receipt.producer === undefined
+          ? {}
+          : { producer: receipt.producer }),
       }),
     );
     await pushStableCellGraph(
@@ -1475,16 +1717,21 @@ export class AgentFabricTarget implements CommandTarget {
     if (prior !== undefined && prior !== null) {
       priorReceipts = validatedReceiptIndexRows(this.conn, prior);
     }
+    const identity = commandIdentity(receipt.commandId, receipt.producer);
     const receipts = priorReceipts
       .filter((item) =>
         item && typeof item === "object" &&
-        (item as Record<string, unknown>).commandId !== receipt.commandId
+        commandIdentity(
+            String((item as Record<string, unknown>).commandId),
+            (item as Record<string, unknown>).producer as string | undefined,
+          ) !== identity
       );
     receipts.push({
       commandId: receipt.commandId,
       ownerDid: receipt.ownerDid,
       sourceId: receipt.sourceId,
       nativeSessionId: receipt.nativeSessionId,
+      ...(receipt.producer === undefined ? {} : { producer: receipt.producer }),
       status: receipt.status,
       updatedAt: receipt.completedAt ?? receipt.claimedAt ??
         new Date().toISOString(),

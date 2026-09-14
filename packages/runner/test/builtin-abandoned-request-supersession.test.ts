@@ -229,6 +229,9 @@ describe("whose cells an abandoned request's ending writes", () => {
     const result = runtime.run(tx, testPattern, inputs, resultCell);
     runtime.prepareTxForCommit(tx);
     await tx.commit();
+    // A reader has to demand the fetch before it is issued; the runtime's
+    // disposal ends the subscription.
+    result.sink(() => {});
 
     // The held response keeps the claim standing: the pending flag stays up
     // and the claim id stays that request's, which is the state the ending

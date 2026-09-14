@@ -70,8 +70,8 @@ describe("op-pattern-ref helpers", () => {
   });
 
   it("passes a non-sentinel value through unchanged (stored-keyless remnant)", () => {
-    // Post-CT-1812 only a graph deserialized from a STORED no-entry-ref
-    // pattern value arrives embedded (a live op whose original is a trusted
+    // Only a graph deserialized from a STORED no-entry-ref pattern value
+    // arrives embedded (a live op whose original is a trusted
     // builder pattern is minted a keyless identity at instantiation and
     // arrives as a sentinel — see keyless-op-identity.test.ts). The stored
     // form must keep executing: stored-pattern-rehydration.test.ts pins that
@@ -202,10 +202,11 @@ describe("map op passed by identity", () => {
   it("reloads a hoisted op by identity without recompiling", async () => {
     // A map's sub-pattern result cells carry the op's `{ identity, symbol }`,
     // where `symbol` is a HOIST (`__cfPattern_1`), not a module export. On reload
-    // the by-identity path must resolve it from the in-memory artifact index — a
-    // cold source recompile here is the CT-1623 "compiles=0 reload" regression
-    // the shell piece test guards. (Without the fix this resolves to undefined /
-    // recompiles, because hoists aren't in `modulesByIdentity.exports`.)
+    // the by-identity path must resolve it from the in-memory artifact index,
+    // with no cold source recompile (the "compiles=0 reload" contract the shell
+    // piece test guards). Hoists aren't in `modulesByIdentity.exports`, so a
+    // lookup that consulted only exports would resolve to undefined and
+    // recompile.
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
     const pm = runtime.patternManager;
     const entryRef = pm.getArtifactEntryRef(compiled);

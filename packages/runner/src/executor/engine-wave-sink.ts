@@ -203,7 +203,7 @@ export class EngineWaveCommitSink implements WaveCommitSink {
     const engine = this.#engineFor(batch.space);
     const commit = {
       localSeq: ++this.#localSeq.value,
-      reads: { confirmed: [], pending: [] },
+      reads: { confirmed: [...(batch.confirmedReads ?? [])], pending: [] },
       operations: [...batch.operations],
       ...(batch.preconditions.length > 0
         ? { preconditions: [...batch.preconditions] }

@@ -1,5 +1,4 @@
 import type { CellScope } from "@commonfabric/api";
-import type { MetaField } from "@commonfabric/runner";
 import type {
   FabricArray,
   FabricPlainObject,
@@ -18,6 +17,7 @@ import type {
   OpCursor,
   OperationFieldSnapshot,
 } from "@commonfabric/memory/v2";
+import type { MetaField } from "@commonfabric/runner";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
@@ -742,6 +742,12 @@ export type InitializationData = {
      * answer.
      */
     serverExecution?: boolean;
+
+    /** Global default for server-selected view replication. */
+    viewScopedReplication?: boolean;
+
+    /** Web client override of the global view replication default. */
+    webViewScopedReplication?: boolean;
 
     /**
      * Whether a link writer emits `cid:` schema-document references, each
@@ -3146,6 +3152,19 @@ export type LoggerCountsResponse = {
    * The flags currently set, by logger.
    */
   flags: LoggerFlagsData;
+
+  /**
+   * The runtime's CFC counters, in the same round trip. They answer questions
+   * the logger's own rows cannot — how many flow-label probes were evaluated
+   * rather than memoized, and how large a dereference-trace set any one
+   * transaction held — and a client reading them against the timings wants
+   * both from the same moment.
+   *
+   * A record of counters rather than the runner's `CfcRuntimeStats`: a
+   * response crosses the boundary as a `FabricValue`, which an interface with
+   * no index signature does not satisfy, and every counter there is a number.
+   */
+  cfc: Record<string, number>;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */

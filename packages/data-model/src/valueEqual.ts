@@ -7,9 +7,10 @@ import {
   type FabricArray,
   FabricInstance,
   type FabricPlainObject,
-  FabricSpecialObject,
+  type FabricSpecialObject,
   type FabricValue,
 } from "@/interface.ts";
+import { isFabricSpecialObject } from "@/type-check.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
 
@@ -179,7 +180,7 @@ export function valueEqual(a: FabricValue, b: FabricValue): boolean {
 function objectSubtypeOf(
   value: FabricPlainObject | FabricArray | FabricSpecialObject,
 ): "array" | "plain" | "special" {
-  if (value instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(value)) {
     return "special";
   } else if (Array.isArray(value)) {
     return "array";

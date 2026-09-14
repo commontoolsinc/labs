@@ -1543,6 +1543,9 @@ describe("generateObject with tools", () => {
     );
 
     const result = runtime.run(tx, testPattern, {}, resultCell);
+    // The built-in is a computation: a reader has to demand it before the
+    // request goes out, and the runtime's disposal ends the subscription.
+    result.sink(() => {});
     tx.commit();
 
     await childRequestSent.promise;
@@ -1623,7 +1626,7 @@ describe("generateObject with tools", () => {
       tx,
     );
 
-    runtime.run(tx, testPattern, {}, resultCell);
+    runtime.run(tx, testPattern, {}, resultCell).sink(() => {});
     runtime.prepareTxForCommit(tx);
     await tx.commit();
 
@@ -1694,7 +1697,7 @@ describe("generateObject with tools", () => {
       tx,
     );
 
-    runtime.run(tx, testPattern, {}, resultCell);
+    runtime.run(tx, testPattern, {}, resultCell).sink(() => {});
     runtime.prepareTxForCommit(tx);
     await tx.commit();
 

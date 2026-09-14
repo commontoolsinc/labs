@@ -251,6 +251,7 @@ cf test ./slow-test.test.tsx --timeout 10000
 |------|-------------|---------|
 | `--timeout <ms>` | Timeout per test in milliseconds | 5000 |
 | `--verbose` | Show detailed execution logs | false |
+| `--compile-only` | Compile each file's program into the compile byte cache and run nothing; with `CF_COMPILE_CACHE_FILE` set, a later run of the same files compiles none of it | false |
 
 ### Output
 
@@ -273,7 +274,8 @@ expense-tracker.test.tsx
 
 The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
 reading aid for the shape of the loop, not a second copy of it: it leaves out
-settling, the retry an assertion gets to let the graph settle, timeouts around
+settling, the wait an assertion gets for the async work its own read started,
+the retry it gets after an action to let the graph settle, timeouts around
 each step, and the multi-user paths. Behavior that matters belongs in the code
 and in the prose above — change one of those and this sketch needs the same
 edit, so keep it short enough to be worth having.

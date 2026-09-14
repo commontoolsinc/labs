@@ -190,11 +190,9 @@ describe("Cell with Optional Link", () => {
   });
 
   describe("ensureLink() error handling", () => {
-    it("should throw error when accessing cell without frame context", () => {
+    it("throws naming the missing space for a cell whose link and frame both lack one", () => {
       const cell = new CellImpl(runtime, tx);
 
-      // Trying to get the cell value without a link should throw
-      // Note: Now that we have a default frame with runtime, the error is about missing space
       expect(() => cell.get()).toThrow(
         "Cannot create cell link - space required",
       );
@@ -208,7 +206,7 @@ describe("Cell with Optional Link", () => {
     });
 
     it("should take space from frame if no id provided", () => {
-      pushFrame({
+      const frame = pushFrame({
         space,
         generatedIdCounter: 0,
         reactives: new Set(),
@@ -219,7 +217,7 @@ describe("Cell with Optional Link", () => {
       // Take space from frame.
       expect(cell.space).toEqual(space);
 
-      popFrame();
+      popFrame(frame);
     });
 
     it("should not throw error when accessing path without cause", () => {
@@ -231,7 +229,7 @@ describe("Cell with Optional Link", () => {
     it("should create link when accessing cell with cause and space", () => {
       const cause = { type: "test-cause" };
 
-      pushFrame({
+      const frame = pushFrame({
         cause: { type: "lift-cause" },
         space,
         generatedIdCounter: 0,
@@ -246,12 +244,12 @@ describe("Cell with Optional Link", () => {
       expect(cell.space).toBe(space);
       expect(cell.path).toEqual([]);
 
-      popFrame();
+      popFrame(frame);
     });
 
     it("should create link using frame cause when in handler context", () => {
       // Create a frame with a cause
-      pushFrame({
+      const frame = pushFrame({
         cause: { type: "handler-cause" },
         space,
         inHandler: true,
@@ -266,7 +264,7 @@ describe("Cell with Optional Link", () => {
         expect(cell.space).toBe(space);
         expect(cell.path).toEqual([]);
       } finally {
-        popFrame();
+        popFrame(frame);
       }
     });
   });
@@ -327,7 +325,7 @@ describe("Cell with Optional Link", () => {
     it("should suggest using .for() in error messages", () => {
       const cell = new CellImpl(runtime, tx, { path: [], space }, false);
 
-      pushFrame({
+      const frame = pushFrame({
         space,
         generatedIdCounter: 0,
         reactives: new Set(),
@@ -340,7 +338,7 @@ describe("Cell with Optional Link", () => {
         expect(error.message).toContain(".for(cause)");
         expect(error.message).toContain("cause");
       } finally {
-        popFrame();
+        popFrame(frame);
       }
     });
   });
@@ -374,7 +372,7 @@ describe("Cell with Optional Link", () => {
     it("should share cause across siblings created with .asSchema()", () => {
       const cause = { type: "shared-cause" };
 
-      pushFrame({
+      const frame = pushFrame({
         cause: { type: "frame-cause" },
         space,
         generatedIdCounter: 0,
@@ -396,14 +394,14 @@ describe("Cell with Optional Link", () => {
         expect(id2).toBeDefined();
         expect(id1).toEqual(id2);
       } finally {
-        popFrame();
+        popFrame(frame);
       }
     });
 
     it("should share cause across siblings created with .withTx()", () => {
       const cause = { type: "shared-cause" };
 
-      pushFrame({
+      const frame = pushFrame({
         cause: { type: "frame-cause" },
         space,
         generatedIdCounter: 0,
@@ -425,14 +423,14 @@ describe("Cell with Optional Link", () => {
         expect(id2).toBeDefined();
         expect(id1).toEqual(id2);
       } finally {
-        popFrame();
+        popFrame(frame);
       }
     });
 
     it("should share link creation across siblings", () => {
       const cause = { type: "shared-cause" };
 
-      pushFrame({
+      const frame = pushFrame({
         cause: { type: "frame-cause" },
         space,
         generatedIdCounter: 0,
@@ -460,12 +458,12 @@ describe("Cell with Optional Link", () => {
         expect(cell2.space).toBe(space);
         expect(cell3.space).toBe(space);
       } finally {
-        popFrame();
+        popFrame(frame);
       }
     });
 
     it("should share cause with children created via .key()", () => {
-      pushFrame({
+      const parentFrame = pushFrame({
         cause: { type: "first-frame" },
         space,
         generatedIdCounter: 0,
@@ -476,7 +474,7 @@ describe("Cell with Optional Link", () => {
 
       const cause = { type: "parent-cause" };
 
-      pushFrame({
+      const childFrame = pushFrame({
         cause: { type: "second-frame" },
         space,
         generatedIdCounter: 0,
@@ -497,8 +495,8 @@ describe("Cell with Optional Link", () => {
         expect(childId).toBeDefined();
         expect(parentId).toEqual(childId);
       } finally {
-        popFrame();
-        popFrame();
+        popFrame(childFrame);
+        popFrame(parentFrame);
       }
     });
   });

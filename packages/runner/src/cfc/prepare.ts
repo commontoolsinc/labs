@@ -110,6 +110,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { isPrefix, PathPrefixIndex } from "./path-prefix-index.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type CfcRefusalDetail,
@@ -178,15 +179,6 @@ const INTERNAL_VERIFIER_META = {
 const LINK_SOURCE_SCHEMA_META = {
   ...internalVerifierRead,
 };
-
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
@@ -2150,7 +2142,7 @@ const forEachFlowObservation = (
   // read arrives via the ordinary reads of the target document. Recognize
   // them by the recorded trace sources: a probe at-or-below a followed
   // slot's path in the same document belongs to that dereference.
-  let traceSourcesByDoc: Map<string, (readonly string[])[]> | undefined;
+  let traceSourcesByDoc: Map<string, PathPrefixIndex> | undefined;
   const probeBelongsToDereference = (
     space: MemorySpace,
     id: URI,
@@ -2167,15 +2159,14 @@ const forEachFlowObservation = (
         });
         let sources = traceSourcesByDoc.get(key);
         if (sources === undefined) {
-          sources = [];
+          sources = new PathPrefixIndex();
           traceSourcesByDoc.set(key, sources);
         }
-        sources.push(canonicalizeLogicalPath(trace.source.path));
+        sources.add(canonicalizeLogicalPath(trace.source.path));
       }
     }
     const sources = traceSourcesByDoc.get(targetKey({ space, id, scope }));
-    return sources !== undefined &&
-      sources.some((source) => isPrefix(source, logicalPath));
+    return sources !== undefined && sources.hasPrefixOf(logicalPath);
   };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) {
@@ -2207,15 +2198,22 @@ const forEachFlowObservation = (
     const space = read.space;
     const id = read.id as URI;
     const scope = normalizeCellScope(read.scope);
-    const coveredByTrace = probeBelongsToDereference(
-      space,
-      id,
-      scope,
-      logicalPath,
-    );
+    // Computed on demand rather than for every read: `flowLabelWorkExists`
+    // consumes observations without ever reading `coveredByTrace`, and it is
+    // the caller that runs on every reactive action commit. Only a
+    // link-resolution probe needs the answer here, and only `deriveFlowJoin`
+    // asks for it afterwards. Memoized so the two cannot disagree.
+    let coveredByTraceMemo: boolean | undefined;
+    const coveredByTrace = (): boolean =>
+      coveredByTraceMemo ??= probeBelongsToDereference(
+        space,
+        id,
+        scope,
+        logicalPath,
+      );
     let shape: ReadObservationShape;
     if (isLinkResolutionProbe(read.meta)) {
-      if (coveredByTrace) {
+      if (coveredByTrace()) {
         continue;
       }
       shape = "followRef";
@@ -2241,7 +2239,9 @@ const forEachFlowObservation = (
         {
           shape,
           nonRecursive: read.nonRecursive,
-          coveredByTrace,
+          get coveredByTrace() {
+            return coveredByTrace();
+          },
           machinery: isMachineryRead(read.meta),
         },
       )
@@ -5414,14 +5414,13 @@ export const loadStoredCfcEnvelope = (
   }
 };
 
-// Union of confidentiality (and integrity) atoms across every non-internal labeled read in the
-// transaction, resolved from stored labels the same way verifyInputRequirements
-// resolves them. Transaction-global by design — deliberately NOT scoped to a
-// D4 read prefix: a sink request is built from whatever the handler read, and
-// the sink-request input does not record its own read provenance, so the whole
-// consumed set is the sound over-approximation for the egress ceiling
-// (docs/specs/cfc-write-prefix-provenance.md §7.4).
-const collectConsumedLabel = (
+/**
+ * Join confidentiality and integrity across the transaction's non-internal
+ * labeled reads, retaining each source in first-seen order for refusal details.
+ * A sink request can depend on any handler read, so the consumed set is
+ * transaction-global (docs/specs/cfc-write-prefix-provenance.md §7.4).
+ */
+export const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
 ): {
   confidentiality: readonly CfcConfClause[];
@@ -5441,6 +5440,7 @@ const collectConsumedLabel = (
   const atoms: unknown[] = [];
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   const sources: ConsumedAtomSource[] = [];
+  const sourceBuckets = new Map<string, ConsumedAtomSource[]>();
   const noteSource = (
     atom: unknown,
     read: CfcAddress,
@@ -5449,18 +5449,24 @@ const collectConsumedLabel = (
     // Deduplicated on the same terms a consumer matches on: one entry per
     // (clause, address, label path). Two label-map entries of one document
     // carrying the same clause to the same read are one source.
-    if (
-      sources.some((seen) =>
-        seen.read.id === read.id && seen.read.space === read.space &&
-        seen.read.scope === read.scope &&
-        pathKey(seen.read.path) === pathKey(read.path) &&
-        pathKey(seen.labelPath) === pathKey(labelPath) &&
-        deepEqual(seen.atom, atom)
-      )
-    ) {
+    // The tuple keeps address fields and pointer boundaries unambiguous,
+    // including paths containing separators. Only atoms sharing that identity
+    // need structural comparison; `sources` retains global first-seen order.
+    const key = JSON.stringify([
+      read.id,
+      read.space,
+      read.scope,
+      pathKey(read.path),
+      pathKey(labelPath),
+    ]);
+    const bucket = sourceBuckets.get(key);
+    if (bucket?.some((seen) => deepEqual(seen.atom, atom))) {
       return;
     }
-    sources.push({ atom, read, labelPath });
+    const source = { atom, read, labelPath };
+    sources.push(source);
+    if (bucket === undefined) sourceBuckets.set(key, [source]);
+    else bucket.push(source);
   };
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
@@ -6244,7 +6250,7 @@ export const prepareBoundaryCommit = (
     // The schema write-policy requirement quantifies over the paths a
     // schema could describe. A raw meta-seam write is not one, so demanding
     // a policy input for it rejects every meta write on a labeled document —
-    // slug assignment, the pattern updater's identity swap, setup over an
+    // slug assignment, a pointer repair's identity swap, setup over an
     // existing piece, and the source-lifecycle transitions. These paths stay
     // flow-label targets: the write above still carries the transaction's
     // join onto the document, so nothing is laundered by skipping them here.
