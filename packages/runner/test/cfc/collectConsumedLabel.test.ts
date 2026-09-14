@@ -14,12 +14,12 @@ import type {
   IReadActivity,
 } from "../../src/storage/interface.ts";
 
-const address: CfcAddress = {
+const address = {
   space: "did:key:source",
-  id: "of:source",
+  id: "of:source" as const,
   scope: "space",
   path: ["field"],
-};
+} satisfies CfcAddress;
 
 /** Supplies the collector's read surfaces without preprocessing their identity. */
 function transaction(
@@ -164,5 +164,113 @@ describe("collectConsumedLabel()", () => {
     expect(second.sources).toEqual(first.sources);
     expect(second.sources).not.toBe(first.sources);
     expect(collectConsumedLabel(transaction()).sources).toEqual([]);
+  });
+
+  it("keeps structure and recursive-read rules when selecting label paths", () => {
+    const entries = [
+      { path: ["field", "child"], label: { confidentiality: ["child"] } },
+      { path: [], origin: "structure", label: { confidentiality: ["shape"] } },
+      { path: [], label: { confidentiality: ["root"] } },
+      { path: ["other"], label: { confidentiality: ["other"] } },
+      {
+        path: ["field"],
+        origin: "structure",
+        label: { confidentiality: ["own"] },
+      },
+      {
+        path: ["*"],
+        origin: "structure",
+        label: { confidentiality: ["template"] },
+      },
+    ];
+    const read: IReadActivity = {
+      ...address,
+      path: ["value", "field"],
+      meta: {},
+    };
+    const collect = (nonRecursive: boolean) =>
+      collectConsumedLabel(
+        transaction([], [{ ...read, nonRecursive }], entries),
+      );
+
+    expect(collect(false).sources.map((source) => source.atom)).toEqual([
+      "child",
+      "root",
+      "own",
+      "template",
+    ]);
+    expect(collect(true).sources.map((source) => source.atom)).toEqual([
+      "root",
+      "own",
+      "template",
+    ]);
+  });
+
+  it("refreshes metadata between collections and separates document scopes and media types", () => {
+    const reads: IReadActivity[] = [
+      { ...address, path: ["value", "field"], meta: {} },
+      { ...address, path: ["value", "other"], meta: {} },
+      { ...address, scope: "user", path: ["value", "field"], meta: {} },
+      { ...address, type: "text/plain", path: ["value", "field"], meta: {} },
+      { ...address, id: "of:other", path: ["value", "field"], meta: {} },
+      {
+        ...address,
+        space: "did:key:other",
+        path: ["value", "field"],
+        meta: {},
+      },
+    ];
+    let generation = 1;
+    const tx = transaction([], reads);
+    tx.readOrThrow = (read) => ({
+      version: 1,
+      schemaHash: "test-schema",
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: [
+              JSON.stringify([
+                generation,
+                read.space,
+                read.id,
+                read.scope,
+                read.type,
+              ]),
+            ],
+          },
+        }],
+      },
+    });
+    const expected = () =>
+      reads.map((read) =>
+        JSON.stringify([
+          generation,
+          read.space,
+          read.id,
+          read.scope,
+          read.type ?? "application/json",
+        ])
+      );
+
+    expect(collectConsumedLabel(tx).sources.map((source) => source.atom))
+      .toEqual(expected());
+    generation++;
+    expect(collectConsumedLabel(tx).sources.map((source) => source.atom))
+      .toEqual(expected());
+  });
+
+  it("rejects malformed metadata even when its entry is outside the consumed path", () => {
+    const read: IReadActivity = {
+      ...address,
+      path: ["value", "field"],
+      meta: {},
+    };
+    const tx = transaction([], [read], [
+      { path: ["field"], label: { confidentiality: ["private"] } },
+      { path: ["other"], label: { confidentiality: "invalid" } },
+    ]);
+    expect(() => collectConsumedLabel(tx)).toThrow();
   });
 });

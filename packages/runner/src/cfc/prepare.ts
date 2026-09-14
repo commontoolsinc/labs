@@ -85,6 +85,7 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+import { ConsumedLabelIndex } from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
   type CfcGrantConsumptionContext,
@@ -5441,6 +5442,9 @@ export const collectConsumedLabel = (
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   const sources: ConsumedAtomSource[] = [];
   const sourceBuckets = new Map<string, ConsumedAtomSource[]>();
+  // Collection is synchronous and read-only. Share one validated metadata
+  // snapshot per document here; another collection observes its current view.
+  const labelIndexes = new Map<string, ConsumedLabelIndex | undefined>();
   const noteSource = (
     atom: unknown,
     read: CfcAddress,
@@ -5484,14 +5488,20 @@ export const collectConsumedLabel = (
     ]
   ) {
     if (isInternalVerifierRead(read.meta)) continue;
-    const metadata = storedMetadataFor(
-      tx,
-      read.space,
-      read.id,
-      normalizeCellScope(read.scope),
-      read.type ?? "application/json",
-    );
-    if (metadata === undefined) continue;
+    const scope = normalizeCellScope(read.scope);
+    const type = read.type ?? "application/json";
+    const metadataKey = JSON.stringify([read.space, read.id, scope, type]);
+    if (!labelIndexes.has(metadataKey)) {
+      const metadata = storedMetadataFor(tx, read.space, read.id, scope, type);
+      labelIndexes.set(
+        metadataKey,
+        metadata === undefined
+          ? undefined
+          : new ConsumedLabelIndex(metadata.labelMap.entries),
+      );
+    }
+    const labels = labelIndexes.get(metadataKey);
+    if (labels === undefined) continue;
     const path = canonicalizeLogicalPath(read.path);
     // A recursive read at `path` observes the value at `path` and everything
     // below it, so its confidentiality is the union of every labelMap entry
@@ -5502,8 +5512,7 @@ export const collectConsumedLabel = (
     // #3993). A nonRecursive read sees ONLY the value at `path`, so it counts
     // ancestor-or-equal entries but NOT descendants — counting those would
     // false-reject valid commits (review round 2 on #3993).
-    for (const entry of metadata.labelMap.entries) {
-      const entryPath = canonicalizeLogicalPath(entry.path);
+    for (const { entry, path: entryPath } of labels.overlapping(path)) {
       // CONCRETE structure entries label only the container node's shape:
       // an ancestor structure entry does not apply to a read strictly
       // below it (same exact-path rule as `labelAtPath`); as a descendant

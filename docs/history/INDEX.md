@@ -188,6 +188,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Consumed label-map width](development/performance/2026-09-14-cfc-consumed-label-index.md) — paired measurements of per-document metadata validation and indexed path lookup, predicate and order regressions, and bounded nested-array probes that leave the Loom gap unresolved.
+- [Consumed label-map width measurements](development/performance/2026-09-14-cfc-consumed-label-index.results.json) — paired collector samples, load readings, source hashes, diagnostic drivers, and nested-array probe output.
+
 - [Consumed CFC source deduplication](development/performance/2026-09-14-cfc-consumed-source-dedup.md) — benchmark-first reproduction, five alternating source-count sweeps, identity and order checks, full runner validation, and a remaining read-count times label-map-width cost; the Loom nested-array gap remains unproven.
 - [Consumed CFC source measurements](development/performance/2026-09-14-cfc-consumed-source-dedup.results.json) — source hashes and deltas, exact diagnostic drivers, paired samples and load readings, initial Deno benchmark distributions, profile summary, and validation results.
 - [Consumed CFC field-label profile](development/performance/2026-09-14-cfc-consumed-source-dedup.cpuprofile) — V8 sampling profile of five fixed collector calls over 1,334 reads and 1,334 label entries, including untimed read setup.

@@ -501,6 +501,9 @@ deno bench --no-lock -A --json packages/runner/test/cfc-consumed-source-dedup.be
 
 The [local measurement report](../history/development/performance/2026-09-14-cfc-consumed-source-dedup.md)
 records an alternating source-count sweep and the limits of that measurement.
+The [metadata-width measurement](../history/development/performance/2026-09-14-cfc-consumed-label-index.md)
+uses the same fixture to compare per-document validation and indexed path
+lookup. Index construction remains inside the collector timer.
 
 ## Scoped snapshot memo reuse
 
