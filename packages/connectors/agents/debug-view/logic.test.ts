@@ -31,6 +31,7 @@ Deno.test("command drafts validate every bounded field", () => {
     [{ nativeSessionId: "bad\tsession" }, "Session IDs cannot contain control"],
     [{ promptText: " " }, "Enter a prompt."],
     [{ promptText: "x".repeat(128 * 1_024 + 1) }, "Prompts are limited"],
+    [{ type: "start", promptText: " " }, "Enter a prompt."],
     [{ type: "rename", argument: " " }, "Enter a new title."],
     [{ type: "rename", argument: "x".repeat(513) }, "Titles are limited"],
     [{ type: "set-mode", argument: " " }, "Enter a mode ID."],
@@ -55,6 +56,9 @@ Deno.test("command drafts validate every bounded field", () => {
 
 Deno.test("command payloads preserve each command's value type", () => {
   assertEquals(commandPayload(draft), { text: "continue" });
+  assertEquals(commandPayload({ ...draft, type: "start" }), {
+    text: "continue",
+  });
   assertEquals(commandPayload({ ...draft, type: "cancel" }), {});
   assertEquals(
     commandPayload({ ...draft, type: "rename", argument: " new " }),

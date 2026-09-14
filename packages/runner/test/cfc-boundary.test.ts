@@ -881,7 +881,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects a uiContract field whose Fabric write differs from its Fabric default (CT-1770)", async () => {
+  it("rejects a uiContract field whose Fabric write differs from its Fabric default", async () => {
     // The schema default and the written value are distinct `FabricBytes`
     // (interned from the `Uint8Array`s) that differ only in byte content, so
     // the write does NOT install the default -- the write-policy gate's
@@ -1779,11 +1779,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("treats claim-only persisted entries as covering the path", async () => {
-    // Regression: persisted labelMap entries with empty labels (i.e., the
-    // schema only carried writeAuthorizedBy / uiContract / exactCopyOf
-    // claims, no confidentiality or integrity values) must still be
-    // recognized as "policy applies on this path". A previous version
-    // filtered on `hasLabelValues` and silently bypassed enforcement.
+    // Persisted labelMap entries with empty labels (i.e., the schema only
+    // carried writeAuthorizedBy / uiContract / exactCopyOf claims, no
+    // confidentiality or integrity values) must still be recognized as
+    // "policy applies on this path"; filtering on `hasLabelValues` would
+    // silently bypass enforcement.
     const { runtime, storageManager } = createRuntime();
     try {
       const seededId = parseLink(
@@ -2119,7 +2119,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
-      // `flowPrecisionClaim` is a reserved legacy key: no longer minted, but
+      // `flowPrecisionClaim` is a reserved legacy key: nothing mints it, but
       // already-persisted link schemas may embed it, so an ifc entry that is
       // not a label must stay tolerated and must not persist CFC metadata.
       const schema: JSONSchema = {
@@ -2832,7 +2832,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     // is split into a child doc) is treated like the inline value it holds:
     // the link label derives from the target's schema at the target path —
     // here the location's own confidentiality — instead of failing closed
-    // (CT-1698: profile element writes).
+    // (the profile element write shape).
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
@@ -2911,7 +2911,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     // A piece instantiated by this transaction gets its result schema written
     // at the doc's ["schema"] meta during setup (updateResultSchemaMeta). A
     // handler that materializes such a piece and links it into a protected
-    // list in ONE commit (profile-home's addElement, CT-1698) leaves the
+    // list in ONE commit (profile-home's addElement) leaves the
     // source with no stored CFC metadata and no pending schema input — the
     // setup-written schema, read back read-your-writes, is what keeps the
     // link write from failing closed. The persisted link label must derive

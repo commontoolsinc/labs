@@ -1181,8 +1181,9 @@ function finalizeReactiveActionCommit(
     ) return;
     const settlement = waveSettlementOf(args.tx);
     if (settlement === undefined) return;
-    // A no-op run has no new publication. Only another sealed contribution can
-    // supersede this run's recovery obligation, even if a no-op refreshed reads.
+    // A run with no contribution has no new publication. Only another sealed
+    // contribution can supersede this run's recovery obligation, even if a
+    // no-op refreshed reads.
     const token = {};
     owner.pendingWaveRun = token;
     const outcome = await settlement;

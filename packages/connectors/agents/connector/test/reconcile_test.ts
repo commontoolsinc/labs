@@ -47,6 +47,7 @@ function fakeDriver(): AgentDriver {
         complete: true,
       }),
     prompt: () => Promise.resolve({ status: "unsupported" }),
+    startSession: () => Promise.resolve({ status: "unsupported" }),
     cancel: () => Promise.resolve({ status: "unsupported" }),
     renameSession: () => Promise.resolve({ status: "unsupported" }),
     setMode: () => Promise.resolve({ status: "unsupported" }),

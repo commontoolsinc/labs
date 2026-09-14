@@ -68,7 +68,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
@@ -89,11 +89,11 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
+import { combineOptionalSchema } from "../traverse.ts";
 import { recordCommitLocalSeq, recordCommitSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import {
@@ -377,6 +377,69 @@ const toExplicitDocument = (value: FabricValue): EntityDocument => {
   }
   return value as EntityDocument;
 };
+
+/**
+ * The document operations of a native commit, with every root an explicit
+ * document: the shape the replica applies as pending state.
+ */
+const documentOperationsOf = (
+  transaction: NativeStorageCommit,
+): NativeCommitOperation[] =>
+  transaction.operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) =>
+      operation.op === "delete"
+        ? {
+          op: "delete" as const,
+          id: operation.id,
+          scope: operation.scope,
+        }
+        : operation.op === "patch"
+        ? {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+          value: toExplicitDocument(operation.value),
+        }
+        : {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        }
+    );
+
+/**
+ * The operations a commit hands the store: cell operations first, a patch
+ * carrying its patches alone, and folded SQLite operations last.
+ */
+const storeOperationsOf = (
+  operations: readonly NativeCommitOperation[],
+  sqliteOps: readonly SqliteOperation[],
+): ClientCommit["operations"] => [
+  ...operations.map((operation) => {
+    switch (operation.op) {
+      case "delete":
+        return operation;
+      case "patch":
+        return {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+        };
+      case "set":
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: operation.value,
+        };
+    }
+  }),
+  ...sqliteOps,
+];
 
 type CachedTransactionValue =
   | FabricValue
@@ -815,10 +878,55 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
 const localSeqKey = (localSeq: number | number[]): string =>
   Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
+/**
+ * Orders paths segment by segment, a shorter path ahead of one it prefixes.
+ * That puts an ancestor directly ahead of every path below it, which is what
+ * lets `compactRecursiveReads()` drop the descendants in one pass.
+ */
+const compareSegments = (
+  left: readonly string[],
+  right: readonly string[],
+): number => {
+  const limit = Math.min(left.length, right.length);
+  for (let index = 0; index < limit; index++) {
+    if (left[index] !== right[index]) {
+      return left[index] < right[index] ? -1 : 1;
+    }
+  }
+  return left.length - right.length;
+};
+
+const isPathPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * Helper for `compactCommitReads()`, which keeps the reads of one dependency
+ * group that no other read of the group covers. A recursive read at a path
+ * covers every path below it, so a read under another is dropped. Sorts
+ * `reads` in place and returns the survivors in that order.
+ */
+const compactRecursiveReads = <Read extends { path: readonly string[] }>(
+  reads: Read[],
+): Read[] => {
+  if (reads.length < 2) return reads;
+  reads.sort((left, right) => compareSegments(left.path, right.path));
+  const kept: Read[] = [];
+  let covering: readonly string[] | undefined;
+  for (const read of reads) {
+    if (covering !== undefined && isPathPrefix(covering, read.path)) continue;
+    kept.push(read);
+    covering = read.path;
+  }
+  return kept;
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
-  space: MemorySpace,
   reads: Read[],
 ): Read[] => {
   const dependencyKeys = new Map<number | number[], string>();
@@ -830,41 +938,16 @@ const compactCommitReads = <
     }
     return key;
   };
-  const sorted = [...reads].sort((left, right) => {
-    const leftScope = normalizeCellScope(left.scope);
-    const rightScope = normalizeCellScope(right.scope);
-    if (leftScope !== rightScope) {
-      return leftScope < rightScope ? -1 : 1;
-    }
 
-    if (left.id !== right.id) {
-      return left.id < right.id ? -1 : 1;
-    }
-
-    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
-      return left.seq - right.seq;
-    }
-
-    if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = dependencyKeyFor(left.localSeq);
-      const rightKey = dependencyKeyFor(right.localSeq);
-      if (leftKey !== rightKey) {
-        return leftKey < rightKey ? -1 : 1;
-      }
-    }
-
-    if (left.nonRecursive !== right.nonRecursive) {
-      return left.nonRecursive === true ? 1 : -1;
-    }
-
-    return comparePath(left.path, right.path);
-  });
-
+  // Grouping reads the input in whatever order it arrives: a recursive read
+  // displaces a shallow one at its path whichever comes first, and two reads
+  // equal in every grouped field are interchangeable, so the order the groups
+  // settle in decides nothing. The sort at the end is the one that orders.
   const grouped = new Map<string, {
     recursiveByPath: Map<string, Read>;
     nonRecursiveByPath: Map<string, Read>;
   }>();
-  for (const candidate of sorted) {
+  for (const candidate of reads) {
     // The dependency key carries every admission-relevant field — seq for
     // confirmed reads, the layer set AND basisSeq for pending reads — so
     // reads with divergent bases never merge: ancestor-path compaction
@@ -899,22 +982,10 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const compactedRecursive = sortAndCompactPaths(
-      [...group.recursiveByPath.values()].map((read) => ({
-        space,
-        id: read.id,
-        scope: read.scope,
-        type: DOCUMENT_MIME,
-        path: read.path,
-      })),
+    compacted.push(
+      ...compactRecursiveReads([...group.recursiveByPath.values()]),
+      ...group.nonRecursiveByPath.values(),
     );
-    for (const address of compactedRecursive) {
-      const read = group.recursiveByPath.get(address.path.join("\0"));
-      if (read) {
-        compacted.push(read);
-      }
-    }
-    compacted.push(...group.nonRecursiveByPath.values());
   }
 
   return compacted.toSorted((left, right) => {
@@ -986,6 +1057,41 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
     },
   };
 };
+
+/**
+ * The selector schema a link target is asked for. Where the reader's schema
+ * takes a handle at the link (`asCell` at its root, or at the root of an
+ * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
+ * selector describes the document's value the way the handle's reads do and
+ * the serving replica holds the document as a value it keeps current rather
+ * than as a reference it delivered once. Inner boundaries stay, as they do
+ * on the handle's own schema, and a schema that takes no handle is asked for
+ * as it is.
+ */
+function selectorSchemaForLink(
+  schema: JSONSchema | undefined,
+): JSONSchema | false {
+  if (!isObjectOrArray(schema)) return schema ?? false;
+  const unwrapped = unwrapOuterHandle(schema);
+  const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
+    const list = unwrapped[key];
+    if (!Array.isArray(list)) return {};
+    return {
+      [key]: list.map((branch) =>
+        isObjectOrArray(branch) ? unwrapOuterHandle(branch) : branch
+      ),
+    };
+  };
+  return { ...unwrapped, ...branches("anyOf"), ...branches("oneOf") };
+}
+
+/** `schema` with its outermost `asCell` boundary removed, if it has one. */
+function unwrapOuterHandle(schema: JSONSchemaObj): JSONSchemaObj {
+  if (schema.asCell === undefined) return schema;
+  const { asCell: _asCell, ...inner } = schema;
+  const values = ContextualFlowControl.getAsCellValues(schema);
+  return values.length > 1 ? { ...inner, asCell: values.slice(1) } : inner;
+}
 
 export class StorageManager implements IStorageManager {
   readonly id: string;
@@ -1255,7 +1361,14 @@ export class StorageManager implements IStorageManager {
       },
       registerPendingLoad: (address) => this.#registerPendingLoad(address),
       collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
-        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
+        this.#collectLinkedCellSyncs(
+          value,
+          base,
+          schema,
+          promises,
+          seen,
+          undefined,
+        ),
     };
   }
 
@@ -2589,8 +2702,14 @@ export class StorageManager implements IStorageManager {
 
   /**
    * Walks `value` for cell links and pushes a pending provider sync of each
-   * linked document onto `promises`, under the schema that the link's place
-   * in `schema` selects. `seen` holds the objects already walked.
+   * linked document onto `promises`, under the schema a read at the link's
+   * place in `schema` would cross it with: the reader's sub-schema, which the
+   * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
+   * through `#syncLinkTarget`, which crosses a link into a data-URI document
+   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * `identity` names that principal's instance of each scoped target
+   * (server-execution v2 stage A), as `syncCell` does for a stored
+   * document.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -2610,33 +2729,15 @@ export class StorageManager implements IStorageManager {
 
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
-      if (link.id && !hasDataUriScheme(link.id)) {
-        const space = link.space ?? base.space!;
-        const scope = normalizeCellScope(
-          link.scope as CellScope | undefined,
-        );
-        const instance = this.#foreignInstanceKey(scope, identity);
-        promises.push(
-          this.#trackPendingProviderSync(
-            {
-              space,
-              scope,
-              id: link.id,
-              ...(instance !== undefined ? { scopeKey: instance } : {}),
-            },
-            () =>
-              this.open(space).sync(
-                link.id!,
-                {
-                  path: link.path.map((segment) => segment.toString()),
-                  schema: link.schema ?? schema ?? false,
-                },
-                scope,
-                instance,
-              ),
-          ),
-        );
-      }
+      if (link.id === undefined) return;
+      this.#syncLinkTarget(
+        { ...link, id: link.id },
+        base,
+        combineOptionalSchema(schema, link.schema),
+        promises,
+        seen,
+        identity,
+      );
       return;
     }
 
@@ -2684,6 +2785,98 @@ export class StorageManager implements IStorageManager {
         );
       }
     }
+  }
+
+  /**
+   * Syncs the document `link` names under `schema`, the schema a read
+   * crosses the link with. A link into a data-URI document is walked
+   * locally instead: the walk descends the link's path through the
+   * document's value, and a link it meets on the way is followed with the
+   * rest of the path appended, so a stand-in holding a caller's cell at
+   * `def` reaches the store for a binding of `def.next` as the read does.
+   * The reader's schema describes the value at the end of the path, so a
+   * link met earlier contributes its own schema narrowed to the rest of the
+   * path, the way `Cell.key()` narrows a schema it walks past.
+   */
+  #syncLinkTarget(
+    link: NormalizedLink & { id: URI },
+    base: NormalizedLink,
+    schema: JSONSchema | undefined,
+    promises: Promise<unknown>[],
+    seen: Set<unknown>,
+    identity: ScopeKeyIdentity | undefined,
+  ): void {
+    const space = link.space ?? base.space!;
+    const scope = normalizeCellScope(link.scope as CellScope | undefined);
+    if (hasDataUriScheme(link.id)) {
+      const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
+      const segments = link.path.map((segment) => segment.toString());
+      let target: unknown = valueFromDataUri(link.id);
+      for (let i = 0; i < segments.length; i++) {
+        if (isPrimitiveCellLink(target)) {
+          const inner = parseLinkPrimitive(target, dataBase);
+          if (inner.id === undefined) return;
+          const remaining = segments.slice(i);
+          const innerSchema = inner.schema === undefined
+            ? undefined
+            : ContextualFlowControl.getSchemaAtPath(inner.schema, remaining);
+          this.#syncLinkTarget(
+            {
+              ...inner,
+              id: inner.id,
+              path: [...inner.path, ...remaining],
+            },
+            dataBase,
+            combineOptionalSchema(schema, innerSchema),
+            promises,
+            seen,
+            identity,
+          );
+          return;
+        }
+        // TODO(danfuzz): the descent stops at a `FabricSpecialObject`, so a
+        // path through a `FabricInstance` held in the document ends here and
+        // the link past it is never synced.
+        if (!isKeyableObjectOrArray(target)) return;
+        target = (target as Record<string, unknown>)[segments[i]];
+      }
+      this.#collectLinkedCellSyncs(
+        target,
+        dataBase,
+        schema,
+        promises,
+        seen,
+        identity,
+      );
+      return;
+    }
+    const instance = this.#foreignInstanceKey(scope, identity);
+    promises.push(
+      this.#trackPendingProviderSync(
+        {
+          space,
+          scope,
+          id: link.id,
+          ...(instance !== undefined ? { scopeKey: instance } : {}),
+        },
+        () =>
+          this.open(space).sync(
+            link.id,
+            {
+              path: link.path.map((segment) => segment.toString()),
+              // A reader that takes a handle at the link asks for the
+              // document under the handle's own schema, the wrapper removed:
+              // a selector carrying the wrapper, or none, describes a
+              // reference, which the serving replica delivers once and
+              // never keeps current, while the handle's reads want the
+              // value as it changes.
+              schema: selectorSchemaForLink(schema),
+            },
+            scope,
+            instance,
+          ),
+      ),
+    );
   }
 
   //
@@ -5053,31 +5246,7 @@ export class SpaceReplica
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => documentOperationsOf(transaction),
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
@@ -5125,41 +5294,51 @@ export class SpaceReplica
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
-    options?: { readonly speculative?: boolean },
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
+    },
   ): SealedNativeCommit {
-    const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? {
-            op: "delete" as const,
-            id: operation.id,
-            scope: operation.scope,
-          }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            scope: operation.scope,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            scope: operation.scope,
-            value: toExplicitDocument(operation.value),
-          }
-      );
     return this.#sealOperations(
-      operations,
+      documentOperationsOf(transaction),
       source,
-      preconditions,
+      activeCommitPreconditions(transaction.preconditions),
       transaction.sqliteOps ?? [],
       verdict,
       options,
     );
+  }
+
+  /**
+   * The operations, preconditions, and read set `transaction` hands the
+   * store, as {@link sealNative} builds them into a sealed commit, without
+   * applying anything here: for a committer that commits to the store
+   * ahead of sealing the same transaction into this replica, which needs
+   * the store's shape before the replica has seen the writes. The reads
+   * are `source`'s, against this replica's records for `identity`'s
+   * instances as they stand, so a pending read names the durable basis
+   * beneath the layers it saw; handed back to {@link sealNative} as its
+   * `reads`, they are the one snapshot both the store and the seal rest
+   * on.
+   */
+  storeCommitOf(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
+  } {
+    return {
+      operations: storeOperationsOf(
+        documentOperationsOf(transaction),
+        transaction.sqliteOps ?? [],
+      ),
+      preconditions: activeCommitPreconditions(transaction.preconditions),
+      reads: this.#buildReads(source, this.#nextLocalSeq, identity),
+    };
   }
 
   #sealOperations(
@@ -5171,6 +5350,7 @@ export class SpaceReplica
     options?: {
       readonly speculative?: boolean;
       readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
@@ -5186,33 +5366,11 @@ export class SpaceReplica
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.#buildReads(source, localSeq, identity),
+      reads: options?.reads ?? this.#buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
-      operations: [
-        ...operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
-        ...sqliteOps,
-      ],
+      operations: storeOperationsOf(operations, sqliteOps),
       ...(preconditions.length > 0
         ? { preconditions: [...preconditions] }
         : {}),
@@ -5841,29 +5999,7 @@ export class SpaceReplica
         reads: this.#buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
+        operations: storeOperationsOf(operations, sqliteOps),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
@@ -6961,8 +7097,8 @@ export class SpaceReplica
     // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
     // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(this.#space, confirmed),
-      pending: compactCommitReads(this.#space, pending),
+      confirmed: compactCommitReads(confirmed),
+      pending: compactCommitReads(pending),
     };
   }
 

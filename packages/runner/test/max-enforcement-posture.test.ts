@@ -1,10 +1,10 @@
 /**
- * The max-enforcement CFC posture as one running system (CT-2075's follow-on
- * to the preset goldens in `runtime-presets.test.ts`, which pin the bundle's
- * SHAPE). CT-2075 found two of the bundle's dials load and run without ever
- * demonstrably firing in ordinary flows — "on and silent" is not "verified
- * enforcing" — so each test here makes one of them decide an outcome that
- * the same flow without the dial would decide the other way:
+ * The max-enforcement CFC posture as one running system, complementing the
+ * preset goldens in `runtime-presets.test.ts`, which pin the bundle's SHAPE.
+ * A dial can load and run without ever demonstrably firing in an ordinary
+ * flow — "on and silent" is not "verified enforcing" — so each test here
+ * makes one of them decide an outcome that the same flow without the dial
+ * would decide the other way:
  *
  * - policy evaluation: an egress fits the bundle's public-only network
  *   ceiling ONLY because the §10.1 value-screened discharge dropped the
@@ -146,7 +146,7 @@ const withPostureRuntime = async (
   }
 };
 
-describe("max-enforcement CFC posture as one system (CT-2075)", () => {
+describe("max-enforcement CFC posture as one system", () => {
   describe("policy evaluation decides an egress under the bundle", () => {
     const source = "of:screened-ingest";
     const valueScreenedCaveat = cfcAtom.caveat(

@@ -85,14 +85,13 @@ import {
 import {
   getBlindStructuralTarget,
   ignoreReadForCommit,
-  ignoreReadForScheduling,
-  internalVerifierRead,
   isDurableReadTx,
   isInternalVerifierRead,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
   isUiInputBlindWriteTx,
+  pendingWriteElisionRead,
   registerCommitRejectionListener,
   takeCoverageWaits,
 } from "./reactivity-log.ts";
@@ -120,12 +119,6 @@ import { recordWriteStackTrace } from "./write-stack-trace.ts";
 type RootAttestation = IAttestation;
 
 const DOCUMENT_MIME = "application/json" as const;
-
-// This shared identity also selects these reads for the foreign-space handoff.
-const pendingWriteElisionRead = {
-  ...ignoreReadForScheduling,
-  ...internalVerifierRead,
-};
 
 /**
  * A root this transaction replaced, and the epoch it stood until.

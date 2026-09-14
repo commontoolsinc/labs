@@ -281,7 +281,9 @@ describe("FabricError", () => {
 
       it("omits `stack` when it is `undefined`", () => {
         const err = new Error("no stack");
-        err.stack = undefined;
+        // The same `[[Set]]` as `err.stack = undefined`, which
+        // `exactOptionalPropertyTypes` refuses on an optional `string`.
+        Object.assign(err, { stack: undefined });
         const se = FabricError.fromNativeError(err);
         const state = FabricError[CODEC].encode(se, env) as Record<
           string,

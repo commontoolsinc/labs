@@ -4,7 +4,7 @@ Normative expansion of [README.md](README.md) §3.5. One entry per
 built-in family; an implementer should be able to port a built-in to the
 serving loop from its row plus the referenced sections.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors
 
 - Inventory: `packages/runner/src/builtins/` (registered via
   `registerBuiltins(runtime)` in `index.ts`).
@@ -129,6 +129,20 @@ Named queues retain their issued work when inputs are cleared. Queued
 request is queued; `llm` publishes only its latest request's successful result.
 Queue completion writes remain bound to the issuing identity and read the live
 input label basis. This queue behavior applies with server execution on or off.
+
+Served `sqliteQuery` keeps equal non-clearance query hashes across readers,
+while its outbox key and in-flight RPC set resolve the result's user or session
+instance. Each completion and refusal captures its result target and binds the
+issuing identity before reading the stored claim. Pending publication ownership
+is separate for each result and physical output binding; accepted actions and
+refusal publications supersede older targets only after commit and wave
+acceptance. Distinct bindings may link the same pending or settled result.
+These tokens retire on acceptance, refusal, or replacement; memoization stays
+in the result cells.
+
+This result lifecycle does not select the database file. The SQLite provider
+READ still resolves a scoped database from its transport session. Explicit
+request-instance authorization for that RPC remains a separate obligation.
 
 `sqlite*` row clearance — RULED 2026-08-02: **per-reader
 materialization**, today's shape. The reader principal is part of

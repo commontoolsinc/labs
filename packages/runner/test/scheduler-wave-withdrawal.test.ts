@@ -16,11 +16,18 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import {
+  ignoreReadForScheduling,
+  internalVerifierRead,
+} from "../src/storage/reactivity-log.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
+import { hasPendingWriteElision } from "../src/storage/transaction-inspection.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import {
   requireWaveAcceptance,
   stampWaveRunContext,
   WaveAccumulator,
+  waveSettlementOf,
 } from "../src/executor/wave.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -97,6 +104,10 @@ describe("reactive wave withdrawal", () => {
       ],
       ["accepted", "keeps an accepted derivation current"],
       [
+        "settled",
+        "queues withdrawal recovery before an existing runtime settlement wait returns",
+      ],
+      [
         "repeated",
         "recovers a withdrawn result after an equal-value no-op rerun",
       ],
@@ -116,6 +127,14 @@ describe("reactive wave withdrawal", () => {
       [
         "reregistered",
         "does not transfer a held seal to a new registration of the same action",
+      ],
+      [
+        "replacement-output",
+        "recovers a pending output claimed by a replacement registration",
+      ],
+      [
+        "replacement-probe",
+        "keeps a replacement read probe outside wave acceptance",
       ],
       [
         "body-reregistered",
@@ -148,14 +167,15 @@ describe("reactive wave withdrawal", () => {
       const releaseSeal = Promise.withResolvers<void>();
       const bodyHeld = Promise.withResolvers<void>();
       const releaseBody = Promise.withResolvers<void>();
-      const reregistered = boundary === "reregistered" ||
-        boundary === "body-reregistered";
+      const heldSeal = boundary === "reregistered" ||
+        boundary === "replacement-output" || boundary === "replacement-probe";
+      const reregistered = heldSeal || boundary === "body-reregistered";
       let seals = 0;
       runtime.installSealDestination({
         seal: async (tx) => {
           const result = await (flushing ? recoveryWave ??= newWave() : wave)
             .seal(tx);
-          if (boundary === "reregistered" && ++seals === 2) {
+          if (heldSeal && ++seals === 2) {
             sealHeld.resolve();
             await releaseSeal.promise;
           }
@@ -172,12 +192,26 @@ describe("reactive wave withdrawal", () => {
       });
       input.withTx(initializer).key("note").set("session-default");
       expect((await initializer.commit()).error).toBeUndefined();
+      const recoveryStarted = Promise.withResolvers<void>();
       let runs = 0;
       let override: string | undefined;
       let retiredRegistration = false;
       const derive: Action = (tx) => {
         runs += 1;
-        if (retiredRegistration) return;
+        if (boundary === "settled" && runs === 2) recoveryStarted.resolve();
+        if (retiredRegistration) {
+          if (boundary === "replacement-output") {
+            const wrapped = new TransactionWrapper(tx);
+            wrapped.writeValueOrThrow(output.getAsNormalizedFullLink(), "b0");
+            expect(hasPendingWriteElision(wrapped)).toBe(runs === 2);
+          } else if (boundary === "replacement-probe") {
+            tx.readOrThrow(
+              toMemorySpaceAddress(output.getAsNormalizedFullLink()),
+              { meta: { ...ignoreReadForScheduling, ...internalVerifierRead } },
+            );
+          }
+          return;
+        }
         if (boundary === "local-acceptance" && runs > 1) {
           requireWaveAcceptance(tx);
         }
@@ -203,9 +237,7 @@ describe("reactive wave withdrawal", () => {
       }, { isEffect: true });
       if (reregistered) {
         try {
-          await (boundary === "reregistered"
-            ? sealHeld.promise
-            : bodyHeld.promise);
+          await (heldSeal ? sealHeld.promise : bodyHeld.promise);
           expect(runs).toBe(1);
           runtime.scheduler.unsubscribe(derive);
           retiredRegistration = true;
@@ -214,7 +246,7 @@ describe("reactive wave withdrawal", () => {
             shallowReads: [],
             writes: [],
           }, { isEffect: true });
-          if (boundary === "reregistered") {
+          if (heldSeal) {
             await runtime.scheduler.idle();
             expect(runs).toBe(2);
           }
@@ -243,6 +275,9 @@ describe("reactive wave withdrawal", () => {
         await runtime.scheduler.idleWithPendingCommits();
         expect(runs).toBe(2);
       }
+      const fullySettled = boundary === "settled"
+        ? runtime.settled().then(() => "settled" as const)
+        : undefined;
       flushing = true;
       if (boundary === "abandoned") wave.abandon("lease tenure ended");
       else {
@@ -250,7 +285,8 @@ describe("reactive wave withdrawal", () => {
         expect(outcome.dispositions).toEqual(
           boundary === "accepted"
             ? [{ kind: "committed" }, { kind: "committed" }]
-            : boundary === "partial" || boundary === "local-acceptance"
+            : boundary === "partial" || boundary === "local-acceptance" ||
+                boundary === "repeated" || boundary === "replacement-output"
             ? [{ kind: "dropped" }, { kind: "dropped" }, { kind: "dropped" }]
             : boundary === "newer"
             ? [{ kind: "dropped" }, { kind: "dropped" }, { kind: "committed" }]
@@ -258,6 +294,14 @@ describe("reactive wave withdrawal", () => {
         );
       }
       await wave.settled();
+      if (fullySettled !== undefined) {
+        expect(
+          await Promise.race([
+            fullySettled,
+            recoveryStarted.promise.then(() => "recovery" as const),
+          ]),
+        ).toBe("recovery");
+      }
       expect(input.get()).toEqual(
         boundary === "accepted"
           ? { draft: "b0", note: "session-default" }
@@ -266,9 +310,12 @@ describe("reactive wave withdrawal", () => {
       await runtime.scheduler.idleWithPendingCommits();
       if (
         boundary === "withdrawn" || boundary === "repeated" ||
-        boundary === "partial" || boundary === "local-acceptance"
+        boundary === "partial" || boundary === "local-acceptance" ||
+        boundary === "settled" || boundary === "replacement-output"
       ) {
-        expect(runs).toBe(boundary === "withdrawn" ? 2 : 3);
+        expect(runs).toBe(
+          boundary === "withdrawn" || boundary === "settled" ? 2 : 3,
+        );
         expect(recoveryWave).toBeDefined();
         await recoveryWave!.commitWave(newSink());
         await recoveryWave!.settled();
@@ -278,13 +325,15 @@ describe("reactive wave withdrawal", () => {
         );
         expect(recoveryWave).toBeUndefined();
       }
+      await fullySettled;
       expect(
         Engine.readState(engine, { id: output.getAsNormalizedFullLink().id })
           ?.document,
       ).toEqual(
         boundary === "withdrawn" || boundary === "accepted" ||
           boundary === "repeated" || boundary === "partial" ||
-          boundary === "local-acceptance"
+          boundary === "local-acceptance" || boundary === "settled" ||
+          boundary === "replacement-output"
           ? { value: "b0" }
           : boundary === "newer"
           ? { value: "newer" }
@@ -297,6 +346,37 @@ describe("reactive wave withdrawal", () => {
       runtime.scheduler.unsubscribe(derive);
     });
   }
+  for (const kind of ["event-handler", "bookkeeping"] as const) {
+    it(`keeps ${kind} no-ops outside automatic wave acceptance`, async () => {
+      const output = runtime.getCell<string>(
+        space,
+        "non-reactive-output",
+        undefined,
+      );
+      const seed = runtime.edit();
+      output.withTx(seed).set("confirmed");
+      expect((await seed.commit()).error).toBeUndefined();
+      const wave = newWave();
+      runtime.installSealDestination(wave);
+      const pending = runtime.edit();
+      stampWaveRunContext(pending, {
+        actionId: "pending-output",
+        kind: "derivation",
+      });
+      output.withTx(pending).set("pending");
+      expect((await pending.commit()).error).toBeUndefined();
+      const noop = runtime.edit();
+      stampWaveRunContext(noop, { actionId: "non-reactive-output", kind });
+      noop.writeValueOrThrow(output.getAsNormalizedFullLink(), "pending");
+      expect(hasPendingWriteElision(noop)).toBe(true);
+      expect((await noop.commit()).error).toBeUndefined();
+      expect(waveSettlementOf(noop)).toBeUndefined();
+      wave.abandon("test cleanup");
+      await wave.settled();
+      expect(output.get()).toBe("confirmed");
+    });
+  }
+
   for (
     const refusal of [
       "output supersession",

@@ -169,8 +169,14 @@ export async function readWorkspaceMembers(
   configPath: string | URL = "./deno.jsonc",
 ): Promise<string[]> {
   const manifest = parseJsonc(await Deno.readTextFile(configPath)) as {
-    workspace: string[];
+    workspace?: string[];
   };
+  // A manifest that declares no workspace is a member's own rather than
+  // the root's, and answering with nothing would read downstream as a
+  // repository holding no packages at all.
+  if (!Array.isArray(manifest.workspace)) {
+    throw new Error(`${configPath} declares no workspace`);
+  }
   return manifest.workspace;
 }
 

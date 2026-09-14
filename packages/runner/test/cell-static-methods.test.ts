@@ -42,11 +42,11 @@ function withinLiftContext<T>(
     unsafe_binding: { space, tx },
   };
 
-  pushFrame(frame as any);
+  const pushed = pushFrame(frame as any);
   try {
     return fn();
   } finally {
-    popFrame();
+    popFrame(pushed);
   }
 }
 
@@ -70,11 +70,11 @@ function withinHandlerContext<T>(
     unsafe_binding: { space, tx },
   };
 
-  pushFrame(frame as any);
+  const pushed = pushFrame(frame as any);
   try {
     return fn();
   } finally {
-    popFrame();
+    popFrame(pushed);
   }
 }
 
