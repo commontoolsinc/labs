@@ -304,7 +304,7 @@ every container, so that `FabricValuePlus<never>` is `FabricValue` itself.
 `FabricValueLayer` is the same mechanism at a different `PlusType`. The array
 and plain-object arms carry `PlusType` structurally, in their element and value
 types. The instance arm, `FabricInstancePlus<PlusType>`, carries it as a
-type-only brand -- the `@commonfabric/FabricInstancePlus` member, which
+type-only brand -- the member keyed by `FABRIC_INSTANCE_PLUS_BRAND`, which
 `FabricInstance` declares at `never` -- because an instance holds its contents
 privately and nothing structural on it can witness what they may include.
 
@@ -903,19 +903,18 @@ defined elsewhere is not a `FabricValue`.
 
 Each class is **nominal**, not structural: each declares a brand member that
 exists only in the type system (`declare` emits no runtime member, and nothing
-reads the key) -- `FabricPrimitive` under the string key
-`@commonfabric/FabricPrimitive`, and `FabricInstance` under
-`FABRIC_INSTANCE_BRAND`, an interned symbol. This matters for what `FabricValue`
+reads the key), keyed by an interned symbol that `api.ts` exports --
+`FABRIC_PRIMITIVE_BRAND` and `FABRIC_INSTANCE_BRAND`. This matters for what `FabricValue`
 means as a static claim. TypeScript is structurally typed, so were
 `FabricPrimitive` empty, every object would satisfy it — and therefore satisfy
 `FabricValue`, since the union includes it — and were `FabricInstance` only its
 two clone methods, so would every object carrying two methods by those names.
 The brands are what make the annotation carry information.
 
-The `FabricInstance` brand is a symbol so that it can never be mistaken for
-data: a symbol-keyed member has no place in a schema, where a string-keyed one
-has to be skipped by name. It is interned so that every realm and every copy of
-the module agree on its value. `packages/data-model/src/api.ts` declares the
+Each brand is a symbol so that it can never be mistaken for data: a
+symbol-keyed member has no place in a schema, where a string-keyed one has to
+be skipped by name. Each is interned so that every realm and every copy of the
+module agree on its value. `packages/data-model/src/api.ts` declares the
 identical members; the two must agree exactly, since a value branded by one
 would otherwise not satisfy the other, and `api-agreement.ts` stops compiling
 when they stop agreeing.
@@ -955,6 +954,12 @@ that form the `FabricPrimitive` arm of `FabricValue`.
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
+
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
  * protocol as primitives: values that behave like primitives in the fabric
@@ -981,7 +986,7 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
    * reads the key. `api.ts` declares the identical member, and
    * `api-agreement.ts` stops compiling if the two stop agreeing.
    */
-  declare readonly "@commonfabric/FabricPrimitive": true;
+  declare readonly [FABRIC_PRIMITIVE_BRAND]: true;
 
   /** Constructs an instance. */
   constructor() {
@@ -1731,7 +1736,11 @@ class-side `[CODEC]` (Section 2.4).
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
-import { FABRIC_INSTANCE_BRAND } from "./api.ts";
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
@@ -1778,7 +1787,7 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
    * Declared the way the brand above is, and for the same reasons; `api.ts`
    * declares the identical member.
    */
-  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no

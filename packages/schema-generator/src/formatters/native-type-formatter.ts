@@ -1,6 +1,5 @@
 import ts from "typescript";
 import {
-  FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
   type MutableJSONSchema,
 } from "@commonfabric/api";
@@ -224,9 +223,17 @@ export class NativeTypeFormatter implements TypeFormatter {
    * named-type hoisting (`getNamedTypeKey`, `type-utils.ts`) classify by it,
    * so an unbranded name-sharer keeps its structural schema AND its normal
    * `$defs` hoisting.
+   *
+   * The brand is keyed by the `FABRIC_PRIMITIVE_BRAND` symbol, whose property
+   * TypeScript names `__@FABRIC_PRIMITIVE_BRAND@<id>`; the name of the
+   * constant is what identifies it, as with the other symbol-keyed markers.
    */
   public static declaresFabricPrimitiveBrand(type: ts.Type): boolean {
-    return type.getProperty(FABRIC_PRIMITIVE_BRAND) !== undefined;
+    return type.getProperties().some((prop) =>
+      String(prop.escapedName as string).startsWith(
+        "__@FABRIC_PRIMITIVE_BRAND@",
+      )
+    );
   }
 
   /**

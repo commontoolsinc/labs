@@ -162,11 +162,14 @@ export type NonNullableFabricValue = NonNullable<FabricValue>;
 export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 
 /**
- * The nominal brand key declared on `FabricPrimitive`. As with
- * `FABRIC_SPECIAL_OBJECT_BRAND`, a runtime instance never carries the key, so
- * a schema derived from the type leaves it out.
+ * The nominal brand of `FabricPrimitive`: an interned symbol, so that every
+ * realm and every copy of this module agree on its value, and so that the
+ * member it keys can never be mistaken for data -- a symbol-keyed member has
+ * no place in a schema. A runtime instance never carries the key.
  */
-export const FABRIC_PRIMITIVE_BRAND = "@commonfabric/FabricPrimitive";
+export const FABRIC_PRIMITIVE_BRAND = Symbol.for(
+  "@commonfabric/FabricPrimitive",
+);
 
 /**
  * The nominal brand of `FabricInstance`: an interned symbol, so that every
@@ -189,9 +192,9 @@ export interface FabricPrimitive {
    * and from every other object, in the type system. Without it this type is
    * structurally empty, and every object would satisfy it, and through it
    * `FabricValue`. It exists only in the type system: a runtime instance never
-   * carries the key. `FABRIC_PRIMITIVE_BRAND` is the key.
+   * carries the key.
    */
-  readonly "@commonfabric/FabricPrimitive": true;
+  readonly [FABRIC_PRIMITIVE_BRAND]: true;
 }
 
 export interface FabricPrimitiveConstructor {
@@ -224,7 +227,7 @@ export interface FabricInstance {
    * `FabricInstancePlus` of any other `PlusType` from being taken for one.
    * `FABRIC_INSTANCE_PLUS_BRAND` is the key.
    */
-  readonly "@commonfabric/FabricInstancePlus"?: never;
+  readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
@@ -270,12 +273,16 @@ export type FabricSpecialObject = FabricPrimitive | FabricInstance;
 //
 
 /**
- * The nominal brand key declared on `FabricInstance` and `FabricInstancePlus`,
- * whose type in a declaration is the `PlusType` the instance may hold. As with
- * `FABRIC_SPECIAL_OBJECT_BRAND`, a runtime instance never carries the key, so
- * a schema derived from either type leaves it out.
+ * The nominal brand of `FabricInstancePlus`, declared on it and on
+ * `FabricInstance`, whose type in a declaration is the `PlusType` the instance
+ * may hold: an interned symbol, so that every realm and every copy of this
+ * module agree on its value, and so that the member it keys can never be
+ * mistaken for data -- a symbol-keyed member has no place in a schema. A
+ * runtime instance never carries the key.
  */
-export const FABRIC_INSTANCE_PLUS_BRAND = "@commonfabric/FabricInstancePlus";
+export const FABRIC_INSTANCE_PLUS_BRAND = Symbol.for(
+  "@commonfabric/FabricInstancePlus",
+);
 
 /**
  * Type which is equivalent to `FabricValue`, except that it is compatible with
@@ -323,7 +330,7 @@ export interface FabricInstancePlus<PlusType> {
    * The nominal brand that carries `PlusType`. It exists only in the type
    * system; the same-named member of `FabricInstance` says how.
    */
-  readonly "@commonfabric/FabricInstancePlus"?: PlusType;
+  readonly [FABRIC_INSTANCE_PLUS_BRAND]?: PlusType;
 
   /** Like `FabricInstance.deepClone()`, but returning this type. */
   deepClone(frozen: boolean): FabricInstancePlus<PlusType>;

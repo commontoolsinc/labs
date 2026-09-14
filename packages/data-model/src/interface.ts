@@ -3,9 +3,9 @@
  * the conversion-layer types of the fabric data model, together with the
  * pattern-visible value types that `api.ts` declares, re-exported here so that
  * this module carries the whole `FabricValue` vocabulary. Its runtime imports
- * are two leaves that import nothing, `api.ts` for the `FabricInstance` brand
- * symbol and the module holding the classes' common root, so any module can
- * import this one without creating a circular dependency.
+ * are two leaves that import nothing, `api.ts` for the brand symbols and the
+ * module holding the classes' common root, so any module can import this one
+ * without creating a circular dependency.
  *
  * The classes here and the declarations in `api.ts` describe the same shapes,
  * and `api-agreement.ts` stops compiling when they drift. The concrete classes
@@ -19,7 +19,11 @@ import type {
   FabricValue,
   FabricValuePlus,
 } from "./api.ts";
-import { FABRIC_INSTANCE_BRAND } from "./api.ts";
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
 import { BaseFabricSpecialObject } from "./fabric-bases/BaseFabricSpecialObject.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
@@ -167,7 +171,7 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
    * Declared the way the brand above is, and for the same reasons; `api.ts`
    * declares the identical member.
    */
-  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
@@ -220,7 +224,7 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
    * reads the key. `api.ts` declares the identical member, and
    * `api-agreement.ts` stops compiling if the two stop agreeing.
    */
-  declare readonly "@commonfabric/FabricPrimitive": true;
+  declare readonly [FABRIC_PRIMITIVE_BRAND]: true;
 
   /** Constructs an instance. */
   constructor() {
