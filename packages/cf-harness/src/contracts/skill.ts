@@ -149,6 +149,18 @@ export interface HarnessSkillScriptExecution {
   digestMatchesRegistry?: boolean;
   registrySizeBytes?: number;
   observedSizeBytes?: number;
+
+  /**
+   * Where an acquired script came from, absent for a registry skill's.
+   *
+   * An acquired script is executed through the same machinery a registry
+   * script is, so the record has to say which it was: the registry fields
+   * above name a run-start snapshot this script was never in, and a reader
+   * that found them set would take an acquisition for a skill the operator
+   * had installed. Set exactly when `skillName` is a pin.
+   */
+  acquisition?: HarnessSkillAcquisition;
+
   exitCode?: number;
   diagnostics: HarnessSkillDiagnostic[];
   error?: HarnessSkillScriptExecutionError;

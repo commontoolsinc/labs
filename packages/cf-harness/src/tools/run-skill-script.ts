@@ -9,6 +9,8 @@ import {
   validateBrowserAccessLeaseFreshness,
 } from "../contracts/browser-access.ts";
 import type {
+  HarnessAcquiredSkill,
+  HarnessSkillAcquisition,
   HarnessSkillDiagnostic,
   HarnessSkillRecord,
   HarnessSkillResourceRecord,
@@ -61,6 +63,15 @@ export interface RunSkillScriptToolOutput {
   digestMatchesRegistry?: boolean;
   registrySizeBytes?: number;
   observedSizeBytes?: number;
+
+  /**
+   * Where an acquired script came from, absent for a registry skill's. An
+   * acquired script runs through the same machinery, so what says which it
+   * was is this rather than the registry fields above — which name a
+   * run-start snapshot an acquired script was never in.
+   */
+  acquisition?: HarnessSkillAcquisition;
+
   stdout?: string;
   stderr?: string;
   exitCode?: number;
@@ -756,6 +767,9 @@ const buildExecutionRecord = (
     : {}),
   ...(options.output.sandboxResourcePath !== undefined
     ? { sandboxResourcePath: options.output.sandboxResourcePath }
+    : {}),
+  ...(options.output.acquisition !== undefined
+    ? { acquisition: options.output.acquisition }
     : {}),
   ...(options.output.registryDigest !== undefined
     ? { registryDigest: options.output.registryDigest }
