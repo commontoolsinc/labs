@@ -1910,7 +1910,7 @@ const validateAgainstSchemaUncached = (
         for (const key of schema.required) {
           // The nominal brand key has no runtime existence; a
           // `FabricSpecialObject` satisfies it by construction (the `TODO`
-          // beside `FABRIC_SPECIAL_OBJECT_BRAND` says what removing this
+          // on `FABRIC_SPECIAL_OBJECT_BRAND` says what removing this
           // exemption takes).
           if (key === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(key in value)) {

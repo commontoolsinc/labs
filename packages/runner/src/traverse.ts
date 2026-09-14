@@ -3956,7 +3956,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               // A `FabricSpecialObject`'s surface is class accessors, so
               // its membership test is prototype-chain `in`; the nominal brand
               // key has no runtime existence and is satisfied by
-              // construction (the `TODO` beside `FABRIC_SPECIAL_OBJECT_BRAND`
+              // construction (the `TODO` on `FABRIC_SPECIAL_OBJECT_BRAND`
               // says what removing that exemption takes).
               if (isFabricSpecialObject(doc.value)) {
                 if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
@@ -5376,7 +5376,7 @@ export function canBranchMatch(
         // A `FabricSpecialObject`'s surface is class accessors, so its
         // membership test is prototype-chain `in`; the nominal brand key has no
         // runtime existence and is satisfied by construction (the `TODO`
-        // beside `FABRIC_SPECIAL_OBJECT_BRAND` says what removing that
+        // on `FABRIC_SPECIAL_OBJECT_BRAND` says what removing that
         // exemption takes).
         if (isFabricSpecialObject(value)) {
           if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
