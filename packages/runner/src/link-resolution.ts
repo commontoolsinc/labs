@@ -17,6 +17,7 @@ import {
   type CellLink,
   type NormalizedFullLink,
   parseLink,
+  schemaForSpaceCrossing,
   type ScopeCapAtDepth,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -808,8 +809,17 @@ export function resolveLinkTracingDereferences(
           schema: crossingSchema,
         });
       }
-      const nextLink = nextHop.link;
-      const crossSpace = nextLink.space !== link.space;
+      const crossSpace = nextHop.link.space !== link.space;
+      const nextLink = crossSpace
+        ? {
+          ...nextHop.link,
+          schema: schemaForSpaceCrossing(
+            tx,
+            nextHop.source.space,
+            nextHop.link.schema,
+          ),
+        }
+        : nextHop.link;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
       // under the target. Caps recorded for the consumed prefix have done
       // their job; caps for the REMAINING segments still have to travel, or a
@@ -853,6 +863,12 @@ export function resolveLinkTracingDereferences(
         link = carriedCaps === undefined
           ? nextLink
           : { ...nextLink, scopeCaps: carriedCaps };
+      }
+      if (crossSpace) {
+        link = {
+          ...link,
+          schema: schemaForSpaceCrossing(tx, nextHop.source.space, link.schema),
+        };
       }
       const mgr = runtime.storageManager;
       const reserved = !crossSpace &&

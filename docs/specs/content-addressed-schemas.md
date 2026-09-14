@@ -521,6 +521,14 @@ external closure is complete.
 
 ### Space boundaries
 
+A link's schema belongs to the space holding the link declaration. When a
+document in space A links to a document in space B, the schema's `cid:`
+references resolve in A, including their transitive closure. Before carrying
+that schema into B, traversal and link resolution recompose it into a
+self-contained schema. Path narrowing, target queries, and derived Cell
+handles therefore do not require B to hold A's schema documents. A schema
+declared by a link inside B resolves in B when that next link is followed.
+
 A schema document's value is space-free: content addressing makes the
 bytes identical wherever they are stored, so the realm-wide registry
 shares one verified object across spaces, and using a shared value can

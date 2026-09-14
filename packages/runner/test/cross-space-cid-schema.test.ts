@@ -1,0 +1,208 @@
+/**
+ * Cross-space reads resolve link schemas in the declaring space. Each case
+ * keeps the target space free of schema documents, including transitive refs.
+ */
+
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import type { EntityDocument } from "@commonfabric/memory/v2";
+
+import type { Cell } from "../src/cell.ts";
+import { resolveLink } from "../src/link-resolution.ts";
+import { Runtime } from "../src/runtime.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { URI } from "../src/storage/interface.ts";
+
+describe("cross-space-cid-schema", () => {
+  for (
+    const route of [
+      "value",
+      "whole document",
+      "path",
+      "cell",
+      "array cell",
+      "reader schema",
+      "carried reader schema",
+      "two space crossings",
+    ] as const
+  ) {
+    it(`reads through ${route} using schema documents held only in the source space`, async () => {
+      const signer = await Identity.fromPassphrase("cid schema source");
+      const sourceSpace = signer.did();
+      const targetSpace = (await Identity.fromPassphrase("cid schema target"))
+        .did();
+      const finalSpace = (await Identity.fromPassphrase("cid schema final"))
+        .did();
+      const manager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        storageManager: manager,
+        apiUrl: new URL(import.meta.url),
+      });
+      const decomposed = decomposeSchema(
+        route === "carried reader schema" ? {} : {
+          type: "object",
+          properties: { name: { $ref: "#/$defs/Name" } },
+          required: ["name"],
+          $defs: { Name: { type: "string" } },
+        },
+      );
+      const sourceId = "of:cid-schema-source" as URI;
+      const targetId = "of:cid-schema-target" as URI;
+      const source = {
+        value: {
+          target: {
+            "/": {
+              [LINK_V1_TAG]: {
+                space: targetSpace,
+                id: targetId,
+                path: [],
+                schema: { $ref: decomposed.rootRef },
+              },
+            },
+          },
+        },
+      };
+      const readerSchema = decomposeSchema({
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        additionalProperties: false,
+      });
+      const sourceDocs = new Map<string, EntityDocument>([
+        [sourceId, source],
+        ...[...decomposed.documents].map(([hash, schema]) =>
+          [`cid:${hash}`, { value: schema }] as [string, EntityDocument]
+        ),
+      ]);
+      if (route === "reader schema" || route === "carried reader schema") {
+        for (const [hash, schema] of readerSchema.documents) {
+          sourceDocs.set(`cid:${hash}`, { value: schema });
+        }
+      }
+      if (route === "array cell") {
+        sourceDocs.set(sourceId, { value: { targets: [source.value.target] } });
+      }
+      const targetDocs = new Map<string, EntityDocument>([
+        [targetId, { value: { name: "Ada", extra: "outside the schema" } }],
+      ]);
+      const finalDocs = new Map<string, EntityDocument>();
+      if (route === "two space crossings") {
+        const finalId = "of:cid-schema-final" as URI;
+        const targetSchema = decomposeSchema({
+          type: "object",
+          properties: { name: { $ref: "#/$defs/NonemptyName" } },
+          required: ["name"],
+          $defs: { NonemptyName: { type: "string", minLength: 1 } },
+        });
+        targetDocs.set(targetId, {
+          value: {
+            "/": {
+              [LINK_V1_TAG]: {
+                space: finalSpace,
+                id: finalId,
+                path: [],
+                schema: { $ref: targetSchema.rootRef },
+              },
+            },
+          },
+        });
+        for (const [hash, schema] of targetSchema.documents) {
+          targetDocs.set(`cid:${hash}`, { value: schema });
+        }
+        finalDocs.set(finalId, { value: { name: "Ada" } });
+      }
+      const schemaReads: string[] = [];
+      const expectedSchemaReads: string[] = [];
+      for (
+        const [space, docs] of [
+          [sourceSpace, sourceDocs],
+          [targetSpace, targetDocs],
+          [finalSpace, finalDocs],
+        ] as const
+      ) {
+        for (const id of docs.keys()) {
+          if (id.startsWith("cid:")) expectedSchemaReads.push(`${space}/${id}`);
+        }
+        manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+          if (id.startsWith("cid:")) schemaReads.push(`${space}/${id}`);
+          const doc = docs.get(id);
+          return {
+            branch: "",
+            id,
+            scope: "space",
+            scopeKey,
+            ...(doc === undefined
+              ? { seq: 0, deleted: true as const }
+              : { seq: 1, doc }),
+          };
+        });
+      }
+      try {
+        const cell = runtime.getCellFromLink({
+          space: sourceSpace,
+          id: sourceId,
+          path: [],
+        });
+        await cell.sync();
+        if (route === "carried reader schema") {
+          const tx = runtime.edit();
+          let target;
+          try {
+            target = runtime.getCellFromLink(resolveLink(runtime, tx, {
+              ...cell.key("target").getAsNormalizedFullLink(),
+              schema: { $ref: readerSchema.rootRef },
+            }));
+          } finally {
+            tx.abort();
+          }
+          const value = await target.pull() as { name: string; extra?: string };
+          expect(value?.name).toBe("Ada");
+          expect(value.extra).toBeUndefined();
+        } else if (route === "cell") {
+          const { target } = cell.asSchema({
+            type: "object",
+            properties: { target: { asCell: ["cell"] } },
+            required: ["target"],
+          }).get() as { target: Cell<{ name: string }> };
+          expect((await target.pull())?.name).toBe("Ada");
+        } else if (route === "array cell") {
+          const { targets } = cell.asSchema({
+            type: "object",
+            properties: {
+              targets: { type: "array", items: { asCell: ["cell"] } },
+            },
+            required: ["targets"],
+          }).get() as { targets: Cell<{ name: string }>[] };
+          expect((await targets[0].pull())?.name).toBe("Ada");
+        } else if (route === "whole document") {
+          const value = await cell.asSchema(true).pull() as {
+            target: { name: string };
+          };
+          expect(value?.target?.name).toBe("Ada");
+        } else if (route === "path") {
+          expect(await cell.key("target").key("name").pull()).toBe("Ada");
+        } else if (route === "reader schema") {
+          const value = await cell.asSchema({
+            type: "object",
+            properties: { target: { $ref: readerSchema.rootRef } },
+            required: ["target"],
+          }).pull() as { target: { name: string; extra?: string } };
+          expect(value?.target?.name).toBe("Ada");
+          expect(value.target.extra).toBeUndefined();
+        } else {
+          const value = await cell.key("target").pull() as { name: string };
+          expect(value?.name).toBe("Ada");
+        }
+        expect(schemaReads).toContain(`${sourceSpace}/${decomposed.rootRef}`);
+        expect(new Set(schemaReads)).toEqual(new Set(expectedSchemaReads));
+      } finally {
+        await runtime.dispose();
+        await manager.close();
+      }
+    });
+  }
+});

@@ -11,6 +11,7 @@ import {
   isNontrivialSchema,
 } from "@commonfabric/data-model-schema";
 import {
+  containsExternalSchemaRef,
   isExternalSchemaRef,
 } from "@commonfabric/data-model-schema/schema-refs";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -50,6 +51,7 @@ import {
 import { resolveExternalCfcSchemaRefAsDocument } from "./cfc/schema-refs.ts";
 import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { ensureExternalSchemaClosure } from "./schema-ifc.ts";
 import {
   areNormalizedLinksSame,
   isNormalizedFullLink,
@@ -267,6 +269,25 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
     if (error instanceof SchemaNotDecomposableError) return schema;
     throw error;
   }
+}
+
+/**
+ * The self-contained schema a link carries across a space boundary. Its
+ * external documents are loaded from the space holding the declaration;
+ * the target space need not hold them. An incomplete declaration selects
+ * nothing until its missing documents arrive.
+ */
+export function schemaForSpaceCrossing(
+  tx: IExtendedStorageTransaction,
+  sourceSpace: MemorySpace,
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (!containsExternalSchemaRef(schema)) return schema;
+  if (!ensureExternalSchemaClosure(tx, sourceSpace, schema)) return false;
+  const { rootRef, documents } = decomposeSchema(schema as JSONSchemaObj, {
+    resolveDocument: lookupSchemaDocument,
+  });
+  return recomposeSchema(rootRef, (hash) => documents.get(hash));
 }
 
 /**
