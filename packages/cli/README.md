@@ -922,6 +922,8 @@ memo, which names a space once for the life of the process.
   `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
   `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
   applied in `lib/color-mode.ts` and guarded by `test/color-mode.test.ts`. The
+  rendering checks use child processes with explicit color environment settings,
+  so the suite can run with `NO_COLOR` set or unset. The
   [Cliffy dependency guidance](../../docs/development/DEPENDENCIES.md#cliffy)
   owns the import-map constraint that keeps this behavior working.
 - `-q/--quiet` (on `piece`/`wish` subcommands) suppresses the stderr hint and
