@@ -171,16 +171,17 @@ describe("LLM partial batch coarsening (channel 6)", () => {
     try {
       const tx = runtime.edit();
       const { commonfabric: builder } = createTrustedBuilder(runtime);
-      const messages = runtime.getCell<{ role: string; content: string }[]>(
+      type Msg = { role: "user" | "assistant" | "tool"; content: string };
+      const messages = runtime.getCell<Msg[]>(
         space,
         "llm-superseded-messages",
         undefined,
         tx,
       );
       messages.set([{ role: "user", content: "first" }]);
-      const testPattern = builder.pattern<
-        { messages: { role: string; content: string }[] }
-      >(({ messages }) => builder.llm({ messages }));
+      const testPattern = builder.pattern<{ messages: Msg[] }>(
+        ({ messages }) => builder.llm({ messages }),
+      );
       const resultCell = runtime.getCell(
         space,
         "llm-superseded",
