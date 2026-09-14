@@ -44,10 +44,10 @@ route parser when they register a hint.
 
 This lifecycle slice is partial. Revisions retain the existing verified
 `pattern:<identity>` source-document closure rather than the complete authored
-program manifest specified below. Fabric URL creation, host-qualified
-fabric-link receipt, live mutable fabric subscriptions, complete cross-space
-policy enforcement, forking, and runtime-fingerprint handling still require
-work. Cross-space history repoint is
+program manifest specified below. Fabric URL creation, the remaining web URL
+creation paths, Common Fabric browser-link receipt, live mutable fabric
+subscriptions, complete cross-space policy enforcement, forking, and
+runtime-fingerprint handling still require work. Cross-space history repoint is
 rejected until the checked source-replication path exists.
 
 Following an origin is ONE mechanism, triggered by opening a piece — which a
@@ -157,6 +157,10 @@ serves no program, a malformed fabric URL — is not an origin and is not
 detachment either: the piece carries something a person can read and repair,
 and nothing follows it.
 
+These retained-source `cf:` URLs are distinct from the user-facing HTTPS URLs
+defined by [Common Fabric URLs](fabric-urls.md). A browser name can resolve to a
+space before the lifecycle stores a stable DID-based source reference.
+
 For example, a host-qualified fabric URL can resolve through
 `cf://toolshed.example/<space-did>/of:fid1:<piece-id>` to a piece, or through
 `cf://toolshed.example/<space-did>/pattern:<identity>` to exact pattern source.
@@ -181,13 +185,12 @@ canonical piece FID or pattern content identity. Static imports keep their
 existing alias-and-pin behavior because the deployed source records the
 terminal content identity.
 
-A future shortlink service may accept a custom string and return a canonical
-identifier URL before the lifecycle operation begins. The shortlink is not the
-active origin or a repoint target. Whether a revision retains it in a separate
-optional provenance field remains open. The active origin contains only the
-identifier URL. This answer remains tentative while the identifier vocabulary
-and shortlink ownership, reassignment, and history semantics receive further
-study.
+The Common Fabric name registry can accept a custom string and resolve it before
+the lifecycle operation begins. The registered browser name is not the active
+origin or a repoint target. Whether a revision retains it in a separate optional
+provenance field remains open. The active origin contains only the identifier
+URL. Registry ownership, reassignment, and browser presentation are defined by
+[Common Fabric URLs](fabric-urls.md), not by the retained-source grammar.
 
 Classification happens before the origin is stored. An explicit pin on an
 accepted entity-FID URL wins over the target's mutable shape. It normalizes to
@@ -785,10 +788,10 @@ For an unpinned fabric URL that resolves to a mutable entity, the stored
 reference names the stable entity, not a slug. A piece is the product case in
 this lifecycle. A lightweight publication pointer uses the same resolution and
 subscription rule if that feature is added. Under the tentative identifier-only
-policy, a shortlink or other human-readable alias resolves outside the
-lifecycle and supplies a fully qualified reference containing the space DID and
-stable entity. Reassigning that alias must not redirect existing followers to a
-different entity. Self-following is rejected.
+policy, a Common Fabric browser name or other human-readable alias resolves
+outside the lifecycle and supplies a fully qualified reference containing the
+space DID and stable entity. Reassigning that alias must not redirect existing
+followers to a different entity. Self-following is rejected.
 
 Every operation that activates a mutable fabric origin walks the active-origin
 chain with a visited set. This includes follow creation, repoint, and legacy
@@ -924,52 +927,50 @@ failure to their caller. The dedicated request must expose live conflict and
 durable commit failure separately so a lifecycle operation or the shell can
 stop before using the target.
 
-### Host-qualified fabric-link receipt
+### Common Fabric browser-link receipt
 
-The shell can also learn a route from a user-facing fabric link that opens
-existing data instead of selecting a piece's source. Link receipt is not a
-source lifecycle transition. It uses the same route registry and durable site
-table because later lifecycle operations and ordinary pattern reads must agree
-about where the named space lives.
+The shell can also learn a route from a user-facing link that opens existing
+data instead of selecting a piece's source. Link receipt is not a source
+lifecycle transition. It uses the same route registry and durable site table
+because later lifecycle operations and ordinary pattern reads must agree about
+where the space lives.
 
-The browser-facing share-link form is a shell URL:
+Browser links use [Common Fabric URLs](fabric-urls.md):
 
-`<shell-http-or-https-origin>/<space-did>[/<piece-id-or-slug>]?spaceHost=<encoded-toolshed-origin>`
+`https://<asp-host>[/@namespace][/space[/piece]]`
 
-`spaceHost` occurs exactly once. Its decoded value is an absolute HTTP or HTTPS
-origin with no credentials, path beyond `/`, query, or fragment. The receiver
-normalizes it with a trailing slash. The path contains an explicit space DID.
-It names either the space root or a piece that the ordinary shell `AppView`
-supports. A host-qualified `cf://` source reference is a different input form.
-Its bare authority does not supply the explicit HTTP or HTTPS scheme required
-by this browser-facing link.
+The URL host identifies the ASP. No host query parameter is present. The
+server resolves a namespace or registered name and redirects to another ASP
+when required. A DID URL on an ASP from which the space moved follows the
+space-move redirect defined by Common Fabric URLs. The destination then
+supplies the resolved space DID to the shell. Receiving a valid link does not
+grant read access. Ordinary fabric authorization and content verification
+still apply.
 
-The outer URL origin identifies the shell frontend. Production share links use
-HTTPS. Local-development and test shells may use HTTP. The shell may use
-`globalThis.location.origin` for this outer origin. That value never supplies
-`spaceHost`. The shell's **Copy link** action obtains `spaceHost` from the
-effective host reported by the runtime's per-space storage manager. It does not
-substitute the shell's default API host when the space has a different
-effective host.
+The earlier `?spaceHost=` share-link form remains a user-facing compatibility
+input. The receiver validates its origin and redirects to the equivalent Common
+Fabric URL before applying this receipt flow. New links do not emit it.
 
-A shell URL without `spaceHost` is an ordinary hostless navigation and supplies
-no new route. A URL with a malformed or repeated `spaceHost`, or with a space
-name instead of a DID, fails link receipt without navigation. Receiving a valid
-link does not grant read access. Ordinary fabric authorization and content
-verification still apply.
+A host-qualified `cf://` source reference is a different input form. It
+identifies retained source and can supply an internal route hint. It is not a
+browser URL and does not define the address shown to a user.
 
 Before the shell opens, mounts, or navigates to the target, it performs these
 steps:
 
-1. Parse the shell path into its DID-based `AppView`. Validate and normalize the
-   `spaceHost` toolshed origin.
-2. Send that DID and host through the dedicated failure-propagating route
-   request. The worker uses the live registry behavior exposed by
-   `RuntimeClient.registerSpaceHost` and records `source: "share-link"` in the
-   site-table entry.
-3. Wait for the request to confirm the durable transaction. Then remove
-   `spaceHost` and hand the canonical hostless `AppView` to ordinary shell
-   navigation.
+1. Accept the resolved space DID and its bound storage origin from the terminal
+   ASP's authenticated HTTPS response. Validate the terminal serving-state
+   revision and normalize the storage origin. The public ASP may itself be that
+   storage proxy, but the shell does not assume the two origins are
+   interchangeable.
+2. Send the DID and effective storage origin through the dedicated
+   failure-propagating route request. The worker uses the live registry behavior
+   exposed by `RuntimeClient.registerSpaceHost` and records
+   `source: "share-link"` in the site-table entry. The public ASP origin remains
+   browser presentation data and is not stored as a memory route.
+3. Wait for the request to confirm the durable transaction. Then hand the
+   resolved `AppView` to ordinary shell navigation. After loading, the shell
+   applies the displayed-URL selection rules from Common Fabric URLs.
 
 A rejected live hint is a route conflict. The shell does not persist that hint
 or navigate to the target through it. If persistence fails after live
@@ -1025,8 +1026,10 @@ replacement. Waiting SQLite registrations settle against the invalidated
 replica instead of blocking convergence. A hint that names the default host
 confirms the provisional route without rebuilding the replica.
 
-This policy settles ingestion of a known host hint. It does not yet make route
-discovery reliable. Host unavailability, replicated hosts, failover, stale
+This policy settles ingestion of a known host hint. Common Fabric URLs proposes
+an ASP-level transfer followed by a DID-keyed redirect on the source ASP. It
+does not define how an open runtime replaces its effective storage route during
+that transfer. Host unavailability, replicated hosts, failover, stale
 site-table entries, authenticated replacement of an explicit route, and
 replicated-host failover remain open design work.
 
@@ -1039,8 +1042,8 @@ replicated-host failover remain open design work.
 | Apply one origin-only grammar to every route | **Partial** | `normalizeSpaceHost` rejects credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration use it. The shared fabric-authority helper defaults to HTTPS and derives HTTP only for loopback when the current runtime route explicitly uses HTTP. Applying the grammar to the default host, future share-link receipt, and future effective-host results remains required |
 | Append an accepted route with commit acknowledgment | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
-| Receive a host-qualified fabric link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path emits or receives the `spaceHost` share-link form, asks the runtime for the effective per-space host, or waits for acknowledged route persistence before navigation |
-| Replace an explicit route after host failure or space movement | **Reliability design required** | There is no authenticated route-change or failover protocol after a seed or late hint becomes authoritative |
+| Receive a Common Fabric browser link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path yet implements the Common Fabric URL resolver and presentation rules or waits for acknowledged route persistence before navigation |
+| Replace an explicit route after host failure or space movement | **Reliability design required** | [Common Fabric URLs](fabric-urls.md#moving-a-space-between-asps) proposes the browser-level ASP handoff and old-ASP redirect. There is no authenticated storage-route change or failover protocol after a seed or late hint becomes authoritative |
 
 ## Reconciliation when a piece loads
 
@@ -1559,10 +1562,10 @@ The implementation evidence for this table is concentrated in:
    provisional until its first hint arrives or a stateful operation is issued.
    Before a stateful operation is issued, allow the first hint to replace and
    reload the provider. Do not create a secondary session.
-   Keep the supplied canonical URL in history. Do not make shortlink retention
-   part of the lifecycle contract until the open provenance question is
-   settled. Any later alias provenance must remain separate from active origins
-   and repoint targets. Keep `patternRepository` separate and clear it when
+   Keep the supplied canonical URL in history. Do not make browser-name
+   retention part of the lifecycle contract until the open provenance question
+   is settled. Any later alias provenance must remain separate from active
+   origins and repoint targets. Keep `patternRepository` separate and clear it when
    newly generated or directly edited code no longer belongs to that
    repository. Append a detached creation revision for a piece that pattern
    code instantiates, so its exact source can be restored and its source panel
@@ -1605,7 +1608,7 @@ The implementation evidence for this table is concentrated in:
    table. Design reliable discovery, authenticated route replacement, host
    failover, and explicit close-and-reopen behavior for unavailable or moved
    spaces.
-9. Apply `normalizeSpaceHost` to the default host, share-link receipt, and
+9. Apply `normalizeSpaceHost` to the default host, Common Fabric link receipt, and
    effective-host results. `spaceHostMap` seeds, live registration, and
    site-table hydration already reject credentials, paths, queries, fragments,
    malformed URLs, and unsupported schemes. The shared `cf://` authority
@@ -1629,22 +1632,23 @@ The implementation evidence for this table is concentrated in:
    not retry them. Do not implement this operation with the optimistic
    `CellHandle.set()` or `CellHandle.push()` paths. Expose the effective host for
    a space through runtime IPC so share-link creation uses the per-space route.
-11. Add host-qualified fabric-link creation and receipt to the shell. **Copy
-   link** emits the specified DID-based shell URL and `spaceHost` parameter.
-   Receipt validates the shell path and toolshed origin, calls the dedicated
-   route request, and removes the parameter before ordinary `AppView`
-   navigation. Intercept an initial share URL before the target `AppView` opens
-   its space. Report malformed links, live conflicts, and durable-write failures
-   without navigating. Keep this route discovery outside pattern APIs and
-   source-origin state.
+11. Add Common Fabric browser-link creation and receipt to the shell. **Copy
+   link** emits the URL selected by the presentation rules in
+   [Common Fabric URLs](fabric-urls.md). Receipt accepts the resolved space DID,
+   bound storage origin, and serving-state revision from the terminal ASP's
+   authenticated response. It calls the dedicated route request before ordinary
+   `AppView` navigation. Intercept an initial share URL before the target
+   `AppView` opens its space. Report malformed links, live conflicts, and
+   durable-write failures without navigating. Keep this route discovery outside
+   pattern APIs and source-origin state.
 12. Add a browser-level shell integration test with two independent toolshed
    servers and real patterns as the user interface. Put the target data only on
    the non-default toolshed. Open that target in a producing shell and invoke its
    production **Copy link** action. Read the emitted URL from the browser
-   clipboard. Assert that its outer origin is the shell frontend, its path names
-   the target by explicit DID, and its sole `spaceHost` value equals the
-   non-default effective host reported by the runtime. Open that exact copied URL
-   in a receiving shell. Prove that receipt records the route durably.
+   clipboard. Assert that its host is the target ASP and that its path follows
+   the Common Fabric presentation rules. Open that exact copied URL in a
+   receiving shell. Prove that resolution reaches the same space DID and that
+   receipt records the route durably.
 
    Tear down the receiving runtime. Start a fresh shell runtime with the same
    identity and durable home space. Do not provide a `spaceHostMap` seed, call

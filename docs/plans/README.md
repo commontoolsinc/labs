@@ -143,6 +143,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
   confidentiality. Gated on a CFC review that has not happened.
+- [Random space identities](random-space-identities.md) replaces publicly
+  derived named-space keys with fresh random identities whose authority ends
+  after ACL genesis. It uses the DID subset of
+  [Common Fabric URLs](../specs/fabric-urls.md) and is complete without a public
+  name registry.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
 - [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
@@ -163,6 +168,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md).
   The plan stays live until the practice has been exercised on a real
   migration.
+- [Space name registry](space-name-registry.md) implements the DNS namespaces,
+  ASP redirects, registered targets, and displayed-name selection specified by
+  [Common Fabric URLs](../specs/fabric-urls.md). It remains independent of space
+  identity creation.
 - [Reading Fabric data](fabric-read-model.md) is the umbrella for one model
   across three concerns: everything addressable is a cell, so a verb's result
   and a direct read are the same operation on different cells. It carries the

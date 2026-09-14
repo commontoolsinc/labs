@@ -6,13 +6,17 @@
 
 The mount root lists only discoverable spaces (`home` always, plus whatever
 the home space's space list provides in the future). Other spaces are
-accessible by name or DID on demand via `lookup`.
+currently accessible by name or DID on demand through `lookup`. After the
+[random space identity cutover](../../plans/random-space-identities.md), a name
+must already be recorded in the mount's explicit space index. A name discovered
+through a [Common Fabric URL](../fabric-urls.md) can be added to that index.
 
 Open questions:
 - When the home space gains a space list, what does the data look like?
   The FUSE layer needs to know how to extract space names/DIDs from it.
-- Should spaces accessed by name be remembered and listed in subsequent
-  `readdir` calls? Or only spaces from the home space's list?
+- Should spaces accessed by name now, or added to the explicit index after the
+  random-identity cutover, be listed in subsequent `readdir` calls? Or should it
+  list only spaces from the home space's list?
 - How should space sessions be garbage-collected? (A user might `cd` into
   dozens of spaces; each holds a WebSocket subscription.)
 

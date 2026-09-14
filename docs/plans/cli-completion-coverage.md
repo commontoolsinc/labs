@@ -32,9 +32,10 @@ unreachable.
 
 **The chain has a weak first link.** Reaching a piece, a verb, or a cell path
 needs a space, `--space` is required on every command that reads one, and
-`--space` completes to space DIDs discovered from local stores — while the
-value a caller types is a space name. A name derives its DID one way, so a
-discovered DID can never produce the name that made it.
+`--space` completes to space DIDs discovered from local stores, while the value
+a caller often types is a registered name. A DID does not reveal which
+viewer-owned or space-owner-owned name the
+[Common Fabric URL registry](../specs/fabric-urls.md) would present.
 
 **A live provider is exercised in one place only.** The unit tests cover the
 pure shaping functions and assert that a slot with no fabric context degrades
@@ -388,9 +389,9 @@ for no measured gain, so the two calls stay.
 
 `--space` takes a space name or a DID, is required on every command that reads a
 space, and has no environment fallback. Completion offers DIDs discovered from
-local memory-v2 stores. A name derives its DID one way, so the discovered DID is
-never the name that produced it, and a caller who works in names gets candidates
-they cannot use.
+local memory-v2 stores. Registered names are independent records, so the
+discovered DID cannot reconstruct them. A caller who works in names therefore
+gets candidates they can use but may not recognize.
 
 Discovery is also positional: `candidateRoots` walks up from the working
 directory looking for a store, so completion offers spaces in a checkout that

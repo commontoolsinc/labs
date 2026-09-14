@@ -20,6 +20,10 @@ from the URL bar (`/<spaceName>/<pieceId>`). Override any default by passing an
 options object. If you already have a full trigger-trace entity id such as
 `of:baedrei...`, pass it as `id`.
 
+[Common Fabric URLs](../../specs/fabric-urls.md) defines the intended browser
+route. After that one-shot migration, these defaults still use the resolved
+space DID and piece DID rather than interpreting the displayed name themselves.
+
 ```javascript
 // Shown at module scope.
 // Read the full output of the current piece

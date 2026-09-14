@@ -64,8 +64,12 @@ Instantiating a child pattern inside another piece creates its cells and
 metadata, but does not add the child to `pieceRegistry` automatically.
 
 A piece is identified by an entity id (a hash, e.g. `fid1:abc...`) and can carry
-a human **slug** for URLs. In the shell, `/{spaceName}/{pieceIdOrSlug}` shows
-a piece's UI.
+a human **slug** for URLs. In the current shell,
+`/{spaceName}/{pieceIdOrSlug}` shows a piece's UI.
+
+[Common Fabric URLs](../specs/fabric-urls.md) defines the intended canonical
+browser form, which uses the ASP host, a registered space name or space DID, and
+the piece DID. That one-shot migration has not landed yet.
 
 The registry is the root of the supported piece listings. A child piece that is
 not registered must be published through a searchable collection or remain

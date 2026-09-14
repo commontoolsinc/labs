@@ -1019,8 +1019,8 @@ Algorithm (spec § Resolution rule — implement hops exactly):
    → M2 throws
    `"space names are currently unsupported; resolve the name to a DID first"`.
    The tentative identifier-only policy keeps name resolution outside the
-   fabric resolver. README Open question 1 retains that policy for further
-   study and places human-readable aliases in a future shortlink service.
+   fabric resolver. Human-readable browser aliases resolve through
+   [Common Fabric URLs](../fabric-urls.md) before the resolver receives a DID.
 3. Start cell:
    - slug → M2.1 resolver (wrap `SlugResolutionError` with the chain so far).
    - `of:` URI → reconstruct the entity id from the parsed hash via the

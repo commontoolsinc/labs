@@ -8,6 +8,11 @@ mode. If a pattern is running under the shell embed route
 stays under `/.embed/...`. Pattern authors do not need to handle embedded
 navigation specially.
 
+[Common Fabric URLs](../../specs/fabric-urls.md) defines the intended ordinary
+browser route and treats embed routes as higher-priority hosted resources. The
+current embed behavior above remains in place until that URL implementation
+lands.
+
 ## List Pattern
 
 ```typescript

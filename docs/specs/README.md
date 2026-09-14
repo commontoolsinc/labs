@@ -18,6 +18,10 @@ decision is reversed or superseded).
 
 ## Index
 
+### Addressing and navigation
+
+- [Common Fabric URLs](fabric-urls.md) (proposed)
+
 ### Pattern construction and authoring
 
 - [Pattern testing](PATTERN_TESTING_SPEC.md)
