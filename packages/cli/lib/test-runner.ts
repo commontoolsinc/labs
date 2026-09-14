@@ -2288,19 +2288,21 @@ export async function runTestPattern(
  * once the process exits, so a later run of the same files compiles nothing.
  * Returns the files whose compile failed. Each of those is reported again,
  * with its error, by the run that tests it; this pass only says which.
+ * `compileOne` is the per-file run, `runTestPattern` unless a test supplies
+ * a stand-in.
  */
 export async function compileTestPatterns(
   paths: readonly string[],
   options: TestRunnerOptions = {},
+  compileOne: typeof runTestPattern = runTestPattern,
 ): Promise<{ compiled: number; failed: string[] }> {
   const failed: string[] = [];
   const started = performance.now();
   for (const testPath of paths) {
     let error: string | undefined;
     try {
-      error =
-        (await runTestPattern(testPath, { ...options, compileOnly: true }))
-          .error;
+      error = (await compileOne(testPath, { ...options, compileOnly: true }))
+        .error;
     } catch (caught) {
       error = formatError(caught);
     }

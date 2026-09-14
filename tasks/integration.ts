@@ -307,11 +307,12 @@ export function selectPatternTestFiles(
  * compile is reported by its own run, with the error; this pass says only
  * how many did, and how long it took.
  */
-async function precompilePatternTests(
+export async function precompilePatternTests(
   cfCmd: string[],
   rootDir: string,
   testFiles: readonly string[],
   concurrency: number,
+  run: typeof runCommand = runCommand,
 ): Promise<void> {
   const filesByRoot = new Map<string, string[]>();
   for (const testFile of testFiles) {
@@ -342,7 +343,7 @@ async function precompilePatternTests(
       // test pool after it.
       let result: Awaited<ReturnType<typeof runCommand>>;
       try {
-        result = await runCommand(
+        result = await run(
           [
             ...cfCmd,
             "test",
