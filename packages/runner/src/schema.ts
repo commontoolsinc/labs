@@ -204,6 +204,39 @@ const asCellCompoundSchemaForValue = (
   return undefined;
 };
 
+/**
+ * Whether `schema` is the bare opaque type, `{ "type": "unknown" }`. A type
+ * list that includes `unknown` beside a concrete type is a constraint of its
+ * own and is not this.
+ */
+const isUnknownTypedSchema = (schema: JSONSchema | undefined): boolean =>
+  isObjectOrArray(schema) && schema.type === "unknown";
+
+/**
+ * The schema an eager read addressed at a link slot traverses the link's
+ * target with.
+ *
+ * The reader's shape takes precedence over the schema stored on the link,
+ * the rule every hop the traversal crosses resolves by
+ * (`combineSchemaForLink`): a shaped reader stands, inheriting only the stored
+ * schema's `default`, and a reader that brought no shape adopts the stored
+ * schema. A reader whose type is the bare `unknown` counts as bringing no
+ * shape here, and adopts the stored schema too: at an eager read's entry that
+ * type names the handle a caller keyed into, and the stored schema is what
+ * describes the value the handle reaches. A view's re-entry is a hop, not a
+ * handle, and does not take this: there `unknown` keeps its reference
+ * semantics. A stored `unknown` is a shape the reader outranks like any
+ * other. All of this is stated in docs/specs/link-schema-precedence.md, "The
+ * read entry".
+ */
+const entrySelectorSchema = (
+  readerSchema: JSONSchema | undefined,
+  storedSchema: JSONSchema | undefined,
+): JSONSchema | undefined =>
+  isUnknownTypedSchema(readerSchema)
+    ? storedSchema ?? readerSchema
+    : combineOptionalSchema(readerSchema, storedSchema);
+
 export type CellViewRef = {
   link: NormalizedFullLink;
   cfcLabelView?: CfcLabelView;
@@ -1242,10 +1275,14 @@ export function validateAndTransform(
   const valueSelectedSchema = isObjectOrArray(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
     : undefined;
-  // If we have a ref with a schema, use that; otherwise, use the link's schema
+  // The reader's schema governs the target, the stored link schema filling in
+  // only what the reader left open; a compound reader has already been
+  // narrowed to the arm the value selects.
   const selector = {
     path: doc.address.path,
-    schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
+    schema: valueSelectedSchema ??
+      entrySelectorSchema(effectiveSchema, resolvedValueLink.schema) ??
+      link.schema!,
   };
   // A marked transaction takes the lazy route from here. Everything above has
   // run either way — link resolution, the `asCell` dispatch, schema
@@ -1266,6 +1303,9 @@ export function validateAndTransform(
     // alone is the link's schema, and a reader asking for a property the link's
     // schema does not name — `title` off a piece typed by its own
     // registration — would read as a property the schema does not select.
+    // A view re-enters here as a hop, so it takes the hop rule as it stands:
+    // an `unknown`-typed reader keeps its reference semantics, where the
+    // eager entry above lets one adopt the stored schema.
     const viewSchema = valueSelectedSchema ??
       combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
       selector.schema;

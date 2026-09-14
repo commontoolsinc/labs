@@ -1246,24 +1246,32 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
           ).join(", ")
         }]`,
     );
-    // Bob's ONLY space-scoped root row is the holder doc; every piece doc
-    // he reaches (the child's result, `echo`'s output doc) is a CLOSURE
-    // row. This is the isolation the pin exists for: the root-level
+    // Bob's ONLY space-scoped root row is the holder doc; the piece docs he
+    // reaches (the child's result, `echo`'s output doc) enter as CLOSURE
+    // rows. This is the isolation the pin exists for: the root-level
     // arrival re-arm (`invalidateActionsForDemandRoots`) re-arms a
     // narrowed node only when the node's `demandRootIds` (its piece's
-    // roots) intersect an ARRIVED key's id — and Bob roots ONLY the
-    // holder doc, which is no piece's root, so the echo node is not
-    // reachable from Bob's arrival by root at all. Only the per-key
-    // currency check on Bob's new pair of the `echo` output key can
-    // materialize `user:bob`'s instance. (The `demandArrivals` counter
-    // does tick — the holder is a demanded root that gained Bob's pair —
-    // but its re-arm reaches no echo node; the LANDING is the assertion
-    // that matters, and M-C makes it red.)
+    // roots) intersect an ARRIVED key's id — and Bob roots no piece doc,
+    // so the echo node is not reachable from Bob's arrival by root at all.
+    // Only the per-key currency check on Bob's new pair of the `echo`
+    // output key can materialize `user:bob`'s instance. (The
+    // `demandArrivals` counter does tick — the holder is a demanded root
+    // that gained Bob's pair — but its re-arm reaches no echo node; the
+    // LANDING is the assertion that matters, and M-C makes it red.)
+    //
+    // Bob's own read follows the link with his `{ echo }` schema, and the
+    // absent `echo` instance that read dead-ends at is pulled by his
+    // client, which roots that one USER-scoped output doc for his session.
+    // That root is his own instance's doc, not a piece root: it gives the
+    // root-level re-arm nothing, and the per-key check stays the path.
     expect(
       bobRows.filter((r) => r.root && r.scopeKey === "space").map((r) => r.id),
     ).toEqual([holderId]);
     expect(bobEchoRows.length).toBeGreaterThan(0);
-    expect(bobEchoRows.every((r) => !r.root)).toBe(true);
+    expect(
+      bobEchoRows.filter((r) => r.root).every((r) => r.scopeKey !== "space"),
+    )
+      .toBe(true);
     // The per-key check fired for Bob's pair (M-C — return 0 — makes the
     // landing time out).
     expect(stats.demand.notCurrentRearms - rearmsBefore)
