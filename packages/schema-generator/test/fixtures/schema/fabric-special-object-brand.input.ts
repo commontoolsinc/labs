@@ -16,12 +16,17 @@ interface FabricSpecialObject {
   readonly "@commonfabric/FabricSpecialObject": true;
 }
 
+const FABRIC_PRIMITIVE_BRAND = Symbol.for("@commonfabric/FabricPrimitive");
+const FABRIC_INSTANCE_PLUS_BRAND = Symbol.for(
+  "@commonfabric/FabricInstancePlus",
+);
+
 interface FabricPrimitive extends FabricSpecialObject {
-  readonly "@commonfabric/FabricPrimitive": true;
+  readonly [FABRIC_PRIMITIVE_BRAND]: true;
 }
 
 interface FabricInstance extends FabricSpecialObject {
-  readonly "@commonfabric/FabricInstancePlus"?: never;
+  readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
   deepClone(frozen: boolean): FabricInstance;
 }
 
