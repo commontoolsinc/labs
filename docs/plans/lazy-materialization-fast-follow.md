@@ -2,7 +2,7 @@
 
 Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
 deferral needed, with three bullets carried forward; F3's evidence assembled,
-with the integration-suite gap recorded; F3's decision, F4, and F5 pending, the
+with partial integration coverage recorded; F3's decision, F4, and F5 pending, the
 decision with the flag's owner and the rest behind it. This plan is the
 separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
@@ -152,7 +152,9 @@ must not accidentally inherit it.
       both current flag postures. Resolve unexplained differences and check
       production-like client/server behavior on isolated data. The runner
       suite has been run at both postures; the F3 record holds the
-      off-posture result and the integration-suite gap.
+      off-posture result. The [integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md)
+      adds isolated eager-posture runner, runtime-client, and shell/browser results;
+      remaining product coverage and owner decisions are explicit in that record.
 - [ ] Obtain the retirement decision from the flag's owner with a concrete
       rollback route. No live data mutation is implied by this plan; coordinate
       any live deployment separately. Bernhard Seefeld, whom the registry's
