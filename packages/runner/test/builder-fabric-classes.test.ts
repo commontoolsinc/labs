@@ -1,5 +1,5 @@
 /**
- * The `FabricSpecialObject` classes reach pattern code as `export declare
+ * The special-object classes reach pattern code as `export declare
  * const`s in `data-model/src/api.ts`, which `api/index.ts` re-exports, but the
  * runtime values behind those declarations are bound separately, in
  * `builder/factory.ts`. The two sides are maintained by hand, so a class can be
@@ -80,9 +80,10 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
 
     for (const name of declaredClasses) {
       it(`exposes \`${name}\` as a runtime value on the pattern surface`, () => {
-        // Presence, not constructibility: `FabricSpecialObject` is abstract,
-        // and exists at runtime so that `instanceof` works rather than so that
-        // it can be `new`-ed. Constructibility is checked per-class below.
+        // Presence, not constructibility: `FabricInstance` and
+        // `FabricPrimitive` are abstract, and exist at runtime so that
+        // `instanceof` works rather than so that they can be `new`-ed.
+        // Constructibility is checked per-class below.
 
         expect(typeof commonfabric[name]).toBe("function");
       });

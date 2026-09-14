@@ -1,5 +1,5 @@
 // fabric-safety (#4527): the schema traversal's special-object handling must
-// distinguish the two direct subclasses of `FabricSpecialObject`. A
+// distinguish the two special-object classes. A
 // `FabricPrimitive` (state in private `#fields`, zero enumerable own-props)
 // is a fully-opaque leaf. A `FabricInstance` — which can have model-visible
 // outgoing references — must fail loudly rather than be silently leafed

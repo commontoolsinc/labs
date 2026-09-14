@@ -619,7 +619,7 @@ describe("fabric special objects through the runner's walks", () => {
       "compares two stored `FabricError`s read back as equal whatever they hold",
       () => {
         // Both operands proxied is the arm that inverts rather than coarsens.
-        // Neither is `instanceof FabricSpecialObject`, so `fabricAwareEqual()`
+        // Neither passes `isFabricSpecialObject()`, so `fabricAwareEqual()`
         // reduces to a property walk, and a proxy's `ownKeys` is empty on both
         // sides -- two empty records, equal. Unproxied, the same two values
         // compare unequal.

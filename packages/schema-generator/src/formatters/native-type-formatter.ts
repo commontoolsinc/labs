@@ -24,7 +24,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // Fields authored against the `FabricPrimitive` classes themselves emit
   // the `FabricPrimitive` schema vocabulary (`FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   // `@commonfabric/api`): a value matches by prototype, not by structure.
-  // Guarded in `supportsType` by the `FabricSpecialObject` brand so an
+  // Guarded in `supportsType` by the `FabricPrimitive` brand so an
   // unrelated user type sharing a name keeps its structural schema.
   FabricBytes: { type: "FabricBytes" },
   FabricEpochDay: { type: "FabricEpochDay" },

@@ -54,8 +54,8 @@ import { refuseFabricInstance } from "./refuseFabricInstance.ts";
  * works on an empty one: it merges to `{}`, compares vacuously equal, descends
  * and finds nothing, or grafts a property onto a frozen value. A `false`
  * result says the value has no keys to reach, which is the whole story for a
- * `FabricPrimitive` and any further subclass, and for a class extending
- * `FabricSpecialObject` directly.
+ * `FabricPrimitive` and any further subclass, and for a class extending the
+ * runtime root `BaseFabricSpecialObject` directly.
  *
  * A `FabricInstance` returns `false` here as well, and that answer is
  * incomplete rather than wrong: an instance holds other `FabricValue`s, so a
