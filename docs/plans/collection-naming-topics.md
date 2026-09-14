@@ -31,22 +31,25 @@ work being finished.** Five things are outstanding, and each still needs
 execution.
 
 1. **Decision 14 — a member takes one input naming its board.** Ruled, and
-   measured buildable: a member declaring a board demand that names only the
-   derived tables reaches exactly what naming those tables directly reaches,
-   a constant `+2 documents` over today's wiring and byte-identical when the
-   element schemas are held equal, flat from a 2-member board to a 40-member
-   one. **Unbuilt.** Until it lands, every collection adopting the namespace
-   pays one `cf piece link` per existing member, per board-to-member input.
+   measured buildable in
+   [the board-demand measurement](../history/plans/collection-naming-board-demand-measurement-2026-09-07.md):
+   an item whose one `board` input names only the derived tables compiled, read
+   its board-given name, and reached the same number of other-member documents,
+   with the same byte total, as the item wired with one link per table, from 2
+   members to 40. **Unbuilt.** Until it lands, every collection adopting the
+   namespace pays one `cf piece link` per existing member, per board-to-member
+   input.
 
 2. **A table handed to every member delivers every member's document whole**
    (#7439). Measured on Topics: a member's declared demand over `boardCrossrefs`
    or `boardNames` reaches every other member, 90.5% of the frame on a
-   40-member board, scaling in member count and indifferent to how connected
-   the graph is. `unknown` bounds the walk's descent, not its delivery, and the
-   comments beside all three tables say otherwise. The fix is a row-shape
-   change — `asCell` markers of every flavor were measured to change nothing —
-   and it touches the same inputs decision 14 touches, so the two belong in one
-   pass.
+   40-member board; the share grew with member count from 4 to 40, and at 10
+   members the document and byte counts were unchanged across the mention
+   densities measured. `unknown` bounds the walk's descent, not its delivery,
+   and comments in `naming.ts` and `topic.tsx` say otherwise. The fix is a
+   row-shape change: the `comparable` marker was measured to leave the document
+   and byte counts unchanged. It touches the same inputs decision 14 touches,
+   so the two belong in one pass.
 
 3. **S6 item 4 — the production backfill.** Held for want of a demand rather
    than a technical answer, with the sequence recorded under S6 below. Two
