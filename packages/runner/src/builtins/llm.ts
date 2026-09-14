@@ -1047,7 +1047,6 @@ export function llm(
       )
       : undefined;
 
-    const thisRun = ++state.currentRun;
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
@@ -1090,13 +1089,15 @@ export function llm(
       | undefined;
 
     // Return if the same request is being made again, either concurrently (same
-    // as state.previousCallHash) or when rehydrated from storage (same as the
-    // contents of the requestHash doc).
+    // as state.previousCallHash) or already settled (same as the contents of
+    // the requestHash doc, with its result or error landed). A stored hash with
+    // neither belongs to a request that was cleared away, and the same
+    // messages are a new one.
     const currentRequestHash = requestHashWithLog.get();
     if (
       (!served && hash === state.previousCallHash) ||
-      (hash === currentRequestHash && (!served ||
-        resultWithLog.get() !== undefined || errorWithLog.get() !== undefined))
+      (hash === currentRequestHash &&
+        (resultWithLog.get() !== undefined || errorWithLog.get() !== undefined))
     ) {
       // The §4 memo hit, gated on SETTLED state like the sibling
       // builtins (generateText/generateObject; round-2 thread 8): a
@@ -1118,6 +1119,18 @@ export function llm(
     }
 
     if (!Array.isArray(messages) || messages.length === 0) {
+      // Abandon a request already in flight, where abandoning one is possible.
+      // Advancing the run makes its response fail the guard on the way back, so
+      // nothing of it reaches the cell, and dropping the remembered hash lets
+      // the same messages go out again rather than match the in-flight check
+      // and never be sent. A queued request is neither of those: the queue
+      // owns its lifecycle and runs it to completion, so forgetting its hash
+      // would enqueue a second copy of a call that is still going to arrive.
+      // The mode is the one the request in flight was issued under.
+      if (!state.lastRequestQueued) {
+        state.currentRun++;
+        state.previousCallHash = undefined;
+      }
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
@@ -1137,6 +1150,13 @@ export function llm(
       },
       () => state.lastRequestQueued = previousRequestQueued,
     );
+
+    // The generation the plain path's cancellation token compares against. A
+    // run advances it only once it issues a request; a re-evaluation that
+    // finds this request in flight has returned above and leaves it alone.
+    // The batched partial's own commit is one such re-evaluation — this node
+    // read `partial` in resetting it — and is not a newer request.
+    const thisRun = ++state.currentRun;
 
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
