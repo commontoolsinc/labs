@@ -179,12 +179,24 @@ differently from the rest of `cf`, which takes those two as ordinary slugs;
 [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
 difference by refusing them as slug values.
 
+A relative operand is the cell reference grammar's
+([`docs/specs/cell-reference-grammar.md`](../../docs/specs/cell-reference-grammar.md)),
+read by that grammar's own reader: a head — `.` for where you stand, or a run of
+`..` — and then a path in which every segment is a key. `a/../b` is three keys,
+`~1` escapes a `/` inside one, and a trailing `/` inside a piece names the empty
+key. The head's climbs walk back the way you came, so `cd ..` from a piece
+reached through `slugs/` returns to `slugs/`. `#argument` on a head or on a
+piece segment selects the piece's arguments cell, which `get` reads and `cd` and
+`ls` refuse, a place always standing in a result. A listing prints a key that
+would read as anything else behind the `.` head — `./..`, `./-x` — and `pwd`
+writes the place as `//<space>/<piece>@<scope>/…`.
+
 | Verb                         | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                                                                                                                                                                                                                                                             |
-| `ls [<ref>]`                 | Lists what stands at a place, defaulting to where you stand: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. The operand is `get`'s, less the `#argument` suffix, and listing a target renumbers the rows, so `cd %n` reaches what it just showed. Rows are numbered, a row that is one of the piece's callables says so, a piece shows the name it carries beside the handle that reaches it, and one screenful is written. `--limit <rows>` overrides the height. |
+| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative references — `.` for where you stand, a run of `..` climbing back the way you came, `.@scope` for the scope, and a literal path after them — and `-`, `/`, rooted and complete references, slugs, `%n` rows, and `#name` entry points.                                                                                                                                                                                                              |
+| `ls [<ref>]`                 | Lists what stands at a place, defaulting to where you stand: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. The operand is `get`'s, less the `#argument` member, and listing a target renumbers the rows, so `cd %n` reaches what it just showed. Rows are numbered, a row that is one of the piece's callables says so, a piece shows the name it carries beside the handle that reaches it, and one screenful is written. `--limit <rows>` overrides the height. |
 | `pwd`                        | The complete address of the place, both dimensions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.                                                                                                                                                                                                                                           |
+| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. `#argument` on a head or a piece segment reads the piece's arguments cell, as in `get .#argument/title` or `get /slugs/board#argument/title`. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.                                                                                                                                                      |
 | `set <ref> <value>`          | Writes a value at a cell, which copies rather than links. The value is JSON, and a bare word is the string it spells. `-` is refused, standard input being the keyboard.                                                                                                                                                                                                                                                                                                                                              |
 | `edit [<ref>]`               | Opens a cell's value in `$EDITOR` and writes back what you save. A value JSON cannot carry is refused before the editor opens, and text that will not parse is refused with the file it is still in.                                                                                                                                                                                                                                                                                                                  |
 | `link <ref> <ref>`           | Writes a reference at the second cell naming the first, `ln -s`'s order. The one spelling that makes a cell read another cell.                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -248,10 +260,10 @@ it was given.
 After the split, a token opening with `-` is an option up to a bare `--`, and
 every other token is an operand. `-` on its own stays an operand, being the
 previous place and the stdin sentinel, and a bare `--` ends the options, so a
-key called `-x` is reached by `cd -- -x` or by the reference a listing prints
-for it. The parse is `cf`'s own — the one a `cf` command reads its flags through
-— so a flag is spelled and refused here as it is on a `cf` command line, and
-`--help` is the option every verb takes.
+key called `-x` is reached by `cd -- -x` or by `./-x`, which is what a listing
+prints for it. The parse is `cf`'s own — the one a `cf` command reads its flags
+through — so a flag is spelled and refused here as it is on a `cf` command line,
+and `--help` is the option every verb takes.
 
 `call` reads that rule the other way, because its operands carry a callable's
 own flags. The parse stops at its first operand, so
@@ -294,15 +306,15 @@ both ends of a `link` are places, `set`'s path is a place and the JSON value
 after it is nothing anything could list, and `call`'s receiver is a place while
 the callable's name after it belongs to that receiver rather than to where you
 stand. What it writes is what `ls` prints for the same row, so a name needing
-quotes arrives quoted and a name the reference has to carry arrives as the
-reference; where several rows agree only as far as a partial that would need
-quoting, nothing is written and you type on. Completing under a place is a read,
-so it runs beside the keys the way a line does: `enter` typed under it is held
-and runs the line it completed, `ctrl-c` cancels it, and a read that failed
-writes nothing rather than saying so. What it completes is the token at the end
-of the line, so a cursor elsewhere leaves the line alone — and the token is the
-one the split reads, so a space you quoted or escaped stays inside its token
-rather than starting a new one.
+quotes arrives quoted and a name a reading would take arrives behind the `.`
+head; where several rows agree only as far as a partial that would need quoting,
+nothing is written and you type on. Completing under a place is a read, so it
+runs beside the keys the way a line does: `enter` typed under it is held and
+runs the line it completed, `ctrl-c` cancels it, and a read that failed writes
+nothing rather than saying so. What it completes is the token at the end of the
+line, so a cursor elsewhere leaves the line alone — and the token is the one the
+split reads, so a space you quoted or escaped stays inside its token rather than
+starting a new one.
 
 Nothing turns a candidate down for its shape. What bounds a completion is which
 rows stand where you stand, so `cd slugs/bo` at a space root writes nothing —

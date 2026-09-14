@@ -47,7 +47,7 @@ import {
   statusLine,
 } from "./page.ts";
 import {
-  type Aimed,
+  type Aim,
   CurrentPlace,
   type FacetPosition,
   type HandleMove,
@@ -397,9 +397,7 @@ export async function aimed(
   if (operand === undefined) {
     return { kind: "place", place: shuttle.place.place, input: false };
   }
-  const aim = shuttle.place.aim(operand, verb);
-  const at = await reading(shuttle, aim.move, verb, deps);
-  return at.kind === "refused" ? at : { ...at, input: aim.input };
+  return await reading(shuttle, shuttle.place.aim(operand, verb), verb, deps);
 }
 
 /** Where a handle's row stands, or the reason it stands nowhere. */
@@ -448,12 +446,6 @@ export function rowFor(shuttle: Shuttle, move: HandleMove): Rowed {
 /** A refusal, which is an arm of every outcome this module has. */
 export type Refusal = { readonly kind: "refused"; readonly reason: string };
 
-/** Where an operand names, or the reason it names nothing to read. */
-type Reading =
-  /** The operand names `place`. */
-  | { readonly kind: "place"; readonly place: Place }
-  | Refusal;
-
 /**
  * Where an operand points and which of the piece's two cells it names, or the
  * reason it names nothing to read.
@@ -468,33 +460,37 @@ export type Aiming =
   | Refusal;
 
 /**
- * Helper for {@link get}, which finishes `move` without moving, `verb` naming
+ * Helper for {@link aimed}, which finishes `aim` without moving, `verb` naming
  * the verb whose line it came off.
  *
- * A space written as a name is settled the way {@link landing} settles one. A
- * `#name` target is not: `cf cell get` takes no such target and `cf wish`
- * does, and a data verb here means what it means there, so the refusal names
- * the verb that reads one. Resolving it here would answer a second way as
- * well as a second time — `wish` hands back what the fabric resolved with its
- * handles written as markers, and a cell read of the same address hands back
- * the raw value.
+ * A space written as a name is settled the way {@link landing} settles one,
+ * and keeps the selection its reference carried. A handle is looked up, and
+ * which cell it selects comes back with the row it reached, since a member on
+ * a handle's head, or on a piece segment the path after it enters, is read
+ * against that row. A `#name` target is not settled: `cf cell get` takes no
+ * such target and `cf wish` does, and a data verb here means what it means
+ * there, so the refusal names the verb that reads one. Resolving it here would
+ * answer a second way as well as a second time — `wish` hands back what the
+ * fabric resolved with its handles written as markers, and a cell read of the
+ * same address hands back the raw value.
  *
- * That is the `#argument` suffix's opposite and for a reason that is not
- * arbitrary. The suffix says which of a piece's two cells to read and the
- * place it rides is reachable either way, so refusing it would put a cell out
+ * That is the `#argument` member's opposite and for a reason that is not
+ * arbitrary. The member says which of a piece's two cells to read and the
+ * piece it rides is reachable either way, so refusing it would put a cell out
  * of reach; a `#name` is a whole target with a verb of its own, so taking it
  * would put a second answer in reach. The two share the character and nothing
  * else (`docs/plans/shuttle/grammar.md`).
  */
 async function reading(
   shuttle: Shuttle,
-  move: Aimed,
+  aim: Aim,
   verb: string,
   deps: VerbDeps,
-): Promise<Reading> {
+): Promise<Aiming> {
+  const move = aim.move;
   switch (move.kind) {
     case "moved":
-      return { kind: "place", place: move.place };
+      return { kind: "place", place: move.place, input: aim.input };
     case "refused":
       return move;
     case "wish":
@@ -508,7 +504,10 @@ async function reading(
       const named = await connectedSpace(shuttle, move.name);
       return named.kind === "refused" ? named : await reading(
         shuttle,
-        shuttle.place.resolveNamedSpace(move, named.space),
+        {
+          input: aim.input,
+          move: shuttle.place.resolveNamedSpace(move, named.space),
+        },
         verb,
         deps,
       );
@@ -543,10 +542,10 @@ export type Named =
  *
  * The comparison is exact, and that is not an approximation of the derivation
  * but its own answer. A named space's key hangs off the name's bytes and
- * nothing else, so two names denote one space when they are one string; and
- * the reference reading has already put the operand's name in the form the
- * connection recorded, `decodeJsonPointer` having read back the `~1` a name
- * holding the separator is written with.
+ * nothing else, so two names denote one space when they are one string. The
+ * reference reader reads the space slot as written, with no escape undone —
+ * the grammar admits no separator in a space name — so a name is compared in
+ * the characters the operand wrote.
  *
  * A session opened by a DID recorded no name, and then there is no answer to
  * give: what the name denotes would take the derivation, and whether it

@@ -96,7 +96,7 @@ export interface ListingRow {
   /**
    * The operand `cd` takes to reach it, as `cd` reads it, and absent where
    * `operandForChild` offers none. Absent is the narrower claim it makes:
-   * that neither the name nor the reference names the row, not that nothing
+   * that no spelling `operandForChild` tries names the row, not that nothing
    * reaches it.
    *
    * It is the decoded operand rather than the quoted token a line writes it

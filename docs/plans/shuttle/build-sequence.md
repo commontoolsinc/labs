@@ -122,13 +122,14 @@ Landed:
 - **B1a — the place value and its owner module**
   (`packages/cli/lib/shuttle/place.ts`). The whole pair, position *and* scope,
   because scope is half of what a place is (decision 20): `cd` over relative
-  segments, `..`, `-`, `/`, `.` and the `.@scope` qualifier, and rooted and
-  complete
+  references read by the shared reader — a `.` or `..` head with its member
+  and qualifier, and a literal path — `-`, `/`, and rooted and complete
   references; the `slugs/` and `pieces/` facets a space root reserves, and
   nothing else there; the rendering `pwd` prints of both halves, the position
   line carrying the scope so that it denotes one cell wherever it is read; and
-  the refusals — a reference carrying `#argument`, a `#` buried in a bare
-  piece id, a part no rendering would name back, and a move into a space other
+  the refusals — a move selecting the `#argument` member, a member that is
+  not one on a piece segment, a part no rendering would name back, and a move
+  into a space other
   than the connected one, which is the gate a home-anchored entry point meets
   once resolution hands it a space. Two operands come back for the connection
   rather than moving: a `#name` wish target, which B1b resolves, and a
@@ -190,22 +191,20 @@ Landed:
 
   The slice settles the two questions held for it, both of them recorded in
   [`grammar.md`](grammar.md). A quote reaches no reading, so a name whose own
-  characters are readings prints as the reference that names it rather than
-  as a quoted spelling of itself — which is what makes every name a listing
+  characters are readings prints as the operand that reaches it — behind the
+  `.` head, or with its separator escaped — rather than as a quoted spelling
+  of itself — which is what makes every name a listing
   prints one `cd` takes back to that row, and leaves the split returning plain
   strings. And every door holds a piece to the slug and handle vocabularies,
   `validatePieceSegment` being called rather than copied, so a walk, a resolved
   target and a settled move hold a piece to what a reference holds one to, and
   give its reason. What the first ruling costs is one shape: a key whose first
-  character is `#` has no direct spelling — neither the name on its own nor a
-  reference names it — and a listing prints no name for it. Some multi-segment
-  operand does reach it, `#` being data in a segment that names a data key,
-  but a route is not a name; [`grammar.md`](grammar.md) carries the ruling and
-  characterizes the routes no further. Which keys are spelled through one door
-  and
-  not the other is pinned case by case in
-  `packages/cli/test/shuttle-place.test.ts`, so the record moves when the behavior
-  does and not otherwise.
+  character is `#` is not reached by its name on its own, which is a wish
+  target, so a listing prints it behind the `.` head, `./#tag`;
+  [`grammar.md`](grammar.md) carries the ruling. Which keys are spelled through
+  which door is pinned case by case in
+  `packages/cli/test/shuttle-place.test.ts`, so the record moves when the
+  behavior does and not otherwise.
 
 - **B1b (slice 4) — the verbs** (`packages/cli/lib/shuttle/verbs.ts`). A line
   splits, its first token names a verb, and the tokens after it are that
@@ -229,8 +228,8 @@ Landed:
   whether it names this one, and the recorded name answers that — the
   comparison being exact is not an approximation of the key derivation but its
   own answer, since a named space's key hangs off the name's bytes and the
-  reference reading has already read back the `~1` a name holding the
-  separator is written with. A session opened by a DID recorded no name and is
+  reference reader reads the space slot as written, the grammar admitting no
+  separator in a space name. A session opened by a DID recorded no name and is
   refused, which is the honest arm rather than an error path: whether a name
   denotes that space is exactly what it cannot say, and the refusal names
   starting against that name as what would. What `cd` asks a wish through is
@@ -238,19 +237,19 @@ Landed:
   every seam here is.
 
   `get`'s operand goes through the door `cd`'s goes through *plus the
-  `#argument` suffix that door turns down*, read from where shuttle stands
+  `#argument` member that door turns down*, read from where shuttle stands
   rather than from a standing built for the occasion, which is what makes the
   two agree about `..`. `CurrentPlace.aim` is that door and
   `CurrentPlace.resolveNamedSpace` the settling twin beside it. A place is
   result-rooted and cannot stand in an arguments cell, which is why `cd`
-  refuses the suffix in every spelling; reading one is a different act, and
-  `get topics/3#argument` is how an operand asks for it.
+  refuses the member in every spelling; reading one is a different act, and
+  `get .#argument/title` is how an operand asks for it.
 
   The one spelling `get` does not take is a `#name` target: `cf cell get`
   takes none and `cf wish` does, and a data verb here means what it means
   there. The two `#` readings pull opposite ways for a reason that is not
-  arbitrary — the suffix says which of a piece's two cells to read and its
-  place is reachable either way, so refusing it would put a cell out of reach,
+  arbitrary — the member says which of a piece's two cells to read and its
+  piece is reachable either way, so refusing it would put a cell out of reach,
   while a `#name` is a whole target with a verb of its own that answers a
   second way as well as a second time, so taking it would put a second answer
   in reach.
@@ -332,8 +331,8 @@ Landed:
 
   What the rule costs is one shape, recorded in [`grammar.md`](grammar.md)
   beside the readings it joins: a key whose name opens with `-` is not reached
-  by that name standing alone, so a listing prints the reference that names it,
-  exactly as it does for a key called `..`. The typed spelling stays open —
+  by that name standing alone, so a listing prints it behind the `.` head,
+  `./-x`, as it does for a key called `..`. The typed spelling stays open —
   `cd -- -x` reaches such a key — and what a listing owes is the name rather
   than the route. `operandForChild` asks the option grammar rather than making
   the move, that reading being one layer above a place.
@@ -587,9 +586,9 @@ reaches its v1 surface: every dimension printed, the light ones settable
 One question B4 settles rather than inherits: what a rendering carries when
 it is not going to a terminal. Only part of the treatment of a control
 character is at stake, and [`grammar.md`](grammar.md) is where the division
-is. An empty segment, one ending in whitespace, and one holding a newline
-are refused for what a rendering of them reads back as, which is a fact
-about addresses: it holds in a file and a pipe as readily as on a screen,
+is. A segment holding a newline is refused for what a rendering of it reads
+back as, which is a fact about addresses: it holds in a file and a pipe as
+readily as on a screen,
 and B4 changes nothing about it. The rest of the class is refused because a
 terminal acts on it, the round trip there being exact, and a message is
 glyphed for that same reason — those two are what a second destination puts

@@ -358,7 +358,7 @@ async function cd(
  * where it names nothing, and writes as much of it as a page holds.
  *
  * The operand is read through the door `cd` reads one through, plus the
- * `#argument` suffix that door turns down: standing in an arguments cell is
+ * `#argument` member that door turns down: standing in an arguments cell is
  * what a result-rooted place cannot do, and reading one is a different act
  * that `cf cell get` performs too.
  *
@@ -463,7 +463,7 @@ function help(_shuttle: Shuttle, line: VerbLine): Outcome {
  * would be rows shown that the next command will not take, which is the one
  * thing a numbered listing may not be.
  *
- * The `#argument` suffix is refused. It selects one of a piece's two cells
+ * The `#argument` member is refused. It selects one of a piece's two cells
  * and a place holds no such selection, so a listing of an arguments cell
  * would number rows whose handles walk the result — the numbers not binding
  * again, by a route the operand rather than the listing opened.
@@ -493,7 +493,7 @@ async function ls(
   if (at.kind === "refused") return at;
   if (at.input) {
     return refuse(
-      `\`${ARGUMENT_SUFFIX}\` selects one of a piece's two cells, and a ` +
+      `\`${ARGUMENT_MEMBER}\` selects one of a piece's two cells, and a ` +
         `listing's rows are reached from the place they were listed at, ` +
         `which carries no such selection. \`get\` reads that cell.`,
     );
@@ -641,8 +641,8 @@ const WHOLE_PIECE_REFUSAL =
  * names, and says where it landed.
  *
  * The path is read through the door `get` reads one through, the `#argument`
- * suffix included, so `set title#argument x` writes the arguments cell exactly
- * as `--input` does for `cf cell set`.
+ * member included, so `set .#argument/title x` writes the arguments cell
+ * exactly as `--input` does for `cf cell set`.
  *
  * The write refuses to land on a whole cell, and the refusal is written twice
  * because the question is asked twice. An operand that reached a piece and
@@ -841,9 +841,9 @@ async function edit(
  * The order is `ln -s`'s and the FUSE layout's: what is pointed at comes
  * first, and where the pointer lands comes second.
  *
- * Neither endpoint takes the `#argument` suffix, which is `parseLink`'s rule
+ * Neither endpoint takes the `#argument` member, which is `parseLink`'s rule
  * and not a second one — a link endpoint is a cell of a piece's result, and
- * the suffix selects between a piece's two cells rather than naming a position
+ * the member selects between a piece's two cells rather than naming a position
  * inside one.
  */
 async function link(
@@ -1178,9 +1178,9 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "does not hold, and a path\nthat is not there are each refused here " +
       "rather than one command later, the\npath with the keys that are. A " +
       "server that does not answer the handle\nlookup leaves that one " +
-      "unsettled.\n\nA target carrying `#argument` is refused: a place " +
-      "roots at a result, and\n`get <ref>#argument` is how an operand reads " +
-      "a piece's arguments cell.",
+      "unsettled.\n\nA target selecting the `#argument` member is refused: " +
+      "a place roots at a\nresult, and `get .#argument/<path>` is how an " +
+      "operand reads a piece's\narguments cell.",
   }],
   ["describe", {
     run: describe,
@@ -1216,8 +1216,10 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     usage: "get [<ref>]",
     summary: "Reads the value at a cell, defaulting to where you stand.",
     detail: "The operand takes everything `cd` takes, plus the `#argument` " +
-      "suffix\n`cd` turns down, which reads the piece's arguments cell " +
-      "rather than its\nresult. A `#name` entry point is the one spelling " +
+      "member\n`cd` turns down, which reads the piece's arguments cell " +
+      "rather than its\nresult: `.#argument/title` from inside a piece, " +
+      "and\n`/slugs/board#argument/title` from anywhere. A `#name` entry " +
+      "point is the one spelling " +
       "it does not take,\n`wish` being the verb that reads one.\n\nA space " +
       "root and a facet hold no value of their own and are refused;\n`ls` " +
       "lists what stands inside them.\n\nThe value is written as JSON, one " +
@@ -1257,8 +1259,8 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "is the one spelling that makes a cell read another cell. `set` and " +
       "`edit`\ncopy a value, and which of the three a line is doing is " +
       "visible on the\nline.\n\nNeither endpoint takes the `#argument` " +
-      "suffix: a link endpoint is a cell of\na piece's result, and the " +
-      "suffix selects between a piece's two cells.",
+      "member: a link endpoint is a cell of\na piece's result, and the " +
+      "member selects between a piece's two cells.",
   }],
   ["ls", {
     run: ls,
@@ -1267,7 +1269,7 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     usage: "ls [<ref>]",
     summary: "Lists what stands at a place, defaulting to where you stand.",
     detail: "The operand names the place to list, and is `get`'s operand " +
-      "less the\n`#argument` suffix: a place carries no selection between a " +
+      "less the\n`#argument` member: a place carries no selection between a " +
       "piece's two\ncells, and a row is reached from the place it was " +
       "listed at. A space\nroot and a facet are places to list, where `get` " +
       "turns them down as\nholding no value. Nothing moves: listing a child " +
@@ -1317,8 +1319,8 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     },
     usage: "set <ref> <value>",
     summary: "Writes a value at a cell, which copies rather than links.",
-    detail: "The path takes everything `get` takes, the `#argument` suffix " +
-      "included, so\n`set title#argument x` writes the arguments cell as " +
+    detail: "The path takes everything `get` takes, the `#argument` member " +
+      "included, so\n`set .#argument/title x` writes the arguments cell as " +
       "`--input` does for\n`cf cell set`.\n\nThe value is JSON, and a " +
       "bare word is the string it spells: `set title milk`\nwrites " +
       '`"milk"`. A value opening the way JSON opens one and then ' +
@@ -1900,17 +1902,30 @@ function confirmedKey(place: PiecePlace): string {
  * the key is not there, and here is what is — in the words the rest of the
  * shell refuses a line in, and as a refusal rather than as a failure, because
  * a place that is not there is a fact about the operand.
+ *
+ * The empty key is named in words rather than quoted, a pair of backticks
+ * around nothing being no name a reader can see. Where the operand ends in the
+ * separator, that separator is what named it, which a person typing a path
+ * the way a directory is typed does not mean; so the sentence says so, and
+ * names the operand without it, which reaches the cell above.
  */
 function noSuchKey(
   operand: string,
   segment: string,
   keys: readonly string[],
 ): string {
-  return `\`${operand}\` reaches no cell: \`${segment}\` is no key of the ` +
-    `cell above it, ` +
+  const trailing = segment === "" && operand.endsWith("/");
+  const named = segment !== ""
+    ? `\`${segment}\` is`
+    : trailing
+    ? "the trailing `/` names the empty key, which is"
+    : "the empty key is";
+  return `\`${operand}\` reaches no cell: ${named} no key of the cell above ` +
+    `it, ` +
     (keys.length === 0
       ? `which holds no keys at all.`
       : `whose keys are ${listed(keys)}.`) +
+    (trailing ? ` \`${operand.slice(0, -1)}\` names the cell above it.` : "") +
     scopeMoveHint(operand);
 }
 
@@ -2070,7 +2085,7 @@ async function resolveTarget(
   const carried = reference.scope !== undefined
     ? `an \`@${reference.scope}\` qualifier`
     : reference.input === true
-    ? "the `#argument` suffix"
+    ? "the `#argument` member"
     : undefined;
   if (carried !== undefined) {
     return {
@@ -2208,13 +2223,13 @@ function wroteAt(
     kind: "text",
     text: `Wrote \`${escapeControlCharacters(landed.path.join("/"))}\` on ` +
       `\`${escapeControlCharacters(landed.piece)}${
-        input ? ARGUMENT_SUFFIX : ""
+        input ? ARGUMENT_MEMBER : ""
       }\`.`,
   };
 }
 
-/** What an operand writes to select a piece's arguments cell. */
-const ARGUMENT_SUFFIX = "#argument";
+/** The member an operand writes to select a piece's arguments cell. */
+const ARGUMENT_MEMBER = "#argument";
 
 /** Where a write is aimed: a cell of a piece, and which of the piece's two. */
 type Writable =
@@ -2267,7 +2282,7 @@ async function writable(
 /**
  * Helper for {@link link}, which is the endpoint `operand` names.
  *
- * It is {@link writable} plus the suffix refusal, which is `link`'s alone: a
+ * It is {@link writable} plus the member refusal, which is `link`'s alone: a
  * link endpoint is a cell of a piece's result, so the selection between a
  * piece's two cells has nothing to select there.
  */
@@ -2282,7 +2297,7 @@ async function endpoint(
     ? refuse(
       `\`${escapeControlCharacters(operand)}\` selects a piece's arguments ` +
         `cell, and a link endpoint is a cell of a piece's result. Write the ` +
-        `endpoint without the \`${ARGUMENT_SUFFIX}\` suffix.`,
+        `endpoint without the \`${ARGUMENT_MEMBER}\` member.`,
     )
     : at;
 }
@@ -2518,7 +2533,7 @@ type Receiving =
  * names, `verb` naming the verb for the refusals to open with.
  *
  * A container holds no callables and no value, so it is refused; and the
- * `#argument` suffix is refused because a piece's callables are the piece's
+ * `#argument` member is refused because a piece's callables are the piece's
  * rather than one of its two cells'.
  */
 async function receiver(
@@ -2531,9 +2546,9 @@ async function receiver(
   if (at.kind === "refused") return at;
   if (at.input) {
     return refuse(
-      `\`${ARGUMENT_SUFFIX}\` selects one of a piece's two cells, and a verb ` +
+      `\`${ARGUMENT_MEMBER}\` selects one of a piece's two cells, and a verb ` +
         `belongs to the piece rather than to either of them. Write the piece ` +
-        `without the suffix.`,
+        `without the member.`,
     );
   }
   return pieceAt(at.place, verb);
@@ -2665,7 +2680,8 @@ async function dispatched(
   // one ends at a cell inside the row, and a cell is a receiver rather than a
   // verb, so it takes the name in the next operand like any other reference.
   const aim = shuttle.place.aim(first, "call").move;
-  const carried = aim.kind === "handle" && aim.rest === ""
+  const carried = aim.kind === "handle" && aim.path.length === 0 &&
+      aim.member === undefined && aim.scope === undefined
     ? carriedName(shuttle, aim.handle)
     : undefined;
   if (carried?.kind === "refused") return carried;
