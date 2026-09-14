@@ -159,7 +159,7 @@ export const SCHEMA_META_MEMBER = "schema";
 
 /** The form a document's {@link SCHEMA_META_MEMBER} takes. */
 export type SchemaMetaForm =
-  /** No member, or a member holding `undefined`/`null`. */
+  /** No member, or a member holding `undefined`. */
   | { readonly kind: "absent" }
   /** A self-contained schema: no `cid:` reference anywhere in it. */
   | { readonly kind: "inline"; readonly schema: JSONSchema }
@@ -170,7 +170,7 @@ export type SchemaMetaForm =
     readonly taggedHash: string;
     readonly defName?: string;
   }
-  /** A `cid:` reference in any other position: nested, or with siblings. */
+  /** A non-schema value, or a `cid:` reference nested or with siblings. */
   | { readonly kind: "malformed"; readonly reason: string };
 
 /**
@@ -201,7 +201,7 @@ export function classifySchemaMeta(document: unknown): SchemaMetaForm {
  * that has the member's value rather than the document around it.
  */
 export function classifySchemaMetaValue(schema: unknown): SchemaMetaForm {
-  if (schema === undefined || schema === null) return { kind: "absent" };
+  if (schema === undefined) return { kind: "absent" };
   if (typeof schema === "boolean") return { kind: "inline", schema };
   if (!isObjectNotArray(schema)) {
     return {

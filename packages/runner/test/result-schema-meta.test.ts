@@ -238,6 +238,15 @@ describe("result-schema-meta", () => {
   it("classifies the member's grammar", () => {
     const ref = "cid:fid1:grammar-target";
     expect(classifySchemaMetaValue(undefined)).toEqual({ kind: "absent" });
+    expect(classifySchemaMetaValue(null)).toEqual({
+      kind: "malformed",
+      reason: "the member holds a value that is not a schema",
+    });
+    const nullableDefault = { type: "null", default: null } as const;
+    expect(classifySchemaMetaValue(nullableDefault)).toEqual({
+      kind: "inline",
+      schema: nullableDefault,
+    });
     expect(classifySchemaMetaValue({ $ref: ref })).toEqual({
       kind: "reference",
       ref,
@@ -296,6 +305,12 @@ describe("result-schema-meta", () => {
     expect(() => recomposeSchemaRefs(hybrid, lookupSchemaDocument)).toThrow(
       MalformedSchemaMetaError,
     );
+    expect(() => inlineResultSchemaMeta(null)).toThrow(
+      MalformedSchemaMetaError,
+    );
+    expect(() => collectSchemaMetaRefHashes({ schema: null })).toThrow(
+      MalformedSchemaMetaError,
+    );
     // The inline and absent forms pass straight through.
     expect(inlineResultSchemaMeta(undefined)).toBeUndefined();
     expect(inlineResultSchemaMeta(resultSchema)).toBe(resultSchema);
@@ -311,6 +326,8 @@ describe("result-schema-meta", () => {
       tx,
     );
     cell.set({ title: "Ada", detail: { count: 1 } });
+    expect(() => writeResultSchemaMeta(cell, null as unknown as JSONSchema))
+      .toThrow(MalformedSchemaMetaError);
     expect(() =>
       cell.setMetaRaw(
         "schema",

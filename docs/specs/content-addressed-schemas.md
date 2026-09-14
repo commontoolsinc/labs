@@ -315,6 +315,9 @@ with a grammar of exactly two forms:
 - **Reference**: a single-member `{ "$ref": "cid:<hash>" }` root, the
   `#/$defs/<name>` fragment form included.
 
+An omitted member or `undefined` means no schema metadata. A member holding
+`null` is malformed and is refused at the same write and read boundaries.
+
 ```jsonc
 {
   "value": { "items": [] },
