@@ -22,9 +22,8 @@ import {
 } from "../src/cfc/policy.ts";
 import { buildCfcTrustConfig, createTrustResolver } from "../src/cfc/trust.ts";
 
-// Epic B4 (docs/history/plans/cfc-future-work-implementation.md §3): the guarded
-// rewrite + fueled fixpoint (spec §4.4.5). Property tests (i)-(vi) from the
-// plan, plus the worked examples the calculus exists for.
+// Exchange-rule evaluation: the guarded rewrite + fueled fixpoint (spec
+// §4.4.5). Property cases, plus the worked examples the calculus exists for.
 
 const ALICE = "did:key:alice";
 const BOB = "did:key:bob";
@@ -442,8 +441,8 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       // A Concept guard is checked on type + trust closure only, so extra
       // constraint fields would be silently dropped — an author's narrow guard
       // `{type:Concept, uri:C, subject:X}` would fire as broadly as the bare
-      // concept (codex/cubic P2 on #4564). It must NOT fire even when C is
-      // satisfied; only the exact `{type, uri}` shape is a live guard.
+      // concept. It must NOT fire even when C is satisfied; only the exact
+      // `{type, uri}` shape is a live guard.
       const concept = "https://commonfabric.org/cfc/concepts/age-rounding";
       const codeAtom = {
         type: "https://commonfabric.org/cfc/atom/CodeHash",
@@ -506,8 +505,8 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       // re-location (the alternative already removed), and the singleton clause
       // reaches the `clauseIndex >= length` guard (its clause spliced). Each
       // clause must lose ONLY the target alternative and no sibling is
-      // corrupted — the duplicate/stale drop matches no-op (cubic P2 on #4564:
-      // the corruption is unreachable, so the guards suffice; no dedup added).
+      // corrupted — the duplicate/stale drop matches no-op (the corruption is
+      // unreachable, so the guards suffice without a dedup).
       const detectedA = {
         type: "https://example.com/atoms/DetectedBy",
         id: "a",
@@ -644,7 +643,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       // U+1F4C6 (128198), so the BMP rule fires first. JS `<` compares UTF-16
       // code UNITS, where the astral id's leading surrogate 0xD83D (55357) is
       // BELOW 0xFFF0 — the OPPOSITE order. Each rule adds to its own clause, so
-      // the firings sequence exposes the iteration order (codex P2 on #4564).
+      // the firings sequence exposes the iteration order.
       const bmpId = "rule-￰";
       const astralId = "rule-\u{1F4C6}";
       const markerA = { type: "https://example.com/atoms/MarkerA" };
@@ -815,7 +814,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
     });
   });
 
-  describe("label-carried selection (B2b, CT-1874)", () => {
+  describe("label-carried selection", () => {
     const MALLORY = "did:key:mallory";
     const SECRET = "https://example.com/atoms/Secret";
     const secretBob = { type: SECRET, subject: BOB };
@@ -864,7 +863,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       ])).toBe(true);
     });
 
-    it("refuses the CT-1874 laundering trace: a policy referenced in clause 0 never rewrites sibling clause 1", () => {
+    it("never lets a policy referenced in clause 0 rewrite its sibling clause 1", () => {
       // Mallory's policy is admitted as an ALTERNATIVE of clause 0 by that
       // clause's author. Its rule targets Secret(?x) — present only in
       // clause 1, Bob's independent requirement. Firing there would be a

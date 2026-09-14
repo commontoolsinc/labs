@@ -1,8 +1,8 @@
-// CT-1770: FabricPrimitive values (e.g. FabricBytes) must be updatable in
-// place. Before the fix, the storage no-op gates and the reactivity
-// change-detection compared two distinct same-class FabricPrimitives via
-// `deepEqual`, which sees zero enumerable own-props and reports them equal —
-// so the write was diffed away and reactive consumers never re-ran.
+// FabricPrimitive values (e.g. FabricBytes) must be updatable in place. The
+// storage no-op gates and the reactivity change-detection must not compare
+// two distinct same-class FabricPrimitives via `deepEqual`, which sees zero
+// enumerable own-props and reports them equal — that would diff the write
+// away and reactive consumers would never re-run.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -19,7 +19,7 @@ const space = signer.did();
 const bytesOf = (cell: { get(): { bytes: { slice(): Uint8Array } } }) =>
   Array.from(cell.get().bytes.slice());
 
-describe("FabricPrimitive cell updates (CT-1770)", () => {
+describe("FabricPrimitive cell updates", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;

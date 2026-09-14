@@ -40,7 +40,7 @@
  */
 
 import { ValidationError } from "@cliffy/command";
-import { FabricSpecialObject } from "@commonfabric/data-model";
+import { isFabricSpecialObject } from "@commonfabric/data-model";
 import { isDID } from "@commonfabric/identity";
 import {
   resolvePieceReference,
@@ -2359,7 +2359,7 @@ function unwritableInJson(
     return { what: numberIs(value), at };
   }
   if (value === null || typeof value !== "object") return undefined;
-  if (value instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(value)) {
     return { what: `a \`${classOf(value)}\``, at };
   }
   if (seen.has(value)) return { what: "a cycle", at };

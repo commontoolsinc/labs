@@ -65,7 +65,6 @@ import type {
   CfcReadOnExceed,
   CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
-import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import {
   type NameSchema,
@@ -89,6 +88,7 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
+import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import {
   assertSuppliedLinkSchemasCompatible,
   assertWritablePiecePath,
@@ -166,47 +166,6 @@ function filterOutCell(
     !piece.resolveAsCell().equals(resolvedTarget)
   );
 }
-
-/**
- * The migration token in its FRAMED reason position — `: <token>: ` — the
- * exact shape the CFC prepare catch emits (`${token}: ${message}` recorded as
- * a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
- * `includes(token)` would also match the token appearing incidentally inside
- * an UNRELATED, user-influenced error — e.g. an ordinary incompatible-type
- * merge failure at a property path literally named
- * `/cfc-schema-migration-incompatible` — and wrongly authorize a root
- * replacement for a non-additive incompatibility. The `: … : ` framing cannot
- * be produced by a path or value that merely contains the token string.
- */
-const FRAMED_MIGRATION_REASON =
-  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
-
-/**
- * Reports whether a cold-start setup repair failed specifically because the
- * CFC SCHEMA MIGRATION rejected the commit — the pinned pattern loads but
- * cannot migrate preserved input or unclassified document data onto a
- * now-required field that carries no default. Generated result fields are not
- * in this class: pattern setup materializes them. This is ONE of the two
- * repair-failure classes the runnability backstop
- * (`PiecesController.#healDefaultRootByRollForward`) acts on — the other is a
- * refused stored argument ({@link isStoredArgumentSchemaRefusal}); every other
- * failure stays fail-closed.
- *
- * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
- * runner emits it for prepared-digest races, unprepared transactions, and
- * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
- * which are repaired by repointing the root's pattern identity. So the check
- * requires the machine-stable migration token the CFC prepare tags onto this
- * class (`migration-reason.ts`), and only in its framed position
- * ({@link FRAMED_MIGRATION_REASON}). Matching a token in the message — not the
- * error class — is what survives the plain-`Error` re-wrap the runner applies
- * at its setup-commit boundary (`runner.ts`), keeping producer and consumer in
- * lockstep across that boundary and across packages.
- */
-const isCfcMigrationRejection = (error: unknown): boolean =>
-  error instanceof Error &&
-  error.message.startsWith("CFC enforcement rejected commit") &&
-  error.message.includes(FRAMED_MIGRATION_REASON);
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -1507,6 +1466,15 @@ export class PiecesController<T = unknown> {
       repository?: string;
       /** Fresh source lifecycle revision written atomically with setup. */
       sourceTransition: PieceSourceTransition;
+      /**
+       * The update as a serving runtime performs it on `actingUser`'s
+       * behalf: the transaction carries that principal's trust snapshot
+       * and commits directly to the store rather than sealing into the
+       * wave, the piece is not started, and the post-commit refresh is
+       * left to the serving loop, so the returned cell view is the one the
+       * commit itself reconciled.
+       */
+      served?: { actingUser: string };
     },
   ): Promise<{
     /** Cell view reconciled to the pattern current after post-commit work. */
@@ -1528,8 +1496,16 @@ export class PiecesController<T = unknown> {
         pieceSourceTransition: options.sourceTransition,
         validateCurrentArgument: options.validateCurrentArgument,
         validateArgumentLinks: options.validateArgumentLinks,
+        ...(options.served === undefined ? {} : {
+          directCommit: true,
+          start: false,
+          cfcTrustSnapshot: this.runtime.trustSnapshotForPrincipal(
+            options.served.actingUser,
+          ),
+        }),
       },
     );
+    if (options.served !== undefined) return result;
     try {
       await this.syncPattern(result.cell);
       await this.getResult(result.cell).pull();
@@ -2160,17 +2136,18 @@ export class PiecesController<T = unknown> {
         () => this.startPiece(rootToStart),
       );
     } catch (startError) {
-      // Cold-start setup repair. A source transition moves patternIdentity
-      // WITHOUT running the setup phase,
-      // and Runner.start() of a not-running piece instantiates the stored
-      // identity directly — also without setup. A root whose identity moved
-      // while it was not running (the bricked-space heal: no watcher existed
-      // to swap it in place) therefore boots over a doc that never
-      // materialized the pattern's internal cells — handler
-      // `{ "$stream": true }` markers included — and dies at instantiation
-      // ("Handler used as lift", the 2026-07-22 estuary failure). This also
-      // covers docs ALREADY left in that state by an earlier session: their
-      // identity compares current, so no further swap will ever fire.
+      // Cold-start setup repair. Two paths move patternIdentity WITHOUT
+      // running the setup phase: this method's own roll-forward heal when
+      // the materialize after its identity swap fails, and the runner's
+      // pattern watcher rolling an unloadable pointer back to the running
+      // pattern or its producer. Runner.start() of a not-running piece
+      // instantiates the stored identity directly — also without setup. A
+      // root whose identity moved while it was not running therefore boots
+      // over a doc that never materialized the pattern's internal cells —
+      // handler `{ "$stream": true }` markers included — and dies at
+      // instantiation ("Handler used as lift"). This also covers docs ALREADY
+      // left in that state by an earlier session: their identity compares
+      // current, so no further swap will ever fire.
       //
       // run() (setup + start) is the sanctioned repair. With an unchanged
       // pattern pointer the setup phase is near-idempotent: it materializes
@@ -2451,7 +2428,7 @@ export class PiecesController<T = unknown> {
         { cause },
       );
 
-    // Fetch + compile the official source, mirroring pattern-updater's #check.
+    // Fetch + compile the official source.
     // Force ETag revalidation (`cache: "no-cache"`): the roll-forward exists to
     // ESCAPE a stale pinned pattern, so compiling a stale HTTP-cached source
     // would defeat the heal — it could "roll forward" to the same aged bytes.
@@ -2461,9 +2438,7 @@ export class PiecesController<T = unknown> {
     // Resolve against the host that actually SERVES this space, not the global
     // apiUrl. A mapped space is served by its own host (`mappedHostFor`); the
     // system pattern must be fetched and compiled from there, or a mapped space
-    // could roll forward onto the WRONG host's system pattern. `hostForSpace`
-    // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
-    // uses for its own roll-forward.
+    // could roll forward onto the WRONG host's system pattern.
     const officialUrl = patternSourceUrl(
       officialUrlPath,
       runtime.hostForSpace(space),
@@ -2499,7 +2474,7 @@ export class PiecesController<T = unknown> {
     // artifact under an obsolete/other symbol (e.g. a persisted export that is
     // no longer `default`) is NOT already-official — rolling it forward to the
     // official `default` entry is exactly the recovery, so it must not
-    // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
+    // short-circuit here.
     const alreadyOfficial = officialRef.identity === pinnedRef.identity &&
       officialRef.symbol === pinnedRef.symbol;
     if (alreadyOfficial && reason === "unrunnable") {
@@ -2523,11 +2498,11 @@ export class PiecesController<T = unknown> {
     // Precondition guard (fail-closed): re-read the root's identity INSIDE the
     // transaction and proceed only if it still equals the pinned ref we
     // diagnosed. `editWithRetry` reruns this callback against fresh state on
-    // conflict, so without the guard a concurrent heal (another boot, the
-    // pattern updater) that already repointed the root would be blindly
-    // clobbered by our stale `officialRef`. Returning `false` aborts the write
-    // without committing — precedent: pattern-updater's `stillMatches`/
-    // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    // conflict, so without the guard a concurrent repoint (another boot's
+    // heal, a source transition) that already moved the root would be blindly
+    // clobbered by our stale `officialRef`. Returning `false` before anything
+    // is staged commits a transaction with no writes; `result.ok === false`
+    // (no error) then means "superseded".
     if (alreadyOfficial) {
       // Nothing to swap: the root already names the entry the official source
       // compiles to, and that source has just been compiled into this space.

@@ -1117,15 +1117,20 @@ export class Scheduler {
    * root. Every NARROWED node whose demand roots intersect `rootIds` is
    * marked invalid and queued, with its per-instance record KEPT: only
    * the arriving principal's instances are not clean, so only those run
-   * (B7 — the siblings stay current). A node that has not narrowed needs
-   * nothing (its one output is shared); a node that never ran will run
-   * for everyone when demanded. Returns the number of nodes re-armed.
+   * (B7 — the siblings stay current). A node that ran with demanders and
+   * did not narrow needs nothing (its one output is shared). A node that
+   * ran with NO demander reachable — the wave-level fallback, before the
+   * first demand reached its roots — has no fan-out record and no known
+   * scope, so it re-arms too: its next run is the probe that learns
+   * whether it narrows for the arriving principal. A node that never ran
+   * has no fan-out record either and is left alone: whether it runs is the
+   * pull scheduler's demand decision, and its first run is that probe
+   * whenever it comes. Returns the number of nodes re-armed.
    */
   invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
     for (const record of this.#nodes.nodes()) {
-      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
       const demandRootIds = identity?.demandRootIds ??
@@ -1134,6 +1139,9 @@ export class Scheduler {
           : undefined);
       if (demandRootIds === undefined) continue;
       if (!demandRootIds.some((id) => roots.has(id))) continue;
+      if (record.fanOut === undefined) {
+        if (record.status === "never-ran") continue;
+      } else if (!record.fanOut.narrowed) continue;
       this.#markActionInvalid(record.action, undefined, {
         fanOutInstances: "keep",
       });
@@ -3066,6 +3074,10 @@ export class Scheduler {
       ]),
     );
     this.#headEventLoadPark = { eventId: event.id, keys, generations };
+    logger.debug("event-load-park", () => [
+      `event ${event.id} parks on ${keys.length} loading document(s)`,
+      keys,
+    ]);
     const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
       Promise.resolve();
     settled.then(

@@ -53,36 +53,74 @@ export function sortAndCompactPaths(
   // NAME as before (byte-identical ordering and compaction OFF).
   const instanceOf = (address: IMemorySpaceAddress): string =>
     address.scopeKey ?? normalizeCellScope(address.scope);
-  const sorted = unsorted.toSorted((a, b) => {
-    if (a.space !== b.space) return a.space < b.space ? -1 : 1;
-    if (a.id !== b.id) return a.id < b.id ? -1 : 1;
-    const aScope = instanceOf(a);
-    const bScope = instanceOf(b);
-    if (aScope !== bScope) return aScope < bScope ? -1 : 1;
-    return comparePaths(a.path, b.path);
-  });
-  const result: IMemorySpaceAddress[] = [sorted[0]];
-  let previous = sorted[0];
-  for (let i = 1; i < sorted.length; i++) {
-    if (
-      sorted[i].space === previous.space &&
-      sorted[i].id === previous.id &&
-      instanceOf(sorted[i]) === instanceOf(previous) &&
-      // Is the previous path a prefix of the current path?
-      previous.path.every((value, index) => value === sorted[i].path[index]) &&
-      // If we compactifyChildren, or the paths are identical, skip this
-      (compactifyChildren || previous.path.length === sorted[i].path.length)
-    ) {
-      continue;
+
+  // Grouped by document instance before anything is sorted. A read log names
+  // many documents and few paths in each, so ordering the groups and then
+  // each group's paths costs far fewer comparisons than one sort over every
+  // address, and produces the same order: groups by space, id and instance,
+  // paths within a group by `comparePaths()`, and equal addresses in the
+  // order they arrived.
+  const groups = new Map<string, IMemorySpaceAddress[]>();
+  for (const address of unsorted) {
+    const key = `${address.space}\0${address.id}\0${instanceOf(address)}`;
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [address]);
+    else group.push(address);
+  }
+  const ordered = [...groups.values()];
+  if (ordered.length > 1) {
+    ordered.sort(([a], [b]) => {
+      if (a.space !== b.space) return a.space < b.space ? -1 : 1;
+      if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+      return instanceOf(a) < instanceOf(b) ? -1 : 1;
+    });
+  }
+
+  const result: IMemorySpaceAddress[] = [];
+  for (const group of ordered) {
+    if (group.length > 1) {
+      group.sort((a, b) => comparePaths(a.path, b.path));
     }
-    result.push(sorted[i]);
-    previous = sorted[i];
+    let previous: IMemorySpaceAddress | undefined;
+    for (const address of group) {
+      if (
+        previous !== undefined &&
+        // Is the previous path a prefix of the current path?
+        previous.path.every((value, index) => value === address.path[index]) &&
+        // If we compactifyChildren, or the paths are identical, skip this
+        (compactifyChildren || previous.path.length === address.path.length)
+      ) {
+        continue;
+      }
+      result.push(address);
+      previous = address;
+    }
   }
   return result;
 }
 
 /**
+ * The grouping `addressesToPathByEntity()` last produced for each address
+ * list, keyed on the list itself. A scheduling log's reads are grouped when
+ * the action registers them and grouped again, as the previous log, when it
+ * re-registers, and the list is not changed between the two, so the second
+ * grouping is the first read back. The identity is part of the answer, so an
+ * entry made under a different one is not served, and the length is checked
+ * so a list that did grow is grouped afresh.
+ */
+const groupingsByAddressList = new WeakMap<IMemorySpaceAddress[], {
+  readonly identity: ScopeKeyIdentity;
+  readonly length: number;
+  readonly byEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+}>();
+
+/**
  * Converts a list of paths to a map of space/id to paths.
+ *
+ * The map is memoized on `addresses` (see `groupingsByAddressList`), so the
+ * list must not be changed after this is called, and a caller must not change
+ * the map or the path arrays it holds: both are shared with every later call
+ * that hands over the same list.
  *
  * @param addresses - The paths to convert.
  * @returns A map of space/id to paths.
@@ -91,6 +129,15 @@ export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
   identity: ScopeKeyIdentity,
 ): Map<SpaceScopeAndURI, SortedAndCompactPaths> {
+  const memoized = groupingsByAddressList.get(addresses);
+  if (
+    memoized !== undefined &&
+    memoized.length === addresses.length &&
+    memoized.identity.principal === identity.principal &&
+    memoized.identity.sessionId === identity.sessionId
+  ) {
+    return memoized.byEntity;
+  }
   const map = new Map<SpaceScopeAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
     // Same key vocabulary as the dependency graph — one map entry per
@@ -99,6 +146,11 @@ export function addressesToPathByEntity(
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }
+  groupingsByAddressList.set(addresses, {
+    identity: { principal: identity.principal, sessionId: identity.sessionId },
+    length: addresses.length,
+    byEntity: map,
+  });
   return map;
 }
 

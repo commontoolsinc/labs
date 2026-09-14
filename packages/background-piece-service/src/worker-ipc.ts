@@ -1,14 +1,30 @@
+/**
+ * The messages that cross between a `WorkerController` and its worker: the
+ * requests the controller sends, the responses the worker posts back, and the
+ * predicates each side checks an incoming message against.
+ */
+
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
+/** The kinds of request a controller sends its worker. */
 export enum WorkerIPCMessageType {
+  /** Request to set the worker up for its space; the first one, sent once. */
   Initialize = "initialize",
+
+  /** Request to run one piece's background updater. */
   Run = "run",
+
+  /** Request to tear the worker's runtime down ahead of termination. */
   Cleanup = "cleanup",
 }
 
+/** Payload of an `Initialize` request. */
 export type InitializationData = {
+  /** DID of the space the worker serves. */
   did: string;
+
+  /** URL of the toolshed the worker's runtime talks to. */
   toolshedUrl: string;
 
   /**
@@ -22,11 +38,14 @@ export type InitializationData = {
    */
   encodedIdentity: RealmEncodedValue;
 
+  /** Experimental runtime options, forwarded from the service's own runtime. */
   experimental?: {
+    /** Whether the runtime uses the modern cell representation. */
     modernCellRep?: boolean;
   };
 };
 
+/** Returns whether `value` has the shape of an `InitializationData`. */
 export function isInitializationData(
   value: unknown,
 ): value is InitializationData {
@@ -40,28 +59,55 @@ export function isInitializationData(
     (value.encodedIdentity.length === 2));
 }
 
+/** Payload of a `Run` request. */
 export type RunData = {
+  /** Entity id of the piece to run. */
   pieceId: string;
 };
 
+/** Returns whether `value` has the shape of a `RunData`. */
 export function isRunData(value: unknown): value is RunData {
   return !!(isObjectNotArray(value) &&
     typeof value.pieceId === "string");
 }
 
-export type WorkerIPCRequest = {
-  type: WorkerIPCMessageType.Initialize;
-  msgId: number;
-  data: InitializationData;
-} | {
-  type: WorkerIPCMessageType.Run;
-  msgId: number;
-  data: RunData;
-} | {
-  type: WorkerIPCMessageType.Cleanup;
-  msgId: number;
-};
+/**
+ * A request from a controller to its worker, tagged by kind and numbered so
+ * that the response can be matched to it.
+ */
+export type WorkerIPCRequest =
+  /** Request to set the worker up, with what it needs to serve its space. */
+  | {
+    /** Kind of the request. */
+    type: WorkerIPCMessageType.Initialize;
 
+    /** Number the response carries back, unique among the worker's requests. */
+    msgId: number;
+
+    /** The request's payload. */
+    data: InitializationData;
+  }
+  /** Request to run one piece's background updater. */
+  | {
+    /** Kind of the request. */
+    type: WorkerIPCMessageType.Run;
+
+    /** Number the response carries back, unique among the worker's requests. */
+    msgId: number;
+
+    /** The request's payload. */
+    data: RunData;
+  }
+  /** Request to tear the worker's runtime down ahead of termination. */
+  | {
+    /** Kind of the request. */
+    type: WorkerIPCMessageType.Cleanup;
+
+    /** Number the response carries back, unique among the worker's requests. */
+    msgId: number;
+  };
+
+/** Returns whether `value` is a `WorkerIPCRequest`, its payload included. */
 export function isWorkerIPCRequest(value: unknown): value is WorkerIPCRequest {
   if (!isObjectNotArray(value) || typeof value.msgId !== "number") {
     return false;
@@ -78,12 +124,23 @@ export function isWorkerIPCRequest(value: unknown): value is WorkerIPCRequest {
   return false;
 }
 
+/**
+ * The worker's answer to a request, carrying the request's `msgId` and, when
+ * the request failed, the error's message. The one unsolicited message, which
+ * the worker posts once it is listening, has `type` set to `ready`.
+ */
 export type WorkerIPCResponse = {
+  /** The `msgId` of the request this answers; `-1` on the `ready` message. */
   msgId: number;
+
+  /** Message of the error that failed the request; absent on success. */
   error?: string;
+
+  /** Kind of an unsolicited message; `ready` is the one kind. */
   type?: string;
 };
 
+/** Returns whether `value` has the shape of a `WorkerIPCResponse`. */
 export function isWorkerIPCResponse(
   value: unknown,
 ): value is WorkerIPCResponse {

@@ -41,6 +41,18 @@ The ON soak is paused. A renewed ON rollout follows the Phase 7 gate
 dispositions and the owner's rollout decision; the flip record alone does not
 establish current readiness.
 
+**Delta 2026-09-11 (the served source update): `setsrc` is a served verb.
+Under ON, `cf piece setsrc` sends the resolved program to
+`/api/pattern-lifecycle/setsrc`; the serving runtime uploads it as a verb
+of its own and, in the cycle after, commits the update's setup transaction
+DIRECTLY to the store — the loop's own derived-class commit outside the
+wave, its written docs re-verified against the seq it was stamped at — so
+the update's module authority publishes from a durable verdict as
+`docs/specs/module-loading.md` requires (`docs/features/server-pattern-lifecycle.md`,
+"Direct commits"). A wave open at such a commit exempts contributions
+sealed after it from the conflict on the docs it wrote. `--check` stays
+client-side. OFF is byte-identical.**
+
 **Delta 2026-09-09 (the lifecycle verbs as server calls): the seed archived
 at `docs/history/plans/server-pattern-verbs-seed.md` is BUILT for `upload`
 and `instantiate`. Under ON, `cf piece new` sends the resolved program to
@@ -51,10 +63,7 @@ slug in the creation's own transaction; the receipt returns once that wave
 has committed and the verb's durability read has passed, ahead of the
 piece's first derivation. The client keeps only its start; the shell and the background piece
 service keep the client-side shape until their own migration. `setsrc`
-stays client-side: a source update publishes module update authority, which
-`docs/specs/module-loading.md` requires from an owned setup transaction that
-commits to storage, and the runner refuses one sealed into a wave. Serving it
-is a follow-up: register the update's authority at the wave's settlement. OFF
+stayed client-side at this delta, served by the 2026-09-11 delta above. OFF
 is byte-identical.**
 
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
