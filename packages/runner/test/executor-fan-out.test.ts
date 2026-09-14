@@ -363,12 +363,18 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         options.names.arg,
         compiled.argumentSchema,
       );
+    // A client's own write of a scoped input races the serving loop
+    // materializing that user's slots, and the loser of that race is told
+    // its read went stale. Every real client retries such a rejection;
+    // these writes do too, so a legitimate race reads as one write landing
+    // after another rather than as a failure.
     const writeDraft = async (runtime: Runtime, value: string) => {
       const arg = typedArg(runtime);
       await arg.sync();
-      const tx = runtime.edit();
-      arg.key("draft").withTx(tx).set(value);
-      expect((await tx.commit()).error).toBeUndefined();
+      const written = await runtime.editWithRetry((tx) => {
+        arg.key("draft").withTx(tx).set(value);
+      });
+      expect(written.error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
     };
@@ -386,9 +392,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         )
         : typedArg(runtime);
       await arg.sync();
-      const tx = runtime.edit();
-      arg.key("note").withTx(tx).set(value);
-      expect((await tx.commit()).error).toBeUndefined();
+      const written = await runtime.editWithRetry((tx) => {
+        arg.key("note").withTx(tx).set(value);
+      });
+      expect(written.error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
     };

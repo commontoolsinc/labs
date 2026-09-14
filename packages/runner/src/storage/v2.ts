@@ -4737,6 +4737,17 @@ export class SpaceReplica
       record?.pending.some((entry) => entry.op !== "patch") === true;
   }
 
+  /** ISpaceReplica.confirmedDocumentSeq: the accepted seq this replica's
+   * confirmed base stands at for the instance, pending writes excluded. */
+  confirmedDocumentSeq(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): number {
+    return this.#docs.get(this.#docKeyOf({ id, scope }, identity))
+      ?.confirmed.seq ?? 0;
+  }
+
   getDocument(
     uri: URI,
     scope?: CellScope,

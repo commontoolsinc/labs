@@ -1007,7 +1007,12 @@ the 2026-08-24 ruling; the owner may re-rule it).
   commit is in flight (a read probe against the serving runtime) would
   otherwise leave a wave whose basis the loop's own commit has already
   passed, and the next cycle's writes to the documents it touched — the
-  watermark advance among them — would be dropped against it.
+  watermark advance among them — would be dropped against it. That input
+  seq is what the wave CLAIMS its view covers, and the view its
+  runs read is the replica's, which can sit below it: a commit admitted
+  between a run's reads and the seal that opens the wave is counted in
+  the basis and absent from the view. The concurrency rule's per-doc CAS
+  is what covers the gap, and its pure-derivation arm says how.
 - Failure isolation is per action: an aborted tx discards only its own
   writes; the wave keeps the rest.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
@@ -1029,7 +1034,34 @@ classes:
   and it recomputes exactly the runs whose recorded reads it dirties —
   the ordinary dependency path, with no superseded-write mark (the
   ruling note below). Count drops as `supersededWrites` (exposed in
-  §7's counters).
+  §7's counters). This class CASes against a second basis as well: the
+  seq the replica stood at for the doc when the contribution SEALED. The
+  replica gap above is when the two differ, and a doc the replica had not
+  taken the head of holds a value the derivation that wrote it never saw,
+  so committing that write would be the blind derived write this section
+  forbids — even where the head sits at or below the wave's basis.
+  Recovery is the same as for any other drop, and needs no addition: a
+  derivation that read the doc carries it in its basis rows, so the
+  arrival of the commit it missed re-runs it.
+
+  An INTRUSION is what makes that second basis a conflict. A serving
+  tenure's own derived commits advance a document under runs still in
+  flight as a matter of course, so a view older than the head means
+  nothing by itself; the drop needs a commit after that view which the
+  tenure's own derived commits do not account for — a client's authored
+  write, another holder's derived write, a system commit. A document only
+  this tenure writes therefore never reaches the drop, which is this
+  section's own reading of a derived document: there are no other writers
+  on one.
+
+  The seal is the moment to read the replica at, and the replica is what
+  to read rather than the run's own recorded read seqs. Later is a
+  different view — the commit step runs after the heads query, by which
+  time a frame may have landed and the replica no longer says what the
+  run derived from. And the recorded seqs are not that view: a sealed
+  transaction has passed its commit-time claim check, which re-reads
+  every document it snapshotted, so a run whose replica is current on a
+  doc read the content the store holds however old the seq it recorded.
 - **Non-re-derivable writes** — `eventWatermark` advances,
   handler-consequence writes, effect intents — are REBASED AND RETRIED:
   re-CAS against the new head, merging at field level (these are
@@ -1038,7 +1070,11 @@ classes:
   to unconsequenced (requeue) rather than lose them. events.md §4's
   atomicity survives the retry: the watermark advance and its
   consequences move TOGETHER into the rebased commit, never
-  separately.
+  separately. This class CASes against the wave's basis alone — the
+  pure-derivation arm's lower basis does not carry here. Its conflict
+  arm rebases or requeues rather than dropping, and requeueing against
+  a seq the replica has not caught up to yet is the sustained-traffic
+  livelock this section forbids.
 
 An event-delivery processing checkpoint is an internal
 `bookkeeping`-stamped write. A terminal error, drop, or
