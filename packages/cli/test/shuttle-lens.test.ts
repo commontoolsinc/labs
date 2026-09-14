@@ -5,8 +5,9 @@
  * The frame comes back as lines and the keys arrive decoded, so every case
  * drives the whole of it with no terminal. What a case can therefore assert is
  * the thing a terminal would have hidden: that every row of a frame is the
- * same width, that a repaint happens once per change rather than once per
- * value, and that `q` cancels this lens's own subscription and nothing else.
+ * same width, that a repaint happens once per settle rather than once per
+ * value on the way there, and that `q` cancels this lens's own subscription
+ * and nothing else.
  */
 
 import { expect } from "@std/expect";
@@ -88,15 +89,15 @@ describe("lens", () => {
           // screen's: one row taller scrolls its own top row away — and that
           // row is the one naming the cell — while one row shorter leaves
           // whatever the frame replaced still on screen under it. Two rows is
-          // the size at which the two edges are the whole of it, and the
-          // transition row is what does not fit.
+          // the size at which the two edges are the whole of it and the value
+          // gets none.
           //
           // Exactly rather than at most, because at most is the assertion that
           // cannot fail in the direction a frame drawn short would fail.
           //
-          // Kills: adding the transition row outside the room left for it,
-          // which returns three rows for a screen with two; and dropping a row
-          // the screen has room for, which returns one.
+          // Kills: giving the value a row the edges have already taken, which
+          // returns three rows for a screen with two; and dropping a row the
+          // screen has room for, which returns one.
 
           const driven = driving("cell @space", 2, COLUMNS);
           driven.lens.showing({ replies: 14 });
@@ -229,62 +230,14 @@ describe("lens", () => {
         });
 
         it("keeps where the reader had scrolled to", () => {
+          // A value that grew while a reader was partway down it leaves them
+          // where they were reading rather than at the top.
+
           const driven = driving("c", 5, 60);
           driven.lens.showing(["a", "b", "c", "d", "e", "f"]);
           driven.lens.reads(key("j"));
           driven.lens.showing(["a", "b", "c", "d", "e", "g"]);
-          expect(body(last(driven)).slice(1)).toEqual(['  "a",', '  "b",']);
-        });
-
-        it("says what the last change was, above the value", () => {
-          // A change is seen rather than inferred: a value that repainted
-          // says only where it landed, and the transition says what moved.
-
-          const driven = driving("c", 5, 60);
-          driven.lens.showing({ replies: 14 });
-          driven.lens.showing({ replies: 15 });
-          expect(body(last(driven))[0]).toBe("<replies 14 → 15>");
-        });
-
-        it("says nothing about a change for the first settled value", () => {
-          // The first settle is what the cell already held, so a row naming a
-          // change would name one nobody made.
-
-          const driven = driving("c", 5, 60);
-          driven.lens.showing({ replies: 14 });
-          expect(body(last(driven))[0]).toBe("{");
-        });
-
-        it("says nothing about a change for a settle that moved nothing", () => {
-          const driven = driving("c", 5, 60);
-          driven.lens.showing({ replies: 14 });
-          driven.lens.showing({ replies: 14 });
-          expect(body(last(driven))[0]).toBe("{");
-        });
-
-        it("keeps the last change on screen until another replaces it", () => {
-          // Nothing takes a row away on a clock, so what a reader comes back
-          // to is the last thing that happened.
-
-          const driven = driving("c", 5, 60);
-          driven.lens.showing({ replies: 14 });
-          driven.lens.showing({ replies: 15 });
-          driven.lens.showing({ replies: 15 });
-          const stood = body(last(driven))[0];
-          driven.lens.showing({ replies: 16 });
-          expect({ stood, then: body(last(driven))[0] })
-            .toEqual({ stood: "<replies 14 → 15>", then: "<replies 15 → 16>" });
-        });
-
-        it("stands the change row wherever the reader has scrolled to", () => {
-          // It is a fact about the cell rather than a line of its value, so
-          // it is not part of what scrolls.
-
-          const driven = driving("c", 5, 60);
-          driven.lens.showing(["a", "b", "c", "d", "e", "f"]);
-          driven.lens.showing(["a", "b", "c", "d", "e", "g"]);
-          driven.lens.reads(key("G"));
-          expect(body(last(driven))[0]).toBe('<5 "f" → "g">');
+          expect(body(last(driven))).toEqual(['  "a",', '  "b",', '  "c",']);
         });
 
         it("draws nothing once the lens is closed", () => {

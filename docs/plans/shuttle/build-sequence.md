@@ -586,15 +586,21 @@ Landed:
   A watch (`lib/shuttle/watch.ts`) is a session object beside the handle table
   and the warm set: `watch <ref>` arms one and numbers what is armed, `watches`
   lists them, `unwatch %n` disarms the one a row was minted for, and `where`
-  names them. Each settled change writes one line above the prompt — the cell,
-  which of the piece's two cells it is, the path inside it, and the transition
-  — through the out-of-band door a connection's own writing already goes
-  through, so scrollback stays append-only. A change is what is reported: the first settle is the baseline,
-  and a settle that landed on the value already held writes nothing. Every
-  change on the line carries its transition, and what a screen too narrow for
-  them costs is written down in rungs: the values stood in for by what they
-  are, and then, for a list of them, the count alone — rather than a terminal
-  filled with a value nobody asked to read.
+  names them. Each settled change writes one line above the prompt — the cell
+  and which of the piece's two cells it is — through the out-of-band door a
+  connection's own writing already goes through, so scrollback stays
+  append-only. A change is what is reported: the first settle is the baseline,
+  and a settle that landed on the value already held writes nothing. Deciding
+  that needs fabric-aware equality at the root, `deepEqual` reading two
+  distinct `FabricBytes` as equal, so a cell whose bytes changed would otherwise
+  report nothing.
+
+  The line says *that* the cell changed, which root equality is enough to
+  decide. Reporting which leaves moved and what each moved to needs a per-leaf
+  diff over arbitrary fabric values, and that is deferred with the transition
+  row it feeds ([#7444](https://github.com/commontoolsinc/labs/issues/7444)) —
+  the feature rather than the decision behind it. Reading the value out is
+  `get`'s, and watching it move is what the lens is for.
 
   The value view (`lib/shuttle/lens.ts`) opens as one lens onto that watch,
   drawn on the alternate screen so that nothing already written scrolls while
@@ -607,11 +613,15 @@ Landed:
   lifetimes are separate, which is what the slice is for: `q` cancels the
   lens's own subscription and leaves the watch armed.
 
-  One thing the frame does not draw is worth naming: the connection marker,
+  Two things the frame does not draw are worth naming. The connection marker,
   the relay that would report connection state being B1's and unbuilt
-  ([`runtime-integration.md`](runtime-integration.md)). The transition row
-  stands until another change replaces it rather than expiring, which is the
-  same document's "never a timer" applied to its own sentence.
+  ([`runtime-integration.md`](runtime-integration.md)). And the transition row,
+  which is deferred with the diff it is built on
+  ([#7444](https://github.com/commontoolsinc/labs/issues/7444)) rather than
+  declined: the project owner ruled that such a row **stands until another
+  change replaces it rather than expiring**, which is
+  [`views.md`](views.md)'s "never a timer" applied to its own sentence, and
+  that ruling is what it returns under.
 
 Still to land:
 

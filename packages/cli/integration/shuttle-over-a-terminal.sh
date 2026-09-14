@@ -262,7 +262,7 @@ watch settings/depth
 @frame q
 watches
 set settings/depth 3
-@said watch first/settings/depth @space: 2 → 3
+@said watch first/settings/depth @space: changed
 where
 unwatch %1
 watches
@@ -650,14 +650,17 @@ check "%1 first/settings/depth @space" "$(said 52 "watches")" \
 # runtime is quiet rather than when the line that caused it answered, and the
 # prompt that ends a record can fall either side of that.
 WATCHED=$(jq -r '[.[].said] | join("\n")' "$TRANSCRIPT")
-contains "watch first/settings/depth @space: 2 → 3" "$WATCHED" \
-  "a settled change wrote one line naming the cell and the transition"
+contains "watch first/settings/depth @space: changed" "$WATCHED" \
+  "a settled change wrote one line naming the cell that changed"
 # The other half of "a change is what is reported", and the half only a real
 # runtime can show: the subscription fires once on registration with what the
-# cell already holds, and a watch that reported that would have written a
-# transition from nothing at the moment it was armed.
-lacks "watch first/settings/depth @space: <nothing> →" "$WATCHED" \
-  "the reading the subscription opened with wrote no line"
+# cell already holds, and a watch that reported that would have written a line
+# the moment it was armed. Counted rather than looked for, because the line a
+# baseline would write is the line a change writes — one write was made here,
+# so one line is what the whole transcript may hold.
+WROTE=$(printf '%s' "$WATCHED" |
+  grep -c "watch first/settings/depth @space: changed")
+check "1" "$WROTE" "the reading the subscription opened with wrote no line"
 contains "watches   first/settings/depth @space" "$(said 54 "where")" \
   "the ambient record names what this run is watching"
 check "Disarmed the watch on \`first/settings/depth @space\`." \

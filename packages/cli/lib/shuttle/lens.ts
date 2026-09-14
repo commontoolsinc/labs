@@ -25,7 +25,6 @@ import { unicodeWidth } from "@std/cli/unicode-width";
 import type { Key } from "../view/keys.ts";
 import { marker, wrapped } from "./page.ts";
 import { renderValue } from "./value.ts";
-import { type Change, changesBetween, transitionFor } from "./watch.ts";
 
 /** What the frame shows before the cell it watches has settled once. */
 const NOT_SETTLED = marker("nothing has settled yet");
@@ -49,9 +48,6 @@ const NARROWEST = 5;
 export class ValueLens {
   #label: string;
   #shown: readonly string[] = [NOT_SETTLED];
-  #settled = false;
-  #value: unknown;
-  #changes: readonly Change[] | undefined;
   #top = 0;
   #repaint: (() => void) | undefined;
   #cancel: (() => void) | undefined;
@@ -112,26 +108,12 @@ export class ValueLens {
    * a reader was partway down it leaves them where they were reading rather
    * than at the top.
    *
-   * What changed is kept beside the value, so the frame shows the transition
-   * rather than only what the value landed on — which is what makes a change
-   * something a reader sees rather than infers. It says what the last change
-   * was and stands until another replaces it: nothing here takes a row away on
-   * a clock, so what a reader comes back to is the last thing that happened.
-   *
-   * The first settle is the value the cell already held, so it names no
-   * change; neither does one that landed on the value already shown.
+   * What the frame shows is the value, not a transition into it: that the
+   * cell changed is the watch's line to say, above the prompt.
    */
   showing(value: unknown): void {
     if (this.#closed) return;
-    const before = this.#value;
-    const first = !this.#settled;
-    this.#settled = true;
-    this.#value = value;
     this.#shown = renderValue(value).split("\n");
-    if (!first) {
-      const changes = changesBetween(before, value);
-      if (changes.length > 0) this.#changes = changes;
-    }
     this.#repaint?.();
   }
 
@@ -203,22 +185,14 @@ export class ValueLens {
   frame(rows: number, columns: number): readonly string[] {
     const width = Math.max(columns, NARROWEST);
     const inner = width - 4;
-    // What the two edges leave, which the transition row and the value share.
-    const inside = Math.max(rows - 2, 0);
-    // The transition is dropped where the edges leave no room rather than
-    // added beyond it: a frame drawn taller than the screen scrolls its own
-    // top row away, and that row is the one naming the cell being watched.
-    // The two columns the marker's own brackets take come off the width the
-    // transition is fitted to, so what stands in for a value too large to
-    // write is decided against the room the row actually has.
-    const moved = this.#changes === undefined || inside === 0
-      ? []
-      : [marker(transitionFor(this.#changes, Math.max(inner - 2, 1)))];
+    // What the two edges leave, which is the whole of what the value gets: a
+    // frame drawn taller than the screen scrolls its own top row away, and
+    // that row is the one naming the cell being watched.
+    const room = Math.max(rows - 2, 0);
     const body = wrapped(this.#shown, inner);
-    const room = inside - moved.length;
     const top = this.#clamped(body.length, room);
     const page = body.slice(top, top + room);
-    const filled = [...moved, ...page, ...Array(room - page.length).fill("")];
+    const filled = [...page, ...Array(room - page.length).fill("")];
     return [
       edge("┌", "┐", this.#label, width),
       ...filled.map((line) => `│ ${padded(fit(line, inner), inner)} │`),

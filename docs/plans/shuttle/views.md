@@ -26,11 +26,26 @@ disciplines it leans on are in
 ## The v1 views
 
 **Value view** — `watch <ref>`. One cell or subtree, rendered as structured
-JSON: scrollable, references followable, and live — a changed value shows the
-transition it made (`14 → 15`) in a row above it, standing until another change
-replaces it, so a change is seen rather than inferred. It stands rather than
-expiring because nothing here waits on a clock, and a row that took itself away
-would need one.
+JSON: scrollable, references followable, and live — the frame redraws as the
+cell settles, so what it shows is what the cell holds now.
+
+A changed value is to show the transition it made (`14 → 15`) in a row above
+it, so that a change is seen rather than inferred. That row **stands until
+another change replaces it rather than expiring**: nothing here waits on a
+clock, and a row that took itself away would need one. That is a ruling and it
+holds — what is deferred is the feature, not the decision. It needs a per-leaf
+diff over arbitrary fabric values, and that is harder than it looks. Deciding
+presence by indexing gets it wrong both ways. An absent key or index and one
+holding `undefined` read the same, so a key holding `undefined` that went, or an
+array that grew or shrank by an `undefined`, reads as no change. And a key named
+for something `Object.prototype` carries reads as present on the side that does
+not hold it, so a key that went reads as though it held the inherited member.
+Comparing the leaves themselves needs fabric-aware equality, a special value
+keeping its state in private fields. It returns when that diff has a test
+surface of its own
+([#7444](https://github.com/commontoolsinc/labs/issues/7444)).
+Until then the frame shows the value and the event line above the prompt says
+which cell changed.
 
 **List view** — `browse [<ref>]`. A paged listing of whatever stands below
 the reference — a facet, a collection, search results. Rows carry the same

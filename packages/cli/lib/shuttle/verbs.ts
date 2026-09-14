@@ -1635,8 +1635,8 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "so is the `#argument`\nsuffix: a piece's arguments cell is not one " +
       "a watch can serve, where `get`\nreads it.\n\nThe two halves are " +
       "separable. `q` closes the view and leaves the watch\narmed, and an " +
-      "armed watch writes one line above the prompt per settled\nchange — " +
-      "the cell, where inside it the change landed, and the transition.\n" +
+      "armed watch writes one line above the prompt per settled\nchange, " +
+      "naming the cell that changed rather than what it changed to.\n" +
       "The view scrolls with `j`/`k` and the arrows, `g` and `G` are its " +
       "ends, and\n`ctrl-c` closes it as `q` does — the whole of what it " +
       "answers to. It repaints\nonce per quiet runtime rather than once per " +

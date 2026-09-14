@@ -207,10 +207,11 @@ view answers to; the fuller key table the design gives a view — drilling,
 filtering, editing a selection, and a command line inside the frame — is not
 built. The two halves are separable on purpose: `q` closes the view and the
 watch stays armed, and every settled change to a watched cell then writes one
-line above the prompt — the cell, where inside it the change landed, and the
-transition, as in `watch board/replies @space: 14 → 15`. Scrollback is never
-rewritten: liveness lives in those lines, and the view draws on a screen of its
-own.
+line above the prompt naming the cell that changed, as in
+`watch board/replies @space: changed`. It says that the cell moved rather than
+what it moved to: `get` reads the value out, and the view shows it moving.
+Scrollback is never rewritten: liveness lives in those lines, and the view draws
+on a screen of its own.
 
 A change is what is reported rather than a value: the first reading of a cell is
 the baseline and writes nothing, and a recomputation that landed on what was
