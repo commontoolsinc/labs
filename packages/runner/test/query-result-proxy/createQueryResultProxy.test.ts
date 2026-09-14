@@ -49,6 +49,7 @@ describe("createQueryResultProxy()", () => {
       const iterated: number[] = [];
       for (const row of rows) iterated.push(row);
       expect(iterated).toEqual([3, 5, 8]);
+      expect(Array.from(rows)).toEqual([3, 5, 8]);
       expect(rows.map((row) => row * 2)).toEqual([6, 10, 16]);
     } finally {
       tx.abort();
