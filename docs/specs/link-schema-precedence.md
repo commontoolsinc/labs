@@ -68,19 +68,22 @@ the reader's shape stands, and the stored schema shapes only a reader
 that brought none. An element read by its own path therefore projects the
 same as that element read within its array, and a read that crosses into
 another space never adopts a stored schema whose `cid:` closure lives in
-the space it left. The eager traversal and the lazy view start from the
-one schema.
+the space it left.
 
 `{ "type": "unknown" }` is the entry's one exception, in both directions.
 At the entry `unknown` does not say whether the value is not available
 yet or does not exist, and the two directions answer that differently:
 
 - A reader typed `unknown` counts as bringing no shape and adopts the
-  stored schema. At the entry that type names the handle a caller keyed
-  into (`{ "type": "unknown", "asCell": ["cell"] }` list items are the
-  common source), and the stored schema is what describes the value the
-  handle reaches. A later hop met under `unknown` keeps its reference
-  semantics as the rule above says.
+  stored schema — at the **eager** entry only. There that type names the
+  handle a caller keyed into (`{ "type": "unknown", "asCell": ["cell"] }`
+  list items are the common source), and the stored schema is what
+  describes the value the handle reaches. A lazy view re-enters the entry
+  as a hop, not as a handle, and keeps the rule above: an `unknown`-typed
+  view read holds the reference, which is what lets a map declared
+  `Record<string, unknown>` be surveyed for its keys without expanding a
+  member. A later hop met under `unknown` keeps its reference semantics
+  either way.
 - A stored `unknown` — the schema a `Writable<unknown>` slot stamps on the
   link it is set to — is a shape the reader outranks like any other. A
   shaped reader reads through it; a reader that brought no shape holds

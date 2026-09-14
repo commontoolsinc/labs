@@ -646,7 +646,8 @@ holds the measurements and the conditions for revisiting.
   §5.3.4 for the query-pipeline context. The read entry — a read addressed
   at a slot holding a link — resolves by the same rule (the spec's "The
   read entry"), so the rollback arm restores the strict pseudo-intersection
-  there as well.
+  there as well, except for the entry's `unknown`-reader exception, which
+  adopts the stored schema under either arm.
 - **Current default and planned end state.** On by default; an explicit
   `false` restores the strict pseudo-intersection (`combineSchema`) at link
   crossings as a rollback override. The rollback is plain ambient

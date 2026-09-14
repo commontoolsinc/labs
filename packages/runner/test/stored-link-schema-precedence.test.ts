@@ -210,16 +210,25 @@ describe("stored-link-schema-precedence", () => {
     // The stored schema of a minted link travels as a `cid:` document in the
     // space holding the link, so a read that adopted it at the target would
     // look for that document in the wrong space. The reader's shape governs
-    // there as anywhere, and the read never has to.
+    // there as anywhere, and the read never has to. The row is minted from a
+    // cell typed by a schema that selects a DIFFERENT property than the
+    // reader's, so adopting the stored schema would show as `{ glaze }` (or
+    // as nothing, the closure being elsewhere) rather than as the reader's
+    // `{ title }`.
+
+    const glazeSchema = {
+      type: "object",
+      properties: { glaze: { type: "string" } },
+    } as const satisfies JSONSchema;
 
     it("projects an element by path through the reader's row schema", async () => {
       const row = runtime.getCell(
         otherSpace,
         `row-${seq}-other`,
-        rowSchema,
+        glazeSchema,
         tx,
       );
-      row.set({ title: "cruller" });
+      row.setRaw(storedRow);
       // One transaction writes one space: the row lands before the holder.
       await tx.commit();
       tx = runtime.edit();
@@ -230,7 +239,16 @@ describe("stored-link-schema-precedence", () => {
         tx,
       );
       holder.set({ rows: [row] } as never);
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: rowSchema as JSONSchema,
+      };
 
+      // The minted link carries its stored schema by reference.
+      expect(resolveLink(runtime, tx, readerLink).schema).toEqual({
+        $ref: expect.stringMatching(/^cid:/),
+      });
       expect(projectionOf(elementByPath(holder))).toEqual({ title: "cruller" });
       expect(projectionOf(elementByPath(holder)))
         .toEqual(projectionOf(elementWithinArray(holder)));

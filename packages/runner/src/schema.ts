@@ -204,26 +204,30 @@ const asCellCompoundSchemaForValue = (
   return undefined;
 };
 
-/** Whether `schema` names the opaque `unknown` type at its top level. */
+/**
+ * Whether `schema` is the bare opaque type, `{ "type": "unknown" }`. A type
+ * list that includes `unknown` beside a concrete type is a constraint of its
+ * own and is not this.
+ */
 const isUnknownTypedSchema = (schema: JSONSchema | undefined): boolean =>
-  isObjectOrArray(schema) &&
-  (schema.type === "unknown" ||
-    (Array.isArray(schema.type) && schema.type.includes("unknown")));
+  isObjectOrArray(schema) && schema.type === "unknown";
 
 /**
- * The schema a read addressed at a link slot traverses the link's target
- * with.
+ * The schema an eager read addressed at a link slot traverses the link's
+ * target with.
  *
  * The reader's shape takes precedence over the schema stored on the link,
  * the rule every hop the traversal crosses resolves by
  * (`combineSchemaForLink`): a shaped reader stands, inheriting only the stored
  * schema's `default`, and a reader that brought no shape adopts the stored
- * schema. A reader typed `unknown` counts as bringing no shape here, and
- * adopts the stored schema too: at a read's entry that type names the handle
- * a caller keyed into, and the stored schema is what describes the value the
- * handle reaches. A stored `unknown` is a shape the reader outranks like any
- * other. Both halves are stated in docs/specs/link-schema-precedence.md,
- * "The read entry".
+ * schema. A reader whose type is the bare `unknown` counts as bringing no
+ * shape here, and adopts the stored schema too: at an eager read's entry that
+ * type names the handle a caller keyed into, and the stored schema is what
+ * describes the value the handle reaches. A view's re-entry is a hop, not a
+ * handle, and does not take this: there `unknown` keeps its reference
+ * semantics. A stored `unknown` is a shape the reader outranks like any
+ * other. All of this is stated in docs/specs/link-schema-precedence.md, "The
+ * read entry".
  */
 const entrySelectorSchema = (
   readerSchema: JSONSchema | undefined,
@@ -1299,8 +1303,11 @@ export function validateAndTransform(
     // alone is the link's schema, and a reader asking for a property the link's
     // schema does not name — `title` off a piece typed by its own
     // registration — would read as a property the schema does not select.
+    // A view re-enters here as a hop, so it takes the hop rule as it stands:
+    // an `unknown`-typed reader keeps its reference semantics, where the
+    // eager entry above lets one adopt the stored schema.
     const viewSchema = valueSelectedSchema ??
-      entrySelectorSchema(effectiveSchema, resolvedValueLink.schema) ??
+      combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
       selector.schema;
     // The RULED unresolved-input refusal (OW51, 2026-08-21): the walk
     // crossed a hop (or started from a data-derived handle) and
