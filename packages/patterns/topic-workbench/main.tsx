@@ -251,15 +251,18 @@ export interface WorkbenchOutput {
 export const sessionKey = (sourceId: string, nativeSessionId: string): string =>
   `${sourceId}/${nativeSessionId}`;
 
-/** Whether the index carries a session, not deleted. */
+/** Whether the index carries a session in any state. A row the connector
+ * has since marked deleted still confirms that the session existed, so a
+ * confirmed start stays attached, showing from its own record the way a
+ * manually attached session does once the index drops it. */
 const indexCarries = (
   index: SessionIndexView | undefined,
   sourceId: string,
   nativeSessionId: string,
 ): boolean =>
   (index?.sessions ?? []).some((s) =>
-    s !== undefined && s.syncStatus !== "deleted" &&
-    s.sourceId === sourceId && s.nativeSessionId === nativeSessionId
+    s !== undefined && s.sourceId === sourceId &&
+    s.nativeSessionId === nativeSessionId
   );
 
 /** The pending starts the index has confirmed, as attachments: the connector
