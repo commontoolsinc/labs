@@ -1180,15 +1180,23 @@ The child a `delegate_task` hands that handle to mounts the directory read-only
 at `/acquired-skill`, and mounts the one skill its handle names and no other.
 Such a child does not share its parent's container — a mount is a property of
 the container, so the child is given the parent's sandbox configuration plus
-that one mount and builds its own sandbox from it. It receives
-`run_skill_script` and the operator's allowlist entries for that pin, and for no
-other skill: the allowlist is the run's while a child's tool surface is its
-profile's, and neither reaches the other on its own. An acquisition is not an
-authorization — mounting the bytes and being allowed to run one stay separate
-decisions, and the second is the operator's. The tool is backed by the
-acquisition itself rather than by a skills root, so a run given no
-`--skills-root` still offers it to such a child; `read_skill_resource` is not,
-since an acquired skill carries no resource index.
+that one mount and builds its own sandbox from it. That is possible only where
+this harness built the parent's sandbox from a configuration; a run whose
+sandbox runtime was handed in has none to extend, and its children go on sharing
+it, acquired skill or not. It receives `run_skill_script` and the operator's
+allowlist entries for that pin, and for no other skill: the allowlist is the
+run's while a child's tool surface is its profile's, and neither reaches the
+other on its own. An acquisition is not an authorization — mounting the bytes
+and being allowed to run one stay separate decisions, and the second is the
+operator's.
+
+What backs the tool is the mount rather than a skills root, so a run given no
+`--skills-root` still offers it to such a child, and `--allow-skill-script`
+takes an acquired pin without one. A run that holds an acquired skill without
+mounting it is not backed and is not offered the tool: that is the acquiring
+parent, which deliberately mounts nothing, and a child that shares a handed-in
+runtime. `read_skill_resource` is registry-backed throughout, an acquired skill
+carrying no resource index.
 
 It runs a script there through the same `run_skill_script` a registry skill's
 goes through: `--allow-skill-script` keys on the pin,

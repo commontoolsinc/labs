@@ -157,3 +157,28 @@ export const acquiredSkillScriptSurface = (
     toolIds: allowedSkillScripts.length > 0 ? ["run_skill_script"] : [],
   };
 };
+
+/**
+ * Whether this run can execute an acquired skill's script at all: it holds one
+ * and its own sandbox mounts it.
+ *
+ * Holding the bytes is not enough, and neither is holding the handle. The
+ * script is addressed by the path the mount puts it at, so a run whose sandbox
+ * does not carry that mount could be offered `run_skill_script` and still have
+ * nothing to run — which is what this exists to stop.
+ *
+ * Two runs fail it for different reasons, and both should. The PARENT that
+ * acquired the skill holds it in run state and deliberately does not mount it,
+ * which is the property the hostile-skill receipt rests on. A child whose
+ * parent's sandbox runtime was handed in rather than built shares that runtime
+ * — there was no configuration to extend — so no mount was added for it
+ * either.
+ */
+export const acquiredSkillScriptBacking = (
+  ownedSandboxConfig: DockerRunscSandboxConfig | undefined,
+  acquiredSkills: readonly HarnessAcquiredSkill[] | undefined,
+): boolean =>
+  (acquiredSkills?.length ?? 0) > 0 &&
+  (ownedSandboxConfig?.additionalMounts ?? []).some((mount) =>
+    mount.kind === "host-bind" && mount.name === ACQUIRED_SKILL_MOUNT_NAME
+  );

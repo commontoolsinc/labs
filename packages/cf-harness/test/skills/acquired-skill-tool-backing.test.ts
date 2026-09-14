@@ -15,6 +15,9 @@ import {
   type HarnessToolBackingAvailability,
   withheldToolIds,
 } from "../../src/contracts/tool-descriptor.ts";
+import type { HarnessAcquiredSkill } from "../../src/contracts/skill.ts";
+import type { DockerRunscSandboxConfig } from "../../src/sandbox/types.ts";
+import { acquiredSkillScriptBacking } from "../../src/skills/acquired-skill-mount.ts";
 
 const backing = (
   overrides: Partial<HarnessToolBackingAvailability> = {},
@@ -26,6 +29,102 @@ const backing = (
   skillRegistryAvailable: false,
   docsCorpusAvailable: true,
   ...overrides,
+});
+
+const acquired: HarnessAcquiredSkill = {
+  registryId: "owner/repo/slug",
+  commitSha: "d".repeat(40),
+  pin: `owner/repo/slug@${"d".repeat(40)}`,
+  hostRoot: "/artifacts/.acquired-skills/run-1/sha/slug",
+  sandboxRoot: "/acquired-skill",
+  scripts: [],
+};
+
+const sandboxWith = (
+  additionalMounts: DockerRunscSandboxConfig["additionalMounts"],
+): DockerRunscSandboxConfig => ({
+  dockerBinary: "docker",
+  runtimeName: "runsc-cfc",
+  image: "cf-harness:test",
+  workspaceHostPath: "/tmp/workspace",
+  workspaceMountPath: "/workspace",
+  shellPath: "/bin/bash",
+  dockerNetworkMode: "none",
+  additionalMounts,
+  extraDockerArgs: [],
+});
+
+const acquiredMount = {
+  kind: "host-bind" as const,
+  name: "acquired-skill",
+  hostPath: acquired.hostRoot,
+  sandboxPath: "/acquired-skill",
+  readOnly: true,
+};
+
+describe("acquiredSkillScriptBacking()", () => {
+  //
+  // Holding an acquired skill is not the same as being able to run one. The
+  // script is addressed by the path its mount puts it at, so the mount is what
+  // decides, and the backing composes into the tool gate below.
+  //
+
+  it("backs a run whose own sandbox mounts the acquired skill", () => {
+    expect(acquiredSkillScriptBacking(sandboxWith([acquiredMount]), [acquired]))
+      .toBe(true);
+    expect(
+      withheldToolIds(
+        backing({
+          acquiredSkillsAvailable: acquiredSkillScriptBacking(
+            sandboxWith([acquiredMount]),
+            [acquired],
+          ),
+        }),
+      ).has("run_skill_script"),
+    ).toBe(false);
+  });
+
+  it("does not back the acquiring parent, which mounts nothing", () => {
+    // The parent holds the skill in run state and deliberately does not mount
+    // it — the property the hostile-skill receipt rests on — so it is offered
+    // no tool it could not use.
+    expect(acquiredSkillScriptBacking(sandboxWith([]), [acquired])).toBe(false);
+    expect(
+      withheldToolIds(
+        backing({
+          acquiredSkillsAvailable: acquiredSkillScriptBacking(
+            sandboxWith([]),
+            [acquired],
+          ),
+        }),
+      ).has("run_skill_script"),
+    ).toBe(true);
+  });
+
+  it("does not back a child that shares a handed-in sandbox runtime", () => {
+    // There was no configuration to extend, so no mount was added for it.
+    expect(acquiredSkillScriptBacking(undefined, [acquired])).toBe(false);
+  });
+
+  it("does not back a run holding no acquired skill, however it is mounted", () => {
+    expect(acquiredSkillScriptBacking(sandboxWith([acquiredMount]), []))
+      .toBe(false);
+    expect(acquiredSkillScriptBacking(sandboxWith([acquiredMount]), undefined))
+      .toBe(false);
+  });
+
+  it("leaves read_skill_resource withheld on the backed path", () => {
+    expect(
+      withheldToolIds(
+        backing({
+          acquiredSkillsAvailable: acquiredSkillScriptBacking(
+            sandboxWith([acquiredMount]),
+            [acquired],
+          ),
+        }),
+      ).has("read_skill_resource"),
+    ).toBe(true);
+  });
 });
 
 describe("withheldToolIds() over the skill tools", () => {

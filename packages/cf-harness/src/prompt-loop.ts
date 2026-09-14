@@ -146,6 +146,7 @@ import { collapseSupersededRunPatternSources } from "./run-pattern-source-collap
 import { isTerminalHarnessRunStatus } from "./run-state.ts";
 import {
   acquiredSkillForHandle,
+  acquiredSkillScriptBacking,
   acquiredSkillScriptSurface,
   childSandboxOptions,
 } from "./skills/acquired-skill-mount.ts";
@@ -2847,10 +2848,14 @@ export class CfHarnessPromptLoop {
       skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
       // The second backing `run_skill_script` has. An acquired skill's script
       // needs no registry: its bytes came from a pinned commit and this run
-      // mounts them, so a run holding one can execute a script whether or not
-      // it was given a skills root.
-      acquiredSkillsAvailable:
-        (this.engine.getRunState().acquiredSkills?.skills.length ?? 0) > 0,
+      // mounts them, so a run that mounts one can execute a script whether or
+      // not it was given a skills root. A run that holds one without mounting
+      // it — the acquiring parent, or a child sharing a handed-in runtime —
+      // has nothing to run and is not backed.
+      acquiredSkillsAvailable: acquiredSkillScriptBacking(
+        this.engine.ownedSandboxConfig,
+        this.engine.getRunState().acquiredSkills?.skills,
+      ),
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
       loomAuthoringAvailable: this.engine.config.loomAuthoring !== undefined,
     };

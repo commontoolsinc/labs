@@ -341,7 +341,9 @@ The current CLI flags are:
 --skills-root <path>      Skill root containing <name>/SKILL.md
 --skill <name>            Preload a skill for this run (repeatable)
 --allow-skill-script <s>  Allow exact script execution (skill:scripts/path,
-                          where skill is a registry name or an acquired pin)
+                          where skill is a registry name or an acquired pin;
+                          a registry name requires --skills-root, a pin does
+                          not)
 --no-skill-catalog        Disable automatic skill catalog disclosure
 ```
 
@@ -355,9 +357,13 @@ Current v1 behavior:
 - `--skill` requires `--skills-root`.
 - Multiple `--skill` values are allowed and loaded in the provided order after
   deduplication.
-- `--allow-skill-script` requires `--skills-root`, is repeatable, deduplicates
-  exact normalized entries, and does not itself expose the execution tool.
-  `--allow-tool run_skill_script` is also required.
+- `--allow-skill-script` is repeatable, deduplicates exact normalized entries,
+  and does not itself expose the execution tool;
+  `--allow-tool
+  run_skill_script` is also required. An entry keyed on a
+  registry name requires `--skills-root`, since that is what gives the script a
+  sandbox path; an entry keyed on an acquired pin does not, its bytes reaching
+  the sandbox through the acquisition's own mount.
 - `--no-skill-catalog` is available for tightly scripted batch runs that only
   want explicit preloaded skills.
 
@@ -520,10 +526,13 @@ Policy rules:
   differently: the run must hold an activation whose acquisition names that pin,
   and the file must match the digest taken at acquisition. It runs in the
   sandbox; a run whose skill-script execution target is the host refuses it.
-- The acquisition itself backs `run_skill_script`, so a run given no
-  `--skills-root` still offers the tool to a child holding an acquired skill.
-  `read_skill_resource` stays registry-backed, an acquired skill having no
-  resource index.
+- What backs `run_skill_script` for an acquired script is the mount that puts it
+  at a path, so a run given no `--skills-root` still offers the tool to a child
+  whose sandbox carries that mount, and `--allow-skill-script` takes an acquired
+  pin without a skills root. A run holding an acquired skill it does not mount —
+  the acquiring parent, or a child sharing a handed-in sandbox runtime — is not
+  backed and is not offered the tool. `read_skill_resource` stays
+  registry-backed, an acquired skill having no resource index.
 - `allowed-tools` can narrow or advise, but v1 should not let it expand the
   allowed tool surface.
 - Prompt-injection-like content in a skill should produce a diagnostic event. It
