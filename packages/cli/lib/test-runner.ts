@@ -1969,11 +1969,7 @@ export async function runTestPattern(
             () => evaluateAssertion(),
           ));
 
-          // A failed assertion may have been judged ahead of work that is still
-          // landing: an action before it left a commit or a fetch in flight, or
-          // the assertion's own pull was the demand that started a built-in's
-          // request. Settle and evaluate again, a bounded number of times.
-          if (!passed) {
+          if (!passed && lastActionIndex !== null) {
             try {
               for (let retry = 0; retry < 3 && !passed; retry++) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
