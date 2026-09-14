@@ -32,21 +32,26 @@ describe(
       // On a machine fast enough to finish the settle inside the bound the
       // case says nothing, and fails rather than passing in silence.
       const bound = 500;
-      const out = join(await Deno.makeTempDir(), "measures.json");
-      const { passed, failed } = await runTests(
-        resolve(FIXTURES, "slow-fan-out.test.tsx"),
-        { root: FIXTURES, timeout: bound, timingMeasuresOut: out },
-      );
-      const written = JSON.parse(await Deno.readTextFile(out)) as Written[];
-      const settle = written.filter((entry) =>
-        entry.name.startsWith(
-          `${TIMING_MEASURE_PREFIX}runTestPattern/step/render_1/settle#`,
-        )
-      );
-      expect(settle.length).toBe(1);
-      expect(settle[0].duration).toBeGreaterThan(bound);
-      expect(failed).toBe(0);
-      expect(passed).toBe(1);
+      const dir = await Deno.makeTempDir();
+      try {
+        const out = join(dir, "measures.json");
+        const { passed, failed } = await runTests(
+          resolve(FIXTURES, "slow-fan-out.test.tsx"),
+          { root: FIXTURES, timeout: bound, timingMeasuresOut: out },
+        );
+        const written = JSON.parse(await Deno.readTextFile(out)) as Written[];
+        const settle = written.filter((entry) =>
+          entry.name.startsWith(
+            `${TIMING_MEASURE_PREFIX}runTestPattern/step/render_1/settle#`,
+          )
+        );
+        expect(settle.length).toBe(1);
+        expect(settle[0].duration).toBeGreaterThan(bound);
+        expect(failed).toBe(0);
+        expect(passed).toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
     });
   },
 );
