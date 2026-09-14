@@ -316,9 +316,6 @@ export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
 
-
-
-
 //
 // Concrete `FabricPrimitive` classes
 //
