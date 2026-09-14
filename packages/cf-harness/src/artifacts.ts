@@ -171,6 +171,7 @@ export interface HarnessArtifactStore {
     path: string,
     text: string,
   ): Promise<string>;
+
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,

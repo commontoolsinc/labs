@@ -1,7 +1,15 @@
-import type {
-  DockerRunscSandboxConfig,
-  SandboxRuntimeMountKind,
-} from "../sandbox/types.ts";
+/**
+ * How an acquired skill's scripts reach the one run allowed to execute them.
+ *
+ * Acquisition happens in a parent and execution in a child, and the whole of
+ * the arrangement between them is here: which acquired skill a delegation's
+ * `skillHandle` selects, and what the child's sandbox configuration becomes
+ * once it has one. The parent that planned an acquisition never mounts its
+ * bytes; the child it hands the handle to mounts that skill's and no other's,
+ * read-only.
+ */
+
+import type { DockerRunscSandboxConfig } from "../sandbox/types.ts";
 import type {
   HarnessAcquiredSkill,
   HarnessSkillAcquisition,
@@ -9,6 +17,16 @@ import type {
 
 /** The mount name a child's acquired-skill directory is bound under. */
 export const ACQUIRED_SKILL_MOUNT_NAME = "acquired-skill";
+
+/**
+ * Where a run that holds a skill's handle sees that skill's acquired scripts.
+ *
+ * One path rather than one per pin: a delegation carries a single
+ * `skillHandle`, so a child has one acquired skill and needs one mount, and a
+ * fixed path is what the `sandboxPath` recorded at acquisition can be written
+ * against — before any child exists to be told where its mount landed.
+ */
+export const ACQUIRED_SKILL_MOUNT_PATH = "/acquired-skill";
 
 /**
  * The acquired skill a delegation hands its child: the one the acquisition
@@ -59,7 +77,7 @@ export const sandboxConfigWithAcquiredSkill = (
     additionalMounts: [
       ...sandbox.additionalMounts,
       {
-        kind: "host-bind" satisfies SandboxRuntimeMountKind,
+        kind: "host-bind",
         name: ACQUIRED_SKILL_MOUNT_NAME,
         hostPath: acquired.hostRoot,
         sandboxPath: acquired.sandboxRoot,

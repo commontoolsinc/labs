@@ -194,6 +194,7 @@ export interface HarnessToolContext {
     hostPath: string;
     sandboxPath: string;
   } | undefined;
+
   isHostPathWithinWorkspace(
     path: string,
     options?: { allowMissing?: boolean },
@@ -238,6 +239,7 @@ export interface HarnessToolContext {
 
   /** The skills this run has acquired scripts for, as it stands. */
   acquiredSkills?: readonly HarnessAcquiredSkill[];
+
   createCfcInvocationContext(options: {
     toolId: string;
     toolOutputId?: ToolOutputId;

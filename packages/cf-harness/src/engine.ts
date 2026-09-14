@@ -174,6 +174,7 @@ import type {
   DockerRunscSandboxConfig,
   SandboxRuntime,
 } from "./sandbox/types.ts";
+import { ACQUIRED_SKILL_MOUNT_PATH } from "./skills/acquired-skill-mount.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import type {
   AcquireSkillToolInput,
@@ -297,6 +298,7 @@ export interface CreateHarnessEngineOptions
   extends ResolveHarnessConfigOptions {
   runId?: string;
   runState?: HarnessRunState;
+
   /**
    * The acquired skills this run may execute scripts of, handed to a child by
    * its delegating parent. A child receives the one its `skillHandle` names
@@ -507,16 +509,6 @@ const isSandboxPathWithinRoot = (root: string, path: string): boolean => {
   return normalizedPath === normalizedRoot ||
     normalizedPath.startsWith(`${normalizedRoot}/`);
 };
-
-/**
- * Where a run that holds a skill's handle sees that skill's acquired scripts.
- *
- * One path rather than one per pin: a delegation carries a single
- * `skillHandle`, so a child has one acquired skill and needs one mount, and a
- * fixed path is what the recorded `sandboxPath` can be written against at
- * acquisition — before any child exists to be told where its mount landed.
- */
-const ACQUIRED_SKILL_MOUNT_PATH = "/acquired-skill";
 
 type HostSandboxMount = {
   kind: string;

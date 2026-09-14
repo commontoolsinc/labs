@@ -56,7 +56,6 @@ import {
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
 import {
-  HARNESS_ACQUIRED_SKILLS_TYPE,
   HARNESS_SKILL_ACTIVATIONS_TYPE,
   type HarnessSkillAcquisition,
   type HarnessSkillActivation,
@@ -4553,8 +4552,9 @@ export class CfHarnessPromptLoop {
     };
     // The acquired skill this child may run scripts of: the one its
     // `skillHandle` names, and no other.
+    const parentAcquiredSkills = this.engine.getRunState().acquiredSkills;
     const childAcquiredSkill = acquiredSkillForHandle(
-      this.engine.getRunState().acquiredSkills?.skills,
+      parentAcquiredSkills?.skills,
       options.resolvedSkill?.acquisition,
     );
     const childEngine = new CfHarnessEngine({
@@ -4565,12 +4565,13 @@ export class CfHarnessPromptLoop {
         this.engine.config.sandbox,
         childAcquiredSkill,
       ),
-      ...(childAcquiredSkill !== undefined
+      // The parent's own record, narrowed to the one skill. Narrowed rather
+      // than rebuilt so the child's record keeps the time the acquisition was
+      // written, which is what it is a record of.
+      ...(childAcquiredSkill !== undefined && parentAcquiredSkills !== undefined
         ? {
           acquiredSkills: {
-            type: HARNESS_ACQUIRED_SKILLS_TYPE,
-            version: 1 as const,
-            generatedAt: new Date().toISOString(),
+            ...parentAcquiredSkills,
             skills: [childAcquiredSkill],
           },
         }
