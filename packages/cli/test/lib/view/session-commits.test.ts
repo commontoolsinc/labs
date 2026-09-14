@@ -7,6 +7,7 @@ import {
   type DiffWorkspace,
 } from "../../../lib/view/diffdoc.ts";
 import { diffSource } from "../../../lib/view/diffedit.ts";
+import { decodeKeys } from "../../../lib/view/keys.ts";
 import { Session } from "../../../lib/view/session.ts";
 import { wrappedRowAt } from "../../../lib/view/wrap.ts";
 
@@ -424,6 +425,44 @@ describe("Session", () => {
           ]);
           expect(s.view().overlay?.selectedLine).toBe(5);
           expect(s.view().message).toBe("No commit ccccccccc files.");
+        });
+
+        it("ignores `Alt+f` in an empty filter and folds after clearing it", () => {
+          const s = session();
+          const altF = decodeKeys(Uint8Array.of(0x1b, 0x66)).keys[0];
+          press(s, "i", "/", ..."commit a");
+          expect(s.view().overlay?.selectedLine).toBe(0);
+          expect(s.view().overlay!.lines[0].text).toBe(
+            "● commit aaaaaaaaa  +2 −3  Update the app",
+          );
+          press(s, "f");
+          expect(s.view().inputLine).toBe("jump to: commit af");
+          expect(s.view().overlay!.lines[0].text).toBe("(no matches)");
+          press(s, "f", "enter");
+          s.handleKey(altF);
+          expect(s.view().inputLine).toBe("jump to: commit aff");
+          expect(s.view().overlay?.selectedLine).toBeUndefined();
+          expect(s.view().overlay!.lines[0].text).toBe("(no matches)");
+          expect(s.displayDoc().text).toBe(LOG);
+          press(s, "escape");
+          expect(s.view().overlay?.selectedLine).toBe(0);
+          expect(hiddenRows(s)).toEqual([
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+          ]);
+          s.handleKey(altF);
+          expect(hiddenRows(s)).toEqual([
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+          ]);
         });
       });
     });
