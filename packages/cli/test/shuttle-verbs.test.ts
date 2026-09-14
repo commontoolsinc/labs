@@ -952,6 +952,27 @@ describe("verbs", () => {
       );
     });
 
+    it("names the empty key in words where it is missing inside an operand that ends in the separator", async () => {
+      // The missing key is the first empty one, under `title`, and not the
+      // final one the trailing `/` wrote, so the trailing-separator sentence
+      // and its remedy do not apply: `title//a` fails as well. Kills a refusal
+      // that decides the key was the trailing one from the operand's last
+      // character alone.
+
+      expect(
+        reasonOf(
+          await runLine(
+            "cd title//a/",
+            atPiece(),
+            settling({ title: { a: 1 } }),
+          ),
+        ),
+      ).toBe(
+        "`title//a/` reaches no cell: the empty key is no key of the cell " +
+          "above it, whose keys are `a`.",
+      );
+    });
+
     describe("the read that settles a move", () => {
       // What makes `cd` a promise. A move onto a piece is asked of the fabric
       // before the place is adopted — the piece resolved, and the path found —
@@ -1795,6 +1816,25 @@ describe("verbs", () => {
             "keep: a " +
             "place holds one scope and roots at a result. Reach that cell by " +
             `its own reference, \`/${HANDLE}@session/title\`.`,
+        );
+      });
+
+      it("refuses a target whose address carries a pin", async () => {
+        // Kills a target reading that drops the pin the reader carries, which
+        // would land a place on a piece at a version it does not hold.
+
+        const pin = "A".repeat(43);
+        const outcome = await runLine(
+          "cd #favorites",
+          shuttleIn(),
+          addressed(`/${HANDLE}@pin=${pin}/title`),
+        );
+        expect(reasonOf(outcome)).toBe(
+          "`#favorites` resolved to an address carrying a `@pin=` qualifier, " +
+            "which a place reached through a target does not keep: a place " +
+            "holds no pin, and shuttle reads a piece as it runs rather than " +
+            "at a pinned version. Reach that cell by its own reference, " +
+            "written without the qualifier.",
         );
       });
 

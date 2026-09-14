@@ -355,23 +355,25 @@ caught by the piece rules above rather than by the vocabulary,
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
 
-The `#` character has three readings, and they share nothing but the
-character. A lone `#name` token is a wish target, as above. `#argument` is a
-**member**, read where the rule above reads one — on a head and on a piece
-segment — and it selects the piece's arguments cell, the same selection
-`--input` spells as a flag: `.#argument/title` from inside a piece,
-`%1#argument/title` against a listed row that stands in a piece, and
-`/slugs/board#argument/title` from anywhere. A head standing at a space root
-or a facet, or a row listed there, holds no arguments cell and is refused
-one. The path after the member is inside the arguments cell and is read from
-that cell's root, so `.#argument/a` reads the key `a` of the arguments cell
-wherever in the result shuttle stands, and a head that climbs and selects the
-member in one, `..#argument/a`, is refused — there is no level for the climb
-to leave, and the reference grammar refuses the same head. `#result` is the
-default member and switches nothing. And in every segment that is data `#`
-is an ordinary character: `/slugs/board/title#argument` is the result key
-`title#argument`, the wish reading being decided on the whole operand and
-governing its head and nothing else.
+The `#` character has three readings, and they share nothing but the character.
+A lone `#name` token is a wish target, as above. `#argument` is a **member**,
+read where the rule above reads one — on a head and on a piece segment — and it
+selects the piece's arguments cell, the same selection `--input` spells as a
+flag: `.#argument/title` from inside a piece, `%1#argument/title` against a
+listed row that stands in a piece, and `/slugs/board#argument/title` from
+anywhere. A head standing at a space root or a facet holds no arguments cell and
+is refused one, and so is a handle whose row stands at one: the row's own
+position decides, and not the place its listing was read at, so a piece row
+listed inside `slugs/` takes `%1#argument/title`. The path after the member is
+inside the arguments cell and is read from that cell's root, so `.#argument/a`
+reads the key `a` of the arguments cell wherever in the result shuttle stands,
+and a head that climbs and selects the member in one, `..#argument/a`, is
+refused — there is no level for the climb to leave, and the reference grammar
+refuses the same head. `#result` is the default member and switches nothing. And
+in every segment that is data `#` is an ordinary character:
+`/slugs/board/title#argument` is the result key `title#argument`, the wish
+reading being decided on the whole operand and governing its head and nothing
+else.
 
 A key whose first character is `#` is a wish target when it is the whole
 operand, and is written behind the `.` head everywhere it is named: `./#tag`

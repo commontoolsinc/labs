@@ -1679,10 +1679,12 @@ async function settlePiece(
   );
   if (walked.kind !== "ran") return walked;
   let level = walked.answer;
-  for (const segment of path.slice(from.length).map(String)) {
+  const unread = path.slice(from.length).map(String);
+  for (const [index, segment] of unread.entries()) {
     const keys = keysOf(level);
     if (!keys.includes(segment)) {
-      return refuse(noSuchKey(move.operand, segment, keys));
+      const last = index === unread.length - 1;
+      return refuse(noSuchKey(move.operand, segment, keys, last));
     }
     level = (level as Record<string, unknown>)[segment];
   }
@@ -1895,7 +1897,8 @@ function confirmedKey(place: PiecePlace): string {
 
 /**
  * Helper for {@link settlePiece}, which is the reason `segment` reaches no
- * cell, `keys` being what the level above it holds.
+ * cell, `keys` being what the level above it holds and `last` saying that
+ * `segment` is the final key of the path.
  *
  * Shuttle's own sentence rather than the runtime's, which the read one level
  * further down would have raised. What it says is what the runtime's says —
@@ -1904,17 +1907,20 @@ function confirmedKey(place: PiecePlace): string {
  * a place that is not there is a fact about the operand.
  *
  * The empty key is named in words rather than quoted, a pair of backticks
- * around nothing being no name a reader can see. Where the operand ends in the
- * separator, that separator is what named it, which a person typing a path
- * the way a directory is typed does not mean; so the sentence says so, and
- * names the operand without it, which reaches the cell above.
+ * around nothing being no name a reader can see. Where it is the final key and
+ * the operand ends in the separator, that separator is what named it, which a
+ * person typing a path the way a directory is typed does not mean; so the
+ * sentence says so, and names the operand without it, which reaches the cell
+ * above. An empty key missing anywhere earlier is named by a separator inside
+ * the operand, and taking the last one off would reach nothing more.
  */
 function noSuchKey(
   operand: string,
   segment: string,
   keys: readonly string[],
+  last: boolean,
 ): string {
-  const trailing = segment === "" && operand.endsWith("/");
+  const trailing = segment === "" && last && operand.endsWith("/");
   const named = segment !== ""
     ? `\`${segment}\` is`
     : trailing
@@ -2080,6 +2086,16 @@ async function resolveTarget(
       kind: "refused",
       reason: `\`${target}\` resolved to \`${address}\`, which is no ` +
         `reference: one is rooted, and this is not.`,
+    };
+  }
+  if (reference.pin !== undefined) {
+    return {
+      kind: "refused",
+      reason: `\`${target}\` resolved to an address carrying a \`@pin=\` ` +
+        `qualifier, which a place reached through a target does not keep: a ` +
+        `place holds no pin, and shuttle reads a piece as it runs rather than ` +
+        `at a pinned version. Reach that cell by its own reference, written ` +
+        `without the qualifier.`,
     };
   }
   const carried = reference.scope !== undefined

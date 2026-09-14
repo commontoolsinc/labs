@@ -1042,6 +1042,7 @@ function movePlace(
   try {
     reference = normalizeLLMFriendlyRef(operand, {
       space: place.position.space,
+      scope: place.scope,
     });
   } catch (error) {
     return refusing(messageOf(error));
@@ -1186,9 +1187,11 @@ function placeScope(scope: LinkScope | undefined): CellScope | undefined {
  * A rooted reference fixes the piece and the path and takes both its space
  * and its scope from the place; a `//did:key:…/` prefix supplies the space, an
  * `@scope` qualifier the scope, and an `#argument` member which of the piece's
- * two cells the path is in. The parse refuses a space whose DID differs from
- * the place's, and hands one written as a name back for a session to settle,
- * since deriving a DID from a name needs one.
+ * two cells the path is in. The place is the reader's context, so `@inherit`
+ * is the place's scope. A `@pin=` is refused, a place holding no pin. The
+ * parse refuses a space whose DID differs from the place's, and hands one
+ * written as a name back for a session to settle, since deriving a DID from a
+ * name needs one.
  */
 function moveByReference(
   place: Place,
@@ -1196,6 +1199,7 @@ function moveByReference(
   operand: string,
   verb: string,
 ): Walked {
+  if (reference.pin !== undefined) return refusing(refusePin(operand));
   const input = reference.input === true;
   if (input && verb === MOVING_VERB) return walked(refuseArgumentMember());
   const badPiece = unnameablePiece(reference.pieceId);

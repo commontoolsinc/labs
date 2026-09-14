@@ -1443,6 +1443,47 @@ describe("place", () => {
             });
           });
 
+          it("keeps the place's scope for `@inherit` on a rooted or complete reference", () => {
+            // Kills a rooted door that reads a reference with no scope in its
+            // context, where `@inherit` falls back to the base.
+
+            for (
+              const reference of [
+                `/${HANDLE}@inherit/title`,
+                `//${SPACE}/${HANDLE}@inherit/title`,
+              ]
+            ) {
+              const place = atSpaceRoot();
+              moved(place, ".@session");
+              moved(place, reference);
+              expect(place.place).toEqual({
+                position: {
+                  kind: "piece",
+                  space: SPACE,
+                  piece: HANDLE,
+                  path: ["title"],
+                },
+                scope: "session",
+              });
+            }
+          });
+
+          it("refuses a `@pin=` qualifier on a rooted or complete reference", () => {
+            // Kills a rooted door that drops the pin the reader carries.
+
+            for (
+              const reference of [
+                `/${HANDLE}@pin=${PIN}/title`,
+                `//${SPACE}/${HANDLE}@pin=${PIN}/title`,
+              ]
+            ) {
+              expect(moved(atSpaceRoot(), reference)).toEqual({
+                kind: "refused",
+                reason: pinRefusal(reference),
+              });
+            }
+          });
+
           it("refuses a reference carrying `#argument`", () => {
             expect(moved(atSpaceRoot(), `/${HANDLE}#argument`)).toEqual({
               kind: "refused",
@@ -3467,6 +3508,24 @@ describe("place", () => {
               kind: "refused",
               reason: containerMemberRefusal("%1#argument"),
             },
+          });
+        });
+
+        it("selects the arguments cell of a piece row listed at a facet, the row's position deciding", () => {
+          // The listing was read at a facet, and its row stands at a piece,
+          // which is what the member is read against. Kills a member switch
+          // that asks the listing's place rather than the row's position.
+
+          expect(
+            atSpaceRoot().resolveHandle(
+              handle("%1#argument/a"),
+              inSlugs().place,
+              "first",
+              "get",
+            ),
+          ).toEqual({
+            input: true,
+            move: atSpaceRoot().aim("slugs/first/a", "get").move,
           });
         });
 
