@@ -1,11 +1,14 @@
 /** Validates stored arguments without treating unreadable links as invalid values. */
 
-import type { FabricValue } from "@commonfabric/data-model";
+import {
+  type FabricValue,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
-import type { Cell } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 import {
   type CellLink,
@@ -46,16 +49,18 @@ export const acceptsOpaqueCellOrUnresolvedLink = (
 
 const READ_NON_RECURSIVE: IReadOptions = { nonRecursive: true };
 
-/** Per-validation traversal state for the unreadable-link overlay. */
+/** Per-validation caches for the unreadable-link view. */
 interface LinkOverlayContext {
-  /** Link addresses on the current descent. */
-  chain: Set<string>;
+  /** Linked views keyed by normalized address and materialized identity. */
+  links: Map<string, Map<unknown, unknown>>;
 
-  /** Completed overlays keyed by resolved address and materialized value. */
-  results: Map<string, Map<unknown, unknown>>;
+  /** Container views keyed by base address, raw identity, and snapshot identity. */
+  containers: Map<string, WeakMap<object, WeakMap<object, object>>>;
+}
 
-  /** Reads whose result depends on a recursion cutoff or unavailable value. */
-  incompleteReads: number;
+/** Helper for the overlay caches, which identifies a stored location. */
+function overlayAddressKey(link: NormalizedFullLink): string {
+  return stringTupleKey([link.space, link.id, link.scope, ...link.path]);
 }
 
 /**
@@ -171,33 +176,19 @@ export function readStoredLinkChainRaw(
 }
 
 /**
- * Rebuilds `materialized` so every slot whose STORED value routes through a
- * link and materialized to `undefined` carries
- * {@link UNRESOLVED_LINK_PLACEHOLDER} instead. Behind a link, an absence
- * defers, whatever produced it: the value is owned elsewhere, and "not
- * replicated here yet" reads identically to "not materialized yet" — the
- * pattern-vintage gate holds real stores where the same missing slot is
- * each of those. A slot that materialized to a VALUE is never touched, so a
- * readable wrong-typed value still refuses; and an `undefined` stored
- * literally in the argument doc itself — no link involved — still judges,
- * so a doc that plainly holds nothing keeps failing a required check. A
- * deferred slot's schema check still happens, at instantiation-time
- * reactive reads (the same verdict link-resolution's `pendingHopDoc`
- * renders for lazy reads).
+ * Creates a validation view that defers unreadable stored links. A linked slot
+ * materialized as `undefined` reads as an opaque placeholder; literal absences
+ * and readable values retain their schema checks. Defaults in `materialized`
+ * remain in the view, and neither input is modified.
  *
- * The walk mirrors the materialization it repairs: from the argument doc's
- * raw bytes, following every link — across docs and spaces, to any depth —
- * via {@link readStoredLinkChainRaw}. Stored links distinguish an unreadable
- * target from a literal absence in the already-defaulted materialized view.
- * Completed subgraphs are reused by address and view within this validation;
- * a result affected by a recursion cutoff or unavailable raw-chain read stays
- * local to its descent. Shared acyclic subgraphs avoid repeated expansion,
- * while cyclic graphs retain their path-dependent cutoff behavior.
+ * Fields resolve on access, so validation only follows the graph it inspects.
+ * Shared containers and cycles retain their identity within the view, keyed by
+ * stored location and materialized snapshot. Separately defaulted snapshots
+ * remain distinct. A recursive schema over a cyclic view is still judged by
+ * the validator's recursion guard.
  *
- * The caller supplies an already-materialized snapshot. Exported for the
- * piece layer's input writes, which stage a document the same way, and for
- * direct cycle tests: eager materialization can reject a cyclic graph before
- * this walk gets to exercise its own termination guards.
+ * The view belongs to this validation and transaction. Deferred slots are
+ * checked when reactive reads materialize them.
  */
 export function overlayUnreadableLinkPlaceholders(
   tx: IExtendedStorageTransaction,
@@ -210,11 +201,11 @@ export function overlayUnreadableLinkPlaceholders(
     base,
     raw,
     materialized,
-    { chain: new Set(), results: new Map(), incompleteReads: 0 },
+    { links: new Map(), containers: new Map() },
   );
 }
 
-/** Helper for `overlayUnreadableLinkPlaceholders()`, which tracks one descent. */
+/** Helper for `overlayUnreadableLinkPlaceholders()`, which reuses linked views. */
 function overlayUnreadableLinkPlaceholdersInternal(
   tx: IExtendedStorageTransaction,
   base: NormalizedFullLink,
@@ -222,85 +213,78 @@ function overlayUnreadableLinkPlaceholdersInternal(
   materialized: unknown,
   context: LinkOverlayContext,
 ): unknown {
+  if (isCell(materialized)) return materialized;
   if (isCellLink(raw)) {
     if (materialized === undefined) return UNRESOLVED_LINK_PLACEHOLDER;
     const link = parseLink(raw, base);
-    const key = stringTupleKey([link.space, link.id, link.scope, ...link.path]);
-    if (context.chain.has(key)) {
-      context.incompleteReads++;
-      return materialized;
-    }
-    // Resolve relative links before indexing, and keep separately defaulted
-    // views of the same endpoint distinct. Reusing the whole completed walk
-    // bounds both reads and traversal work on shared acyclic linked graphs.
-    let byValue = context.results.get(key);
+    const key = overlayAddressKey(link);
+    let byValue = context.links.get(key);
     if (byValue?.has(materialized)) return byValue.get(materialized);
     if (byValue === undefined) {
       byValue = new Map();
-      context.results.set(key, byValue);
+      context.links.set(key, byValue);
     }
-    const incompleteBefore = context.incompleteReads;
-    context.chain.add(key);
-    try {
-      const reading = readStoredLinkChainRaw(tx, link, context.chain);
-      if (reading.value === undefined) {
-        // A raw chain can stop at an active ancestor or unavailable value.
-        // Its result and every enclosing result stay local to this descent.
-        context.incompleteReads++;
-        return materialized;
-      }
-      const result = overlayUnreadableLinkPlaceholdersInternal(
+    // Only the chain of aliases needs a cutoff. A link to a concrete container
+    // resolves to a cached view whose fields can point back to that same view.
+    const reading = readStoredLinkChainRaw(tx, link, new Set([key]));
+    const result = reading.value === undefined
+      ? materialized
+      : overlayUnreadableLinkPlaceholdersInternal(
         tx,
         reading.base,
         reading.value,
         materialized,
         context,
       );
-      // A back edge leaves an ancestor's materialized value in place. That
-      // partial result depends on this descent and cannot serve a sibling.
-      if (incompleteBefore === context.incompleteReads) {
-        byValue.set(materialized, result);
-      }
-      return result;
-    } finally {
-      context.chain.delete(key);
-    }
+    byValue.set(materialized, result);
+    return result;
   }
-  if (Array.isArray(raw) && Array.isArray(materialized)) {
-    let result: unknown[] | undefined;
-    for (let i = 0; i < raw.length; i++) {
-      const child = overlayUnreadableLinkPlaceholdersInternal(
-        tx,
-        base,
-        raw[i],
-        materialized[i],
-        context,
-      );
-      if (child !== materialized[i]) {
-        result ??= materialized.slice();
-        result[i] = child;
-      }
-    }
-    return result ?? materialized;
+  if (
+    !isWalkableObjectOrArray(raw) || !isWalkableObjectOrArray(materialized)
+  ) return materialized;
+
+  const key = overlayAddressKey(base);
+  let byRaw = context.containers.get(key);
+  if (byRaw === undefined) {
+    byRaw = new WeakMap();
+    context.containers.set(key, byRaw);
   }
-  if (isObjectOrArray(raw) && isObjectOrArray(materialized)) {
-    let result: Record<string, unknown> | undefined;
-    for (const [key, rawChild] of Object.entries(raw)) {
-      const child = overlayUnreadableLinkPlaceholdersInternal(
-        tx,
-        base,
-        rawChild,
-        (materialized as Record<string, unknown>)[key],
-        context,
-      );
-      if (child !== (materialized as Record<string, unknown>)[key]) {
-        result ??= { ...(materialized as Record<string, unknown>) };
-        result[key] = child;
-      }
-    }
-    return result ?? materialized;
+  let byValue = byRaw.get(raw);
+  if (byValue?.has(materialized)) return byValue.get(materialized);
+  if (byValue === undefined) {
+    byValue = new WeakMap();
+    byRaw.set(raw, byValue);
   }
-  return materialized;
+  const result = Array.isArray(materialized)
+    ? materialized.slice()
+    : { ...materialized };
+  // Publish the container before any child is resolved, so a back edge shares
+  // its view instead of expanding another path through the graph.
+  byValue.set(materialized, result);
+  for (const [key, rawChild] of Object.entries(raw)) {
+    if (!Object.hasOwn(materialized, key) && !isCellLink(rawChild)) continue;
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        const child = overlayUnreadableLinkPlaceholdersInternal(
+          tx,
+          base,
+          rawChild,
+          (materialized as Record<string, unknown>)[key],
+          context,
+        );
+        Object.defineProperty(result, key, {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: child,
+        });
+        return child;
+      },
+    });
+  }
+  return result;
 }
 
 /**

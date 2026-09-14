@@ -669,11 +669,14 @@ value is refused. Preflight does not establish that every linked value is
 available.
 
 When validation needs to distinguish unreadable links from literal absence, its
-fallback walks stored links alongside the materialized argument. It reuses
-completed subgraphs within that validation, keyed by the full normalized link
-address and materialized view so distinct defaults stay distinct. Results that
-depend on a recursion cutoff or an unavailable raw-chain read are not reused;
-cyclic graphs retain their path-dependent cutoff behavior.
+fallback builds a view whose fields follow stored links as validation reads
+them. Fields the schema does not inspect need no recursive expansion. The view
+preserves shared containers and cycles, keyed by normalized stored location and
+materialized snapshot so distinct defaults stay distinct. A link materialized
+as `undefined` reads as an opaque placeholder; literal absences, readable values,
+and opaque Cell handles retain their validation rules. A recursive schema over
+a cyclic value still reaches the validator's recursion guard. The view is local
+to the validation and changes no stored or materialized input.
 
 A source update can preserve a committed direct handle under an unchanged
 consumer input contract. The serialized link values must compare equal under

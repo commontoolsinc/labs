@@ -12,14 +12,16 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { JSONSchema } from "../src/builder/types.ts";
+import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
 import { extractDefaultValues } from "../src/runner-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
+  acceptsOpaqueCellOrUnresolvedLink,
   overlayUnreadableLinkPlaceholders,
   storedArgumentValidationIssue,
 } from "../src/stored-argument-validation.ts";
 
-/** Materialized snapshot whose back edge remains observable by identity. */
+/** Materialized snapshot whose cycle remains observable by identity. */
 interface MaterializedNode {
   /** Linked value that materialization could not read. */
   pending: unknown;
@@ -93,6 +95,109 @@ describe("stored-argument-validation", () => {
     }
   });
 
+  it("validates a shared cyclic graph with work proportional to its nodes", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const nodes = Array.from(
+        { length: 13 },
+        (_, i) => runtime.getCell(space, `shared-cycle-${i}`, undefined, tx),
+      );
+      const snapshots: Record<string, unknown>[] = nodes.map(() => ({
+        pending: undefined,
+      }));
+      for (let i = 0; i < nodes.length; i++) {
+        const next = (i + 1) % nodes.length;
+        nodes[i].set({
+          pending: absent,
+          left: nodes[next],
+          right: nodes[next],
+        });
+        snapshots[i].left = snapshots[next];
+        snapshots[i].right = snapshots[next];
+      }
+      for (const snapshot of snapshots) Object.freeze(snapshot);
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ graph: nodes[0] });
+      const raw = argument.getRaw();
+      using reads = spy(tx, "read");
+      const result = overlayUnreadableLinkPlaceholders(
+        tx,
+        argument.getAsNormalizedFullLink(),
+        raw,
+        Object.freeze({ graph: snapshots[0] }),
+      ) as { graph: Record<string, unknown> };
+      // A finite schema can inspect each node, leaving the back edges opaque.
+      let schema: JSONSchema = true;
+      for (let i = 0; i < nodes.length; i++) {
+        schema = {
+          type: "object",
+          properties: {
+            pending: { type: "string" },
+            left: schema,
+            right: schema,
+          },
+          required: ["pending"],
+        };
+      }
+      expect(validateSchemaValue(schema, result.graph, schema, {
+        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+      })).toBeUndefined();
+      expect(reads.calls.length).toBeGreaterThan(0);
+      expect(reads.calls.length).toBeLessThan(4 * nodes.length);
+      let entry = result.graph;
+      for (let i = 0; i < nodes.length; i++) {
+        expect(entry.pending).toBeDefined();
+        expect(entry.left).toBe(entry.right);
+        entry = entry.left as typeof entry;
+      }
+      expect(entry).toBe(result.graph);
+      expect(snapshots.every((node) => node.pending === undefined)).toBe(true);
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("leaves an unmodeled cyclic graph unread during stored argument validation", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const first = runtime.getCell(space, "ui-first", undefined, tx);
+      const second = runtime.getCell(space, "ui-second", undefined, tx);
+      first.set({ left: second, right: second });
+      second.set({ left: first, right: first });
+      const topic = runtime.getCell(space, "topic", undefined, tx);
+      topic.set({ mentions: absent, $UI: first });
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ topics: [topic] });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          topics: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { mentions: { type: "array" } },
+              required: ["mentions"],
+            },
+          },
+        },
+      };
+      const before = argument.getRaw();
+      using reads = spy(tx, "read");
+      expect(storedArgumentValidationIssue(argument, schema, undefined, tx))
+        .toBeUndefined();
+      expect(
+        reads.calls.some((call) =>
+          call.args[0].id === second.getAsNormalizedFullLink().id
+        ),
+      ).toBe(false);
+      expect(argument.getRaw()).toEqual(before);
+    } finally {
+      tx.abort();
+    }
+  });
+
   it("keeps differently defaulted views of one linked endpoint distinct", () => {
     const tx = runtime.edit();
     try {
@@ -127,7 +232,62 @@ describe("stored-argument-validation", () => {
     }
   });
 
-  it("rebuilds each cyclic descent without reusing a partial sibling overlay", () => {
+  it("preserves opaque Cell handles beside an unreadable linked value", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const held = runtime.getCell(space, "held", undefined, tx);
+      held.set({ label: "linked value" });
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ held, pending: absent });
+      const result = overlayUnreadableLinkPlaceholders(
+        tx,
+        argument.getAsNormalizedFullLink(),
+        argument.getRaw(),
+        { held, pending: undefined },
+      ) as { held: unknown; pending: unknown };
+      expect(result.held).toBe(held);
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          held: { type: "object", asCell: ["cell"] },
+          pending: { type: "string" },
+        },
+        required: ["held", "pending"],
+      };
+      expect(validateSchemaValue(schema, result, schema, {
+        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+      })).toBeUndefined();
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("refuses literal absences beside an unreadable linked value", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          pending: { type: "string" },
+          literal: { type: "string" },
+        },
+        required: ["pending", "literal"],
+      };
+      argument.set({ pending: absent, literal: undefined });
+      expect(storedArgumentValidationIssue(argument, schema, undefined, tx))
+        .toContain("literal: value does not match type string");
+      argument.set({ pending: absent });
+      expect(storedArgumentValidationIssue(argument, schema, undefined, tx))
+        .toContain("missing required property literal");
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("preserves cycles and distinct stored locations without changing the snapshot", () => {
     const tx = runtime.edit();
     try {
       const absent = runtime.getCell(space, "absent", undefined, tx);
@@ -150,8 +310,26 @@ describe("stored-argument-validation", () => {
       for (const entry of [result.first, result.second]) {
         expect(entry.pending).toBeDefined();
         expect(entry.next?.pending).toBeDefined();
-        expect(entry.next?.next).toBe(node);
+        expect(entry.next?.next).toBe(entry);
       }
+      expect(result.first).not.toBe(result.second);
+      expect(result.first.next).toBe(result.second);
+      const schema: JSONSchema = {
+        $ref: "#/$defs/Node",
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              pending: { type: "string" },
+              next: { $ref: "#/$defs/Node" },
+            },
+            required: ["pending"],
+          },
+        },
+      };
+      expect(validateSchemaValue(schema, result.first, schema, {
+        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+      })).toContain("recursive schema validation made no progress");
       expect(node.pending).toBeUndefined();
       expect(node.next).toBe(node);
       expect(snapshot.first).toBe(node);
@@ -161,7 +339,7 @@ describe("stored-argument-validation", () => {
     }
   });
 
-  it("revisits an alias whose first resolution reaches an active ancestor", () => {
+  it("shares a cyclic view reached through an alias", () => {
     const tx = runtime.edit();
     try {
       const absent = runtime.getCell(space, "absent", undefined, tx);
@@ -182,9 +360,10 @@ describe("stored-argument-validation", () => {
       ) as typeof snapshot;
 
       expect(result.first.pending).toBeDefined();
-      expect(result.first.next).toBe(node);
+      expect(result.first.next).toBe(result.first);
       expect(result.second.pending).toBeDefined();
-      expect(result.second.next).toBe(node);
+      expect(result.second.next).toBe(result.first);
+      expect(result.second).toBe(result.first);
       expect(node.pending).toBeUndefined();
       expect(snapshot.first).toBe(node);
       expect(snapshot.second).toBe(node);
