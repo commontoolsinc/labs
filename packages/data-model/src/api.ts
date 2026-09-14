@@ -212,7 +212,7 @@ export type FabricValuePlus<PlusType> =
   | symbol
   | undefined
   | FabricPrimitive
-  | FabricContainerValue
+  | FabricContainerValuePlus<PlusType>
   | PlusType;
 
 /**
