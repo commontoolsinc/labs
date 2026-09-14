@@ -5,6 +5,7 @@ import {
   codexTurnExecutionPolicy,
   resolveCodexAppServerLaunch,
 } from "../../src/drivers/codex-app-server.ts";
+import type { AgentDriver } from "../../src/types.ts";
 
 Deno.test("Codex unrestricted turn policy requires explicit opt-in", () => {
   const source = {
@@ -651,6 +652,12 @@ Deno.test("Codex driver handles provider edge cases and cancellation", async () 
 
     assertEquals((await driver.cancel("edge")).status, "unsupported");
     assertEquals((await driver.setMode("edge", "plan")).status, "unsupported");
+    assertEquals("startSession" in driver.source.capabilities, false);
+    assertEquals(
+      (await (driver as AgentDriver).startSession("edge", { text: "Hi" }))
+        .status,
+      "unsupported",
+    );
     assertEquals(
       (await driver.setConfigOption("edge", "thinking", true)).status,
       "unsupported",

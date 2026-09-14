@@ -25,7 +25,7 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { type AnyCell } from "./cell.ts";
+import { type AnyCell, markCellDocumentSynced } from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -869,12 +869,20 @@ export function findAllWriteRedirectCells<T>(
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
       if (options?.followRedirectChains === false) return;
+      // The probe reads the target's raw value to see whether it is itself a
+      // redirect. The cell keeps the link's schema, which carries the scope
+      // caps resolution honors along the path, but a raw read of a cold
+      // document would kick a sync under that schema, pulling everything the
+      // schema reaches for a read that wants one document, so the probe
+      // reads the replica as it stands and kicks nothing: what a run reads
+      // is named by the pre-sync, not by this walk.
       const linkCell = baseCell.runtime.getCellFromLink(
         link,
         undefined,
         baseCell.tx,
       );
       if (!linkCell) throw new Error("Link cell not found");
+      markCellDocumentSynced(linkCell);
       const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
       // Resolve the next redirect relative to `linkCell` (the cell the chained
       // redirect lives in), not the original `baseCell`: a relative redirect in

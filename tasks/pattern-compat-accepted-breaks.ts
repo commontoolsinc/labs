@@ -63,6 +63,28 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
+    // The Join verb's event opens: `Record<PropertyKey, never>` compiled to
+    // a closed empty object the runner's closed-world gate now enforces, so
+    // the rendered button's serialized DOM event was refused and the roster
+    // could never be joined. `void` (the lobby's shape) is a different
+    // recorded contract for the stream; nothing held state under the old one.
+    pattern: "profile-roster-live-demo.tsx",
+    baselines: ["20260729T022742Z-QNOFVBAs80X9XKZu"],
+    paths: ["result.join"],
+    reason:
+      "the Join verb's closed empty event refused every rendered click; re-declared void",
+    record: "docs/history/roster-join-event-opened.md",
+  },
+  {
+    // The same break in the shared roster, same record.
+    pattern: "shared-profile-roster/main.tsx",
+    baselines: ["20260729T022742Z-MLeLOCqjpbIUoIib"],
+    paths: ["result.join"],
+    reason:
+      "the Join verb's closed empty event refused every rendered click; re-declared void",
+    record: "docs/history/roster-join-event-opened.md",
+  },
+  {
     // One entry per (pattern, BASELINE) pair, and that is a requirement
     // rather than tidiness: the gate keys accepted pairs into a Map, so a
     // second entry naming a baseline this one also names REPLACES its path

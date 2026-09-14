@@ -427,6 +427,16 @@ export type ServerRunInfo = {
    * it directly. */
   kind: "derivation" | "event-handler" | "bookkeeping";
 
+  /**
+   * The transaction commits to the store on its own, ahead of the wave the
+   * serving loop would otherwise seal it into, so its `commit()` result is
+   * the store's verdict and nothing the wave later decides can withdraw it
+   * (docs/features/server-pattern-lifecycle.md). Only a `bookkeeping` run
+   * asks for this; off the serving posture the stamp is inert and the
+   * transaction commits as it would anyway.
+   */
+  directCommit?: boolean;
+
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
 
@@ -801,6 +811,14 @@ export interface CfcRuntimeStats {
   flowLabelProbesComputed: number;
 
   flowLabelProbeMemoHits: number;
+
+  /** Dereference traces recorded, and the largest set any one transaction
+   * held. `probeBelongsToDereference` scans a document's traces once per read
+   * activity, so the maximum is what decides that scan's cost. Measurement
+   * only. */
+  dereferenceTracesRecorded: number;
+
+  dereferenceTracesMax: number;
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -844,6 +862,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcRelevantTx: 0,
   flowLabelProbesComputed: 0,
   flowLabelProbeMemoHits: 0,
+  dereferenceTracesRecorded: 0,
+  dereferenceTracesMax: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -2257,6 +2277,12 @@ export class Runtime {
       onFlowLabelProbe: (outcome) => {
         if (outcome === "memo") this.#cfcStats.flowLabelProbeMemoHits += 1;
         else this.#cfcStats.flowLabelProbesComputed += 1;
+      },
+      onDereferenceTrace: (held) => {
+        this.#cfcStats.dereferenceTracesRecorded += 1;
+        if (held > this.#cfcStats.dereferenceTracesMax) {
+          this.#cfcStats.dereferenceTracesMax = held;
+        }
       },
       onPreparedTx: () => {
         this.#cfcStats.cfcPreparedTx += 1;

@@ -228,7 +228,14 @@ describe("view replication client", () => {
           inputs: { $alias: { cell: "argument", path: ["side"] } },
           outputs: { $alias: { partialCause: "side-output", path: [] } },
         }, {
-          module: { type: "javascript", implementation: () => undefined },
+          module: {
+            type: "javascript",
+            argumentSchema: {
+              type: "object",
+              properties: { $event: true },
+            },
+            implementation: () => undefined,
+          },
           inputs: {
             $event: { $alias: { partialCause: "hidden-stream", path: [] } },
           },
@@ -353,6 +360,7 @@ describe("view replication client", () => {
         true,
       );
       expect(handlers.calls).toHaveLength(1);
+      expect(handlers.calls[0].args[0].presyncInputs).toBeUndefined();
       expect(visibleBindings()).toHaveLength(1);
       expect(visibleRuns).toBe(runsBeforeCoverage);
       notifyCoverage();

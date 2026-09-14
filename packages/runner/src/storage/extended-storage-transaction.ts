@@ -208,6 +208,12 @@ type CfcInstrumentationHooks = {
 
   onPreparedTx?(): void;
 
+  /** One dereference trace was recorded, and how many the transaction holds
+   * after it. `probeBelongsToDereference` scans this set once per read
+   * activity at commit preparation, so its size is a per-read multiplier.
+   * Measurement only. */
+  onDereferenceTrace?(held: number): void;
+
   /**
    * CFC prepare refused this transaction. `reasons` are the PLAIN reason
    * texts (the verdict tag is a classification channel and never leaves the
@@ -1713,6 +1719,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
     traces.push(deepFreeze(trace));
+    this.#cfcInstrumentation.onDereferenceTrace?.(traces.length);
     if (changesDigest) {
       this.invalidateCfc("dereference-trace-added");
     }

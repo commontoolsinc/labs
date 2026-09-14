@@ -4,7 +4,7 @@ Normative expansion of [README.md](README.md) §3.5. One entry per
 built-in family; an implementer should be able to port a built-in to the
 serving loop from its row plus the referenced sections.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors
 
 - Inventory: `packages/runner/src/builtins/` (registered via
   `registerBuiltins(runtime)` in `index.ts`).

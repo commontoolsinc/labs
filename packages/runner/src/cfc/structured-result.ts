@@ -1,6 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import {
-  FabricSpecialObject,
+  isFabricSpecialObject,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -443,7 +443,7 @@ const sanitizeValueWithOpaqueLinks = (
     });
     return { value: items, linkedStringCount, sealedPaths };
   }
-  if (value instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(value)) {
     // Sealed, not shown and not walked. A special object holds its state
     // behind no property name, so the record arm below cannot measure it
     // against the schema the way the unmodeled-key policy measures a record --

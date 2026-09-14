@@ -2627,7 +2627,13 @@ export class RuntimeProcessor {
     const timing = getTimingStatsBreakdown();
     const flags = getLoggerFlagsBreakdown();
     assertFabricLoggerFlags(flags);
-    return { counts, metadata, timing, flags };
+    return {
+      counts,
+      metadata,
+      timing,
+      flags,
+      cfc: this.#runtime.getCfcStats(),
+    };
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {

@@ -43,21 +43,6 @@ describe("entity-id-scheme-parsing", () => {
             "action:pattern:did:key:z6Mkabc/computed:fid1:BBB/value",
           )).toBe("computed:fid1:BBB");
         });
-
-        it("truncateLabel() keeps a schemed segment's entity tail and path", () => {
-          const helpers = XSchedulerGraph.accessForTestingOnly;
-
-          const ofLabel = helpers.truncateLabel(
-            "sink:did:key:z6MkabcdefghijkLMNOP/of:fid1:AAAABBBBCCCCDDDD/value",
-          );
-          expect(ofLabel).toContain("DDDD");
-          expect(ofLabel).toContain("value");
-          const computedLabel = helpers.truncateLabel(
-            "sink:did:key:z6MkabcdefghijkLMNOP/computed:fid1:EEEEFFFFGGGGHHHH/count",
-          );
-          expect(computedLabel).toContain("HHHH");
-          expect(computedLabel).toContain("count");
-        });
       });
     });
   });

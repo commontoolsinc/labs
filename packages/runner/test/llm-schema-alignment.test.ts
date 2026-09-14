@@ -301,7 +301,7 @@ describe("LLM schema alignment", () => {
       expect(value.messages[0].role).toBe("user");
     });
 
-    it("regression CT-1254: multimodal prompt survives schema application", () => {
+    it("preserves a multimodal prompt through schema application", () => {
       const params: BuiltInGenerateTextParams = {
         prompt: [
           { type: "image", image: "data:image/png;base64,longbase64data" },
@@ -363,7 +363,7 @@ describe("LLM schema alignment", () => {
       expect(Array.isArray(value.messages)).toBe(true);
     });
 
-    it("regression CT-1254: multimodal prompt in generateObject survives schema", () => {
+    it("preserves a multimodal prompt in `generateObject` through schema application", () => {
       const params: BuiltInGenerateObjectParams = {
         prompt: [
           { type: "image", image: "data:image/png;base64,abc" },

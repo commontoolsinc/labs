@@ -1091,7 +1091,7 @@ Deno.test("key() does not stamp the asCell entry scope onto the container link",
     // key() only extends the path; it must NOT stamp the schema scope (asCell
     // entry or inline) onto the navigated link. Scope is carried on the schema
     // (a follow cap on reads, the target scope on writes); stamping it here reads
-    // the wrong, narrower, empty scoped instance of the container — see CT-1623.
+    // the wrong, narrower, empty scoped instance of the container.
     const current = outer.key("current");
     assertEquals(current.getAsNormalizedFullLink().scope, "space");
     const currentSchema = current.getAsNormalizedFullLink().schema as any;
@@ -1291,8 +1291,8 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
     );
     secret.set(41);
 
-    // The nested computation is a module-scope factory (what the CT-1644
-    // transformer hoist produces); the action INSTANTIATES it — minting a
+    // The nested computation is a module-scope factory (what the transformer
+    // hoist produces); the action INSTANTIATES it — minting a
     // builder artifact inside an action throws (identity E5).
     const nested42 = lift(
       () => 42,
@@ -1355,7 +1355,7 @@ Deno.test("opaque JS action result schema scope participates in effective output
 
   try {
     const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
-    // Hoisted factory + in-action instantiation (the CT-1644 transformer
+    // Hoisted factory + in-action instantiation (the transformer's hoisted
     // shape — minting inside the action throws since identity E5).
     const nested42 = lift(
       () => 42,

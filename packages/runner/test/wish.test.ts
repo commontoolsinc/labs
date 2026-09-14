@@ -2210,8 +2210,8 @@ describe("wish built-in", () => {
     });
 
     it("preserves object syntax through compilation pipeline", async () => {
-      // This test ensures that wish({ query: "..." }) object syntax works
-      // when patterns are compiled and deployed (CT-1084)
+      // The `wish({ query: "..." })` object syntax survives pattern
+      // compilation and deployment.
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "compiled pattern value" };
       spaceCell.set(spaceData);
@@ -2648,13 +2648,13 @@ describe("wish built-in", () => {
     });
 
     it("#profile resolves to the default directly (no picker) when a default is set among multiple profiles", async () => {
-      // Regression for the profile-picker deadlock: a non-headless `#profile`
-      // wish from a viewer with 2+ profiles used to launch the multi-candidate
-      // picker, leaving `.result` undefined until a selection — dead-locking
-      // every pattern that wishes for "the viewer's active profile" (e.g.
-      // profile-group-chat's send guard). With a default set, `#profile` must
-      // resolve to it directly as a single result.
-      // Each profile in its OWN space — space DID is the identity (CT-1842).
+      // With a default set among 2+ profiles, a non-headless `#profile` wish
+      // resolves to it directly as a single result rather than launching the
+      // multi-candidate picker. A picker owning `.result` would leave it
+      // undefined until a selection, dead-locking every pattern that wishes
+      // for "the viewer's active profile" (e.g. profile-group-chat's send
+      // guard).
+      // Each profile in its OWN space — space DID is the identity.
       const spaceA = (await Identity.fromPassphrase(
         "wish-profile-default-among-many-a",
       )).did();
@@ -2894,14 +2894,14 @@ describe("wish built-in", () => {
     });
 
     it("settles the create surface's launch and says so when it cannot load", async () => {
-      // Two things the create surface used to get wrong at once. The wish sends
+      // Two things the create surface has to get right at once. The wish sends
       // its `[UI]` — a `cf-render` over a cell only the deferred launch fills —
-      // and then the runtime reported itself idle with that cell still empty,
-      // so a caller settling the view was told a surface still on its way had
-      // arrived. And when the launch could not produce a pattern (here the
-      // fetch is refused: this suite runs without net access), nothing was
-      // written at all, leaving the only route to a first profile permanently
-      // blank with no account of why.
+      // so the runtime must not report itself idle with that cell still empty,
+      // or a caller settling the view is told a surface still on its way has
+      // arrived. And when the launch cannot produce a pattern (here the fetch
+      // is refused: this suite runs without net access), the failure must be
+      // written, or the only route to a first profile is permanently blank
+      // with no account of why.
       //
       // One `idle()`, no draining loop, and the cell holds the failure.
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
@@ -3076,7 +3076,7 @@ describe("wish built-in", () => {
 
     it("resolves headless #profile to the default profile (ordered first)", async () => {
       // Each profile lives in its OWN (non-home) space — its space DID is its
-      // identity (CT-1842). Commit per space (single-space-writer per tx).
+      // identity. Commit per space (single-space-writer per tx).
       const p1Space = (await Identity.fromPassphrase(
         "wish-multi-profile-space-1",
       )).did();
@@ -3144,7 +3144,7 @@ describe("wish built-in", () => {
     });
 
     it("orders headless #profile by MRU when no default is set", async () => {
-      // Each profile in its OWN space — space DID is the identity (CT-1842).
+      // Each profile in its OWN space — space DID is the identity.
       const p1Space = (await Identity.fromPassphrase(
         "wish-mru-profile-space-1",
       )).did();
@@ -3721,13 +3721,12 @@ describe("wish built-in", () => {
       });
     });
 
-    describe("single-result #profile contract (CT-1829)", () => {
-      // CT-1829: `wish("#profile").result` is ALWAYS the single best profile
-      // (ordered default → MRU → first) in every mode. The picker no longer
-      // owns `.result`; it is only the `[UI]` switching affordance. These tests
-      // pin the decided contract that Loom (loom PR #3627) binds to. This is a
-      // distinct describe from the "host embedding contract" block landing in
-      // PR #4502 — do not depend on that one.
+    describe("single-result `#profile` contract", () => {
+      // `wish("#profile").result` is ALWAYS the single best profile (ordered
+      // default → MRU → first) in every mode. The picker does not own
+      // `.result`; it is only the `[UI]` switching affordance. These tests pin
+      // the contract that Loom binds to, and are distinct from the "host
+      // embedding contract" block above — do not depend on that one.
 
       // Stand up N profiles in one profile space, wire the home default-pattern
       // `profiles` list (and optionally `defaultProfile` / `mru`), run a
@@ -3749,7 +3748,7 @@ describe("wish built-in", () => {
       ) {
         // Each profile lives in its OWN space (an anonymous
         // `ProfileHome.inSpace()` in production) — the profile's own space DID is
-        // its stable identity (CT-1842). Commit per space: a single tx can only
+        // its stable identity. Commit per space: a single tx can only
         // open one space writer at a time.
         const profileCells: Array<ReturnType<Runtime["getCell"]>> = [];
         for (let i = 0; i < opts.names.length; i++) {
@@ -3905,12 +3904,11 @@ describe("wish built-in", () => {
         expect(result.key("profile").get()?.result?.name).toBe("TheDefault");
       });
 
-      it("2+ no default → result = MRU head, INTERACTIVE (new behavior; no empty window)", async () => {
+      it("resolves 2+ profiles with no default to the MRU head interactively, with no empty window", async () => {
         // The orphan-second-profile case: 2 profiles, no default, MRU lists the
-        // second first. Pre-CT-1829 this launched the picker and left `.result`
-        // undefined until the sidecar ran (undefined forever on fetch failure —
-        // which is exactly what happens here, the sidecar 404s against the test
-        // apiUrl). Now `.result` rides the main wish state and resolves eagerly.
+        // second first. `.result` rides the main wish state and resolves
+        // eagerly, so the picker's sidecar — which here 404s against the test
+        // apiUrl and never runs — cannot leave it undefined.
         const { result } = await setupProfiles("mru-interactive", {
           names: ["Ada", "Grace"],
           mruIndices: [1],
@@ -4008,10 +4006,9 @@ describe("wish built-in", () => {
 
       it("picker sidecar fetch failure → result still resolves; error surfaced in picker UI", async () => {
         // Fail every request for the picker's source, so opening its surface
-        // cannot answer. Under CT-1829 `.result` no longer rides the sidecar
-        // cell, so it must still resolve to ordered[0]; the failure is
-        // surfaced as an error inside the picker `[UI]` cell, not as an
-        // unhandled rejection.
+        // cannot answer. `.result` does not ride the sidecar cell, so it must
+        // still resolve to ordered[0]; the failure is surfaced as an error
+        // inside the picker `[UI]` cell, not as an unhandled rejection.
         const originalFetch = globalThis.fetch;
         globalThis.fetch = ((input: Request | URL | string) => {
           const url = input instanceof Request ? input.url : String(input);
@@ -4043,27 +4040,26 @@ describe("wish built-in", () => {
         }
       });
 
-      describe("cross-space id skew (CT-1842)", () => {
-        // CT-1842: In real deployments each profile lives in its OWN space (an
+      describe("cross-space id skew", () => {
+        // In real deployments each profile lives in its OWN space (an
         // anonymous `ProfileHome.inSpace()`), and the `mru` / `defaultProfile`
         // link and the `profiles` candidate for the SAME profile point at
         // DIFFERENT cells WITHIN that profile's space — same space, DIFFERENT
         // entity id (the picker stores the profile pattern's result cell; the
-        // list stores the pattern cell). So neither `Cell.equals` nor an
-        // id-based comparison matches them; the MRU/default match returned
-        // false for every candidate and the ordering silently collapsed to
-        // `profiles`-list (creation) order — the switcher was a no-op
-        // cross-space. The builtin now matches by the profile's own SPACE (the
-        // stable per-profile identity), so the id difference no longer defeats
-        // the match. Verified against live data (switchtest identity):
-        // mru[0].space == profiles[1].space for the same profile, while the ids
-        // differ.
+        // list stores the pattern cell). Neither `Cell.equals` nor an id-based
+        // comparison matches them: either would return false for every
+        // candidate, silently collapsing the ordering to `profiles`-list
+        // (creation) order and making the switcher a no-op cross-space. The
+        // builtin matches by the profile's own SPACE (the stable per-profile
+        // identity), so the id difference does not defeat the match. Live
+        // data has this shape: mru[0].space == profiles[1].space for the same
+        // profile, while the ids differ.
 
         // Stand up N profiles, each in its OWN space (real cross-space), wire the
         // home `profiles` list from the profiles' CANONICAL cells, and write
         // `mru` / `defaultProfile` as links pointing at a DIFFERENT cell in the
-        // SAME profile space (a distinct entity id) — the exact production shape
-        // that made id/equals comparison return false for the same profile.
+        // SAME profile space (a distinct entity id) — the production shape under
+        // which id/equals comparison returns false for the same profile.
         async function setupCrossSpace(
           label: string,
           opts: {
@@ -4179,13 +4175,13 @@ describe("wish built-in", () => {
           return { result };
         }
 
-        it("MRU head resolves cross-space despite different-id mru links (fails on unfixed code)", async () => {
+        it("resolves the MRU head cross-space despite different-id mru links", async () => {
           // Two profiles in two spaces, no default. MRU lists the SECOND-created
           // profile first, via a link whose entity id differs from the candidate's
-          // (but shares the profile space). Pre-fix, id/equals matching rejects
-          // every mru↔candidate pair, so ordering falls back to creation order and
-          // `.result` = first-created (Ada). With space-based matching, `.result`
-          // = MRU head (Grace).
+          // (but shares the profile space). Id/equals matching would reject every
+          // mru↔candidate pair, ordering would fall back to creation order, and
+          // `.result` would be first-created (Ada). Space-based matching gives
+          // `.result` = MRU head (Grace).
           const { result } = await setupCrossSpace("mru-id-skew", {
             names: ["Ada", "Grace"],
             mruIndices: [1],
@@ -4193,11 +4189,11 @@ describe("wish built-in", () => {
           expect(result.key("profile").get()?.result?.name).toBe("Grace");
         });
 
-        it("default resolves cross-space despite different-id default link (guards the default-match fix)", async () => {
+        it("resolves the default cross-space despite a different-id default link", async () => {
           // defaultProfile points at the SECOND profile via a different-id link.
-          // Pre-fix the default-match (`defaultCell.equals(candidate)`) fails the
-          // same way, so the default is ignored; with the fix it resolves to the
-          // chosen default.
+          // A default match by `defaultCell.equals(candidate)` would fail the
+          // same way and ignore the default; space-based matching resolves to
+          // the chosen default.
           const { result } = await setupCrossSpace("default-id-skew", {
             names: ["Ada", "Grace"],
             defaultIndex: 1,

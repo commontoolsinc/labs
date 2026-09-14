@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
 
 /**
- * Conformance guard for CT-1814 (the construction-config axis of CT-1811).
+ * Conformance guard for the runtime presets.
  *
  * The presets exist so a new `RuntimeOptions` key — or a changed default —
  * cannot land unevenly across first-party environments. Two mechanisms are
@@ -153,7 +153,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   servingPosture: { treat: "absent" },
 };
 
-describe("runtimePresets conformance (CT-1814)", () => {
+describe("runtimePresets conformance", () => {
   it("every registered option key gets its declared treatment in every preset", () => {
     for (const key of RUNTIME_OPTION_KEYS) {
       const treatment = MINIMAL_TREATMENT[key];
@@ -734,8 +734,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
       });
 
       it("an adopted server-OFF posture rides the deployed-topology presets explicitly, immune to the first-party default", async () => {
-        // The separately-installed-host shape (the #6535 Codex P1 on the
-        // GitHub host): nothing declared in the environment, talking to a
+        // The separately-installed-host shape: nothing declared in the
+        // environment, talking to a
         // server held on the explicit-OFF rollback posture. Adoption hands
         // the preset an EXPLICIT `false`, and the presets' `??` fill then
         // never consults `SERVER_EXECUTION_DEFAULT_ENABLED` — which is why
@@ -812,7 +812,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
     });
   });
 
-  describe("cfcPosture: max-enforcement (CT-2075)", () => {
+  describe("cfcPosture: max-enforcement", () => {
     const posture = { cfcPosture: "max-enforcement" } as const;
     const postureOutputs: Record<PresetName, RuntimeOptions> = {
       productionServer: runtimePresets.productionServer({

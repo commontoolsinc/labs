@@ -47,7 +47,7 @@ const ACCEPT: Case[] = [
       `const inner_1 = require("./inner.ts");\nObject.defineProperty(exports, "x", { enumerable: true, get: function () { return inner_1.x; } });`,
   },
   {
-    // CT-1661: `export { x } from "./m"` emits the module reference as `var`
+    // `export { x } from "./m"` emits the module reference as `var`
     // (hoisted ahead of the getter), not `const`. The import-preamble fast-path
     // must accept the `var` form, or a legitimate barrel re-export is rejected.
     name: "named reexport getter from a var require preamble",
@@ -135,7 +135,7 @@ const REJECT: Case[] = [
     reject: /.*/,
   },
   {
-    // CT-1661: the `var` re-export relaxation must not extend to trusted runtime
+    // The `var` re-export relaxation must not extend to trusted runtime
     // bindings — `var` is mutable at runtime, so a runtime require must be
     // `const`. Mirrors `const` accept "named reexport getter from a var require".
     name: "var require of a trusted runtime module",
