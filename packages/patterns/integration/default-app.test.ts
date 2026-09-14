@@ -696,29 +696,44 @@ describe("default-app flow test", () => {
         // to where the view wandered.
         let notebookEntityId: string | undefined;
         try {
-          notebookEntityId = await waitForCondition(page, async () => {
-            const commonfabric = globalThis.commonfabric as
-              | { readCell?: (options: { id: string }) => Promise<unknown> }
-              | undefined;
-            const view = globalThis.app?.serialize?.()?.view;
-            const pieceId = view && typeof view === "object" &&
-                "pieceId" in view && typeof view.pieceId === "string"
-              ? view.pieceId
-              : undefined;
-            if (!pieceId || !commonfabric?.readCell) return false;
-            let current: unknown;
-            const originalLog = console.log;
-            try {
-              console.log = () => {};
-              current = await commonfabric.readCell({ id: pieceId });
-            } finally {
-              console.log = originalLog;
-            }
-            return (current as { isNotebook?: unknown } | undefined)
-                ?.isNotebook === true
-              ? pieceId
-              : false;
-          });
+          notebookEntityId = await waitForCondition(
+            page,
+            async (_probe, space) => {
+              const commonfabric = globalThis.commonfabric as
+                | { readCell?: (options: { id: string }) => Promise<unknown> }
+                | undefined;
+              const view = globalThis.app?.serialize?.()?.view;
+              const pieceId = view && typeof view === "object" &&
+                  "pieceId" in view && typeof view.pieceId === "string"
+                ? view.pieceId
+                : undefined;
+              if (!pieceId || !commonfabric?.readCell) return false;
+              let current: unknown;
+              const originalLog = console.log;
+              try {
+                console.log = () => {};
+                current = await commonfabric.readCell({ id: pieceId });
+              } finally {
+                console.log = originalLog;
+              }
+              if (
+                (current as { isNotebook?: unknown } | undefined)
+                  ?.isNotebook !==
+                  true
+              ) return false;
+              // Navigation may name a cell whose value links to the notebook.
+              // Its argument and internal metadata belong to the resolved
+              // notebook, not to the cell that carries that reference.
+              const piece = await globalThis.commonfabric?.rt?.getPiece(
+                pieceId,
+                space,
+                false,
+              );
+              if (!piece) return false;
+              return (await piece.cell().resolveAsCell()).id();
+            },
+            { args: [notebookSpaceDid] },
+          );
         } catch (error) {
           console.log(
             "Notebook navigation diagnostics:",

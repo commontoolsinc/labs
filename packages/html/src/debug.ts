@@ -8,7 +8,7 @@
 
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import {
-  FabricSpecialObject,
+  isFabricSpecialObject,
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { debugVDOMSchema } from "@commonfabric/runner/schemas";
@@ -92,7 +92,7 @@ export function formatTree(node: unknown, indent = 0): string {
   // A `FabricSpecialObject` is rendered before the vdom-node check below
   // reads it: one can carry a `name` of its own, as a `FabricError` does,
   // which would pass for a node's.
-  if (node instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(node)) {
     return `${pad}${toCompactDebugString(node)}`;
   }
 

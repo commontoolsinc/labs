@@ -7,170 +7,44 @@
  * circular dependency.
  *
  * The classes here and the declarations in `api.ts` describe the same shapes,
- * and the assertions at the end of this file stop compiling when they drift.
- * The concrete classes under `fabric-primitives/` and `fabric-instances/`
- * carry the same kind of guard, each beside its own definition.
+ * and `api-agreement.ts` stops compiling when they drift. The concrete classes
+ * under `fabric-primitives/` and `fabric-instances/` carry the same kind of
+ * guard, each beside its own definition.
  */
 
 import type {
-  CompactDebugStringOptions,
-  DebugValueOptions,
   FabricArray,
-  FabricContainerValue,
-  FabricInstance as ApiFabricInstance,
   FabricPlainObject,
-  FabricPrimitive as ApiFabricPrimitive,
-  FabricSpecialObject as ApiFabricSpecialObject,
   FabricValue,
-  FromNativeErrorOptions,
-  NonNullableFabricValue,
+  FabricValuePlus,
 } from "./api.ts";
 
-//
-// `FabricSpecialObject`
-//
-
-/**
- * Abstract base class for all fabric-system value types. This is the common
- * superclass of `FabricInstance` (object-like protocol types) and
- * `FabricPrimitive` (immutable special primitives). It enables a single
- * `instanceof FabricSpecialObject` check wherever code needs to recognize any
- * fabric-system value without caring which branch of the hierarchy it
- * belongs to.
- *
- * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
- * exists only in the type system: `declare` emits no runtime member, and
- * nothing ever reads the key. Without it the class is structurally empty, so
- * *every* object satisfies `FabricSpecialObject` — which in turn makes every
- * object satisfy `FabricValue`, since that union includes this type. The brand
- * is what makes `FabricValue` mean anything as a static claim.
- *
- * It is a well-known string key rather than a `unique symbol` because that
- * would require importing a symbol *value*, and this file is deliberately free
- * of runtime imports (see the file header). `api.ts` declares the identical
- * member, and the assertions at the end of this file stop compiling if the two
- * stop agreeing; a value branded by one would otherwise not satisfy the
- * other.
- */
-export abstract class FabricSpecialObject {
-  declare readonly "@commonfabric/FabricSpecialObject": true;
-}
+// We re-`export` all the _types_ from `./api.ts`, so that they're consistently
+// available internally to `data-model` without having to `import ... from
+// "./api.ts"`.
+export type * from "./api.ts";
 
 //
-// `FabricInstance` protocol
+// "Layer" types
+//
+// A layer type is a `FabricValue`-like type whose claim stops at the root
+// container. `FabricValueLayer` leaves what the root holds untyped, and the
+// `Mutable*Layer` types keep what it holds as ordinary `FabricValue`s but
+// leave the root itself writable. In each case the root still carries the
+// other `FabricValue` restrictions on its kind of container (e.g., for an
+// array, no synthetic keys and no named properties other than `length`).
 //
 
 /**
- * Abstract base class for values that participate in the fabric protocol.
- * See Section 2.3 of the formal spec.
- *
- * This is the pure abstract protocol -- the `instanceof`-able contract that
- * external code is written against. Concrete `FabricInstance` classes in the
- * data-model extend `BaseFabricInstance` (a subclass of this one) rather
- * than this class directly; `BaseFabricInstance` is where shared
- * template-method scaffolding (such as `shallowClone()`) lives.
- *
- * An instance holds all of its state privately and makes it reachable only
- * through members, so it has no own properties at all. A structural view of
- * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
- * Mutable state is exposed as an accessor pair over a private field, whose
- * setter is responsible for honoring the instance's frozen state:
- * `Object.freeze()` bears only on own properties and so cannot enforce that
- * on its own.
- *
- * Subclasses must implement `deepClone()` and `shallowClone()`; both are
- * normally inherited from `BaseFabricInstance` as template methods, with the
- * subclass supplying the symbol-keyed clone core each one calls. The
- * freeze-protocol members `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are
- * declared on `BaseFabricInstance`, not here: they are implementation plumbing
- * and are kept off this pure-protocol class.
+ * Single "layer" of fabric validity: a `FabricValue`, or an array or plain
+ * object root whose contents are untyped. Arrays and objects have the right
+ * shape but their contents may not. As with `FabricValue`, the type system
+ * requires deep immutability -- the type is deeply `readonly` -- while actual
+ * deep-freezing happens only tactically.
  */
-export abstract class FabricInstance extends FabricSpecialObject {
-  /**
-   * Returns a new deep clone of this instance with equivalent data but no
-   * shared structure for any unfrozen data in the original. When `frozen ===
-   * true`, produces a frozen instance with maximal structural sharing,
-   * including returning `this` if it is already deep-frozen. When `frozen ===
-   * false`, produces a deeply-mutable instance with no visible shared reference
-   * structure with the original.
-   *
-   * The concrete template-method implementation lives on `BaseFabricInstance`
-   * (deferring to the `[DEEP_CLONE_CORE]` sibling, mirroring the
-   * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this declaration just
-   * pins the protocol surface so that callers can invoke it through a
-   * `FabricInstance` reference.
-   */
-  abstract deepClone(frozen: boolean): FabricInstance;
-
-  /**
-   * Returns a shallow clone of this instance with the requested frozenness.
-   * The concrete template-method implementation lives on
-   * `BaseFabricInstance`; this declaration just pins the protocol surface so
-   * that callers can invoke it through a `FabricInstance` reference.
-   */
-  abstract shallowClone(frozen: boolean): FabricInstance;
-}
-
-//
-// `FabricPrimitive` base class
-//
-
-/**
- * Abstract base class for "special primitive" fabric types -- values that
- * behave like primitives in the fabric type system but are represented as
- * class instances for type safety and dispatch. Covers temporal types,
- * content IDs, byte sequences, and similar.
- *
- * This class enables a single `instanceof` check where code needs to handle
- * any `FabricPrimitive` uniformly.
- *
- * Instances are always frozen (like true primitives, they are immutable).
- * Each leaf subclass must call `Object.freeze(this)` at the end of its
- * constructor, after all fields are initialized. (Freezing in the base
- * constructor would prevent subclass field assignment.)
- *
- * See Section 1.4.6 of the formal spec.
- */
-export abstract class FabricPrimitive extends FabricSpecialObject {
-  /** Constructs an instance. */
-  constructor() {
-    super();
-  }
-}
-
-//
-// Type definitions
-//
-
-/**
- * The pattern-visible fabric value types, and the option types of the debug
- * renderers over them, declared in `api.ts` and re-exported here so that this
- * module carries the whole `FabricValue` vocabulary. `api.ts` is where they
- * have to be declared: it reaches patterns by being inlined into the type
- * module the pattern compiler serves, and so must not import anything, which
- * makes it the leaf of this pair.
- */
-export type {
-  CompactDebugStringOptions,
-  DebugValueOptions,
-  FabricArray,
-  FabricContainerValue,
-  FabricPlainObject,
-  FabricValue,
-  FromNativeErrorOptions,
-  NonNullableFabricValue,
-};
-
-/**
- * Single "layer" of fabric conversion -- the result of shallow conversion
- * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
- * shape but their contents may still contain values requiring further
- * conversion (e.g., `Error` instances in a `.cause` chain).
- */
-export type FabricValueLayer =
-  | FabricValue
-  | unknown[]
-  | Record<string, unknown>;
+export type FabricValueLayer = FabricValuePlus<
+  Readonly<unknown[] | Record<string, unknown>>
+>;
 
 /** A mutable array root whose elements remain `FabricValue`s. */
 export type MutableFabricArrayLayer = FabricValue[];
@@ -199,6 +73,10 @@ export type MutableFabricValueLayer =
   | Exclude<FabricValue, FabricArray | FabricPlainObject>
   | MutableFabricArrayLayer
   | MutableFabricPlainObjectLayer;
+
+//
+// Types for dealing with native (non-fabric, a/k/a "wild west") values
+//
 
 /**
  * Union of raw native JS **object** types that the fabric type system can
@@ -231,34 +109,135 @@ export type FabricNativeObject =
  * Converting a `FabricError` yields an `Error`, so an array of them is an array
  * of natives, which has no `FabricValue` name.
  */
-export type FabricConvertibleValue =
-  | FabricValue
-  | FabricNativeObject
-  | readonly FabricConvertibleValue[]
-  | { readonly [key: string]: FabricConvertibleValue };
+export type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
 
 //
-// Agreement with the pattern-visible declarations
+// Abstract base classes
+//
+// The _class_ definitions corresponding to the _interface_ definitions in
+// `api.ts` of `FabricSpecialObject` and its only two direct subclasses.
 //
 
-/** Whether `A` and `B` are mutually assignable. */
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/**
+ * Common base class for `FabricInstance` and `FabricPrimitive`, which are the
+ * only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
+ * differ along one axis: whether the data model treats an instance as a
+ * primitive. A `FabricPrimitive` is treated the way a built-in `string` or
+ * `number` is; a `FabricInstance` is treated the way an `object` is. What
+ * follows from that, and what a caller sees of it, is that a `FabricInstance`
+ * may hold and expose arbitrary outgoing `FabricValue` references, and a
+ * `FabricPrimitive` may not. Enables a single `instanceof FabricSpecialObject`
+ * check wherever code needs to recognize any fabric-system value without
+ * caring which branch of the hierarchy it belongs to.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
+ * exists only in the type system: `declare` emits no runtime member, and
+ * nothing ever reads the key. Without it the class is structurally empty, so
+ * *every* object satisfies `FabricSpecialObject` — which in turn makes every
+ * object satisfy `FabricValue`, since that union includes this type. The brand
+ * is what makes `FabricValue` mean anything as a static claim.
+ *
+ * It is a well-known string key rather than a `unique symbol` because that
+ * would require importing a symbol *value*, and this file is deliberately free
+ * of runtime imports (see the file header). `api.ts` declares the identical
+ * member, and `api-agreement.ts` stops compiling if the two stop agreeing; a
+ * value branded by one would otherwise not satisfy the other.
+ */
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 
-/** Compiles only when its argument is `true`. */
-type MustBeTrue<T extends true> = T;
+/**
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as non-primitives. An instance may hold and expose arbitrary
+ * outgoing `FabricValue` references, and is mutable until frozen.
+ * `FabricSpecialObject` says how this differs from `FabricPrimitive`. See
+ * Section 2.3 of the formal spec.
+ *
+ * This is the pure abstract protocol -- the `instanceof`-able contract that
+ * external code is written against. Concrete `FabricInstance` classes in the
+ * data-model extend `BaseFabricInstance` (a subclass of this one) rather
+ * than this class directly; `BaseFabricInstance` is where shared
+ * template-method scaffolding (such as `shallowClone()`) lives.
+ *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no enumerable own properties. A structural view
+ * of one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
+ * Mutable state is exposed as an accessor pair over a private field, whose
+ * setter is responsible for honoring the instance's frozen state:
+ * `Object.freeze()` bears only on own properties and so cannot enforce that
+ * on its own.
+ *
+ * Subclasses must implement `deepClone()` and `shallowClone()`; both are
+ * normally inherited from `BaseFabricInstance` as template methods, with the
+ * subclass supplying the symbol-keyed clone core each one calls. The
+ * freeze-protocol members `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are
+ * declared on `BaseFabricInstance`, not here: they are implementation plumbing
+ * and are kept off this pure-protocol class.
+ */
+export abstract class FabricInstance extends FabricSpecialObject {
+  /**
+   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
+   * `never` here since an instance of this class holds only `FabricValue`s.
+   * Declared the way the `FabricSpecialObject` brand is, and for the same
+   * reasons; `api.ts` declares the identical member.
+   */
+  declare readonly "@commonfabric/FabricInstancePlus"?: never;
 
-// Compile-time checks that the abstract base classes above and the
-// declarations in `api.ts` -- which is what a pattern compiles against --
-// describe the same shape.
-//
-// Mutual assignability, not `satisfies`. A one-way check passes when the class
-// carries a member the declaration omits, since the extra member only makes
-// the class more assignable; that is the direction a pattern feels, because
-// the member it cannot reach is the one missing from the declaration. Both
-// directions have to be asserted for a member added on either side alone to
-// fail here.
-type _SpecialObjectAgrees = MustBeTrue<
-  Same<FabricSpecialObject, ApiFabricSpecialObject>
->;
-type _InstanceAgrees = MustBeTrue<Same<FabricInstance, ApiFabricInstance>>;
-type _PrimitiveAgrees = MustBeTrue<Same<FabricPrimitive, ApiFabricPrimitive>>;
+  /**
+   * Returns a new deep clone of this instance with equivalent data but no
+   * shared structure for any unfrozen data in the original. When `frozen ===
+   * true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen ===
+   * false`, produces a deeply-mutable instance with no visible shared reference
+   * structure with the original.
+   *
+   * The concrete template-method implementation lives on `BaseFabricInstance`
+   * (deferring to the `[DEEP_CLONE_CORE]` sibling, mirroring the
+   * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this declaration just
+   * pins the protocol surface so that callers can invoke it through a
+   * `FabricInstance` reference.
+   */
+  abstract deepClone(frozen: boolean): FabricInstance;
+
+  /**
+   * Returns a shallow clone of this instance with the requested frozenness.
+   * The concrete template-method implementation lives on
+   * `BaseFabricInstance`; this declaration just pins the protocol surface so
+   * that callers can invoke it through a `FabricInstance` reference.
+   */
+  abstract shallowClone(frozen: boolean): FabricInstance;
+}
+
+/**
+ * Abstract base class for the `FabricValue`s that participate in the fabric
+ * protocol as primitives: values that behave like primitives in the fabric
+ * type system but are represented as class instances for type safety and
+ * dispatch. Covers temporal types, content IDs, byte sequences, and similar.
+ * `FabricSpecialObject` says how this differs from `FabricInstance`.
+ *
+ * This class enables a single `instanceof` check where code needs to handle
+ * any `FabricPrimitive` uniformly.
+ *
+ * Instances are always frozen (like true primitives, they are immutable), pass
+ * through the native conversions unchanged, and hold no arbitrary outgoing
+ * `FabricValue` reference. `BaseFabricPrimitive` freezes each instance at
+ * construction; a subclass keeps its state in private fields, which the freeze
+ * does not reach.
+ *
+ * See Section 1.4.6 of the formal spec.
+ */
+export abstract class FabricPrimitive extends FabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
+   * in the type system; without it this class is structurally the
+   * `FabricSpecialObject` brand alone. Declared the way that brand is, and for
+   * the same reasons; `api.ts` declares the identical member.
+   */
+  declare readonly "@commonfabric/FabricPrimitive": true;
+
+  /** Constructs an instance. */
+  constructor() {
+    super();
+  }
+}

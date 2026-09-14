@@ -1,4 +1,5 @@
 import { type Config } from "@commonfabric/felt";
+
 import ports from "@commonfabric/ports" with { type: "json" };
 
 import { computeCurrentCompilerVersion } from "../runner/src/compilation-cache/compiler-fingerprint.deno.ts";
@@ -63,6 +64,12 @@ const config: Config = {
       ),
       "$EXPERIMENTAL_COMPUTED_CELL_IDS": Deno.env.get(
         "EXPERIMENTAL_COMPUTED_CELL_IDS",
+      ),
+      "$EXPERIMENTAL_VIEW_SCOPED_REPLICATION": Deno.env.get(
+        "EXPERIMENTAL_VIEW_SCOPED_REPLICATION",
+      ),
+      "$EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION": Deno.env.get(
+        "EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION",
       ),
       "$EXPERIMENTAL_SERVER_EXECUTION": Deno.env.get(
         "EXPERIMENTAL_SERVER_EXECUTION",

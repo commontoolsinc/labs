@@ -1,4 +1,6 @@
 import {
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
   FABRIC_SPECIAL_OBJECT_BRAND,
   type MutableJSONSchema,
   type MutableJSONSchemaObj,
@@ -196,10 +198,15 @@ function shouldSkipInternalProperty(
     return true;
   }
 
-  // The FabricSpecialObject nominal brand exists only in the type system —
-  // no runtime value carries the key, so it must never appear in a schema's
-  // `properties` or `required`.
-  if (propName === FABRIC_SPECIAL_OBJECT_BRAND) {
+  // The `FabricSpecialObject`, `FabricPrimitive`, and `FabricInstancePlus`
+  // nominal brands exist only in the type system -- no runtime value carries
+  // any of the keys, so none may appear in a schema's `properties` or
+  // `required`.
+  if (
+    (propName === FABRIC_SPECIAL_OBJECT_BRAND) ||
+    (propName === FABRIC_PRIMITIVE_BRAND) ||
+    (propName === FABRIC_INSTANCE_PLUS_BRAND)
+  ) {
     return true;
   }
 
@@ -226,7 +233,9 @@ function shouldSkipInternalProperty(
  * `FabricExecPlainObject` is used as a compile-time constraint on internal
  * execution graph types. Its inherited index signature does not describe
  * authored data accepted by a pattern, so it must not become a JSON Schema
- * `additionalProperties` declaration.
+ * `additionalProperties` declaration. The name is a type alias, so a base
+ * declared through it resolves to the aliased type and carries the alias as
+ * its alias symbol; that is what identifies it.
  */
 function hasFabricExecPlainObjectBase(
   type: ts.Type,
@@ -238,7 +247,8 @@ function hasFabricExecPlainObjectBase(
   if ((objectType.objectFlags & ts.ObjectFlags.Interface) === 0) return false;
 
   return (checker.getBaseTypes(type as ts.InterfaceType) ?? []).some((base) =>
-    base.getSymbol()?.getName() === "FabricExecPlainObject"
+    (base.aliasSymbol ?? base.getSymbol())?.getName() ===
+      "FabricExecPlainObject"
   );
 }
 

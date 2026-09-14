@@ -136,6 +136,46 @@ describe("sqlite-served-identity", () => {
     expect(handle.owner).toBe(aliceSigner.did());
   });
 
+  it("initializes each demanded session through the same database factory", async () => {
+    const setup = runtime.edit();
+    const parent = runtime.getCell(space, "session factory", undefined, setup);
+    parent.set({});
+    const inputs = runtime.getImmutableCell(
+      space,
+      { tables: {} },
+      undefined,
+      setup,
+    );
+    expect((await setup.commit()).error).toBeUndefined();
+    const handles: SqliteDbRef[] = [];
+    const builtin = sqliteDatabase(
+      inputs,
+      (tx, handle) =>
+        handles.push((handle as Cell<SqliteDbRef>).withTx(tx).get()),
+      () => {},
+      [parent],
+      parent,
+      runtime,
+      { ...parent.getAsNormalizedFullLink(), scope: "session" },
+    );
+    for (const session of ["first", "second", "first"]) {
+      const tx = runtime.edit();
+      demandedStamp(tx, serviceSigner.did(), session);
+      builtin.action(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    expect(handles).toHaveLength(2);
+    expect(handles[0].id).toBe(handles[1].id);
+    expect(handles.map((handle) => handle.scope)).toEqual([
+      "session",
+      "session",
+    ]);
+    expect(handles.map((handle) => handle.owner)).toEqual([
+      serviceSigner.did(),
+      serviceSigner.did(),
+    ]);
+  });
+
   it("mints no owner on a served creation whose run carries no acting principal (fail closed, ownerless handle)", async () => {
     const tx = runtime.edit();
     // An actor-less served run (wave-fallback shape): stamped, but the
@@ -454,22 +494,10 @@ describe("sqlite-served-identity", () => {
       "keys a session-scoped cleared read's request identity by the run's session (two sessions of one user stage distinct hashes)",
     sanitizeResources: false,
   }, async () => {
-    // RULED 2026-08-22 (verification-coverage.md OW53): a SUB-USER-scoped
-    // cleared result — a session-scoped db narrows `narrowestScope` below
-    // the clearance-forced `user` floor — joins the run's SESSION to the
-    // request identity alongside the user: one cleared cell per
-    // query-and-reader-at-matching-granularity. Pre-ruling, two sessions
-    // of one user shared hash AND effect key across DISTINCT session
-    // instances of one result cell, and the second rode the first's
-    // in-flight dedupe (starvation until an unrelated re-run). The hash
-    // is the ONLY session carrier in that identity: the outbox key
-    // `sqliteQuery:<hash>@<id>:<scope>` widens by scope NAME, not
-    // instance, so distinct hashes are what split the keys. As
-    // throughout this file, the pin reads each run's STAGED claim —
-    // completion (each session instance settling with the reader's
-    // cleared rows) is the true-ON integration pair's realm: post-run
-    // scoped-instance reads here are refused for want of an execution
-    // lease (protocol.md §2's read row).
+    // Cleared session results include both reader and session in the memo
+    // hash. The outbox also resolves the target's scope instance. This pin
+    // checks staged hashes; executor-sqlite-instances covers non-clearance
+    // completions against a space database under a live execution lease.
     const { builtin, result } = await clearedQuerySetup("session");
 
     const tx1 = runtime.edit();

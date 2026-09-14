@@ -12,7 +12,7 @@ import {
 } from "@commonfabric/runner";
 import {
   FabricInstance,
-  FabricSpecialObject,
+  isFabricSpecialObject,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import {
@@ -143,7 +143,7 @@ export async function preloadCloneValue(
   assertCloneDataUnlabeled(value);
   if (
     value === null || typeof value !== "object" ||
-    value instanceof FabricSpecialObject || seen.has(value)
+    isFabricSpecialObject(value) || seen.has(value)
   ) {
     return;
   }

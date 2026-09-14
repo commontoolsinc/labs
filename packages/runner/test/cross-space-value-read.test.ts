@@ -12,16 +12,15 @@ const signer = await Identity.fromPassphrase("cross-space-value-read");
 const spaceH = signer.did(); // "home" — holds the link
 const spaceP = (await Identity.fromPassphrase("cross-space target P")).did();
 
-// CT-1667: a value READ through a cross-space link never materializes the
-// target's fields in a session that didn't create them. The home Profile tab
-// binds `cf-profile-badge` (minimal `{name, avatar}` schema) and `cf-render`
-// to a profile living in its own space; both show blanks because the
-// profile-space docs behind the link are never fetched — derived cell handles
-// inherit `synced` from their parent even across the space boundary (where
-// the parent's per-space server query cannot have covered them), and the
-// schema traversal returns notFound for the absent docs without triggering a
-// fetch. Only explicit per-path `.pull()`s on fresh cells (the wish.ts
-// workaround) materialize them.
+// A value READ through a cross-space link must materialize the target's
+// fields in a session that didn't create them. The home Profile tab binds
+// `cf-profile-badge` (minimal `{name, avatar}` schema) and `cf-render` to a
+// profile living in its own space, and both must render it without explicit
+// per-path `.pull()`s. That takes a fetch trigger on the cross-space read:
+// derived cell handles inherit `synced` from their parent even across the
+// space boundary (where the parent's per-space server query cannot have
+// covered them), so the schema traversal must not merely return notFound for
+// the absent docs.
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -73,7 +72,7 @@ const nameSchema = {
   // deno-lint-ignore no-explicit-any
 } as any;
 
-describe("cross-space value reads (CT-1667)", () => {
+describe("cross-space value reads", () => {
   let server: MemoryV2Server.Server;
   let writerStorage: EmulatedStorageManager;
   let readerStorage: EmulatedStorageManager;
@@ -160,11 +159,10 @@ describe("cross-space value reads (CT-1667)", () => {
   });
 
   it("a whole-value pull() of the linking parent materializes the child", async () => {
-    // This is THE regression guard: red without the fix (the deep value read
-    // goes through traverse's followPointer, which had no fetch trigger at
-    // all). The key-path-pull and sink steps above/below converge through
-    // link-resolution's pre-existing cross-space kick under loopback timing —
-    // they pin the contract but already passed on main in this harness.
+    // The deep value read goes through traverse's followPointer, which is the
+    // path that needs its own fetch trigger. The key-path-pull and sink steps
+    // above/below converge through link-resolution's cross-space kick under
+    // loopback timing, so this is the case that discriminates.
 
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),

@@ -52,7 +52,10 @@ wave, and once the wave has committed re-announces the documents the
 verb staged to itself as a warm-marked notice — the same carrier as the
 provisioning path's — so the next cycle loads and derives the staged
 piece; the request settles at the verb's own wave commit —
-[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).
+AMENDED 2026-09-11: a verb's transaction stamped `directCommit` commits
+to the store on its own instead of sealing, ahead of the wave; the source
+update's setup transaction is one, per §3e.)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -1084,6 +1087,46 @@ deliberate: a survivor whose writes were dropped per-doc still lands
 its BASIS ROWS — its reads are true, and no recompute-owed mark
 exists.
 
+A contribution whose **read dependency is withdrawn** has a separate
+invalidation obligation. The accumulator records when its withdrawn-read
+closure discards an entire reactive run. Once the replica finishes rolling
+that run back, the scheduler re-arms its current, still-registered instance
+against the next wave's basis. This covers a read of an unchanged field through
+a pending document whose sibling field was discarded: rollback leaves the
+read's value equal, so a value-change notification alone cannot recover the
+withdrawn result. The retry preserves the run's consumed CFC trigger reads and
+does not dirty accepted sibling instances. Removing the action or its scoped
+instance invalidates that registration's obligation, including a run whose body
+or seal is still pending. A newer sealed publication makes the old withdrawal
+inert. A run with no new contribution preserves the outstanding publication's
+recovery obligation and keeps its refreshed subscriptions. This settlement
+observer is outside the pending-commit barrier that the serving loop drains before committing its wave.
+
+An ordinary write elided against pending state retains internal commit
+provenance for that dependency. This applies to raw storage writes, normalized
+result values, and preserved output links. Normalization records the actual
+compared target, including descendants reached through scoped links and write
+redirects. A later run that elides one pending output and
+writes another must withdraw if the elided value is discarded. Read-only foreign
+spaces carry the same internal dependency into the wave. A derivation that only
+elides pending outputs automatically contributes a write-free acceptance
+obligation, so a replacement registration can recover the outputs it reused
+without inheriting its predecessor's registration. Ordinary read probes,
+confirmed-only no-ops, and non-derivation runs do not acquire this obligation.
+The basis is conservative at document granularity:
+when an older pending layer exists, repeating the transaction's own replacement
+can retain that layer's dependency too. Its withdrawal can require one fresh run
+even when the replacement did not need the old value. These reads do not create
+scheduling subscriptions or CFC value taint. UI-blind writes retain their existing
+blind-write behavior;
+this provenance does not extend the raw API's CFC attempted-target coverage.
+
+This dependency invalidation does not re-arm a direct output supersession, a
+failed foreign writer, or a failed commit precondition. Those dispositions
+retain their existing dependency and demand rules. A reader of a failed
+contribution can recompute from the rolled-back state without retrying its
+failed producer.
+
 **The event REQUEUE above is not events.md §5's event DROP** (T3).
 Two different conflict notions share the vocabulary of this section
 and must not be collapsed:
@@ -1185,7 +1228,18 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. Root creation and explicit wish-sidecar opens
+under the writing principal. A served source update (the `setsrc`
+lifecycle verb, [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md))
+moves the pointer in a setup transaction that COMMITS DIRECTLY to the
+store rather than sealing — the serving loop's own derived-class commit,
+serialized with the wave's seals, its own read set validated by the
+store as a client commit's — because module-loading.md lets update
+authority publish only from a transaction that commits to storage
+itself. A wave open at that commit takes a contribution sealed AFTER it,
+whose reads of the docs it wrote saw the commit, as having observed them
+(§3d's conflict set exempts them for that contribution, and the sink
+holds the store to that exact head), so the swap's first derivation
+under the new pattern lands in the same cycle. Root creation and explicit wish-sidecar opens
 fetch system source through the serving runtime's API URL. Those fetches remain
 within verification-coverage.md OW55's source-trust obligation; root ensuring
 adds no source-following probe for an existing root.

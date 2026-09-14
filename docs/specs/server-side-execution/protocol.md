@@ -84,12 +84,14 @@ snapshot — as a step of a wave cycle
 The scheduler tell is unchanged: the verb's writes are still commits made
 outside the scheduler, made now by the serving side on the requester's
 behalf, the registry entry and the slug in the same transaction as the
-piece. A source replacement stays the client's authored act: it publishes
-module update authority, which module-loading.md requires from an owned
-setup transaction that commits to storage, and a wave's withdrawable
-acceptance cannot supply that. Every other client of the piece controller —
-the shell, the background piece service — keeps the client-side shape
-until its own migration.)*
+piece. A source replacement (AMENDED 2026-09-11) is a served verb too:
+it publishes module update authority, which module-loading.md requires
+from an owned setup transaction that commits to storage, and since a
+wave's withdrawable acceptance cannot supply that, its setup transaction
+commits directly to the store as the serving loop's own derived-class
+commit, outside the wave (serving-loop.md §3e). Every other client of
+the piece controller — the shell, the background piece service — keeps
+the client-side shape until its own migration.)*
 
 **The `system` class is PRODUCER-defined, its contents exemplary
 (RULED 2026-08-05).** The stamp rides the memory server's generic
@@ -606,6 +608,23 @@ semantics: the outbox retries the append, the eventId dedupes it, and
 the target's `eventWatermark` makes processing exactly-once.
 
 ## 3. Subscription and push
+
+A server with execution enabled advertises optional `viewScopedReplicationV1`.
+Clients without that capability use ordinary watches. An opted-in web client
+adds session-owned `views` to `session.watch.set`; omitting `views` preserves
+existing view ownership, while an empty array removes it. Ordinary watches keep
+separate ownership. View revisions and server-side session/view lifetime tokens
+reject stale publications, and `viewPlans` in a session sync frame apply after
+the frame's documents. A plan-only frame is meaningful and must be delivered.
+
+Visible roots contribute execution demand. The additional complete documents
+selected for local previews contribute delivery only, under the same READ and
+instance-scoping rules. The optional plan includes eligible graph positions,
+source identities, admitted inputs, observed write surfaces, and fingerprints of
+settled producer inputs/outputs. These are compact eligibility evidence, not the
+durable scheduler-basis table. See the
+[feature contract](../../features/view-scoped-client-replication.md) for guarded
+execution and downgrade behavior.
 
 - Clients subscribe to docs/queries as today
   (`packages/runner/src/storage/query.ts` path). The SpaceServer
