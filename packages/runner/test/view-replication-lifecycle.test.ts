@@ -478,6 +478,56 @@ describe("view replication lifetimes", () => {
     expect(errors).toHaveLength(3);
   });
 
+  for (const end of ["disposal", "capability loss"] as const) {
+    it(`cancels an installed preview graph once after ${end}`, async () => {
+      const root = runtime.getCell(space, `installed graph ${end}`, undefined);
+      let cancellations = 0;
+      using starts = stub(
+        runtime.runner,
+        "startViewPiece",
+        () =>
+          Promise.resolve(Object.assign(() => cancellations++, {
+            graphIsInstalled: () => true,
+            resume: () => true,
+          })),
+      );
+      using fallback = stub(runtime, "start", () => Promise.resolve(true));
+      await runtime.viewReplication.mount(root, "screen");
+      const plan: ViewPlan = {
+        id: "screen",
+        revision: interests[0].revision,
+        generation: 1,
+        eligibleActions: ["preview"],
+        pieces: [{
+          id: root.getAsNormalizedFullLink().id,
+          scope: "space",
+          patternIdentity: "installed#default",
+        }],
+      };
+      emit([plan]);
+      await runtime.idle();
+      expect(starts.calls).toHaveLength(1);
+      expect(cancellations).toBe(0);
+      expect(runtime.viewReplication.eligible(space, "preview")).toBe(true);
+
+      if (end === "disposal") runtime.viewReplication.dispose();
+      else {
+        capable = false;
+        emit([]);
+      }
+      await runtime.idle();
+      expect(cancellations).toBe(1);
+      expect(runtime.viewReplication.active(space)).toBe(false);
+      expect(runtime.viewReplication.eligible(space, "preview")).toBe(false);
+      expect(fallback.calls).toHaveLength(end === "disposal" ? 0 : 1);
+      emit([{ ...plan, generation: 2 }]);
+      runtime.viewReplication.dispose();
+      await runtime.idle();
+      expect(starts.calls).toHaveLength(1);
+      expect(cancellations).toBe(1);
+    });
+  }
+
   it("retires a held graph load before draining a kept storage manager", async () => {
     const root = runtime.getCell(space, "held load", undefined);
     const entered = Promise.withResolvers<void>();

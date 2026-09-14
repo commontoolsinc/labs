@@ -865,6 +865,10 @@ describe("view interests", () => {
 
   it("reuses an ordinary query under another watch ID while retaining visible demand", async () => {
     await set([watch("of:ordinary")], [view()]);
+    const [session] = server.accessForTestingOnly.sessionsForSpace(space);
+    const graphs = new Map(session.graphs);
+    expect(graphs.size).toBeGreaterThan(0);
+    using evaluations = spy(server, "evaluateWatchSet");
     const added = await server.watchAdd({
       type: "session.watch.add",
       requestId: "alias-watch",
@@ -874,6 +878,11 @@ describe("view interests", () => {
     });
     expect(added.error).toBeUndefined();
     expect(added.ok?.sync.upserts).toEqual([]);
+    expect(evaluations.calls).toHaveLength(0);
+    expect(session.graphs.size).toBe(graphs.size);
+    for (const [branch, graph] of graphs) {
+      expect(session.graphs.get(branch)).toBe(graph);
+    }
     expect(server.viewInterestsForSpace(space)).toHaveLength(1);
     expect(
       server.demandedInstancesForSpace(space).map((row) => row.id).toSorted(),
