@@ -292,6 +292,7 @@ export function isHeadEventParked(
 ): boolean {
   const headEvent = state.eventQueue[0];
   return headEvent?.handlerLoadPending === true ||
+    headEvent?.retryReadinessPending === true ||
     (headEvent?.notBefore !== undefined && headEvent.notBefore > now);
 }
 
@@ -351,6 +352,11 @@ function notifyEventDropped(
   options: {
     quiet?: boolean;
     servedOutcome?: ServedEventFailureOutcome;
+
+    /** The transaction the callback settles on, when the drop has one:
+     * a dispatched attempt whose commit was refused. Absent, an aborted
+     * one is minted for it. */
+    callbackTx?: IExtendedStorageTransaction;
   } = {},
 ): void {
   if (options.quiet === true) {
@@ -374,8 +380,11 @@ function notifyEventDropped(
       : { kind: "deferred", message: reason });
   reportServedEventFailure(args.served, outcome);
   if (!args.onCommit) return;
-  const tx = state.runtime.edit();
-  tx.abort(new Error(reason));
+  let tx = options.callbackTx;
+  if (tx === undefined) {
+    tx = state.runtime.edit();
+    tx.abort(new Error(reason));
+  }
   try {
     args.onCommit(tx);
   } catch (callbackError) {
@@ -403,6 +412,7 @@ export function dropQueuedEvent(
   options: {
     quiet?: boolean;
     servedOutcome?: ServedEventFailureOutcome;
+    callbackTx?: IExtendedStorageTransaction;
   } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
@@ -1327,6 +1337,10 @@ export async function processPullQueuedEventDuringExecute(
   // completion hydrates the same object and queues a fresh execution tick.
   if (queuedEvent.handlerLoadPending) return;
 
+  // The head is a stale-basis retry holding its slot while the state it
+  // re-runs against arrives; the readiness continuation queues a fresh tick.
+  if (queuedEvent.retryReadinessPending) return;
+
   // Head is parked on in-flight closure loads; loadsSettled re-queues after
   // success or drops the event after an explicit load failure.
   if (state.isHeadEventLoadParked(queuedEvent)) {
@@ -1875,6 +1889,61 @@ export async function dispatchQueuedEvent(state: {
       return requeued;
     };
 
+    // A stale-basis rejection re-runs the handler against fresh state, and
+    // the requeued event holds its slot until that state arrives: the
+    // replica's catch-up to the conflict point (the rejection's
+    // `readyToRetry`) and the pull of the document the conflict names, the
+    // same readiness `Runtime.editWithRetry` and the reactive path (run.ts)
+    // await before their re-runs. The event re-enters the queue at once, by
+    // `enqueueSeq`, marked `retryReadinessPending` so dispatch passes over it
+    // and idle stays open; a later event cannot overtake it, and a cascade
+    // victim whose own readiness resolves first queues up behind it. The
+    // backoff step stays as the pacing floor: `runAt` was fixed when the
+    // rejection was classified, so a readiness that outlasts the delay
+    // dispatches the re-run as soon as it resolves, and one that resolves
+    // sooner leaves the event parked until the step elapses. The retry window
+    // is untouched either way; the deadline rides the requeued event. The
+    // returned promise is part of the tracked `handled` chain, so the
+    // pending-commit barrier stays open across the wait.
+    const requeueAfterRetryReadiness = async (
+      error: CommitError,
+      step: Extract<CommitDisposition, { kind: "backoff" }>,
+    ): Promise<void> => {
+      const teardown = state.runtime.writeTeardownSignal;
+      const readiness = state.runtime.awaitCommitRetryReadiness(
+        error,
+        teardown,
+      );
+      const requeued = requeueForRetry(
+        step.attempts,
+        step.deadline,
+        step.runAt,
+      );
+      requeued.retryReadinessPending = true;
+      await readiness;
+      // An event a failed origin dropped while it waited is already out of
+      // the queue and settled; clearing the mark and the tick below are
+      // no-ops for it, and the drop chokepoint tolerates a second drop.
+      delete requeued.retryReadinessPending;
+      if (teardown.aborted) {
+        // The runtime stopped minting write work while the event waited, so
+        // no re-run is coming: the drop settles the callback on the refused
+        // transaction, the staged work hears the rejection as it does on the
+        // give-up arm, and the execution tick wakes an idle waiter parked on
+        // the head this was.
+        dropQueuedEvent(
+          state,
+          requeued,
+          "Event dropped: commit retry abandoned because the runtime is " +
+            "tearing down",
+          "dropped",
+          { callbackTx: tx },
+        );
+        tx.abandonStagedWork(error);
+      }
+      state.queueExecution();
+    };
+
     const finalize = (error?: unknown): void => {
       const unavailable = validateLocalReadBasis(tx);
       if (unavailable !== undefined) {
@@ -2081,10 +2150,12 @@ export async function dispatchQueuedEvent(state: {
       // the normal retry path reruns the event. Durability is still observable:
       // commit() registers itself with the storage manager's pending-commit
       // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
-      // waits on without blocking the scheduler loop here.
+      // waits on without blocking the scheduler loop here. The backoff arm
+      // returns the promise of its readiness-gated requeue, which the tracked
+      // `handled` chain below flattens into the same barrier.
       const handleCommitResult = (
         error: EventCommitError | undefined,
-      ): void => {
+      ): void | Promise<void> => {
         if (validateLocalReadBasis(tx) !== undefined) {
           releaseLocalReadBasis(tx);
           runFinalCommitCallback();
@@ -2238,6 +2309,7 @@ export async function dispatchQueuedEvent(state: {
           });
         };
 
+        let requeue: Promise<void> | undefined;
         switch (disposition.kind) {
           case "success": {
             const viewActor = waveRunContextOf(tx)?.scopeKeyIdentity;
@@ -2293,10 +2365,9 @@ export async function dispatchQueuedEvent(state: {
                 `(attempt ${disposition.attempts})`,
               { handlerId },
             );
-            requeueForRetry(
-              disposition.attempts,
-              disposition.deadline,
-              disposition.runAt,
+            requeue = requeueAfterRetryReadiness(
+              error as CommitError,
+              disposition,
             );
             break;
           case "terminal":
@@ -2366,8 +2437,15 @@ export async function dispatchQueuedEvent(state: {
           }
         }
         if (telemetryFailure !== undefined) {
-          throw telemetryFailure.error;
+          // Surfaced once the requeue has settled, so a failed telemetry
+          // submission never detaches a pending retry from the tracked chain.
+          const failure = telemetryFailure.error;
+          if (requeue === undefined) throw failure;
+          return requeue.then(() => {
+            throw failure;
+          });
         }
+        return requeue;
       };
       const handled = tx.commit().then(
         ({ error }) => handleCommitResult(error),
@@ -2380,8 +2458,8 @@ export async function dispatchQueuedEvent(state: {
         );
       });
       // The barrier entry commit() registered settles with the commit
-      // promise, but the disposition above — a conflict's backoff requeue in
-      // particular — runs a few microtasks later. Register the handled chain
+      // promise, but the disposition above runs later — a conflict's backoff
+      // requeue only once its readiness resolves. Register the handled chain
       // too, so the pending-commit barrier cannot release in the gap between
       // a rejection settling and its retry being requeued.
       state.runtime.storageManager.trackPendingCommit(handled);

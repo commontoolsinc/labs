@@ -14,7 +14,7 @@ import {
   isWalkableObjectOrArray,
 } from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
-import { FabricSpecialObject } from "@/interface.ts";
+import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
@@ -334,7 +334,7 @@ describe("type-check", () => {
       });
 
       it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
-        class DirectSpecialObject extends FabricSpecialObject {}
+        class DirectSpecialObject extends BaseFabricSpecialObject {}
 
         expect(isKeyableObjectOrArray(new DirectSpecialObject())).toBe(false);
       });
@@ -404,7 +404,7 @@ describe("type-check", () => {
     });
 
     it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
-      class DirectSpecialObject extends FabricSpecialObject {}
+      class DirectSpecialObject extends BaseFabricSpecialObject {}
 
       expect(isKeyableObjectNotArray(new DirectSpecialObject())).toBe(false);
     });
@@ -465,7 +465,7 @@ describe("type-check", () => {
         // Every special object the refusal above does not claim is carried
         // whole, decided by class rather than by what the subclass declares.
 
-        class DirectSpecialObject extends FabricSpecialObject {}
+        class DirectSpecialObject extends BaseFabricSpecialObject {}
 
         expect(isWalkableObjectOrArray(new DirectSpecialObject())).toBe(false);
       });
@@ -536,7 +536,7 @@ describe("type-check", () => {
     });
 
     it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
-      class DirectSpecialObject extends FabricSpecialObject {}
+      class DirectSpecialObject extends BaseFabricSpecialObject {}
 
       expect(isWalkableObjectNotArray(new DirectSpecialObject())).toBe(false);
     });

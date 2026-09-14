@@ -1,10 +1,11 @@
 /**
- * The `FabricSpecialObject` class hierarchy and the conversion-layer types of
- * the fabric data model, together with the pattern-visible value types that
- * `api.ts` declares, re-exported here so that this module carries the whole
- * `FabricValue` vocabulary. It is intentionally free of runtime imports (only
- * `import type` is used) so that any module can import it without creating a
- * circular dependency.
+ * The two special-object classes, `FabricInstance` and `FabricPrimitive`, and
+ * the conversion-layer types of the fabric data model, together with the
+ * pattern-visible value types that `api.ts` declares, re-exported here so that
+ * this module carries the whole `FabricValue` vocabulary. Its runtime imports
+ * are two leaves that import nothing, `api.ts` for the brand symbols and the
+ * module holding the classes' common root, so any module can import this one
+ * without creating a circular dependency.
  *
  * The classes here and the declarations in `api.ts` describe the same shapes,
  * and `api-agreement.ts` stops compiling when they drift. The concrete classes
@@ -18,6 +19,12 @@ import type {
   FabricValue,
   FabricValuePlus,
 } from "./api.ts";
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
+import { BaseFabricSpecialObject } from "./fabric-bases/BaseFabricSpecialObject.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
 // available internally to `data-model` without having to `import ... from
@@ -115,37 +122,9 @@ export type FabricConvertibleValue = FabricValuePlus<FabricNativeObject>;
 // Abstract base classes
 //
 // The _class_ definitions corresponding to the _interface_ definitions in
-// `api.ts` of `FabricSpecialObject` and its only two direct subclasses.
+// `api.ts` of `FabricInstance` and `FabricPrimitive`, the two special-object
+// classes; `FabricSpecialObject` there is their union.
 //
-
-/**
- * Common base class for `FabricInstance` and `FabricPrimitive`, which are the
- * only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
- * differ along one axis: whether the data model treats an instance as a
- * primitive. A `FabricPrimitive` is treated the way a built-in `string` or
- * `number` is; a `FabricInstance` is treated the way an `object` is. What
- * follows from that, and what a caller sees of it, is that a `FabricInstance`
- * may hold and expose arbitrary outgoing `FabricValue` references, and a
- * `FabricPrimitive` may not. Enables a single `instanceof FabricSpecialObject`
- * check wherever code needs to recognize any fabric-system value without
- * caring which branch of the hierarchy it belongs to.
- *
- * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
- * exists only in the type system: `declare` emits no runtime member, and
- * nothing ever reads the key. Without it the class is structurally empty, so
- * *every* object satisfies `FabricSpecialObject` — which in turn makes every
- * object satisfy `FabricValue`, since that union includes this type. The brand
- * is what makes `FabricValue` mean anything as a static claim.
- *
- * It is a well-known string key rather than a `unique symbol` because that
- * would require importing a symbol *value*, and this file is deliberately free
- * of runtime imports (see the file header). `api.ts` declares the identical
- * member, and `api-agreement.ts` stops compiling if the two stop agreeing; a
- * value branded by one would otherwise not satisfy the other.
- */
-export abstract class FabricSpecialObject {
-  declare readonly "@commonfabric/FabricSpecialObject": true;
-}
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
@@ -175,14 +154,24 @@ export abstract class FabricSpecialObject {
  * declared on `BaseFabricInstance`, not here: they are implementation plumbing
  * and are kept off this pure-protocol class.
  */
-export abstract class FabricInstance extends FabricSpecialObject {
+export abstract class FabricInstance extends BaseFabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricInstance` from any other object with
+   * the two clone methods, in the type system; the runtime root carries no
+   * brand, so this member is what makes the class nominal. `declare` emits no
+   * runtime member, and nothing ever reads the key. `api.ts` declares the
+   * identical member, and `api-agreement.ts` stops compiling if the two stop
+   * agreeing.
+   */
+  declare readonly [FABRIC_INSTANCE_BRAND]: true;
+
   /**
    * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
    * `never` here since an instance of this class holds only `FabricValue`s.
-   * Declared the way the `FabricSpecialObject` brand is, and for the same
-   * reasons; `api.ts` declares the identical member.
+   * Declared the way the brand above is, and for the same reasons; `api.ts`
+   * declares the identical member.
    */
-  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
@@ -227,14 +216,15 @@ export abstract class FabricInstance extends FabricSpecialObject {
  *
  * See Section 1.4.6 of the formal spec.
  */
-export abstract class FabricPrimitive extends FabricSpecialObject {
+export abstract class FabricPrimitive extends BaseFabricSpecialObject {
   /**
    * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
-   * in the type system; without it this class is structurally the
-   * `FabricSpecialObject` brand alone. Declared the way that brand is, and for
-   * the same reasons; `api.ts` declares the identical member.
+   * and from every other object, in the type system; without it this class is
+   * structurally empty. `declare` emits no runtime member, and nothing ever
+   * reads the key. `api.ts` declares the identical member, and
+   * `api-agreement.ts` stops compiling if the two stop agreeing.
    */
-  declare readonly "@commonfabric/FabricPrimitive": true;
+  declare readonly [FABRIC_PRIMITIVE_BRAND]: true;
 
   /** Constructs an instance. */
   constructor() {

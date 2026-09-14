@@ -209,6 +209,67 @@ describe(
       }
     });
 
+    it("fills the cache from a compile-only run that a later run then compiles nothing from", async () => {
+      // The precompile pass the pattern-test orchestrator runs ahead of its
+      // pool: one process compiles with coverage instrumentation on, runs no
+      // step and writes no coverage, and the run that follows takes every
+      // module from the file.
+      const dir = await Deno.makeTempDir({
+        prefix: "cf-test-compile-byte-cache-compile-only-",
+      });
+      const cacheFile = join(dir, "cache.json");
+      const coverageDir = join(dir, "coverage");
+      const env = {
+        CF_COMPILE_CACHE_FILE: cacheFile,
+        CF_PATTERN_COVERAGE_DIR: coverageDir,
+        CF_LOG_LEVEL: "info",
+      };
+
+      try {
+        const first = await cf(
+          `test --compile-only "${TEST_FILE}" --root "${FIXTURES}"`,
+          { env },
+        );
+        expect(first.code).toBe(0);
+        checkStderr(first.stderr);
+        expect(first.stdout.some((line) => line.includes("1 compiled")))
+          .toBe(true);
+        expect(first.stdout.some((line) => line.includes("passed"))).toBe(
+          false,
+        );
+        const entries = JSON.parse(await Deno.readTextFile(cacheFile));
+        expect(Array.isArray(entries)).toBe(true);
+        expect(entries.length).toBeGreaterThan(0);
+        // Compiled the way the run will compile: under the coverage key.
+        expect(
+          entries.every((entry: { key?: unknown }) =>
+            typeof entry.key === "string" &&
+            entry.key.includes("/pattern-coverage\0")
+          ),
+        ).toBe(true);
+        await expect(Deno.stat(coverageDir)).rejects.toThrow(
+          Deno.errors.NotFound,
+        );
+
+        const second = await cf(`test "${TEST_FILE}" --root "${FIXTURES}"`, {
+          env,
+        });
+        expect(second.code).toBe(0);
+        checkStderr(second.stderr);
+        expect(
+          second.stdout.some((line) =>
+            line.includes(`[compile-byte-cache] restored ${entries.length}`)
+          ),
+        ).toBe(true);
+        expect(
+          second.stdout.some((line) => line.includes("compile-cache-hit")),
+        ).toBe(true);
+        expect(await readCoverageText(coverageDir)).toMatch(/LH:[1-9]/);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("uses a coverage-specific cache key across cf test processes", async () => {
       const dir = await Deno.makeTempDir({
         prefix: "cf-test-compile-byte-cache-coverage-env-",

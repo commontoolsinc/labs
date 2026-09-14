@@ -184,7 +184,7 @@ class FakeTarget implements AgentsHostTarget {
   observationSequences: number[] = [];
   checkoutDirectories: string[][] = [];
   receipts: AgentSessionCommandReceipt[] = [];
-  commandCallback?: (commands: unknown[]) => void;
+  commandCallback?: (commands: unknown[], producer?: string) => void;
   subscriptionCancelled = false;
   failSubscriptionCancel = false;
   failRefresh = false;
@@ -257,7 +257,7 @@ class FakeTarget implements AgentsHostTarget {
   }
 
   async subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<() => void> {
     this.commandCallback = callback;
     const gate = this.subscriptionGate;
@@ -275,11 +275,12 @@ class FakeTarget implements AgentsHostTarget {
 
   readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined> {
     return Promise.resolve(
       structuredClone(
         [...this.receipts].reverse().find((receipt) =>
-          receipt.commandId === commandId
+          receipt.commandId === commandId && receipt.producer === producer
         ),
       ),
     );
@@ -306,11 +307,11 @@ class FakeTarget implements AgentsHostTarget {
     return Promise.resolve();
   }
 
-  sendCommands(commands: unknown[]): void {
+  sendCommands(commands: unknown[], producer?: string): void {
     if (!this.commandCallback) {
       throw new Error("command subscription is absent");
     }
-    this.commandCallback(commands);
+    this.commandCallback(commands, producer);
   }
 }
 
@@ -937,6 +938,140 @@ Deno.test("AgentsHost flushes unpublished receipts before stopping", async () =>
         event.details?.commandId === "command-with-publication-failure"
       ),
       true,
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost names the producer queue on a failed receipt publication", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const driver = new FakeDriver("codex");
+    const target = new FakeTarget();
+    target.terminalReceiptFailures = 1;
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+    await host.start();
+    target.sendCommands([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "workbench-rename",
+      createdAt: "2026-07-20T00:05:00.000Z",
+      sourceId: "codex",
+      nativeSessionId: "codex-session",
+      type: "rename",
+      payload: { title: "Updated title" },
+    }], "workbench");
+
+    await target.failedTerminalAttempt.promise;
+    await target.commandFailureHealth.promise;
+    await host.synchronize("pending-receipt-check");
+    await assertRejects(
+      () => host.stop("test-complete"),
+      AggregateError,
+      "command worker operations failed",
+    );
+
+    const failure = host.health().activity.find((event) =>
+      event.type === "receipt-publication-failed"
+    );
+    assertEquals(failure?.details?.commandId, "workbench-rename");
+    assertEquals(failure?.details?.producer, "workbench");
+    assertEquals(
+      target.receipts.map((receipt) => [receipt.status, receipt.producer]),
+      [["in-flight", "workbench"], ["succeeded", "workbench"]],
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost names the producer queue on a failed command", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const driver = new FakeDriver("codex");
+    const target = new FakeTarget();
+    // A receipt already published on the producer's queue binds the command
+    // ID to another session, so the same ID for this session is refused.
+    target.receipts.push({
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
+      commandId: "workbench-reused",
+      sourceId: "codex",
+      nativeSessionId: "another-session",
+      producer: "workbench",
+      status: "succeeded",
+      completedAt: "2026-07-20T00:04:00.000Z",
+    });
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+    await host.start();
+    target.sendCommands([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "workbench-reused",
+      createdAt: "2026-07-20T00:05:00.000Z",
+      sourceId: "codex",
+      nativeSessionId: "codex-session",
+      type: "rename",
+      payload: { title: "Updated title" },
+    }], "workbench");
+
+    const failureHealth = await target.commandFailureHealth.promise;
+    assertEquals(failureHealth.commandProcessing, {
+      accepting: true,
+      pendingReceiptPublications: 0,
+      failedCommands: 1,
+      lastError: "command ID belongs to another session: workbench-reused",
+    });
+
+    // The same ID on the owner's queue is another command; its success does
+    // not clear the producer's failure.
+    target.sendCommands([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "workbench-reused",
+      createdAt: "2026-07-20T00:06:00.000Z",
+      sourceId: "codex",
+      nativeSessionId: "codex-session",
+      type: "rename",
+      payload: { title: "Updated title" },
+    }]);
+    const owners = await target.terminalReceipt.promise;
+    assertEquals(owners.producer, undefined);
+    assertEquals(host.health().commandProcessing.failedCommands, 1);
+    await assertRejects(
+      () => host.stop("test-complete"),
+      AggregateError,
+      "command worker operations failed",
+    );
+
+    const failure = host.health().activity.find((event) =>
+      event.type === "command-task-failed"
+    );
+    assertEquals(failure?.details?.commandId, "workbench-reused");
+    assertEquals(failure?.details?.producer, "workbench");
+    assertEquals(failure?.details?.nativeSessionId, "codex-session");
+    assertEquals(
+      target.receipts.map((receipt) => [receipt.status, receipt.producer]),
+      [
+        ["succeeded", "workbench"],
+        ["in-flight", undefined],
+        ["succeeded", undefined],
+      ],
     );
   } finally {
     await Deno.remove(directory, { recursive: true });

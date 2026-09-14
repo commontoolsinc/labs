@@ -33,7 +33,7 @@ import { UI } from "@commonfabric/runner";
 
 import { ValidationError } from "@cliffy/command";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { FabricSpecialObject } from "@commonfabric/data-model";
+import { BaseFabricSpecialObject } from "@commonfabric/data-model/fabric-bases";
 
 import { pieceDataCommand } from "../commands/piece.ts";
 import {
@@ -3962,7 +3962,7 @@ describe("verbs", () => {
       // name has none to read. The refusal still has to say what it found,
       // because a person deciding what to `set` instead is deciding from it.
 
-      const nameless = new (class extends FabricSpecialObject {})();
+      const nameless = new (class extends BaseFabricSpecialObject {})();
       expect(
         reasonOf(
           await runLine(

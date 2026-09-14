@@ -349,6 +349,13 @@ export interface TestRunResult {
 
 export interface TestRunnerOptions {
   timeout?: number;
+
+  /**
+   * Compile the file's program and run nothing: no steps, no coverage
+   * written, no multi-user participants started. What the run leaves behind
+   * is the compile byte cache. `compileTestPatterns()` is the caller.
+   */
+  compileOnly?: boolean;
   verbose?: boolean;
   /** Disables diagnostic replay for timing measurements. */
   noIdempotencyCheck?: boolean;
@@ -1292,6 +1299,24 @@ export async function runTestPattern(
     // module namespace, so a named `fetchMocks` export is reachable.
     fetchMockEntries = readFetchMocks(main);
     readBudgets = parseReadBudgets(main.readBudgets);
+
+    // A compile-only run ends here: the program's modules are in the byte
+    // cache, which is all it was asked for. Nothing ran, so there is no
+    // coverage to write, and a multi-user descriptor's participants are not
+    // started, since they compile this same program from that cache.
+    if (options.compileOnly) {
+      writeLocalPatternCoverage = false;
+      return {
+        path: testPath,
+        results: [],
+        totalDurationMs: performance.now() - startTime,
+        navigations: [],
+        runtimeErrors: [],
+        nonIdempotent: [],
+        consoleErrors: [],
+        consoleWarnings: [],
+      };
+    }
 
     // Multi-user tests export a descriptor ({ setup?, participants }) as the
     // default export. They run in worker-isolated runtimes against a shared
@@ -2288,6 +2313,47 @@ export async function runTestPattern(
       throw error;
     });
   }
+}
+
+/**
+ * Compiles each file's program the way `runTests()` would, and runs none of
+ * them. What it leaves behind is the compile byte cache: with
+ * `CF_COMPILE_CACHE_FILE` set, every module the files reach is in that file
+ * once the process exits, so a later run of the same files compiles nothing.
+ * Returns the files whose compile failed. Each of those is reported again,
+ * with its error, by the run that tests it; this pass only says which.
+ * `compileOne` is the per-file run, `runTestPattern` unless a test supplies
+ * a stand-in.
+ */
+export async function compileTestPatterns(
+  paths: readonly string[],
+  options: TestRunnerOptions = {},
+  compileOne: typeof runTestPattern = runTestPattern,
+): Promise<{ compiled: number; failed: string[] }> {
+  const failed: string[] = [];
+  const started = performance.now();
+  for (const testPath of paths) {
+    let error: string | undefined;
+    try {
+      error = (await compileOne(testPath, { ...options, compileOnly: true }))
+        .error;
+    } catch (caught) {
+      error = formatError(caught);
+    }
+    if (error === undefined) {
+      console.log(`  compiled ${basename(testPath)}`);
+    } else {
+      failed.push(testPath);
+      console.log(`  ✗ ${basename(testPath)}: ${error}`);
+    }
+  }
+  const compiled = paths.length - failed.length;
+  console.log(
+    `\n${compiled} compiled, ${failed.length} failed (${
+      Math.round(performance.now() - started)
+    }ms)`,
+  );
+  return { compiled, failed };
 }
 
 /**

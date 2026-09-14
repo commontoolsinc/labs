@@ -1,6 +1,5 @@
 import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   type JSONSchema,
   type JSONValue,
@@ -24,6 +23,7 @@ import {
   type ReadonlyRecord,
 } from "@commonfabric/utils/types";
 
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "../fabric-special-object-brand.ts";
 import { isSubschema } from "../schema-walk.ts";
 import {
   hasOwnEnumerableDataProperty,
@@ -1909,12 +1909,9 @@ const validateAgainstSchemaUncached = (
       if (typeAllowsObject && Array.isArray(schema.required)) {
         for (const key of schema.required) {
           // The nominal brand key has no runtime existence; a
-          // `FabricSpecialObject` satisfies it by construction. Only schemas
-          // from pre-vocabulary compilations carry it (current emissions skip
-          // it everywhere). Removable with the other brand exemptions (see
-          // opaqueLeafMissesRequired in traverse.ts) once those stored schemas
-          // have cycled out — a redeploy-gated horizon, since pattern update
-          // refuses the structural-to-vocabulary transition.
+          // `FabricSpecialObject` satisfies it by construction (the `TODO`
+          // on `FABRIC_SPECIAL_OBJECT_BRAND` says what removing this
+          // exemption takes).
           if (key === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(key in value)) {
             return mismatch(`missing required property ${key}`);

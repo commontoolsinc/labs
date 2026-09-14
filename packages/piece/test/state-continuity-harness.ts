@@ -36,7 +36,7 @@ import { fromFileUrl } from "@std/path/from-file-url";
 // comparison unaided — see `comparableState`.
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
-  FabricSpecialObject,
+  isFabricSpecialObject,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
@@ -685,7 +685,7 @@ export function comparableState(value: unknown): unknown {
   const onPath = new Set<object>();
   const walk = (current: unknown): unknown => {
     if (current === null || typeof current !== "object") return current;
-    if (current instanceof FabricSpecialObject) {
+    if (isFabricSpecialObject(current)) {
       return { "[fabric]": taggedHashStringOf(current) };
     }
     if (isCell(current) || isStream(current)) {
