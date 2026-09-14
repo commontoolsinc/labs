@@ -38,6 +38,8 @@ const storeOf = (
 describe("schema-closure", () => {
   describe("verifySchemaDocument()", () => {
     it("returns the interned schema for a value that is the document its hash names", () => {
+      // A plain lookalike of the document, not the interned schema itself:
+      // what a store hands back, which the verifier has to freeze and intern.
       const verified = verifySchemaDocument(leafHash, structuredClone(leaf));
       expect(verified).toEqual(leaf);
       expect(Object.isFrozen(verified)).toBe(true);

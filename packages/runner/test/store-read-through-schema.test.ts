@@ -78,6 +78,74 @@ describe("store read-through schema metadata", () => {
     });
   }
 
+  it("quarantines a read document whose schema document the store holds nothing under", async () => {
+    // The read-through has nothing to say about the referenced document,
+    // so the frame cannot carry the closure, and the validator keeps the
+    // referrer out rather than apply it against a hole.
+    const signer = await Identity.fromPassphrase(
+      "absent dependency read through",
+    );
+    const manager = StorageManager.emulate({ as: signer });
+    const { rootRef } = decomposeSchema(schema);
+    const id = "of:absent-dependency-carrier" as URI;
+    const reads: string[] = [];
+    try {
+      manager.installStoreReadThrough(
+        signer.did(),
+        ({ id: read, scopeKey }) => {
+          reads.push(read);
+          if (read !== id) return undefined;
+          return {
+            branch: "",
+            id: read,
+            scope: "space",
+            scopeKey,
+            seq: 1,
+            doc: { value: { leaf: null }, schema: { $ref: rootRef } },
+          };
+        },
+      );
+      const replica = manager.open(signer.did()).replica;
+      expect(replica.getDocument(id)).toBeUndefined();
+      expect(reads).toContain(rootRef);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it("quarantines a read document whose schema document the store reports deleted", async () => {
+    // A deleted entry carries no obligations of its own and never joins the
+    // frame, so the referrer's reference stays unresolved and it is kept out.
+    const signer = await Identity.fromPassphrase(
+      "deleted dependency read through",
+    );
+    const manager = StorageManager.emulate({ as: signer });
+    const { rootRef } = decomposeSchema(schema);
+    const id = "of:deleted-dependency-carrier" as URI;
+    try {
+      manager.installStoreReadThrough(
+        signer.did(),
+        ({ id: read, scopeKey }) => ({
+          branch: "",
+          id: read,
+          scope: "space",
+          scopeKey,
+          ...(read === id
+            ? {
+              seq: 1,
+              doc: { value: { leaf: null }, schema: { $ref: rootRef } },
+            }
+            : { seq: 0, deleted: true as const }),
+        }),
+      );
+      const replica = manager.open(signer.did()).replica;
+      expect(replica.getDocument(id)).toBeUndefined();
+      expect(replica.getDocument(rootRef as URI)).toBeUndefined();
+    } finally {
+      await manager.close();
+    }
+  });
+
   it("quarantines malformed metadata on an initial read", async () => {
     const signer = await Identity.fromPassphrase(
       "malformed metadata read through",
