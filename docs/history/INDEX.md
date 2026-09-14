@@ -188,6 +188,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [Consumed CFC source deduplication](development/performance/2026-09-14-cfc-consumed-source-dedup.md) — benchmark-first reproduction, five alternating source-count sweeps, identity and order checks, full runner validation, and a remaining read-count times label-map-width cost; the Loom nested-array gap remains unproven.
+- [Consumed CFC source measurements](development/performance/2026-09-14-cfc-consumed-source-dedup.results.json) — source hashes and deltas, exact diagnostic drivers, paired samples and load readings, initial Deno benchmark distributions, profile summary, and validation results.
+- [Consumed CFC field-label profile](development/performance/2026-09-14-cfc-consumed-source-dedup.cpuprofile) — V8 sampling profile of five fixed collector calls over 1,334 reads and 1,334 label entries, including untimed read setup.
 - [2026-09-11-view-replication-server-currency.md](development/performance/2026-09-11-view-replication-server-currency.md) — initial server-currency adoption removes 121 authored startup executions in each of three enabled trials; records proof and revalidation cost, browser checks, and a preexisting feature-off CFC control failure.
 - [2026-09-11-view-replication-server-currency.results.json](development/performance/2026-09-11-view-replication-server-currency.results.json) — source hashes, exact commands, alternating startup counters and timings, profile hashes, validation failures and passes, and cleanup evidence.
 - [Browser process-group teardown follow-up, 2026-09-11](development/browser-process-group-teardown-2026-09-11.md) — Orphan renderers retaining browser pipes, explicit process-group ownership, and cleanup regression validation.
