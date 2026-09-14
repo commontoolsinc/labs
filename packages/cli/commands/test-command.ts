@@ -4,7 +4,11 @@ import { resolve } from "@std/path";
 import { Command } from "@cliffy/command";
 
 import { cliText } from "../lib/cli-name.ts";
-import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
+import {
+  compileTestPatterns,
+  discoverTestFiles,
+  runTests,
+} from "../lib/test-runner.ts";
 
 export interface TestCommandOptions {
   recordResults?: boolean;
@@ -50,6 +54,10 @@ export function createTestCommand(
     .option(
       "--no-idempotency-check",
       "Disable verification replay for performance measurements.",
+    )
+    .option(
+      "--compile-only",
+      "Compile each file's program into the compile byte cache and run nothing. With CF_COMPILE_CACHE_FILE set, a later run of the same files compiles none of it.",
     )
     .option(
       "--root <dir:string>",
@@ -156,6 +164,20 @@ export function createTestCommand(
         : Deno.env.get("CF_PATTERN_COVERAGE_DIR")
         ? resolve(Deno.cwd(), Deno.env.get("CF_PATTERN_COVERAGE_DIR")!)
         : undefined;
+      if (options.compileOnly) {
+        const { failed } = await compileTestPatterns(uniqueTestFiles, {
+          root,
+          dataFilePaths: options.datafile?.map((path: string) =>
+            resolve(Deno.cwd(), path)
+          ),
+          patternCoverageDir,
+        });
+        if (failed.length > 0) {
+          Deno.exit(1);
+        }
+        return;
+      }
+
       const statsInclude = options.statsInclude
         ? String(options.statsInclude)
           .split(",")

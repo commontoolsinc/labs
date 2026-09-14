@@ -251,6 +251,7 @@ cf test ./slow-test.test.tsx --timeout 10000
 |------|-------------|---------|
 | `--timeout <ms>` | Timeout per test in milliseconds | 5000 |
 | `--verbose` | Show detailed execution logs | false |
+| `--compile-only` | Compile each file's program into the compile byte cache and run nothing; with `CF_COMPILE_CACHE_FILE` set, a later run of the same files compiles none of it | false |
 
 ### Output
 
