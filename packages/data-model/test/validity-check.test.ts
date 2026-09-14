@@ -32,7 +32,7 @@ import {
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags/index.ts";
+import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 
 describe("validity-check", () => {

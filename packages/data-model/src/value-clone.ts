@@ -26,7 +26,7 @@ import {
   MutableFabricContainerValueLayer,
   MutableFabricPlainObjectLayer,
 } from "./interface.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "./value-tags/index.ts";
+import { tagFromNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricContainerValue,

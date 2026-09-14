@@ -26,7 +26,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/value-tags/interface.ts";
+} from "@/value-tags";
 
 /**
  * Temporal type representing a particular day, as a count of days from the

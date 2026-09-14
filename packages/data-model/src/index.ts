@@ -82,6 +82,6 @@ export {
   tagFromNativeValueElseNull,
   VALUE_TAGS,
   type ValueTag,
-} from "./value-tags/index.ts";
+} from "@/value-tags";
 
 export { valueEqual } from "./valueEqual.ts";

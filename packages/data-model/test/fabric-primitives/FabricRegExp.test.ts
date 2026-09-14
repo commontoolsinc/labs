@@ -34,7 +34,7 @@ import {
   tagFromNativeBuiltinClassElseNull,
   tagFromNativeValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags/index.ts";
+} from "@/value-tags";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {

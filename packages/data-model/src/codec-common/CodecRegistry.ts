@@ -23,11 +23,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import {
-  jsTagFromValue,
-  type JsTypeValueTag,
-  VALUE_TAGS,
-} from "@/value-tags/index.ts";
+import { jsTagFromValue, type JsTypeValueTag, VALUE_TAGS } from "@/value-tags";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 
 /**

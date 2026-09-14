@@ -57,7 +57,7 @@ import {
   tagFromNativeBuiltinClassElseNull,
   tagFromNativeValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags/index.ts";
+} from "@/value-tags";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 
 /**
