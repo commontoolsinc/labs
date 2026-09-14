@@ -2482,6 +2482,84 @@ Deno.test("Fabric target binds producer queues and reads commands from every bou
   }
 });
 
+Deno.test("a session read this publication is not also retained", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector read wins over retention test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  try {
+    const target = await AgentFabricTarget.open(connection);
+    const source: SourceDescriptor = {
+      id: "claude-code:test",
+      driver: "claude-agent-sdk",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: true,
+        setConfigOption: true,
+      },
+    };
+    const snapshot: NativeSessionSnapshot = {
+      summary: {
+        nativeSessionId: "session-1",
+        title: "Read once",
+        cwd: null,
+        createdAt: "2026-09-11T10:00:00.000Z",
+        updatedAt: "2026-09-11T10:01:00.000Z",
+        archived: null,
+        active: null,
+        raw: { id: "session-1" },
+      },
+      events: [{ text: "hello" }],
+      normalizedMessages: [],
+      complete: true,
+    };
+    await target.publish([{
+      source,
+      sessions: [snapshot],
+      errors: [],
+      complete: true,
+    }], { observationSequence: target.beginSessionObservation() });
+
+    // A collected source naming one session as both read (now a partial
+    // transcript) and retained: the read is the session's outcome, so its
+    // row is partial and the source counts it once.
+    await target.publish([{
+      source,
+      sessions: [{ ...snapshot, events: [{ text: "hel" }], complete: false }],
+      retained: [snapshot.summary],
+      errors: [],
+      complete: true,
+    }], { observationSequence: target.beginSessionObservation() });
+    const index = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    assertEquals(
+      (index.sessions as Array<Record<string, unknown>>).map((row) => [
+        row.nativeSessionId,
+        row.syncStatus,
+      ]),
+      [["session-1", "partial"]],
+    );
+    const sourceRow = (index.sources as Array<Record<string, unknown>>)[0];
+    assertEquals(sourceRow.sessionCount, 1);
+    assertEquals(sourceRow.errors, []);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("a retained session's row carries the checkout's current Git context", async () => {
   const signer = await Identity.fromPassphrase(
     "agent connector retained git context test",
@@ -2815,9 +2893,19 @@ Deno.test("publication keeps an older retained session and vouches only for comp
     assertEquals(recentIndex.sessions, []);
     const before = await target.publishedSessions();
     const priorState = before.get("claude-code%3Atest/session-1");
-    assertEquals(priorState?.syncStatus, "complete");
-    assertEquals(priorState?.updatedAt, "2000-01-01T10:01:00.000Z");
-    assertEquals(priorState?.driver, "claude-agent-sdk");
+    assertEquals(priorState, {
+      driver: "claude-agent-sdk",
+      updatedAt: "2000-01-01T10:01:00.000Z",
+      archived: null,
+      active: null,
+      syncStatus: "complete",
+    });
+    const firstIndex = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    const firstHash =
+      (firstIndex.sessions as Array<Record<string, unknown>>)[0].contentHash;
 
     await target.publish([{
       source,
@@ -2833,7 +2921,7 @@ Deno.test("publication keeps an older retained session and vouches only for comp
     const rows = retainedIndex.sessions as Array<Record<string, unknown>>;
     assertEquals(
       rows.map((row) => [row.nativeSessionId, row.syncStatus, row.contentHash]),
-      [["session-1", "complete", priorState!.contentHash]],
+      [["session-1", "complete", firstHash]],
     );
     assertEquals(
       ((rows[0].manifest as Record<string, unknown>).summary as Record<
@@ -2894,7 +2982,7 @@ Deno.test("publication keeps an older retained session and vouches only for comp
         row.syncStatus,
         row.contentHash,
       ]),
-      [["session-1", "partial", priorState!.contentHash]],
+      [["session-1", "partial", firstHash]],
     );
     const partialSource =
       (partialIndex.sources as Array<Record<string, unknown>>)[0];

@@ -114,12 +114,13 @@ refresh finishes.
 ### Collection
 
 `collectSource(driver, { signal, retain })` consumes `listSessions()` until
-`nextCursor` is absent. It records an inventory error for a repeated cursor. It
-also records an error before keeping a page that would raise the inventory above
-100,000 summaries. It then calls `readSession()` once for every listed summary
-the `retain` predicate does not accept. The optional signal is checked before
-and after every provider call. A host still stops the driver to interrupt a
-provider call that does not return on its own.
+`nextCursor` is absent. It records an inventory error for a repeated cursor, and
+one for a session a later page lists again, which it keeps once. It also records
+an error before keeping a page that would raise the inventory above 100,000
+summaries. It then calls `readSession()` once for every listed summary the
+`retain` predicate does not accept. The optional signal is checked before and
+after every provider call. A host still stops the driver to interrupt a provider
+call that does not return on its own.
 
 The optional `retain` predicate sees each inventory summary before the session
 is read. A summary it accepts goes into the result's `retained` list and its
@@ -174,7 +175,7 @@ The target exposes these orchestration methods:
 
 | Method                                      | Behavior                                                                                                                                            |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `publishedSessions()`                       | Reads the complete index without transcripts and returns each session's driver, update time, lifecycle state, content hash, and status.             |
+| `publishedSessions()`                       | Reads the complete index without transcripts and returns each session's driver, update time, lifecycle state, and status, by key.                   |
 | `beginSessionObservation()`                 | Allocates the ordering value that a caller records before it begins a full provider collection.                                                     |
 | `publish(collected, options?)`              | Publishes changed session graphs and replaces both indexes. Returns the number of non-deleted sessions.                                             |
 | `publishHealth(value)`                      | Publishes a host-defined health record under the connector-owned health schema.                                                                     |

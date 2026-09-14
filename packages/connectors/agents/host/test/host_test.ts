@@ -1404,14 +1404,10 @@ Deno.test("AgentsHost retains a session whose published copy matches its invento
     const summary = driver.snapshot.summary;
     const key = "codex/codex-session";
     const published = (updatedAt: string | null): PublishedSessionState => ({
-      key,
-      sourceId: "codex",
-      nativeSessionId: summary.nativeSessionId,
       driver: "codex-app-server",
       updatedAt,
       archived: summary.archived,
       active: summary.active,
-      contentHash: "sha256:prior",
       syncStatus: "complete",
     });
     target.published.set(key, published(summary.updatedAt));
@@ -1424,17 +1420,24 @@ Deno.test("AgentsHost retains a session whose published copy matches its invento
       clock: clock(),
     });
 
+    // The first collection after a start reads every listed session, a
+    // matching published copy or not: the driver learns a session's controls
+    // when it reads it. The next collection retains the session it has read.
     await host.start({ acceptCommands: false });
-    assertEquals(driver.readCount, 0);
-    assertEquals(target.publications[0][0].sessions, []);
+    assertEquals(driver.readCount, 1);
+    assertEquals(target.publications[0][0].retained, []);
+    assertEquals(target.publications[0][0].sessions.length, 1);
+    await host.synchronize("read-once");
+    assertEquals(driver.readCount, 1);
+    assertEquals(target.publications[1][0].sessions, []);
     assertEquals(
-      target.publications[0][0].retained?.map((retained) =>
+      target.publications[1][0].retained?.map((retained) =>
         retained.nativeSessionId
       ),
       ["codex-session"],
     );
     assertEquals(
-      host.health().activity.find((entry) =>
+      host.health().activity.findLast((entry) =>
         entry.type === "source-collection-completed"
       )?.details,
       { complete: true, errorCount: 0, sessionCount: 0, retainedCount: 1 },
@@ -1443,16 +1446,16 @@ Deno.test("AgentsHost retains a session whose published copy matches its invento
     // A different update time means the copy is behind, so it is read.
     target.published.set(key, published("2026-07-20T00:00:30.000Z"));
     await host.synchronize("changed");
-    assertEquals(driver.readCount, 1);
-    assertEquals(target.publications[1][0].retained, []);
-    assertEquals(target.publications[1][0].sessions.length, 1);
+    assertEquals(driver.readCount, 2);
+    assertEquals(target.publications[2][0].retained, []);
+    assertEquals(target.publications[2][0].sessions.length, 1);
 
     // Without the index, nothing can be retained and everything is read.
     target.published.set(key, published(summary.updatedAt));
     target.failPublishedLookup = true;
     await host.synchronize("unreadable-index");
-    assertEquals(driver.readCount, 2);
-    assertEquals(target.publications[2][0].retained, []);
+    assertEquals(driver.readCount, 3);
+    assertEquals(target.publications[3][0].retained, []);
     assertEquals(
       host.health().activity.some((entry) =>
         entry.type === "published-sessions-unavailable"

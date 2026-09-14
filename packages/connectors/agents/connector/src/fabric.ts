@@ -57,17 +57,15 @@ export interface AgentFabricCells {
 }
 
 /** What the indexes say about one session, read without its transcript. */
-export interface PublishedSessionState {
-  key: string;
-  sourceId: string;
-  nativeSessionId: string;
-  driver: string;
-  updatedAt: string | null;
-  archived: boolean | null;
-  active: boolean | null;
-  contentHash: string;
-  syncStatus: IndexEntry["syncStatus"];
-}
+/** What a host reads of a published session to decide retention: the fields
+ * an inventory summary can change, and the row's status. The map it comes in
+ * supplies the identity. */
+export type PublishedSessionState = Readonly<
+  Pick<
+    IndexEntry,
+    "driver" | "updatedAt" | "archived" | "active" | "syncStatus"
+  >
+>;
 
 export interface AgentFabricPublishOptions {
   preserveUntouchedStatus?: boolean;
@@ -841,21 +839,46 @@ function rowGitContext(
   previousEntry: IndexEntry | undefined,
   observed: GitContext,
 ): GitContext {
-  const preservesPrior = previousEntry !== undefined &&
+  if (
+    previousEntry !== undefined &&
     (observed.gitObservationFailed === true ||
       (observed.gitWorktreeRoot !== null &&
         observed.gitObservedAt === null &&
-        previousEntry.gitWorktreeRoot === observed.gitWorktreeRoot));
-  return preservesPrior
-    ? {
-      gitRepo: previousEntry!.gitRepo,
-      gitBranch: previousEntry!.gitBranch,
-      gitWorktreeRoot: previousEntry!.gitWorktreeRoot,
-      gitHeadSha: previousEntry!.gitHeadSha,
-      gitRemotes: previousEntry!.gitRemotes,
-      gitObservedAt: previousEntry!.gitObservedAt,
-    }
-    : observed;
+        previousEntry.gitWorktreeRoot === observed.gitWorktreeRoot))
+  ) {
+    return {
+      gitRepo: previousEntry.gitRepo,
+      gitBranch: previousEntry.gitBranch,
+      gitWorktreeRoot: previousEntry.gitWorktreeRoot,
+      gitHeadSha: previousEntry.gitHeadSha,
+      gitRemotes: previousEntry.gitRemotes,
+      gitObservedAt: previousEntry.gitObservedAt,
+    };
+  }
+  return observed;
+}
+
+/**
+ * A prior row carried into this publication: its `deletedAt` dropped, its
+ * Git context and source capabilities refreshed. What a session's previews
+ * and completeness become is the caller's difference.
+ */
+function refreshedRow(
+  prior: IndexEntry,
+  context: GitContext,
+  capabilities: DriverCapabilities,
+): IndexEntry {
+  const { deletedAt: _deletedAt, ...rest } = prior;
+  return {
+    ...rest,
+    gitRepo: context.gitRepo,
+    gitBranch: context.gitBranch,
+    gitWorktreeRoot: context.gitWorktreeRoot,
+    gitHeadSha: context.gitHeadSha,
+    gitRemotes: context.gitRemotes,
+    gitObservedAt: context.gitObservedAt,
+    capabilities: { ...capabilities },
+  };
 }
 
 export class AgentFabricTarget implements CommandTarget {
@@ -955,14 +978,10 @@ export class AgentFabricTarget implements CommandTarget {
     const states = new Map<string, PublishedSessionState>();
     for (const entry of index?.sessions ?? []) {
       states.set(entry.key, {
-        key: entry.key,
-        sourceId: entry.sourceId,
-        nativeSessionId: entry.nativeSessionId,
         driver: entry.driver,
         updatedAt: entry.updatedAt ?? null,
         archived: typeof entry.archived === "boolean" ? entry.archived : null,
         active: typeof entry.active === "boolean" ? entry.active : null,
-        contentHash: entry.contentHash,
         syncStatus: entry.syncStatus,
       });
     }
@@ -1050,44 +1069,42 @@ export class AgentFabricTarget implements CommandTarget {
       ...(previousRecent?.sessions ?? []),
       ...(previousAll?.sessions ?? []),
     ];
-    const priorStatusByKey = new Map(
-      previousEntries.map((entry) => [entry.key, entry.syncStatus] as const),
+    // The rows as the previous indexes hold them, kept apart from the working
+    // rows below, which a full publication marks stale until a session is
+    // seen: retention reads a session's prior row and status from here.
+    const priorEntriesByKey: ReadonlyMap<string, IndexEntry> = new Map(
+      previousEntries
+        .map((entry): [string, IndexEntry] => [entry.key, {
+          ...entry,
+          gitHeadSha: typeof entry.gitHeadSha === "string"
+            ? entry.gitHeadSha
+            : null,
+          gitRemotes: Array.isArray(entry.gitRemotes) ? entry.gitRemotes : [],
+          gitObservedAt: typeof entry.gitObservedAt === "string"
+            ? entry.gitObservedAt
+            : null,
+          archived: typeof entry.archived === "boolean" ? entry.archived : null,
+          active: typeof entry.active === "boolean" ? entry.active : null,
+          manifest: this.conn.runtime.getCell(
+            this.conn.spaceDid,
+            sessionCause(
+              this.conn.spaceDid,
+              this.conn.ownerDid,
+              entry.sourceId,
+              entry.nativeSessionId,
+            ),
+            agentOwnerSchema(this.conn.ownerDid),
+          ),
+        }]),
     );
     const entriesByKey = new Map<string, IndexEntry>(
-      previousEntries
-        .map((entry): [string, IndexEntry] => {
-          const restored = {
-            ...entry,
-            gitHeadSha: typeof entry.gitHeadSha === "string"
-              ? entry.gitHeadSha
-              : null,
-            gitRemotes: Array.isArray(entry.gitRemotes) ? entry.gitRemotes : [],
-            gitObservedAt: typeof entry.gitObservedAt === "string"
-              ? entry.gitObservedAt
-              : null,
-            archived: typeof entry.archived === "boolean"
-              ? entry.archived
-              : null,
-            active: typeof entry.active === "boolean" ? entry.active : null,
-            manifest: this.conn.runtime.getCell(
-              this.conn.spaceDid,
-              sessionCause(
-                this.conn.spaceDid,
-                this.conn.ownerDid,
-                entry.sourceId,
-                entry.nativeSessionId,
-              ),
-              agentOwnerSchema(this.conn.ownerDid),
-            ),
-          };
-          return [
-            entry.key,
-            options.preserveUntouchedStatus || isSuperseded(entry.key) ||
-              isSourceSuperseded(entry.sourceId)
-              ? restored
-              : { ...restored, syncStatus: "stale" },
-          ];
-        }),
+      [...priorEntriesByKey.values()].map((restored): [string, IndexEntry] => [
+        restored.key,
+        options.preserveUntouchedStatus || isSuperseded(restored.key) ||
+          isSourceSuperseded(restored.sourceId)
+          ? restored
+          : { ...restored, syncStatus: "stale" },
+      ]),
     );
     const sourceRows = new Map<string, Record<string, unknown>>(
       [
@@ -1164,16 +1181,8 @@ export class AgentFabricTarget implements CommandTarget {
           previousEntry.contentHash === prepared.snapshotHash &&
           previousEntry.driver === driver
         ) {
-          const { deletedAt: _deletedAt, ...rest } = previousEntry;
           entriesByKey.set(prepared.key, {
-            ...rest,
-            gitRepo: prepared.summary.gitRepo ?? null,
-            gitBranch: prepared.summary.gitBranch ?? null,
-            gitWorktreeRoot: prepared.summary.gitWorktreeRoot ?? null,
-            gitHeadSha: context.gitHeadSha,
-            gitRemotes: context.gitRemotes,
-            gitObservedAt: context.gitObservedAt,
-            capabilities: { ...capabilities },
+            ...refreshedRow(previousEntry, context, capabilities),
             recentMessages: recentSessionMessages(
               prepared.normalizedMessages,
             ),
@@ -1205,16 +1214,20 @@ export class AgentFabricTarget implements CommandTarget {
       // error like a failed read: the inventory cannot vouch for the session
       // and stops being complete, so nothing absent from it is deleted on its
       // word, and the session's row, where there is one, is marked partial
-      // below with the other errors.
+      // below with the other errors. A session this publication read has
+      // its outcome already; a retention naming it too is not applied.
       let sourceComplete = source.complete;
       const sourceErrors = [...source.errors];
+      let retainedListed = 0;
       for (const summary of source.retained ?? []) {
         throwIfPublicationCanStop();
         const key = sessionKey(source.source.id, summary.nativeSessionId);
+        if (currentKeys.has(key)) continue;
         currentKeys.add(key);
+        retainedListed++;
         if (isSuperseded(key)) continue;
-        const prior = entriesByKey.get(key);
-        if (prior === undefined || priorStatusByKey.get(key) !== "complete") {
+        const prior = priorEntriesByKey.get(key);
+        if (prior === undefined || prior.syncStatus !== "complete") {
           sourceComplete = false;
           sourceErrors.push({
             nativeSessionId: summary.nativeSessionId,
@@ -1227,16 +1240,8 @@ export class AgentFabricTarget implements CommandTarget {
           await gitContext.resolve(summary.cwd, cancellableSignal()),
         );
         throwIfPublicationCanStop();
-        const { deletedAt: _deletedAt, ...rest } = prior;
         entriesByKey.set(key, {
-          ...rest,
-          gitRepo: context.gitRepo,
-          gitBranch: context.gitBranch,
-          gitWorktreeRoot: context.gitWorktreeRoot,
-          gitHeadSha: context.gitHeadSha,
-          gitRemotes: context.gitRemotes,
-          gitObservedAt: context.gitObservedAt,
-          capabilities: { ...capabilities },
+          ...refreshedRow(prior, context, capabilities),
           syncStatus: "complete",
         });
         observedSessionKeys.add(key);
@@ -1286,8 +1291,7 @@ export class AgentFabricTarget implements CommandTarget {
           driver,
           capabilities,
           complete: sourceComplete,
-          sessionCount: source.sessions.length +
-            (source.retained?.length ?? 0),
+          sessionCount: source.sessions.length + retainedListed,
           errors: sourceErrors,
         });
       }

@@ -164,6 +164,14 @@ export class AgentsHost {
   readonly #drivers = new Map<string, AgentDriver>();
   readonly #cleanupDrivers = new Map<string, AgentDriver>();
   readonly #sources = new Map<string, AgentsHostSourceHealth>();
+  /**
+   * Per source, the sessions the running driver has read since it started.
+   * A driver learns a session's controls (its mode and configuration
+   * options, for Agent Client Protocol drivers) when it reads the session,
+   * so a session is retained only once this driver has read it; the first
+   * collection after a start reads every listed session.
+   */
+  readonly #readSinceStart = new Map<string, Set<string>>();
   readonly #activity: AgentsHostActivity[] = [];
   readonly #commandFailures = new Map<string, string>();
   readonly #startedAt: string;
@@ -585,6 +593,7 @@ export class AgentsHost {
       signal?.throwIfAborted();
       this.#cleanupDrivers.delete(config.id);
       this.#drivers.set(config.id, driver);
+      this.#readSinceStart.set(config.id, new Set());
       state.status = "ready";
       state.capabilities = structuredClone(driver.source.capabilities);
       state.lastError = undefined;
@@ -802,12 +811,14 @@ export class AgentsHost {
       sourceId,
     );
     // A session is retained when its inventory summary matches a complete
-    // published copy in every field the summary can change.
+    // published copy in every field the summary can change, and this driver
+    // has read it since it started.
+    const readSinceStart = this.#readSinceStart.get(sourceId) ?? new Set();
     const retain = (summary: SessionSummary): boolean => {
-      const prior = published.get(
-        sessionKey(sourceId, summary.nativeSessionId),
-      );
+      const key = sessionKey(sourceId, summary.nativeSessionId);
+      const prior = published.get(key);
       return prior !== undefined && prior.syncStatus === "complete" &&
+        readSinceStart.has(key) &&
         prior.driver === driver.source.driver &&
         summary.updatedAt !== null && prior.updatedAt === summary.updatedAt &&
         prior.archived === summary.archived && prior.active === summary.active;
@@ -825,6 +836,9 @@ export class AgentsHost {
       };
     }
 
+    for (const session of collected.sessions) {
+      readSinceStart.add(sessionKey(sourceId, session.summary.nativeSessionId));
+    }
     const retainedCount = collected.retained?.length ?? 0;
     state.capabilities = structuredClone(driver.source.capabilities);
     state.sessionCount = collected.sessions.length + retainedCount;
@@ -883,6 +897,9 @@ export class AgentsHost {
       });
       throw error;
     }
+    this.#readSinceStart.get(driver.source.id)?.add(
+      sessionKey(driver.source.id, nativeSessionId),
+    );
     this.#recordActivity(
       "session-refresh-completed",
       "Post-command session refresh completed",

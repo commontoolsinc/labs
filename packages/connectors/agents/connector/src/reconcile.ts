@@ -57,9 +57,10 @@ export async function collectSource(
   { signal, retain }: CollectSourceOptions = {},
 ): Promise<CollectedSource> {
   signal?.throwIfAborted();
-  const summaries = [];
+  const summaries: SessionSummary[] = [];
   const errors: CollectedSource["errors"] = [];
   const seenCursors = new Set<string>();
+  const seenSessions = new Set<string>();
   let cursor: string | undefined;
   let enumerationComplete = false;
   try {
@@ -74,7 +75,21 @@ export async function collectSource(
       if (page.sessions.length > MAX_SESSION_SUMMARIES - summaries.length) {
         throw new Error("session enumeration exceeded safety limit");
       }
-      summaries.push(...page.sessions);
+      // One outcome per session: a page that repeats an ID an earlier page
+      // listed is an inventory the provider did not keep consistent across
+      // its cursors, recorded as an error; the first listing stands.
+      for (const summary of page.sessions) {
+        if (seenSessions.has(summary.nativeSessionId)) {
+          errors.push({
+            nativeSessionId: summary.nativeSessionId,
+            message:
+              `duplicate session in inventory: ${summary.nativeSessionId}`,
+          });
+          continue;
+        }
+        seenSessions.add(summary.nativeSessionId);
+        summaries.push(summary);
+      }
       if (!page.nextCursor) {
         enumerationComplete = true;
         break;

@@ -98,6 +98,47 @@ Deno.test("collectSource lists a session the retain predicate accepts without re
   assertEquals(collected.complete, true);
 });
 
+Deno.test("collectSource keeps a session a later page repeats once and records the repeat", async () => {
+  // A provider whose cursors overlap lists one session on two pages, the
+  // second time with a newer update. The first listing stands, the session
+  // is read once, and the inventory is not complete on the provider's word.
+  const base = fakeDriver();
+  const reads: string[] = [];
+  const first = (await base.listSessions()).sessions[0];
+  const second = (await base.listSessions("next")).sessions[0];
+  const driver: AgentDriver = {
+    ...base,
+    listSessions: (cursor?: string): Promise<SessionPage> =>
+      Promise.resolve(
+        cursor
+          ? {
+            sessions: [
+              { ...first, updatedAt: "2026-09-14T00:00:00.000Z" },
+              second,
+            ],
+          }
+          : { sessions: [first], nextCursor: "next" },
+      ),
+    readSession: (id: string) => {
+      reads.push(id);
+      return base.readSession(id);
+    },
+  };
+
+  const collected = await collectSource(driver);
+
+  assertEquals(reads, ["one", "two"]);
+  assertEquals(collected.errors, [{
+    nativeSessionId: "one",
+    message: "duplicate session in inventory: one",
+  }]);
+  assertEquals(collected.complete, false);
+  assertEquals(
+    collected.sessions.map((session) => session.summary.nativeSessionId),
+    ["one", "two"],
+  );
+});
+
 Deno.test("collectSource retains lifecycle state reported only by inventory", async () => {
   const inventorySummary = {
     nativeSessionId: "one",
