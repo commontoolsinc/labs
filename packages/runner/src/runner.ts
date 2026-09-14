@@ -16,8 +16,15 @@ import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 
+import {
+  requireLocalReadCondition,
+  restrictToLocalReads,
+  usesLocalReads,
+  validateLocalReadBasis,
+} from "./storage/local-read-policy.ts";
 import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
 import { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
+import { viewNodeId } from "./view-replication.ts";
 
 export {
   isStoredArgumentSchemaRefusal,
@@ -197,6 +204,8 @@ import { createRef } from "./create-ref.ts";
 import {
   diffAndUpdate,
   initializeScopedArgumentSlots,
+  scopedArgumentInitializationTargets,
+  sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
@@ -1439,7 +1448,10 @@ function programActionInstanceKey(
 }
 
 type SchedulerRehydrationSubscriptionOptions = {
+  adoptViewIdentity?: string;
   implementationSelection?: ImplementationSelection;
+  viewNodeId?: string;
+  viewLocalOnly?: boolean;
   // The owning pattern instance for this reader, set unconditionally so the
   // scheduler can group a pattern's shaped cell-flip wakes by instance
   // (timing side-channel mitigation, plan B) and tell a pattern reader from
@@ -1751,6 +1763,12 @@ function dedupeNormalizedLinks(
  * rather than the registration's presence.
  */
 type PieceRegistration = Cancel & { graphIsInstalled: () => boolean };
+
+/** A resident view graph whose unavailable bindings can resume independently. */
+export type ViewPieceRegistration = PieceRegistration & {
+  /** Binds newly available nodes; returns false if this registration retired. */
+  resume(): boolean;
+};
 
 /** One shared piece registration with a node group per selected program. */
 type ScopedPieceRegistration = PieceRegistration & {
@@ -4202,7 +4220,82 @@ export class Runner {
         ?.selection;
       initialSchedulerRehydrationAvailable = false;
       try {
-        for (const node of pattern.nodes) {
+        if (
+          this.#runtime.servingPosture &&
+          this.#runtime.experimental.serverExecution &&
+          sessionScopedArgumentKeys(pattern.argumentSchema).length > 0
+        ) {
+          const selection = schedulerRehydration.implementationSelection;
+          const argument = getMetaLink(resultCell.withTx(actualTx), "argument");
+          const bindings = argument ? [argument] : [];
+          const declaredTargets = bindings.flatMap((link) =>
+            sessionScopedArgumentKeys(pattern.argumentSchema).map((key) => ({
+              ...link,
+              scope: "user" as const,
+              path: [...link.path, key],
+            }))
+          );
+          const initialize: Action = async (runTx) => {
+            if (selection && !selection.matches(runTx)) return;
+            const argument = getMetaLink(resultCell.withTx(runTx), "argument");
+            if (argument) {
+              const targets = scopedArgumentInitializationTargets(
+                this.#runtime,
+                runTx,
+                argument,
+                pattern.argumentSchema,
+              );
+              Object.assign(initialize, {
+                materializerWriteEnvelopes: dedupeNormalizedLinks([
+                  ...declaredTargets,
+                  ...targets,
+                ]),
+              });
+              // Initialization needs the actor's whole user document: diffing
+              // a partially delivered row can remove unseen sibling fields.
+              await Promise.all(
+                targets.map((target) =>
+                  syncCellForIdentity(
+                    this.#runtime.getCellFromLink({
+                      ...target,
+                      path: [],
+                      schema: false,
+                    }),
+                    runTx.tx.scopeKeyIdentity,
+                  )
+                ),
+              );
+              initializeScopedArgumentSlots(
+                this.#runtime,
+                runTx,
+                argument,
+                pattern.argumentSchema,
+              );
+            }
+          };
+          Object.assign(initialize, {
+            implementationHash: "cf:runner/scoped-input-initialization",
+            schedulerInstanceKey: programActionInstanceKey(
+              schedulerActionInstanceKey({
+                process: resultCell.getAsNormalizedFullLink(),
+                reads: bindings,
+                writes: bindings,
+              }),
+              selection,
+            ),
+            reads: bindings,
+            writes: [],
+            materializerWriteEnvelopes: declaredTargets,
+            pattern,
+          });
+          selection?.actions.add(initialize);
+          addNodeCancel(() => selection?.actions.delete(initialize));
+          addNodeCancel(this.#runtime.scheduler.subscribe(
+            initialize,
+            schedulerRehydration,
+          ));
+        }
+        for (const [nodeIndex, node] of pattern.nodes.entries()) {
           const baseCell = resultCell.withTx(actualTx);
           this.#instantiateNode(
             actualTx,
@@ -4210,7 +4303,13 @@ export class Runner {
             baseCell,
             addNodeCancel,
             pattern,
-            schedulerRehydration,
+            {
+              ...schedulerRehydration,
+              viewNodeId: viewNodeId(
+                resultCell.getAsNormalizedFullLink(),
+                nodeIndex,
+              ),
+            },
           );
         }
       } finally {
@@ -5028,6 +5127,144 @@ export class Runner {
     return cancel;
   }
 
+  /** Installs resident JavaScript graph bindings without setup or output writes. */
+  async startViewPiece(
+    resultCell: Cell<unknown>,
+    expectedIdentity: string,
+    current: () => boolean,
+  ): Promise<ViewPieceRegistration | undefined> {
+    if (!current()) return undefined;
+    const key = this.#getDocKey(resultCell);
+    if (this.#cancels.has(key)) return undefined;
+    const read = this.#runtime.readTx();
+    restrictToLocalReads(read.tx);
+    let ref: ReturnType<typeof getPatternIdentityRef>;
+    try {
+      ref = getPatternIdentityRef(resultCell.withTx(read));
+    } catch (error) {
+      if (validateLocalReadBasis(read) === undefined) throw error;
+      return undefined;
+    } finally {
+      read.clearReadOnly?.();
+      read.abort("stored graph identity read complete");
+    }
+    if (ref === undefined || patternIdentityKey(ref) !== expectedIdentity) {
+      return undefined;
+    }
+    const manager = this.#runtime.patternManager;
+    const loaded = manager.artifactFromIdentitySync(ref.identity, ref.symbol) ??
+      await manager.loadPatternByIdentity(
+        ref.identity,
+        ref.symbol,
+        resultCell.space,
+      );
+    if (!current() || loaded === undefined || this.#cancels.has(key)) {
+      return undefined;
+    }
+    const pattern = this.#resolveToPattern(loaded as Pattern);
+    const pending = new Set(pattern.nodes.keys());
+    const [cancelNodes, addCancel] = useCancelGroup();
+    let active = true;
+    const cancel = (() => {
+      if (!active) return;
+      active = false;
+      cancelNodes();
+      pending.clear();
+      if (this.#cancels.get(key) === cancel) this.#cancels.delete(key);
+      this.#allCancels.delete(cancel);
+    }) as ViewPieceRegistration;
+    cancel.graphIsInstalled = () => active && pending.size === 0;
+    this.#cancels.set(key, cancel);
+    this.#allCancels.add(cancel);
+    const resume = () => {
+      if (!active) return false;
+      if (pending.size === 0) return true;
+      const identityRead = this.#runtime.readTx();
+      restrictToLocalReads(identityRead.tx);
+      try {
+        const stored = getPatternIdentityRef(resultCell.withTx(identityRead));
+        if (
+          stored === undefined ||
+          patternIdentityKey(stored) !== expectedIdentity
+        ) {
+          cancel();
+          return false;
+        }
+      } catch (error) {
+        if (validateLocalReadBasis(identityRead) === undefined) {
+          throw error;
+        }
+        return true;
+      } finally {
+        identityRead.clearReadOnly?.();
+        identityRead.abort("stored graph resume identity read complete");
+      }
+      for (const index of pending) {
+        const node = pattern.nodes[index];
+        let module = node.module;
+        if (isModule(module) && module.type === "ref") {
+          module = this.#runtime.moduleRegistry.getModule(
+            module.implementation as string,
+            module.defaultScope,
+          );
+        }
+        // Raw outputs and child graph roots are supplied by the server view plan.
+        if (!isModule(module) || module.type !== "javascript") {
+          pending.delete(index);
+          continue;
+        }
+        const tx = this.#runtime.readTx();
+        restrictToLocalReads(tx.tx);
+        const [cancelAttempt, addAttemptCancel] = useCancelGroup();
+        try {
+          this.#instantiateNode(
+            tx,
+            { ...node, module },
+            resultCell.withTx(tx),
+            addAttemptCancel,
+            pattern,
+            {
+              ...this.#schedulerRehydrationOptions(resultCell),
+              viewNodeId: viewNodeId(
+                resultCell.getAsNormalizedFullLink(),
+                index,
+              ),
+              viewLocalOnly: true,
+              adoptViewIdentity: expectedIdentity,
+            },
+          );
+          const unavailable = validateLocalReadBasis(tx);
+          if (unavailable !== undefined) throw unavailable;
+          addCancel(cancelAttempt);
+          pending.delete(index);
+        } catch (error) {
+          cancelAttempt();
+          if (validateLocalReadBasis(tx) === undefined) {
+            throw error;
+          }
+        } finally {
+          tx.clearReadOnly?.();
+          tx.abort("stored graph binding read complete");
+        }
+      }
+      return true;
+    };
+    cancel.resume = () => {
+      try {
+        return resume();
+      } catch (error) {
+        cancel();
+        throw error;
+      }
+    };
+    if (!cancel.resume()) return undefined;
+    if (!current()) {
+      cancel();
+      return undefined;
+    }
+    return cancel;
+  }
+
   /**
    * Internal start implementation with cascade of checks.
    * Each check: if it fails and needs async work, return a promise that
@@ -5038,6 +5275,13 @@ export class Runner {
     seenCells: Set<Cell>,
     attempt: StartAttempt,
   ): Promise<boolean> {
+    if (
+      this.#runtime.viewScopedReplicationRequested &&
+      this.#runtime.viewReplication.active(resultCell.space)
+    ) {
+      attempt.targetKey = this.#getDocKey(resultCell);
+      return Promise.resolve(this.#cancels.has(attempt.targetKey));
+    }
     if (!this.#isStartAttemptCurrent(attempt)) {
       return Promise.resolve(false);
     }
@@ -8575,8 +8819,12 @@ export class Runner {
     return {
       inputs,
       outputs,
-      reads: findAllWriteRedirectCells(inputs, resultCell),
-      writes: findAllWriteRedirectCells(outputs, resultCell),
+      reads: findAllWriteRedirectCells(inputs, resultCell, {
+        followRedirectChains: !usesLocalReads(resultCell.tx),
+      }),
+      writes: findAllWriteRedirectCells(outputs, resultCell, {
+        followRedirectChains: !usesLocalReads(resultCell.tx),
+      }),
       inputsCell: this.#runtime.getImmutableCell(
         resultCell.space,
         inputs,
@@ -8600,6 +8848,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     outputCells: readonly NormalizedFullLink[],
   ): { targets: NormalizedFullLink[]; complete: boolean } {
+    if (usesLocalReads(tx)) return { targets: [], complete: false };
     // Write redirects are the static writable-output form: resolving them here
     // lets pull-mode indexing treat the resolved target like a normal declared
     // write. Dynamic writable-input writes use materializer envelopes instead.
@@ -8641,6 +8890,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     inputCells: readonly NormalizedFullLink[],
   ): { targets: NormalizedFullLink[]; complete: boolean } {
+    if (usesLocalReads(tx)) return { targets: [], complete: false };
     // Declared inputs can point through their argument-slot redirect and then
     // through an ordinary link to the effective source cell. Resolve the full
     // static chain so the completeness certificate covers the same target the
@@ -8812,7 +9062,11 @@ export class Runner {
         (asCell.includes("cell") || asCell.includes("writeonly"))
       ) {
         if (shouldCollectPath(path)) {
-          links.push(...findAllWriteRedirectCells(currentValue, resultCell));
+          links.push(
+            ...findAllWriteRedirectCells(currentValue, resultCell, {
+              followRedirectChains: !usesLocalReads(resultCell.tx),
+            }),
+          );
         }
         return;
       }
@@ -9741,6 +9995,13 @@ export class Runner {
     }
 
     const parentPieceRootId = resultCell.getAsNormalizedFullLink().id;
+    if (usesLocalReads(tx)) {
+      requireLocalReadCondition(
+        tx.tx,
+        toMemorySpaceAddress(resultCell.getAsNormalizedFullLink()),
+        () => false,
+      );
+    }
     const resultPattern = patternFromFrame(() => result);
     const effectiveOutputScope = narrowestScope([
       schemaCellScope(resultSchema),
@@ -9895,7 +10156,13 @@ export class Runner {
     // runs once rather than per event.
     const causalInputs = causalFormOfBinding(inputs) as Record<string, any>;
 
+    const handlerResultCell = schedulerRehydration.viewLocalOnly
+      ? resultCell.withTx()
+      : resultCell;
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
+      const resultCell = schedulerRehydration.viewLocalOnly
+        ? handlerResultCell.withTx(tx)
+        : handlerResultCell;
       if (event?.preventDefault) event.preventDefault();
 
       // The dispatch-side closed-world gate (verb contract WS-C, C5). A
@@ -10089,41 +10356,42 @@ export class Runner {
     // the handle doc) finds the doc local. The scheduler awaits this before
     // dispatching the event. Steady-state this is ~free: covered selectors
     // resolve without a server round trip.
-    const presyncInputs = module.argumentSchema !== undefined
-      ? async (
-        event: any,
-        identity: ScopeKeyIdentity | undefined,
-        tx: IExtendedStorageTransaction,
-      ): Promise<void> => {
-        const eventInputs = {
-          ...(inputs as Record<string, any>),
-          $event: event,
-        };
-        const inputsCell = this.#runtime.getImmutableCell(
-          resultCell.space,
-          eventInputs,
-          module.argumentSchema,
-          tx,
-        );
-        if (identity === undefined) {
-          await inputsCell.sync();
-        } else {
-          // A served event's presync loads the ACTOR's instances of the
-          // handler's scoped inputs (stage A — the runner's
-          // explicit-instance read; see EventHandler.presyncInputs).
-          await this.#runtime.storageManager.syncCell(inputsCell, {
-            scopeKeyIdentity: identity,
-          });
+    const presyncInputs =
+      !usesLocalReads(resultCell.tx) && module.argumentSchema !== undefined
+        ? async (
+          event: any,
+          identity: ScopeKeyIdentity | undefined,
+          tx: IExtendedStorageTransaction,
+        ): Promise<void> => {
+          const eventInputs = {
+            ...(inputs as Record<string, any>),
+            $event: event,
+          };
+          const inputsCell = this.#runtime.getImmutableCell(
+            resultCell.space,
+            eventInputs,
+            module.argumentSchema,
+            tx,
+          );
+          if (identity === undefined) {
+            await inputsCell.sync();
+          } else {
+            // A served event's presync loads the ACTOR's instances of the
+            // handler's scoped inputs (stage A — the runner's
+            // explicit-instance read; see EventHandler.presyncInputs).
+            await this.#runtime.storageManager.syncCell(inputsCell, {
+              scopeKeyIdentity: identity,
+            });
+          }
+          // Materialize the inputs once through the presync transaction: the
+          // link resolutions the body's first reads would otherwise pay are
+          // accounted to the presync, the scheduler's read budget keeps them
+          // apart from the body's own reads, and a read that dead-ends on a
+          // link into another space kicks that document's load here rather
+          // than in the body.
+          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
         }
-        // Materialize the inputs once through the presync transaction: the
-        // link resolutions the body's first reads would otherwise pay are
-        // accounted to the presync, the scheduler's read budget keeps them
-        // apart from the body's own reads, and a read that dead-ends on a
-        // link into another space kicks that document's load here rather
-        // than in the body.
-        inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
-      }
-      : undefined;
+        : undefined;
 
     // Tag the handler with its owning pattern instance so the delivery shaper
     // can group a pattern's input across its several streams into one shaping
@@ -10132,6 +10400,9 @@ export class Runner {
     const instanceLink = resultCell.getAsNormalizedFullLink();
     const wrappedHandler = Object.assign(handler, {
       implementationSelection: schedulerRehydration.implementationSelection,
+      viewNodeId: schedulerRehydration.viewNodeId,
+      viewLocalOnly: schedulerRehydration.viewLocalOnly,
+      viewPiece: resultCell.getAsNormalizedFullLink(),
       reads,
       writes,
       module,
@@ -10231,9 +10502,15 @@ export class Runner {
       fn: fnSource,
     };
 
+    const actionResultCell = schedulerRehydration.viewLocalOnly
+      ? resultCell.withTx()
+      : resultCell;
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
     } = (tx: IExtendedStorageTransaction) => {
+      const resultCell = schedulerRehydration.viewLocalOnly
+        ? actionResultCell.withTx(tx)
+        : actionResultCell;
       action.ignoredSchedulingWrites = [];
       if (schedulerRehydration.implementationSelection?.matches(tx) === false) {
         return;
@@ -10527,6 +10804,9 @@ export class Runner {
       )
       : [];
     const wrappedAction = Object.assign(action, {
+      viewNodeId: schedulerRehydration.viewNodeId,
+      viewLocalOnly: schedulerRehydration.viewLocalOnly,
+      viewPiece: resultCell.getAsNormalizedFullLink(),
       reads,
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),

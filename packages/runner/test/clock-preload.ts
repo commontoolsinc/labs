@@ -44,6 +44,7 @@ installFakeClock({
     // The engine read-through suite drives the same live ExecutorHost
     // under the same wall-clock policies.
     "engine-read-through",
+    "executor-llm-dialog",
     // The compiled-child suite runs the same live serving host. Its lease
     // renew interval must advance in real time while compiler work settles.
     "executor-compile-and-run",
@@ -55,6 +56,9 @@ installFakeClock({
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
     "executor-space-server",
+    // View publication drives a live ExecutorHost with the same flush, renew,
+    // and disposal deadlines. The fixture waits on view-plan events.
+    "view-replication-client",
     // The activation lease suite controls Date and renewal intervals itself,
     // while scheduler and transport dispatch use ordinary zero-delay timers.
     "activation-lease",

@@ -1,4 +1,5 @@
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+
 import {
   type CellScope,
   DEFAULT_BRANCH,
@@ -54,7 +55,7 @@ export const sameSnapshot = (
 
 export const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0 &&
-  (sync.operationFields?.length ?? 0) === 0;
+  (sync.operationFields?.length ?? 0) === 0 && sync.viewPlans === undefined;
 
 /**
  * Build a session cache entry for one tracked instance. The instance key
@@ -229,6 +230,17 @@ export const groupedQueries = (
     existing.roots.push(...watch.query.roots);
   }
   return grouped;
+};
+
+export const mergeWatchesById = (
+  current: readonly WatchSpec[],
+  added: readonly WatchSpec[],
+): WatchSpec[] => {
+  const merged = new Map(current.map((watch) => [watch.id, watch] as const));
+  for (const watch of added) {
+    merged.set(watch.id, watch);
+  }
+  return [...merged.values()];
 };
 
 const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>

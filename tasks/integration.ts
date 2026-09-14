@@ -351,7 +351,14 @@ async function runPatternTests(
               path.join(rootDir, patternRoot(testFile)),
               testFile,
             ],
-            { cwd: rootDir, env: { CF_TEST_RECORDS_DIR: "" } },
+            {
+              cwd: rootDir,
+              env: {
+                CF_TEST_RECORDS_DIR: "",
+                // This harness owns its emulated store and has no serving host.
+                EXPERIMENTAL_SERVER_EXECUTION: "false",
+              },
+            },
           );
         } catch (error) {
           result = { success: false, code: 127, stderr: String(error) };
@@ -628,6 +635,9 @@ export async function runPackageIntegration(
 
   const env: Record<string, string> = {
     LOG_LEVEL: "warn",
+    ...(PACKAGES_WITHOUT_SERVER.includes(pkg)
+      ? { EXPERIMENTAL_SERVER_EXECUTION: "false" }
+      : {}),
   };
 
   // Set INTEGRATION_TEST_FLAGS for JUnit output if --junit-dir was specified.

@@ -6,6 +6,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
   encodeMemoryBoundary,
   type SessionSync,
+  type ViewPlan,
 } from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
@@ -597,16 +598,58 @@ describe("schema-doc-sync", () => {
       removes: [],
     };
     const replica = provider.replica as SpaceReplica;
-    // The frame is malformed on purpose, so it declares itself a frame only
-    // where it is handed over.
-    replica.accessForTestingOnly.applySessionSync(
-      frame as unknown as SessionSync,
-      "integrate",
-    );
-    expect(replica.getDocument("of:frame-innocent-sibling")).toEqual({
-      value: { fine: true },
+    const plan: ViewPlan = {
+      id: "quarantined-view",
+      revision: 0,
+      generation: 1,
+      eligibleActions: ["preview"],
+      pieces: [],
+    };
+    replica.accessForTestingOnly.applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+      viewPlans: [plan],
+    }, "integrate");
+    const plans: (readonly ViewPlan[])[] = [];
+    const covered: string[] = [];
+    let initial = true;
+    const cancelThrowingPlan = replica.subscribeViewPlans(() => {
+      if (initial) {
+        initial = false;
+        return;
+      }
+      throw new Error("Plan observer failed");
     });
-    expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
+    const cancelPlan = replica.subscribeViewPlans((value) => plans.push(value));
+    const cancelThrowingCoverage = replica.subscribeLocalCoverage(() => {
+      throw new Error("Coverage observer failed");
+    });
+    const cancelCoverage = replica.subscribeLocalCoverage((addresses) =>
+      covered.push(...addresses.map((address) => address.id))
+    );
+    try {
+      // The frame is malformed on purpose, so it declares itself a frame only
+      // where it is handed over.
+      replica.accessForTestingOnly.applySessionSync(
+        frame as unknown as SessionSync,
+        "integrate",
+      );
+      expect(replica.getDocument("of:frame-innocent-sibling")).toEqual({
+        value: { fine: true },
+      });
+      expect(replica.getDocument("of:frame-carrier")).toBeUndefined();
+      expect(plans).toEqual([[plan], [{ ...plan, eligibleActions: [] }]]);
+      expect(covered).toContain("of:frame-innocent-sibling");
+      expect(covered).not.toContain("of:frame-carrier");
+    } finally {
+      cancelCoverage();
+      cancelThrowingCoverage();
+      cancelPlan();
+      cancelThrowingPlan();
+    }
   });
 
   it("quarantines a doc delivered with malformed `schema` metadata, applying the rest of the frame", () => {
