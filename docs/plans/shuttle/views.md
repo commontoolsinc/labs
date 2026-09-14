@@ -75,7 +75,7 @@ the other two.
 handle — and opens the value view as one lens onto it. `q` closes the lens
 and leaves the watch armed. While the prompt is up, an armed watch shows
 its changes as **event lines**: each settled change appends one line —
-`watch topics/3: replies 14 → 15` — and the prompt is redrawn beneath it,
+`watch topics/3 @space: changed` — and the prompt is redrawn beneath it,
 so cause and effect interleave in one transcript that doubles as a
 record. (A pinned strip rendering armed watches live above the prompt is
 designed and deferred: [`futures.md`](futures.md).)

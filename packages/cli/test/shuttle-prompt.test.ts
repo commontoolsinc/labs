@@ -971,6 +971,7 @@ describe("prompt", () => {
       sink: () => Promise<() => void> = () => Promise.resolve(() => {}),
       refuseAnnounce = false,
       refuseUnframe = false,
+      shuttle: Shuttle = atPiece(),
     ): {
       writes: Promise<Write[]>;
       drawn: Write[];
@@ -1015,7 +1016,7 @@ describe("prompt", () => {
         // threw hands back no array and what it drew on the way out is exactly
         // what such a case is about.
         drawn: writes,
-        writes: runPrompt(atPiece(), terminal, {
+        writes: runPrompt(shuttle, terminal, {
           warmPiece: (config) => Promise.resolve({ piece: config.piece }),
           sinkCellValue: () => sink(),
         }).then(() => writes),
@@ -1168,6 +1169,54 @@ describe("prompt", () => {
       // left armed, which is what a watch is for, and the run's own way out is
       // where that one stops (`run.ts`).
       expect(cancelled).toBe(1);
+    });
+
+    it("cancels a lens subscription that arrives after the run threw", async () => {
+      // The run can end while a `watch` is still taking the lens's
+      // subscription, which is a read nothing can call off. The line has to be
+      // stopped on the way out, so that when the subscription arrives the line
+      // is no longer live: its cancel runs then. A line left running adopts it
+      // instead, and hands the lens to an outcome nothing is left to read.
+      //
+      // The run's own way out tears the session down after the prompt returns
+      // (`run.ts`), which is done here by hand. The watch's own subscription is
+      // cancelled whichever way the line goes — by the interruption, or by the
+      // torn-down session refusing to hold it — so that cancel is the event
+      // both reach, and the case waits on it rather than on a clock.
+      //
+      // Kills: ending the run without stopping the line in flight, which
+      // leaves the lens's cancel unrun.
+
+      const shuttle = atPiece();
+      const lensAsked = Promise.withResolvers<void>();
+      const lensArrives = Promise.withResolvers<() => void>();
+      const watchCancelled = Promise.withResolvers<void>();
+      let asked = 0;
+      let lensCancels = 0;
+      const run = driving(
+        async function* () {
+          yield* typed("watch title");
+          yield ENTER;
+          await lensAsked.promise;
+          throw new Error("The keyboard went.");
+        },
+        () => {
+          asked++;
+          if (asked === 1) {
+            return Promise.resolve(() => watchCancelled.resolve());
+          }
+          lensAsked.resolve();
+          return lensArrives.promise;
+        },
+        false,
+        false,
+        shuttle,
+      );
+      await expect(run.writes).rejects.toThrow("The keyboard went.");
+      shuttle.session.disarmAll();
+      lensArrives.resolve(() => lensCancels++);
+      await watchCancelled.promise;
+      expect(lensCancels).toBe(1);
     });
 
     it("cancels the lens's subscription where announcing the line threw", async () => {

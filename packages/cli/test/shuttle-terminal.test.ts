@@ -294,6 +294,17 @@ function wide(columns: number): () => { columns: number; rows: number } {
   return () => ({ columns, rows: 24 });
 }
 
+/**
+ * Helper for the cases below, which is what `written` sent after the frame last
+ * gave the screen back, and a sentence no case expects where it never did.
+ */
+function afterFrame(written: string): string {
+  const gave = written.lastIndexOf(LEAVE_ALT);
+  return gave < 0
+    ? "<the screen was never given back>"
+    : written.slice(gave + LEAVE_ALT.length);
+}
+
 describe("terminal", () => {
   describe("withPromptTerminal()", () => {
     it("throws where standard input is not a terminal", async () => {
@@ -819,10 +830,16 @@ describe("terminal", () => {
       expect(watched.written()).toBe("");
     });
 
-    it("forgets what was drawn before the frame took the screen", async () => {
-      // The alternate screen leaves the cursor where the transcript ended
-      // rather than where the last line was drawn, so the next drawing is an
-      // ordinary first one and clears nothing above it.
+    it("draws the next line from where the line before the frame was drawn", async () => {
+      // Giving the alternate screen back restores the cursor the terminal
+      // saved on taking it, which is where the last drawing left it: a line
+      // wrapped onto a second row leaves the cursor back on that row. So the
+      // next drawing climbs to the line's first row, as any repaint does, and
+      // clears the whole of the old line rather than leaving its first row
+      // standing above the new one.
+      //
+      // Kills: forgetting what was drawn when the frame gives the screen back,
+      // which starts the next line on the wrapped row with no cursor-up.
 
       const watched = await watching({ consoleSize: wide(20) }, async (t) => {
         t.edit("a".repeat(25), 25);
@@ -831,8 +848,52 @@ describe("terminal", () => {
         t.edit("b", 1);
         await Promise.resolve();
       });
-      expect(watched.written().endsWith("\r\x1b7\x1b[0Jb\x1b8\x1b[1C"))
-        .toBe(true);
+      expect(afterFrame(watched.written()))
+        .toBe("\x1b[1A\r\x1b7\x1b[0Jb\x1b8\x1b[1C");
+    });
+
+    it("measures the next line against the line before the frame, not one edited during it", async () => {
+      // Nothing reaches this screen while a frame holds it, so an edit or an
+      // ending asked for then changes nothing on it, and what was drawn has
+      // to say so: the next drawing climbs by the rows of the line that is
+      // actually there.
+      //
+      // Kills: recording an edit or an ending made while framed, which
+      // measures the next repaint against a line that was never drawn.
+
+      const watched = await watching({ consoleSize: wide(20) }, async (t) => {
+        t.edit("a".repeat(25), 25);
+        t.frame(["f"]);
+        t.edit("x", 1);
+        t.finish();
+        t.unframe();
+        t.edit("b", 1);
+        await Promise.resolve();
+      });
+      expect(afterFrame(watched.written()))
+        .toBe("\x1b[1A\r\x1b7\x1b[0Jb\x1b8\x1b[1C");
+    });
+
+    it("writes a line announced during the frame above the line drawn before it", async () => {
+      // The other write a frame holds back. It lands once the screen is given
+      // back, above the line the frame was drawn over, so it climbs to that
+      // line's first row and draws the line again beneath it.
+      //
+      // Kills: forgetting what was drawn when the frame gives the screen back,
+      // which writes the announced line on the wrapped row and draws an empty
+      // line under it.
+
+      const watched = await watching({ consoleSize: wide(20) }, async (t) => {
+        t.edit("a".repeat(25), 25);
+        t.frame(["f"]);
+        t.announce("one");
+        t.unframe();
+        await Promise.resolve();
+      });
+      expect(afterFrame(watched.written())).toBe(
+        "\x1b[1A\r\x1b[0Jone\r\n" +
+          `\r\x1b7\x1b[0J${"a".repeat(25)}\x1b8\x1b[1B\x1b[5C`,
+      );
     });
   });
 

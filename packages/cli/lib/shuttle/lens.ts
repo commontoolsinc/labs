@@ -169,10 +169,8 @@ export class ValueLens {
    * position a row of the screen rather than a line of the rendering, which is
    * what a reader moving by one expects.
    *
-   * The row above the value says what the last change was, where there has
-   * been one. It is not part of what scrolls — it is a fact about the cell
-   * rather than a line of its value — so it stands wherever a reader has
-   * scrolled to and costs the body one row.
+   * The body between the two edges is the value alone, and it has every row
+   * the edges leave — `rows - 2` of them — to scroll within.
    *
    * The frame is as tall as the terminal whatever the value is, its rows
    * filled out where the value does not reach the bottom: it is the screen

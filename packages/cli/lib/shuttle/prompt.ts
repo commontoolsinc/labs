@@ -411,6 +411,12 @@ export async function runPrompt(
     // is closed first because that costs no terminal. Nothing is drawn on the
     // way past: the prompt this ended at is the last thing a run has to say.
     lens?.close();
+    // A line still in flight is stopped too. Its read cannot be called off, but
+    // the line can stop being live, and a line that is not live adopts nothing
+    // its read brings back (`guarded`, `vocabulary.ts`): a `watch` still taking
+    // the lens's subscription cancels it when it arrives, rather than handing
+    // the lens to an outcome nothing is left to read.
+    running?.stop();
     // Each on its own rather than both under one `try`: giving the screen back
     // and ending the line are two things a run owes a terminal, and sharing
     // one would make the first the gate on the second — a terminal that

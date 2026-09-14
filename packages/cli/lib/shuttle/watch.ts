@@ -192,6 +192,7 @@ export function watchEntries(
       : armed.map((watch) => oneLine(watch.label)).join(", "),
   }];
 }
+
 /**
  * The line a watch called `label` writes when the cell it watches changed,
  * fitted to a terminal `columns` wide.

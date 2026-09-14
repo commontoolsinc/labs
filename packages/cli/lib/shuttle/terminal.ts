@@ -247,15 +247,29 @@ class StandardTerminal implements PromptTerminal {
     return this.#keys;
   }
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * Nothing is drawn while a frame has the screen, and nothing is recorded as
+   * drawn either. What was drawn describes the screen the frame gives back,
+   * which the frame leaves as it found it, so a line edited under a frame is
+   * not the line the next drawing is measured against.
+   */
   edit(text: string, column: number): void {
+    if (this.#framed) return;
     const line = { text, column, columns: this.#columns() };
     this.#send(repaint(this.#painted, line));
     this.#painted = line;
   }
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * Ending a line while a frame has the screen does nothing, for the reason
+   * {@link StandardTerminal.edit} gives.
+   */
   finish(): void {
+    if (this.#framed) return;
     this.#send(finish(this.#painted));
     this.#painted = NOTHING_PAINTED;
   }
@@ -295,16 +309,18 @@ class StandardTerminal implements PromptTerminal {
   /**
    * @inheritDoc
    *
-   * What was drawn before the frame is forgotten, as it is across a
-   * suspension and for the same reason: the alternate screen leaves the cursor
-   * where the transcript ended rather than where the last line was drawn, so
-   * the next drawing is an ordinary first one.
+   * What was drawn before the frame is kept. Giving the alternate screen back
+   * restores the cursor the terminal saved on taking it, which is where the
+   * last drawing left it, and nothing reaches this screen while the frame
+   * holds it ({@link StandardTerminal.edit}): the line last drawn is still the
+   * line under the cursor, and the next drawing repaints it as any drawing
+   * repaints the one before, climbing to its first row. A suspension is where
+   * that differs, another program having drawn on this screen in between.
    */
   unframe(): void {
     if (!this.#framed) return;
     this.#framed = false;
     this.#write(givingScreen());
-    this.#painted = NOTHING_PAINTED;
     const waiting = this.#waiting;
     this.#waiting = [];
     for (const text of waiting) this.announce(text);

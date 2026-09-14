@@ -4763,7 +4763,7 @@ describe("verbs", () => {
       settle(14);
       settle(15);
       expect(watched.announced)
-        .toEqual([`watch ${HANDLE}/title @space: 14 → 15`]);
+        .toEqual([`watch ${HANDLE}/title @space: changed`]);
     });
 
     it("writes no event line once the watch is disarmed", async () => {
