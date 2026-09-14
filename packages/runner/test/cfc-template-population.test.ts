@@ -484,13 +484,9 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     expect(JSON.stringify(entriesOf(listId))).toEqual(before);
   });
 
-  it("the re-deriving tx's own slot readback does not ratchet J (readback exclusion)", async () => {
-    // The §8.12.8 replace-from-criteria READBACK EXCLUSION, pinned at the
-    // unit level: the re-deriving transaction's own reads of the container's
-    // slots (an incremental reconciler diffing its previous output) must not
-    // feed the replaced templates back into the J it re-mints them from —
-    // otherwise replace degenerates into accumulate-forever. The end-to-end
-    // pin is cfc-flow-pointwise's "membership replaces from criteria".
+  it("retains application slot observations when restamping membership", async () => {
+    // Declaring a container for restamping cannot erase what the application
+    // already observed. Trusted coordinator bookkeeping uses machineryRead.
 
     const rt = makeRuntime();
     await seedDoc(rt, "tp-el-rb", { n: 1 }, []);
@@ -502,10 +498,9 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     ]);
     const listId = await buildList(rt, "tp-list-rb", criteriaA, ["tp-el-rb"]);
 
-    // The reconcile: reads the new criteria AND its own container's slot
-    // (the diff readback — a standalone probe at the slot plus a raw slot
-    // read), then re-declares. Without the exclusion the readback would
-    // resolve the old templates and mint old ∪ new.
+    // Reading the new criteria and the existing slot consumes both selection
+    // histories. Restamping membership retains the old and new criteria in
+    // the templates, including the standalone reference observation.
     const reconcile = rt.edit();
     reconcile.readOrThrow(readAddress(criteriaB, []));
     reconcile.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
@@ -523,16 +518,11 @@ describe("CFC template population (Stage A): the two under-taints", () => {
       .filter((e) => e.origin === "structure" && e.path.length === 1)
       .flatMap((e) => e.label.confidentiality ?? []);
     expect(templateConf).toContainEqual("new-criteria");
-    expect(templateConf).not.toContainEqual("old-criteria");
+    expect(templateConf).toContainEqual("old-criteria");
   });
 
-  it("trace-covered slot reads are machinery: no template consumption", async () => {
-    // The C0 §6.1 row-4 boundary extended to plain reads: a read at a slot
-    // that is COVERED by a same-tx dereference trace is resolution machinery
-    // passing through — it must not consume the slot templates (the follow's
-    // taint arrives via the target's own reads). A standalone read of the
-    // same slot (the row-3 case) consumes them — that asymmetry is pinned by
-    // this test together with the red tests above.
+  it("retains slot selection confidentiality when a trace covers the read", async () => {
+    // Dereference tracing cannot erase the selected reference's history.
 
     const rt = makeRuntime();
     const elId = await seedDoc(rt, "tp-el-tc", { n: 1 }, []);
@@ -549,7 +539,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
         kind: "value",
       });
     });
-    expect(join).not.toContainEqual("memb-secret");
+    expect(join).toContainEqual("memb-secret");
   });
 });
 
@@ -925,10 +915,8 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     expect(join).not.toContainEqual("ptr-label");
   });
 
-  it("raw value read at the slot consumes value + shape twins, not followRef", async () => {
-    // A raw sigil value read at the slot consumes the value twin and the
-    // shape twin (value reads consume the shape class, C0 §4) — never the
-    // followRef twin or the pointer's transport label.
+  it("consumes membership and reference labels when materializing a slot", async () => {
+    // The raw stored value exposes the reference as well as slot membership.
 
     const rt = makeRuntime();
     const id = await seedSplitDoc(rt, "tp-split-value");
@@ -937,8 +925,8 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     });
     expect(join).toContainEqual("memb-value");
     expect(join).toContainEqual("memb-shape");
-    expect(join).not.toContainEqual("memb-ref");
-    expect(join).not.toContainEqual("ptr-label");
+    expect(join).toContainEqual("memb-ref");
+    expect(join).toContainEqual("ptr-label");
   });
 
   it("templates apply to reads strictly below the slot", async () => {

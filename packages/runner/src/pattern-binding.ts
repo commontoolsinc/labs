@@ -25,13 +25,19 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
-import { type AnyCell, markCellDocumentSynced } from "./cell.ts";
+import { type AnyCell, isCell } from "./cell.ts";
+import {
+  carryCfcReferenceProvenance,
+  getCfcReferenceProvenance,
+  withCfcReferenceConfidentiality,
+} from "./cfc/reference-provenance.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import { joinCfcObservedConfidentiality } from "./cfc/observation.ts";
+import { diffAndUpdate, recordTrustedLinkValueWrite } from "./data-updating.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
-import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -51,8 +57,10 @@ import { isCellScope, scopeRank } from "./scope.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   internalVerifierRead,
+  linkResolutionProbe,
   machineryRead,
 } from "./storage/reactivity-log.ts";
+import { schemaWithRetainedReferenceScope } from "./cfc/reference-scope.ts";
 
 /**
  * Longest rendering of a binding an error message carries. A binding can
@@ -274,6 +282,7 @@ function sendValueToBindingInner<T>(
   // cells. This and `unwrapOneLevelAndBindToDoc` below are the only two
   // places that do.
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    let bindingSource: unknown = binding;
     if (isAliasBinding(binding)) {
       const alias = binding.$alias;
       if ((alias.defer ?? 0) > 0) {
@@ -313,6 +322,7 @@ function sendValueToBindingInner<T>(
         if (link === undefined) {
           throw new Error("Invalid pseudo-alias path: " + alias.path);
         }
+        bindingSource = link;
         const path = alias.path;
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(link, path, alias.schema),
@@ -329,6 +339,35 @@ function sendValueToBindingInner<T>(
       "writeRedirect",
       { preserveOverwrite: true },
     );
+    const writeScopeReference = (
+      target: NormalizedFullLink,
+      source: NormalizedFullLink,
+    ) => {
+      const sigil = createSigilLinkFromParsedLink(source, { base: target });
+      if (tx.getCfcState().flowLabelsMode === "persist") {
+        const acquired = cell.runtime.getCellFromLink(
+          source,
+          undefined,
+          tx,
+          withCfcReferenceConfidentiality(
+            undefined,
+            joinCfcObservedConfidentiality(
+              [cell, bindingSource, value].map((carrier) =>
+                getCfcReferenceProvenance(carrier)?.confidentiality ?? []
+              ),
+            ),
+          ),
+        );
+        carryCfcReferenceProvenance(
+          source.overwrite === "redirect"
+            ? acquired.getAsWriteRedirectLink()
+            : acquired.getAsLink(),
+          sigil,
+        );
+        recordTrustedLinkValueWrite(tx, target, sigil);
+      }
+      tx.writeValueOrThrow(target, sigil);
+    };
     const outputScope = options.narrowestReadScope;
     if (
       outputScope !== undefined &&
@@ -361,18 +400,8 @@ function sendValueToBindingInner<T>(
         scopeRank(ref.scope) < scopeRank("user")
       ) {
         const userRef = { ...ref, scope: "user" as const };
-        tx.writeValueOrThrow(
-          userRef,
-          createSigilLinkFromParsedLink(scopedRef, {
-            base: userRef,
-          }),
-        );
-        tx.writeValueOrThrow(
-          bindingLink,
-          createSigilLinkFromParsedLink(userRef, {
-            base: bindingLink,
-          }),
-        );
+        writeScopeReference(userRef, scopedRef);
+        writeScopeReference(bindingLink, userRef);
         return;
       }
       if (
@@ -391,18 +420,10 @@ function sendValueToBindingInner<T>(
         // one-hop shape below) would repoint the SHARED space slot at
         // `session` and every other principal's next read would resolve
         // a session instance of a node that is user-scoped for them.
-        tx.writeValueOrThrow(
-          ref,
-          createSigilLinkFromParsedLink(scopedRef, { base: ref }),
-        );
+        writeScopeReference(ref, scopedRef);
         return;
       }
-      tx.writeValueOrThrow(
-        bindingLink,
-        createSigilLinkFromParsedLink(scopedRef, {
-          base: bindingLink,
-        }),
-      );
+      writeScopeReference(bindingLink, scopedRef);
       return;
     }
     if (options.preserveLinkOutput) {
@@ -427,6 +448,11 @@ function sendValueToBindingInner<T>(
           meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
         });
         if (!valueEqual(current, newValue)) {
+          carryCfcReferenceProvenance(
+            isCell(value) ? value.getAsLink() : value,
+            newValue,
+          );
+          recordTrustedLinkValueWrite(tx, bindingLink, newValue);
           tx.writeValueOrThrow(bindingLink, newValue);
         }
         return;
@@ -594,10 +620,61 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
+  const argumentSource = argumentCellLink;
   const resultCellLink = canonicalSchemaLink(
     resultCell.getAsNormalizedFullLink(),
   )!;
   argumentCellLink = canonicalSchemaLink(argumentCellLink);
+
+  const bindReference = (
+    link: NormalizedFullLink,
+    source: NormalizedFullLink | AnyCell<unknown>,
+  ) => {
+    if (
+      (resultCell.tx?.getCfcState().flowLabelsMode ??
+        resultCell.runtime.cfcFlowLabels) === "persist"
+    ) {
+      const sourceCell = resultCell.runtime.getCellFromLink(
+        source,
+        undefined,
+        resultCell.tx,
+      );
+      const sourceLink = sourceCell.getAsNormalizedFullLink();
+      const underSource = sourceLink.space === link.space &&
+        sourceLink.id === link.id && sourceLink.scope === link.scope &&
+        sourceLink.path.every((part, index) => link.path[index] === part);
+      const projected = (underSource
+        ? sourceCell.key(...link.path.slice(sourceLink.path.length))
+        : sourceCell).asSchema(link.schema);
+      const reference = getCfcReferenceProvenance(projected)!;
+      // A field's cap governs outgoing hops. Projecting within its existing
+      // scoped document retains that cap without making another hop to it.
+      if (
+        !underSource && reference.scopeCaps?.some((cap) =>
+          cap.scope !== "any" && scopeRank(link.scope) > scopeRank(cap.scope)
+        )
+      ) {
+        throw new Error("Reference alias exceeds its acquired scope cap");
+      }
+      link = {
+        ...link,
+        schema: schemaWithRetainedReferenceScope(
+          sanitizeAliasSchemaForBinding(link.schema ?? true),
+          reference.scopeCaps,
+        ),
+      };
+      return resultCell.runtime.getCellFromLink(
+        { ...link, scopeCaps: reference.scopeCaps },
+        undefined,
+        resultCell.tx,
+        withCfcReferenceConfidentiality(undefined, reference.confidentiality),
+      ).getAsWriteRedirectLink({ includeSchema: true });
+    }
+    return createSigilLinkFromParsedLink(link, {
+      includeSchema: true,
+      overwrite: "redirect",
+    });
+  };
 
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
@@ -686,9 +763,9 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           : link.schema !== undefined
           ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return bindReference(
           scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
-          { includeSchema: true, overwrite: "redirect" },
+          resultCell,
         );
       } else {
         // Resolve the special values for "argument" and "result" — the only
@@ -712,13 +789,13 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         const authoredRootSchema = alias.cell === "argument"
           ? options?.sourceSchemas?.argument
           : undefined;
-        return createSigilLinkFromParsedLink(
+        return bindReference(
           foldDeclaredScopeIntoLinkSchema(
             scopedLinkForPath(link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
           ),
-          { includeSchema: true, overwrite: "redirect" },
+          alias.cell === "argument" ? argumentSource! : resultCell,
         );
       }
     } else if (binding instanceof FabricPrimitive) {
@@ -843,10 +920,8 @@ export function findAllWriteRedirectCells<T>(
 ): NormalizedFullLink[] {
   const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
-  // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
-  // does not depend on the cell's value type, so accept any cell. This lets the
-  // redirect-chain recursion re-base onto the resolved `linkCell` (a
-  // `Cell<unknown>`) rather than the original typed base.
+  // Binding traversal needs the base cell's address and transaction, regardless
+  // of its value type. Each redirect hop resolves against its own target.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isAliasBinding(binding)) {
       // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
@@ -855,39 +930,26 @@ export function findAllWriteRedirectCells<T>(
       // and is not part of this level's read/write surface.
       return;
     } else if (isWriteRedirectLink(binding)) {
-      // Follow a *chain* of write redirects: record this redirect, then if its
-      // target value is ITSELF a write redirect, follow that too (one string of
-      // redirects). We stop as soon as the target is a non-redirect value — we
-      // do NOT recurse into it looking for further nested redirects.
-      //
-      // (Previously this recursed via `find(linkCell.getRaw(...))`, which walked
-      // the whole target value structurally — the transitive closure across
-      // documents — and was the dominant reload instantiation cost: resolving a
-      // cell + walking its entire value per link. Following only direct redirect
-      // chains keeps the cases that matter without the deep dive.)
-      const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
-      if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
-      seen.push(link);
-      if (options?.followRedirectChains === false) return;
-      // The probe reads the target's raw value to see whether it is itself a
-      // redirect. The cell keeps the link's schema, which carries the scope
-      // caps resolution honors along the path, but a raw read of a cold
-      // document would kick a sync under that schema, pulling everything the
-      // schema reaches for a read that wants one document, so the probe
-      // reads the replica as it stands and kicks nothing: what a run reads
-      // is named by the pre-sync, not by this walk.
-      const linkCell = baseCell.runtime.getCellFromLink(
-        link,
-        undefined,
-        baseCell.tx,
-      );
-      if (!linkCell) throw new Error("Link cell not found");
-      markCellDocumentSynced(linkCell);
-      const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
-      // Resolve the next redirect relative to `linkCell` (the cell the chained
-      // redirect lives in), not the original `baseCell`: a relative redirect in
-      // a cross-document target must resolve against its own document.
-      if (isWriteRedirectLink(target)) find(target, linkCell);
+      let link = parseLink(binding, baseCell.getAsNormalizedFullLink());
+      const tx = baseCell.runtime.readTx(baseCell.tx);
+      while (
+        !seen.some((candidate) => areNormalizedLinksSame(candidate, link))
+      ) {
+        seen.push(link);
+        if (options?.followRedirectChains === false) return;
+        // Dependency discovery observes redirect topology. A terminal value's
+        // contents and nested references belong to the action's later reads.
+        const target = resolveLink(baseCell.runtime, tx, link, "top", {
+          markIfcCrossings: true,
+          requestMissingDocs: false,
+        });
+        const next = tx.runWithAmbientReadMeta(
+          { ...ignoreReadForScheduling, ...linkResolutionProbe },
+          () => readMaybeLink(tx, target, true),
+        );
+        if (next === undefined) break;
+        link = next;
+      }
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;

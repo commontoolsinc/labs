@@ -144,6 +144,8 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
       stableExpressionResultIds: true,
+      readValidation: true,
+      eventContext: true,
       commitPreconditions: false,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
@@ -168,6 +170,8 @@ describe("memory v2 flags", () => {
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
       stableExpressionResultIds: true,
+      readValidation: true,
+      eventContext: true,
       commitPreconditions: true,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
@@ -195,6 +199,8 @@ describe("memory v2 flags", () => {
       {
         modernCellRep: true,
         stableExpressionResultIds: true,
+        readValidation: true,
+        eventContext: true,
         commitPreconditions: true,
         applyOp: true,
         syncSchemaTableV2: true,
@@ -211,6 +217,8 @@ describe("memory v2 flags", () => {
       {
         modernCellRep: true,
         stableExpressionResultIds: true,
+        readValidation: true,
+        eventContext: true,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -261,6 +269,8 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
       stableExpressionResultIds: false,
+      readValidation: false,
+      eventContext: false,
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
@@ -277,6 +287,8 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
       stableExpressionResultIds: false,
+      readValidation: false,
+      eventContext: false,
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
@@ -300,6 +312,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: true,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -342,6 +356,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: true,
@@ -364,6 +380,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -388,6 +406,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -420,6 +440,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -445,6 +467,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -467,6 +491,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -494,6 +520,8 @@ describe("parseMemoryProtocolFlags", () => {
       {
         modernCellRep: false,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
@@ -545,6 +573,8 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({
         modernCellRep: true,
         stableExpressionResultIds: false,
+        readValidation: false,
+        eventContext: false,
         commitPreconditions: "true",
       }),
       null,

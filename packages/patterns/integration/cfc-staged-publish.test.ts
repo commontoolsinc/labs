@@ -31,6 +31,7 @@ describe("cfc staged publish integration test", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
 
     // Pre-create the space-root (default) pattern so the browser's

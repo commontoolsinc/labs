@@ -149,6 +149,7 @@ describe("sx2 scale (Phase 6 gates)", () => {
       space: `${SPACE_NAME}-sx2-scale-${suffix}`,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
     controllers.push(controller);
     return controller;

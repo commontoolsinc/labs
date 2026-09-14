@@ -248,6 +248,8 @@ export function startServerExecutionHost(options: {
         // commit through the loopback plane, and the wave destination
         // takes over at activation.
         servingPosture: true,
+        // Precise clients require complete acquisition history on served writes.
+        cfcFlowLabels: "persist",
         experimental: { ...experimental, ...SERVING_RUNTIME_EXPERIMENTAL },
       });
       void space;

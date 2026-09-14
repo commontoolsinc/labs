@@ -17,6 +17,7 @@
 
 import {
   type Cell,
+  type CellLinkInput,
   compileAndSavePattern,
   entityIdFrom,
   getPatternIdentityRef,
@@ -318,9 +319,15 @@ export async function servedInstantiatePiece(
     tx.setCfcTrustSnapshot(
       runtime.trustSnapshotForPrincipal(request.actingUser),
     );
+    // The authenticated host request independently chooses these references.
+    // Acquire them before setup; target content is labeled when it is read.
+    const argument = request.argument ?? {};
+    const acquiredArgument = runtime.cfcFlowLabels === "persist"
+      ? runtime.acquireExternalInput(space, argument as CellLinkInput)
+      : argument;
     // With a transaction supplied, setup runs to completion before it
     // returns and leaves the commit to this transaction.
-    void runtime.setup(tx, pattern, request.argument ?? {}, piece, {
+    void runtime.setup(tx, pattern, acquiredArgument, piece, {
       ...(request.repository === undefined
         ? {}
         : { patternRepository: request.repository }),

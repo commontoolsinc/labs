@@ -2,7 +2,12 @@ import {
   getLogger,
   getLoggerCountsBreakdown,
 } from "@commonfabric/utils/logger";
-import { hasDependentPath } from "../src/scheduler/dependency-graph.ts";
+import { spy } from "@std/testing/mock";
+import {
+  hasDependentPath,
+  hasInvalidUpstream,
+} from "../src/scheduler/dependency-graph.ts";
+import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { forEachOverlappingWriter } from "../src/scheduler/scheduling-writes.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
@@ -770,5 +775,38 @@ describe("dependency graph reachability", () => {
 
     expect(hasDependentPath(dependents, actions[0], actions[depth])).toBe(true);
     expect(hasDependentPath(dependents, actions[0], unreachable)).toBe(false);
+  });
+
+  it("visits shared descendants once when checking many invalid upstream candidates", () => {
+    const nodes = new NodeRegistry();
+    const roots = Array.from({ length: 32 }, () => (() => {}) as Action);
+    const shared = Array.from({ length: 32 }, () => (() => {}) as Action);
+    const target = (() => {}) as Action;
+    const dependents = new WeakMap<Action, Set<Action>>();
+    for (const root of roots) {
+      nodes.register(root, "computation");
+      dependents.set(root, new Set([shared[0]]));
+    }
+    for (let index = 0; index < shared.length - 1; index++) {
+      dependents.set(shared[index], new Set([shared[index + 1]]));
+    }
+    dependents.set(shared.at(-1)!, new Set([shared[0]]));
+    using reads = spy(dependents, "get");
+    expect(hasInvalidUpstream({ nodes, dependents }, target)).toBe(false);
+    expect(reads.calls.length).toBeLessThanOrEqual(
+      roots.length + shared.length,
+    );
+
+    const lastRootTarget = (() => {}) as Action;
+    dependents.get(roots.at(-1)!)!.add(lastRootTarget);
+    expect(hasInvalidUpstream({ nodes, dependents }, lastRootTarget)).toBe(
+      true,
+    );
+    dependents.get(shared.at(-1)!)!.add(target);
+    expect(hasInvalidUpstream({ nodes, dependents }, target)).toBe(true);
+    for (const root of roots) nodes.setStatus(root, "clean");
+    nodes.register(target, "computation");
+    dependents.set(target, new Set([shared[0]]));
+    expect(hasInvalidUpstream({ nodes, dependents }, target)).toBe(false);
   });
 });

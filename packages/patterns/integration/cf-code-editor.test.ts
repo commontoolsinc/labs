@@ -146,6 +146,7 @@ describe("cf-code-editor cursor stability", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
+      cfcFlowLabels: "persist",
     });
     piece = await cc.create(
       await Deno.readTextFile(
@@ -1356,6 +1357,7 @@ describe("cf-code-editor backlink title sync", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
     piece = await cc.create(
       await Deno.readTextFile(

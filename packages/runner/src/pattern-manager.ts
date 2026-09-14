@@ -1,3 +1,4 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import type { Source } from "@commonfabric/js-compiler";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -181,7 +182,11 @@ function assertNoReservedHoistExports(
   }
 }
 
-/** Whether copying source bytes would discard a meaningful stored CFC label. */
+/**
+ * Returns whether recovering source bytes would discard confidentiality or
+ * content integrity. Public reference identities belong to the source links;
+ * copying verified bytes creates new links with their own identity evidence.
+ */
 export function sourceCfcMetadataProhibitsCrossSpaceCopy(
   metadata: CfcMetadata | undefined,
 ): boolean {
@@ -189,10 +194,16 @@ export function sourceCfcMetadataProhibitsCrossSpaceCopy(
     const confidentiality = entry.label.confidentiality ?? [];
     const integrity = entry.label.integrity ?? [];
     if (confidentiality.length > 0) return true;
-    if (integrity.length === 0) return false;
-    return entry.path.length !== 1 ||
-      entry.path[0] !== "delegatedModuleIdentities" ||
-      integrity.some((atom) => atom !== COMPILED_INTEGRITY_ATOM);
+    return integrity.some((atom) => {
+      if (
+        entry.path.length === 1 &&
+        entry.path[0] === "delegatedModuleIdentities" &&
+        atom === COMPILED_INTEGRITY_ATOM
+      ) return false;
+      return metadata.version !== 2 || entry.origin !== "link" ||
+        entry.observes !== "followRef" || !isObjectOrArray(atom) ||
+        atom.type !== CFC_ATOM_TYPE.LinkReference;
+    });
   }) ?? false;
 }
 

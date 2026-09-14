@@ -1,13 +1,9 @@
 # CFC enforcement × propagation × write-floor × trigger gating — the deployment mode matrix
 
-_Epic H, stage H4 (first sub-step), of
-[`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
-Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
-the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
-**which combinations of the five CFC dials are conforming deployment states and
-in what order a deployment may advance them**, before H4 lands `enforce-strict`
-behavior and before H3a flips any shipped host — so the rollout ordering is
-written down first._
+This document defines conforming combinations of the five CFC dials and the
+order in which a deployment may advance them. The rollout constraints are tracked
+in SC-13 of [CFC spec changes](cfc-spec-changes.md); the current reference profile
+and reader compatibility requirements are in [CFC references](cfc-references.md).
 
 ## 1. The five dials (all runtime-configured, all orthogonal)
 
@@ -41,8 +37,7 @@ conforming, and the conforming ones are reachable only along a partial order.
   provenance mints still run (e.g. the external-ingest mark), but no reason ever
   rejects. CFC is descriptive only. This posture exists only by **explicitly
   passing** `cfcEnforcementMode: "disabled"` — no shipped host does today
-  (toolshed constructs its `Runtime` with no CFC options and therefore runs the
-  `enforce-explicit` default; see §3).
+  (toolshed selects `enforce-explicit` with persistent flow labels; see §3).
 - **`observe`** — the boundary pass runs and records reasons as **diagnostics**;
   the commit still succeeds. Used to measure reason volume before enforcing.
 - **`enforce-explicit`** — a recorded reason **rejects** the commit, and that
@@ -80,6 +75,34 @@ such a name and returns `undefined`, so every floor comparison against it reads
 false — including the audit-S3 anti-downgrade floor, which therefore never
 rises — while the commit gate, which asks only whether the name is one of
 `disabled` and `observe`, reads the same name as enforcing.
+
+### Linked value subjects
+
+The write-floor dial applies to the subject required by the declaring path. A
+floor governing linked contents resolves the current target field through the
+Runtime's scoped link resolver. A receiving reference's `addIntegrity`, a
+relationship endorsement, or a carried reader schema does not certify that
+content. Wildcard floors enumerate concrete written slots, including slots below
+ancestor links, and unresolved evidence rejects under `cfcWriteFloor: enforce`.
+Inline values receive their authorized schema integrity and, only with
+`cfcFlowLabels: persist`, their hereditary flow integrity. Setup writes obey the
+same floor; pure deletion is outside its value requirement.
+
+Explicit `exactCopyOf` and `projection` claims are independent of the write-floor
+dial. They resolve ancestor links to current fields. Inline fields compare by
+Fabric value equality; reference fields compare their full normalized bindings,
+including overwrite mode. Missing evidence, mixed inline/reference subjects, and
+wildcard copy claims reject. Reader schemas on handles remain views rather than
+general payload-validation certificates.
+
+The Runtime performs content verification before storage submission. Its reads
+remain authorization dependencies even though verifier reads do not become
+handler content inputs. Storage's revision checks bind this evidence within the
+destination space. A content assertion that traverses another space rejects,
+because those target revisions cannot be bound atomically to the write.
+Reference-only forwarding and identity-copy checks may still name another
+space without observing its contents. The focused checks are in
+[cfc-linked-content-floor.test.ts](../../packages/runner/test/cfc-linked-content-floor.test.ts).
 
 ## 2. Rollout ordering (the partial order)
 
@@ -160,10 +183,10 @@ dial is not yet producing. The states a deployment is expected to pass through:
 | State | enforcement | flow | write-floor | trigger | Meaning |
 |---|---|---|---|---|---|
 | **Operator (explicitly disabled)** | `disabled` | `off` | `off` | `false` | CFC descriptive only; provenance mints run, nothing rejects. Requires explicitly passing `cfcEnforcementMode: "disabled"` — no shipped host does today. |
-| **Server hosts today (toolshed, background-piece-service)** | `enforce-explicit` | `off` | `off` | `false` | Neither host passes any CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts), [background-piece-service main.ts](../../packages/background-piece-service/src/main.ts)), so both inherit the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
+| **Server hosts (toolshed, background-piece-service)** | `enforce-explicit` | `persist` | `off` | `false` | The `productionServer` preset and toolshed's per-space serving Runtime persist reference acquisition history for precise readers. Flow propagation and explicit checks run in the trusted Runtime; storage admits the resulting revision dependencies. |
 | **Shell today** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
 | **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
-| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects; complete on flow-endorsed writes (flow persists). |
+| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects and credits persisted flow integrity; content assertions require evidence within the destination space. |
 | **Strict** | `enforce-strict` | `persist` | `enforce` | `true` | Writer-fit fail-closed (H4); render ceiling consumes derived labels (H3b); trigger reads gated, multi-hop complete since flow persists. The end state. |
 
 Trigger gating may flip to `true` at any of these states (ordering constraint
@@ -206,7 +229,7 @@ posture (anti-fail-closed).
 The strict-only delta is:
 
 - **Writer-fit reject (SC-18b) — implemented (H4 code step).** The per-tx flow
-  join landing as a target's `derived` value component is measured against the
+  join landing in a target's value, structure, or reference component is measured against the
   target's DECLARED store-policy component (declared + legacy entries, resolved
   by the same per-component longest-prefix rule reads use; absent declarations
   are the empty "public" ceiling, fail-closed) joined with the target's
@@ -230,10 +253,10 @@ The strict-only delta is:
   bit-for-bit on stored metadata. The reason string is stable and names the
   rule id, target, path, and offending clause(s) (SC-18c):
   `writer-fit confidentiality misfit for <doc> at /<path> (canWrite, §8.12.4):
-  <clauses>`. Scope note (v1): link-covered writes carry per-slot link labels
-  instead of the join and are outside the check, as is the pure-link-structure
-  shape channel; grown existence atoms (SC-4) are historical and deliberately
-  never measured — only the current join is; `Space` is the only principal
+  <clauses>`. Reference writes include their retained acquisition restrictions
+  and current selection join in the measurement. Pure-link containers also
+  measure their structure stamp. Grown existence atoms (SC-4) retain historical
+  restrictions; the check measures the current write's confidentiality; `Space` is the only principal
   form residency admits, because `User` and the bare DID-string spelling gate
   by equality against one acting reader, making their audience narrower than
   the set of principals a space grants reader roles to, while
@@ -700,7 +723,11 @@ The strict-only delta is:
     carrying a label into the child is refused at the child's id, and that id
     is a hash of the parent and the path, so nothing recovers the parent from
     it: what the message establishes is that some document holds a piece of
-    another document's value. The same test file pins the four outcomes.
+    another document's value. The containing document is measured at its own
+    written path as well: a declaration on the element does not cover replacing
+    the whole parent under a confidential flow. Writing the declared element
+    slot of an existing public container measures that slot and the anchored
+    child. The same test file pins both write shapes and the child outcomes.
   - **How far it reaches inside that document.** Every path the
     transaction writes there, not only the paths setup wrote: the marker
     names the store, and the declaration is a statement about the store.
@@ -842,5 +869,7 @@ SC-13 rollout constraint in `cfc-spec-changes.md` and the current host
 postures: shell
 ([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
 `enforce-explicit` + flow `persist`, H2); toolshed and
-background-piece-service (no CFC options passed → `Runtime` defaults,
-`enforce-explicit` + flow `off`).
+background-piece-service (`productionServer` and the per-space serving Runtime:
+`enforce-explicit` + flow `persist`). The deployed CLI also selects persistent
+flow labels; embedding clients must select a writer profile compatible with
+their readers. See [CFC references](cfc-references.md).

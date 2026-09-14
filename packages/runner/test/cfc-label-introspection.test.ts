@@ -8,6 +8,7 @@ import {
   evaluateConfLabelQuery,
   parseConfLabelTargetPath,
 } from "../src/cfc/label-introspection.ts";
+import { deriveLabelMetadataTemplateEntries } from "../src/cfc/label-metadata-population.ts";
 import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
 
@@ -45,6 +46,92 @@ const derivedBodyEntry = (atom: CfcAtom = caveatAtom(SOURCE_A)) => ({
 });
 
 describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
+  it("retains concrete shape confidentiality for a wildcard target", () => {
+    const metadata = metadataWith([{
+      path: ["items", "0"],
+      origin: "derived",
+      label: { confidentiality: ["private selection"] },
+    }]);
+    const evaluation = evaluateConfLabelQuery(metadata, ["items", "*"], {});
+    expect(evaluation.result.status).toBe("ok");
+    expect(evaluation.consumedConfidentiality).toEqual(["private selection"]);
+  });
+
+  it("keeps legacy link fields unavailable in an upgraded envelope", () => {
+    for (const complete of [false, true]) {
+      const entry = {
+        path: ["body"],
+        origin: "link" as const,
+        ...(complete && { observes: "followRef" as const }),
+        label: { confidentiality: [caveatAtom(SOURCE_A)] },
+      };
+      const templates = deriveLabelMetadataTemplateEntries([entry], 2);
+      expect(templates.length > 0).toBe(complete);
+      const metadata = {
+        ...metadataWith([entry, ...templates]),
+        version: 2 as const,
+      };
+      const evaluation = evaluateConfLabelQuery(metadata, ["body"], {
+        source: SOURCE_A,
+      });
+      expect(evaluation.result.status).toBe(complete ? "ok" : "notAvailable");
+    }
+  });
+
+  it("protects an empty query below a privately selected structure", () => {
+    const metadata = metadataWith([{
+      path: [],
+      origin: "structure",
+      observes: "shape",
+      label: { confidentiality: ["selection"] },
+    }]);
+    const evaluation = evaluateConfLabelQuery(metadata, ["missing"], {});
+    expect(evaluation.result).toEqual({ status: "ok", atoms: [] });
+    expect(evaluation.consumedConfidentiality).toEqual(["selection"]);
+  });
+
+  it("retains ancestor selection under a more specific metadata template", () => {
+    const metadata = metadataWith([
+      {
+        path: [],
+        origin: "structure",
+        observes: "shape",
+        label: { confidentiality: ["selection"] },
+      },
+      {
+        path: ["cfc", "labels", "value", "missing"],
+        origin: "label-metadata",
+        observes: "labelMetadata",
+        label: { confidentiality: ["field"] },
+      },
+    ]);
+    const evaluation = evaluateConfLabelQuery(metadata, ["missing"], {});
+    expect(evaluation.result).toEqual({ status: "ok", atoms: [] });
+    expect(evaluation.consumedConfidentiality).toEqual(["field", "selection"]);
+  });
+
+  it("retains selection observations when a later field is unavailable", () => {
+    const evaluation = evaluateConfLabelQuery(
+      metadataWith([
+        {
+          path: [],
+          origin: "structure",
+          observes: "shape",
+          label: { confidentiality: ["selection"] },
+        },
+        {
+          path: ["body"],
+          origin: "declared",
+          label: { confidentiality: [caveatAtom(SOURCE_A)] },
+        },
+      ]),
+      ["body"],
+      { source: SOURCE_A },
+    );
+    expect(evaluation.result).toEqual({ status: "notAvailable" });
+    expect(evaluation.consumedConfidentiality).toEqual(["selection"]);
+  });
+
   describe("target path parsing (first-layer addressing)", () => {
     it("maps the payload pointer to the canonical /value entry path", () => {
       expect(parseConfLabelTargetPath("/body")).toEqual(["body"]);
@@ -99,7 +186,7 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       expect(consumedConfidentiality).toContainEqual("secret");
     });
 
-    it("returns ok+[] for a type miss established from public metadata", () => {
+    it("protects an empty type-query result with the derived selection label", () => {
       const metadata = metadataWith([derivedBodyEntry()]);
       const { result, consumedConfidentiality } = evaluateConfLabelQuery(
         metadata,
@@ -107,9 +194,8 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
         { atomType: CFC_ATOM_TYPE.Expires },
       );
       expect(result).toEqual({ status: "ok", atoms: [] });
-      // type consultation is public; establishing this miss consumed nothing
-      // protected.
-      expect(consumedConfidentiality).toEqual([]);
+      // The type field adds no restriction, but selecting the label did.
+      expect(consumedConfidentiality).toContainEqual("secret");
     });
 
     it("matches a source query on a derived entry and consumes the fallback label", () => {
@@ -140,11 +226,9 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       expect(consumedConfidentiality).toContainEqual("secret");
     });
 
-    it("treats an absent field as no-match without protected consumption", () => {
-      // Neither the bare string atom nor the (record) User atom carries a
-      // `source` field: testing the predicate observes only atom shape
-      // (public), so the miss is public — for records the family-generic
-      // predicate reaches the field-presence check and stops there.
+    it("protects a miss established from a derived label field absence", () => {
+      // Neither atom has a source field. Its absence is still part of the
+      // metadata shape selected under the derived confidentiality.
       const metadata = metadataWith([{
         path: ["body"],
         label: {
@@ -161,7 +245,7 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
         { source: SOURCE_A },
       );
       expect(result).toEqual({ status: "ok", atoms: [] });
-      expect(consumedConfidentiality).toEqual([]);
+      expect(consumedConfidentiality).toContainEqual("secret");
     });
 
     it("requires every present predicate to match (AND semantics)", () => {
@@ -189,9 +273,8 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       if (result.status !== "ok") throw new Error("unreachable");
       expect(result.atoms).toHaveLength(1);
       expect(result.atoms[0].atom).toBe("secret");
-      // A bare string atom is its own (public) type tag; projecting it
-      // reveals nothing beyond the type observation.
-      expect(consumedConfidentiality).toEqual([]);
+      // Projecting a tag reveals that it was selected into this label.
+      expect(consumedConfidentiality).toEqual(["secret"]);
     });
 
     it("addresses alternatives inside an anyOf clause", () => {
@@ -397,7 +480,9 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       expect(derived.result.status).toBe("ok");
       if (derived.result.status !== "ok") throw new Error("unreachable");
       expect(derived.result.atoms).toHaveLength(1);
-      expect(derived.consumedConfidentiality).toEqual([]);
+      expect(derived.consumedConfidentiality).toEqual([
+        { anyOf: [["tag-a", "tag-b"]] },
+      ]);
 
       // ...while an array smuggling a source-bearing atom on a DECLARED
       // entry fails closed through the element walk.
@@ -655,12 +740,14 @@ describe("CFC label introspection evaluator (inv-12 Stage 2)", () => {
       if (byClass.result.status !== "ok") throw new Error("unreachable");
       expect(byClass.result.atoms).toHaveLength(1);
 
-      // originUri has no mint site: absent field = no match, public miss.
+      // The absent origin field still reveals the derived metadata shape.
       const byOrigin = evaluateConfLabelQuery(metadata, ["body"], {
         originUri: "https://example.com",
       });
       expect(byOrigin.result).toEqual({ status: "ok", atoms: [] });
-      expect(byOrigin.consumedConfidentiality).toEqual([]);
+      expect(byOrigin.consumedConfidentiality).toEqual(
+        metadata.labelMap.entries[0].label.confidentiality,
+      );
     });
   });
 });

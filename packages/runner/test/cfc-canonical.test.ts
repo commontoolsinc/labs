@@ -5,10 +5,9 @@
  * stay apart — including the pair that a payload field named `value` produces,
  * whose canonical path still opens with the element canonicalization strips.
  *
- * Only `canonicalizePreparedDigestInput`'s handling of `dereferenceTraces` is
- * in scope. Each other field of the digest input is covered alongside the gate
- * that depends on it, the write-attempt log's ordering in
- * `cfc-write-prefix-provenance.test.ts` among them.
+ * Reference observations retain their journal positions while their container
+ * order is canonical. The write-attempt log is covered separately in
+ * `cfc-write-prefix-provenance.test.ts`.
  */
 
 import { expect } from "@std/expect";
@@ -56,6 +55,47 @@ describe("canonical", () => {
 
   const digestOf = (traces: CfcDereferenceTrace[]) =>
     preparedDigestFor(baseInput({ dereferenceTraces: traces }));
+
+  it("orders reference observations by journal position and deterministic ties", () => {
+    const observations = [
+      {
+        target: address("second"),
+        confidentiality: ["private"],
+        purpose: "identity" as const,
+        journalIndex: 2,
+      },
+      {
+        target: address("first"),
+        confidentiality: [],
+        purpose: "dereference" as const,
+        journalIndex: 1,
+      },
+      {
+        target: address("tied"),
+        confidentiality: [],
+        purpose: "identity" as const,
+        journalIndex: 2,
+      },
+    ];
+    const digest = preparedDigestFor(
+      baseInput({ referenceObservations: observations }),
+    );
+    expect(
+      preparedDigestFor(
+        baseInput({ referenceObservations: [...observations].reverse() }),
+      ),
+    ).toBe(digest);
+    expect(
+      preparedDigestFor(
+        baseInput({
+          referenceObservations: observations.map((entry) => ({
+            ...entry,
+            journalIndex: 3 - entry.journalIndex,
+          })),
+        }),
+      ),
+    ).not.toBe(digest);
+  });
 
   describe("dereference traces in the prepared digest", () => {
     const hop = trace(address("board"), address("row"));

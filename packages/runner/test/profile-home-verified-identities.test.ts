@@ -9,6 +9,10 @@ import { cfcLabelViewForCell } from "../src/cfc/mod.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 
 const signer = await Identity.fromPassphrase(
   "profile-home-verified-identities",
@@ -64,6 +68,8 @@ describe("profile-home verified external identities", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
+      cfcFlowLabels: "persist",
+      cfcWriteFloor: "enforce",
     });
     try {
       const tx = runtime.edit();
@@ -92,10 +98,25 @@ describe("profile-home verified external identities", () => {
         assertionSchema(true),
         assertionTx,
       );
-      assertion.set({
-        type: "github.login",
-        value: "ada",
-        verifiedAt: "2026-07-15T20:00:00.000Z",
+      // The attestation covers the complete tuple, including its shape.
+      writeSeedEnvelopeDoc(assertionTx, space);
+      assertionTx.writeOrThrow({
+        ...assertion.getAsNormalizedFullLink(),
+        path: [],
+      }, {
+        value: {
+          type: "github.login",
+          value: "ada",
+          verifiedAt: "2026-07-15T20:00:00.000Z",
+        },
+        cfc: {
+          version: 2,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{ path: [], label: { integrity: [INTEGRITY] } }],
+          },
+        },
       });
       runtime.prepareTxForCommit(assertionTx);
       expect((await assertionTx.commit()).error).toBeUndefined();
@@ -149,6 +170,8 @@ describe("profile-home verified external identities", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
+      cfcFlowLabels: "persist",
+      cfcWriteFloor: "enforce",
     });
     try {
       const setupTx = runtime.edit();

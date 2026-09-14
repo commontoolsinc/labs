@@ -33,8 +33,8 @@ import type { CfcMetadata, LabelMapEntry } from "./types.ts";
 //   labels-of-labels subtree (`/cfc/labels/...`) is runtime-enforced metadata
 //   and is not introspectable (`parseConfLabelTargetPath` refuses `/cfc`).
 // - EQUALITY PREDICATES ONLY, over the six §4.6.4.1 fields. An absent field
-//   is no match (consulting absence is an atom-shape observation — public
-//   under the default profile).
+//   is no match. The metadata shape label applies to presence, type, kind,
+//   count, ordering, and empty results before field-specific labels join.
 // - OUTCOME NORMALIZATION. Unobservable targets, missing metadata and
 //   matching-but-unreadable atoms all collapse to one byte-identical
 //   `{status:"notAvailable"}`; `ok` with empty atoms is returned only when
@@ -129,9 +129,9 @@ export type ConfLabelQueryEvaluation = {
   /**
    * Joined population-rule confidentiality of every labeled metadata
    * observation the evaluation consumed (per-field consultations and
-   * whole-atom projections). Deduped. Always empty for `notAvailable`: the
-   * hidden arms are value-independent of protected fields (the response is
-   * the shared constant), so nothing protected flowed to the caller.
+   * whole-atom projections). Deduped. A normalized denial retains the
+   * observations that decided it, including metadata shape and earlier
+   * predicates: its status can differ from a successful query.
    */
   consumedConfidentiality: readonly CfcConfClause[];
 
@@ -189,9 +189,9 @@ type FieldObservation = readonly unknown[] | undefined;
  * CONCRETE metadata path:
  *
  * 1. Containment gate first (spec §4.6.4.2, merged via specs#14): only
- *    derived-containment entries (`derived`/`structure` — the §8.9.2
- *    conservative join) have observable source-bearing fields at all.
- *    Declared/authored, link, external-ingest and legacy entries stay
+ *    derived-containment entries (`derived`/`structure` and complete v2
+ *    `followRef` acquisitions) have observable source-bearing fields at all.
+ *    Declared/authored, external-ingest and legacy entries stay
  *    fail-closed UNOBSERVABLE — and a persisted template at the same path
  *    never re-opens them: the per-path metadata addressing conflates the
  *    entries stored at one payload path, so a template minted for a derived
@@ -210,8 +210,9 @@ const protectedFieldObservationLabel = (
   entry: LabelMapEntry,
   entries: readonly LabelMapEntry[],
   concretePath: readonly string[],
+  metadataVersion: 1 | 2,
 ): FieldObservation => {
-  if (!cfcEntryHasDerivedContainment(entry)) {
+  if (!cfcEntryHasDerivedContainment(entry, metadataVersion)) {
     return undefined;
   }
   const template = resolveLabelMetadataTemplateConfidentiality(
@@ -227,8 +228,8 @@ const protectedFieldObservationLabel = (
 /**
  * The population rule for one field of one atom in one entry:
  *
- * 1. `type`/`kind` at an atom root — and atom presence itself — are public
- *    (the normative §4.6.4.2 default).
+ * 1. `type`/`kind` at an atom root add no field-specific restriction. The
+ *    metadata shape label already protects their selection and presence.
  * 2. A field the Stage-0 classification table marks `public` (disclosure is
  *    the feature: authored attribution subjects, Policy/Context ref
  *    name/hash, `TransformedBy.identity.moduleIdentity`) is public.
@@ -248,9 +249,15 @@ const fieldObservationLabel = (
   field: string,
   entries: readonly LabelMapEntry[],
   concretePath: readonly string[],
+  metadataVersion: 1 | 2,
 ): FieldObservation =>
   labelMetadataFieldIsProtected(atom, field)
-    ? protectedFieldObservationLabel(entry, entries, concretePath)
+    ? protectedFieldObservationLabel(
+      entry,
+      entries,
+      concretePath,
+      metadataVersion,
+    )
     : [];
 
 /**
@@ -281,6 +288,7 @@ const atomProjectionLabel = (
   atom: unknown,
   entries: readonly LabelMapEntry[],
   alternativePath: readonly string[],
+  metadataVersion: 1 | 2,
 ): FieldObservation => {
   const consumed: unknown[] = [];
   const walk = (
@@ -299,7 +307,12 @@ const atomProjectionLabel = (
     if (isCfcFieldCommitment(value)) {
       // A bare commitment marker outside a classified field position (it
       // would have been consumed AS the field value below): protected.
-      const label = protectedFieldObservationLabel(entry, entries, valuePath);
+      const label = protectedFieldObservationLabel(
+        entry,
+        entries,
+        valuePath,
+        metadataVersion,
+      );
       if (label === undefined) return false;
       consumed.push(...label);
       return true;
@@ -323,6 +336,7 @@ const atomProjectionLabel = (
         key,
         entries,
         fieldPath,
+        metadataVersion,
       );
       if (observation === undefined) {
         return false;
@@ -460,6 +474,23 @@ export const evaluateConfLabelQuery = (
       confidentiality: uniqueCfcAtoms([...atoms]),
     });
   };
+  // Metadata shape is observable even when no predicate matches. Template
+  // entries retain applicable ancestor control labels even when a more specific
+  // template exists; public field classification cannot erase that dependency.
+  const metadataShape = uniqueCfcAtoms([
+    ...(resolveLabelMetadataTemplateConfidentiality(entries, metaBase) ?? []),
+    ...entries.flatMap((entry) =>
+      cfcEntryHasDerivedContainment(entry, metadata.version) &&
+        canonicalizeLogicalPath(entry.path).every((part, index) =>
+          index < targetPath.length &&
+          (part === "*" || targetPath[index] === "*" ||
+            part === targetPath[index])
+        )
+        ? entry.label.confidentiality ?? []
+        : []
+    ),
+  ]);
+  consumeAt(metaBase, metadataShape);
   const atoms: LabelAtomProjection[] = [];
   let clauseIndex = 0;
   for (const entry of entries) {
@@ -492,10 +523,8 @@ export const evaluateConfLabelQuery = (
         let matched = true;
         for (const { field, familyTypes, expected } of predicates) {
           if (!isObjectOrArray(atom)) {
-            // A bare string atom is a type-only atom: its entire content is
-            // its (public) type tag, so `atomType` equality applies to the
-            // atom itself; every other field is absent (no match, shape-only
-            // consultation).
+            // A string atom exposes its type tag. The metadata shape
+            // observation above protects its selection and presence.
             matched = field === "type"
               ? commitmentAwareEquals(atom, expected)
               : false;
@@ -516,9 +545,8 @@ export const evaluateConfLabelQuery = (
             break;
           }
           if (!Object.hasOwn(atom, field)) {
-            // Absent field = no match. Establishing absence is an atom-shape
-            // observation — public under the default profile — so nothing
-            // protected is consumed.
+            // Absence contributes no field-specific restriction; the
+            // metadata shape observation above already covers it.
             matched = false;
             break;
           }
@@ -529,6 +557,7 @@ export const evaluateConfLabelQuery = (
             field,
             entries,
             fieldPath,
+            metadata.version,
           );
           if (observation === undefined) {
             // The query needs a field observation the population rule cannot
@@ -538,8 +567,8 @@ export const evaluateConfLabelQuery = (
             // value — exactly the distinction normalization forbids.
             return {
               result: CONF_LABEL_NOT_AVAILABLE,
-              consumedConfidentiality: [],
-              consumedObservations: [],
+              consumedConfidentiality: uniqueCfcAtoms(consumed),
+              consumedObservations,
             };
           }
           // Testing equality observes the field whether it matches or not:
@@ -566,6 +595,7 @@ export const evaluateConfLabelQuery = (
           atom,
           entries,
           alternativePath,
+          metadata.version,
         );
         if (projection === undefined) {
           // Matching but unreadable: the projection would reveal a field the
@@ -574,8 +604,8 @@ export const evaluateConfLabelQuery = (
           // it would misreport a match as a miss. Collapse.
           return {
             result: CONF_LABEL_NOT_AVAILABLE,
-            consumedConfidentiality: [],
-            consumedObservations: [],
+            consumedConfidentiality: uniqueCfcAtoms(consumed),
+            consumedObservations,
           };
         }
         // The whole-atom projection is a read AT the alternative node.
@@ -673,7 +703,7 @@ export const inspectStoredConfLabel = (
       payloadPath,
       query,
     );
-  if (result.status !== "ok" || consumedConfidentiality.length === 0) {
+  if (consumedConfidentiality.length === 0) {
     return result;
   }
   const state = tx.getCfcState();

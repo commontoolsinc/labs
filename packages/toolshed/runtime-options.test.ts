@@ -52,6 +52,7 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
     SERVER_EXECUTION_DEFAULT_ENABLED,
   );
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
+  assertEquals(options.cfcFlowLabels, "persist");
 });
 
 Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", async () => {
@@ -139,11 +140,11 @@ Deno.test("createToolshedRuntime publishes the posture it resolved", async () =>
     );
     const posture = experimentalPosture();
     // The CFC posture publishes alongside, from the same constructed Runtime
-    // (lib/cfc-posture.ts): the preset core pin plus constructor defaults.
+    // (lib/cfc-posture.ts): the production preset pins plus constructor defaults.
     const cfc = cfcPosture();
     assertEquals(cfc?.enforcementMode.rung, "enforce-explicit");
-    assertEquals(cfc?.flowLabels.rung, "off");
-    assertEquals(cfc?.flowLabels.diagnosticOnly, true);
+    assertEquals(cfc?.flowLabels.rung, "persist");
+    assertEquals(cfc?.flowLabels.diagnosticOnly, false);
     assertEquals(cfc?.policyDigest, null);
     // Every known sink is named, none of them ceilinged: a server that has
     // configured nothing publishes ten ungated sinks rather than an empty

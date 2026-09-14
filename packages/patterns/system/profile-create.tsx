@@ -13,8 +13,25 @@ import {
 } from "commonfabric";
 import ProfileHome, {
   type BackwardsCompatibleProfile,
-  type ProfileHomeOutput,
 } from "./profile-home.tsx";
+
+/** The named reference surface used by profile rosters and pickers. */
+export type ProfileReferenceValue = Pick<
+  BackwardsCompatibleProfile,
+  typeof NAME
+>;
+
+/** The profile fields Home exposes for display without claiming content integrity. */
+export type ProfileDisplayValue = ProfileReferenceValue & {
+  name: string;
+  avatar: string;
+};
+
+/** A profile handle used for selection and display without identity assertions. */
+export type ProfileLink = Cell<ProfileReferenceValue>;
+
+/** The roster surface shared by creation and selection handlers. */
+export type ProfileRoster = Writable<ProfileReferenceValue[]>;
 
 // Trusted UI surfaces / actions. The create surface authorizes appending a new
 // profile to the home `profiles` list; the picker surface authorizes setting the
@@ -74,7 +91,7 @@ export type CreateProfileEvent = {
 export const submitProfileCreation = handler<
   CreateProfileEvent,
   {
-    profiles: Writable<BackwardsCompatibleProfile[]>;
+    profiles: ProfileRoster;
   }
 >((event, { profiles }) => {
   // The submitted name rides the event: the create surface is a
@@ -94,11 +111,7 @@ export const submitProfileCreation = handler<
     profiles.push(
       ProfileHome.inSpace()({
         initialName: name,
-        // The freshly created profile is current-vintage by construction — it
-        // carries every stream and field, so the strict producer type is the
-        // honest cast here (BackwardsCompatibleProfile is for stored docs of
-        // unknown vintage).
-      }) as ProfileHomeOutput,
+      }),
     );
   }
 });
@@ -109,14 +122,14 @@ export const submitProfileCreation = handler<
 export const setDefaultProfile = handler<
   unknown,
   {
-    defaultProfile: Writable<BackwardsCompatibleProfile | undefined>;
+    defaultProfile: Writable<ProfileReferenceValue | undefined>;
     // Take the profile as a LINK cell, not a resolved value: the handler only
     // needs the link to write into defaultProfile, and a link argument doesn't
     // require the profile's cross-space values to be loaded at event time —
     // resolving the full value here would fail required-field validation
     // ("stream action argument is undefined … not running") whenever the
     // profile's space hasn't materialized locally yet.
-    profile: Cell<BackwardsCompatibleProfile>;
+    profile: ProfileLink;
   }
 >((_, { defaultProfile, profile }) => {
   if (profile) {
@@ -129,10 +142,10 @@ export const setDefaultProfile = handler<
 export const setMruProfile = handler<
   unknown,
   {
-    mru: Writable<BackwardsCompatibleProfile[]>;
+    mru: ProfileRoster;
     // Link cell, not a resolved value — same event-time-validation reason as
     // setDefaultProfile above.
-    profile: Cell<BackwardsCompatibleProfile>;
+    profile: ProfileLink;
   }
 >((_, { mru, profile }) => {
   if (!profile) return;
@@ -140,7 +153,7 @@ export const setMruProfile = handler<
   // links into an unloaded space doesn't collapse the whole read to `undefined`
   // and silently wipe MRU history. Dedup by link identity via `equals`.
   const current = ((mru as any).asSchema(profileLinkListSchema()).get() ??
-    []) as BackwardsCompatibleProfile[];
+    []) as ProfileLink[];
   const filtered = current.filter((entry) => !equals(entry, profile));
   mru.set([profile, ...filtered] as any);
 });
@@ -152,7 +165,7 @@ export const setMruProfile = handler<
 // below).
 export type TrustedProfileLink = Cfc<
   WriteAuthorizedBy<
-    Cell<BackwardsCompatibleProfile>,
+    Cell<ProfileDisplayValue>,
     typeof submitProfileCreation
   >,
   {
@@ -184,7 +197,7 @@ export type TrustedProfileList = Cfc<
 
 // A profile link written via the trusted picker surface (default / MRU writes).
 type PickerProfileLink<Binding, Action extends string> = Cfc<
-  WriteAuthorizedBy<Cell<BackwardsCompatibleProfile>, Binding>,
+  WriteAuthorizedBy<Cell<ProfileDisplayValue>, Binding>,
   {
     addIntegrity: ["profile-link"];
     uiContract: {
@@ -219,7 +232,8 @@ export type TrustedProfileMru = Cfc<
 >;
 
 export type ProfileCreateInput = {
-  profiles: Writable<BackwardsCompatibleProfile[]>;
+  // Creation appends a profile reference without inspecting existing profiles.
+  profiles: ProfileRoster;
   inputId?: string;
   // Optional prefill for the create field. Embedders often already know the
   // user's name (e.g. Loom asks at setup) — without this, first-run re-asks a

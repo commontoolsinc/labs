@@ -64,6 +64,8 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcReferenceObservation,
+  CfcReferenceProvenance,
   CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
@@ -353,6 +355,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * the sink's data batch (protocol.md §2b's genesis clause).
    */
   ensureSpaceInitialized?(space: MemorySpace): Promise<void>;
+
+  /**
+   * Waits for this manager's already-running initialization of a space whose
+   * key it holds. Opens no provider and grants no authority: callers must
+   * authorize against the resulting current ACL after the wait.
+   */
+  waitForPendingSpaceInitialization?(space: MemorySpace): Promise<void>;
 
   /**
    * The serving manager's HOME space (a serving runtime's storage
@@ -1386,6 +1395,9 @@ export interface IStorageTransaction {
    */
   getReadActivities?(): Iterable<IReadActivity>;
 
+  /** The next position on the transaction's shared activity clock. */
+  currentActivityIndex?(): number | undefined;
+
   /**
    * Optional ordered log of every applied write attempt, in transaction
    * order, stamped on the same per-transaction activity clock as read
@@ -1886,6 +1898,36 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
+  /**
+   * Resolves a content assertion through the Runtime's scoped link resolver.
+   * Evidence must already be loaded in this snapshot; verification schedules no
+   * document pulls.
+   * Unavailable evidence or a traversal outside `destinationSpace` returns
+   * `undefined`; storage binds authorization revisions within one space.
+   * A missing descendant in a loaded envelope returns `absenceParent` for
+   * applicability checks, without supplying positive content evidence.
+   */
+  resolveCfcContentTarget(
+    address: CfcAddress & Pick<NormalizedFullLink, "schema" | "scopeCaps">,
+    destinationSpace: MemorySpace,
+    authorization?: RuntimeWritePolicyAuthorization,
+    lastNode?: "value" | "top",
+    projectionPath?: readonly string[],
+  ): {
+    address: CfcAddress;
+    value: FabricValue;
+    references: readonly CfcAddress[];
+    /** Existing parent whose shape establishes a missing descendant. */
+    absenceParent?: CfcAddress;
+  } | undefined;
+
+  /** Acquires a reference from trusted writes staged in this attempt. */
+  acquireCfcReference(
+    source: CfcAddress,
+    sourceAcquisition?: CfcReferenceProvenance,
+    authorization?: RuntimeWritePolicyAuthorization,
+  ): CfcReferenceProvenance | undefined;
+
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
@@ -2045,6 +2087,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Returns captured value authorship, withholding builtin authority when any
+   * surviving overlapping write was untrusted. Undefined means no value write.
+   */
+  getCfcValueWriteAuthor(
+    target: CfcAddress,
+  ): Readonly<{ identity: ImplementationIdentity | undefined }> | undefined;
+
+  /**
    * Records a write-policy input that will participate in the CFC
    * commit-boundary digest. See ownership note above; the argument is
    * `deepFreeze()`d on entry, both to honor the ownership-transfer
@@ -2191,6 +2241,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   recordCfcLabelMetadataObservation(
     observation: CfcLabelMetadataObservation,
   ): void;
+
+  /** Records confidentiality consumed by an acquired reference observation. */
+  recordCfcReferenceObservation(observation: CfcReferenceObservation): void;
 
   /**
    * Records a structured description of a refusal one of this transaction's
@@ -2779,6 +2832,15 @@ export type EventAppendDeliveryOutcome =
   | { delivered: true; deduped?: boolean }
   | { delivered: false; refused: string };
 
+/** Revisions composing a document snapshot used by a commit dependency. */
+export interface CommitReadBasis {
+  /** Authoritative revision below the snapshot's pending layers. */
+  readonly seq: number;
+
+  /** Own-session pending layers actually included in the snapshot. */
+  readonly localSeqs: readonly number[];
+}
+
 /** Exclusive renderer ownership across runtimes sharing one replica. */
 export interface ViewInterestLease {
   /** Whether this lease still owns the replica's renderer interests. */
@@ -2817,6 +2879,14 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /** Captures the revisions composing the corresponding document view. */
+  getDocumentReadBasis?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    excludeSpeculative?: boolean,
+  ): CommitReadBasis;
 
   /** Claims renderer ownership and retires the previous owner's local graphs. */
   acquireViewInterests?(onReplaced: Cancel): ViewInterestLease;
@@ -3221,6 +3291,10 @@ export type NativeStorageCommitOperation =
     type: MediaType;
     scope?: CellScope;
     patches: PatchOp[];
+    /** Local pending view; admission and confirmation always use `patches`. */
+    replayPatches?: PatchOp[];
+    /** Pending layers whose values the local replay snapshot contains. */
+    replayDependencies?: readonly number[];
     value: FabricValue;
   };
 

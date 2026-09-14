@@ -245,22 +245,33 @@ Deno.test("worker reconciler CFC denials", async (t) => {
     // The gate blocks a cell whose label it cannot read, and reports the
     // decision it made without one.
     await t.step("names an unreadable label as the source", async () => {
+      const inspection = runtime.edit();
       const unreadable = runtime.getCell<string>(
         signer.did(),
         "cfc-denials-unsigned",
+        undefined,
+        inspection,
       );
-      unreadable.resolveAsCell = () => {
-        throw new Error("label resolution failed");
+      const read = inspection.readOrThrow.bind(inspection);
+      inspection.readOrThrow = (address, options) => {
+        if (address.path[0] === "cfc") {
+          throw new Error("label resolution failed");
+        }
+        return read(address, options);
       };
       const collector = collectOps();
-      const said = await mounted({
-        type: "vnode",
-        name: "div",
-        props: {},
-        children: [unreadable as never],
-      }, { collector, ceiling: true, debug: true });
-      expect(collector.texts()).toContain("Content hidden by policy");
-      expect(said).toContain("unreadable");
+      try {
+        const said = await mounted({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [unreadable as never],
+        }, { collector, ceiling: true, debug: true });
+        expect(collector.texts()).toContain("Content hidden by policy");
+        expect(said).toContain("unreadable");
+      } finally {
+        inspection.abort();
+      }
     });
 
     // A boundary whose props arrive as a cell has no policy on its first pass,

@@ -208,6 +208,7 @@ const compareWritePolicyInput = (
   let primary = 0;
   switch (left.kind) {
     case "schema":
+    case "output-reissue":
     case "structural-provenance":
     case "trusted-event":
     case "link-write": {
@@ -272,6 +273,7 @@ export const canonicalizeWritePolicyInput = (
 ): WritePolicyInput => {
   switch (input.kind) {
     case "schema":
+    case "output-reissue":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
     case "structural-provenance":
       return {
@@ -299,12 +301,27 @@ export const canonicalizeWritePolicyInput = (
         entries: cloned.entries.map((entry) => ({
           path: entry.path,
           label: canonicalizeCfcLabel(entry.label),
+          ...(entry.observes !== undefined && { observes: entry.observes }),
         })),
       };
       return {
         ...input,
         target: canonicalizeAttemptedWrite(input.target),
         source: canonicalizeAttemptedWrite(input.source),
+        ...(input.reference !== undefined && {
+          reference: {
+            ...input.reference,
+            binding: {
+              ...input.reference.binding,
+              // Reference bindings carry logical Cell paths, including a
+              // possible payload field named "value", not envelope paths.
+              path: [...input.reference.binding.path],
+            },
+            confidentiality: canonicalizeCfcLabel({
+              confidentiality: [...input.reference.confidentiality],
+            }).confidentiality ?? [],
+          },
+        }),
         ...(cfcLabelView !== undefined && { cfcLabelView }),
       };
     }
@@ -345,7 +362,7 @@ export const canonicalizeCfcLabel = (label: IFCLabel): IFCLabel => {
 export const canonicalizeCfcMetadata = (
   metadata: CfcMetadata,
 ): CfcMetadata => ({
-  version: 1,
+  version: metadata.version,
   schemaHash: metadata.schemaHash,
   labelMap: {
     version: 1,
@@ -492,6 +509,18 @@ export const canonicalizePreparedDigestInput = (
       labelMetadataObservations: [...input.labelMetadataObservations].sort(
         compareLabelMetadataObservation,
       ),
+    }
+    : {}),
+  ...(input.referenceObservations?.length
+    ? {
+      referenceObservations: [...input.referenceObservations].sort((a, b) => {
+        if (a.journalIndex !== b.journalIndex) {
+          return a.journalIndex - b.journalIndex;
+        }
+        const left = hashStringOf(a);
+        const right = hashStringOf(b);
+        return left < right ? -1 : left > right ? 1 : 0;
+      }),
     }
     : {}),
 });

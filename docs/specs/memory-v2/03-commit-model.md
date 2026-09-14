@@ -135,6 +135,18 @@ path of `v2-transaction.ts`, and the local rejection is
 retryable. The two forms are equivalent in what reaches the server; they
 differ in when a change under an open transaction is discovered.
 
+A client may retain stricter revision preconditions alongside this coherent
+content check. The runner's authorization reads preserve the confirmed basis
+and pending layers on which their evidence was observed. Equal current content
+MUST NOT replace that captured basis: a policy change followed by restoration of
+the same value must still conflict. These historical dependencies supplement
+the claim check; they do not permit mixing different observed contents.
+
+A server-judged precondition can exempt its document from the local claim check
+without removing these authorization dependencies. In particular, an
+`entity-value-hash` pin checks the document's value and does not replace a
+revision precondition on its CFC metadata or schema.
+
 ## 3.4 Commit Structure
 
 A client commit explicitly separates dependencies on confirmed state from
@@ -169,11 +181,15 @@ interface ConfirmedRead {
   branch?: BranchId;
   path: ReadPath;
   seq: number;
+  // Omission requires validation; only explicit elidable reads may be waived.
+  validation?: "required" | "elidable";
 }
 
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
+  // Omission requires validation; only explicit elidable reads may be waived.
+  validation?: "required" | "elidable";
   // The dependency set: every pending layer the read's materialized view
   // sat on. Each element must have resolved to an ACCEPTED commit for this
   // commit to be applicable; the staleness check (§3.6.1) runs once per
@@ -314,15 +330,22 @@ with seq > read.seq
 The validation model is path-aware and seq-based. A later write to an unrelated
 path on the same entity does not invalidate the read.
 
-An **identity commit** is exempt from this rule and from the staleness half of
-§3.6.3. It is a commit that leaves every document it writes as the space
-already holds it. The server proves that only once a staleness check has
-refused the commit, since the proof reads stored documents and reconstructs
-the reader's view of each; a commit that validates pays nothing for it, and
-one refused for an unresolved or rejected dependency is not a candidate. The
-proof is per document, over the commit's `set` and `patch` operations on that
-document in order, so a commit that creates a document with a `set` and then
-patches it is judged as one write of the final value:
+Each confirmed and pending read may declare
+`validation: "required" | "elidable"`. Absence means `required`. Required reads
+MUST satisfy the staleness rules even when the proposed document writes are
+already present: the caller may depend on the read to authorize a write or
+release an external effect. Only a caller whose dependency affects document
+operations alone may mark it `elidable`.
+
+An **identity commit** may waive these explicitly elidable staleness checks,
+including the staleness half of §3.6.3. It is a commit that leaves every
+document it writes as the space already holds it. The server proves that only
+once a staleness check has refused the commit, since the proof reads stored
+documents and reconstructs the reader's view of each; a commit that validates
+pays nothing for it, and one refused for an unresolved or rejected dependency is
+not a candidate. The proof is per document, over the commit's `set` and `patch`
+operations on that document in order, so a commit that creates a document with a
+`set` and then patches it is judged as one write of the final value:
 
 - replayed on the document as the commit's read of that document saw it, the
   sequence yields the stored document;
@@ -350,17 +373,31 @@ other paths that landed before the layer and that the reader had not
 integrated; and a read whose basis lies below the commit's branch's creation
 seq, which names no state of that branch (`06-branching.md` §6.10.1).
 
-Applying such a commit changes nothing, so no read it recorded can have led it
-to a wrong write, and refusing it would only make the writer re-derive the
-value the space already holds. An operation that is not a `set` or a `patch`,
-or that no reconstructed view accepts, keeps the commit out of the exemption.
-Every operation of an identity commit elides
-(§3.7.1 step 5). The exemption covers staleness only: a pending read naming an
-unresolved or rejected layer still refuses the commit (§3.6.3), so a commit the
-client has cascade-dropped is never accepted (`09-invariants.md`, INV-6). A
-commit touching a space's ACL document is never an identity commit: INV-12 and
-INV-13 define its admission, and a losing genesis is refused rather than
-recorded twice.
+The identity proof covers document operations, not authorization or other
+observable outcomes. After the proof, the server revalidates every required
+confirmed and pending read, including reads of unwritten documents and reads
+after the first reported elidable conflict. A required read that changed and
+returned to its original value still conflicts: its revision basis changed. An
+operation that is not a `set` or a `patch`, or that no reconstructed view
+accepts, keeps the commit out of the exemption. Every operation of an identity
+commit elides (§3.7.1 step 5). The exemption covers staleness only: a pending
+read naming an unresolved or rejected layer still refuses the commit (§3.6.3),
+so a commit the client has cascade-dropped is never accepted
+(`09-invariants.md`, INV-6). A commit touching a space's ACL document is never
+an identity commit: INV-12 and INV-13 define its admission, and a losing genesis
+is refused rather than recorded twice. An unrecognized validation class is a
+protocol error.
+
+Clients require the positive `readValidation` capability (§4.1.1) before
+submitting a commit with any required or unclassified read, including a queued
+commit replayed after reconnecting. Servers keep unclassified reads strict, so
+clients that omit the field do not opt into identity elision. The class is a
+generic dependency contract; the server does not evaluate the caller's policy.
+
+These guarantees apply when a storage commit is submitted. Runtime transactions
+with no document operations can finish without submitting one; marking their
+reads required does not itself create a read-only commit or add a server
+admission step for their queued effects.
 
 ### 3.6.2 Write-Footprint Overlap
 

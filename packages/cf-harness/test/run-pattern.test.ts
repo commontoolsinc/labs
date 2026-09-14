@@ -5,10 +5,11 @@ import {
 } from "../../runner/test/cfc-seed-envelope.ts";
 import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import { type Cell, Runtime } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   EmulatedStorageManager,
@@ -403,28 +404,28 @@ async function seedAccountHolder(
   const notesCell = runtime.getCell(space, `${cause}-notes`, undefined, seed);
   const notesId = notesCell.getAsNormalizedFullLink().id;
   seed.writeOrThrow({ space, scope: "space", id: notesId, path: [] }, {
-    value: { text: "unlabeled" },
+    value: { text: "unlabeled", transactions: account.transactions },
   });
-  const linkTo = (id: string) => ({
-    "/": { "link@1": { id, path: [], scope: "space", space } },
-  });
-  const holderCell = runtime.getCell(space, `${cause}-holder`, undefined, seed);
-  seed.writeOrThrow(
-    {
-      space,
-      scope: "space",
-      id: holderCell.getAsNormalizedFullLink().id,
-      path: [],
-    },
-    {
-      value: shape === "root-link"
-        ? linkTo(accountId)
-        : shape === "two-fields"
-        ? { account: linkTo(accountId), notes: linkTo(notesId) }
-        : { account: linkTo(accountId) },
-    },
-  );
   expect((await seed.commit()).ok).toBeDefined();
+
+  const attach = runtime.edit();
+  const holderCell = runtime.getCell(
+    space,
+    `${cause}-holder`,
+    undefined,
+    attach,
+  );
+  // Runtime-issued references preserve the public selection of each target;
+  // the account's confidentiality is observed when its contents are read.
+  holderCell.set(
+    shape === "root-link"
+      ? accountCell.withTx(attach)
+      : shape === "two-fields"
+      ? { account: accountCell.withTx(attach), notes: notesCell.withTx(attach) }
+      : { account: accountCell.withTx(attach) },
+  );
+  attach.prepareCfc();
+  expect((await attach.commit()).ok).toBeDefined();
   return {
     account: createLLMFriendlyLink(
       holderCell.key("account").getAsNormalizedFullLink(),
@@ -1464,6 +1465,62 @@ describe("run-pattern", () => {
       }
     });
 
+    it("continues release attribution after one live input cannot be read", async () => {
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const missingRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "unavailable-attribution-input",
+        );
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "readable-attribution-input",
+        );
+        const missing = runtime.getCell(space, "unavailable-attribution-input");
+        const missingId = missing.getAsNormalizedFullLink().id;
+        const prototype = Object.getPrototypeOf(missing) as Cell<unknown>;
+        const originalPull = prototype.pull;
+        let failedReads = 0;
+        using _pull = stub(prototype, "pull", function (this: Cell<unknown>) {
+          if (this.getAsNormalizedFullLink().id === missingId) {
+            failedReads++;
+            return Promise.reject(new Error("input became unavailable"));
+          }
+          return originalPull.call(this);
+        });
+
+        const result = await createStrictEngine(
+          piecesWithUnresolvableArgument(pieces),
+        ).invokeBuiltinTool("run_pattern", {
+          sourceText: [
+            "import { computed, pattern, Reactive } from 'commonfabric';",
+            "interface Source { secret: string; }",
+            "interface Input {",
+            "  amount: number;",
+            "  unavailable: Reactive<Source>;",
+            "  source: Reactive<Source>;",
+            "}",
+            "export default pattern<Input, { total: number }>(({ amount, source }) => ({",
+            "  total: computed(() => amount + source.secret.length),",
+            "}));",
+          ].join("\n"),
+          inputs: { unavailable: missingRef, source: sourceRef, amount: 2 },
+          resultSchema: TOTAL_RESULT_SCHEMA,
+        });
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(failedReads).toBeGreaterThan(0);
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal?.inputKeys).toEqual(["source"]);
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+      } finally {
+        await dispose();
+      }
+    });
+
     it("refuses an answer whose label is two links down", async () => {
       // The leaf the answer carries sits inside a nested object, behind a
       // computed cell, behind the result document. Resolving the result is
@@ -1507,6 +1564,39 @@ describe("run-pattern", () => {
         expect(output.value).toBeUndefined();
         expect(output.valueError).toContain("policy refused to release");
         expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("attributes a declared confidential plain input to its argument key", async () => {
+      const { pieces, dispose } = await createStrictFabric();
+      try {
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, Confidential, pattern } from 'commonfabric';",
+              "interface Input {",
+              "  secret: Confidential<string, readonly ['secret']>;",
+              "  amount: number;",
+              "}",
+              "export interface Output { total: number; }",
+              "export default pattern<Input, Output>(({ secret, amount }) => ({",
+              "  total: computed(() => secret.length + amount),",
+              "}));",
+            ].join("\n"),
+            inputs: { secret: "private value", amount: 2 },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.value).toBeUndefined();
+        expect(output.policyRefusal?.offendingAtoms).toEqual(['"secret"']);
+        expect(output.policyRefusal?.inputKeys).toEqual(["secret"]);
+        expect(output.policyRefusal?.attribution).toBe("complete");
+        expect(output.valueError).toContain('input "secret"');
       } finally {
         await dispose();
       }
@@ -1629,7 +1719,7 @@ describe("run-pattern", () => {
     it("counts a refused read of a computed document, whose kinded id no input address can be compared against", async () => {
       // A kinded entity id does not reduce to a hash, so neither route from a
       // refused read to an input key can place it. The report counts it
-      // instead of guessing, and drops to `partial`.
+      // instead of guessing, and attributes none of the offending flow.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const sourceRef = await seedLabelledComputedSecret(
@@ -1648,6 +1738,42 @@ describe("run-pattern", () => {
         const output = result.output as RunPatternToolSuccessOutput;
         expect(output.status).toBe("ok");
         expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+        expect(output.policyRefusal?.attribution).toBe("none");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("keeps partial attribution when a known input accompanies an unplaced computed read", async () => {
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const known = await seedLabelledSecret(runtime, space, "known-source");
+        const unknown = await seedLabelledComputedSecret(
+          runtime,
+          space,
+          "unplaced-computed-source",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { known: Reactive<Source>; unknown: Reactive<Source>; }",
+              "export default pattern<Input, { total: number }>(({ known, unknown }) => ({",
+              "  total: computed(() => known.secret.length + unknown.secret.length),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { known, unknown },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolSuccessOutput;
+        expect(output.status).toBe("ok");
+        expect(output.policyRefusal?.inputKeys).toEqual(["known"]);
+        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+        expect(output.policyRefusal?.attribution).toBe("partial");
       } finally {
         await dispose();
       }
@@ -1871,7 +1997,9 @@ describe("run-pattern", () => {
       // dereference is recorded against the same holder document, but it
       // starts beside the `account` address rather than at, below, or above
       // it, so it leads the `account` input nowhere — and `notes` is not
-      // named, since nothing it reaches carries the label.
+      // named, since nothing it reaches carries the label. Its transaction
+      // rows have the same bytes as the account's rows, so their immutable
+      // snapshot addresses alone cannot establish confidential provenance.
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const refs = await seedAccountHolder(
@@ -1887,7 +2015,7 @@ describe("run-pattern", () => {
               "import { computed, pattern } from 'commonfabric';",
               "interface Transaction { amount: number; }",
               "interface Account { balance: number; transactions: Transaction[]; }",
-              "interface Notes { text: string; }",
+              "interface Notes { text: string; transactions: Transaction[]; }",
               "interface Input { account: Account; notes: Notes; }",
               "interface Output { totalSpending: number; noteLength: number; }",
               "export default pattern<Input, Output>(({ account, notes }) => ({",
@@ -2024,16 +2152,7 @@ describe("run-pattern", () => {
       const { runtime, pieces, space, dispose } = await createStrictFabric();
       try {
         const expenseIds: string[] = [];
-        const elementLinks: {
-          "/": {
-            "link@1": {
-              id: string;
-              path: string[];
-              scope: string;
-              space: string;
-            };
-          };
-        }[] = [];
+        const elementCells: Cell<unknown>[] = [];
         for (
           const [i, description] of ["alpha-secret", "beta-secret"].entries()
         ) {
@@ -2062,9 +2181,7 @@ describe("run-pattern", () => {
           });
           expect((await seed.commit()).ok).toBeDefined();
           expenseIds.push(id);
-          elementLinks.push({
-            "/": { "link@1": { id, path: [], scope: "space", space } },
-          });
+          elementCells.push(cell.withTx());
         }
         const listSeed = runtime.edit();
         const listCell = runtime.getCell(
@@ -2073,15 +2190,8 @@ describe("run-pattern", () => {
           { type: "array", items: EXPENSE_SCHEMA },
           listSeed,
         );
-        listSeed.writeOrThrow(
-          {
-            space,
-            scope: "space",
-            id: listCell.getAsNormalizedFullLink().id,
-            path: [],
-          },
-          { value: elementLinks },
-        );
+        listCell.set(elementCells.map((cell) => cell.withTx(listSeed)));
+        listSeed.prepareCfc();
         expect((await listSeed.commit()).ok).toBeDefined();
 
         const engine = createStrictEngine(pieces);

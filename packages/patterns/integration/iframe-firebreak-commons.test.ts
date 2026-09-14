@@ -394,6 +394,7 @@ describe("iframe Firebreak Commons", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: aliceIdentity,
+      cfcFlowLabels: "persist",
     });
     await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
     await cc.ensureDefaultPattern();

@@ -65,7 +65,14 @@ import {
   useCancelGroup,
   useDeferredCancelOwnership,
 } from "./cancel.ts";
-import { type Cell, createCell, isCell, syncCellForIdentity } from "./cell.ts";
+import {
+  type Cell,
+  type CellLinkInput,
+  convertCellsToLinks,
+  createCell,
+  isCell,
+  syncCellForIdentity,
+} from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -158,8 +165,10 @@ import {
   type URI,
 } from "./storage/interface.ts";
 import {
+  internalVerifierRead,
   machineryRead,
   markDurableReadTx,
+  requireCommitReadValidation,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
 import {
@@ -205,6 +214,10 @@ import {
   diffAndUpdate,
   initializeScopedArgumentSlots,
 } from "./data-updating.ts";
+import {
+  carryCfcReferenceProvenance,
+  getCfcReferenceProvenance,
+} from "./cfc/reference-provenance.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
@@ -2322,6 +2335,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     callback: (accepted: boolean) => void,
   ): void {
+    requireCommitReadValidation(tx);
     if (!this.#runtime.servingPosture) {
       tx.addCommitCallback((_committed, result) => callback(!result.error));
       return;
@@ -2906,15 +2920,28 @@ export class Runner {
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     ) as R;
-    const previousResult = writableResultCell.getRaw({
-      meta: ignoreReadForScheduling,
-    });
-    if (
-      options.preserveName &&
-      isObjectOrArray(previousResult) &&
-      previousResult[NAME]
-    ) {
-      result = { ...result, [NAME]: previousResult[NAME] };
+    // Comparing the stored projection only decides whether a write is needed.
+    // Keep its conflict dependency without consuming the old result's content.
+    const resultLink = writableResultCell.getAsNormalizedFullLink();
+    const previousResult = tx.readValueOrThrow(
+      resultLink,
+      { meta: { ...ignoreReadForScheduling, ...internalVerifierRead } },
+    );
+    // Preserving an authored name copies content, so its read contributes CFC
+    // labels independently of the comparison above.
+    let previousName = options.preserveName
+      ? tx.readValueOrThrow({
+        ...resultLink,
+        path: [...resultLink.path, NAME],
+      }, { meta: ignoreReadForScheduling })
+      : undefined;
+    if (isCellLink(previousName)) {
+      previousName = writableResultCell.key(NAME).getRaw({
+        meta: ignoreReadForScheduling,
+      });
+    }
+    if (previousName) {
+      result = { ...result, [NAME]: previousName };
     }
     // Convert-and-freeze (default): a deep-frozen value lets the storage write
     // boundary's `cloneIfNecessary` identity-pass instead of
@@ -2930,7 +2957,12 @@ export class Runner {
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
     // actually store, which is the whole point of converting first.
-    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
+    const flattened = flattenBuilderArtifacts(result);
+    const fabricResult = tx.getCfcState().flowLabelsMode === "persist"
+      ? convertCellsToLinks(flattened as CellLinkInput, {
+        allowLinkFreeFabricInstances: true,
+      })
+      : fabricFromNativeValue(flattened);
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -3283,6 +3315,7 @@ export class Runner {
           this.#stageSessionPatternPointer(tx, resultCell, undefined);
         }
       } else if (priorPointer !== undefined) {
+        requireCommitReadValidation(tx);
         tx.addCommitCallback((_tx, result) => {
           if (
             !result.error &&
@@ -3340,6 +3373,7 @@ export class Runner {
       // and is not worth its weight here.)
       const key = this.#getSetupKey(resultCell.withTx(tx));
       const priorPointer = this.#sessionPatternPointers.get(key);
+      requireCommitReadValidation(tx);
       this.#sessionPatternPointers.set(key, entryRef);
       tx.addCommitCallback((_tx, result) => {
         if (!result.error) return;
@@ -3478,13 +3512,24 @@ export class Runner {
     ]);
 
     if (isCellLink(argument)) {
-      argument = createSigilLinkFromParsedLink(
-        parseLink(argument),
-        {
-          base: resultCell.getAsNormalizedFullLink(),
-          includeSchema: true,
-          overwrite: "redirect",
-        },
+      const parsedArgument = carryCfcReferenceProvenance(
+        argument,
+        parseLink(argument, resultCell),
+      );
+      const acquired = getCfcReferenceProvenance(argument) !== undefined
+        ? this.#runtime.getCellFromLink(parsedArgument, undefined, tx)
+          .getAsWriteRedirectLink()
+        : undefined;
+      argument = carryCfcReferenceProvenance(
+        acquired,
+        createSigilLinkFromParsedLink(
+          parsedArgument,
+          {
+            base: resultCell.getAsNormalizedFullLink(),
+            includeSchema: true,
+            overwrite: "redirect",
+          },
+        ),
       ) as T;
     }
 
@@ -3580,6 +3625,7 @@ export class Runner {
     }
 
     if (!validationOptions.prepareForResume) {
+      requireCommitReadValidation(tx);
       const key = this.#getSetupKey(resultCell.withTx(tx));
       const preparedPatternKey = patternIdentityKey(entryRef);
       this.#locallyPreparedResults.set(key, preparedPatternKey);
@@ -4026,6 +4072,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<unknown>,
   ): void {
+    requireCommitReadValidation(tx);
     if (!this.#usesScopedPrograms(resultCell)) {
       const key = this.#getDocKey(resultCell);
       const registration = this.#cancels.get(key);

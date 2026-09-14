@@ -88,6 +88,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Executed plans and work orders
 
+- [cfc-reference-confidentiality.md](plans/cfc-reference-confidentiality.md) — reference confidentiality implementation plan for spec ca3b3e6: independently labeled bindings, preserved acquisition history, trusted Runtime content verification, and conservative legacy and cross-space support boundaries.
 - [view-replication-server-currency.md](plans/view-replication-server-currency.md) — executed plan for initial client view currency from settled server input/output evidence, with provenance, wake dependencies, and registration-only adoption.
 - [Pattern computation cost implementation](plans/pattern-computation-cost-implementation.md) — executed #7155 sequence, copy-based acceptance, explicit B3a deferral, and D1/D2 handoff.
 

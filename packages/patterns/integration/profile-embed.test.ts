@@ -65,6 +65,7 @@ describe("profile-embed integration test", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
     spaceDid = cc.getSpace();
 

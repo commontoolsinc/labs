@@ -37,6 +37,7 @@ describe("Topics durable navigation", () => {
       space: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
+      cfcFlowLabels: "persist",
     });
     await cc.ensureDefaultPattern();
 

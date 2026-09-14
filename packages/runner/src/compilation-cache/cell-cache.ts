@@ -21,7 +21,7 @@ import {
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
-import { createSigilLinkFromParsedLink, parseLink } from "../link-utils.ts";
+import { parseLink } from "../link-utils.ts";
 import { snapshotQueryResult } from "../query-result-proxy.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
@@ -799,12 +799,14 @@ function sourceDocWriteSchema(): JSONSchema {
  * the space does not hold.
  */
 function codeLink(
+  runtime: Runtime,
   space: MemorySpace,
   code: string,
   tx: IExtendedStorageTransaction,
 ): SigilLink {
   const id = tx.stageContentAddressedDocument(space, code);
-  return createSigilLinkFromParsedLink({ id, path: [], space });
+  return runtime.getCellFromLink({ id, path: [], space }, undefined, tx)
+    .getAsLink();
 }
 
 /**
@@ -980,7 +982,7 @@ export function writeSourceDocs(
         {
           kind: "source",
           identity,
-          code: codeLink(space, doc.code, tx),
+          code: codeLink(runtime, space, doc.code, tx),
           filename: doc.filename,
           imports: doc.imports.map((imp) => ({
             specifier: imp.specifier,
@@ -1566,10 +1568,11 @@ export function stageModuleDelegations(
             );
           }
           recordUndeclarablePolicyStore(tx, compiled);
-          compiled.asSchema(compiledDocWriteSchema()).key(
-            "delegatedModuleIdentities",
-          )
-            .set([...predecessors]);
+          // The compiler renews the whole record's attestation after checking
+          // its stored evidence. Keep the root schema on this partial update.
+          compiled.asSchema(compiledDocWriteSchema()).update({
+            delegatedModuleIdentities: [...predecessors],
+          });
         }
       }
     }
@@ -1647,7 +1650,7 @@ export function writeCompiledDocs(
       writeCacheRecord(cell, {
         kind: module.isData ? "data" : "compiled",
         identity: module.identity,
-        code: codeLink(space, module.js, tx),
+        code: codeLink(runtime, space, module.js, tx),
         filename: module.filename,
         ...(derived === undefined ? {} : {
           exportNames: derived.exportNames,

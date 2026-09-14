@@ -202,6 +202,7 @@ describe("shell piece tests", () => {
         space: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
+        cfcFlowLabels: "persist",
       });
       cc = controller;
       const sourcePath = join(

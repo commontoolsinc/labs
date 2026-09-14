@@ -168,6 +168,7 @@ export function ensureExternalSchemaClosure(
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schema: JSONSchema | undefined,
+  options?: { silentFailures?: boolean },
 ): boolean {
   if (schema === undefined || !containsExternalSchemaRef(schema)) return true;
   let complete = true;
@@ -187,11 +188,13 @@ export function ensureExternalSchemaClosure(
       const result = tx.read(address);
       const doc = result.error === undefined ? result.ok.value : undefined;
       if (doc === undefined) {
-        logger.warn("schema-closure", () => [
-          "Stored schema names a cid: document this space holds no value " +
-          "for — a corrupt or malformed declaration; ignoring it:",
-          address.id,
-        ]);
+        if (!options?.silentFailures) {
+          logger.warn("schema-closure", () => [
+            "Stored schema names a cid: document this space holds no value " +
+            "for — a corrupt or malformed declaration; ignoring it:",
+            address.id,
+          ]);
+        }
         complete = false;
         continue;
       }
@@ -203,10 +206,12 @@ export function ensureExternalSchemaClosure(
         !isObjectNotArray(doc) ||
         (doc as { value?: unknown }).value === undefined
       ) {
-        logger.warn("schema-closure", () => [
-          "cid: document is not a schema document; ignoring it:",
-          address.id,
-        ]);
+        if (!options?.silentFailures) {
+          logger.warn("schema-closure", () => [
+            "cid: document is not a schema document; ignoring it:",
+            address.id,
+          ]);
+        }
         complete = false;
         continue;
       }
@@ -218,10 +223,12 @@ export function ensureExternalSchemaClosure(
       } catch {
         // A document whose content does not hash to its id is forged:
         // neither registered nor recursed into.
-        logger.warn("schema-closure", () => [
-          "cid: document content does not hash to its id; ignoring it:",
-          address.id,
-        ]);
+        if (!options?.silentFailures) {
+          logger.warn("schema-closure", () => [
+            "cid: document content does not hash to its id; ignoring it:",
+            address.id,
+          ]);
+        }
         complete = false;
         continue;
       }

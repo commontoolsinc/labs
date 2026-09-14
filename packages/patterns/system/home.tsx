@@ -14,13 +14,13 @@ import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
 import {
   type CreateProfileEvent,
+  type ProfileReferenceValue,
   submitProfileCreation,
   type TrustedDefaultProfile,
   type TrustedProfileList,
   type TrustedProfileMru,
 } from "./profile-create.tsx";
 import ProfilePicker from "./profile-picker.tsx";
-import type { BackwardsCompatibleProfile } from "./profile-home.tsx";
 
 // Types from favorites-manager.tsx
 type Favorite = {
@@ -191,14 +191,14 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   // space. `profiles` is the durable list (appended on create). `defaultProfile`
   // is the one `#profile` resolves to in headless mode and orders first in the
   // picker; `mru` is the recency-ordered list driving the rest of the ordering.
-  const profiles = new Writable<BackwardsCompatibleProfile[]>([]).for(
+  const profiles = new Writable<ProfileReferenceValue[]>([]).for(
     "profiles",
   );
-  const defaultProfile = new Writable<BackwardsCompatibleProfile | undefined>(
+  const defaultProfile = new Writable<ProfileReferenceValue | undefined>(
     undefined,
   )
     .for("defaultProfile");
-  const mru = new Writable<BackwardsCompatibleProfile[]>([]).for("mru");
+  const mru = new Writable<ProfileReferenceValue[]>([]).for("mru");
   // Untrusted-write regression surface: this stream is exported so tests can
   // verify that sending it from outside the trusted create surface does NOT
   // create a profile. The actual create UI lives in the profile picker below.

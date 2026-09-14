@@ -2,10 +2,9 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { resolveLink } from "../link-resolution.ts";
 import { ownedCell } from "./runtime-owned-store.ts";
+import { resolveCellReference } from "./resolve-cell-reference.ts";
 import { ownedResultCause, resolvedCellScope } from "./scope-policy.ts";
-import { parseLink } from "../link-utils.ts";
 import type { RawNodeCause } from "../module.ts";
 
 /**
@@ -40,13 +39,12 @@ export function when(
     const condition = inputsWithLog.key("condition").get();
 
     // && semantics: if truthy, return value; if falsy, return condition
-    const ref = condition
-      ? inputsWithLog.key("value").getAsLink({ base: result })
-      : inputsWithLog.key("condition").getAsLink({ base: result });
-    const resolvedRef = resolveLink(runtime, tx, parseLink(ref, result));
-    const serializedRef = runtime.getCellFromLink(resolvedRef).getAsLink({
-      base: result,
-    });
+    const selected = inputsWithLog.key(condition ? "value" : "condition");
+    const serializedRef = resolveCellReference(runtime, tx, selected).getAsLink(
+      {
+        base: result,
+      },
+    );
 
     resultWithLog.setRawUntyped(serializedRef);
   };
