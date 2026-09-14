@@ -1310,7 +1310,7 @@ export type DependencySync = (
  */
 export type DependencySyncer = (
   resultCell: Cell<any>,
-  pattern: Module | Pattern,
+  pattern: Pattern,
   inputs: any,
   sync: DependencySync,
 ) => Promise<boolean>;
