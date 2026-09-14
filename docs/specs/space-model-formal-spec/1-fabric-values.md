@@ -906,12 +906,15 @@ empty, every object would satisfy `FabricSpecialObject` — and therefore satisf
 `FabricValue` would then assert nothing at all. The brand is what makes the
 annotation carry information.
 
-The brand is a well-known string key rather than a `unique symbol` because
-`interface.ts` is deliberately free of runtime imports, and a `unique symbol`
-would have to be imported as a *value*. `packages/data-model/src/api.ts` declares
-the identical member; the two must agree exactly, since a value branded by one
-would otherwise not satisfy the other, and `api-agreement.ts` stops compiling
-when they stop agreeing.
+The `FabricSpecialObject` brand is a well-known string key. The brands on its
+two subclasses, `FABRIC_PRIMITIVE_BRAND` and `FABRIC_INSTANCE_PLUS_BRAND`, are
+interned symbols that `api.ts` exports and `interface.ts` imports: a
+symbol-keyed member has no place in a schema, where a string-keyed one has to
+be skipped by name, and an interned one has the same value in every realm and
+every copy of the module. `packages/data-model/src/api.ts` declares the
+identical members; the two files must agree exactly, since a value branded by
+one would otherwise not satisfy the other, and `api-agreement.ts` stops
+compiling when they stop agreeing.
 
 ```typescript
 // file: packages/data-model/src/interface.ts
@@ -971,8 +974,8 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
   /**
    * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
    * in the type system; without it this class is structurally the
-   * `FabricSpecialObject` brand alone. Declared the way that brand is, and for
-   * the same reasons; `api.ts` declares the identical member.
+   * `FabricSpecialObject` brand alone. `declare` emits no runtime member, and
+   * nothing ever reads the key; `api.ts` declares the identical member.
    */
   declare readonly [FABRIC_PRIMITIVE_BRAND]: true;
 
@@ -1758,8 +1761,8 @@ export abstract class FabricInstance extends FabricSpecialObject {
   /**
    * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
    * `never` here since an instance of this class holds only `FabricValue`s.
-   * Declared the way the `FabricSpecialObject` brand is, and for the same
-   * reasons; `api.ts` declares the identical member.
+   * `declare` emits no runtime member, and nothing ever reads the key;
+   * `api.ts` declares the identical member.
    */
   declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
