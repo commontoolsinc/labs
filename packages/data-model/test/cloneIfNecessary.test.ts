@@ -41,7 +41,7 @@ import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
+  type FabricSpecialObject,
 } from "@/interface.ts";
 
 describe("cloneIfNecessary()", () => {

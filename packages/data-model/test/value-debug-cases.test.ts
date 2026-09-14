@@ -51,8 +51,8 @@ import {
   type DebugValueOptions,
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
 } from "@/interface.ts";
+import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
 import {
   toCompactDebugString,
   toIndentedDebugString,
@@ -105,9 +105,9 @@ const SCOPE: Record<string, unknown> = Object.fromEntries([
       )
     ),
   ...Object.entries({
+    BaseFabricSpecialObject,
     FabricInstance,
     FabricPrimitive,
-    FabricSpecialObject,
     REALM_CODEC,
   }),
 ]);

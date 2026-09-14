@@ -489,7 +489,7 @@ function deepCanonicalize(node: unknown): unknown {
   // fields with no enumerable own properties, so walking it with
   // `Object.entries` would silently flatten it to `{}`. It is a leaf here.
   //
-  // TODO(danfuzz): The other `FabricSpecialObject` subclass, `FabricInstance`,
+  // TODO(danfuzz): The other special-object class, `FabricInstance`,
   // is NOT a leaf -- it holds nested `FabricValue`s that this walk ought to
   // descend into. There is no faithful way to do that through `Object.entries`
   // either, so a `FabricInstance` still flattens to `{}` here. Handling it is

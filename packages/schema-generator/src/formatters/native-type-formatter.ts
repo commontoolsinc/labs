@@ -1,7 +1,6 @@
 import ts from "typescript";
 import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  FABRIC_SPECIAL_OBJECT_BRAND,
   type MutableJSONSchema,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
@@ -24,7 +23,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // Fields authored against the `FabricPrimitive` classes themselves emit
   // the `FabricPrimitive` schema vocabulary (`FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   // `@commonfabric/api`): a value matches by prototype, not by structure.
-  // Guarded in `supportsType` by the `FabricSpecialObject` brand so an
+  // Guarded in `supportsType` by the `FabricPrimitive` brand so an
   // unrelated user type sharing a name keeps its structural schema.
   FabricBytes: { type: "FabricBytes" },
   FabricEpochDay: { type: "FabricEpochDay" },
@@ -134,7 +133,7 @@ export class NativeTypeFormatter implements TypeFormatter {
       return NativeTypeFormatter.#hasLibraryDeclaration(type, context);
     }
     if (NativeTypeFormatter.isFabricPrimitiveTypeName(typeName)) {
-      return NativeTypeFormatter.declaresFabricSpecialObjectBrand(type);
+      return NativeTypeFormatter.declaresFabricPrimitiveBrand(type);
     }
     return true;
   }
@@ -217,16 +216,24 @@ export class NativeTypeFormatter implements TypeFormatter {
   }
 
   /**
-   * Whether the type carries the `FabricSpecialObject` nominal brand
-   * (directly or by inheritance). This is what makes a type named e.g.
-   * `FabricBytes` actually BE the `FabricPrimitive` class rather than an
-   * unrelated user type that happens to share the name. Both this formatter's
-   * `supportsType` and named-type hoisting (`getNamedTypeKey`,
-   * `type-utils.ts`) classify by it, so an unbranded name-sharer keeps its
-   * structural schema AND its normal `$defs` hoisting.
+   * Whether the type carries the `FabricPrimitive` nominal brand (directly or
+   * by inheritance). This is what makes a type named e.g. `FabricBytes`
+   * actually BE the `FabricPrimitive` class rather than an unrelated user type
+   * that happens to share the name. Both this formatter's `supportsType` and
+   * named-type hoisting (`getNamedTypeKey`, `type-utils.ts`) classify by it,
+   * so an unbranded name-sharer keeps its structural schema AND its normal
+   * `$defs` hoisting.
+   *
+   * The brand is keyed by the `FABRIC_PRIMITIVE_BRAND` symbol, whose property
+   * TypeScript names `__@FABRIC_PRIMITIVE_BRAND@<id>`; the name of the
+   * constant is what identifies it, as with the other symbol-keyed markers.
    */
-  public static declaresFabricSpecialObjectBrand(type: ts.Type): boolean {
-    return type.getProperty(FABRIC_SPECIAL_OBJECT_BRAND) !== undefined;
+  public static declaresFabricPrimitiveBrand(type: ts.Type): boolean {
+    return type.getProperties().some((prop) =>
+      String(prop.escapedName as string).startsWith(
+        "__@FABRIC_PRIMITIVE_BRAND@",
+      )
+    );
   }
 
   /**

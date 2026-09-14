@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { FabricSpecialObject } from "@commonfabric/data-model";
+import { BaseFabricSpecialObject } from "@commonfabric/data-model/fabric-bases";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
@@ -3530,7 +3530,7 @@ describe("cli piece parsing", () => {
       },
     };
     const stringError = new Error("Fabric string representation unavailable");
-    class UnrepresentableFabricValue extends FabricSpecialObject {
+    class UnrepresentableFabricValue extends BaseFabricSpecialObject {
       override toString(): string {
         throw stringError;
       }
