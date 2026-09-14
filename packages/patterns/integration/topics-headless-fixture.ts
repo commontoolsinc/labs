@@ -47,6 +47,12 @@ export const DEFAULT_LINKS_PER_TOPIC = 3;
  */
 export const MAX_RECORDS_PER_TOPIC = 10_000;
 
+/**
+ * The most mentions per source the `single-bucket` shape accepts. Its sources
+ * repeat the bucket, so unlike the other shapes no topic count bounds them.
+ */
+export const MAX_SINGLE_BUCKET_MENTIONS_PER_SOURCE = 10_000;
+
 /** Width of the timestamp band each topic's records occupy. */
 const TOPIC_STAMP_BAND = 1_000_000;
 
@@ -54,8 +60,18 @@ const TOPIC_STAMP_BAND = 1_000_000;
 const RECORD_STAMP_STEP = 10;
 
 /**
- * How a fixture's topics mention one another. Degree is counted inbound: the
- * shapes differ in how the mentions are spread over their destinations.
+ * How a fixture's topics mention one another.
+ *
+ * A shape's name says how the mentions are spread over their destinations, not
+ * how many there are: `perSource` sets the count. `low-degree` and
+ * `high-degree` both give each of the N topics `perSource` mentions, so N x
+ * `perSource` in all. `low-degree` spreads each source's mentions over
+ * distinct neighbors; `high-degree` concentrates them on the first `perSource`
+ * topics, the hubs. The two meet at the extremes: at a `perSource` of N - 1
+ * both are the complete graph, and at a `perSource` of one `high-degree`
+ * differs from `single-bucket` only in the first topic mentioning the second.
+ * A shape named in a measurement is therefore a spread, and its `perSource`
+ * is what gives the degree.
  */
 export type MentionGraph =
   /** No topic mentions anything. */
@@ -67,13 +83,15 @@ export type MentionGraph =
   | { readonly shape: "low-degree"; readonly perSource: number }
   /**
    * Each topic mentions the first `perSource` topics other than itself, so
-   * each of those is mentioned by every other topic.
+   * each of those hubs is mentioned by every other topic. A hub, which cannot
+   * mention itself, mentions the topic after the hubs in its place.
    */
   | { readonly shape: "high-degree"; readonly perSource: number }
   /**
    * Every topic but the first mentions the first topic, `perSource` times
    * over, so one destination holds every inbound mention and a `perSource`
-   * above one repeats it within each source.
+   * above one repeats it within each source. The first topic mentions
+   * nothing: a mention of itself is what `selfMention` adds.
    */
   | { readonly shape: "single-bucket"; readonly perSource: number };
 
@@ -185,7 +203,7 @@ export function buildTopicsFixture(
       "mentions.perSource",
       graph.perSource,
       1,
-      MAX_RECORDS_PER_TOPIC,
+      MAX_SINGLE_BUCKET_MENTIONS_PER_SOURCE,
     );
   }
   for (
@@ -577,8 +595,10 @@ export async function measureTopicsFixture(
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
-    // Pinned here rather than taken from the environment, so a measurement
-    // runs the same read semantics, on the client, whatever its host sets.
+    // Pinned so a measurement keeps these semantics whatever the runtime's
+    // defaults become. Left unset, `lazyMaterialization` takes the built-in
+    // default, and `serverExecution` takes process-wide state that another
+    // runtime in the same process can change.
     experimental: { lazyMaterialization: true, serverExecution: false },
     errorHandlers: [(error) => errors.push(String(error))],
   });

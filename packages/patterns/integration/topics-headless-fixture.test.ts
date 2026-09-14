@@ -119,7 +119,7 @@ describe("topics-headless-fixture", () => {
       expect(inboundCounts(fixture)).toEqual([5, 5, 2, 0, 0, 0]);
     });
 
-    it("returns `perSource` mentions of the first topic from each other topic for the `single-bucket` shape", () => {
+    it("returns `perSource` mentions of the first topic from each other topic, and none from the first topic, for the `single-bucket` shape", () => {
       const fixture = buildTopicsFixture({
         topicCount: 6,
         mentions: { shape: "single-bucket", perSource: 2 },
@@ -406,10 +406,13 @@ describe("topics-headless-fixture", () => {
 
     it("attributes each lift's runs to that lift by the source the scheduler reports", () => {
       // Each lift has one scheduler action per instance: one pivot, and one of
-      // each topic lift per topic. The graph snapshot names an action's
-      // authored source independently of the telemetry the record keys on, so
-      // the two sets of actions agreeing is what shows the runs landed where
-      // they belong rather than merely somewhere.
+      // each topic lift per topic. The run telemetry the reads are keyed on,
+      // the graph snapshot, and the reach helper's `src` all take an action's
+      // authored source from one lookup, so the source string is not checked
+      // independently here. The action IDs are: the reads gather them from
+      // run telemetry, and the snapshot lists the actions the scheduler holds,
+      // so the two sets agreeing shows each lift's runs are attributed to that
+      // lift's own actions and to no others.
 
       const { reads, graph, derivations } = measurement;
       const instances = {
@@ -441,6 +444,11 @@ describe("topics-headless-fixture", () => {
     const fixture = buildTopicsFixture({
       topicCount: 6,
       mentions: { shape: "low-degree", perSource: 2 },
+      // `mentionedBy` leaves a topic out of its own backlinks by identity, not
+      // by board position, so the duplicated topic's self-mention must not
+      // reach it through its second entry. Without the self-mention, a
+      // position comparison would pass every case below.
+      selfMention: DUPLICATED,
       duplicateBoardEntry: DUPLICATED,
     });
     let measurement: TopicsMeasurement;
@@ -470,6 +478,7 @@ describe("topics-headless-fixture", () => {
 
       const { seeded, outputs } = measurement;
       const oracle = mentionedByIndex(measurement, fixture, DUPLICATED);
+      expect(oracle).toEqual(inboundByIndex(fixture, DUPLICATED));
       expect(oracle).toEqual([0, 1]);
       expect(topicIndicesOf(seeded, outputs.backlinks[DUPLICATED])).toEqual([
         ...oracle,
@@ -489,19 +498,21 @@ describe("topics-headless-fixture", () => {
       );
     });
 
-    it("returns every other topic's backlinks as `mentionedBy` computes them, with the duplicated source listed per entry", () => {
+    it("returns every other topic's backlinks as the fixture's indices and `mentionedBy` compute them, with the duplicated source listed per entry", () => {
       const { seeded, outputs } = measurement;
       const others = fixture.topics.map((_, topic) => topic).filter((topic) =>
         topic !== DUPLICATED
       );
+      const expected = others.map((topic) => inboundByIndex(fixture, topic));
+      expect(
+        others.map((topic) => mentionedByIndex(measurement, fixture, topic)),
+      ).toEqual(expected);
       expect(
         others.map((topic) => topicIndicesOf(seeded, outputs.backlinks[topic])),
-      ).toEqual(
-        others.map((topic) => mentionedByIndex(measurement, fixture, topic)),
-      );
+      ).toEqual(expected);
       const [target] = fixture.topics[DUPLICATED].mentions;
       expect(
-        mentionedByIndex(measurement, fixture, target).filter((source) =>
+        expected[others.indexOf(target)].filter((source) =>
           source === DUPLICATED
         ),
       ).toHaveLength(2);
