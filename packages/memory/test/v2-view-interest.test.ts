@@ -20,11 +20,16 @@ import {
   type WatchSetResult,
   type WatchSpec,
 } from "../v2.ts";
-import { Server } from "../v2/server.ts";
+import { createBranch } from "../v2/engine.ts";
+import {
+  acquireExecutionLease,
+  executionLeaseHolder,
+} from "../v2/execution-lease.ts";
 import {
   CODEMIRROR_CHANGESET_CODEC,
   operationBaselineHash,
 } from "../v2/operation-codec.ts";
+import { Server } from "../v2/server.ts";
 import { parseViewQuery } from "../v2/view-interest.ts";
 
 const space = "did:key:z6Mk-view-space";
@@ -257,6 +262,43 @@ describe("view interests", () => {
     ).toBe(false);
     expect(server.viewInterestsForSpace(space)[0].selectionGeneration)
       .toBeUndefined();
+  });
+
+  it("preserves delivery when a serving session selects an unnamed foreign scoped root", async () => {
+    const homeSpace = "did:key:z6Mk-view-home";
+    const homeEngine = await server.engineForSpace(homeSpace);
+    expect(acquireExecutionLease(homeEngine, {
+      space: homeSpace,
+      holder: executionLeaseHolder(principal),
+    })).toBe(true);
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    expect(
+      await server.setViewSelection(space, handle, {
+        generation: 1,
+        delivery: [query("of:support")],
+      }),
+    ).toBe(true);
+
+    expect(
+      await server.setViewSelection(space, handle, {
+        generation: 2,
+        delivery: [{
+          roots: [{
+            id: "of:ordinary",
+            scope: "user",
+            selector: { path: [], schema: false },
+          }],
+        }],
+      }),
+    ).toBe(false);
+
+    const sync = await set([]);
+    expect(sync.viewPlans?.[0].generation).toBe(1);
+    expect(sync.upserts.map((entry) => entry.id).toSorted()).toEqual([
+      "of:render",
+      "of:support",
+    ]);
   });
 
   it("does not publish a selection evaluated across session replacement", async () => {
@@ -572,6 +614,51 @@ describe("view interests", () => {
     } finally {
       evaluations.restore();
     }
+  });
+
+  it("adds a watch on another branch while retaining the active view", async () => {
+    const engine = await server.engineForSpace(space);
+    createBranch(engine, "feature");
+    await server.writeDocument(space, "of:ordinary", {
+      value: { label: "updated on main" },
+    });
+    await set([], [view()]);
+    const [session] = server.accessForTestingOnly.sessionsForSpace(space);
+    const viewGraphs = new Map(session.graphs);
+    expect(viewGraphs.size).toBeGreaterThan(0);
+
+    const added = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: "add-feature",
+      space,
+      sessionId,
+      watches: [{
+        id: "feature-owner",
+        kind: "graph",
+        query: { ...query("of:ordinary"), branch: "feature" },
+      }],
+    });
+    expect(added.error).toBeUndefined();
+    expect(added.ok?.sync.upserts).toHaveLength(1);
+    expect(added.ok?.sync.upserts[0]).toMatchObject({
+      id: "of:ordinary",
+      branch: "feature",
+      doc: { value: { label: "of:ordinary" } },
+    });
+    for (const [key, graph] of viewGraphs) {
+      expect(session.graphs.get(key)).toBe(graph);
+    }
+    expect(session.graphs.size).toBe(viewGraphs.size + 1);
+    expect(server.viewInterestsForSpace(space)[0].view).toEqual(view());
+
+    const removed = await set([]);
+    expect(removed.removes).toEqual([{
+      id: "of:ordinary",
+      branch: "feature",
+      scope: "space",
+    }]);
+    expect(removed.upserts.map((entry) => entry.id)).toEqual(["of:render"]);
+    expect(session.graphs.size).toBe(viewGraphs.size);
   });
 
   it("does not install staged view watch additions when a later query fails", async () => {
