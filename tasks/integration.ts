@@ -295,6 +295,89 @@ export function selectPatternTestFiles(
 }
 
 /**
+ * Compiles every file's program into the compile byte cache through
+ * `cf test --compile-only`, ahead of the test runs. The files are sorted by
+ * path within each program root and cut into `concurrency` runs of
+ * neighbors, one process each: files that sit together share most of their
+ * modules, so each such run compiles those once, and the runs overlap only
+ * where a directory straddles a cut. A file that fails to compile is
+ * reported by its own run, with the error; this pass says only how many
+ * did, and how long it took.
+ */
+async function precompilePatternTests(
+  cfCmd: string[],
+  rootDir: string,
+  testFiles: readonly string[],
+  concurrency: number,
+): Promise<void> {
+  const filesByRoot = new Map<string, string[]>();
+  for (const testFile of testFiles) {
+    const root = patternRoot(testFile);
+    const files = filesByRoot.get(root);
+    if (files === undefined) filesByRoot.set(root, [testFile]);
+    else files.push(testFile);
+  }
+  const groups: string[][] = [];
+  const perGroup = Math.ceil(testFiles.length / concurrency);
+  for (const files of filesByRoot.values()) {
+    files.sort();
+    for (let start = 0; start < files.length; start += perGroup) {
+      groups.push(files.slice(start, start + perGroup));
+    }
+  }
+  console.log(
+    `Precompiling ${testFiles.length} pattern test(s) in ${groups.length} group(s), ${concurrency} at a time...`,
+  );
+  const startMs = performance.now();
+  let failed = 0;
+  let nextIndex = 0;
+  const compileNext = async (): Promise<void> => {
+    while (nextIndex < groups.length) {
+      const files = groups[nextIndex++];
+      const result = await runCommand(
+        [
+          ...cfCmd,
+          "test",
+          "--compile-only",
+          "--root",
+          path.join(rootDir, patternRoot(files[0])),
+          ...files,
+        ],
+        {
+          cwd: rootDir,
+          env: {
+            CF_TEST_RECORDS_DIR: "",
+            EXPERIMENTAL_SERVER_EXECUTION: "false",
+          },
+        },
+      );
+      if (!result.success) {
+        failed++;
+        console.log(
+          `Precompile of ${files.length} file(s) from ${
+            files[0]
+          } exited ${result.code}:`,
+        );
+        for (const text of [result.stdout, result.stderr]) {
+          for (const line of (text ?? "").trimEnd().split("\n")) {
+            if (line) console.log(`   ${line}`);
+          }
+        }
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: concurrency }, () => compileNext()),
+  );
+  const seconds = ((performance.now() - startMs) / 1000).toFixed(1);
+  console.log(
+    failed === 0
+      ? `Precompiled ${testFiles.length} pattern test(s) in ${seconds}s`
+      : `Precompile finished in ${seconds}s; ${failed} group(s) had a failure, each reported by the file's own run`,
+  );
+}
+
+/**
  * Find and run all .test.tsx pattern tests via `cf test`.
  * Captures per-test timing and optionally writes JUnit XML.
  */
@@ -316,6 +399,15 @@ async function runPatternTests(
   console.log(
     `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
   );
+
+  // With a cache file to fill, every file's program is compiled once, in one
+  // process, before any test runs. Each `cf test` child seeds from that file
+  // only as it starts, so on a cold cache the children started together
+  // would each compile the modules they share, and the heavy files among
+  // them would run their steps beside that work.
+  if (Deno.env.get("CF_COMPILE_CACHE_FILE")) {
+    await precompilePatternTests(cfCmd, rootDir, testFiles, concurrency);
+  }
   const failed: string[] = [];
   const testTimings: { file: string; durationMs: number; passed: boolean }[] =
     [];

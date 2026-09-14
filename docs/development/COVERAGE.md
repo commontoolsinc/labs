@@ -1025,6 +1025,14 @@ before the cached module bytes run. The `pattern-unit-test` job wires both
 coverage-transformed module bytes between runs without mixing them with ordinary
 compiled bytes.
 
+With that file set, the pattern-test orchestrator in `tasks/integration.ts`
+fills it before any test runs: one `cf test --compile-only` process per program
+root compiles every file's program and runs nothing, so the test processes that
+follow, five at a time, all start from a full cache. A `cf test` process seeds
+from the file only as it starts, so without that pass the processes started
+together on a cold cache each compile the modules they share. The compile-only
+process writes no coverage, since nothing ran.
+
 The persistent cell cache stores each module's span list as one JSON string.
 This keeps reporting metadata in one value instead of expanding every span
 object into its own derived storage records. Coverage caches use the
