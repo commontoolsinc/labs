@@ -422,6 +422,13 @@ Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 interactive use. New reference-syntax capabilities land in the reference first;
 the alias does not grow a capability the reference lacks.
 
+`cf piece render --cell /tracker` renders the UI of the piece the slug names.
+`cf piece render --cell /top/2` renders the selected collection member's UI,
+using the scope stored in its link. Rendering takes a whole piece: a reference
+such as `/tracker/title` that continues inside the piece is refused. `--watch`
+reports later UI changes from the resolved piece, and `--no-start` renders its
+stored state without starting it.
+
 ### Writing the target
 
 On `cf cell get`, `cf cell set`, and `cf piece call`, the reference goes in the
