@@ -586,7 +586,10 @@ The `@commonfabric/pattern-testing` package has been removed from the codebase.
 1. **Test patterns run in < 100ms** for typical patterns
 2. **Test patterns can be deployed as pieces** for debugging
 3. **The runner correctly detects Stream vs Cell<boolean>**
-4. **Timeouts prevent infinite loops from hanging CI**
+4. **A stalled step fails instead of hanging CI**: `--timeout` bounds how long
+   the runtime may go without reporting progress, so a pattern that keeps
+   running actions without ever settling is bounded only by the job that
+   runs it
 5. **Error messages identify which assertion failed and why**, naming the
    operands of a failed `assert(...)` and the values they held
 

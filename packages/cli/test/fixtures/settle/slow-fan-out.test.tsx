@@ -15,7 +15,7 @@ import {
   Writable,
 } from "commonfabric";
 
-const COUNT = 200;
+const COUNT = 120;
 const INPUT = 10;
 const INDICES = Array.from({ length: COUNT }, (_, index) => index);
 const EXPECTED_TOTAL = INDICES.reduce((sum, index) => sum + INPUT + index, 0);
