@@ -2247,19 +2247,23 @@ Deno.test("publication refuses a stored index whose source capabilities are malf
   }
 });
 
+/** A verified-writer authorization naming a handler in module `path`. */
+function writerAuthorizationFor(path: string) {
+  return {
+    __ctWriterIdentityOf: {
+      file: `${path}/main.tsx`,
+      moduleIdentity: `fid1:verified-${path}`,
+      path: ["sendCommand"],
+    },
+  };
+}
+
 Deno.test("Fabric target binds producer queues and reads commands from every bound queue", async () => {
   const owner = await Identity.fromPassphrase("producer queue binding owner");
   const storageManager = StorageManager.emulate({ as: owner });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-  });
-  const writerAuthorizationFor = (path: string) => ({
-    __ctWriterIdentityOf: {
-      file: `${path}/main.tsx`,
-      moduleIdentity: `fid1:verified-${path}`,
-      path: ["sendCommand"],
-    },
   });
   const pushAs = async (
     cell: Cell<unknown>,
@@ -2363,6 +2367,68 @@ Deno.test("Fabric target binds producer queues and reads commands from every bou
       "late",
       writerAuthorizationFor("late"),
     );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("a subscription that fails on a later queue leaves no queue subscribed", async () => {
+  const owner = await Identity.fromPassphrase(
+    "producer subscription failure owner",
+  );
+  const storageManager = StorageManager.emulate({ as: owner });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: owner.did(),
+      ownerDid: owner.did(),
+    });
+    await target.bindCommandCell(
+      target.cells.commands,
+      writerAuthorizationFor("debug-view"),
+    );
+    await target.bindProducerCommandCell(
+      "workbench",
+      writerAuthorizationFor("workbench"),
+    );
+
+    // Each queue's sink delivers its current commands as the subscription
+    // begins. The owner's queue is subscribed first; a callback that fails
+    // on the producer's queue fails the subscription, and the owner's queue
+    // is unsubscribed again rather than left delivering to nobody.
+    const deliveries: Array<string | undefined> = [];
+    await assertRejects(
+      () =>
+        target.subscribeCommands((_commands, producer) => {
+          deliveries.push(producer);
+          if (producer === "workbench") {
+            throw new Error("workbench delivery refused");
+          }
+        }),
+      Error,
+      "workbench delivery refused",
+    );
+    assertEquals(deliveries, [undefined, "workbench"]);
+    // Nothing is subscribed, so a queue can still be bound, and a
+    // subscription that succeeds covers all three queues.
+    await target.bindProducerCommandCell(
+      "late",
+      writerAuthorizationFor("late"),
+    );
+    const subscribed: Array<string | undefined> = [];
+    const cancel = await target.subscribeCommands((_commands, producer) => {
+      subscribed.push(producer);
+    });
+    try {
+      assertEquals(subscribed, [undefined, "workbench", "late"]);
+    } finally {
+      cancel();
+    }
   } finally {
     await runtime.dispose();
     await storageManager.close();

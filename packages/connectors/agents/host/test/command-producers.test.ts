@@ -225,6 +225,51 @@ Deno.test("a producer whose command writer is defined in another module is refus
   assertEquals(bindings, []);
 });
 
+Deno.test("a producer whose pattern has no recorded identity is refused", async () => {
+  // Without the pattern's identity the writer's module cannot be compared
+  // with it, so the binding stops before any queue is created.
+  const pattern = {
+    resultSchema: {
+      type: "object",
+      properties: {
+        commandAuthorization: {
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                file: "producer.tsx",
+                moduleIdentity: "fid1:producer-pattern",
+                path: ["sendCommand"],
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const bindings: string[] = [];
+  const manager = {
+    get: () => Promise.resolve({ getPattern: () => Promise.resolve(pattern) }),
+    runtime: { patternManager: { getArtifactEntryRef: () => undefined } },
+    link: () => Promise.resolve(),
+  } as unknown as Parameters<typeof bindCommandProducers>[0];
+  const target = {
+    bindProducerCommandCell: (producerId: string) => {
+      bindings.push(producerId);
+      return Promise.reject(new Error("must not be reached"));
+    },
+  } as unknown as Parameters<typeof bindCommandProducers>[1];
+
+  await assertRejects(
+    () =>
+      bindCommandProducers(manager, target, [
+        { id: "unrecorded", piece: "fid1:piece" },
+      ]),
+    Error,
+    "command producer unrecorded's pattern has no recorded identity",
+  );
+  assertEquals(bindings, []);
+});
+
 Deno.test("a producer cannot write through another producer's queue", async () => {
   const session = await createSession({
     identity,

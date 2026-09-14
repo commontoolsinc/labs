@@ -496,9 +496,10 @@ export class CommandLedger {
       await this.#persist(receipts, pendingPublicationCommandIds);
       return [...this.#pendingPublicationCommandIds]
         .sort((left, right) => left.localeCompare(right))
-        .map((commandId) =>
-          parseCommandReceipt(commandId, this.#receipts.get(commandId)!)
-        );
+        .map((key) => {
+          const receipt = this.#receipts.get(key)!;
+          return parseCommandReceipt(receipt.commandId, receipt);
+        });
     });
   }
 

@@ -4,6 +4,7 @@ import {
   type AgentSourceConfig,
   type CollectedSource,
   collectSource,
+  commandIdentity,
   type CommandTarget,
   type CommandTaskFailure,
   CommandWorker,
@@ -305,7 +306,8 @@ export class AgentsHost {
       publishReceipt: (receipt) => this.#publishReceipt(receipt),
       refreshSession: (driver, nativeSessionId) =>
         this.#refreshSession(driver, nativeSessionId),
-      readReceipt: (commandId) => this.#target.readReceipt(commandId),
+      readReceipt: (commandId, producer) =>
+        this.#target.readReceipt(commandId, producer),
     };
     this.#commandWorker = new CommandWorker(
       this.#drivers,
@@ -328,9 +330,8 @@ export class AgentsHost {
         this.#subscriptionTask = this.#target.subscribeCommands(
           (commands, producer) => {
             if (!this.#acceptingCommands) return;
-            void this.#commandWorker?.handle(commands, producer).catch((
-              error,
-            ) => {
+            const worker = this.#commandWorker;
+            void worker?.handle(commands, producer).catch((error) => {
               this.#logger.error(
                 `command admission failed: ${errorMessage(error)}`,
               );
@@ -893,7 +894,9 @@ export class AgentsHost {
   }
 
   #recordReceipt(receipt: AgentSessionCommandReceipt): void {
-    this.#commandFailures.delete(receipt.commandId);
+    this.#commandFailures.delete(
+      commandIdentity(receipt.commandId, receipt.producer),
+    );
     this.#recordActivity(
       "command-receipt",
       `Command receipt is ${receipt.status}`,
@@ -917,7 +920,10 @@ export class AgentsHost {
 
   #recordCommandFailure(failure: CommandTaskFailure): void {
     const message = errorMessage(failure.error);
-    this.#commandFailures.set(failure.commandId, message);
+    this.#commandFailures.set(
+      commandIdentity(failure.commandId, failure.producer),
+      message,
+    );
     const state = this.#sources.get(failure.sourceId);
     if (state) {
       state.status = "degraded";

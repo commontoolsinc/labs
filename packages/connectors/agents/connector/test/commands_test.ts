@@ -1365,6 +1365,12 @@ Deno.test("command receipt parsing rejects every malformed boundary field", () =
       { ...receipt, sourceId: " Fake:Default " },
       "sourceId is not normalized",
     ],
+    ["command", { ...receipt, producer: "" }, "producer must be a string"],
+    [
+      "command",
+      { ...receipt, producer: " Workbench " },
+      "producer is not normalized",
+    ],
     [
       "command",
       { ...receipt, providerOperationId: "" },
@@ -1375,6 +1381,10 @@ Deno.test("command receipt parsing rejects every malformed boundary field", () =
   for (const [commandId, value, message] of cases) {
     assertThrows(() => parseCommandReceipt(commandId, value), Error, message);
   }
+  assertEquals(
+    parseCommandReceipt("command", { ...receipt, producer: "workbench" }),
+    { ...receipt, producer: "workbench" },
+  );
 });
 
 Deno.test("command worker covers unavailable sources and control commands", async () => {

@@ -226,9 +226,10 @@ durable in every target and the ledger publication marker is clear. A callback
 failure is logged and does not turn a published command receipt back into
 pending work.
 
-The optional command-task failure callback receives command ID, source ID,
-native session ID, and the thrown error as soon as scheduled work fails. It does
-not receive the command payload.
+The optional command-task failure callback receives command ID, the producer
+whose queue delivered it when one did, source ID, native session ID, and the
+thrown error as soon as scheduled work fails. It does not receive the command
+payload.
 
 `recoverUnpublishedReceipts()` changes ledger entries left in flight by a prior
 process to unknown, then publishes every receipt whose publication was not
