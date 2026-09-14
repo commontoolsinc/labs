@@ -322,9 +322,9 @@ $ deno run -A packages/patterns/collection-naming/measure-board-demand.ts 3 2>/d
 
 The memory server's `graph.query`, the walk a `session.watch.add` runs,
 answered by the emulated server behind `StorageManager.emulate` through a
-second session mounted over a loopback transport. For one member, the first
-filed, the root is that member's argument document and the selector schema is
-the schema recorded on the member's argument link, unaltered:
+second session mounted over a loopback transport. For the member at position 0
+of `items`, the root is that member's argument document and the selector schema
+is the schema recorded on the member's argument link, unaltered:
 
 ```ts
   const memberCell = items.key(0).resolveAsCell();
@@ -651,7 +651,7 @@ $ deno run -A packages/patterns/collection-naming/probe-roots.ts board-c.tsx 3 2
 ```
 
 **A one-property change moves the count.** On an arm A board of 20 members, one
-document — the table the first member's `boardNames` link points at — under
+document — the names table a member's `boardNames` link points at — under
 three row demands. The first two differ only in whether the row's `member`
 reference is named. The third is the schema recorded on that `boardNames` link:
 
@@ -685,7 +685,7 @@ board of 20 members; root = the names table
 The ladder's arms A and B differ in more than where the walk starts; § Stated
 limitations lists what else differs. This probe runs both wirings on the same
 board with the same schemas. It builds one arm A board per size, and takes both
-element schemas from the schema recorded on its first member's argument link,
+element schemas from the schema recorded on a member's argument link,
 with the top-level cell marker removed:
 
 ```ts
@@ -780,9 +780,8 @@ documents were not compared.
 ## Stated limitations
 
 - **Board size and content.** N ran from 2 to 40 (§ The ladder). No block here
-  shows the fixture itself — the items' titles and bodies, how boards were
-  assigned to spaces, or which member's walk was the one measured — and the
-  rigs that built it are not in the tree.
+  shows the fixture itself — the items' titles and bodies, or how boards were
+  assigned to spaces — and the rigs that built it are not in the tree.
 - **The exemplar, not Topics.** This question was measured on
   `packages/patterns/collection-naming/`, not on the Topics patterns.
 - **A query, not a resume.** The instrument is one `graph.query` rooted at a
