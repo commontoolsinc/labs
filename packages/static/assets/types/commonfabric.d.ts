@@ -196,15 +196,6 @@ export type NonNullableFabricValue = NonNullable<FabricValue>;
 //
 
 /**
- * A brand key that no live declaration carries. Schemas from pre-vocabulary
- * compilations name it in `required`, and a stored schema outlives the
- * declaration that put it there, so the runner's `required` presence checks
- * treat this key as satisfied by any `FabricSpecialObject` rather than probing
- * for it with `in`.
- */
-export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
-
-/**
  * The nominal brand of `FabricPrimitive`: an interned symbol, so that every
  * realm and every copy of this module agree on its value, and so that the
  * member it keys can never be mistaken for data -- a symbol-keyed member has

@@ -113,7 +113,6 @@ import {
   FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   MERGEABLE_OP_METHODS,
 } from "@commonfabric/api";
@@ -323,7 +322,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // that module.
     FABRIC_PRIMITIVE_SCHEMA_TYPES,
     isFabricPrimitiveSchemaType,
-    FABRIC_SPECIAL_OBJECT_BRAND,
     FABRIC_INSTANCE_PLUS_BRAND,
     FABRIC_PRIMITIVE_BRAND,
     FABRIC_INSTANCE_BRAND,
