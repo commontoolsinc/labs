@@ -15,7 +15,6 @@ import {
   fabricFromNativeValue,
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
@@ -4345,7 +4344,7 @@ function containsCycle(value: unknown): boolean {
   const walk = (node: unknown): boolean => {
     if (
       node === null || typeof node !== "object" || isCell(node) ||
-      isCellLink(node) || node instanceof FabricSpecialObject
+      isCellLink(node) || isFabricSpecialObject(node)
     ) {
       return false;
     }

@@ -1,7 +1,7 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
-  FabricSpecialObject,
   isFabricObjectOrArray,
+  isFabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -135,8 +135,7 @@ const collectChangedPaths = (
     // point this arm covers only the `FabricPrimitive` leaves it is correct
     // for.
     if (
-      before instanceof FabricSpecialObject ||
-      after instanceof FabricSpecialObject
+      isFabricSpecialObject(before) || isFabricSpecialObject(after)
     ) {
       pushChangedPath(paths, currentPath, depth);
       return;
