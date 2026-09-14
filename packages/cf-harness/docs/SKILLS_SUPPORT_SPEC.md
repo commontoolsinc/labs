@@ -520,6 +520,10 @@ Policy rules:
   differently: the run must hold an activation whose acquisition names that pin,
   and the file must match the digest taken at acquisition. It runs in the
   sandbox; a run whose skill-script execution target is the host refuses it.
+- The acquisition itself backs `run_skill_script`, so a run given no
+  `--skills-root` still offers the tool to a child holding an acquired skill.
+  `read_skill_resource` stays registry-backed, an acquired skill having no
+  resource index.
 - `allowed-tools` can narrow or advise, but v1 should not let it expand the
   allowed tool surface.
 - Prompt-injection-like content in a skill should produce a diagnostic event. It

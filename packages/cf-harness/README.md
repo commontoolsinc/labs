@@ -1177,15 +1177,28 @@ covering mount leaves no handle to a skill whose scripts its own planner could
 have read.
 
 The child a `delegate_task` hands that handle to mounts the directory read-only
-at `/acquired-skill`, and mounts the one skill its handle names and no other. It
-runs a script there through the same `run_skill_script` a registry skill's goes
-through: `--allow-skill-script` keys on the pin, `owner/repo/slug@<commit sha>`,
-in place of a registry name, and every other gate is the same call. Activation
-is by the acquisition rather than by a name — a handle activates under
-`handle:<token>`, so what says the run was given this skill is an activation
-whose acquisition records that pin. The digest the file is re-checked against is
-the one taken at acquisition, over the bytes the pinned commit served, so a file
-changed on the host between acquisition and execution refuses.
+at `/acquired-skill`, and mounts the one skill its handle names and no other.
+Such a child does not share its parent's container — a mount is a property of
+the container, so the child is given the parent's sandbox configuration plus
+that one mount and builds its own sandbox from it. It receives
+`run_skill_script` and the operator's allowlist entries for that pin, and for no
+other skill: the allowlist is the run's while a child's tool surface is its
+profile's, and neither reaches the other on its own. An acquisition is not an
+authorization — mounting the bytes and being allowed to run one stay separate
+decisions, and the second is the operator's. The tool is backed by the
+acquisition itself rather than by a skills root, so a run given no
+`--skills-root` still offers it to such a child; `read_skill_resource` is not,
+since an acquired skill carries no resource index.
+
+It runs a script there through the same `run_skill_script` a registry skill's
+goes through: `--allow-skill-script` keys on the pin,
+`owner/repo/slug@<commit sha>`, in place of a registry name, and every other
+gate is the same call. Activation is by the acquisition rather than by a name —
+a handle activates under `handle:<token>`, so what says the run was given this
+skill is an activation whose acquisition records that pin. The digest the file
+is re-checked against is the one taken at acquisition, over the bytes the pinned
+commit served, so a file changed on the host between acquisition and execution
+refuses.
 
 The invocation is labeled with confidentiality alone. The acquisition's
 `ExternalIngest` provenance belongs on it and cannot go there: a non-empty

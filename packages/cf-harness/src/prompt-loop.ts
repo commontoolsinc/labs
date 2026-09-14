@@ -2845,6 +2845,12 @@ export class CfHarnessPromptLoop {
       // has yet to scan still knows it will, and one that never will offers
       // neither tool.
       skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
+      // The second backing `run_skill_script` has. An acquired skill's script
+      // needs no registry: its bytes came from a pinned commit and this run
+      // mounts them, so a run holding one can execute a script whether or not
+      // it was given a skills root.
+      acquiredSkillsAvailable:
+        (this.engine.getRunState().acquiredSkills?.skills.length ?? 0) > 0,
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
       loomAuthoringAvailable: this.engine.config.loomAuthoring !== undefined,
     };
