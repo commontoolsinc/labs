@@ -1046,17 +1046,15 @@ export class AgentFabricTarget implements CommandTarget {
       }
     }
     throwIfPublicationCanStop();
+    const previousEntries = [
+      ...(previousRecent?.sessions ?? []),
+      ...(previousAll?.sessions ?? []),
+    ];
     const priorStatusByKey = new Map(
-      [
-        ...(previousRecent?.sessions ?? []),
-        ...(previousAll?.sessions ?? []),
-      ].map((entry) => [entry.key, entry.syncStatus] as const),
+      previousEntries.map((entry) => [entry.key, entry.syncStatus] as const),
     );
     const entriesByKey = new Map<string, IndexEntry>(
-      [
-        ...(previousRecent?.sessions ?? []),
-        ...(previousAll?.sessions ?? []),
-      ]
+      previousEntries
         .map((entry): [string, IndexEntry] => {
           const restored = {
             ...entry,
