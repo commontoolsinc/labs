@@ -16,11 +16,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { StaticCache } from "@commonfabric/static";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-} from "@commonfabric/data-model";
+import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
 import {
   FabricError,
   FabricLink,
@@ -47,7 +43,6 @@ const declaredClasses = [
 // test's own knowledge, and the first assertion below pins it against the
 // derived list, so the two cannot drift apart silently.
 const expectedBindings: Record<string, unknown> = {
-  FabricSpecialObject,
   FabricInstance,
   FabricPrimitive,
   FabricEpochNsec,
@@ -233,21 +228,6 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
       const bytes = new Uint8Array([7, 8, 9]);
 
       expect(new BoundFabricBytes(bytes).slice()).toEqual(bytes);
-    });
-  });
-
-  describe("FabricSpecialObject", () => {
-    it("is usable as the right-hand side of `instanceof`", () => {
-      const BoundFabricSpecialObject = commonfabric
-        .FabricSpecialObject as typeof FabricSpecialObject;
-
-      // The `instanceof` operator rather than `toBeInstanceOf()`, which does
-      // not accept an abstract constructor. This is also the expression a
-      // pattern would itself write.
-      const instance = new FabricBytes(new Uint8Array([1]));
-
-      expect(instance instanceof BoundFabricSpecialObject).toBe(true);
-      expect({} instanceof BoundFabricSpecialObject).toBe(false);
     });
   });
 });

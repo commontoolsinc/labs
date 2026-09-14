@@ -50,8 +50,9 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   fabricAwareEqual,
-  FabricSpecialObject,
+  type FabricSpecialObject,
   type FabricValue,
+  isFabricSpecialObject,
 } from "@commonfabric/data-model";
 
 import { mergeDefaults } from "../src/schema.ts";
@@ -581,7 +582,7 @@ describe("fabric special objects through the runner's walks", () => {
       cell.set({ v: new FabricBytes(new Uint8Array([1, 2])) } as never);
       const read = cell.get().v;
 
-      expect(read instanceof FabricSpecialObject).toBe(true);
+      expect(isFabricSpecialObject(read)).toBe(true);
       expect(fabricAwareEqual(read, new FabricBytes(new Uint8Array([1, 2]))))
         .toBe(true);
       expect(fabricAwareEqual(read, new FabricBytes(new Uint8Array([9]))))
@@ -608,7 +609,7 @@ describe("fabric special objects through the runner's walks", () => {
       cell.set({ v: FabricError.fromNativeError(new Error("boom")) } as never);
       const read = cell.get().v;
 
-      expect(read instanceof FabricSpecialObject).toBe(false);
+      expect(isFabricSpecialObject(read)).toBe(false);
       expect(
         fabricAwareEqual(read, FabricError.fromNativeError(new Error("boom"))),
       ).toBe(false);

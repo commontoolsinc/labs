@@ -1,26 +1,23 @@
-// Mirrors the api's `FabricSpecialObject` hierarchy. The brand keys exist
-// only in the type system -- no runtime value carries either -- so the
-// generator must not surface one as a schema property or requirement.
+// Mirrors the api's special-object classes. Their brand keys exist only in
+// the type system -- no runtime value carries any of them -- so the generator
+// must not surface one as a schema property or requirement.
 //
-// `FabricPrimitive` and `FabricInstance` each carry a second brand:
-// `FabricPrimitive` the one that tells it from a `FabricInstance`, and
-// `FabricInstance` the one that types a `FabricInstancePlus`, at `never`. A
-// structural schema of either skips that key the same way.
+// `FabricPrimitive` carries the brand that tells it from a `FabricInstance`;
+// `FabricInstance` carries its own, plus the one that types a
+// `FabricInstancePlus`, at `never`. A structural schema of either skips every
+// such key.
 //
 // A concrete `FabricPrimitive` class (`FabricBytes`) emits its
 // `FabricPrimitive` schema type (`{ type: "FabricBytes" }`, matched by
 // prototype at validation time). A branded type OUTSIDE that vocabulary
 // (the `FabricPrimitive` base here) still emits a structural object schema,
 // with the brand skipped.
-interface FabricSpecialObject {
-  readonly "@commonfabric/FabricSpecialObject": true;
-}
-
-interface FabricPrimitive extends FabricSpecialObject {
+interface FabricPrimitive {
   readonly "@commonfabric/FabricPrimitive": true;
 }
 
-interface FabricInstance extends FabricSpecialObject {
+interface FabricInstance {
+  readonly "@commonfabric/FabricInstance": true;
   readonly "@commonfabric/FabricInstancePlus"?: never;
   deepClone(frozen: boolean): FabricInstance;
 }

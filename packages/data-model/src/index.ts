@@ -8,11 +8,7 @@ export { fabricAwareEqual } from "./fabricAwareEqual.ts";
 
 export type * from "./interface.ts";
 
-export {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-} from "./interface.ts";
+export { FabricInstance, FabricPrimitive } from "./interface.ts";
 
 export {
   fabricFromNativeValue,
