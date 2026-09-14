@@ -2876,7 +2876,7 @@ export interface ISpaceReplica extends ISpace {
    * replica is behind the store on the document, and so whether a run that
    * read it here read what the store now holds.
    */
-  confirmedDocumentSeq?(
+  confirmedDocumentSeq(
     id: URI,
     scope?: CellScope,
     identity?: ScopeKeyIdentity,

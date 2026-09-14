@@ -1883,8 +1883,8 @@ export class WaveAccumulator
     ): Promise<boolean> => {
       if (conflicted.has(key)) return true;
       if (contribution.context.kind !== "derivation") return false;
-      const held = contribution.viewSeqs.get(key);
-      if (held === undefined || (heads.get(key) ?? 0) <= held) return false;
+      const held = contribution.viewSeqs.get(key) ?? 0;
+      if ((heads.get(key) ?? 0) <= held) return false;
       return await sink.intrusionSince?.(
         this.#space,
         doc,
@@ -2517,22 +2517,25 @@ export class WaveAccumulator
     spaces: readonly SealedSpaceContribution[],
     context: WaveRunContext,
   ): ReadonlyMap<string, number> {
-    const seqs = new Map<string, number>();
-    const home = spaces.find((space) => space.space === this.#space);
-    if (home === undefined) return seqs;
     const replica = this.#replicaFor(this.#space);
-    if (replica.confirmedDocumentSeq === undefined) return seqs;
-    for (const operation of home.sealed.commit.operations) {
-      if (operation.op === "sqlite") continue;
-      const scopeKey = this.#scopeKeyFor(operation.scope, context);
-      const key = docInstanceKey(operation.id, scopeKey);
-      if (seqs.has(key)) continue;
+    const identity = context.scopeKeyIdentity ?? this.#scopeKeyIdentity;
+    const home = spaces.find((space) => space.space === this.#space);
+    const writes = (home?.sealed.commit.operations ?? []).filter((operation) =>
+      operation.op !== "sqlite"
+    );
+    const seqs = new Map<string, number>();
+    for (const operation of writes) {
+      // Two operations on one instance read the same seq, so the second
+      // overwrites the first with what it already held.
       seqs.set(
-        key,
+        docInstanceKey(
+          operation.id,
+          this.#scopeKeyFor(operation.scope, context),
+        ),
         replica.confirmedDocumentSeq(
           operation.id as URI,
           operation.scope,
-          context.scopeKeyIdentity ?? this.#scopeKeyIdentity,
+          identity,
         ),
       );
     }
