@@ -67,6 +67,13 @@ and removal timestamps. Removing them from the aggregate could move activity
 backward. Preserve optional-field defaults and compatibility with stored topic
 generations. Preserve linked record identity for editing handlers.
 
+A reactive `.map()` lowers to a nested pattern whose name depends on its
+position in the source, and stored state records that name. New reactive
+`.map()` calls in the Topics sources therefore go after the existing ones. The
+[pattern update gates](../specs/pattern-update-testing.md) do not establish that
+an inserted map is safe, so a candidate unable to keep that order has T6 check
+the map-rendered rows on the clone.
+
 ## Execution tracker
 
 Check off a stage only with linked implementation, tests, and measurement
@@ -78,17 +85,23 @@ on T0 gates a stage's acceptance, as
 [measurement and acceptance](#measurement-and-acceptance) requires;
 implementation and prototypes can begin earlier.
 
-- [ ] **T0 — Establish the baseline and demonstration.** Extend the existing
-      [scale](../../packages/patterns/integration/topic-board-scale.bench.ts)
-      and
-      [navigation](../../packages/patterns/integration/topic-board-navigation.bench.ts)
-      workloads for the browser tier, and build the headless tier's fixture;
-      [measurement and acceptance](#measurement-and-acceptance) defines both
-      tiers. Separate pivot production, per-topic lookup, activity, and
-      rendering costs. Capture a reproducible baseline and a browser demo with
-      board, topic, backlink, and comment actions. Exit: both tiers run at the
-      sizes they build, with explicit demand and recorded environment/source
-      versions, and the acceptance limits are recorded.
+- [ ] **T0 — Establish the baseline and demonstration.** Build the two tiers
+      [measurement and acceptance](#measurement-and-acceptance) defines, and
+      separate pivot production, per-topic lookup, activity, and rendering
+      costs. Exit: every deliverable below is checked off and the acceptance
+      limits are set.
+  - [ ] The headless tier's fixture.
+  - [ ] The probe script and its baseline.
+  - [ ] The CI read-budget test with its negative controls.
+  - [ ] Browser instrumentation.
+  - [ ] Browser workloads, extending the
+        [scale](../../packages/patterns/integration/topic-board-scale.bench.ts)
+        and
+        [navigation](../../packages/patterns/integration/topic-board-navigation.bench.ts)
+        benchmarks.
+  - [ ] A browser demo with board, topic, backlink, and comment actions.
+  - [ ] The baseline report, with environment and source versions, in
+        `docs/history/`.
 - [ ] **T1 — Share individual-topic derivations.** Reuse `commentCount` for
       `hasComments`; evaluate sharing the active-link view with `hasLinks` and
       link resolution. Preserve narrow compatibility schemas and stable links.
@@ -105,12 +118,13 @@ implementation and prototypes can begin earlier.
       so the index keys by canonical Cell identity. `crossrefTable` is a `lift`,
       whose result type exposes no index operator, and `TopicCrossrefRow.topic`
       is `unknown` so that reading the table expands no topic. Second, the
-      resulting handle reaches topics without broadening demand. Existing topics
-      hold `boardCrossrefs` as a link to the board's cross-reference table, so
-      decide between carrying the handle through that link, which changes the
-      board's published `crossrefs` result, and a new topic input, which needs
-      the one-time link-bind onto every existing topic that the `mentionable`
-      and `boardNames` inputs describe. Classify the choice under step 1 of the
+      resulting handle reaches topics without broadening demand. Topics the
+      board itself creates hold `boardCrossrefs` as a link to the board's
+      cross-reference table, so decide between carrying the handle through that
+      link, which changes the board's published `crossrefs` result, and a new
+      topic input, which needs the one-time link-bind onto every existing topic
+      that the `mentionable` and `boardNames` inputs describe. Classify the
+      choice under step 1 of the
       [stored-state procedure](#stored-state-and-deployment-procedure), and list
       a link-bind in the step 7 manifest. Retain existing public results through
       a compatibility bridge where needed; do not assume adding a required field
@@ -164,26 +178,37 @@ Measure in two tiers. The headless tier exercises the pivot, lookup, and
 aggregate candidates directly over synthetic Cell arrays rather than seeded
 boards, as the
 [index maintenance count probe](../development/BENCHMARKS.md#index-maintenance-count-probe)
-does for indexes. It runs at 32, 128, and 512 topics, with low-degree and
-high-degree mention graphs; vary E independently of N. Exercise a single large
-inbound bucket as well as distributed links. Test threads at 10, 100, and 1,000
-comments, varying L separately. T0 builds this tier's fixture; if a size cannot
-be built, T0 records the measured limit and the tier runs at the largest size it
-builds.
+does for indexes. It measures the Topics sources unmodified, the baseline's and
+each candidate's alike, and reaches their non-exported derivations without
+adding exports for measurement; a compiled module
+[registers](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#114-__cfreg-content-addressed-registration)
+its non-exported top-level builder artifacts under its content identity. It runs
+at 32, 128, and 512 topics, with low-degree and high-degree mention graphs, and
+varies E independently of N. Exercise a single large inbound bucket as well as
+distributed links. Test threads at 10, 100, and 1,000 comments, varying L
+separately. The headless read-budget test runs in CI at sizes up to 128 topics;
+512 topics runs only from this tier's probe script. T0 builds this tier's
+fixture; if a size cannot be built, T0 records the measured limit and the tier
+runs at the largest size it builds.
 
 The browser tier measures the whole system, rendering included, through the
-scale and navigation benchmarks at the board sizes their seed builds. Seeding a
+scale and navigation benchmarks at the board sizes their seed builds. Its new
+cases run in the scheduled
+[Benchmarks workflow](../development/BENCHMARKS.md#the-pipeline). Seeding a
 whole board bounds those sizes in any tier: the
 [benchmark guide](../development/BENCHMARKS.md#the-board-scaling-benchmark)
-records its time, memory, and cause, and citations raise the cost further (see
+records its time, memory, and cause. Citations raise the cost further, and
 `DEFAULT_CITING_TOPICS` in
-[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)). Each
-tier includes a small case to expose startup and maintenance overhead that
-scaling tests can hide.
+[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)
+records the heap that citing from every topic exhausts, so only the headless
+tier varies E independently of N. Each tier includes a small case to expose
+startup and maintenance overhead that scaling tests can hide.
 
-Demand three distinct workloads: the board alone, the board with one topic open,
-and all backlink outputs for a scaling probe. Do not describe the last workload
-as normal UI behavior. Measure cold initialization, warm updates, and reopen or
+Three demand workloads are distinct: the board alone, the board with one topic
+open, and all backlink outputs. The headless tier runs all three, labeling the
+all-backlinks workload a scaling probe rather than normal UI behavior. The
+browser tier runs the board-alone and board-with-one-topic workloads and not the
+all-backlinks one. Measure cold initialization, warm updates, and reopen or
 reconnect separately. Hold runtime, source package, data, demand, and feature
 flags constant between comparison arms; alternate repeated timing runs and
 report their distribution rather than a single favorable sample.
@@ -195,20 +220,28 @@ sibling edits. Include unresolved linked inputs, cold recovery, and two-client
 observation. Existing naming, rejection, render-shape, view-identity, and
 multi-user tests are part of acceptance, not replaced by benchmarks.
 
-Record completed body and transaction-attempt reads with their distinct
-boundaries, executions, graph nodes/edges, elapsed time, and available storage
-or memory measurements. Count producer and consumer work separately but decide
-on the complete settled operation. Network claims require bytes/subscription
-measurements in addition to read accounting.
+The headless tier records completed body and transaction-attempt reads with
+their distinct [boundaries](../features/read-accounting.md#execution-boundary),
+executions, graph size in nodes and edges, elapsed time, and available storage
+or memory measurements. The browser tier records body reads, graph size, and
+timings; attempt reads come from the headless tier, because the runtime client's
+read-stats request enables body accounting only. Count producer and consumer
+work separately but decide on the complete settled operation. Network claims
+require bytes/subscription measurements in addition to read accounting.
 
 T0 must set numeric baseline-derived acceptance limits before tuning candidates.
-Use total and per-run read budgets with explicit output/UI demand, then exercise
-a scan-regression negative control to prove the budget detects the intended
-regression. An accepted candidate must preserve semantics, improve its targeted
-scaling/work measure, and stay within the recorded startup, graph, and latency
-limits. If measurement noise prevents a latency conclusion, say so; if a cost
-exceeds its limit, revise or defer the candidate rather than silently moving the
-limit. A new tradeoff needs a documented decision and rationale.
+Read budgets are total and per-run, with explicit output/UI demand. Read and
+graph limits live in a code table beside the headless read-budget test, not as
+numbers in this plan. A gated count must repeat identically across five runs
+before its limit is set, and the limit is the largest observed value plus 10%.
+Each gated measure has a scan-regression variant, a negative control that must
+exceed its limit to prove the budget detects the intended regression. Startup
+and latency limits are recorded in this section and are not gated in CI. An
+accepted candidate must preserve semantics, improve its targeted scaling/work
+measure, and stay within the read, graph, startup, and latency limits. If
+measurement noise prevents a latency conclusion, say so; if a cost exceeds its
+limit, revise or defer the candidate rather than silently moving the limit. A
+new tradeoff needs a documented decision and rationale.
 
 ## Stored-state and deployment procedure
 
@@ -218,9 +251,10 @@ its existing topic children are separate targets. Updating imported source in a
 board's package does not upgrade those existing children.
 
 1. Inventory target piece IDs, source revisions, stored input/result contracts,
-   linked spaces, active generations, and each topic's stored
-   `topicStateVersion`. Inspect the deployed parent's stored demand, not just
-   its current repository source. Record whether each improvement changes only
+   linked spaces, active generations, each topic's stored `topicStateVersion`,
+   and which topics hold `boardCrossrefs`, `mentionable`, and `boardNames` and
+   what each links to. Inspect the deployed parent's stored demand, not just its
+   current repository source. Record whether each improvement changes only
    derived computation, a public result, or persisted state.
 2. Confirm the target runtime/compiler supports the operators. A change to
    derived computation alone needs no upgrade step. A change the topic pattern
@@ -242,14 +276,19 @@ board's package does not upgrade those existing children.
    topology or shell behavior needs qualification.
 4. Run every authored test and retain the exact complete source package. Run
    `setsrc --check` against the clone, then apply with every test root and data
-   attachment included. Tests attached to deployment are packaged/type-checked,
-   not executed there. Classify refusals, including missing linked data; a clean
-   compatibility check is not an apply or semantic acceptance result.
+   attachment included. Rehearse any link-bind the step 7 manifest lists on the
+   clone along with the check and apply, using
+   [`cf piece link`](../../packages/cli/README.md#linking-piece-inputs). Tests
+   attached to deployment are packaged/type-checked, not executed there.
+   Classify refusals, including missing linked data; a clean compatibility check
+   is not an apply or semantic acceptance result.
 5. Choose upgrade order from the old/new board-topic compatibility matrix.
    Usually children precede the board, but an old board unable to read a new
    child needs a bridge or parent-first sequence. Check old/old, old/new,
    new/old, and new/new combinations that can occur during rollout or rollback.
-   Keep each transition serial and inspect its result before the next.
+   Where the manifest lists a link-bind, the matrix also covers topics with and
+   without the bind, and the bind run before and after the board's source
+   update. Keep each transition serial and inspect its result before the next.
 6. Verify authored content independently of `space verify --expect-migration`:
    that command detects removal, not in-place clobbering. Check board
    membership, ordering, names, backlinks, titles/bodies, attribution,
@@ -257,13 +296,14 @@ board's package does not upgrade those existing children.
    topic's stored `topicStateVersion` reaches `TOPIC_STATE_VERSION`, or record
    the step still pending and why. Stop the clone server, reset, restart, and
    repeat from the pristine snapshot for a second clean pass.
-7. Before live execution, record target order, exact package hashes, retained
-   source revisions, expected schema/data changes, acceptance commands, snapshot
-   location, and rollback actions. Coordinate legacy writers and client refresh
-   if a schema/state transition requires them. Source restoration does not undo
-   stored-data migration. Whole-space snapshot restoration can discard later
-   human edits; specify a recovery window and preservation procedure before
-   relying on it. A local clone reset command is not a live rollback procedure.
+7. Before live execution, record target order, link-binds, exact package hashes,
+   retained source revisions, expected schema/data changes, acceptance commands,
+   snapshot location, and rollback actions. Coordinate legacy writers and client
+   refresh if a schema/state transition requires them. Source restoration does
+   not undo stored-data migration. Whole-space snapshot restoration can discard
+   later human edits; specify a recovery window and preservation procedure
+   before relying on it. A local clone reset command is not a live rollback
+   procedure.
 8. Obtain live authorization for the concrete manifest. Start with the smallest
    rehearsed compatible target set, verify it, then continue serially. Record
    failures and successful targets durably. Stop dependent updates on
