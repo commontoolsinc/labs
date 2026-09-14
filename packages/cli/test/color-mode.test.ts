@@ -146,6 +146,9 @@ Deno.test("resolveColorEnabled honors FORCE_COLOR / CLICOLOR_FORCE when piped", 
   }));
 });
 
+// The first rendering test starts the child; both tests share its output.
+let colorOutputPromise: Promise<ColorOutput> | undefined;
+
 /** Renders with color support established before Deno and its modules load. */
 async function readColorOutput(): Promise<ColorOutput> {
   const output = await runDenoCommandWithTemporaryLock({
@@ -173,7 +176,7 @@ Deno.test("setColorEnabled controls Cliffy version output", async () => {
   // dependency range drifts away from the pin, this test fails and the pin must
   // be updated.
 
-  const output = await readColorOutput();
+  const output = await (colorOutputPromise ??= readColorOutput());
   expect(output.plainVersion).toMatch(/\S/);
   expect(output.plainVersion).not.toContain("\x1b[");
   expect(output.coloredVersion).toContain("\x1b[");
@@ -184,7 +187,7 @@ Deno.test("help colors follow the Cliffy help option", async () => {
   // so help output is controlled through Command.help(), not setColorEnabled —
   // mod.ts mirrors the resolved policy into main.help({ colors }).
 
-  const output = await readColorOutput();
+  const output = await (colorOutputPromise ??= readColorOutput());
   expect(output.plainHelp).toMatch(/\S/);
   expect(output.plainHelp).not.toContain("\x1b[");
   expect(output.plainCellHelp).toMatch(/\S/);
