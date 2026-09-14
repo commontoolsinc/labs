@@ -82,6 +82,24 @@ describe("schema-closure", () => {
       expect(loads.toSorted()).toEqual([leafHash, middleHash].toSorted());
     });
 
+    it("loads and reports a repeated root only once", () => {
+      const loads: string[] = [];
+      const verified: string[] = [];
+      const store = storeOf([[middleHash, middle], [leafHash, leaf]]);
+      const result = walkSchemaDocumentClosure({
+        roots: [middleHash, middleHash],
+        load: (hash) => {
+          loads.push(hash);
+          return store(hash);
+        },
+        onVerified: (hash) => verified.push(hash),
+      });
+      expect(loads).toEqual([middleHash, leafHash]);
+      expect(verified).toEqual([middleHash, leafHash]);
+      expect([...result.verified]).toEqual([middleHash, leafHash]);
+      expect(result.missing.size).toBe(0);
+    });
+
     it("reports a hash the loader holds nothing under as absent, once, and walks on", () => {
       const misses: [string, SchemaClosureMiss][] = [];
       const result = walkSchemaDocumentClosure({
