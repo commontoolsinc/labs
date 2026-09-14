@@ -106,6 +106,22 @@ describe("acquiredSkillScriptBacking()", () => {
     expect(acquiredSkillScriptBacking(undefined, [acquired])).toBe(false);
   });
 
+  it("does not back a mount that is not this skill's, whatever it is named", () => {
+    // An operator `--host-mount` that happened to carry the name would be a
+    // coincidence rather than the mount this acquisition made, so the host and
+    // sandbox roots have to be the ones recorded with the skill, read-only.
+    const wrongHost = { ...acquiredMount, hostPath: "/somewhere/else" };
+    const wrongSandbox = { ...acquiredMount, sandboxPath: "/elsewhere" };
+    const writable = { ...acquiredMount, readOnly: false };
+
+    expect(acquiredSkillScriptBacking(sandboxWith([wrongHost]), [acquired]))
+      .toBe(false);
+    expect(acquiredSkillScriptBacking(sandboxWith([wrongSandbox]), [acquired]))
+      .toBe(false);
+    expect(acquiredSkillScriptBacking(sandboxWith([writable]), [acquired]))
+      .toBe(false);
+  });
+
   it("does not back a run holding no acquired skill, however it is mounted", () => {
     expect(acquiredSkillScriptBacking(sandboxWith([acquiredMount]), []))
       .toBe(false);

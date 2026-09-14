@@ -1192,11 +1192,14 @@ operator's.
 
 What backs the tool is the mount rather than a skills root, so a run given no
 `--skills-root` still offers it to such a child, and `--allow-skill-script`
-takes an acquired pin without one. A run that holds an acquired skill without
-mounting it is not backed and is not offered the tool: that is the acquiring
-parent, which deliberately mounts nothing, and a child that shares a handed-in
-runtime. `read_skill_resource` is registry-backed throughout, an acquired skill
-carrying no resource index.
+takes an acquired pin without one. Being backed is necessary and not sufficient:
+the child receives `run_skill_script` only where the operator allowlisted at
+least one script at that exact pin, so a child holding the handle and the mount
+and nothing else has no tool to invoke. A run that holds an acquired skill
+without mounting it is not backed at all: that is the acquiring parent, which
+deliberately mounts nothing, and a child that shares a handed-in runtime.
+`read_skill_resource` is registry-backed throughout, an acquired skill carrying
+no resource index.
 
 It runs a script there through the same `run_skill_script` a registry skill's
 goes through: `--allow-skill-script` keys on the pin,

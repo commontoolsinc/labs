@@ -173,12 +173,27 @@ export const acquiredSkillScriptSurface = (
  * parent's sandbox runtime was handed in rather than built shares that runtime
  * — there was no configuration to extend — so no mount was added for it
  * either.
+ *
+ * A mount answers for a skill only where it is that skill's: the host root it
+ * was written to, at the sandbox root recorded with it, read-only. The name
+ * alone would let an operator `--host-mount` that happened to carry it stand
+ * in for the mount this made, which is a coincidence rather than a backing.
+ *
+ * Being backed is necessary and not sufficient. What the child may actually
+ * run is what the operator allowlisted at the pin — see
+ * {@link acquiredSkillScriptSurface} — and a run backed with no such entry
+ * receives no tool.
  */
 export const acquiredSkillScriptBacking = (
   ownedSandboxConfig: DockerRunscSandboxConfig | undefined,
   acquiredSkills: readonly HarnessAcquiredSkill[] | undefined,
 ): boolean =>
-  (acquiredSkills?.length ?? 0) > 0 &&
-  (ownedSandboxConfig?.additionalMounts ?? []).some((mount) =>
-    mount.kind === "host-bind" && mount.name === ACQUIRED_SKILL_MOUNT_NAME
+  (acquiredSkills ?? []).some((skill) =>
+    (ownedSandboxConfig?.additionalMounts ?? []).some((mount) =>
+      mount.kind === "host-bind" &&
+      mount.name === ACQUIRED_SKILL_MOUNT_NAME &&
+      mount.hostPath === skill.hostRoot &&
+      mount.sandboxPath === skill.sandboxRoot &&
+      mount.readOnly
+    )
   );
