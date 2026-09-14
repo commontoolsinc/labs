@@ -14,9 +14,10 @@
  */
 
 import type { ConsoleDisclosure, ConsoleHandle, ConsoleStep } from "./steps.ts";
-import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
+import { renderCellReference } from "@commonfabric/runner/shared";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
 import { type ConsoleCellLabels, foldCellLabels } from "./cell-labels.ts";
+import { parseConsoleReference } from "./reference.ts";
 
 /** A pattern that ran, or a cell in the space. */
 export type ConsoleGraphNodeKind = "pattern" | "cell";
@@ -116,18 +117,14 @@ const tokensIn = (value: unknown): string[] => {
  * on the path would draw two nodes for one cell.
  */
 const linkDocument = (value: unknown): string | undefined => {
-  if (typeof value !== "string") {
+  if (typeof value !== "string" || !value.startsWith("/")) {
     return undefined;
   }
-  const text = value.trim();
-  if (!matchLLMFriendlyLink.test(text)) {
-    return undefined;
-  }
-  // The document is the link up to its first path segment past the entity, so
-  // a cross-space link keeps its space prefix and a path inside a document
-  // resolves to the document.
-  const parts = text.split("/");
-  return parts.slice(0, text.startsWith("/@") ? 3 : 2).join("/");
+  const parts = parseConsoleReference(value);
+  return parts === undefined ? undefined : renderCellReference(
+    { ...parts, path: [] },
+    { scope: "space" },
+  );
 };
 
 /** The short name of a CFC atom, which is the last segment of its type URL. */
@@ -192,7 +189,9 @@ export const consoleRunGraph = (
 ): ConsoleGraph => {
   const addressByToken = new Map(
     handles.flatMap((handle) =>
-      handle.ref === undefined ? [] : [[handle.token, handle.ref] as const]
+      handle.ref === undefined
+        ? []
+        : [[handle.token, linkDocument(handle.ref) ?? handle.ref] as const]
     ),
   );
   // The same handles, read for what the space says about the cell rather than
@@ -209,7 +208,7 @@ export const consoleRunGraph = (
     handles.flatMap((handle) =>
       handle.ref === undefined || handle.labels === undefined
         ? []
-        : [[handle.ref, handle.labels] as const]
+        : [[linkDocument(handle.ref) ?? handle.ref, handle.labels] as const]
     ),
   );
   const cellId = (token: string): string =>

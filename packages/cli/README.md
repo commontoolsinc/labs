@@ -360,13 +360,14 @@ see whether the write committed.
 A reference names a cell, and one grammar covers every part of the name:
 
 ```
-/[@<space>/]<piece>[@<scope>][/<path>]
+//<space>/<piece>[#<member>][@<qualifier>…][/<path>]
+/<piece>[#<member>][@<qualifier>…][/<path>]
 ```
 
 `<space>` is a space name or a DID; `<piece>` is a slug or a handle
 (`of:fid1:...`). `did:key:...` and `fid1:...` both say what they are, so neither
 can be mistaken for a name and one token holds whichever spelling the caller
-has. `/@my-space/tracker/items/0` and `/@did:key:z6Mk.../of:fid1:abc.../items/0`
+has. `//my-space/tracker/items/0` and `//did:key:z6Mk.../of:fid1:abc.../items/0`
 are the same shape.
 
 This is the one reference syntax of the fabric — the same structure names the
@@ -376,13 +377,24 @@ resolves a link from the string alone, so it needs the self-identifying
 spellings; `cf` opens a session before it reads anything, so it resolves a name
 and a slug as well.
 
-A path embedded in a reference prefixes the command's positional path argument.
-A space embedded in it names the target space: it supplies the space when
-`--space` is absent, and when both are given they must agree — a mismatch is
-refused rather than resolved, at parse time when the two are written the same
-way and once the session opens when only a derivation can compare them. An
-address printed by one command therefore composes into the next with no flag
-beside it, whatever space the reader has configured.
+A positional reference is relative to the selected cell. `.` names the current
+position, `../title` climbs once, and `.././..` climbs once then names the key
+`..`. Only the head climbs: `a/../b` names three keys. A trailing slash names
+the empty key, including `./` at the current position. `.#argument/title`
+selects the arguments document from its root; `.@session/title` changes scope
+while keeping the position. A bare `title` is the same as `./title`.
+
+Qualifiers repeat as `@name=value`, with each name appearing once. Scope has the
+abbreviations `@space`, `@user`, `@session`, and `@inherit`; the last requires a
+context. `@pin=<43 base64url characters>` is reserved for module identity and
+ignored by runtime cell resolution. The `/@did:…/` space alias stays readable;
+the `/@name/` alias remains readable until the writer migration. A space
+embedded in it names the target space: it supplies the space when `--space` is
+absent, and when both are given they must agree — a mismatch is refused rather
+than resolved, at parse time when the two are written the same way and once the
+session opens when only a derivation can compare them. An address printed by one
+command therefore composes into the next with no flag beside it, whatever space
+the reader has configured.
 
 A slug may name a collection rather than a piece.
 `cf piece set-slug top /of:fid1:…/names` points `top` at the map a board keeps
@@ -430,7 +442,7 @@ first positional, which is the spelling to reach for: a reference begins with
 
 ```
 cf cell get /tracker items/0/title
-cf cell get /@my-space/tracker/items/0 title
+cf cell get //my-space/tracker/items/0 title
 cf piece call /tracker addItem '{"title":"Milk"}'
 ```
 
@@ -446,23 +458,25 @@ rather than resolved.
 spelling of its own: the host becomes the `--api-url` and the rest becomes a
 reference, and both are read on exactly as if they had been written, so
 `--url https://cf.dev/my-space/tracker/items` means
-`--api-url https://cf.dev /@my-space/tracker/items`.
+`--api-url https://cf.dev //my-space/tracker/items`.
 
 Those three each sit under the noun they act on: `get` and `set` name a cell, so
 they are `cf cell` subcommands, while `call` invokes a verb on a piece and is a
 `cf piece` one. The bare `cf get`, `cf set` and `cf call` still answer, hidden
 and superseded — see [Superseded spellings](#superseded-spellings).
 
-A target may also end in `#argument`, which selects the piece's arguments cell
-the way `--input` does — on a reference, on a bare id, and on a slug alike,
-since all three designate the same piece. Only commands that take `--input`
-accept it; `#` is reserved for the suffix, so a path key containing `#` needs
-the positional path spelling. A `--url` carries no fragment into the reference
-it decomposes to, whatever the URL names, so a `#argument` written on one is
-dropped rather than refused. A URL that names the piece admits no `--cell` or
-positional address beside it, and `--input` is what reaches the arguments cell
-there; a URL that names only the space leaves the target to arrive as it always
-does — a positional address, or `--cell` — carrying the suffix like any other.
+A target may select `#argument` on its piece segment, before any qualifiers or
+path, which selects the piece's arguments cell the way `--input` does — on a
+reference, on a bare id, and on a slug alike, since all three designate the same
+piece. Only commands that take `--input` accept it. `#result` selects the result
+document. Within a path, `#` is data: `/piece/a#argument` selects the result's
+literal key `a#argument`, while `/piece#argument/a` selects argument key `a`. A
+`--url` carries no fragment into the reference it decomposes to, whatever the
+URL names, so a `#argument` written on one is dropped rather than refused. A URL
+that names the piece admits no `--cell` or positional address beside it, and
+`--input` is what reaches the arguments cell there; a URL that names only the
+space leaves the target to arrive as it always does — a positional address, or
+`--cell` — carrying the suffix like any other.
 
 `cf piece apply` replaces a piece's whole input rather than one path within it.
 It validates the document against the pattern's `argumentSchema` and re-executes
@@ -762,10 +776,10 @@ standard error and continues searching that piece and the rest of the space.
 ## Piece CFC labels
 
 `cf cell get-label` returns the effective CFC label view for a result path. Pass
-`--input` to select the input cell — a `--cell` value ending in `#argument`
-selects it too. The paths in the returned view are relative to the selected
-path, and the view includes declared, derived, and link-carried labels. An
-unlabeled value returns JSON `null`.
+`--input` to select the input cell — a `--cell` value selecting `#argument` on
+its piece segment selects it too. The paths in the returned view are relative to
+the selected path, and the view includes declared, derived, and link-carried
+labels. An unlabeled value returns JSON `null`.
 
 The path is followed through any links it crosses, so the view describes the doc
 that actually holds the value rather than the doc the path started in. That is
@@ -1187,11 +1201,12 @@ cf cell get --cell ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 The address is one string in the fabric's reference syntax —
-`/[@space/]<piece>[@scope][/path]` — which is exactly what `cf piece call` and
-`cf cell get` take in the positional they read a target from, scheme included,
-so an address emitted by one command composes into the next unchanged, without
-being reassembled. The space rides in front as `@did:key:…` only when it differs
-from the space the command targeted, the scope follows the id as
+`//<space>/<piece>[#member][@qualifier…][/path]` or its space-relative form
+`/<piece>[#member][@qualifier…][/path]` — which is exactly what `cf piece call`
+and `cf cell get` take in the positional they read a target from, scheme
+included, so an address emitted by one command composes into the next unchanged,
+without being reassembled. The space rides in front as `@did:key:…` only when it
+differs from the space the command targeted, the scope follows the id as
 `@user`/`@session` only when it is not the default, and the path follows as
 ordinary segments. No schema is inlined and no write-redirect flag rides along.
 
@@ -1822,7 +1837,7 @@ An option's value completes the same whether it is written after a space or
 after `=`, and every spelling of a target reaches the same slots behind it: the
 bare id, the slug, the reference (space-qualified or not, with an embedded
 path), and a reference written positionally in place of the flag — each of them
-carrying the `@scope` and `#argument` suffixes.
+carrying the `#argument` member and `@scope` qualifier.
 
 Past a `stopEarly()` boundary — after `cf piece call`'s callable name, after
 `cf exec`'s mounted file — nothing is offered. The CLI's own flags are refused

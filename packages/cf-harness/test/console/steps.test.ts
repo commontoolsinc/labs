@@ -1190,6 +1190,22 @@ describe("console/steps provenance", () => {
       expect(args[0].ref).toBe("/@did:key:z6MkAbc/of:fid1:xyz");
     });
 
+    it("matches complete references to legacy handles by decoded address", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "//did:key:z6MkAbc/of:fid1:abc@space/numbers" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const handles = consoleRunHandles(composed("cfh:a:aaaaa"), table).map(
+        (handle) => ({ ...handle, ref: `/@did:key:z6MkAbc${handle.ref}` }),
+      );
+      const args = consoleStepArguments(steps[0], handles);
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+    });
+
     it("resolves a link naming a path inside a held cell to that cell", () => {
       const steps = composed("/of:fid1:abc/numbers");
       const handles = consoleRunHandles(steps, table);

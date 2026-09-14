@@ -15,7 +15,6 @@ import {
 } from "@commonfabric/runner/entity-kind";
 import {
   addressKey,
-  CELL_SCOPE_VALUES,
   createLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
@@ -69,7 +68,7 @@ const HANDLE_REF_CONTEXT_SPACE =
  * `computed:`-schemed entity URI — to a normalized link. A ref with no
  * embedded space DID yields a link without `space`; the two operations
  * applied to the result tolerate that (`addressKey()` serializes the absence
- * deterministically, and `createLLMFriendlyLink()` omits the DID), which is
+ * deterministically, and the reference renderer preserves the absence), which is
  * what the cast relies on.
  *
  * This is the rule minting holds a ref to, exported so a surface taking a
@@ -80,7 +79,7 @@ const HANDLE_REF_CONTEXT_SPACE =
  * entity URI schemes (a bare hash, an `opaque:` handle, a human name).
  */
 export const parseHandleRef = (refText: string): NormalizedFullLink => {
-  const trimmed = refText.trim();
+  const trimmed = refText.trimStart();
   const parsed = parseLLMFriendlyLink(
     trimmed.startsWith("/") ? trimmed : `/${trimmed}`,
   );
@@ -331,23 +330,14 @@ const ENTITY_ID_SOURCE = `(?:${
 // A path segment ends at whitespace, quotes, backticks, or closing
 // punctuation, so an address at the end of a sentence does not swallow it.
 const PATH_SEGMENT_SOURCE = `[^/\\s"'\`\\)\\]\\}>,;]+`;
-const SCOPE_SUFFIX_SOURCE = `(?:@(?:${[...CELL_SCOPE_VALUES].join("|")}))?`;
-// This scans free prose for occurrences — unanchored, global, with the
-// leading slash optional — which is a different job from the runner's
-// `matchLLMFriendlyLink`, an anchored gate over a whole string that is
-// already known to be a reference. Neither can stand in for the other.
-const LINK_OCCURRENCE_SOURCE =
-  // An optional cross-space prefix ending in `/`, or a bare leading `/`.
-  `((?:/@did:[^/\\s]+)?/)?` +
-  // At a word boundary: when the leading `/` is present the lookbehind sees
-  // it and passes; when absent it keeps `proof:fid1:…` and `x-of:fid1:…`
-  // from half-matching.
+// The scanner captures the whole occurrence; the shared reader decides whether
+// its member and qualifiers are valid. Complete prefixes are consumed with the
+// piece, so a refused occurrence cannot be rescanned as a shorter reference.
+const LINK_OCCURRENCE_SOURCE = `(?:(?://|/@)[^/\\s]+/|/)?` +
   `(?<![A-Za-z0-9_:.@-])` +
-  `${ENTITY_ID_SOURCE}` +
-  // `@space` is consumed too: it is the default scope, so the canonical
-  // serialization of the minted ref simply drops it.
-  SCOPE_SUFFIX_SOURCE +
-  `((?:/${PATH_SEGMENT_SOURCE})*)`;
+  ENTITY_ID_SOURCE +
+  `(?:[#@](?:${PATH_SEGMENT_SOURCE})?)?` +
+  `(?:/(?:${PATH_SEGMENT_SOURCE})?)*`;
 
 /**
  * Replaces every positively-marked address occurrence in `value` with a

@@ -397,3 +397,16 @@ export {
 
 export { schemaPathSelection } from "./schema-path.ts";
 export { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
+
+export {
+  parseCellReference,
+  parsePieceSegment,
+  parseReferenceContext,
+  parseRelativeReference,
+  type ReferenceContext,
+  type ReferenceMember,
+  type RelativeReferenceParts,
+  type RenderableCellReference,
+  renderCellReference,
+  renderReferenceContext,
+} from "./cell-reference.ts";

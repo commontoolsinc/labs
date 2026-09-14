@@ -696,6 +696,50 @@ export type CellScope = "space" | "user" | "session";
 export type SchemaScope = CellScope | "any";
 export type LinkScope = "inherit" | CellScope;
 
+/** A document selected on the piece segment. */
+export type ReferenceMember = "argument" | "result";
+
+/** A location prefix, with an independently known or unknown scope. */
+export type ReferenceContext =
+  & {
+    scope?: CellScope;
+  }
+  & (
+    | {
+      space?: undefined;
+      id?: undefined;
+      member?: undefined;
+      path?: undefined;
+    }
+    | { space: string; id?: undefined; member?: undefined; path?: undefined }
+    | {
+      space: string;
+      id: string;
+      member?: ReferenceMember;
+      path?: readonly string[];
+    }
+  );
+
+/** A cell address to render, with an optional space for unresolved references. */
+export interface RenderableCellReference {
+  id: string;
+  space?: string;
+  member?: ReferenceMember;
+  scope?: CellScope;
+  pin?: string;
+  path: readonly (string | number)[];
+}
+
+/**
+ * Renders a cell address relative to a location and scope context. Without a
+ * context, includes the known space and explicit scope. Empty and dot path
+ * keys retain their literal meaning.
+ */
+export declare function renderCellReference(
+  link: RenderableCellReference,
+  context?: ReferenceContext,
+): string;
+
 export type AsCellEntry =
   | CellKind
   | {

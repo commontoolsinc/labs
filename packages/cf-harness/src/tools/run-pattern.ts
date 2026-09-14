@@ -464,10 +464,8 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
  * The `@link` object addressing one sealed position of a result: the result
  * cell's link extended by the sealed path. It rides as a whole object, which
  * the outbound swap mints from in one piece — the free-text scanner would
- * stop an address short at a property name's whitespace. A path the link
- * grammar cannot round-trip — an empty final segment parses back as its
- * parent — answers `undefined`, keeping the seal rather than becoming a
- * reference to the wrong cell.
+ * stop an address short at a property name's whitespace. Returns `undefined`
+ * if parsing the rendered reference fails to recover the sealed path.
  */
 export const sealedPositionLink = (
   resultLink: NormalizedFullLink,

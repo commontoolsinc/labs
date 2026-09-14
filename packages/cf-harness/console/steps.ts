@@ -11,6 +11,7 @@
  */
 
 import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
+import { parseConsoleReference } from "./reference.ts";
 import {
   HANDLE_TOKEN_PATTERN,
   type HarnessHandleEntry,
@@ -977,11 +978,9 @@ const handleProvenance = (
  * alone — a spelling this failed to recognise would read as a plain value and
  * lose the reference entirely.
  *
- * A handle's `ref` is the canonical spelling of what it names, so a link naming
- * a path inside a held cell starts with that cell's `ref`. The longest such
- * match wins, which is what keeps a path inside a document resolving to the
- * document rather than to a second cell. A link matching no handle is still a
- * reference — the run simply holds no handle for it.
+ * Addresses are compared after parsing, so aliases and explicit base scopes
+ * match the same held cell. The deepest matching path wins. A link matching no
+ * handle is still a reference — the run simply holds no handle for it.
  */
 const linkTarget = (
   value: unknown,
@@ -990,46 +989,31 @@ const linkTarget = (
   if (typeof value !== "string") {
     return undefined;
   }
-  const text = value.trim();
-  if (!matchLLMFriendlyLink.test(text) || !parsesAsLink(text)) {
+  const text = value;
+  const address = parseConsoleReference(text);
+  if (!matchLLMFriendlyLink.test(text) || address === undefined) {
     return undefined;
   }
   let best: ConsoleHandle | undefined;
+  let bestDepth = -1;
   for (const handle of handles) {
+    const candidate = handle.ref === undefined
+      ? undefined
+      : parseConsoleReference(handle.ref);
     if (
-      handle.ref !== undefined && continuesAddress(text, handle.ref) &&
-      (best?.ref === undefined || handle.ref.length > best.ref.length)
+      candidate !== undefined && candidate.space === address.space &&
+      candidate.id === address.id && candidate.scope === address.scope &&
+      candidate.path.length > bestDepth &&
+      candidate.path.length <= address.path.length &&
+      candidate.path.every((key, index) => key === address.path[index])
     ) {
       best = handle;
+      bestDepth = candidate.path.length;
     }
   }
   return best?.ref === undefined
     ? { ref: text }
     : { ref: best.ref, handle: best };
-};
-
-/**
- * Whether a link continues a held cell's own address rather than merely
- * starting with its characters. `/of:fid1:abcdef` shares a prefix with
- * `/of:fid1:abc` and names a different entity, so a prefix test on its own
- * would attach one cell's handle to another cell's link.
- */
-const continuesAddress = (link: string, ref: string): boolean =>
-  link === ref || (link.startsWith(ref) && link[ref.length] === "/");
-
-/**
- * Whether a string is a whole LLM-friendly link rather than something merely
- * shaped like one. `run_pattern` passes a string it cannot parse through as
- * plain JSON, so reading one as a reference would draw a flow edge the run
- * never had.
- */
-const parsesAsLink = (text: string): boolean => {
-  const body = text.startsWith("/@")
-    ? text.slice(1).split("/").slice(1).join("/")
-    : text.slice(1);
-  const entity = body.split("/")[0] ?? "";
-  const separator = entity.indexOf(":");
-  return separator > 0 && entity.length > separator + 1;
 };
 
 /**

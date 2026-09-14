@@ -8,6 +8,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test cellFromUrl builtin");
 const space = signer.did();
@@ -39,7 +40,14 @@ describe("cellFromUrl builtin", () => {
   async function resolve(
     url: string,
     hosts?: string[],
-  ): Promise<{ pending: unknown; id: string | undefined }> {
+  ): Promise<
+    {
+      pending: unknown;
+      id: string | undefined;
+      path?: readonly unknown[];
+      scope?: string;
+    }
+  > {
     const builtin = byRef("cellFromUrl");
     const testPattern = pattern<{ url: string }>(
       ({ url }) => builtin(hosts ? { url, hosts } : { url }),
@@ -68,7 +76,12 @@ describe("cellFromUrl builtin", () => {
     const sub = runtime.getCellFromLink(parseLink(slotRaw, slot)!);
     const held = sub.getRaw();
     const link = held === undefined ? undefined : parseLink(held, sub);
-    return { pending, id: link?.id as string | undefined };
+    return {
+      pending,
+      id: link?.id as string | undefined,
+      path: link?.path,
+      scope: link?.scope,
+    };
   }
 
   /** A cell in this space, and the id a URL would have to name to reach it. */
@@ -88,6 +101,30 @@ describe("cellFromUrl builtin", () => {
 
     expect(pending).toBe(false);
     expect(resolved).toBe(id);
+  });
+
+  it("selects an arguments document before traversing its path", async () => {
+    const result = runtime.getCell(space, "member-result", undefined, tx);
+    const argument = runtime.getCell(space, "member-argument", undefined, tx);
+    result.setMetaRaw(
+      "argument",
+      argument.getAsLink(),
+      rawMetaWriteAuthorization,
+    );
+    const id = result.getAsNormalizedFullLink().id;
+    const selected = await resolve(`//${space}/${id}#argument/title/`);
+    expect(selected.id).toBe(argument.getAsNormalizedFullLink().id);
+    expect(selected.path).toEqual(["title", ""]);
+    expect(selected.scope).toBe("space");
+  });
+
+  it("returns no cell for a missing argument member and preserves explicit scope", async () => {
+    const id = anExistingCell();
+    expect((await resolve(`/${id}#argument`)).id).toBeUndefined();
+    const selected = await resolve(`/${id}@user/title`);
+    expect(selected.id).toBe(id);
+    expect(selected.scope).toBe("user");
+    expect(selected.path).toEqual(["title"]);
   });
 
   it("resolves a bare tagged hash to the same cell", async () => {

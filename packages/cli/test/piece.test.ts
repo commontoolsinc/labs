@@ -34,6 +34,7 @@ import {
   parsePieceOptions,
   parseSpaceOptions,
   piece,
+  type PieceCellCommandDependencies,
   pieceDataCommand,
   readCallTarget,
   readTargetPositionals,
@@ -391,6 +392,12 @@ describe("cli piece parsing", () => {
     });
     expect(mergePiecePath(config, "title")).toEqual(["items", 0, "title"]);
     expect(mergePiecePath(config)).toEqual(["items", 0]);
+    expect(() => mergePiecePath(config, "/other/title")).toThrow(
+      /piece-relative/,
+    );
+    expect(() => mergePiecePath(config, "//other-space/other/title")).toThrow(
+      /piece-relative/,
+    );
     expect(() => parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}/items` }))
       .toThrow(/takes a piece id only/);
   });
@@ -489,7 +496,7 @@ describe("cli piece parsing", () => {
       .toMatchObject({ piece: "thermostat", pieceInput: true });
     // The suffix comes off before the scope is read, so the two compose in
     // the order the reference form writes them.
-    expect(parseSpaceOptions({ ...base, cell: "thermostat@session#argument" }))
+    expect(parseSpaceOptions({ ...base, cell: "thermostat#argument@session" }))
       .toMatchObject({
         piece: "thermostat",
         pieceScope: "session",
@@ -509,10 +516,10 @@ describe("cli piece parsing", () => {
     // it. One sentence covers both spellings, since one reader splits both.
 
     const base = { apiUrl: API_URL, space: SPACE, identity: ID };
-    expect(() => parseSpaceOptions({ ...base, cell: "thermostat#result" }))
-      .toThrow(/Unknown suffix "#result"/);
-    expect(() => parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}#result` }))
-      .toThrow(/Unknown suffix "#result"/);
+    expect(parseSpaceOptions({ ...base, cell: "thermostat#result" }))
+      .toEqual(parseSpaceOptions({ ...base, cell: "thermostat" }));
+    expect(parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}#result` }))
+      .toEqual(parseSpaceOptions({ ...base, cell: `/${LLM_HANDLE}` }));
   });
 
   it("readTargetPositionals() reads a leading canonical reference as the address", () => {
@@ -556,7 +563,7 @@ describe("cli piece parsing", () => {
     const base = { apiUrl: API_URL, identity: ID };
     // A slug where a handle goes, a name where a DID goes: one token carrying
     // the whole target, in the spelling a person writes.
-    expect(parsePieceOptions({ ...base, cell: `/@${SPACE}/tracker` }))
+    expect(parsePieceOptions({ ...base, cell: `//${SPACE}/tracker` }))
       .toMatchObject({ space: SPACE, piece: "tracker" });
     // The named space is checked against `--space` rather than ignored, and
     // two names are settled without a session.
@@ -564,7 +571,7 @@ describe("cli piece parsing", () => {
       parsePieceOptions({
         ...base,
         space: "other-space",
-        cell: `/@${SPACE}/tracker`,
+        cell: `//${SPACE}/tracker`,
       })
     ).toThrow(
       `Reference names space "${SPACE}" but the command targets ` +
@@ -573,7 +580,7 @@ describe("cli piece parsing", () => {
     // Across spellings only a derivation can compare them, so the reference's
     // space is carried to the session check instead.
     expect(
-      parsePieceOptions({ ...base, space: SPACE_DID, cell: "/@n-space/t" }),
+      parsePieceOptions({ ...base, space: SPACE_DID, cell: "//n-space/t" }),
     ).toMatchObject({ space: SPACE_DID, embeddedSpaces: ["n-space"] });
   });
 
@@ -584,8 +591,8 @@ describe("cli piece parsing", () => {
       address: "/tracker",
       pathString: "items/0",
     });
-    expect(readTargetPositionals({}, `/@${SPACE}/tracker`)).toEqual({
-      address: `/@${SPACE}/tracker`,
+    expect(readTargetPositionals({}, `//${SPACE}/tracker`)).toEqual({
+      address: `//${SPACE}/tracker`,
     });
     expect(readTargetPositionals({}, "tracker")).toEqual({
       pathString: "tracker",
@@ -651,15 +658,13 @@ describe("cli piece parsing", () => {
     ).toThrow(/is not valid percent-encoding/);
   });
 
-  it("parseSpaceOptions() refuses a URL part holding the reference terminator", () => {
-    // Folded into the reference this decomposes to, "#" would read as the
-    // suffix and silently address the arguments cell instead.
-    expect(() =>
-      parsePieceOptions(
-        { url: `${FULL_URL}/foo%23argument`, identity: ID },
-        { acceptsPath: true, acceptsArgument: true },
-      )
-    ).toThrow(/"#" closes a reference/);
+  it("parsePieceOptions() preserves an encoded `#argument` path key from a URL", () => {
+    const config = parsePieceOptions(
+      { url: `${FULL_URL}/foo%23argument`, identity: ID },
+      { acceptsPath: true, acceptsArgument: true },
+    );
+    expect(config.piecePath).toEqual(["foo#argument"]);
+    expect(config.pieceInput).not.toBe(true);
   });
 
   it("readCallTarget() lets the flag name the target for a rooted callable", () => {
@@ -685,24 +690,23 @@ describe("cli piece parsing", () => {
     // not one — whichever spelling of the target asks for it.
     expect(() => parseLink(`${LLM_HANDLE}#argument`))
       .toThrow(/does not apply to a link endpoint/);
-    expect(() => parseLink("thermostat/draft#argument"))
-      .toThrow(/does not apply to a link endpoint/);
   });
 
   it("parseLink() keeps a `#` inside a bare endpoint's path key", () => {
-    // Why the refusal above tests `endsWith` rather than reading the fragment
-    // the way the shared reader does. A bare endpoint carries its piece and
-    // path in one word and has no positional path beside it, so reading every
-    // fragment here would leave a key holding `#` with no spelling at all.
-
     expect(parseLink("tracker/we#ird")).toEqual({
       pieceId: "tracker",
       path: ["we#ird"],
     });
-    // The reference form reserves `#` outright, which is the difference the
-    // two readers exist for.
-    expect(() => parseLink("/tracker/we#ird"))
-      .toThrow(/Unknown suffix "#ird"/);
+    expect(parseLink("/tracker/we#ird")).toEqual({
+      pieceId: "tracker",
+      path: ["we#ird"],
+    });
+    for (const prefix of ["", "/"]) {
+      expect(parseLink(`${prefix}thermostat/draft#argument`)).toEqual({
+        pieceId: "thermostat",
+        path: ["draft#argument"],
+      });
+    }
   });
 
   it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
@@ -782,6 +786,62 @@ describe("cli piece parsing", () => {
     );
     expect(reads[1]?.slice(1)).toEqual([[], { input: true, step: undefined }]);
     expect(rendered).toEqual([{ ok: true }, { ok: true }]);
+  });
+
+  it("getCellValueFromCommand() resolves relative heads, members, and scope before reading", async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const reads: {
+      scope?: string;
+      input?: boolean;
+      path: readonly (string | number)[];
+    }[] = [];
+    const deps = {
+      getCellValue: (
+        config: Parameters<
+          NonNullable<PieceCellCommandDependencies["getCellValue"]>
+        >[0],
+        path: Parameters<
+          NonNullable<PieceCellCommandDependencies["getCellValue"]>
+        >[1],
+        options: Parameters<
+          NonNullable<PieceCellCommandDependencies["getCellValue"]>
+        >[2],
+      ) => {
+        reads.push({ scope: config.pieceScope, input: options?.input, path });
+        return Promise.resolve({});
+      },
+      render: () => {},
+    };
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}@user/items/0`,
+      "../1/title",
+      deps,
+    );
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}@user/items/0`,
+      ".@session/title",
+      deps,
+    );
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}@user/items/0`,
+      ".#argument/title",
+      deps,
+    );
+    await getCellValueFromCommand(
+      { ...base, input: true },
+      `/${LLM_HANDLE}/items/0`,
+      ".#result/",
+      deps,
+    );
+    expect(reads).toEqual([
+      { scope: "user", input: undefined, path: ["items", 1, "title"] },
+      { scope: "session", input: undefined, path: ["items", 0, "title"] },
+      { scope: "user", input: true, path: ["title"] },
+      { scope: undefined, input: false, path: [""] },
+    ]);
   });
 
   it('getCellValueFromCommand() reads "#argument" on a bare target as --input does', async () => {
@@ -1236,7 +1296,7 @@ describe("cli piece parsing", () => {
     it("should reject invalid scope suffixes on the piece ID segment", () => {
       expect(() => parseLink("piece1@any")).toThrow(/Invalid scope suffix/);
       expect(() => parseLink("piece1@inherit")).toThrow(
-        /Invalid scope suffix/,
+        /requires a reference context/,
       );
       expect(() => parseLink("piece1@")).toThrow(/Invalid scope suffix/);
     });

@@ -62,6 +62,20 @@ describe("fabric-url", () => {
         expect(target?.path).toEqual(["summary"]);
       });
 
+      it("reads complete references, members, scopes, and empty path keys", () => {
+        expect(
+          parseFabricUrl(`//${SPACE}/of:fid1:${HASH}#argument@scope=user//`),
+        ).toEqual({
+          space: SPACE,
+          id: `of:fid1:${HASH}`,
+          member: "argument",
+          scope: "user",
+          path: ["", ""],
+        });
+        expect(parseFabricUrl(`/of:fid1:${HASH}/a%2Fb`)?.path).toEqual(["a/b"]);
+        expect(parseFabricUrl(`/of:fid1:${HASH}@owner`)).toBeUndefined();
+      });
+
       it("returns undefined for a rooted path naming no id", () => {
         expect(parseFabricUrl("/notes/mine")).toBeUndefined();
       });

@@ -212,6 +212,32 @@ describe("console/graph", () => {
       expect(graph.unwiredPatterns).toBe(1);
     });
 
+    it("keeps complete document addresses distinct and coalesces their aliases", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
+        call("c2", "run_pattern", {
+          sourceText: "y",
+          inputs: {
+            source: "/@did:key:bakery/of:fid1:abc/numbers",
+            other: "//did:key:other/of:fid1:abc@space/numbers",
+          },
+        }),
+        result("c2", "run_pattern", { status: "ok" }),
+      ]);
+      const graph = consoleRunGraph(steps, [
+        handle("cfh:a:aaaaa", "//did:key:bakery/of:fid1:abc@space"),
+      ]);
+      const cells = graph.nodes.filter((node) => node.kind === "cell");
+      expect(cells.map((node) => node.id).sort()).toEqual([
+        "cell://did:key:bakery/of:fid1:abc",
+        "cell://did:key:other/of:fid1:abc",
+      ]);
+      expect(graph.edges.filter((edge) => edge.kind === "reads")).toHaveLength(
+        2,
+      );
+    });
+
     it("leaves a cell unnamed when assign_slug refused it", () => {
       const steps = consoleRunSteps([
         call("c1", "assign_slug", { token: "cfh:a:aaaaa", slug: "books" }),

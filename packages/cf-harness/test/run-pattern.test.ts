@@ -3,7 +3,6 @@ import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "../../runner/test/cfc-seed-envelope.ts";
-import { isSealedOpaqueLinkObject } from "../src/structured-result.ts";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -874,10 +873,7 @@ describe("run-pattern", () => {
       });
     });
 
-    it("keeps the seal for a property the link grammar cannot round-trip", async () => {
-      // An empty property name is valid JSON, but its address serializes
-      // with a trailing slash the link parse discards — the reference would
-      // name the parent. The position keeps its seal instead.
+    it("addresses an empty property with a trailing slash", async () => {
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {
         sourceText: [
@@ -898,8 +894,9 @@ describe("run-pattern", () => {
       });
       const output = result.output as RunPatternToolSuccessOutput;
       expect(output.status).toBe("ok");
-      const sealed = (output.value as Record<string, unknown>)[""];
-      expect(isSealedOpaqueLinkObject(sealed)).toBe(true);
+      expect((output.value as Record<string, unknown>)[""]).toEqual({
+        "@link": `${output.resultRef}/`,
+      });
     });
 
     it("returns a structured error for a plain-function pattern whose compiled argument schema is undefined, rather than throwing out of the run", async () => {
