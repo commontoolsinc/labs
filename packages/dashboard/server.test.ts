@@ -140,10 +140,14 @@ Deno.test("healthz: not ok until the board has collected something", async () =>
 
 Deno.test("registered tiles render before their first collection completes", () => {
   const html = page(new Map());
+  const benchmarkLabels: Record<string, string> = {
+    benchmark: "all benchmarks",
+    "key-benchmarks": "key benchmarks",
+  };
   for (const tile of TILES) {
     assertStringIncludes(
       html,
-      `</span> ${tile.id}<span class="spacer"></span>`,
+      `</span> ${benchmarkLabels[tile.id] ?? tile.id}<span class="spacer"></span>`,
     );
   }
   assert(tileHtml("recent-runs", html).startsWith(`unknown wide" data-tile-id="recent-runs">`));
@@ -318,10 +322,14 @@ Deno.test("simultaneous collector completions keep a red handoff's incident age"
 });
 
 Deno.test("a tile stays wide through failures and keeps its last good view", async () => {
-  await tick([fake("recent-runs", () => {
-    throw new Error("HTTP 404: Not Found");
-  })]);
-  const firstFailure = tileHtml("recent-runs");
+  const namedTile = {
+    ...fake("recent-runs", () => {
+      throw new Error("HTTP 404: Not Found");
+    }),
+    label: "recent main runs",
+  };
+  await tick([namedTile]);
+  const firstFailure = tileHtml("recent main runs");
   assert(firstFailure.startsWith(`unknown wide" data-tile-id="recent-runs">`));
   assertStringIncludes(firstFailure, `<p class="big unknown">—</p>`);
   assertStringIncludes(firstFailure, `<p class="sub" title="not found">not found</p>`);

@@ -73,7 +73,7 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     id: "benchmark",
     subSelector: ".benchmark-count",
     view: {
-      label: "benchmarks",
+      label: "all benchmarks",
       status: "warn",
       value: "▲6%",
       extra:
@@ -123,12 +123,17 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     },
   },
   {
-    id: "loom-metric-placeholder",
+    id: "key-benchmarks",
+    subSelector: ".benchmark-count",
     view: {
-      label: "YOUR METRIC HERE",
-      status: "good",
-      value: "–",
-      sub: "no metric selected for this tile",
+      label: "key benchmarks",
+      status: "warn",
+      value: "▲6%",
+      extra:
+        `<div class="benchmark-count" style="font-size:13px;color:var(--text-muted);margin:5px 0 0">2 benchmarks · last 10 days</div>${twoLines()}`,
+      duration: 30 * DAY,
+      hint: "metrics ↗",
+      href: "/bench?view=runtime&repo=labs",
     },
   },
   {
