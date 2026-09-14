@@ -224,12 +224,14 @@ export type FabricContainerValuePlus<PlusType> =
   | FabricPlainObjectPlus<PlusType>;
 
 /** Read-only array of `FabricValuePlus`es. */
-export interface FabricArrayPlus<PlusType>
-  extends ReadonlyArray<FabricValuePlus<PlusType>> {}
+export type FabricArrayPlus<PlusType> = ReadonlyArray<
+  FabricValuePlus<PlusType>
+>;
 
 /** Read-only object/record of `FabricValuePlus`es. */
-export interface FabricPlainObjectPlus<PlusType>
-  extends Readonly<Record<string, FabricValuePlus<PlusType>>> {}
+export type FabricPlainObjectPlus<PlusType> = {
+  readonly [key: string]: FabricValuePlus<PlusType>;
+};
 
 /**
  * A `FabricSpecialObject` whose instance variant includes a `PlusType`.
