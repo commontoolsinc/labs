@@ -44,9 +44,9 @@ Baseline: `a769e6d67708ef119f7a0bb41230f6831398a236`. Fixed: the same tree with
 only `packages/memory/v2/path.ts` changed for the measured operation. Both arms
 use identical benchmark bodies. Machine: Apple M3 Max, macOS aarch64, Deno
 2.9.4. Other work was active on the host; this task ran no concurrent tests
-during measurement. One-minute load during the ten Deno benchmark
-invocations ranged from 9.19 to 12.05 at their starts. These absolute
-measurements are diagnostic, not quiet-machine release numbers.
+during measurement. One-minute load during the ten Deno benchmark invocations
+ranged from 9.19 to 12.05 at their starts. These absolute measurements are
+diagnostic, not quiet-machine release numbers.
 
 First, five fresh-process pairs ran in B/F, F/B, B/F, F/B, B/F order using:
 
@@ -58,9 +58,9 @@ deno bench --no-lock --json packages/memory/test/v2-path.bench.ts \
 The median paired p75 speedups were 1.68x, 1.82x, and 2.00x for plain depths 1,
 4, and 12; 1.28x for long segments; and 1.14x for escaped segments. The latter
 two were inconsistent across pairs. The unchanged calibration bodies also moved
-substantially between runs. Calibration at a different point in the
-process cannot correct that phase-local contention, so normalized figures are
-not used as the conclusion.
+substantially between runs. Calibration at a different point in the process
+cannot correct that phase-local contention, so normalized figures are not used
+as the conclusion.
 
 A second diagnostic reused the maintained benchmark bodies and their exact
 start/end boundaries, registering each arm in one process. Each case warmed both
@@ -91,11 +91,26 @@ replaced by these summaries.
 
 [Raw measurements](2026-09-14-encode-pointer.results.json) include both
 measurement sets, initial smoke runs, load before/after each process, source
-text and SHA-256 hashes for both encoders and the benchmark, and the diagnostic
-drivers. To replay the drivers, recreate the baseline worktree at the stated
-commit, copy the benchmark into it, and update their absolute checkout paths.
-The two timing methods have different harness overhead and must not be compared
-as an absolute before/after pair.
+text and SHA-256 hashes for both encoders and the benchmark, and the original
+capture scripts. Their absolute paths are capture provenance. The
+[portable paired replay](2026-09-14-encode-pointer-replay.py) accepts checkout
+and output paths at runtime. From a checkout containing the fixed encoder:
+
+```sh
+git worktree add --detach /tmp/pointer-baseline a769e6d67708ef119f7a0bb41230f6831398a236
+cp packages/memory/test/v2-path.bench.ts /tmp/pointer-baseline/packages/memory/test/
+python3 docs/history/development/performance/2026-09-14-encode-pointer-replay.py \
+  /tmp/pointer-baseline . /tmp/pointer-pairs.json
+```
+
+Choose any unused baseline directory and output file; the driver resolves the
+paths and requires identical benchmark bodies. Its transient driver lives
+outside both checkouts; results go only to the requested output file. It
+requires Python 3, Deno, and a Unix host with load averages. It preserves the
+capture's five processes, warmup, pair ordering, batch counts, and timer
+boundaries; it does not replay the separate Deno p75 runs. The two timing
+methods have different harness overhead and must not be compared as an absolute
+before/after pair.
 
 ## Semantics and remaining questions
 
@@ -111,8 +126,8 @@ change reduces the cost of each remaining call. Its impact on current pane
 startup requires a new deployed measurement.
 
 The original profile's `isPrefix` frame also remains only partially attributed.
-PR #7412 already indexed concrete dereference-trace coverage queries.
-The consumed-label metadata index in PR #7460 removes full label-map scans for
+PR #7412 already indexed concrete dereference-trace coverage queries. The
+consumed-label metadata index in PR #7460 removes full label-map scans for
 concrete narrow reads. Wildcard metadata or wildcard queries still use the
 shared prefix predicate over a scan, and broad reads can legitimately overlap
 many entries. Other callers in `prepare.ts` use that predicate too. A fresh
