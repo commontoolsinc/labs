@@ -4908,6 +4908,29 @@ describe("verbs", () => {
         .toEqual({ cancelled: [true], armed: 0 });
     });
 
+    it("takes no subscription and arms nothing where handing over its lens throws", async () => {
+      // The lens is made and handed over before anything is held, so a
+      // handover that throws leaves nothing to undo: no subscription taken,
+      // and no watch armed. Handed over any later, the throw would leave the
+      // watch's own subscription running with nothing holding its cancel.
+      //
+      // Kills: handing the lens over after the watch's first subscription,
+      // which leaves that subscription taken and uncancelled.
+
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await expect(runLine("watch title", shuttle, {
+        ...deps,
+        adoptLens: () => {
+          throw new Error("The lens had nowhere to go.");
+        },
+      })).rejects.toThrow("The lens had nowhere to go.");
+      expect({
+        taken: watched.settles.length,
+        armed: shuttle.session.watches.length,
+      }).toEqual({ taken: 0, armed: 0 });
+    });
+
     it("lists what is armed, numbering each", async () => {
       const shuttle = atPiece();
       const { deps } = watching();

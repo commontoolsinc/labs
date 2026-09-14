@@ -1054,9 +1054,10 @@ async function describe(
  * does read one.
  *
  * @throws Whatever taking a subscription throws — an unreachable server among
- * them. Nothing is left armed by one: the session holds the watch only once
- * both subscriptions are taken, and the first is cancelled on every way out
- * before that.
+ * them — and whatever handing the lens over throws. Nothing is left armed by
+ * either: the lens is handed over before anything is held, the session holds
+ * the watch only once both subscriptions are taken, and the first is
+ * cancelled on every way out before that.
  */
 async function watch(
   shuttle: Shuttle,
@@ -1107,15 +1108,16 @@ async function watch(
         `\`watches\` numbers what is armed, and \`unwatch %n\` disarms one.`,
     );
   }
+  // Made and handed over before anything is held, so the lens has its owner
+  // before it holds a subscription, and a handover that throws has nothing to
+  // undo.
+  const lens = new ValueLens(armed.label);
+  deps.adoptLens?.(lens);
   const watching = await subscribed(shuttle, place, at.input, deps, (value) => {
     armed.settled(value);
   });
   if (watching.kind !== "ran") return watching;
   armed.holding(watching.answer);
-  const lens = new ValueLens(armed.label);
-  // Handed over as it is made, so the lens has an owner before it holds a
-  // subscription, whatever becomes of the outcome it is returned in.
-  deps.adoptLens?.(lens);
   // From here the watch holds a subscription and the session does not hold the
   // watch, so every way out of this stretch but the lens disarms it — a line
   // the person cancelled, and a subscription that failed. Left armed, it is a
