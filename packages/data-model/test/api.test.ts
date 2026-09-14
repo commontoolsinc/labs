@@ -25,6 +25,10 @@ declare const value: FabricValue;
 declare const valuePlusNever: FabricValuePlus<never>;
 declare const valuePlusError: FabricValuePlus<Error>;
 declare const specialObject: FabricSpecialObject;
+declare const shaped: {
+  deepClone(frozen: boolean): FabricInstance;
+  shallowClone(frozen: boolean): FabricInstance;
+};
 declare const primitive: FabricPrimitive;
 declare const instance: FabricInstance;
 declare const instancePlusNever: FabricInstancePlus<never>;
@@ -55,40 +59,39 @@ function fabricValuePlusTypeChecks() {
 
 /** Carrier for the `FabricSpecialObject` family checks. */
 function fabricSpecialObjectTypeChecks() {
-  // Each subclass is a `FabricSpecialObject` and a `FabricValue`.
+  // `FabricSpecialObject` is the union of the two classes: each is one, the
+  // union is a `FabricValue`, and the union is neither class alone.
   const primitiveAsSpecial: FabricSpecialObject = primitive;
   const instanceAsSpecial: FabricSpecialObject = instance;
-  const primitiveAsValue: FabricValue = primitive;
-  const instanceAsValue: FabricValue = instance;
+  const specialAsValue: FabricValue = specialObject;
+  // @ts-expect-error the union is not a `FabricPrimitive`
+  const specialAsPrimitive: FabricPrimitive = specialObject;
+  // @ts-expect-error the union is not a `FabricInstance`
+  const specialAsInstance: FabricInstance = specialObject;
 
-  // The two subclasses are told apart, each by what the other lacks: the
-  // primitive brand on one side, the clone methods on the other. Without the
-  // brand a `FabricPrimitive` is structurally the base, and every instance
+  // The two classes are told apart, each by its own brand. Without one, a
+  // `FabricPrimitive` is structurally empty and a `FabricInstance` is its two
+  // clone methods, and every object, or every object with those methods,
   // would be one.
   // @ts-expect-error a `FabricInstance` is not a `FabricPrimitive`
   const instanceAsPrimitive: FabricPrimitive = instance;
   // @ts-expect-error a `FabricPrimitive` is not a `FabricInstance`
   const primitiveAsInstance: FabricInstance = primitive;
-
-  // The abstract base is neither subclass, and so not a `FabricValue`: no
-  // value is a bare `FabricSpecialObject`.
-  // @ts-expect-error the base is not a `FabricPrimitive`
-  const specialAsPrimitive: FabricPrimitive = specialObject;
-  // @ts-expect-error the base is not a `FabricInstance`
-  const specialAsInstance: FabricInstance = specialObject;
-  // @ts-expect-error the base is not a `FabricValue`
-  const specialAsValue: FabricValue = specialObject;
+  // @ts-expect-error an object with the clone methods is not a `FabricInstance`
+  const shapedAsInstance: FabricInstance = shaped;
+  // @ts-expect-error nor is it a `FabricValue`
+  const shapedAsValue: FabricValue = shaped;
 
   return {
     primitiveAsSpecial,
     instanceAsSpecial,
-    primitiveAsValue,
-    instanceAsValue,
-    instanceAsPrimitive,
-    primitiveAsInstance,
+    specialAsValue,
     specialAsPrimitive,
     specialAsInstance,
-    specialAsValue,
+    instanceAsPrimitive,
+    primitiveAsInstance,
+    shapedAsInstance,
+    shapedAsValue,
   };
 }
 
@@ -161,7 +164,7 @@ describe("api", () => {
   // decides it, and at run time only the carrier is observable.
 
   describe("FabricSpecialObject", () => {
-    it("has two subclasses that are each a `FabricValue`, told apart from each other and from the base", () => {
+    it("is the union of the two classes, each told from the other and from a look-alike by its brand", () => {
       expect(typeof fabricSpecialObjectTypeChecks).toBe("function");
     });
   });

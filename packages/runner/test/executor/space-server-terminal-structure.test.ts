@@ -64,12 +64,14 @@ describe("SpaceServer", () => {
         const phase of [
           "during confirmation",
           "across a deadline",
+          "at the post-input deadline",
           "through a changed owning backlink",
           "behind a sealed root",
           "behind an unrelated sealed write",
         ] as const
       ) {
         const crossDeadline = phase === "across a deadline";
+        const postInputDeadline = phase === "at the post-input deadline";
         const shadow = phase === "behind a sealed root";
         it(`settles a piece created ${phase} before covering its input`, async () => {
           const engine = await server.engineForSpace(space);
@@ -247,11 +249,82 @@ describe("SpaceServer", () => {
             },
           });
           const provider = runtime.storageManager.open(space);
+          let restoreTime: (() => void) | undefined;
+          let cancelLeftover: (() => void) | undefined;
+          let deadlineSampled = false;
+          let leftoverRuns = 0;
+          const deadlinePurges: { count: number; watermark: number }[] = [];
           const verdict = Promise.withResolvers<SealedCommitVerdict>();
           let sealed:
             | ReturnType<NonNullable<typeof provider.replica.sealNative>>
             | undefined;
           try {
+            if (postInputDeadline) {
+              const originalDate = Date;
+              const now = Date.now;
+              let expireSample = false;
+              // SES freezes Date.now, so replace its global constructor binding
+              // while retaining ordinary date construction and every other read.
+              class DeadlineDate extends originalDate {
+                static override now() {
+                  if (!expireSample) return now();
+                  expireSample = false;
+                  deadlineSampled = true;
+                  return now() + 100;
+                }
+              }
+              expect(Reflect.set(globalThis, "Date", DeadlineDate)).toBe(true);
+              restoreTime = () => {
+                expect(Reflect.set(globalThis, "Date", originalDate)).toBe(
+                  true,
+                );
+              };
+              const leftover = runtime.getCell(space, "post-input-lt1-copy")
+                .getAsNormalizedFullLink();
+              cancelLeftover = runtime.scheduler.addEventHandler(() => {
+                leftoverRuns++;
+              }, leftover);
+              let inputApplied = false;
+              const inputSynced = manager.inputSynced.bind(manager);
+              manager.inputSynced = async () => {
+                await inputSynced();
+                if (creationSeq !== undefined) inputApplied = true;
+              };
+              const foreignFloor = provider.replica.unappliedForeignSeqFloor!
+                .bind(provider.replica);
+              provider.replica.unappliedForeignSeqFloor = () => {
+                const floor = foreignFloor();
+                if (inputApplied && !deadlineSampled && floor === undefined) {
+                  // The input barrier has completed. This copy arrives before
+                  // the synchronous deadline decision, while its timer is held.
+                  runtime.scheduler.queueEvent(
+                    leftover,
+                    {},
+                    false,
+                    undefined,
+                    true,
+                    {
+                      eventId: "post-input-lt1-copy",
+                      time: now(),
+                      served: { firedAt: { user: owner.did() } },
+                    },
+                  );
+                  expireSample = true;
+                }
+                return floor;
+              };
+              const purge = runtime.scheduler.purgeQueuedEvents.bind(
+                runtime.scheduler,
+              );
+              runtime.scheduler.purgeQueuedEvents = (predicate, reason) => {
+                const count = purge(predicate, reason);
+                deadlinePurges.push({
+                  count,
+                  watermark: readWatermarkSeq(engine),
+                });
+                return count;
+              };
+            }
             expect(await settle(serving.activate())).toBe(true);
             expect(held).toBe(1);
             sealed = phase.startsWith("behind")
@@ -314,6 +387,15 @@ describe("SpaceServer", () => {
               await clock.settle();
             }
             expect(coveringCommits.length).toBeGreaterThan(0);
+            if (postInputDeadline) {
+              expect(deadlineSampled).toBe(true);
+              expect(stats.wavesBudgetExhausted).toBe(1);
+              expect(deadlinePurges).toHaveLength(1);
+              expect(deadlinePurges[0].count).toBe(1);
+              expect(deadlinePurges[0].watermark).toBeLessThan(creationSeq!);
+              expect(stats.events.lt1LeftoversPurged).toBe(1);
+              expect(leftoverRuns).toBe(0);
+            }
             for (const { watermark, total } of coveringCommits) {
               expect(total, `durable result at watermark ${watermark}`).toBe(
                 10,
@@ -321,6 +403,8 @@ describe("SpaceServer", () => {
             }
             expect(stats.structureLoadFailures).toBe(0);
           } finally {
+            restoreTime?.();
+            cancelLeftover?.();
             release.resolve();
             if (sealed !== undefined) {
               verdict.resolve({ withdrawn: { message: "test cleanup" } });

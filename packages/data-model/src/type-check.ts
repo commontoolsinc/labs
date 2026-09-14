@@ -39,9 +39,9 @@ import {
   FabricInstance,
   type FabricPlainObject,
   type FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
 } from "./interface.ts";
+import { BaseFabricSpecialObject } from "./fabric-bases/BaseFabricSpecialObject.ts";
 import { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 /**
@@ -54,8 +54,8 @@ import { refuseFabricInstance } from "./refuseFabricInstance.ts";
  * works on an empty one: it merges to `{}`, compares vacuously equal, descends
  * and finds nothing, or grafts a property onto a frozen value. A `false`
  * result says the value has no keys to reach, which is the whole story for a
- * `FabricPrimitive` and any further subclass, and for a class extending
- * `FabricSpecialObject` directly.
+ * `FabricPrimitive` and any further subclass, and for a class extending the
+ * runtime root `BaseFabricSpecialObject` directly.
  *
  * A `FabricInstance` returns `false` here as well, and that answer is
  * incomplete rather than wrong: an instance holds other `FabricValue`s, so a
@@ -89,7 +89,7 @@ export function isKeyableObjectOrArray(
 ): value is ReadonlyRecord;
 export function isKeyableObjectOrArray(value: unknown): boolean {
   return typeof value === "object" && value !== null &&
-    !(value instanceof FabricSpecialObject);
+    !(value instanceof BaseFabricSpecialObject);
 }
 
 /**
@@ -176,11 +176,9 @@ export function isWalkableObjectNotArray(value: unknown): boolean {
 }
 
 /**
- * Narrows to the `FabricSpecialObject` arms of `FabricValue` -- a
- * `FabricPrimitive` or a `FabricInstance` -- by one `instanceof`. The class is
- * abstract, so a value that passes is an instance of one of its two
- * subclasses, and this says so; `instanceof FabricSpecialObject` alone narrows
- * to the base, which is neither and so is not a `FabricValue`.
+ * Narrows to `FabricSpecialObject` -- a `FabricPrimitive` or a
+ * `FabricInstance` -- by one `instanceof` against the two classes' runtime
+ * root, `BaseFabricSpecialObject`, which is not itself a type a caller names.
  *
  * The first signature takes a value already known to be one of the two, and
  * only reports; narrowing there would leave the `false` branch with nothing.
@@ -192,7 +190,7 @@ export function isFabricSpecialObject(
   value: unknown,
 ): value is FabricPrimitive | FabricInstance;
 export function isFabricSpecialObject(value: unknown): boolean {
-  return value instanceof FabricSpecialObject;
+  return value instanceof BaseFabricSpecialObject;
 }
 
 /**

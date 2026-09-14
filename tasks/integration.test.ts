@@ -9,12 +9,14 @@ import {
   GENERATED_PORT_OFFSET_RANGE,
   integrationTestDir,
   offsetPorts,
+  precompilePatternTests,
   runFilteredIntegration,
   runPackageIntegration,
   selectIntegrationTestFiles,
   selectPatternTestFiles,
   startServers,
 } from "./integration.ts";
+import { PATTERN_TREES } from "./pattern-files.ts";
 
 Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () => {
   const files = [
@@ -420,4 +422,113 @@ Deno.test("every recorded blocked port is one fetch refuses", async () => {
     }
   }
   assertEquals(stillBlocked, ports.blockedPorts);
+});
+
+// The precompile pass, driven with a stand-in for the command runner: what it
+// asks to run, and how a group that fails or cannot spawn is reported.
+
+type Ran = Awaited<
+  ReturnType<NonNullable<Parameters<typeof precompilePatternTests>[4]>>
+>;
+
+const PRECOMPILE_ROOT = "/repo";
+const PATTERN_FILES = "abcdefghijkl".split("").map((name) =>
+  `packages/patterns/${name}/main.test.tsx`
+);
+const CONNECTOR_FILE = `${PATTERN_TREES[1].directory}/main.test.tsx`;
+
+async function precompileCapturing(
+  run: (argv: string[]) => Promise<Ran>,
+): Promise<{ argvs: string[][]; logged: string[] }> {
+  const argvs: string[][] = [];
+  const logged: string[] = [];
+  const previousLog = console.log;
+  console.log = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
+  try {
+    await precompilePatternTests(
+      ["cf"],
+      PRECOMPILE_ROOT,
+      [...PATTERN_FILES, CONNECTOR_FILE],
+      5,
+      (argv) => {
+        argvs.push(argv);
+        return run(argv);
+      },
+    );
+  } finally {
+    console.log = previousLog;
+  }
+  return { argvs, logged };
+}
+
+Deno.test("precompilePatternTests cuts the shard into runs of neighbors that share a root", async () => {
+  const { argvs } = await precompileCapturing(() =>
+    Promise.resolve({ success: true, code: 0 })
+  );
+  const groups = argvs.map((argv) => {
+    const root = argv[argv.indexOf("--root") + 1];
+    return { root, files: argv.slice(argv.indexOf("--root") + 2) };
+  });
+  // Thirteen files, five at a time: runs of three, and the lone file of the
+  // other root in a run of its own, never beside the others.
+  assertEquals(
+    groups.map((group) => group.files.length),
+    [3, 3, 3, 3, 1],
+  );
+  assertEquals(
+    groups.map((group) => group.root),
+    [
+      ...Array(4).fill(`${PRECOMPILE_ROOT}/packages/patterns`),
+      PRECOMPILE_ROOT,
+    ],
+  );
+  assertEquals(groups.flatMap((group) => group.files), [
+    ...PATTERN_FILES,
+    CONNECTOR_FILE,
+  ]);
+  for (const argv of argvs) {
+    assertEquals(argv.slice(0, 3), ["cf", "test", "--compile-only"]);
+  }
+});
+
+Deno.test("precompilePatternTests prints a failed group's output and goes on to the rest", async () => {
+  let calls = 0;
+  const { argvs, logged } = await precompileCapturing(() => {
+    calls++;
+    return Promise.resolve(
+      calls === 1
+        ? { success: false, code: 3, stdout: "first\nsecond", stderr: "third" }
+        : { success: true, code: 0 },
+    );
+  });
+  assertEquals(argvs.length, 5);
+  assertEquals(
+    logged.some((line) => line.endsWith("exited 3:")),
+    true,
+  );
+  for (const line of ["   first", "   second", "   third"]) {
+    assertEquals(logged.includes(line), true, line);
+  }
+  assertEquals(
+    logged.some((line) => line.includes("1 group(s) had a failure")),
+    true,
+  );
+});
+
+Deno.test("precompilePatternTests treats a run that cannot spawn as that group's failure", async () => {
+  let calls = 0;
+  const { argvs, logged } = await precompileCapturing(() => {
+    calls++;
+    return calls === 1
+      ? Promise.reject(new Error("no such binary"))
+      : Promise.resolve({ success: true, code: 0 });
+  });
+  assertEquals(argvs.length, 5);
+  assertEquals(
+    logged.some((line) => line.endsWith("exited 127:")),
+    true,
+  );
+  assertEquals(logged.includes("   Error: no such binary"), true);
 });

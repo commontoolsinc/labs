@@ -5,7 +5,6 @@
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   toCompactDebugString,
   toIndentedDebugString,
   valueEqual,
@@ -110,10 +109,10 @@ import {
 } from "./types.ts";
 import {
   CFC_CANONICAL_ALIAS_NAMES,
+  FABRIC_INSTANCE_BRAND,
   FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_PRIMITIVE_BRAND,
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
-  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   MERGEABLE_OP_METHODS,
 } from "@commonfabric/api";
@@ -323,9 +322,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // that module.
     FABRIC_PRIMITIVE_SCHEMA_TYPES,
     isFabricPrimitiveSchemaType,
-    FABRIC_SPECIAL_OBJECT_BRAND,
     FABRIC_INSTANCE_PLUS_BRAND,
     FABRIC_PRIMITIVE_BRAND,
+    FABRIC_INSTANCE_BRAND,
     MERGEABLE_OP_METHODS,
     CFC_CANONICAL_ALIAS_NAMES,
 
@@ -335,12 +334,12 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     UiPromptSlot,
     UiDisclosure,
 
-    // `FabricSpecialObject` classes -- runtime values backing the type
+    // The special-object classes -- runtime values backing the type
     // declarations in data-model/src/api.ts. Enables `new FabricEpochNsec(...)`
-    // and `instanceof` checks in patterns. `FabricSpecialObject` is abstract;
-    // it is bound for `instanceof` only. Listed in declaration order, so this
-    // list and those declarations can be compared directly.
-    FabricSpecialObject,
+    // and `instanceof` checks in patterns. `FabricInstance` and
+    // `FabricPrimitive` are abstract; they are bound for `instanceof` only.
+    // Listed in declaration order, so this list and those declarations can be
+    // compared directly.
     FabricInstance,
     FabricPrimitive,
     FabricEpochNsec,

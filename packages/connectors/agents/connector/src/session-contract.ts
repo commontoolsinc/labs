@@ -62,15 +62,19 @@ export function sessionChunkCause(
   };
 }
 
+/** The receipt cell for one command; a producer's command has its own,
+ * since its ID may repeat another queue's. */
 export function commandReceiptCause(
   spaceDid: string,
   ownerDid: string,
   commandId: string,
+  producer?: string,
 ): Record<string, string | number> {
   return {
     spaceDid,
     ownerDid: requiredIdentityPart(ownerDid, "ownerDid"),
     agentConnector: "command-receipt",
     commandId: normalizeCommandId(commandId),
+    ...(producer === undefined ? {} : { producer }),
   };
 }

@@ -1,5 +1,4 @@
 import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   type JSONSchemaObj,
   type SchemaPathSelector,
@@ -75,6 +74,7 @@ import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import type { LastNode } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -3956,9 +3956,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
               // A `FabricSpecialObject`'s surface is class accessors, so
               // its membership test is prototype-chain `in`; the nominal brand
               // key has no runtime existence and is satisfied by
-              // construction (removable with the other brand exemptions
-              // once the generator skips the brand — see
-              // opaqueLeafMissesRequired's doc comment).
+              // construction (the `TODO` on `FABRIC_SPECIAL_OBJECT_BRAND`
+              // says what removing that exemption takes).
               if (isFabricSpecialObject(doc.value)) {
                 if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
                 if (
@@ -5376,9 +5375,9 @@ export function canBranchMatch(
       for (const req of resolved.required) {
         // A `FabricSpecialObject`'s surface is class accessors, so its
         // membership test is prototype-chain `in`; the nominal brand key has no
-        // runtime existence and is satisfied by construction (removable
-        // with the other brand exemptions once the generator skips the
-        // brand — see opaqueLeafMissesRequired's doc comment).
+        // runtime existence and is satisfied by construction (the `TODO`
+        // on `FABRIC_SPECIAL_OBJECT_BRAND` says what removing that
+        // exemption takes).
         if (isFabricSpecialObject(value)) {
           if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(req as string in value)) return false;
@@ -5407,16 +5406,10 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * — prototype chain included, the same check the anyOf prefilters apply —
  * so a class accessor such as `FabricBytes.length` satisfies
  * `required: ["length"]` while a key the primitive lacks rejects it. The
- * nominal brand key that schemas from pre-vocabulary compilations require
- * has no runtime existence and is satisfied by the instance itself; that
- * exemption (here and at the other brand-aware check sites) exists for
- * those stored schemas — current generator emissions carry the brand
- * nowhere — and it can be removed once they have cycled out. That horizon
- * is redeploy-gated: pattern update refuses the structural-to-vocabulary
- * transition (`packages/piece/src/schema-compatibility.ts`), so such a
- * schema persists until its piece is redeployed. A
- * `FabricPrimitive`-typed schema is not gated here (its type never
- * includes "object").
+ * nominal brand key that schemas from pre-vocabulary compilations require,
+ * `FABRIC_SPECIAL_OBJECT_BRAND`, has no runtime existence and is satisfied
+ * by the instance itself. A `FabricPrimitive`-typed schema is not gated here
+ * (its type never includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
  * against a primitive's accessor values, so

@@ -8,6 +8,7 @@ import {
   CommandLedger,
   type NativeSessionSnapshot,
   type PromptInput,
+  type PublishedSessionState,
   type SessionPage,
 } from "@commonfabric/agents-connector";
 import {
@@ -51,6 +52,7 @@ class FakeDriver implements AgentDriver {
   failStart = false;
   stopFailures = 0;
   refreshCount = 0;
+  readCount = 0;
   activeLists = 0;
   maxActiveLists = 0;
   activePrompt = false;
@@ -136,6 +138,7 @@ class FakeDriver implements AgentDriver {
 
   readSession(): Promise<NativeSessionSnapshot> {
     this.refreshCount++;
+    this.readCount++;
     return Promise.resolve(structuredClone(this.snapshot));
   }
 
@@ -180,11 +183,13 @@ class FakeDriver implements AgentDriver {
 class FakeTarget implements AgentsHostTarget {
   healthValues: Record<string, unknown>[] = [];
   publications: CollectedSource[][] = [];
+  published = new Map<string, PublishedSessionState>();
+  failPublishedLookup = false;
   allocatedObservationSequences: number[] = [];
   observationSequences: number[] = [];
   checkoutDirectories: string[][] = [];
   receipts: AgentSessionCommandReceipt[] = [];
-  commandCallback?: (commands: unknown[]) => void;
+  commandCallback?: (commands: unknown[], producer?: string) => void;
   subscriptionCancelled = false;
   failSubscriptionCancel = false;
   failRefresh = false;
@@ -204,6 +209,13 @@ class FakeTarget implements AgentsHostTarget {
     release: PromiseWithResolvers<void>;
   };
   #nextObservationSequence = 1;
+
+  publishedSessions(): Promise<ReadonlyMap<string, PublishedSessionState>> {
+    if (this.failPublishedLookup) {
+      return Promise.reject(new Error("index unavailable"));
+    }
+    return Promise.resolve(this.published);
+  }
 
   beginSessionObservation(): number {
     const sequence = this.#nextObservationSequence++;
@@ -257,7 +269,7 @@ class FakeTarget implements AgentsHostTarget {
   }
 
   async subscribeCommands(
-    callback: (commands: unknown[]) => void,
+    callback: (commands: unknown[], producer?: string) => void,
   ): Promise<() => void> {
     this.commandCallback = callback;
     const gate = this.subscriptionGate;
@@ -275,11 +287,12 @@ class FakeTarget implements AgentsHostTarget {
 
   readReceipt(
     commandId: string,
+    producer?: string,
   ): Promise<AgentSessionCommandReceipt | undefined> {
     return Promise.resolve(
       structuredClone(
         [...this.receipts].reverse().find((receipt) =>
-          receipt.commandId === commandId
+          receipt.commandId === commandId && receipt.producer === producer
         ),
       ),
     );
@@ -306,11 +319,11 @@ class FakeTarget implements AgentsHostTarget {
     return Promise.resolve();
   }
 
-  sendCommands(commands: unknown[]): void {
+  sendCommands(commands: unknown[], producer?: string): void {
     if (!this.commandCallback) {
       throw new Error("command subscription is absent");
     }
-    this.commandCallback(commands);
+    this.commandCallback(commands, producer);
   }
 }
 
@@ -943,6 +956,140 @@ Deno.test("AgentsHost flushes unpublished receipts before stopping", async () =>
   }
 });
 
+Deno.test("AgentsHost names the producer queue on a failed receipt publication", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const driver = new FakeDriver("codex");
+    const target = new FakeTarget();
+    target.terminalReceiptFailures = 1;
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+    await host.start();
+    target.sendCommands([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "workbench-rename",
+      createdAt: "2026-07-20T00:05:00.000Z",
+      sourceId: "codex",
+      nativeSessionId: "codex-session",
+      type: "rename",
+      payload: { title: "Updated title" },
+    }], "workbench");
+
+    await target.failedTerminalAttempt.promise;
+    await target.commandFailureHealth.promise;
+    await host.synchronize("pending-receipt-check");
+    await assertRejects(
+      () => host.stop("test-complete"),
+      AggregateError,
+      "command worker operations failed",
+    );
+
+    const failure = host.health().activity.find((event) =>
+      event.type === "receipt-publication-failed"
+    );
+    assertEquals(failure?.details?.commandId, "workbench-rename");
+    assertEquals(failure?.details?.producer, "workbench");
+    assertEquals(
+      target.receipts.map((receipt) => [receipt.status, receipt.producer]),
+      [["in-flight", "workbench"], ["succeeded", "workbench"]],
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost names the producer queue on a failed command", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const driver = new FakeDriver("codex");
+    const target = new FakeTarget();
+    // A receipt already published on the producer's queue binds the command
+    // ID to another session, so the same ID for this session is refused.
+    target.receipts.push({
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      ownerDid: "did:key:test-owner",
+      commandId: "workbench-reused",
+      sourceId: "codex",
+      nativeSessionId: "another-session",
+      producer: "workbench",
+      status: "succeeded",
+      completedAt: "2026-07-20T00:04:00.000Z",
+    });
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+    await host.start();
+    target.sendCommands([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "workbench-reused",
+      createdAt: "2026-07-20T00:05:00.000Z",
+      sourceId: "codex",
+      nativeSessionId: "codex-session",
+      type: "rename",
+      payload: { title: "Updated title" },
+    }], "workbench");
+
+    const failureHealth = await target.commandFailureHealth.promise;
+    assertEquals(failureHealth.commandProcessing, {
+      accepting: true,
+      pendingReceiptPublications: 0,
+      failedCommands: 1,
+      lastError: "command ID belongs to another session: workbench-reused",
+    });
+
+    // The same ID on the owner's queue is another command; its success does
+    // not clear the producer's failure.
+    target.sendCommands([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      ownerDid: "did:key:test-owner",
+      id: "workbench-reused",
+      createdAt: "2026-07-20T00:06:00.000Z",
+      sourceId: "codex",
+      nativeSessionId: "codex-session",
+      type: "rename",
+      payload: { title: "Updated title" },
+    }]);
+    const owners = await target.terminalReceipt.promise;
+    assertEquals(owners.producer, undefined);
+    assertEquals(host.health().commandProcessing.failedCommands, 1);
+    await assertRejects(
+      () => host.stop("test-complete"),
+      AggregateError,
+      "command worker operations failed",
+    );
+
+    const failure = host.health().activity.find((event) =>
+      event.type === "command-task-failed"
+    );
+    assertEquals(failure?.details?.commandId, "workbench-reused");
+    assertEquals(failure?.details?.producer, "workbench");
+    assertEquals(failure?.details?.nativeSessionId, "codex-session");
+    assertEquals(
+      target.receipts.map((receipt) => [receipt.status, receipt.producer]),
+      [
+        ["succeeded", "workbench"],
+        ["in-flight", undefined],
+        ["succeeded", undefined],
+      ],
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("AgentsHost checks startup cancellation after initial collection", async () => {
   const directory = await Deno.makeTempDir();
   try {
@@ -1244,6 +1391,78 @@ Deno.test("AgentsHost continues stopping after a synchronous driver failure", as
     );
     assertEquals(second.stopped, true);
     assertEquals(host.health().status, "stopped");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHost retains a session whose published copy matches its inventory", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const target = new FakeTarget();
+    const driver = new FakeDriver("codex");
+    const summary = driver.snapshot.summary;
+    const key = "codex/codex-session";
+    const published = (updatedAt: string | null): PublishedSessionState => ({
+      driver: "codex-app-server",
+      updatedAt,
+      archived: summary.archived,
+      active: summary.active,
+      syncStatus: "complete",
+    });
+    target.published.set(key, published(summary.updatedAt));
+    const host = new AgentsHost({
+      sources: [sourceConfig("codex")],
+      target,
+      targetDescription: TARGET_DESCRIPTION,
+      ledger: await openLedger(directory),
+      createDriver: () => driver,
+      clock: clock(),
+    });
+
+    // The first collection after a start reads every listed session, a
+    // matching published copy or not: the driver learns a session's controls
+    // when it reads it. The next collection retains the session it has read.
+    await host.start({ acceptCommands: false });
+    assertEquals(driver.readCount, 1);
+    assertEquals(target.publications[0][0].retained, []);
+    assertEquals(target.publications[0][0].sessions.length, 1);
+    await host.synchronize("read-once");
+    assertEquals(driver.readCount, 1);
+    assertEquals(target.publications[1][0].sessions, []);
+    assertEquals(
+      target.publications[1][0].retained?.map((retained) =>
+        retained.nativeSessionId
+      ),
+      ["codex-session"],
+    );
+    assertEquals(
+      host.health().activity.findLast((entry) =>
+        entry.type === "source-collection-completed"
+      )?.details,
+      { complete: true, errorCount: 0, sessionCount: 0, retainedCount: 1 },
+    );
+
+    // A different update time means the copy is behind, so it is read.
+    target.published.set(key, published("2026-07-20T00:00:30.000Z"));
+    await host.synchronize("changed");
+    assertEquals(driver.readCount, 2);
+    assertEquals(target.publications[2][0].retained, []);
+    assertEquals(target.publications[2][0].sessions.length, 1);
+
+    // Without the index, nothing can be retained and everything is read.
+    target.published.set(key, published(summary.updatedAt));
+    target.failPublishedLookup = true;
+    await host.synchronize("unreadable-index");
+    assertEquals(driver.readCount, 3);
+    assertEquals(target.publications[3][0].retained, []);
+    assertEquals(
+      host.health().activity.some((entry) =>
+        entry.type === "published-sessions-unavailable"
+      ),
+      true,
+    );
+    await host.stop();
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

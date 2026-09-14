@@ -65,8 +65,9 @@ wrapper classes (Section 1.4).
 > **Package note:** The data model implementation lives in
 > `packages/data-model/`. The `FabricValue` union and the types beside it are
 > declared in `api.ts`, together with the pattern-visible declarations of the
-> base classes (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`).
-> The base classes themselves, the layer types, and the conversion-layer types
+> special-object classes (`FabricInstance`, `FabricPrimitive`) and their union
+> `FabricSpecialObject`. The classes themselves, the layer types, and the
+> conversion-layer types
 > are declared in `interface.ts`, which also re-exports every type `api.ts`
 > declares. The in-process lifecycle symbols (`DEEP_FREEZE`, `IS_DEEP_FROZEN`)
 > live in `fabric-bases/`, on `BaseFabricInstance` alongside the abstract base
@@ -303,7 +304,7 @@ every container, so that `FabricValuePlus<never>` is `FabricValue` itself.
 `FabricValueLayer` is the same mechanism at a different `PlusType`. The array
 and plain-object arms carry `PlusType` structurally, in their element and value
 types. The instance arm, `FabricInstancePlus<PlusType>`, carries it as a
-type-only brand -- the `@commonfabric/FabricInstancePlus` member, which
+type-only brand -- the member keyed by `FABRIC_INSTANCE_PLUS_BRAND`, which
 `FabricInstance` declares at `never` -- because an instance holds its contents
 privately and nothing structural on it can witness what they may include.
 
@@ -384,9 +385,8 @@ content-level identity (see Section 6.3), but it is a `FabricPrimitive`, not a
 The **special primitive** types (`FabricEpochNsec`, `FabricEpochDay`,
 `FabricHash`, `FabricBytes`, `FabricKeyPair`, `FabricRegExp`) are **not**
 `FabricInstance`s — they are `FabricPrimitive` subclasses (Section 1.4.6).
-`FabricPrimitive` extends `FabricSpecialObject`, and the `FabricValue` union
-includes `FabricSpecialObject`, so all `FabricPrimitive` subclasses are
-implicitly members of `FabricValue`. They are always-frozen value types that
+`FabricPrimitive` is an arm of the `FabricValue` union, so all
+`FabricPrimitive` subclasses are implicitly members of `FabricValue`. They are always-frozen value types that
 bypass the `freeze` option in conversion functions. Each hosts its own codec for
 wire-format encoding, but bound per wire format — under `[JSON_CODEC]` for JSON
 — rather than under the format-neutral `[CODEC]` a wrapper binds, because a
@@ -479,7 +479,7 @@ Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
 `FabricEpochDay`, `FabricHash`, `FabricBytes`, `FabricKeyPair`,
 `FabricRegExp`) are **`FabricPrimitive` subclasses** and do not extend
 `FabricInstance`. They are included in `FabricValue` via the
-`FabricSpecialObject` arm of the union (Section 1.4.6). See Sections 1.4.5
+`FabricPrimitive` arm of the union (Section 1.4.6). See Sections 1.4.5
 through 1.4.11.
 
 | Special Primitive Type | Extends | Wire Tag | Stored Value | Notes |
@@ -875,67 +875,74 @@ export class FabricRegExp extends FabricPrimitive {
 }
 ```
 
-#### 1.4.6 `FabricSpecialObject` and `FabricPrimitive` (Base Classes)
+#### 1.4.6 `FabricPrimitive`, `FabricInstance`, and `FabricSpecialObject`
 
-The fabric type hierarchy uses two abstract base classes that share a common
-root:
+The fabric type hierarchy has two abstract classes, and a type naming either:
 
 ```
-FabricSpecialObject (abstract root)
+BaseFabricSpecialObject (runtime root; an implementation detail)
 ├── FabricInstance (abstract — object-like protocol types)
 └── FabricPrimitive (abstract — immutable special primitives)
+
+FabricSpecialObject = FabricPrimitive | FabricInstance
 ```
 
-**`FabricSpecialObject`** is the common superclass of both branches, which are
-the only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
-differ along one axis: whether the data model treats an instance as a
-primitive. A `FabricPrimitive` is treated the way a built-in `string` or
-`number` is, and a `FabricInstance` the way an `object` is. What follows from
-that, and what a caller sees of it, is that a `FabricInstance` may hold and
-expose arbitrary outgoing `FabricValue` references, and a `FabricPrimitive` may
-not. The common superclass enables a single `instanceof FabricSpecialObject`
-check wherever code needs to recognize any fabric-system value without caring
-which branch it belongs to.
+**`FabricSpecialObject`** is the union of the two classes, which are the only
+two kinds of `FabricValue` beyond the JavaScript built-ins. The two differ along
+one axis: whether the data model treats an instance as a primitive. A
+`FabricPrimitive` is treated the way a built-in `string` or `number` is, and a
+`FabricInstance` the way an `object` is. What follows from that, and what a
+caller sees of it, is that a `FabricInstance` may hold and expose arbitrary
+outgoing `FabricValue` references, and a `FabricPrimitive` may not.
 
-It is **nominal**, not structural: the `@commonfabric/FabricSpecialObject`
-member is a brand that exists only in the type system (`declare` emits no
-runtime member, and nothing reads the key). This matters for what `FabricValue`
-means as a static claim. TypeScript is structurally typed, so were the class
-empty, every object would satisfy `FabricSpecialObject` — and therefore satisfy
-`FabricValue`, since the union includes this type. Annotating a value
-`FabricValue` would then assert nothing at all. The brand is what makes the
-annotation carry information.
+At runtime the two classes extend one memberless root, `BaseFabricSpecialObject`
+in `fabric-bases/`, so that `isFabricSpecialObject()` recognizes either with a
+single `instanceof`, narrowing to the union. The root is not a type a caller
+names, and the data model defines no other subclass of it; an instance of one
+defined elsewhere is not a `FabricValue`.
 
-The brand is a well-known string key rather than a `unique symbol` because
-`interface.ts` is deliberately free of runtime imports, and a `unique symbol`
-would have to be imported as a *value*. `packages/data-model/src/api.ts` declares
-the identical member; the two must agree exactly, since a value branded by one
+Each class is **nominal**, not structural: each declares a brand member that
+exists only in the type system (`declare` emits no runtime member, and nothing
+reads the key), keyed by an interned symbol that `api.ts` exports --
+`FABRIC_PRIMITIVE_BRAND` and `FABRIC_INSTANCE_BRAND`. This matters for what `FabricValue`
+means as a static claim. TypeScript is structurally typed, so were
+`FabricPrimitive` empty, every object would satisfy it — and therefore satisfy
+`FabricValue`, since the union includes it — and were `FabricInstance` only its
+two clone methods, so would every object carrying two methods by those names.
+The brands are what make the annotation carry information.
+
+Each brand is a symbol so that it can never be mistaken for data: a
+symbol-keyed member has no place in a schema, where a string-keyed one has to
+be skipped by name. Each is interned so that every realm and every copy of the
+module agree on its value. `packages/data-model/src/api.ts` declares the
+identical members; the two must agree exactly, since a value branded by one
 would otherwise not satisfy the other, and `api-agreement.ts` stops compiling
 when they stop agreeing.
 
 ```typescript
-// file: packages/data-model/src/interface.ts
+// Shown at module scope.
+// file: packages/data-model/src/api.ts
 
 /**
- * Common base class for `FabricInstance` and `FabricPrimitive`, which are the
- * only two kinds of `FabricValue` beyond the JavaScript built-ins. The two
- * differ along one axis: whether the data model treats an instance as a
- * primitive. A `FabricPrimitive` is treated the way a built-in `string` or
+ * The two kinds of `FabricValue` beyond the JavaScript built-ins, as one type.
+ * The two differ along one axis: whether the data model treats an instance as
+ * a primitive. A `FabricPrimitive` is treated the way a built-in `string` or
  * `number` is; a `FabricInstance` is treated the way an `object` is. What
  * follows from that, and what a caller sees of it, is that a `FabricInstance`
  * may hold and expose arbitrary outgoing `FabricValue` references, and a
- * `FabricPrimitive` may not. Enables a single `instanceof FabricSpecialObject`
- * check wherever code needs to recognize any fabric-system value without
- * caring which branch of the hierarchy it belongs to.
+ * `FabricPrimitive` may not. `isFabricSpecialObject()` narrows to this type
+ * with one check.
+ *
+ * As part of the overall `FabricValue` contract, no instance of either class
+ * exposes any enumerable own property; all interaction with an instance is via
+ * its concrete class's instance members, and in particular an object-spread
+ * (`{ ...instance }`) on an instance always yields an empty object (`{}`).
  */
-export abstract class FabricSpecialObject {
-  declare readonly "@commonfabric/FabricSpecialObject": true;
-}
+type FabricSpecialObject = FabricPrimitive | FabricInstance;
 ```
 
 **`FabricPrimitive`** is the abstract base class for non-`FabricInstance` types
-that are included in `FabricValue` via the `FabricSpecialObject` arm of the
-union. It extends `FabricSpecialObject`.
+that form the `FabricPrimitive` arm of `FabricValue`.
 
 - `UnknownValue` and `ProblematicValue` are the `FabricInstance` subtypes
   that preserve a type tag alongside their state (Section 3.2).
@@ -946,6 +953,12 @@ union. It extends `FabricSpecialObject`.
 ```typescript
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
+
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
@@ -965,14 +978,15 @@ union. It extends `FabricSpecialObject`.
  *
  * See Section 1.4.6 of the formal spec.
  */
-export abstract class FabricPrimitive extends FabricSpecialObject {
+export abstract class FabricPrimitive extends BaseFabricSpecialObject {
   /**
    * The nominal brand that tells a `FabricPrimitive` from a `FabricInstance`
-   * in the type system; without it this class is structurally the
-   * `FabricSpecialObject` brand alone. Declared the way that brand is, and for
-   * the same reasons; `api.ts` declares the identical member.
+   * and from every other object, in the type system; without it this class is
+   * structurally empty. `declare` emits no runtime member, and nothing ever
+   * reads the key. `api.ts` declares the identical member, and
+   * `api-agreement.ts` stops compiling if the two stop agreeing.
    */
-  declare readonly "@commonfabric/FabricPrimitive": true;
+  declare readonly [FABRIC_PRIMITIVE_BRAND]: true;
 
   /** Constructs an instance. */
   constructor() {
@@ -1722,6 +1736,12 @@ class-side `[CODEC]` (Section 2.4).
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
+import {
+  FABRIC_INSTANCE_BRAND,
+  FABRIC_INSTANCE_PLUS_BRAND,
+  FABRIC_PRIMITIVE_BRAND,
+} from "./api.ts";
+
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
  * protocol as non-primitives. An instance may hold and expose arbitrary
@@ -1750,14 +1770,24 @@ class-side `[CODEC]` (Section 2.4).
  * declared on `BaseFabricInstance`, not here: they are implementation plumbing
  * and are kept off this pure-protocol class.
  */
-export abstract class FabricInstance extends FabricSpecialObject {
+export abstract class FabricInstance extends BaseFabricSpecialObject {
+  /**
+   * The nominal brand that tells a `FabricInstance` from any other object with
+   * the two clone methods, in the type system; the runtime root carries no
+   * brand, so this member is what makes the class nominal. `declare` emits no
+   * runtime member, and nothing ever reads the key. `api.ts` declares the
+   * identical member, and `api-agreement.ts` stops compiling if the two stop
+   * agreeing.
+   */
+  declare readonly [FABRIC_INSTANCE_BRAND]: true;
+
   /**
    * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
    * `never` here since an instance of this class holds only `FabricValue`s.
-   * Declared the way the `FabricSpecialObject` brand is, and for the same
-   * reasons; `api.ts` declares the identical member.
+   * Declared the way the brand above is, and for the same reasons; `api.ts`
+   * declares the identical member.
    */
-  declare readonly "@commonfabric/FabricInstancePlus"?: never;
+  declare readonly [FABRIC_INSTANCE_PLUS_BRAND]?: never;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
