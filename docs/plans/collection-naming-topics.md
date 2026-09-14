@@ -22,6 +22,58 @@ This block is LIVE: the change that moves a stage updates it here.
 | S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed twice and held, awaiting a demand for named Topics rather than a technical answer |
 | S5 — deferred, not scheduled | — |
 
+### What remains, and none of it is built
+
+The stages the table marks on main give a collection that adopts `naming.ts`
+member names end to end: allocation, resolution at the CLI, the shell opening
+`/<space>/top/42`, `#42` in the editor. **That is not the same as the work
+being finished.** Five things are outstanding, and each still needs
+execution.
+
+1. **Decision 14 — a member takes one input naming its board.** Ruled, and
+   measured buildable in
+   [the board-demand measurement](../history/plans/collection-naming-board-demand-measurement-2026-09-07.md):
+   an item whose one `board` input names only the derived tables compiled, read
+   its board-given name, and reached the same number of other-member documents,
+   with the same byte total, as the item wired with one link per table, from 2
+   members to 40. **Unbuilt.** Until it lands, every collection adopting the
+   namespace pays one `cf piece link` per existing member, per board-to-member
+   input.
+
+2. **A table handed to every member delivers every member's document whole**
+   (#7439). Measured on Topics: a member's declared demand over `boardCrossrefs`
+   or `boardNames` reaches every other member, 90.5% of the frame on a
+   40-member board; the share grew with member count from 4 to 40, and at 10
+   members the document and byte counts were unchanged across the mention
+   densities measured. `unknown` bounds the walk's descent, not its delivery,
+   and comments in `naming.ts` and `topic.tsx` say otherwise. The fix is a
+   row-shape change: the `comparable` marker was measured to leave the document
+   and byte counts unchanged. It touches the same inputs decision 14 touches,
+   so the two belong in one pass.
+
+3. **S6 item 4 — the production backfill.** Held for want of a demand rather
+   than a technical answer. Its sequence, and the contract breaks it still
+   needs, are recorded under S6 below. Two things that gated it have since
+   moved. #6969 was closed by #7178, and the patched check accepted the board
+   source retrieved from a local snapshot of the Topics board taken August 31;
+   and an optional `unknown` member demand no longer refuses. The
+   [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md)
+   records both.
+
+4. **The `naming` declaration has no reader** (#6986, #6994). Every collection
+   publishes `NamingPolicy`; nothing consumes it. Member resolution applies no
+   grammar, no renderer reads `compact`, and `name` is never set. It is an
+   extension point with nothing extending through it, recorded in the spec's
+   "Deliberately open" rather than claimed as working.
+
+5. **The citation surfaces are partial.** A mention pill shows whatever its
+   destination publishes, whichever collection named it (#6985); a URL naming
+   more than a member is answered as if it named a member (#6993); "Copy
+   reference" yields an address that does not resolve outside the fabric
+   (#6995).
+
+S5 is separately deferred and unscheduled; its scope is listed under S5 below.
+
 ## Decisions, ruled 2026-09-03
 
 Each of these was a question with a recommendation; the recommendation was
@@ -338,11 +390,13 @@ Mike's call, after S4.
    The sequence that makes running it routine rather than a one-way door,
    whenever consensus appears:
 
-   1. Fix #6969 first. `setsrc --check` exhausts the heap against the
-      deployed board, so today the live board cannot be inspected before it
-      is written to. That is the only step that converts this into a
-      checkable operation, and it is worth doing whether or not the graft
-      runs.
+   1. Check the deployed board with `setsrc --check` before writing to it.
+      #6969, that check exhausting the heap against the deployed board, was
+      closed by #7178. The
+      [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md)
+      ran the patched check over a local snapshot of the board taken August
+      31, where it accepted the retrieved board source; production was not
+      contacted.
    2. Deploy the board leg, which is refused over topics filed before the
       namespace and needs `--dangerously-allow-incompatible-schema` until a
       general mechanism for adding a property to existing data exists.

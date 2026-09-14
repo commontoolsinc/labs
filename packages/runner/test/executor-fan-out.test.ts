@@ -371,10 +371,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     const writeDraft = async (runtime: Runtime, value: string) => {
       const arg = typedArg(runtime);
       await arg.sync();
-      const written = await runtime.editWithRetry((tx) => {
+      const result = await runtime.editWithRetry((tx) => {
         arg.key("draft").withTx(tx).set(value);
       });
-      expect(written.error).toBeUndefined();
+      expect(result.error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
     };
@@ -392,10 +392,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         )
         : typedArg(runtime);
       await arg.sync();
-      const written = await runtime.editWithRetry((tx) => {
+      const result = await runtime.editWithRetry((tx) => {
         arg.key("note").withTx(tx).set(value);
       });
-      expect(written.error).toBeUndefined();
+      expect(result.error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
     };

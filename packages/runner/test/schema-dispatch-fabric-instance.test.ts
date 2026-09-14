@@ -28,11 +28,9 @@ import type {
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
-  type SchemaPathSelector,
-} from "@commonfabric/api";
+import type { SchemaPathSelector } from "@commonfabric/api";
 
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "../src/fabric-special-object-brand.ts";
 import {
   createDefaultTraversalContext,
   type IMemorySpaceValueAttestation,

@@ -214,9 +214,14 @@ settling happens before the timings start.
 `packages/patterns/integration/topic-board-navigation.bench.ts` measures what a
 person waits for rather than what a component costs: a browser loading a topic
 board carrying dozens of topics, signing in, the cards appearing, opening a
-topic, and following a crossref to a sibling. Its `topic board (index demand)` group charts
+topic, and following a crossref to a sibling. Its `topic board` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
+
+The `load` segment ends after the shell publishes its ready application and
+selects the requested board route. Shell readiness is an explicit notification
+from bootstrap; selecting the route does not require its topic data to have
+rendered. This keeps the segment boundary independent of DOM mutation timing.
 
 Each segment reaches its starting point with the timer stopped — `Deno.bench`'s
 `b.start()` and `b.end()` bracket only the segment itself — so every iteration
@@ -258,9 +263,8 @@ The seeder holds a subscription to the board's index using its durable result
 schema. This keeps the current list demanded without subscribing to each
 topic's full result. Set `CF_TOPIC_BOARD_DEMAND=full` in either board benchmark,
 or pass `--demand=full` to the seeder, to run the full-result stress workload.
-The fixture records `seedDemand`, diagnostics name it, and benchmark groups
-include `index demand` or `full demand`; compare execution arms with the same
-setting. An unqualified `topic board` series is a separate workload series.
+The fixture records `seedDemand`, and diagnostics name it. Both seeding modes
+use the same benchmark groups; compare execution arms with the same setting.
 These subscriptions do not bound every seeding read: controller writes also
 pull their result to complete, and citation creation addresses the topics.
 
@@ -271,10 +275,10 @@ change that is flat at thirty topics and quadratic at three hundred looks the
 same on the navigation benchmark's `board` series.
 `packages/patterns/integration/topic-board-scale.bench.ts` measures that same
 thing — a signed-in cold load, timed until every card has rendered — across
-board sizes of 100, 1000, and 10000, in a `topic board scale (index demand)` group whose
+board sizes of 100, 1000, and 10000, in a `topic board scale` group whose
 series are named for the sizes. The boards carry no crossrefs, so the numbers
 describe the cost of the list rather than of the join over it.
-`CF_TOPIC_BOARD_DEMAND=full` selects the separately labeled full-demand group.
+`CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding.
 The navigation fixture's citations and the scale fixture's lack of citations
 are distinct workloads, so their timings do not form a size-only comparison.
 
@@ -472,6 +476,38 @@ The command reports measured totals and per-run maxima for every interval. Keep
 the functional assertions, declared collection sizes, and render windows when
 adjusting a ceiling; a budget failure should lead to attribution of the added
 reads before changing the limit.
+
+## Consumed CFC source collection
+
+`packages/runner/test/cfc-consumed-source-dedup.bench.ts` calls
+`collectConsumedLabel()` over real emulated-storage transaction reads at 128,
+458, 916, 1,832, and 2,668 consumed sources. Each address contributes two
+distinct confidentiality atoms; all addresses share one document and have
+four-segment logical paths. The source count measures provenance entries,
+while the joined confidentiality label contains only two atoms.
+
+The `root label` arm keeps metadata width at one entry. The `field labels`
+arm labels each read path separately, holding reads and resulting source counts
+fixed while increasing label-map width. This pair distinguishes source
+deduplication cost from the collector's per-read metadata work. It does not
+measure pattern compilation, `lift`/`.map()` execution, or browser startup.
+
+Each sample opens a fresh transaction and reads the values outside timing.
+The timed interval contains one collector call, including its verifier reads,
+metadata validation, overlap checks, and atom joins. Untimed checks verify
+read, source, and joined-atom counts; fixture construction and transaction
+cleanup are also outside timing. Exact counts go to stderr, and stdout remains
+the benchmark JSON report:
+
+```sh
+deno bench --no-lock -A --json packages/runner/test/cfc-consumed-source-dedup.bench.ts
+```
+
+The [local measurement report](../history/development/performance/2026-09-14-cfc-consumed-source-dedup.md)
+records an alternating source-count sweep and the limits of that measurement.
+The [metadata-width measurement](../history/development/performance/2026-09-14-cfc-consumed-label-index.md)
+uses the same fixture to compare per-document validation and indexed path
+lookup. Index construction remains inside the collector timer.
 
 ## Scoped snapshot memo reuse
 

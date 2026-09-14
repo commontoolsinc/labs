@@ -242,12 +242,19 @@ when the replacement host does not share the earlier host's local ledger.
 
 The command-line wrapper requests collections periodically and on `SIGHUP`. It
 keeps one pending request while a collection is active. Calls that reach
-`AgentsHost.synchronize(reason)` are serialized. Each collection asks every
-running driver for its complete inventory and session snapshots. The host
-allocates a target observation sequence before those reads. It publishes all
-successful and partial source results together through
-`AgentFabricTarget.publish()`. The sequence prevents that collection from
-overwriting a newer session refresh if the refresh finishes first.
+`AgentsHost.synchronize(reason)` are serialized. Each collection first reads the
+complete index, then asks every running driver for its complete inventory. A
+listed session is read only when its inventory summary differs from its
+published copy: a session with the same driver, update time, archived state, and
+active state as a complete published row is retained, once the running driver
+has read it: a driver learns a session's controls (its mode and configuration
+options) when it reads the session, so the first collection after a start reads
+every listed session. A retained session's graph and previews stay, and its row
+takes the checkout's current Git context. When the index cannot be read, every
+listed session is read. The host allocates a target observation sequence before
+those reads. It publishes all successful and partial source results together
+through `AgentFabricTarget.publish()`. The sequence prevents that collection
+from overwriting a newer session refresh if the refresh finishes first.
 
 Provider read failures do not discard sessions read successfully from the same
 source. They make that source and the overall host degraded. A Fabric
