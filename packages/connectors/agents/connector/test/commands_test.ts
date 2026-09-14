@@ -72,6 +72,76 @@ Deno.test("command worker claims before execution and deduplicates command ids",
   await Deno.remove(dir, { recursive: true });
 });
 
+Deno.test("command worker keeps the same command ID apart across producer queues", async () => {
+  const dir = await Deno.makeTempDir();
+  const ledger = await CommandLedger.open(`${dir}/ledger.json`);
+  const published: Array<[string | undefined, string]> = [];
+  const target: CommandTarget = {
+    publishReceipt: (receipt) => {
+      published.push([receipt.producer, receipt.status]);
+      return Promise.resolve();
+    },
+    refreshSession: () => Promise.resolve(),
+  };
+  let renameCalls = 0;
+  const driver = {
+    source: {
+      id: "fake:default",
+      driver: "acp",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: true,
+        cancel: true,
+        rename: true,
+        setMode: false,
+        setConfigOption: false,
+      },
+    },
+    renameSession: () => {
+      renameCalls++;
+      return Promise.resolve({ status: "succeeded" as const });
+    },
+  } as unknown as AgentDriver;
+  const worker = new CommandWorker(
+    new Map([[driver.source.id, driver]]),
+    [target],
+    ledger,
+    "did:key:test-owner",
+  );
+  const command = {
+    schema: AGENT_CONNECTOR_SCHEMAS.command,
+    ownerDid: "did:key:test-owner",
+    id: "one",
+    createdAt: "2026-09-13T00:00:00.000Z",
+    sourceId: "fake:default",
+    nativeSessionId: "session-1",
+    type: "rename",
+    payload: { title: "New name" },
+  };
+
+  // The same ID from two producers is two commands, each with its receipt.
+  await worker.handle([command], "workbench");
+  await worker.handle([command], "dashboard");
+  await worker.drain();
+  assertEquals(renameCalls, 2);
+  assertEquals(published, [
+    ["workbench", "in-flight"],
+    ["workbench", "succeeded"],
+    ["dashboard", "in-flight"],
+    ["dashboard", "succeeded"],
+  ]);
+  assertEquals(ledger.get("one", "workbench")?.producer, "workbench");
+  assertEquals(ledger.get("one", "dashboard")?.producer, "dashboard");
+  assertEquals(ledger.get("one"), undefined);
+
+  // The same ID again on one queue is the same command delivered again.
+  await worker.handle([command], "workbench");
+  await worker.drain();
+  assertEquals(renameCalls, 2);
+  await Deno.remove(dir, { recursive: true });
+});
+
 Deno.test("command worker ignores commands for another owner", async () => {
   const dir = await Deno.makeTempDir();
   const ledger = await CommandLedger.open(`${dir}/ledger.json`);
@@ -706,7 +776,7 @@ Deno.test("command ledger validates receipt keys and contents", async () => {
     await assertRejects(
       () => CommandLedger.open(path),
       Error,
-      "command ledger receipt key does not match commandId: stored-key",
+      "command ledger receipt key does not match its identity: stored-key",
     );
 
     await Deno.writeTextFile(
@@ -1295,6 +1365,12 @@ Deno.test("command receipt parsing rejects every malformed boundary field", () =
       { ...receipt, sourceId: " Fake:Default " },
       "sourceId is not normalized",
     ],
+    ["command", { ...receipt, producer: "" }, "producer must be a string"],
+    [
+      "command",
+      { ...receipt, producer: " Workbench " },
+      "producer is not normalized",
+    ],
     [
       "command",
       { ...receipt, providerOperationId: "" },
@@ -1305,6 +1381,10 @@ Deno.test("command receipt parsing rejects every malformed boundary field", () =
   for (const [commandId, value, message] of cases) {
     assertThrows(() => parseCommandReceipt(commandId, value), Error, message);
   }
+  assertEquals(
+    parseCommandReceipt("command", { ...receipt, producer: "workbench" }),
+    { ...receipt, producer: "workbench" },
+  );
 });
 
 Deno.test("command worker covers unavailable sources and control commands", async () => {

@@ -21,7 +21,7 @@ import {
   SINGLE_SUBSCHEMA_KEYS,
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
-} from "@commonfabric/runner/schema-walk";
+} from "@commonfabric/data-model-schema/schema-walk";
 import { internSchema } from "@commonfabric/data-model-schema";
 import {
   fabricAwareEqual,
@@ -183,7 +183,7 @@ const SEMANTIC_EXTENSION_KEYS = [
  * {@link SUBSCHEMA_LIST_KEYS} and {@link SUBSCHEMA_MAP_KEYS} these are the
  * edges a walk follows to reach every schema written inside another one.
  *
- * The vocabulary comes from `@commonfabric/runner/schema-walk`, which is where
+ * The vocabulary comes from `@commonfabric/data-model-schema/schema-walk`, which is where
  * this repository keeps it. Both walks here need it complete rather than
  * limited to what the generator emits: a schema reaching this gate may have
  * been written into a space by anything, and `validateSchemaDefinition` accepts

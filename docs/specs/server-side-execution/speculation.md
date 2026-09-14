@@ -181,8 +181,8 @@ currency. The existing overlay and retirement rules below still apply.
      population audit).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
-     it) and the run's transaction aborts with it as the reason — the
-     same non-event disposal, re-triggering on the reads so far. A
+     it) and produces an undefined result through the ordinary result
+     path — the same non-event disposal, re-triggering on the reads so far. A
      pattern body cannot yet MINT the error itself (it is
      runner-internal; a pattern-facing refusal export is a flagged API
      question with the owner), so the built coverage is the

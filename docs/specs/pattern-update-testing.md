@@ -253,6 +253,24 @@ separately: nothing replayed could have needed its entry, so the run has no
 evidence either way, and an exemption nothing can audit is one nobody can
 retire.
 
+### Corrections of stale derived state
+
+An approved correction of calculated state is recorded separately in
+`tasks/pattern-vintage-derived-corrections.ts`. Its scope includes the exact
+fixture provenance and SHA-256, absence of companion stores, recorded root and
+pattern identities, field, and before/after values. Different fixture bytes or
+additional stores receive no correction policy.
+
+The comparison still runs on all fields. Only an exact approved transition is
+graded as a reported change instead of a loss; a missing field, nested loss, or
+other transition retains its ordinary grade. The run prints each correction and
+its decision record. A verified fixture whose correction is unused fails, so
+an exemption must be removed or reassessed when the evidence changes.
+
+The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
+records the approved case and alternatives. This policy does not classify
+derived values generally as expendable.
+
 ### Findings are graded
 
 A replay recomputes as well as reads, so a derived value the vintage never

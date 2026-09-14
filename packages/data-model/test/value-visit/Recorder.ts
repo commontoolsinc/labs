@@ -3,7 +3,7 @@
  * call it receives, and builders for the result forms a test hands back.
  *
  * The recorder dispatches every value to its subtype method and recurses into
- * containers the way `ContainerIteratingValueVisitor` does by default, so a
+ * containers the way `RecursiveValueVisitor` does by default, so a
  * test that wants the default walk sets nothing, and one that wants a different
  * decision at one hook assigns the matching `on*` property.
  */
@@ -20,10 +20,10 @@ import {
 import { type PrimitiveValueTag } from "@/value-tags.ts";
 import {
   type BaselineVisitResult,
-  ContainerIteratingValueVisitor,
   type DispatchingVisitorResult,
   DO_VISIT_SUBTYPE,
   type LeafVisitorResult,
+  RecursiveValueVisitor,
 } from "@/value-visit";
 
 /** One recorded call into a `Recorder`. */
@@ -31,11 +31,11 @@ export type Event = [name: string, ...args: unknown[]];
 
 /**
  * Visitor that dispatches every value to its subtype method, recurses into
- * containers the way `ContainerIteratingValueVisitor` does by default, and
+ * containers the way `RecursiveValueVisitor` does by default, and
  * records each call it receives. Each hook can be overridden per test by
  * assigning the matching `on*` property.
  */
-export class Recorder extends ContainerIteratingValueVisitor<unknown, unknown> {
+export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
   readonly events: Event[] = [];
 
   /**

@@ -155,6 +155,12 @@ must not accidentally inherit it.
       off-posture result. The [integration evidence](../history/development/performance/2026-09-14-lazy-off-integration.md)
       adds isolated eager-posture runner, runtime-client, and shell/browser results;
       remaining product coverage and owner decisions are explicit in that record.
+      The [reload evidence](../history/development/performance/2026-09-14-lazy-materialization-reload-evidence.md)
+      records served eager browser errors and an unresolved default-on control
+      failure; those findings remain part of the acceptance decision.
+      The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
+      permits two exact stale fetch-status transitions during vintage replay;
+      it does not retire the flag or waive other state-loss findings.
 - [ ] Obtain the retirement decision from the flag's owner with a concrete
       rollback route. No live data mutation is implied by this plan; coordinate
       any live deployment separately. Bernhard Seefeld, whom the registry's

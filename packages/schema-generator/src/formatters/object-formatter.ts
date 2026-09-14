@@ -1,5 +1,4 @@
 import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
   type MutableJSONSchema,
   type MutableJSONSchemaObj,
 } from "@commonfabric/api";
@@ -193,15 +192,6 @@ function shouldSkipInternalProperty(
   context: GenerationContext,
 ): boolean {
   if (propName.startsWith("__@")) {
-    return true;
-  }
-
-  // The `FabricSpecialObject` nominal brand is string-keyed and exists only
-  // in the type system -- no runtime value carries the key, so it may not
-  // appear in a schema's `properties` or `required`. The `FabricPrimitive` and
-  // `FabricInstancePlus` brands are symbol-keyed, which the test above already
-  // skips.
-  if (propName === FABRIC_SPECIAL_OBJECT_BRAND) {
     return true;
   }
 

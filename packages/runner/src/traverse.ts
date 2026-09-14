@@ -1,5 +1,4 @@
 import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   type JSONSchemaObj,
   type SchemaPathSelector,
@@ -28,6 +27,11 @@ import {
   schemaTypeOfFabricPrimitive,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
+import {
+  collectExternalSchemaRefHashes,
+  containsExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,
@@ -52,10 +56,6 @@ import {
   isString,
 } from "../../utils/src/types.ts";
 import {
-  collectExternalSchemaRefHashes,
-  containsExternalSchemaRef,
-} from "./schema-decompose.ts";
-import {
   externalResolutionMissCount,
   lookupSchemaDocument,
   onSchemaRegistryClear,
@@ -74,6 +74,7 @@ import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import type { LastNode } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -2707,20 +2708,19 @@ function loadExternalSchemaDocs(
   // The verdict: every hash transitively reachable from the schema's own
   // refs was collected in this traversal (this call or an earlier one — the
   // per-context set accumulates).
-  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
-  const checked = new Set<string>();
-  while (pendingCheck.length > 0) {
-    const hash = pendingCheck.pop()!;
-    if (checked.has(hash)) continue;
-    checked.add(hash);
-    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
-      return false;
-    }
-    const document = lookupSchemaDocument(hash);
-    if (document === undefined) return false;
-    pendingCheck.push(...collectExternalSchemaRefHashes(document));
-  }
-  return true;
+  const { missing } = walkSchemaDocumentClosure({
+    roots: collectExternalSchemaRefHashes(schema),
+    load: (hash) => {
+      if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+        return undefined;
+      }
+      const document = lookupSchemaDocument(hash);
+      return document === undefined
+        ? undefined
+        : { kind: "verified", schema: document };
+    },
+  });
+  return missing.size === 0;
 }
 
 function loadSchemaDocClosure(
@@ -2729,62 +2729,62 @@ function loadSchemaDocClosure(
   initialHashes: ReadonlySet<string>,
   context: TraversalContext,
 ): void {
-  const pending = [...initialHashes];
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    const address = {
-      space: referrer.space,
-      id: `cid:${hash}` as URI,
-      scope: "space" as const,
-      path: [],
-    };
-    const key = getTrackerKey(address, context.scopeKeyIdentity);
-    if (context.schemaDocsLoaded.has(key)) continue;
-    context.schemaDocsLoaded.add(key);
-    // A plain read: loads the document AND records the dependency, so an
-    // absent document's later arrival re-triggers the reader.
-    const result = tx.read(address);
-    if (result.error !== undefined) {
-      // Absence is the only failure the missing-link-target channel is
-      // for (the followPointer pattern): a permission or transport error
-      // is not a doc to fetch, and reporting it would kick spurious loads.
-      if (result.error.name === "NotFoundError") {
-        context.onMissingLinkTarget?.(
-          {
-            space: address.space,
-            id: address.id,
-            path: [],
-            scope: address.scope,
-          } as NormalizedFullLink,
-          referrer.space,
-        );
+  walkSchemaDocumentClosure({
+    roots: initialHashes,
+    load: (hash) => {
+      const address = {
+        space: referrer.space,
+        id: `cid:${hash}` as URI,
+        scope: "space" as const,
+        path: [],
+      };
+      const key = getTrackerKey(address, context.scopeKeyIdentity);
+      if (context.schemaDocsLoaded.has(key)) return { kind: "settled" };
+      context.schemaDocsLoaded.add(key);
+      // A plain read: loads the document AND records the dependency, so an
+      // absent document's later arrival re-triggers the reader.
+      const result = tx.read(address);
+      if (result.error !== undefined) {
+        // Absence is the only failure the missing-link-target channel is
+        // for (the followPointer pattern): a permission or transport error
+        // is not a doc to fetch, and reporting it would kick spurious loads.
+        if (result.error.name === "NotFoundError") {
+          context.onMissingLinkTarget?.(
+            {
+              space: address.space,
+              id: address.id,
+              path: [],
+              scope: address.scope,
+            } as NormalizedFullLink,
+            referrer.space,
+          );
+        }
+        return undefined;
       }
-      continue;
-    }
-    context.schemaTracker.add(key, REJECTING_SELECTOR);
-    const doc = result.ok.value;
-    if (!isObjectNotArray(doc) || !("value" in doc)) continue;
-    const schemaValue = (doc as { value?: FabricValue }).value;
-    try {
-      const interned = registerSchemaDocument(
-        hash,
-        schemaValue as JSONSchema,
-      );
+      context.schemaTracker.add(key, REJECTING_SELECTOR);
+      const doc = result.ok.value;
+      if (!isObjectNotArray(doc) || !("value" in doc)) return undefined;
+      return {
+        kind: "stored",
+        value: (doc as { value?: FabricValue }).value,
+      };
+    },
+    onVerified: (hash, schema) => {
+      registerSchemaDocument(hash, schema);
       // Loaded in this space and verified.
-      context.schemaDocsAvailable.add(`${address.space}/${hash}`);
-      for (const dep of collectExternalSchemaRefHashes(interned)) {
-        pending.push(dep);
-      }
-    } catch (error) {
-      // Fail closed: the document stays unregistered, so refs to it stay
-      // unresolvable, and nothing below it is followed.
+      context.schemaDocsAvailable.add(`${referrer.space}/${hash}`);
+    },
+    onMissing: (hash, miss) => {
+      // An absent document was reported where its read failed. One that is
+      // not the schema its id names fails closed: it stays unregistered, so
+      // refs to it stay unresolvable, and nothing below it is followed.
+      if (miss !== "mismatch") return;
       logger.warn("traverse", () => [
         "Rejected schema document (content does not match its id):",
-        address.id,
-        error,
+        `cid:${hash}`,
       ]);
-    }
-  }
+    },
+  });
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
@@ -3956,9 +3956,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
               // A `FabricSpecialObject`'s surface is class accessors, so
               // its membership test is prototype-chain `in`; the nominal brand
               // key has no runtime existence and is satisfied by
-              // construction (removable with the other brand exemptions
-              // once the generator skips the brand — see
-              // opaqueLeafMissesRequired's doc comment).
+              // construction (the `TODO` on `FABRIC_SPECIAL_OBJECT_BRAND`
+              // says what removing that exemption takes).
               if (isFabricSpecialObject(doc.value)) {
                 if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
                 if (
@@ -5376,9 +5375,9 @@ export function canBranchMatch(
       for (const req of resolved.required) {
         // A `FabricSpecialObject`'s surface is class accessors, so its
         // membership test is prototype-chain `in`; the nominal brand key has no
-        // runtime existence and is satisfied by construction (removable
-        // with the other brand exemptions once the generator skips the
-        // brand — see opaqueLeafMissesRequired's doc comment).
+        // runtime existence and is satisfied by construction (the `TODO`
+        // on `FABRIC_SPECIAL_OBJECT_BRAND` says what removing that
+        // exemption takes).
         if (isFabricSpecialObject(value)) {
           if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(req as string in value)) return false;
@@ -5407,16 +5406,10 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * — prototype chain included, the same check the anyOf prefilters apply —
  * so a class accessor such as `FabricBytes.length` satisfies
  * `required: ["length"]` while a key the primitive lacks rejects it. The
- * nominal brand key that schemas from pre-vocabulary compilations require
- * has no runtime existence and is satisfied by the instance itself; that
- * exemption (here and at the other brand-aware check sites) exists for
- * those stored schemas — current generator emissions carry the brand
- * nowhere — and it can be removed once they have cycled out. That horizon
- * is redeploy-gated: pattern update refuses the structural-to-vocabulary
- * transition (`packages/piece/src/schema-compatibility.ts`), so such a
- * schema persists until its piece is redeployed. A
- * `FabricPrimitive`-typed schema is not gated here (its type never
- * includes "object").
+ * nominal brand key that schemas from pre-vocabulary compilations require,
+ * `FABRIC_SPECIAL_OBJECT_BRAND`, has no runtime existence and is satisfied
+ * by the instance itself. A `FabricPrimitive`-typed schema is not gated here
+ * (its type never includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
  * against a primitive's accessor values, so

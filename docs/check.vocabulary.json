@@ -87,6 +87,7 @@
     "BaseEncodeAct",
     "BaseFabricCodec",
     "BaseFabricInstance",
+    "BaseFabricSpecialObject",
     "BaseNonterminalCodec",
     "Battleship",
     "Branch",

@@ -48,6 +48,11 @@ describe("LLM builtin no-request paths", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let builder: ReturnType<typeof createTrustedBuilder>["commonfabric"];
+  // A test that parks a request so it can act while it is in flight sets this
+  // to what lets it finish. Teardown calls it whether or not the test got that
+  // far, so an assertion failing before the release leaves nothing for
+  // `settled()` to wait on forever.
+  let releaseHeldRequest: (() => void) | undefined;
 
   beforeEach(() => {
     enableMockMode();
@@ -64,7 +69,11 @@ describe("LLM builtin no-request paths", () => {
   afterEach(async () => {
     resetMockMode();
     await tx.commit();
-    await runtime.idle();
+    releaseHeldRequest?.();
+    releaseHeldRequest = undefined;
+    // The built-in's request chain is async work `idle()` returns ahead of;
+    // `settled()` drains it before the runtime is torn down.
+    await runtime.settled();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -163,10 +172,9 @@ describe("LLM builtin no-request paths", () => {
   });
   it("`generateText` leaves no trace of a request a cleared prompt abandoned", async () => {
     const original = LLMClient.prototype.sendRequest;
-    let release: (() => void) | undefined;
     const arrived = Promise.withResolvers<void>();
     const held = new Promise<void>((resolve) => {
-      release = resolve;
+      releaseHeldRequest = resolve;
     });
     LLMClient.prototype.sendRequest = async () => {
       arrived.resolve();
@@ -196,6 +204,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -208,7 +219,7 @@ describe("LLM builtin no-request paths", () => {
       clear.commit();
       await runtime.idle();
 
-      release!();
+      releaseHeldRequest!();
       await runtime.settled();
 
       // `requestHash` is what tells an applied response from an abandoned one.
@@ -256,6 +267,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -317,6 +331,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -372,6 +389,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -398,10 +418,9 @@ describe("LLM builtin no-request paths", () => {
   });
   it("`generateText` abandons an unqueued request even if `queue` is set later", async () => {
     const original = LLMClient.prototype.sendRequest;
-    let release: (() => void) | undefined;
     const arrived = Promise.withResolvers<void>();
     const held = new Promise<void>((resolve) => {
-      release = resolve;
+      releaseHeldRequest = resolve;
     });
     LLMClient.prototype.sendRequest = async () => {
       arrived.resolve();
@@ -438,6 +457,9 @@ describe("LLM builtin no-request paths", () => {
         { prompt: promptCell, queue: queueCell },
         resultCell,
       );
+      // A reader holds the node live across the prompt's transitions; the
+      // runtime's disposal ends the subscription.
+      result.sink(() => {});
       tx.commit();
       tx = runtime.edit();
 
@@ -452,7 +474,7 @@ describe("LLM builtin no-request paths", () => {
       change.commit();
       await runtime.idle();
 
-      release!();
+      releaseHeldRequest!();
       await runtime.settled();
 
       expect(result.key("requestHash").get()).toBeUndefined();

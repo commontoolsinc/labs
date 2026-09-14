@@ -6,6 +6,7 @@ import type {
 import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchema } from "@commonfabric/data-model-schema";
+import { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
@@ -23,7 +24,6 @@ import type { NormalizedFullLink } from "../link-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
-import { mapSubschemas } from "../schema-walk.ts";
 import {
   requireWaveAcceptance,
   waveRunContextOf,

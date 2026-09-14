@@ -197,12 +197,19 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
         queryPattern.resultSchema,
         tx,
       );
-      runtime.run(tx, queryPattern, {}, resultCell);
+      const result = runtime.run(tx, queryPattern, {}, resultCell);
       tx.commit();
-      // The wire call is the event here, not a result value: the spy above
-      // resolves `issued` when `db.query` reaches the provider, which the
-      // post-commit flush drives without the result being observed.
-      await issued.promise;
+      // The query is a computation, so a reader has to demand it; the wire
+      // call is the event here, not a result value: the spy above resolves
+      // `issued` when `db.query` reaches the provider.
+      const cancel = (result as unknown as {
+        sink: (f: () => void) => () => void;
+      }).sink(() => {});
+      try {
+        await issued.promise;
+      } finally {
+        cancel();
+      }
       return seenScope;
     } finally {
       provider.sqliteQuery = original;

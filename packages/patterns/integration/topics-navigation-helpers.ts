@@ -8,6 +8,7 @@ import {
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
+import { waitForShellReady } from "@commonfabric/integration/shell-utils";
 import {
   CLICK_TARGET_ATTR,
   clickMarked,
@@ -135,6 +136,7 @@ export async function waitForPieceView(
   spaceName: string,
   pieceId: string,
 ): Promise<void> {
+  await waitForShellReady(page);
   await waitForCondition(
     page,
     (_probe, expectedSpaceName: string, expectedPieceId: string) => {

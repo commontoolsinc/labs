@@ -847,14 +847,14 @@ Deno.test("validates the schema document a result's `schema` metadata references
 
     // The member's grammar has two forms. A `cid:` reference in any other
     // position — nested inside an inline schema, or a root reference with
-    // sibling keywords — is refused outright, whether a set or a patch
-    // lands it, before any backing is consulted.
+    // sibling keywords — is refused outright, as is a non-schema value,
+    // whether a set or a patch lands it, before any backing is consulted.
     const hybridNested = {
       type: "object",
       properties: { nested: { $ref: `cid:${resultHash}` } },
     };
     const hybridSiblings = { $ref: `cid:${resultHash}`, title: "sibling" };
-    for (const hybrid of [hybridNested, hybridSiblings]) {
+    for (const malformed of [null, hybridNested, hybridSiblings]) {
       assertThrows(
         () =>
           applyCommit(engine, {
@@ -863,7 +863,7 @@ Deno.test("validates the schema document a result's `schema` metadata references
               operations: [{
                 op: "set",
                 id: "of:hybrid-carrier",
-                value: { value: { title: "v" }, schema: hybrid },
+                value: { value: { title: "v" }, schema: malformed },
               } as never],
             }),
           }),
@@ -878,7 +878,7 @@ Deno.test("validates the schema document a result's `schema` metadata references
               operations: [{
                 op: "patch",
                 id: "of:result-carrier",
-                patches: [{ op: "replace", path: "/schema", value: hybrid }],
+                patches: [{ op: "replace", path: "/schema", value: malformed }],
               } as never],
             }),
           }),

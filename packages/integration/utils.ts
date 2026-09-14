@@ -173,6 +173,7 @@ function installWaiter(
   bindingName: string,
   predicateSource: string,
   predicateArgs: unknown[],
+  events: string[],
 ): void {
   const isRendered = (element: Element): boolean => {
     const style = globalThis.getComputedStyle(element);
@@ -451,16 +452,20 @@ function installWaiter(
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    hub.listeners.delete(pulse);
+    stopObserving();
     registry.delete(bindingName);
+  };
+
+  const stopObserving = () => {
+    hub.listeners.delete(pulse);
+    for (const event of events) globalThis.removeEventListener(event, pulse);
     clearInterval(backstop);
   };
 
   const onConditionMet = () => {
     if (stopped) return;
     stopped = true;
-    hub.listeners.delete(pulse);
-    clearInterval(backstop);
+    stopObserving();
     // The binding is added and awaited before this script installs, so the
     // bound function is normally present; retry a bounded number of times on the
     // macrotask queue in case it has not yet attached to this execution context.
@@ -517,12 +522,15 @@ function installWaiter(
 
   registry.set(bindingName, stop);
   hub.listeners.add(pulse);
+  for (const event of events) globalThis.addEventListener(event, pulse);
   // Mutation pulses are the fast path, but a condition can flip true with no
   // mutation record at all — e.g. a Lit `.value=` binding writing a committed
   // cell value back into an input sets only the element property. A coarse
   // timer backstop re-evaluates so such waits converge instead of starving
   // until the outer timeout.
-  const backstop = setInterval(evaluate, 500);
+  // TODO(Hixie): Subscribe to cell changes or rendering completion for conditions
+  // without DOM mutations, then remove this polling backstop.
+  const backstop = events.length === 0 ? setInterval(evaluate, 500) : undefined;
   // Check immediately; the condition may already hold.
   evaluate();
 }
@@ -534,6 +542,11 @@ function installWaiter(
  * have changed and signals the test process over a CDP binding, so an awaited
  * step idles until its condition is actually satisfied — like `select(2)` or
  * `wait` — and then proceeds immediately.
+ *
+ * `events` names window events that announce changes to the condition. A wait
+ * naming events observes those and the DOM without polling. A wait with no
+ * events also checks on a 500-millisecond backstop for unannounced changes.
+ * Every wait checks once immediately, including when the event already fired.
  *
  * On a stuck condition it throws once the built-in `WAIT_FOR_CONDITION_TIMEOUT`
  * safety net elapses; callers add the context and rich probe for the failure
@@ -551,7 +564,7 @@ export const waitForCondition = async <
 >(
   page: Page,
   predicate: PageCondition<A, R>,
-  { args }: { args?: A } = {},
+  { args, events = [] }: { args?: A; events?: string[] } = {},
 ): Promise<R | undefined> => {
   const bindingName = `__cfcWait_${crypto.randomUUID().replace(/-/g, "")}`;
   let answer: R | undefined;
@@ -579,7 +592,12 @@ export const waitForCondition = async <
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await page.evaluate(installWaiter, {
-      args: [bindingName, predicate.toString(), (args ?? []) as unknown[]],
+      args: [
+        bindingName,
+        predicate.toString(),
+        (args ?? []) as unknown[],
+        events,
+      ],
     });
     const timedOut = new Promise<never>((_, reject) => {
       timer = setTimeout(

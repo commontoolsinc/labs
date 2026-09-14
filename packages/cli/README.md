@@ -90,12 +90,27 @@ A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions
 and removals.
 
+Dialogs share Up / Down, Page Up / Page Down, and Home / End for navigation.
+Ctrl-F / Ctrl-B also page down / up. Pages follow the dialog's visible height,
+with one row of overlap. While browsing, `j` / `k` and `J` / `K` move down / up,
+Space and `b` / `B` page down / up, and `g` / `G` jump to the top / bottom.
+Ctrl-N / Ctrl-P move down / up, and Ctrl-D / Ctrl-U move half a page.
+Confirmation prompts use navigation keys to move button focus; Space activates
+the focused button. Printable keys enter text while a filter is active.
+
 Press `i` in a diff to open its file and commit list. The list starts in browse
-mode. Press `/` to filter it by file name, commit hash, or commit subject. The
-usual `f`, `F`, `E`, `T`, and `M` file-visibility keys remain active while the
-list is in browse mode, and Space pages through the entries. Its summary reports
-added and removed lines for the complete diff and for the files that are
-currently shown.
+mode. Press `/` to filter it by file name, commit hash, or commit subject. In
+browse mode, Space pages through the entries, and `g` and `G` select the first
+and last entry. The `f`, `F`, `E`, `T`, and `M` file-visibility keys remain
+active. On a commit row, `f` hides all of that commit's files. Pressing it again
+shows them. Each commit row reports its total added and removed lines under the
+selected count policy. The list's summary reports added and removed lines for
+the complete diff and for the files that are currently shown.
+
+Use `<` and `>` to move to the preceding or following commit header in the main
+view or the index list. From within a commit, `<` returns to that commit's
+header. These keys follow the order of commits in the input, including separate
+commits piped from `git show` or `git log -p`.
 
 Press `D` in that list to cycle its line-count policy. Normal counts include
 every added and removed line. The second policy removes pairs within one file
@@ -192,9 +207,33 @@ difference by refusing them as slug values.
 | `verbs [<ref>]`              | Lists a piece's callables, numbering each so `call %n` invokes it. `--all` shows the rows the marks hide.                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `describe [<ref>]`           | The page `cf piece describe` writes: what the piece is, what it holds, and what it takes. `--all` as above.                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `wish <#name>`               | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `watch [<ref>]`              | Arms a watch on a cell and opens the value view onto it. `q` closes the view and leaves the watch armed; an armed watch writes one line above the prompt per settled change. A cell already watched is refused.                                                                                                                                                                                                                                                                                                       |
+| `watches`                    | Lists the watches this run has armed, numbering each so `unwatch %n` disarms one.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `unwatch <handle>`           | Disarms the watch a `watches` row numbered. The row carries the cell its watch is armed on, so it names the watch it showed.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `more`                       | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                                                                                                                                                                                                                                                       |
-| `where`                      | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `where`                      | The whole ambient record: the connection, the place `pwd` prints, and what this run is watching.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `help [<verb>]`              | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+`watch` is the live half. It arms a **watch** — a subscription on one cell that
+outlives the view that opened it — and opens the value view onto that cell: the
+value as JSON, scrollable with `j`/`k` and the arrows, `g` and `G` for its ends,
+and `q` or `ctrl-c` to come back to the prompt. Those are the whole of what the
+view answers to; the fuller key table the design gives a view — drilling,
+filtering, editing a selection, and a command line inside the frame — is not
+built. The two halves are separable on purpose: `q` closes the view and the
+watch stays armed, and every settled change to a watched cell then writes one
+line above the prompt naming the cell that changed, as in
+`watch board/replies @space: changed`. It says that the cell moved rather than
+what it moved to: `get` reads the value out, and the view shows it moving.
+Scrollback is never rewritten: liveness lives in those lines, and the view draws
+on a screen of its own.
+
+A change is what is reported rather than a value: the first reading of a cell is
+the baseline and writes nothing, and a recomputation that landed on what was
+there writes nothing either. A repaint and a line come once per quiet runtime
+rather than once per value on the way there, and nothing waits on a clock to
+decide that. `watches` numbers what is armed and `where` names it; `unwatch %n`
+disarms one.
 
 A listing numbers its rows, and `%n` names a row until the next listing replaces
 the numbering — `more` continues the current one rather than starting another.
@@ -421,6 +460,13 @@ Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 `pieceId[@scope]/path` at link endpoints, and slugs — is a convenience alias for
 interactive use. New reference-syntax capabilities land in the reference first;
 the alias does not grow a capability the reference lacks.
+
+`cf piece render --cell /tracker` renders the UI of the piece the slug names.
+`cf piece render --cell /top/2` renders the selected collection member's UI,
+using the scope stored in its link. Rendering takes a whole piece: a reference
+such as `/tracker/title` that continues inside the piece is refused. `--watch`
+reports later UI changes from the resolved piece, and `--no-start` renders its
+stored state without starting it.
 
 ### Writing the target
 

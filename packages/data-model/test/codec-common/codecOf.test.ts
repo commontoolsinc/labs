@@ -16,7 +16,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricSpecialObject } from "@/interface.ts";
+import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
+import type { FabricSpecialObject } from "@/interface.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import {
   CODEC,
@@ -27,6 +28,15 @@ import {
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+
+/**
+ * Declares a direct subclass of the runtime root as the `FabricSpecialObject`
+ * it is not, so that a case can hand `codecOf()` a class that binds no codec.
+ * Such a value is out of contract, and the cast is what says so.
+ */
+function outOfContract(value: BaseFabricSpecialObject): FabricSpecialObject {
+  return value as unknown as FabricSpecialObject;
+}
 
 describe("codecOf()", () => {
   describe("given no `altCodec`", () => {
@@ -43,8 +53,10 @@ describe("codecOf()", () => {
     });
 
     it("throws for a `FabricSpecialObject` binding no `[CODEC]`", () => {
-      class NoCodec extends FabricSpecialObject {}
-      expect(() => codecOf(new NoCodec())).toThrow("no `[CODEC]`");
+      class NoCodec extends BaseFabricSpecialObject {}
+      expect(() => codecOf(outOfContract(new NoCodec()))).toThrow(
+        "no `[CODEC]`",
+      );
     });
   });
 
@@ -58,7 +70,7 @@ describe("codecOf()", () => {
       // No class in the tree binds both, so this needs a double: with only a
       // real class the two symbols cannot disagree, and the case would pass
       // whichever one the implementation preferred.
-      class BothCodecs extends FabricSpecialObject {
+      class BothCodecs extends BaseFabricSpecialObject {
         static get [CODEC](): NonterminalCodec {
           return FabricError[CODEC];
         }
@@ -68,12 +80,14 @@ describe("codecOf()", () => {
         }
       }
 
-      expect(codecOf(new BothCodecs(), JSON_CODEC)).toBe(FabricError[CODEC]);
+      expect(codecOf(outOfContract(new BothCodecs()), JSON_CODEC)).toBe(
+        FabricError[CODEC],
+      );
     });
 
     it("throws when the class binds neither symbol", () => {
-      class NoCodec extends FabricSpecialObject {}
-      expect(() => codecOf(new NoCodec(), JSON_CODEC))
+      class NoCodec extends BaseFabricSpecialObject {}
+      expect(() => codecOf(outOfContract(new NoCodec()), JSON_CODEC))
         .toThrow("no `[CODEC]`");
     });
   });

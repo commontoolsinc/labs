@@ -79,17 +79,20 @@ Waits split into two groups with different primitives.
 
 **Browser integration tests** have a page to attach an in-page waiter to:
 
-- `waitForCondition(page, predicate, { args })` installs a single waiter inside
-  the page. A shared MutationObserver hub watches the document and every shadow
-  root — including shadow roots created after the wait began — and re-evaluates
-  the predicate the instant the DOM reflects new state, then signals the test
-  process over a protocol binding. It takes no caller-supplied timeout: a
+- `waitForCondition(page, predicate, { args, events })` installs a single waiter
+  inside the page. A shared MutationObserver hub watches the document and every
+  shadow root — including shadow roots created after the wait began — and
+  re-evaluates the predicate the instant the DOM reflects new state, then signals
+  the test process over a protocol binding. It takes no caller-supplied timeout: a
   built-in five-minute stuck-condition safety net bounds a condition that never
   holds, and a coarse 500-millisecond in-page backstop covers conditions that
-  flip with no DOM mutation (for example a runtime global being set). The
-  predicate is serialized and runs in the page, so it closes over nothing from
-  the test module — inline any collection it needs, and pass values in through
-  `args`. A predicate that returns a truthy value instead of `true` hands that
+  flip with no DOM mutation (for example a runtime global being set). A nonempty
+  `events` list additionally observes those window events and disables the
+  polling backstop. The waiter checks once immediately, so an event that fired
+  before the wait is also covered. `waitForShellReady(page)` uses `cf-shell-ready`, which the shell dispatches
+  after publishing `globalThis.app` at the end of bootstrap. The predicate is
+  serialized and runs in the page, so it closes over nothing from the test module
+  — inline any collection it needs, and pass values in through `args`. A predicate that returns a truthy value instead of `true` hands that
   value back to the caller in the same binding notification, so it must be a
   `PageConditionValue`: a plain JSON value. Maps, functions, class instances,
   cycles, and other lossy JSON inputs are rejected at the boundary instead of
@@ -422,11 +425,13 @@ current server state. The assertion is therefore read once, at quiescence, with
 no convergence loop around it: a false value is a failure.
 
 Reach for this rather than a settle-and-retry loop whenever the write is
-something the test can name — name the arrival, wait on it, then read. What the
-awaiting side gets in place of the Deno fail-fast above is the orchestrator's
-worker RPC deadline, which is the ambient limit the previous paragraph
-describes: a marker that never arrives is reported against the participant,
-marker, and announcer rather than fast.
+something the test can name — name the arrival, wait on it, then read. Worker
+requests wait for a response without a wall-clock limit. A worker error rejects
+its pending and future requests. If every unfinished participant is waiting for
+an unannounced marker, the orchestrator reports a deadlock. An announced marker
+that never arrives leaves the request pending: the shared server keeps the
+event loop open, so the CI step or job limit, or local cancellation, ends that
+run.
 
 ### Browser-hosted unit tests have a harness backstop
 

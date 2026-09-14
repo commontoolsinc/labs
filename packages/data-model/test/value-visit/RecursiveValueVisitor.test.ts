@@ -3,14 +3,14 @@ import { expect } from "@std/expect";
 
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import {
-  ContainerIteratingValueVisitor,
   type DispatchingVisitorResult,
   DO_RECURSE_VALUES,
   type LeafVisitorResult,
+  RecursiveValueVisitor,
 } from "@/value-visit";
 
-describe("ContainerIteratingValueVisitor", () => {
-  class Iterating extends ContainerIteratingValueVisitor<never, never> {
+describe("RecursiveValueVisitor", () => {
+  class Recursive extends RecursiveValueVisitor<never, never> {
     override isDomainExtra(_value: unknown): _value is never {
       return false;
     }
@@ -31,7 +31,7 @@ describe("ContainerIteratingValueVisitor", () => {
   describe("instance members", () => {
     describe("visitFabricContainer()", () => {
       it("returns `DO_RECURSE_VALUES`, without subtype dispatch", () => {
-        expect(new Iterating().visitFabricContainer([])).toBe(
+        expect(new Recursive().visitFabricContainer([])).toBe(
           DO_RECURSE_VALUES,
         );
       });
@@ -39,13 +39,13 @@ describe("ContainerIteratingValueVisitor", () => {
 
     describe("visitFabricArray()", () => {
       it("returns `DO_RECURSE_VALUES`", () => {
-        expect(new Iterating().visitFabricArray([1])).toBe(DO_RECURSE_VALUES);
+        expect(new Recursive().visitFabricArray([1])).toBe(DO_RECURSE_VALUES);
       });
     });
 
     describe("visitFabricPlainObject()", () => {
       it("returns `DO_RECURSE_VALUES`", () => {
-        expect(new Iterating().visitFabricPlainObject({ a: 1 })).toBe(
+        expect(new Recursive().visitFabricPlainObject({ a: 1 })).toBe(
           DO_RECURSE_VALUES,
         );
       });
@@ -55,7 +55,7 @@ describe("ContainerIteratingValueVisitor", () => {
       it("returns `DO_RECURSE_VALUES`", () => {
         const instance = new FabricMap(new Map());
 
-        expect(new Iterating().visitFabricInstance(instance)).toBe(
+        expect(new Recursive().visitFabricInstance(instance)).toBe(
           DO_RECURSE_VALUES,
         );
       });
@@ -63,7 +63,7 @@ describe("ContainerIteratingValueVisitor", () => {
 
     describe("the `visited*()` methods", () => {
       it("return `undefined`", () => {
-        const vis = new Iterating();
+        const vis = new Recursive();
 
         expect(vis.visitedFabricArrayElement([1], 0, 1)).toBeUndefined();
         expect(vis.visitedFabricArrayGap([], 0, 1)).toBeUndefined();

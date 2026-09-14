@@ -13,6 +13,12 @@ import {
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
 import {
+  containsExternalSchemaRef,
+  formatExternalSchemaRef,
+  parseExternalSchemaRef,
+  SCHEMA_META_MEMBER,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   cloneForMutation,
   type CloneForMutationResult,
   fabricAwareEqual,
@@ -35,13 +41,9 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
 import {
-  containsExternalSchemaRef,
   decomposeSchema,
-  formatExternalSchemaRef,
-  parseExternalSchemaRef,
   recomposeSchema,
   recomposeSchemaRefs,
-  SCHEMA_META_MEMBER,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
 import {
@@ -85,6 +87,7 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+import { ConsumedLabelIndex } from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
   type CfcGrantConsumptionContext,
@@ -5414,14 +5417,13 @@ export const loadStoredCfcEnvelope = (
   }
 };
 
-// Union of confidentiality (and integrity) atoms across every non-internal labeled read in the
-// transaction, resolved from stored labels the same way verifyInputRequirements
-// resolves them. Transaction-global by design — deliberately NOT scoped to a
-// D4 read prefix: a sink request is built from whatever the handler read, and
-// the sink-request input does not record its own read provenance, so the whole
-// consumed set is the sound over-approximation for the egress ceiling
-// (docs/specs/cfc-write-prefix-provenance.md §7.4).
-const collectConsumedLabel = (
+/**
+ * Join confidentiality and integrity across the transaction's non-internal
+ * labeled reads, retaining each source in first-seen order for refusal details.
+ * A sink request can depend on any handler read, so the consumed set is
+ * transaction-global (docs/specs/cfc-write-prefix-provenance.md §7.4).
+ */
+export const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
 ): {
   confidentiality: readonly CfcConfClause[];
@@ -5441,6 +5443,10 @@ const collectConsumedLabel = (
   const atoms: unknown[] = [];
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   const sources: ConsumedAtomSource[] = [];
+  const sourceBuckets = new Map<string, ConsumedAtomSource[]>();
+  // Collection is synchronous and read-only. Share one validated metadata
+  // snapshot per document here; another collection observes its current view.
+  const labelIndexes = new Map<string, ConsumedLabelIndex | undefined>();
   const noteSource = (
     atom: unknown,
     read: CfcAddress,
@@ -5449,18 +5455,24 @@ const collectConsumedLabel = (
     // Deduplicated on the same terms a consumer matches on: one entry per
     // (clause, address, label path). Two label-map entries of one document
     // carrying the same clause to the same read are one source.
-    if (
-      sources.some((seen) =>
-        seen.read.id === read.id && seen.read.space === read.space &&
-        seen.read.scope === read.scope &&
-        pathKey(seen.read.path) === pathKey(read.path) &&
-        pathKey(seen.labelPath) === pathKey(labelPath) &&
-        deepEqual(seen.atom, atom)
-      )
-    ) {
+    // The tuple keeps address fields and pointer boundaries unambiguous,
+    // including paths containing separators. Only atoms sharing that identity
+    // need structural comparison; `sources` retains global first-seen order.
+    const key = JSON.stringify([
+      read.id,
+      read.space,
+      read.scope,
+      pathKey(read.path),
+      pathKey(labelPath),
+    ]);
+    const bucket = sourceBuckets.get(key);
+    if (bucket?.some((seen) => deepEqual(seen.atom, atom))) {
       return;
     }
-    sources.push({ atom, read, labelPath });
+    const source = { atom, read, labelPath };
+    sources.push(source);
+    if (bucket === undefined) sourceBuckets.set(key, [source]);
+    else bucket.push(source);
   };
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
@@ -5478,14 +5490,20 @@ const collectConsumedLabel = (
     ]
   ) {
     if (isInternalVerifierRead(read.meta)) continue;
-    const metadata = storedMetadataFor(
-      tx,
-      read.space,
-      read.id,
-      normalizeCellScope(read.scope),
-      read.type ?? "application/json",
-    );
-    if (metadata === undefined) continue;
+    const scope = normalizeCellScope(read.scope);
+    const type = read.type ?? "application/json";
+    const metadataKey = JSON.stringify([read.space, read.id, scope, type]);
+    if (!labelIndexes.has(metadataKey)) {
+      const metadata = storedMetadataFor(tx, read.space, read.id, scope, type);
+      labelIndexes.set(
+        metadataKey,
+        metadata === undefined
+          ? undefined
+          : new ConsumedLabelIndex(metadata.labelMap.entries),
+      );
+    }
+    const labels = labelIndexes.get(metadataKey);
+    if (labels === undefined) continue;
     const path = canonicalizeLogicalPath(read.path);
     // A recursive read at `path` observes the value at `path` and everything
     // below it, so its confidentiality is the union of every labelMap entry
@@ -5496,8 +5514,7 @@ const collectConsumedLabel = (
     // #3993). A nonRecursive read sees ONLY the value at `path`, so it counts
     // ancestor-or-equal entries but NOT descendants — counting those would
     // false-reject valid commits (review round 2 on #3993).
-    for (const entry of metadata.labelMap.entries) {
-      const entryPath = canonicalizeLogicalPath(entry.path);
+    for (const { entry, path: entryPath } of labels.overlapping(path)) {
       // CONCRETE structure entries label only the container node's shape:
       // an ancestor structure entry does not apply to a read strictly
       // below it (same exact-path rule as `labelAtPath`); as a descendant

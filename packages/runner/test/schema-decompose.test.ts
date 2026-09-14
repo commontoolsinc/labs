@@ -5,11 +5,13 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
   collectExternalSchemaRefHashes,
-  type DecomposedSchema,
-  decomposeSchema,
   formatExternalSchemaRef,
   isExternalSchemaRef,
   parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
+  type DecomposedSchema,
+  decomposeSchema,
   recomposeSchema,
   SchemaNotDecomposableError,
 } from "../src/schema-decompose.ts";
