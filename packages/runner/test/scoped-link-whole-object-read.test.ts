@@ -413,6 +413,51 @@ describe("whole-object read over a session-scoped link", () => {
     }
   });
 
+  it("relaxes a required behind an embedded schema reference", async () => {
+    // The renderer's vnode schema is an embedded document, and a schema that
+    // is a bare reference to it carries no structure of its own. The
+    // relaxation resolves through the reference into that document, where
+    // `name` is required, and drops it when the stored `name` is a
+    // session-scoped link.
+    const vnodeReference = {
+      $ref: "https://commonfabric.org/schemas/vnode.json",
+    } as unknown as JSONSchema;
+
+    const tx = writerRt.edit();
+    const name = writerRt.getCell<string>(
+      space,
+      "vnode-session-name",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    name.set("writer-session-only");
+    const container = writerRt.getCell(
+      space,
+      "vnode-container",
+      vnodeReference,
+      tx,
+    );
+    container.set({ type: "vnode", name, props: {} } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "vnode-container", vnodeReference);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        vnodeReference,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as { required?: string[] };
+      expect(relaxed.required).toEqual(["type", "props"]);
+    } finally {
+      await close();
+    }
+  });
+
   it("multi-hop: scope declared one redirect hop deep is detected (the real piece-result shape)", async () => {
     // Live pieces don't put the scope on the first link: result.prop links
     // (scope "space") to an intermediate doc whose VALUE is the

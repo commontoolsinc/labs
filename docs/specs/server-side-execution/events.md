@@ -3,7 +3,7 @@
 Normative spec for Phase 3 (D-v2-1). Assumes
 [README.md](README.md) §3.6 and [serving-loop.md](serving-loop.md).
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors
 
 - Event machinery: `packages/runner/src/scheduler/events.ts`
   (`queueSchedulerEvent`, `addSchedulerEventHandler`,
@@ -67,6 +67,22 @@ The shape is settled as specced — every field above is load-bearing
 events (e.g. attesting an authentic DOM origin).
 
 ## 2. Lifecycle, end to end
+
+An admitted entry can exist in the store before the serving replica sees it.
+Before queuing a durable event, the drain validates both `eventId` and `seq`
+at the stored index in the replica. On a mismatch, it publishes this space's
+pending subscription frames and awaits an ordered response on the serving
+connection. This barrier consumes published input without waiting for sealed
+wave writes to become durable. A drain pass attempts it at most once.
+
+After the response, the drain reads the stored entries again, finds the same
+immutable identity, and validates its current index in the replica. A consumed
+or compacted entry needs no dispatch. A failed synchronization or a view still
+hidden by a local write defers that entry and every later arrival across streams.
+Scheduler quiescence does not establish completion for these unqueued events:
+the space watermark stays below the earliest deferred sequence until a fresh
+scan can process it. The existing input wake and deferral backstop re-arm that
+scan. Ending the serving tenure abandons an outstanding drain continuation.
 
 ```
 client                          server (SpaceServer)
@@ -182,9 +198,9 @@ handler fires
   UNCHANGED from today's client: handlers run eagerly, but only after
   preflight makes any dirty state inputs current (D-v2-2) — the
   scheduler recomputes a dirty computed input on demand before the
-  handler that reads it runs
-  (`event-preflight-dependencies.ts:246-248` — preflight recomputes an
-  input that is invalid OR has never run, so the lazy-computed case is
+  handler that reads it runs (`isInvalidNode` in
+  `event-preflight-dependencies.ts` — preflight recomputes an input
+  that is invalid OR has never run, so the lazy-computed case is
   literally in the code; CT-1795's staleness park is an extra gate on
   top) — the common case being not rapid-fire but a lazy computed
   nothing has pulled yet, which the handler must and does see fresh.
@@ -198,7 +214,7 @@ handler fires
 - Server enqueue goes through the scheduler facade (`facade.queueEvent`
   — the wake-shaping entry point), never raw `queueSchedulerEvent`, so
   server-enqueued events get the same shaping as client ones.
-- The inherited backlog collapse (`events.ts:266-321`) would
+- The inherited backlog collapse (`queueSchedulerEvent` in `events.ts`) would
   last-wins-coalesce DURABLE intents; under the flag, collapse is
   DISABLED for durable-id stream events — backpressure is shaped at the
   binding layer instead (README §3.8). (Ledger L8: the owner may yet
@@ -243,8 +259,9 @@ ambient-state one.
   notice. Retry or Dismiss records its resolution; only a resolved entry
   may compact under the ordinary watermark rule.
 - Cascade sends minted inside a handler attempt get fresh ids per
-  attempt (`event-identity.ts:5-9`); harmless under exactly-once,
-  because only the committing attempt's cascades escape the wave.
+  attempt (`mintEventId`'s per-transaction origin state in
+  `event-identity.ts`); harmless under exactly-once, because only the
+  committing attempt's cascades escape the wave.
 - Today's receipt-cell exactly-once (`commitPreconditions`, on by
   default) is SUBSUMED by `eventWatermark` under the flag; the two
   mechanisms MUST NOT be active for the same event

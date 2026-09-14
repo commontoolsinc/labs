@@ -7,6 +7,7 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  type FabricValuePlus,
   valueEqual,
 } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -65,11 +66,11 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * already makes for the render types -- `Cell` replaced by `CellHandle` --
  * applied to a cell's own value.
  *
- * What a cell holds is a `FabricValue`, so that is an arm of this rather than
- * something restated: a `FabricBytes` in a cell is a value the client holds
- * like any other, and this stays true of whatever `FabricValue` comes to admit.
- * The container arms are here too, since theirs hold `FabricValue` where these
- * hold handles as well.
+ * What a cell holds is a `FabricValue`, so this is `FabricValuePlus` at
+ * `CellHandle` rather than something restated: a `FabricBytes` in a cell is a
+ * value the client holds like any other, and this stays true of whatever
+ * `FabricValue` comes to admit, while a handle may sit at the top or inside
+ * any container.
  *
  * The connection's encoding carries this whole domain. The conversion walk
  * that feeds it is narrower: `CellHandle.serialize()` refuses a
@@ -77,11 +78,7 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * inside. So a value admitted here can still be refused on the way out, and
  * the refusal names which.
  */
-export type ClientCellValue =
-  | FabricValue
-  | readonly ClientCellValue[]
-  | { readonly [key: string]: ClientCellValue }
-  | CellHandle<unknown>;
+export type ClientCellValue = FabricValuePlus<CellHandle<unknown>>;
 
 /**
  * CellHandle provides a cell interface for cells living in a web worker.

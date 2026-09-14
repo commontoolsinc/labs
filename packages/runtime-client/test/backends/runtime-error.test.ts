@@ -1,12 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { CompilerStackLoadError } from "@commonfabric/runner";
+
 import { NotificationType, RuntimeErrorCode } from "@/protocol/mod.ts";
 import {
   postContextualRuntimeError,
   postRuntimeError,
 } from "@/backends/runtime-error.ts";
-import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 
 describe("runtime error notifications", () => {
   it("classifies compiler-load failures in contextual and renderer errors", () => {

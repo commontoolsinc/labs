@@ -121,6 +121,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
   CFC_STRUCTURAL_PROVENANCE_UNDECLARABLE_STORE,
+  POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
@@ -205,6 +206,12 @@ type CfcInstrumentationHooks = {
   onFlowLabelProbe?(outcome: "computed" | "memo"): void;
 
   onPreparedTx?(): void;
+
+  /** One dereference trace was recorded, and how many the transaction holds
+   * after it. `probeBelongsToDereference` scans this set once per read
+   * activity at commit preparation, so its size is a per-read multiplier.
+   * Measurement only. */
+  onDereferenceTrace?(held: number): void;
 
   /**
    * CFC prepare refused this transaction. `reasons` are the PLAIN reason
@@ -1711,6 +1718,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
     traces.push(deepFreeze(trace));
+    this.#cfcInstrumentation.onDereferenceTrace?.(traces.length);
     if (changesDigest) {
       this.invalidateCfc("dereference-trace-added");
     }
@@ -2865,6 +2873,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.tx.committedSeq?.(space);
+  }
+
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
@@ -3447,7 +3459,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           }
           for (const effect of this.#cfcState.outbox) {
             try {
-              await effect.flush(this);
+              const flushed = effect.flush(this);
+              if (flushed === POST_COMMIT_RELEASE_REJECTED) continue;
+              await flushed;
               this.#cfcInstrumentation.onOutboxFlush?.(effect);
             } catch (error) {
               logger.error(
@@ -3998,6 +4012,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   status(): StorageTransactionStatus {
     return this.#wrapped.status();
+  }
+
+  committedSeq(space: MemorySpace): number | undefined {
+    return this.#wrapped.committedSeq?.(space);
   }
 
   #transformReadOptions(options?: IReadOptions): IReadOptions {

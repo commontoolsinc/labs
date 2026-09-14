@@ -262,6 +262,10 @@ cd /pieces
 ls
 cd %1
 pwd
+cd /slugs/first
+ls settings
+cd %1
+pwd
 LINES
 EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
@@ -446,7 +450,7 @@ lacks "names no facet" "$GET_HELP" "--help is not read as a path"
 # step 2 took its stored one — over a connection this session never had, so a
 # write that reached only the running piece and never committed fails there. It
 # reads each cell once, at the end, so which write a reading is evidence for is
-# a question per cell: step 27 names that write beside each of its checks, and
+# a question per cell: step 28 names that write beside each of its checks, and
 # the writes it cannot speak for rest on the shell's own read on the line after
 # each.
 AFTER() { $CF cell get --quiet --cell "$1" "$2" $ARGS 2>/dev/null; }
@@ -458,7 +462,7 @@ check '"a written place"' "$(said 23 "get label")" \
   "the shell serves the value it just wrote"
 # `label` is written five times below, so a reading of it at the end says the
 # last write landed and nothing about the four before it. This one goes to a
-# path nothing else in the session touches, which is what lets step 27 speak
+# path nothing else in the session touches, which is what lets step 28 speak
 # about a particular write rather than about whichever write reached a cell
 # last.
 check "Wrote \`settings/note\` on \`$FIRST\`." \
@@ -533,7 +537,7 @@ step "22. call runs the callable, and what it did is there afterwards"
 # the call settled rather than that it was accepted — a call the fabric took
 # and never ran would say the second and not the first. What the handler did
 # is a separate reading, and this is the only one that takes it: step 23 empties
-# `items` and refills it, so the array step 27 reads ends at `["jam"]` whether
+# `items` and refills it, so the array step 28 reads ends at `["jam"]` whether
 # or not this call's `milk` ever committed.
 CALLED=$(said 31 "call . addItem '{\"text\":\"milk\"}'")
 contains '"status": "settled"' "$CALLED" "the call settled"
@@ -642,7 +646,40 @@ else
   contains "$ROW" "$(said 54 "pwd")" "pwd names the piece the row named"
 fi
 
-step "27. What the fabric holds, read from outside the session that wrote it"
+step "27. ls reads a child without standing on it, and its numbers bind"
+# The other composition no unit case reaches, and the one `ls <target>` is
+# for: the listing is read at a place the shell is not standing at, and the
+# `%n` it hands out has to name a row of *that* place. Numbered against where
+# the shell stands, `%1` here would walk to `depth` under the piece root,
+# which is no key there — so the prompt after `cd %1` is the whole assertion.
+#
+# The prompt is read three times for three different claims: that `ls
+# settings` left the shell on the piece, which is what reading a child without
+# standing on it means; that `cd %1` then stood two segments in; and that the
+# segment it stood on is the row the listing printed rather than a key this
+# script guessed.
+check "shuttle first @space> " "$(prompt 55 "cd /slugs/first")" \
+  "the shell is standing on the piece before the child is listed"
+NESTED=$(said 56 "ls settings")
+contains "depth" "$NESTED" "the listing names a key of the target"
+lacks "label" "$NESTED" \
+  "the listing is the target's rather than the place's"
+check "shuttle first @space> " "$(prompt 56 "ls settings")" \
+  "listing a child leaves the shell standing where it was"
+# The row `%1` named, read off the listing rather than assumed, as step 26
+# reads its own: what is asserted is that the listing and the mover agree,
+# which a hard-coded key would turn into a claim about the fixture.
+NESTED_ROW=$(printf '%s' "$NESTED" | sed -n '1s/^ *%1 \([^ ]*\).*/\1/p')
+if [ -z "$NESTED_ROW" ]; then
+  bad "the listing of the child printed no operand for the next line to reach"
+else
+  check "shuttle first/settings/$NESTED_ROW @space> " "$(prompt 57 "cd %1")" \
+    "cd %1 lands on the row the listing of the child numbered"
+  contains "settings/$NESTED_ROW" "$(said 58 "pwd")" \
+    "pwd names the path the row stands at"
+fi
+
+step "28. What the fabric holds, read from outside the session that wrote it"
 # The half no transcript can make: every reading is taken over a connection
 # this session never had, after the shell has gone, so a write that reached
 # only the running piece and never committed fails here and nowhere above.

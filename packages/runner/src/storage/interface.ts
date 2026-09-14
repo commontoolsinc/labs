@@ -730,6 +730,13 @@ export interface IStorageProvider {
   /** Establish the authenticated space session without reading entity values. */
   ensureSession?(): Promise<void>;
 
+  /**
+   * Wait for an ordered response after this space's published input frames.
+   * Frame application completes before the response; pending local writes may
+   * still shadow those inputs. This does not wait for commit durability.
+   */
+  pullToServerHead?(): Promise<void>;
+
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
 
@@ -1422,6 +1429,16 @@ export interface IStorageTransaction {
    * Each status variant includes a `journal` field with transaction operations.
    */
   status(): StorageTransactionStatus;
+
+  /**
+   * The store seq `space` accepted this transaction's commit at: the position
+   * in that space's commit log the writes landed at, which
+   * `cf inspect value-at --seq` and `diff --from/--to` read. Known once the
+   * commit's verdict arrives; undefined before it, for a commit the space
+   * rejected, and for a space this transaction wrote nothing to. Optional the
+   * same way as the read hooks above; absent means unknown.
+   */
+  committedSeq?(space: MemorySpace): number | undefined;
 
   /**
    * Reads a value from a (local) memory address and captures corresponding
@@ -2847,8 +2864,35 @@ export interface ISpaceReplica extends ISpace {
        * read set is built against those instances' pending stacks.
        * Absent = the replica's own identity, exactly as before. */
       readonly identity?: ScopeKeyIdentity;
+
+      /** The read set to seal under instead of building one here: the set
+       * {@link storeCommitOf} took for the same transaction and identity,
+       * which the store has validated, so the store's verdict and the local
+       * seal rest on one snapshot. Absent, the seal builds its own. */
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit;
+
+  /**
+   * The operations, preconditions, and read set `transaction` would hand
+   * the store, as {@link sealNative} builds them into a sealed commit,
+   * without applying anything to this replica. A committer that commits to
+   * the store ahead of sealing the transaction here (the serving loop's
+   * direct commit) reads the store's shape from this; the reads are
+   * `source`'s against this replica's records for `identity`'s instances
+   * (the replica's own when absent, as {@link sealNative}'s), a pending
+   * read naming the durable basis beneath its layers. Optional, as
+   * {@link sealNative} is.
+   */
+  storeCommitOf?(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
+  };
 
   /**
    * Resolves when the accepted commit at `localSeq` has been APPLIED to

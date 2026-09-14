@@ -78,6 +78,7 @@ import {
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { census } from "./test-selection/census.ts";
+import { coverageGateFor, measuredSetName } from "./test-selection/coverage.ts";
 import { plan } from "./test-selection/plan.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
@@ -597,6 +598,13 @@ export async function main(
     };
   }
 
+  // The same function the gate runs, over the same declarations, so the
+  // note about a rise and the gate that was supposed to catch it cannot
+  // disagree about which sets were gated.
+  const gate = coverageGateFor(
+    await (deps.topology ?? loadTopology)(),
+    changed,
+  );
   const input: ReportInput = {
     current,
     previous,
@@ -604,6 +612,10 @@ export async function main(
     coverage: await coverageOfRun(run.id, listedHere),
     coverageBefore: await coverageOfRun(previousRun.id, listedThere),
     touched: coverageGroupsForChangedFiles(changed),
+    coverageGate: {
+      reached: gate.reached.map(measuredSetName),
+      ran: gate.off === undefined,
+    },
     day: new Date().toISOString().slice(0, 10),
   };
   console.log(

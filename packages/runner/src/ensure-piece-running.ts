@@ -1,7 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
-import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
+import {
+  areNormalizedLinksSame,
+  getMetaLink,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
@@ -30,11 +34,6 @@ const logger = getLogger("ensure-piece-running", {
 
 const MAX_RESULT_LINK_DEPTH = 10;
 
-function cellTraversalKey(cell: Cell<any>): string {
-  const { space, id, path } = cell.getAsNormalizedFullLink();
-  return JSON.stringify([space, id, path]);
-}
-
 /**
  * Follows `result` backlinks from `rootCell` to the result document that
  * owns the chain, naming each document before its metadata is read: the
@@ -48,24 +47,26 @@ async function followResultCellChain(
   rootCell: Cell<any>,
   tx: IExtendedStorageTransaction,
   observedDocIds: string[],
+  signal?: AbortSignal,
 ): Promise<Cell<any> | undefined> {
   let currentCell = rootCell;
-  const visited = new Set<string>();
+  const visited: NormalizedFullLink[] = [];
   let depth = 0;
 
   while (true) {
-    const key = cellTraversalKey(currentCell);
-    if (visited.has(key)) {
+    const link = currentCell.getAsNormalizedFullLink();
+    if (visited.some((previous) => areNormalizedLinksSame(previous, link))) {
       logger.debug("ensure-piece", () => [
         `Cycle found while following result metadata at ${currentCell.getAsNormalizedFullLink().id}`,
       ]);
       return undefined;
     }
-    visited.add(key);
-    const currentId = currentCell.getAsNormalizedFullLink().id;
+    visited.push(link);
+    const currentId = link.id;
     if (!observedDocIds.includes(currentId)) observedDocIds.push(currentId);
 
     await currentCell.sync();
+    signal?.throwIfAborted();
     const resultLink = getMetaLink(currentCell, "result");
     if (resultLink === undefined) return currentCell;
 
@@ -102,17 +103,11 @@ export type EnsurePieceVerdict = {
     /** The chain's owning doc, named before it was read, carries no
      * `patternIdentity` meta at the scope the chain was walked in. A
      * scoped instance can read meta-less while the space instance holds
-     * the pointer, so a terminal decision re-asks at the space scope
-     * first (the caller's confirm step). */
+     * the pointer. The serving caller tries the requested scope, then
+     * falls back to space scope; confirmation repeats that order. */
     | "no-pattern-meta"
     /** Meta present but `loadPatternByIdentity` found nothing. */
-    | "pattern-unloadable"
-    /** Minted by the serving loop's confirm step (space-server's
-     * `#confirmNoPatternMeta`), never by the traversal here: an
-     * observed-doc pull failed, so the no-meta verdict stays
-     * UNCONFIRMED — no terminal decision; the caller's deferred arm
-     * retries next cycle. */
-    | "confirm-pull-failed";
+    | "pattern-unloadable";
 
   /** Whether the started piece has a pattern graph installed AT THE
    * MOMENT THIS IS CALLED. `started` reports what the start walk did,
@@ -137,6 +132,9 @@ export type EnsurePieceOptions = {
    */
   propagateErrors?: boolean;
 
+  /** Aborting it stops the traversal at its next asynchronous boundary. */
+  signal?: AbortSignal;
+
   /**
    * Called with the owning piece root's id once the chain from `cellLink`
    * has resolved to it, before the piece is started. A caller that supplies
@@ -149,7 +147,8 @@ export type EnsurePieceOptions = {
 /**
  * Classified variant of {@link ensurePieceRunning} — same traversal and
  * start, richer outcome. {@link EnsurePieceOptions} says what a caller may
- * ask of it.
+ * ask of it. An aborted `signal` stops the traversal at its next
+ * asynchronous boundary and prevents a later piece start.
  */
 export async function ensurePieceRunningVerdict(
   runtime: Runtime,
@@ -157,7 +156,9 @@ export async function ensurePieceRunningVerdict(
   options?: EnsurePieceOptions,
 ): Promise<EnsurePieceVerdict> {
   const observedDocIds: string[] = [];
+  const signal = options?.signal;
   try {
+    signal?.throwIfAborted();
     const tx = runtime.edit();
     tx.tx.immediate = true;
 
@@ -178,7 +179,9 @@ export async function ensurePieceRunningVerdict(
         rootCell,
         tx,
         observedDocIds,
+        signal,
       );
+      signal?.throwIfAborted();
       if (resultCell === undefined) {
         return { started: false, reason: "chain-cycle", observedDocIds };
       }
@@ -201,6 +204,7 @@ export async function ensurePieceRunningVerdict(
       // Commit the read transaction before starting the piece
       runtime.prepareTxForCommit(tx);
       await tx.commit();
+      signal?.throwIfAborted();
 
       // Load the pattern by its content identity.
       const pattern = await runtime.patternManager.loadPatternByIdentity(
@@ -208,6 +212,7 @@ export async function ensurePieceRunningVerdict(
         identityRef.symbol,
         cellLink.space,
       );
+      signal?.throwIfAborted();
 
       if (!pattern) {
         logger.debug("ensure-piece", () => [
@@ -244,6 +249,10 @@ export async function ensurePieceRunningVerdict(
         observedDocIds,
       };
     } catch (error) {
+      if (signal?.aborted) {
+        tx.abort(signal.reason);
+        throw error;
+      }
       // Make sure to commit/rollback the transaction on error
       try {
         runtime.prepareTxForCommit(tx);

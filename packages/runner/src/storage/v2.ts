@@ -89,13 +89,12 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { combineOptionalSchema } from "../traverse.ts";
-import { recordCommitLocalSeq } from "./commit-identity.ts";
+import { recordCommitLocalSeq, recordCommitSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import {
   IMemoryAddress,
@@ -379,6 +378,69 @@ const toExplicitDocument = (value: FabricValue): EntityDocument => {
   return value as EntityDocument;
 };
 
+/**
+ * The document operations of a native commit, with every root an explicit
+ * document: the shape the replica applies as pending state.
+ */
+const documentOperationsOf = (
+  transaction: NativeStorageCommit,
+): NativeCommitOperation[] =>
+  transaction.operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) =>
+      operation.op === "delete"
+        ? {
+          op: "delete" as const,
+          id: operation.id,
+          scope: operation.scope,
+        }
+        : operation.op === "patch"
+        ? {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+          value: toExplicitDocument(operation.value),
+        }
+        : {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        }
+    );
+
+/**
+ * The operations a commit hands the store: cell operations first, a patch
+ * carrying its patches alone, and folded SQLite operations last.
+ */
+const storeOperationsOf = (
+  operations: readonly NativeCommitOperation[],
+  sqliteOps: readonly SqliteOperation[],
+): ClientCommit["operations"] => [
+  ...operations.map((operation) => {
+    switch (operation.op) {
+      case "delete":
+        return operation;
+      case "patch":
+        return {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+        };
+      case "set":
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: operation.value,
+        };
+    }
+  }),
+  ...sqliteOps,
+];
+
 type CachedTransactionValue =
   | FabricValue
   | typeof UNCACHED_TRANSACTION_VALUE
@@ -390,24 +452,39 @@ type MaterializedVersion = {
 };
 
 type PendingVersion =
-  | {
-    localSeq: number;
-    op: "set";
-    value: EntityDocument;
+  & {
+    /** A sealed verdict already accepted this operation at the store seq. */
+    acceptedSeq?: number;
   }
-  | {
-    localSeq: number;
-    op: "patch";
-    patches: PatchOp[];
-    value: EntityDocument;
-  }
-  | {
-    localSeq: number;
-    op: "delete";
-  };
+  & (
+    | {
+      localSeq: number;
+      op: "set";
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "patch";
+      patches: PatchOp[];
+      value: EntityDocument;
+    }
+    | {
+      localSeq: number;
+      op: "delete";
+    }
+  );
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
+
+  /** Partial local promotion of a wave whose contributions share one seq.
+   * An authoritative frame replaces this record, so same-seq delivery is
+   * never replayed. Entries remain only while an earlier pending contribution
+   * could require reconstructing their local order. */
+  localWavePromotion?: {
+    base: EntityDocument | undefined;
+    entries: PendingVersion[];
+  };
 
   /**
    * The class of the covering commit — the commit whose write produced
@@ -565,6 +642,35 @@ const applyPendingVersion = (
   }
 };
 
+/** Whether the confirmed view covers an accepted operation. */
+const isCoveredPendingVersion = (
+  confirmed: ConfirmedVersion,
+  pending: PendingVersion,
+): boolean =>
+  confirmed.localWavePromotion === undefined &&
+  pending.acceptedSeq !== undefined && pending.acceptedSeq <= confirmed.seq;
+
+/** Folds pending and locally accepted wave contributions in sealing order. */
+const materializePendingVersions = (
+  confirmed: ConfirmedVersion,
+  pending: readonly PendingVersion[],
+  logContext: PendingPatchLogContext,
+): EntityDocument | undefined => {
+  const promotion = confirmed.localWavePromotion;
+  const interleaved = promotion !== undefined && promotion.entries.length > 0;
+  const entries = interleaved
+    ? [...promotion.entries, ...pending].sort((left, right) =>
+      left.localSeq - right.localSeq
+    )
+    : pending;
+  let value = interleaved ? promotion.base : confirmed.value;
+  for (const entry of entries) {
+    if (isCoveredPendingVersion(confirmed, entry)) continue;
+    value = applyPendingVersion(value, entry, logContext);
+  }
+  return value;
+};
+
 const ensurePendingMaterializationCache = (
   record: DocumentRecord,
 ): PendingMaterializationCache => {
@@ -588,6 +694,19 @@ const materializedVersionThroughPending = (
   if (pendingCount <= 0) {
     return record.confirmed;
   }
+  if (record.confirmed.localWavePromotion?.entries.length) {
+    // A later verdict can settle before an earlier pending contribution.
+    // Reconstruct their sealing order until that unresolved prefix retires;
+    // the ordinary prefix cache assumes all confirmed operations precede it.
+    return {
+      value: materializePendingVersions(
+        record.confirmed,
+        record.pending.slice(0, pendingCount),
+        logContext,
+      ),
+      transactionValue: UNCACHED_TRANSACTION_VALUE,
+    };
+  }
 
   const cache = ensurePendingMaterializationCache(record);
   while (cache.prefixes.length < pendingCount) {
@@ -596,10 +715,15 @@ const materializedVersionThroughPending = (
       ? record.confirmed
       : cache.prefixes[nextIndex - 1]!;
     const pending = record.pending[nextIndex]!;
+    const covered = isCoveredPendingVersion(record.confirmed, pending);
     cache.prefixes.push({
       localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending, logContext),
-      transactionValue: UNCACHED_TRANSACTION_VALUE,
+      value: covered
+        ? base.value
+        : applyPendingVersion(base.value, pending, logContext),
+      transactionValue: covered
+        ? base.transactionValue
+        : UNCACHED_TRANSACTION_VALUE,
     });
   }
   return cache.prefixes[pendingCount - 1]!;
@@ -754,10 +878,55 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
 const localSeqKey = (localSeq: number | number[]): string =>
   Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
+/**
+ * Orders paths segment by segment, a shorter path ahead of one it prefixes.
+ * That puts an ancestor directly ahead of every path below it, which is what
+ * lets `compactRecursiveReads()` drop the descendants in one pass.
+ */
+const compareSegments = (
+  left: readonly string[],
+  right: readonly string[],
+): number => {
+  const limit = Math.min(left.length, right.length);
+  for (let index = 0; index < limit; index++) {
+    if (left[index] !== right[index]) {
+      return left[index] < right[index] ? -1 : 1;
+    }
+  }
+  return left.length - right.length;
+};
+
+const isPathPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * Helper for `compactCommitReads()`, which keeps the reads of one dependency
+ * group that no other read of the group covers. A recursive read at a path
+ * covers every path below it, so a read under another is dropped. Sorts
+ * `reads` in place and returns the survivors in that order.
+ */
+const compactRecursiveReads = <Read extends { path: readonly string[] }>(
+  reads: Read[],
+): Read[] => {
+  if (reads.length < 2) return reads;
+  reads.sort((left, right) => compareSegments(left.path, right.path));
+  const kept: Read[] = [];
+  let covering: readonly string[] | undefined;
+  for (const read of reads) {
+    if (covering !== undefined && isPathPrefix(covering, read.path)) continue;
+    kept.push(read);
+    covering = read.path;
+  }
+  return kept;
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
-  space: MemorySpace,
   reads: Read[],
 ): Read[] => {
   const dependencyKeys = new Map<number | number[], string>();
@@ -769,41 +938,16 @@ const compactCommitReads = <
     }
     return key;
   };
-  const sorted = [...reads].sort((left, right) => {
-    const leftScope = normalizeCellScope(left.scope);
-    const rightScope = normalizeCellScope(right.scope);
-    if (leftScope !== rightScope) {
-      return leftScope < rightScope ? -1 : 1;
-    }
 
-    if (left.id !== right.id) {
-      return left.id < right.id ? -1 : 1;
-    }
-
-    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
-      return left.seq - right.seq;
-    }
-
-    if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = dependencyKeyFor(left.localSeq);
-      const rightKey = dependencyKeyFor(right.localSeq);
-      if (leftKey !== rightKey) {
-        return leftKey < rightKey ? -1 : 1;
-      }
-    }
-
-    if (left.nonRecursive !== right.nonRecursive) {
-      return left.nonRecursive === true ? 1 : -1;
-    }
-
-    return comparePath(left.path, right.path);
-  });
-
+  // Grouping reads the input in whatever order it arrives: a recursive read
+  // displaces a shallow one at its path whichever comes first, and two reads
+  // equal in every grouped field are interchangeable, so the order the groups
+  // settle in decides nothing. The sort at the end is the one that orders.
   const grouped = new Map<string, {
     recursiveByPath: Map<string, Read>;
     nonRecursiveByPath: Map<string, Read>;
   }>();
-  for (const candidate of sorted) {
+  for (const candidate of reads) {
     // The dependency key carries every admission-relevant field — seq for
     // confirmed reads, the layer set AND basisSeq for pending reads — so
     // reads with divergent bases never merge: ancestor-path compaction
@@ -838,22 +982,10 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const compactedRecursive = sortAndCompactPaths(
-      [...group.recursiveByPath.values()].map((read) => ({
-        space,
-        id: read.id,
-        scope: read.scope,
-        type: DOCUMENT_MIME,
-        path: read.path,
-      })),
+    compacted.push(
+      ...compactRecursiveReads([...group.recursiveByPath.values()]),
+      ...group.nonRecursiveByPath.values(),
     );
-    for (const address of compactedRecursive) {
-      const read = group.recursiveByPath.get(address.path.join("\0"));
-      if (read) {
-        compacted.push(read);
-      }
-    }
-    compacted.push(...group.nonRecursiveByPath.values());
   }
 
   return compacted.toSorted((left, right) => {
@@ -4510,18 +4642,17 @@ export class SpaceReplica
     // array, not a prefix, so the prefix materialization cache does not
     // apply; a doc carrying speculation is a bounded transient (the
     // overlay destination retires it), so this stays a cold path.
-    let value = record.confirmed.value;
-    for (const entry of record.pending) {
-      if (this.#speculativeLocalSeqs.has(entry.localSeq)) {
-        continue;
-      }
-      value = applyPendingVersion(value, entry, {
+    return materializePendingVersions(
+      record.confirmed,
+      record.pending.filter((entry) =>
+        !this.#speculativeLocalSeqs.has(entry.localSeq)
+      ),
+      {
         space: this.#space,
         id: uri,
         scope,
-      });
-    }
-    return value;
+      },
+    );
   }
 
   /** Whether an optimistic local write for this doc is still pending — not
@@ -5111,31 +5242,7 @@ export class SpaceReplica
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => documentOperationsOf(transaction),
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
@@ -5183,41 +5290,51 @@ export class SpaceReplica
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
-    options?: { readonly speculative?: boolean },
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
+    },
   ): SealedNativeCommit {
-    const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? {
-            op: "delete" as const,
-            id: operation.id,
-            scope: operation.scope,
-          }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            scope: operation.scope,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            scope: operation.scope,
-            value: toExplicitDocument(operation.value),
-          }
-      );
     return this.#sealOperations(
-      operations,
+      documentOperationsOf(transaction),
       source,
-      preconditions,
+      activeCommitPreconditions(transaction.preconditions),
       transaction.sqliteOps ?? [],
       verdict,
       options,
     );
+  }
+
+  /**
+   * The operations, preconditions, and read set `transaction` hands the
+   * store, as {@link sealNative} builds them into a sealed commit, without
+   * applying anything here: for a committer that commits to the store
+   * ahead of sealing the same transaction into this replica, which needs
+   * the store's shape before the replica has seen the writes. The reads
+   * are `source`'s, against this replica's records for `identity`'s
+   * instances as they stand, so a pending read names the durable basis
+   * beneath the layers it saw; handed back to {@link sealNative} as its
+   * `reads`, they are the one snapshot both the store and the seal rest
+   * on.
+   */
+  storeCommitOf(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
+  } {
+    return {
+      operations: storeOperationsOf(
+        documentOperationsOf(transaction),
+        transaction.sqliteOps ?? [],
+      ),
+      preconditions: activeCommitPreconditions(transaction.preconditions),
+      reads: this.#buildReads(source, this.#nextLocalSeq, identity),
+    };
   }
 
   #sealOperations(
@@ -5229,6 +5346,7 @@ export class SpaceReplica
     options?: {
       readonly speculative?: boolean;
       readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
@@ -5244,33 +5362,11 @@ export class SpaceReplica
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.#buildReads(source, localSeq, identity),
+      reads: options?.reads ?? this.#buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
-      operations: [
-        ...operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
-        ...sqliteOps,
-      ],
+      operations: storeOperationsOf(operations, sqliteOps),
       ...(preconditions.length > 0
         ? { preconditions: [...preconditions] }
         : {}),
@@ -5352,6 +5448,58 @@ export class SpaceReplica
     return { localSeq, commit, settled };
   }
 
+  /** Records accepted sealed operations before their promotion continuation. */
+  #noteSealedReceipt(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    seq: number,
+    identity?: ScopeKeyIdentity,
+  ): void {
+    const touched = this.#touchedOf(operations, identity);
+    const changed = touched.filter(({ id, scope, scopeKey }) => {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      return record.confirmed.localWavePromotion === undefined &&
+        record.confirmed.seq >= seq &&
+        record.pending.some((entry) => entry.localSeq === localSeq);
+    });
+    const shouldNotifySubscribers = changed.length > 0 &&
+      this.#hasNotificationSubscribers();
+    const shouldNotifySinks = changed.length > 0 &&
+      this.#hasSinkSubscribers(changed);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        changed.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    // The confirmed view can advance between receipt and settlement, or
+    // already cover the receipt. Covered operations are present in that value;
+    // partial local wave promotions still need their pending contributions.
+    for (const { id, scope, scopeKey } of touched) {
+      const record = this.#record(id, scope, undefined, scopeKey);
+      for (const entry of record.pending) {
+        if (entry.localSeq === localSeq) entry.acceptedSeq = seq;
+      }
+      record.materialized = undefined;
+    }
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        });
+        if (shouldNotifySinks) this.#notifySinks(changes);
+      }
+    } else if (shouldNotifySinks) {
+      this.#notifySinksForIds(changed);
+    }
+  }
+
   async #settleSealedCommit(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -5376,7 +5524,19 @@ export class SpaceReplica
     try {
       const outcome = await Promise.race([
         verdict.then(
-          (v) => ({ verdict: v }),
+          (v) => {
+            if (
+              "committed" in v && inFlight.localRejectionValue === undefined
+            ) {
+              this.#noteSealedReceipt(
+                localSeq,
+                operations,
+                v.committed.seq,
+                identity,
+              );
+            }
+            return { verdict: v };
+          },
           // The accumulator's contract is to resolve every verdict; a
           // rejection is a wave-machinery bug, mapped to a withdrawal so
           // the pending writes still roll back instead of stranding.
@@ -5479,6 +5639,9 @@ export class SpaceReplica
       // The cover class: a sealed native commit is the co-hosted
       // executor's wave commit (speculative seals resolve withdrawn and
       // never reach here) — the wave admission class, derived.
+      if (source !== undefined) {
+        recordCommitSeq(source, this.#space, v.committed.seq);
+      }
       this.#confirmPending(
         localSeq,
         operations,
@@ -5832,29 +5995,7 @@ export class SpaceReplica
         reads: this.#buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
+        operations: storeOperationsOf(operations, sqliteOps),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
@@ -6256,6 +6397,7 @@ export class SpaceReplica
             operations,
             applied,
             resolveAtVerdict,
+            source,
           );
           // Tx-sourced commits ALWAYS record the coverage wait: the inner
           // settlement promise carries commit callbacks and the
@@ -6310,6 +6452,7 @@ export class SpaceReplica
           operations,
           outcome.applied,
           resolveAtVerdict,
+          source,
         );
         // Same rule as the direct-await branch above: tx-sourced commits
         // always record; only the direct path honors the verdict opt-out.
@@ -6950,8 +7093,8 @@ export class SpaceReplica
     // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
     // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(this.#space, confirmed),
-      pending: compactCommitReads(this.#space, pending),
+      confirmed: compactCommitReads(confirmed),
+      pending: compactCommitReads(pending),
     };
   }
 
@@ -7930,11 +8073,17 @@ export class SpaceReplica
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
     resolveAtVerdict = false,
+    source?: IStorageTransaction,
   ): Promise<void> {
     // The retirement floor's ack record (speculation.md §4): known at
     // VERDICT time, before any parking — a parked promotion changes when
     // the value becomes visible, not that the origin acked.
     this.#ackedSeqsByLocalSeq.set(localSeq, applied.seq);
+    // The same seq, on the transaction that produced the commit: its caller
+    // can name the commit after the bounded record above has forgotten it.
+    if (source !== undefined) {
+      recordCommitSeq(source, this.#space, applied.seq);
+    }
     if (
       this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS
     ) {
@@ -8114,7 +8263,37 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      if (record.confirmed.seq < applied.seq) {
+      const previousWave = record.confirmed.seq === applied.seq
+        ? previousConfirmed.localWavePromotion
+        : undefined;
+      if (
+        coverClass === "derived" &&
+        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+      ) {
+        // One wave can accept several local contributions to this document.
+        // Their shared seq covers all of them only after each has promoted.
+        const base = previousWave ? previousWave.base : previousConfirmed.value;
+        const entries = [
+          ...(previousWave?.entries ?? []),
+          ...pendingIndexes.map((index) => record.pending[index]),
+        ].sort((left, right) => left.localSeq - right.localSeq);
+        let value = base;
+        for (const entry of entries) {
+          value = applyPendingVersion(value, entry, {
+            space: this.#space,
+            id,
+            scope,
+          });
+        }
+        promoted = confirmedVersion(applied.seq, value, coverClass);
+        const lastApplied = entries.at(-1)!.localSeq;
+        const earlierPending = record.pending.some((entry) =>
+          entry.localSeq !== localSeq && entry.localSeq < lastApplied
+        );
+        promoted.localWavePromotion = earlierPending
+          ? { base, entries }
+          : { base: value, entries: [] };
+      } else if (record.confirmed.seq < applied.seq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -8222,6 +8401,17 @@ export class SpaceReplica
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      const promotion = record.confirmed.localWavePromotion;
+      const lastApplied = promotion?.entries.at(-1)?.localSeq;
+      if (
+        promotion && lastApplied !== undefined &&
+        !record.pending.some((entry) => entry.localSeq < lastApplied)
+      ) {
+        record.confirmed.localWavePromotion = {
+          base: record.confirmed.value,
+          entries: [],
+        };
+      }
       if (
         record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
       ) {
@@ -8413,7 +8603,10 @@ export class SpaceReplica
     for (let index = 0; index < frame.length; index++) {
       const upsert = frame[index]!;
       if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
-      const hashes = new Set<string>();
+      const metadata = classifySchemaMeta(upsert.doc);
+      // Leave malformed metadata in the frame for per-document quarantine.
+      if (metadata.kind === "malformed") continue;
+      const hashes = new Set(schemaMetaRefHashes(metadata));
       if (upsert.id.startsWith("cid:")) {
         const value = (upsert.doc as { value?: unknown }).value;
         if (isSubschema(value)) {
@@ -8430,10 +8623,6 @@ export class SpaceReplica
           }
           return schema;
         });
-        const meta = classifySchemaMeta(upsert.doc);
-        if (meta.kind !== "malformed") {
-          for (const hash of schemaMetaRefHashes(meta)) hashes.add(hash);
-        }
       }
       for (const hash of hashes) {
         const id = `cid:${hash}` as URI;

@@ -912,8 +912,8 @@ being imposed.
 
 ### What does not change
 
-- The per-package coverage gate runs a package's whole measured set, so
-  its invocations carry no skip list.
+- A measured set runs whole, so the invocations of a set the coverage
+  gate is scoring carry no skip list.
 - Suites that are not `deno test` need no mechanism. Every one of their
   invocation units holds a single identity, so skipping it is declining to
   invoke it.
@@ -1690,9 +1690,8 @@ does not run it is not something this repository should permit, so a
 changed test file's items are mandatory. A unit that is not a file, such
 as a type-check group or a binary, is one its suite maps the change onto,
 since only the suite knows what its unit covers. A changed *source* file
-forces nothing else in, apart from the whole of a covered package's
-measured set under [the per-package
-gate](#the-one-coverage-gate-that-survives). What runs for it otherwise is
+forces nothing else in, apart from the whole of a [measured
+set](#the-measured-set) the change reaches. What runs for it otherwise is
 what the score chose, which is the trade named under [consequences we are
 choosing](#consequences-we-are-choosing).
 
@@ -1942,36 +1941,38 @@ share near nothing and a score raised by its own noise.
 Two rules answer this. They are separable, and only the second carries any
 risk, so they are argued separately.
 
-**An excluded identity whose independence is established runs on `main` as
-many times as its share asks for.** [The line that decides the
-count](#flakes-and-repeats) already runs past the exclusion rate, so
-nothing new decides anything; what changes is that the mandatory pass
-places such an identity with that count rather than with the single run it
-gives every mandatory identity. Any share above the threshold asks for at
-least four runs, so this is at least three further runs at each commit.
+**An excluded identity runs on `main` as many times as its share asks
+for.** [The line that decides the count](#flakes-and-repeats) already
+runs past the exclusion rate, and the mandatory pass already places every
+identity with the count its share asks for, so this half is in place. Any
+share above the threshold asks for at least four runs, so it is at least
+three further runs at each commit.
 
 Those further runs are what let a share rise as well as fall. They also
 put a pass beside a spurious failure at its own commit, which classifies
 it as a disagreement rather than crediting it as a catch, so both
 paragraphs above close on one mechanism.
 
-**The independence flag is a precondition and not a detail.** A repeat
-invokes the identity's file with every other identity skipped, and an
+**The independence flag is what these runs still want.** A repeat should
+invoke the identity's file with every other identity skipped, and an
 identity without the flag may not have its siblings skipped, so its file
-would have to be invoked whole several times. Every sibling in that file
-would then run several times, and every sibling still gates, so a file
-holding one flaky test would fail lanes several times as often for tests
-that are not flaky at all. So an identity without the flag keeps its
-single run, and gains the measurement when the flag is established. [The
-`main`-side check that establishes it](#establishing-it) is already part
-of this design, and this gives it a second thing to be worth.
+is invoked whole several times. Every sibling in that file then runs
+several times, and every sibling still gates, so a file holding one flaky
+test fails lanes several times as often for tests that are not flaky at
+all. [The `main`-side check that establishes the
+flag](#establishing-it) is already part of this design, and this gives it
+a second thing to be worth: with it, the identity is skipped in its
+file's own invocation and run alone, and the siblings go back to running
+once.
 
-With the flag, the identity is skipped in its file's own invocation and
-run alone the whole count of times. Every run of it at that commit is then
-the same shape, and the same shape the independence check uses. Without
-that, an identity would run once beside its siblings and again alone, and
-a test sensitive to the difference would be recorded as disagreeing with
-itself at every commit, which would pin its exclusion in place for good.
+The count of runs is what the identity gets either way, and the flag
+decides their shape. With it, the identity is skipped in its file's own
+invocation and run alone the whole count of times; every run of it at
+that commit is then the same shape, and the same shape the independence
+check uses. Running it once beside its siblings and again alone is the
+one shape to avoid, since a test sensitive to the difference would be
+recorded as disagreeing with itself at every commit, which would pin its
+exclusion in place for good.
 
 **What these runs cannot separate is a bad machine.** All of an identity's
 runs at one commit go in one lane, so they run on one runner, and a runner
@@ -1984,13 +1985,12 @@ already names, and these runs sit inside it rather than widening it.
 
 What this costs is runner time. Each run is an invocation of its own, so
 the cost model charges every one its invocation rather than charging the
-file once, and the floor `--lane-count` starts its search from has to
-count them as well, which today it does not. Most of the cost then arrives
-as more lanes. Not all of it: one identity's runs go in one lane, so an
+file once. Most of the cost then arrives as more lanes, which the search
+`--lane-count` runs finds by packing what the lanes will actually be
+packed against. Not all of it: one identity's runs go in one lane, so an
 expensive identity multiplied past the bound its job is killed at cannot
-be helped by adding lanes. The mandatory pass has to give up runs until
-what is left fits, down to one, which is what the discretionary passes
-already do and what the mandatory pass does not.
+be helped by adding lanes. The mandatory pass gives up runs until what
+is left fits, down to one, which is what the discretionary passes do.
 
 **A failure of an excluded test does not fail the run.** This is the
 second rule and it is a different question, which is what a `main` failure
@@ -2034,10 +2034,11 @@ no lane chose it.
 
 Three things elsewhere have to move with this rule.
 
-- **Coverage.** A covered package whose lane held a non-gating failure is
-  reported rather than having a baseline published from it, which is the
-  rule the per-package gate already applies to a package with a failing
-  test. Coverage measured through a failing suite says nothing either way.
+- **Coverage.** A [measured set](#the-measured-set) whose lane held a
+  non-gating failure is reported rather than having a baseline published
+  from it, which is the rule the gate already applies to a run with a
+  failing test. Coverage measured through a failing suite says nothing
+  either way.
 - **The pending-failure list.** A `main` failure waits in `pendingMain`
   until a later `main` run judges it, and nothing ages that list. Today a
   broken test turns `main` red and somebody fixes it; under this rule an
@@ -2174,9 +2175,8 @@ From what is left, given every item's value and cost and a budget of five
 lanes times 230 seconds each, it fills in four passes.
 
 1. **Mandatory.** Everything mandatory goes in first: the items the diff
-   touched directly, every item of a covered package the diff touched as
-   described in [The one coverage gate that
-   survives](#the-one-coverage-gate-that-survives), and the items with no
+   touched directly, every unit of a [measured set](#the-measured-set)
+   the diff reached, and the items with no
    history. An item excluded above comes back into this pass if the
    change edits the test itself, or its suite maps the change onto its
    unit, since that is very likely a fix. Every
@@ -2461,9 +2461,9 @@ The object carries:
 - the `unschedulable` list;
 - a count and digest of the known item-level identities, for the
   unknown-item rule;
-- each covered workspace member's own-tests uncovered-line count, against
-  the commit it was measured at, which is what the per-package gate
-  compares a pull request against.
+- each measured set's uncovered-line count, against the commit it was
+  measured at, which is what the coverage gate compares a pull request
+  against.
 
 The size is measured rather than bounded. A publisher run over one day of
 the store — 18,849 objects holding 5,487,611 executions — produced 20,091
@@ -2839,25 +2839,27 @@ the topology or to the test machinery itself, and the moment somebody
 wants to know whether a lane failure is real.
 
 `Status` also joins what the lanes measured. Each lane uploads the
-coverage it produced, one report per workspace member, and `Status`
-downloads the five, adds them up per member, and runs the [per-package
-coverage gate](#the-one-coverage-gate-that-survives) over the totals. It
-is the only job in a position to do that, and it is a job that has to
-exist regardless, so the gate costs a download and an arithmetic pass
-rather than a job.
+coverage it produced, one report per [measured set](#the-measured-set),
+and `Status` downloads the five, adds them up per set, and runs the
+coverage gate over the totals. It is the only job in a position to do
+that, and it is a job that has to exist regardless, so the gate costs a
+download and an arithmetic pass rather than a job.
 
-`Status` decides which packages the gate covers by running the same
-function the lanes run, over the same diff and the same manifest, rather
-than by trusting what a lane reported. That includes the cap on how many
-covered packages a change may touch, so a lane cannot talk `Status` into
-gating something or into skipping something.
+`Status` decides which sets the gate covers by running the same function
+the lanes run, over the same diff and the same topology, rather than by
+trusting what a lane reported. That includes the cap on how many measured
+sets a change may reach, so a lane cannot talk `Status` into gating
+something or into skipping something.
 
 Two rules keep the joined result honest. A coverage failure says in the
 summary that it is a coverage failure, so it is never mistaken for a test
-failure. And when any test in a covered package failed, that package is
-reported rather than gated, because coverage measured through a failing
-suite says nothing about whether the change was tested and the failure is
-the thing to fix.
+failure. And when any lane failed, every set is reported rather than
+gated, because coverage measured through a failing run says nothing about
+whether the change was tested. Every set rather than the sets the failure
+was in: `Status` is already failing for the lane, so a second failure over
+a measurement taken through it buys nothing, and attributing a lane's
+failure to a set would be a second way of asking which tests belong to
+which set.
 
 ### What moves to `main`, and what happens to coverage
 
@@ -2865,17 +2867,17 @@ the thing to fix.
 and `full-tests`, with the two-clause rule above.
 
 Repository-wide coverage measurement moves to the full run and stops
-gating; the per-package gate that stays on pull requests is in [The one
-coverage gate that survives](#the-one-coverage-gate-that-survives), and it
-runs inside a lane rather than in a job of its own. Concretely: the
+gating; the gate that stays on pull requests is over [measured
+sets](#the-measured-set), and it runs inside a lane rather than in a job
+of its own. Concretely: the
 `Coverage Check` job becomes push-only and reports rather than fails,
 which takes a job off every pull request. The barrier it sat behind does
 not go away, because `Status` is a barrier by construction, but what
 happens at that barrier shrinks from a 12-artifact download and a
 repository-wide metric to five small reports and an addition. The
 compile-cache state recording that feeds it moves with it. The full run
-converts each workspace member's coverage directory separately, so the
-per-package baselines come out of it. And `coverage-comment.yml` is
+converts each measured set's coverage directory separately, so the
+baselines come out of it. And `coverage-comment.yml` is
 generalized into the reporter described in [Telling a pull request what
 `main` found](#telling-a-pull-request-what-main-found) rather than deleted
 — it already does the hard part, which is posting to a pull request from a
@@ -2895,7 +2897,7 @@ is no longer the same thing.
 What the gate was actually for is worth separating from how it worked. It
 was there so that coverage keeps going up, or at least stops going down
 quietly. That goal survives, and it is served two ways: as a trend on
-`main`, and as a gate over the packages a pull request can still measure
+`main`, and as a gate over the sets a pull request can still measure
 whole.
 
 ### The repository-wide number is a trend, not a gate
@@ -2904,8 +2906,8 @@ Coverage debt across the repository is measured on `main`, from the full
 run, and it gates nothing. Not on pull requests, where a run of a fifth of
 the test time measures a fifth of the coverage, and not on `main`, where a
 red build for one uncovered line would make `main`'s color mean nothing.
-One narrower measurement does still gate pull requests, and it is the
-subject of [the next section](#the-one-coverage-gate-that-survives).
+Narrower measurements do still gate pull requests, and they are the
+subject of [the next section](#the-measured-set).
 
 It is a dashboard tile instead, and the tile follows [the wall's
 rules](../../packages/dashboard/README.md#philosophy-and-values). It shows
@@ -2921,84 +2923,116 @@ a scoreboard.
 That tile is live, ahead of the rest of this plan. It reads the
 repository-wide `coverage-debt: workspace uncovered lines` figure out of
 each `main` run's `perf-metrics` artifact, which the full run on `main`
-produces today and goes on producing under selection.
+produces today and goes on producing under selection. The full run
+produces it by merging every report its lanes wrote, which is the same
+merge the present gate does over the present matrix's artifacts.
 
 The `ACCEPT_COVERAGE_DEBT` markers stay. They are how somebody says "yes,
 knowingly", and they remain the right escape hatch whether or not anything
 gates on them.
 
 Nothing about coverage fails a run on `main`, and that includes the
-per-package numbers the next section gates on. `main`'s job is to measure:
-its full run produces the repository-wide figure for the trend and each
-covered package's own-tests figure for the baselines, and a landed change
-that added an uncovered line must not turn `main` red for it. What happens
+per-set numbers the next section gates on. `main`'s job is to measure: its
+full run produces the repository-wide figure for the trend and each
+measured set's own figure for the baselines, and a landed change that
+added an uncovered line must not turn `main` red for it. What happens
 instead is that the rise is reported back to the pull request that caused
 it, by [the reporter](#telling-a-pull-request-what-main-found). The
 ratchet has teeth in the one place a person can still act on it, which is
 before the change lands.
 
-### The one coverage gate that survives
+### The measured set
 
 What stops the repository-wide gate working under selection is that its
 two sides no longer measure the same thing. There is a case where they
-still do. Take a package that owns its own unit tests, score only that
-package's source, and count as covered only what those tests reached. Run
-every one of those tests and the measurement is complete, whatever
-selection did anywhere else in the run. Nothing about it depends on how
-many tests the pull request chose, so the comparison against `main` stays
-honest, and so it can gate.
+still do. Take one suite's tests over one workspace member's lines, run
+every one of those tests, and count as covered only what those tests
+reached. The measurement is complete, whatever selection did anywhere else
+in the run. Nothing about it depends on how many tests the pull request
+chose, so the comparison against `main` stays honest, and so it can gate.
 
-That is also the comparison an author most wants. It answers "did the
-change I just made to this package leave more of this package untested
-than before", which is a question about the diff in front of them.
+That pair — one suite's tests, one member's lines — is a **measured set**,
+and it is the unit of everything below. A member's Deno-only unit tests
+are one: the `workspace-unit` suite's tests over `packages/memory`. So are
+`runner-unit`'s tests over `packages/runner`. A member whose tests are a
+suite of their own is one measured set the same way, so nothing here
+depends on which suite a member's tests sit in.
 
-#### The measurement is already being made and thrown away
+A measured set is also the comparison an author most wants. It answers
+"did the change I just made to this package leave more of this package
+untested than before", which is a question about the diff in front of
+them.
 
-`tasks/workspace-tests.ts` runs one `deno task test` per workspace member,
-and it already points each one at a coverage directory named for that
-member. The per-package split exists on disk in every workspace unit
-shard today. `tasks/write-coverage-lcov.ts` then walks those directories
-and merges everything under a shard into one report, which is where the
-split is lost.
+### Each set is measured on its own, and never merged with another
 
-Converting each member's directory on its own instead yields, for every
-package, exactly the coverage its own tests produced. On `main` that costs
-no runner time at all, because those tests already ran that way and the
-profiles are already written. It is a change to how the profiles are
-converted, not to how anything runs.
+Two measured sets over the same member are different numbers and are never
+added together. `pattern-unit` and `pattern-integration` both reach
+authored pattern code; a line one of them covers says nothing about
+whether the other covers it, and a merged figure would let either suite
+pay the other's debt down. Two sets over different members are separate
+for the same reason in the other direction: `packages/memory`'s tests load
+`packages/piece`, so a merged figure would credit `packages/piece` with
+lines nothing in `packages/piece` tests.
 
-The directory belongs to the member rather than to the walk that happens
-to run it. A package whose tests are a suite of their own writes one the
-same way, so nothing about the gate depends on which suite a package's
-tests sit in.
+So each set writes its coverage profiles into a directory of its own,
+named for the suite and the member, and each set's number is converted
+from that directory alone. The isolation is a property of where the
+profiles land rather than a filter applied afterwards, which is what stops
+a later reader merging them by accident.
+
+A suite is never run once per set. A set's tests are mandatory items like
+any others, so a suite two sets reach runs the union of them, and the two
+directories catch what each set's own tests covered. Running the suite a
+second time to keep two numbers apart would cost the run twice over and
+measure nothing the one pass does not.
 
 The counting rules are the existing ones in `tasks/coverage-metrics.ts`,
 including the rule that a file compiling to nothing is charged nothing, so
-a declarations-only file costs a package nothing here either. The result
+a declarations-only file costs a set nothing here either. A member's lines
+are the tracked source files under its own directory, and a file under a
+member nested inside it belongs to that nested member instead. The result
 is a separate series from `coverage-debt: packages/<name> uncovered
 lines`, which sums every job in the repository that loads those files. The
 two are never compared against each other, and the manifest keeps them
 under distinct names so nothing can.
 
-#### Which directories are covered
+### Which sets exist, and what reaches them
 
-Every workspace member under `packages/` carries the gate, at whatever
-depth the member sits: `packages/memory`, `packages/connectors/github`,
-and anything nested deeper the same way. The unit is the workspace member
-rather than a fixed path depth, which is what makes depth stop mattering.
-Adding a package means adding it to the `workspace` array in the root
-`deno.jsonc`, because nothing in the repository knows a package exists
-until it is there, so a new package is covered from the moment it exists.
+A suite declares its measured sets. Each one names the member whose lines
+it counts, the units that measure it, and the paths a change reaches it
+by. Reaching a set is what makes every one of its units mandatory, which
+is the same rule and the same declaration vocabulary as [what the change
+touches must run](#two-rules-that-force-a-test-in), rather than a rule of
+its own. Two mechanisms answering one question is two things to be wrong
+about, and the failure they produce is silent: the gate would run a set's
+tests and decline to score it, or score a set whose tests it did not
+force.
 
-Nothing else is. `tasks` is one coverage group rather than a directory
-tree of them, and `scripts` is left out of coverage accounting entirely
-today.
+That also settles what a set may declare. The bounds the declarations are
+under are the ones stated there — nothing reached by a significant share
+of the tree, and no file reaching a significant share of the things
+declaring — and a member's own tree satisfies the first by construction.
+`LOCAL_COVERAGE_MAX_SETS` is the second, said in measured sets.
+
+The unit suites declare one set per workspace member under `packages/`, at
+whatever depth the member sits: `packages/memory`,
+`packages/connectors/github`, and anything nested deeper the same way. The
+unit is the workspace member rather than a fixed path depth, which is what
+makes depth stop mattering. Adding a package means adding it to the
+`workspace` array in the root `deno.jsonc`, because nothing in the
+repository knows a package exists until it is there, so a new package is
+measured from the moment it exists. A member's set is reached by its own
+tree.
+
+`tasks` is one coverage group rather than a directory tree of them, and
+`scripts` is left out of coverage accounting entirely today, so neither
+carries a set.
 
 A member is out only by being named in `EXCLUDED_FROM_COVERAGE_GATE` in
 `tasks/test-selection/policy.ts`, beside every other dial, each entry
 carrying the reason it is there. A list is the right shape for this
-because the alternative — a rule that measures each package and decides —
-can take a package's gate away for a change nobody meant as a change to
+because the alternative — a rule that measures each member and decides —
+can take a member's gate away for a change nobody meant as a change to
 coverage, and a gate that silently stops gating is worse than no gate. The
 list is what it is today:
 
@@ -3014,20 +3048,20 @@ list is what it is today:
 | `packages/deno-web-test` | Its tests drive the browser harness end to end. |
 | `packages/toolshed` | Its tests want the service's own environment and its initialized database. |
 
-That leaves 33 of the 42 members under `packages/` covered,
-`packages/memory` among them. `packages/agents-host` and `packages/piece`
-are two of them: both are hand-sharded today, and being hand-sharded stops
-meaning anything once the packer does the sharding and `Status` joins what
-the lanes measured.
+That leaves 35 measured sets in the tree today, `packages/memory` among
+them, out of the 45 members `deno.jsonc` lists under `packages/`: the
+nine on the list, and one member with no Deno-only tests to measure.
+`packages/agents-host` and `packages/piece` are two of the 35: both are
+hand-sharded today, and being hand-sharded stops meaning anything once
+the packer does the sharding and `Status` joins what the lanes measured.
 
 One entry is there for size. Because `Status` joins the lanes' coverage, a
-package's tests do not have to land in one lane, or even in one batch —
-they are ordinary mandatory items that the packer distributes like any
-others, and the totals meet again afterwards. What a package's tests have
-to fit inside is the whole run's budget rather than a lane's, which is
-five times the room. `packages/runner` still does not fit it, at around
-1,600 seconds against about 1,150 for all five lanes together. Nothing
-else comes close to that.
+set's tests do not have to land in one lane, or even in one batch — they
+are ordinary mandatory items that the packer distributes like any others,
+and the totals meet again afterwards. What a set has to fit inside is the
+whole run's budget rather than a lane's, which is five times the room.
+`packages/runner` still does not fit it, at around 1,600 seconds against
+about 1,150 for all five lanes together. Nothing else comes close to that.
 
 None of this is special to those packages any more either: [sharding stops
 being written down](#sharding-stops-being-written-down) in the same pull
@@ -3037,13 +3071,13 @@ reference build and are what the item-level dry run checks; a package
 listed for a size it no longer has comes off.
 
 The list is a starting position and is expected to shrink. The publisher
-reports which listed packages would now fit the run's budget, the same way
-it reports a covered package that has grown expensive, so a line comes off
+reports which listed members would now fit the run's budget, the same way
+it reports a measured set that has grown expensive, so a line comes off
 because somebody read a measurement rather than because a threshold moved
-on its own. Two entries are there because the package has no Deno-only
+on its own. Two entries are there because the member has no Deno-only
 tests at all, and the moment one gains some, the same holds.
 
-#### Adding a browser test must not cost a package its gate
+### Adding a browser test must not cost a member its gate
 
 A package that mixes Deno-only tests with tests that need a browser should
 keep the gate over the Deno-only half rather than losing it. That is
@@ -3056,127 +3090,205 @@ with the browser files listed in `--ignore`, then `&&`, then those same
 files handed to the browser harness.
 
 So the convention is the one `packages/static` already follows. A member
-that has a Deno-only half names it `deno-test`. The gate measures
-`deno-test` when a member defines one and `test` otherwise, and
-`tasks/workspace-tests.ts` gives `deno-test` a coverage directory of its
-own so that the baseline on `main` and the run on a pull request measure
-the same half. A member with no `deno-test` is unchanged in every respect.
+that has a Deno-only half names it `deno-test`. A member's measured set
+holds the units of that half and never its browser unit. The browser unit
+then writes no coverage into the set's directory either: it is not one of
+the set's units, so a lane that happened to select it would move a number
+a lane that did not select it would not, which is exactly what the set
+exists to rule out. A member with no `deno-test` is unchanged in every
+respect: its whole test task is its Deno-only half.
 
 `packages/ui` and `packages/iframe-sandbox` get their one-string tasks
 split into `deno-test` and `browser-test` the way `packages/static` writes
 it. Both keep the gate over their Deno-only halves, which is coverage the
 share-based rule this replaced would have taken away from them. Adding a
-browser test to any covered package is then an edit to `browser-test`, and
+browser test to any measured member is then an edit to `browser-test`, and
 the gate does not notice.
 
-#### What a covered package costs is reported, never enforced
+### What a measured set costs is reported, never enforced
 
-A package whose measured set grows past `LOCAL_COVERAGE_MAX_SECONDS` is
-named in the publisher's summary, and by the `coverage` operator mode
-below. Nothing happens to it automatically. Somebody then decides whether
-to split the package's tests, let the run carry the cost, or add a line to
-the exclusion list — all three being decisions about the repository rather
+A set whose measured units grow past `LOCAL_COVERAGE_MAX_SECONDS` is named
+in the publisher's summary, and by the `coverage` operator mode below.
+Nothing happens to it automatically. Somebody then decides whether to
+split the member's tests, let the run carry the cost, or add a line to the
+exclusion list — all three being decisions about the repository rather
 than about one pull request, which is why they belong to a person and not
 to a threshold.
 
-#### Which packages a change reaches
+### A change that reaches more than two measured sets forces none of them
 
-The gate makes two decisions — which tests to run, and which packages to
-measure — and both are the same question: which covered packages did this
-change reach. It answers that question the way everything else in this
-design answers it, from the declarations described under [what the change
-touches must run](#two-rules-that-force-a-test-in), rather than from a
-rule of its own. A covered package declares the paths a change reaches
-its own measured test set by, which is its own tree; the packages a
-change reaches are the packages whose sets become mandatory and the
-packages the gate scores. Two mechanisms answering one question is two
-things to be wrong about, and the failure they produce is silent: the
-gate would run a package's tests and decline to score it, or score a
-package whose tests it did not force.
+The mandatory set a measured set adds is every one of its units, and a
+change reaching several sets adds all of theirs. A sweeping change would
+spend most of a run re-running suites it barely touched, and the gate's
+value falls as the change gets broader anyway: over three or four sets at
+once, "did this leave more untested" stops being a question about one
+thing somebody can look at.
 
-That also settles what a package may declare. The bounds the declarations
-are under are the ones stated there — nothing reached by a significant
-share of the tree, and no file reaching a significant share of the things
-declaring — and a package's own tree satisfies the first by construction.
-`LOCAL_COVERAGE_MAX_PACKAGES` is the second, said in packages.
-
-#### A change that touches more than two covered packages is not gated
-
-The mandatory set a covered package adds is its whole measured test set,
-and a change touching several packages adds all of theirs. A sweeping
-change would spend most of a run re-running suites it barely touched, and
-the gate's value falls as the change gets broader anyway: over three or
-four packages at once, "did this leave more untested" stops being a
-question about one thing somebody can look at.
-
-So when the diff reaches more than `LOCAL_COVERAGE_MAX_PACKAGES` covered
-packages, the gate is off for that pull request entirely. No package's set
-is forced whole, nothing is gated, and `Status` says the gate did not run
-and why. The tests are still selected normally, and the items the diff
-touched directly are still mandatory under [what the change touches must
-run](#two-rules-that-force-a-test-in); it is only the run-the-whole-package
+So when the diff reaches more than `LOCAL_COVERAGE_MAX_SETS` measured
+sets, none of them is forced whole, and `Status` says so and why. The
+tests are still selected normally, and the items the diff touched directly
+are still mandatory under [what the change touches must
+run](#two-rules-that-force-a-test-in); it is only the run-the-whole-set
 part that stops.
 
-Off entirely rather than off for some of them. Gating two of the four
-packages a change touched would mean the gate quietly ignored the other
-two, which is the failure this design keeps refusing elsewhere. A cliff is
-also predictable: an author can tell from the diff whether the gate
-applies, without knowing what any package's tests cost.
+None of them rather than some of them. Forcing two of the four sets a
+change reached would mean the gate quietly ignored the other two, which
+is the failure this design keeps refusing elsewhere. A cliff is also
+predictable: an author can tell from the diff whether their change is
+about to run whole packages, without knowing what any set's tests cost.
 
-Nothing is lost permanently. The full run on `main` measures every
-package, so a rise that a skipped gate let through is caught there and
-[reported back to the pull
-request](#telling-a-pull-request-what-main-found), named as a rise the
-gate would have caught.
+What the cap bounds is what a change is made to run, which is a cost.
+Whether a number may be compared against the baseline is a different
+question, and it turns on whether the set ran whole rather than on why it
+did. So a set the cap left unforced that some run measured anyway is
+still scored: the comparison is exactly as sound as a forced one, and
+throwing it away would leave the gate silent over work the run has
+already paid for. A pull request labelled `ci: full` measures every set
+in the repository, so a sweeping change carrying that label is gated on
+every set it reaches.
 
-#### What a pull request does
+Nothing is lost permanently. The full run on `main` measures every set, so
+a rise that a skipped gate let through is caught there and [reported back
+to the pull request](#telling-a-pull-request-what-main-found), named as a
+rise the gate would have caught.
 
-When the diff reaches a covered package, by the declaration that package
-carries, and the pull request is under the cap above, every item in that
-package's measured test set becomes mandatory, and runs once with
-coverage turned on. They are packed like any other mandatory items, so a large package
-spreads across lanes rather than filling one.
+### What a pull request does
 
-Run once is enforced rather than hoped for. A mandatory item leaves the
-selectable set, so no later pass can pick it a second time, and repeats do
-not apply to a measured item: running it twice covers nothing a first run
-did not. Coverage makes those tests slower, so their items are costed from
-the lane runner's recorded with-coverage durations rather than from the
-ordinary ones, fitted the same way every other cost in this design is.
+When the diff reaches a measured set, by the declaration that set carries,
+and the pull request is under the cap above, every unit in that set
+becomes mandatory and runs with coverage turned on. They are packed like
+any other mandatory items, so a large set spreads across lanes rather than
+filling one. Coverage is turned on for the members being measured and for
+no others, so a lane that also holds a few sampled tests from elsewhere
+pays nothing for them.
 
-Each lane converts the coverage it produced into one report per workspace
-member and uploads it. `Status` adds the five together, scores each
-covered package the diff reached, and fails when the uncovered count has
-risen. A rise is accepted with the marker the repository already has, in
-the same form and with the same rebase-proof meaning:
+Each unit is placed once, and that is enforced rather than hoped for: a
+mandatory item leaves the selectable set, so no later pass picks it a
+second time and no unit is placed in two lanes at once. That is what
+stops a lane's budget being spent twice on the same work, and what keeps
+a set's units from being scattered across lanes by two passes that both
+chose them.
+
+How many times a placed unit then runs is what its share asks for, and
+measuring it changes nothing about that. A test that would have been run
+three times to catch it disagreeing with itself is still run three times,
+with coverage on. Those runs leave the set's number where it was, since a
+coverage count is the union over what the runs reached.
+
+A repeat reaches the unit that asked for it and no further. A lane's
+batch is a suite's whole share of the lane, and a set the gate pulled in
+whole is a great many units of one suite, so a batch that repeated at
+its noisiest unit's count would run everything beside it again — time
+the packer never charged, on tests nobody doubted.
+
+None of this is special to the gate. How often an identity runs is what
+its share asks for, whatever put it in the lane, so an identity a change
+edited carries the same count as one the gate reached.
+
+Nor does it depend on which run it is. The full run requires every
+identity, the exclusion rule therefore takes none of them out, and every
+identity withheld for disagreeing with itself runs in it the count its
+share asks for. That is [what the default branch owes such a
+test](#an-excluded-test-still-runs-on-main): those extra runs are the
+only thing that lets a share rise rather than fall on a branch where an
+identity runs once per commit. It rests on that section's other half,
+which is that a failure of an excluded test does not fail the run.
+
+All of one identity's runs go in one lane, so a lane cannot be added to
+make room for them, and the mandatory pass gives up runs until what is
+left fits, down to one.
+
+Coverage makes those tests slower, and the packer charges them what a run
+without it costs. That is an underestimate whose size nothing has measured
+yet, because no lane has run anything with coverage on. What closes it is
+a record surface of its own for a measured batch, so a with-coverage
+duration is fitted the way every other cost in this design is; until the
+lanes produce those durations there is nothing to fit.
+
+Each lane converts the profiles under each measured set's directory into
+one report and uploads it. `Status` adds the five together per set, scores
+each set the diff reached, and fails when the uncovered count has risen. A
+rise is accepted with the marker the repository already has, in the same
+form and with the same rebase-proof meaning:
 
 ```text
 ACCEPT_COVERAGE_DEBT: packages/memory +12 lines
 ```
 
-#### The baseline, and when it declines to fail
+The marker names the member, and it accepts the rise for every measured
+set over that member. A marker that had to name a suite as well would ask
+an author to know which suite measured what before they could say "yes,
+knowingly". Where a member carries two sets, one marker therefore accepts
+a rise in both; no member carries two today, since the sets in the tree
+are the unit suites' and those divide the members between them.
 
-The manifest carries the per-package numbers for every full `main` run in
-the last `LOCAL_COVERAGE_BASELINE_DAYS`, each against its commit. `Status`
-picks the nearest ancestor of the merge base, which is the walk the
-present ratchet does over downloaded artifacts, done here over data the
-newest manifest already holds.
+### What `main` does
 
-Two cases report instead of failing. A package with no baseline yet is
-reported, because the first pull request to touch a new package should not
-inherit the whole of that package's debt. And when the manifest holds no
-run that is an ancestor of the merge base, the comparison is against a
-tree the branch does not contain, so a rise measured against it is not the
-branch's rise.
+The full run measures every set, because it runs every test in every
+suite: the profiles land in the same per-set directories, and the same
+conversion produces the same numbers. Those are the baselines. Nothing
+gates on them there.
 
-#### Why this one is sound
+Then, separately, the run merges every report its lanes wrote into one and
+takes the repository-wide figure out of that, which is the trend the
+dashboard shows. The merge is over everything the run measured rather than
+over the per-set reports alone, so the trend goes on counting the coverage
+that integration tests and pattern runs contribute, as it does today.
 
-Both sides run the same complete set of tests over the same package.
-Selection cannot skew it, because within that package nothing is selected.
-Sharding cannot skew it, because the package is one invocation either way.
-The count moves when the package's own source or its own tests change,
-which is the change the author is looking at. That is the whole of the
-argument, and it is why this gate keeps its teeth while the
+The two figures come from the same profiles and answer different
+questions, so they are published under different names and nothing
+compares one against the other.
+
+### The baseline, and when it declines to fail
+
+The manifest carries the per-set numbers for every full `main` run in the
+last `LOCAL_COVERAGE_BASELINE_DAYS`, each against its commit. The gate
+takes the newest of them the branch contains, and which one that is comes
+from git: it reads the branch's own history back from the tip and takes
+the first of those commits it meets. That is the walk the present ratchet
+does over downloaded artifacts, done here over data the newest manifest
+already holds.
+
+The branch's history rather than the moment each run was created. A
+re-run of an older commit is created after the run of a newer one, so run
+times can order two baselines the opposite way from the trees they
+measured, and the tree is what a rise is measured against. Reading the
+history back from the tip also costs only the distance to the answer,
+where asking about each commit in turn costs a question per commit and
+the window holds a week of them.
+
+Two of the cases that report instead of failing are about the baseline. A
+set with no baseline yet is reported, because the first pull request to
+reach a new package should not inherit the whole of that package's debt.
+And when the manifest holds no run the branch contains, the comparison
+would be against a tree the branch does not have, so a rise measured
+against it is not the branch's rise.
+
+A third is not about the baseline at all: a set whose joined reports name
+no line of its member measured nothing, rather than covering nothing.
+Charging it every tracked line would fail a change for a measurement that
+never happened, and a set's tests always load some of their own member's
+source, so an empty report is the conversion having produced nothing.
+
+The publisher fills those numbers from the `perf-metrics` artifact of each
+run on `main` it has not read yet, and carries forward what the previous
+manifest held for the rest of the window. Reading one run's figures costs
+an artifact listing and a download, and a week holds far more runs than a
+four-hourly publish should ask about, so what each run reads is the
+handful since the last one. A publisher run that cannot read them at all
+publishes what the previous manifest held, and every set with no baseline
+is reported rather than gated.
+
+### Why this one is sound
+
+Both sides run the same complete set of tests over the same member's
+lines. Selection cannot skew it, because within that set nothing is
+selected. Sharding cannot skew it, because the profiles are joined by the
+set they belong to rather than by the job that produced them. Another
+suite cannot skew it, because another suite's profiles are in another
+directory. The count moves when the member's own source or the set's own
+tests change, which is the change the author is looking at. That is the
+whole of the argument, and it is why this gate keeps its teeth while the
 repository-wide one gives them up.
 
 ## Telling a pull request what `main` found
@@ -3212,12 +3324,11 @@ pull request's own run could not have:
   groups the change touched that rose as well, which is as near as this
   gets to saying where a test would go. Never as a failure — the run is
   green — and never for one line.
-- **A rise in a covered package's own-tests number**, named as one the
-  per-package gate exists to catch. There are three ways one reaches
-  `main`: the change reached more covered packages than the cap allows, so
-  the gate did not run; a package the change reached is on the exclusion
-  list; or a change somewhere else moved which lines of that package its
-  own tests reach. The comment says which, because the three call for
+- **A rise in a measured set's number**, named as one the coverage gate
+  exists to catch. There are three ways one reaches `main`: the change
+  reached more measured sets than the cap allows, so the gate did not run;
+  a member the change reached is on the exclusion list; or a change
+  somewhere else moved which lines of that member the set's tests reach. The comment says which, because the three call for
   different things — nothing, a look at the exclusion list, and a look at
   the change respectively. A fourth state is possible and the comment
   names it too: the gate measured the package on the pull request and
@@ -3298,13 +3409,12 @@ on is one people learn to read past, which costs the signal for everything
 else on it. Running these tests several times and keeping every failure
 gating is the alternative, and it is set out beside the rule.
 
-**Outside a covered package, a change to a source file does not pull in
-the tests that execute it.** Selection knows which test files a change
-edited, and which units the declarations reach. Where those reach a
-covered package and the diff stays under the cap, [the per-package
-gate](#the-one-coverage-gate-that-survives) makes that package's whole
-measured set mandatory, which reaches the tests executing the changed
-lines by running every test the package has. Everywhere else, selection
+**Outside a measured set, a change to a source file does not pull in the
+tests that execute it.** Selection knows which test files a change edited,
+and which units the declarations reach. Where those reach a [measured
+set](#the-measured-set) and the diff stays under the cap, the gate makes
+that whole set mandatory, which reaches the tests executing the changed
+lines by running every test the set holds. Everywhere else, selection
 does not know which tests execute a changed line, so what runs for an
 edited source file is what the score chose. The finer answer is buildable
 and is not being built. Deno writes one coverage profile per pair of test
@@ -3335,15 +3445,14 @@ often as it would have. The net is an empirical question and the
 dashboard is where it gets answered.
 
 **Coverage stops being enforced across the repository, and stays enforced
-per package.** Nothing will fail because a change lowered the repository's
-whole coverage number. What replaces that is a weekly trend somebody has
-to choose to look at, plus a comment naming the source groups where the
-debt rose. Over the 31 packages that carry the [per-package
-gate](#the-one-coverage-gate-that-survives) the ratchet still fails a pull
-request, because there both sides measure the same complete thing. The
-reduction in enforcement is real and confined to what could no longer be
-measured per change: the code covered by suites a pull request only
-samples. If debt starts climbing there, the response is a conversation
+over each measured set.** Nothing will fail because a change lowered the
+repository's whole coverage number. What replaces that is a weekly trend
+somebody has to choose to look at, plus a comment naming the source
+groups where the debt rose. Over the 35 [measured
+sets](#the-measured-set) the ratchet still fails a pull request, because
+there both sides measure the same complete thing. The reduction in
+enforcement is real and confined to what could no longer be measured per
+change: the code covered by suites a pull request only samples. If debt starts climbing there, the response is a conversation
 about the trend, not a reinstated gate on a number a selected run cannot
 produce.
 
@@ -3371,12 +3480,13 @@ is pinned to the commit's date. And if none of that settles it,
 | A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown. Removing the skip makes it mandatory until `main` records it. |
 | One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that, a mandatory item is still placed and its lane over-runs, while a discretionary one is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
 | The mandatory set alone exceeds the budget | The lane runs it anyway and over-runs, past the five-minute step bound where the set demands it. The summary says by how much, which is what argues for raising the bound. |
-| A covered package has no baseline, or none from an ancestor of the merge base | The lane reports the comparison and does not fail. The next full `main` run supplies one. |
-| A covered package gains a test needing a browser or a server | It goes in the package's `browser-test` half, which the gate does not measure, so the Deno-only half keeps its gate. A package with no such half yet names one. |
-| A covered package's measured set grows expensive | Reported in the publisher's summary and by `deno task test-selection coverage`. Nothing is excluded automatically; somebody splits the tests or adds a line to the exclusion list. |
-| A test in a covered package fails | That package is reported rather than gated. Coverage measured through a failing suite says nothing about whether the change was tested, and the failure is the thing to fix. |
-| A change touches more than two covered packages | The per-package gate does not run at all, and `Status` says so. The full run on `main` still measures every package, and a rise it finds is reported back to the pull request. |
+| A measured set has no baseline, or none from an ancestor of the merge base | `Status` reports the comparison and does not fail. The next full `main` run supplies one. |
+| A measured member gains a test needing a browser or a server | It goes in the member's `browser-test` half, which no measured set holds, so the Deno-only half keeps its gate. A member with no such half yet names one. |
+| A measured set grows expensive | Reported in the publisher's summary and by `deno task test-selection coverage`. Nothing is excluded automatically; somebody splits the member's tests or adds a line to the exclusion list. |
+| A test in a measured set fails | Every set is reported rather than gated. Coverage measured through a failing run says nothing about whether the change was tested, and the failure is the thing to fix. |
+| A change reaches more than two measured sets | The gate does not run at all, and `Status` says so. The full run on `main` still measures every set, and a rise it finds is reported back to the pull request. |
 | A lane dies without uploading its coverage | `Status` is already failing for the dead lane. It says the coverage total is incomplete rather than gating on a partial one. |
+| Two measured sets over one member disagree | Nothing joins them. Each carries its own baseline and its own verdict, and an `ACCEPT_COVERAGE_DEBT` marker naming the member accepts a rise in either. |
 | A lane exceeds five minutes repeatedly | The correction factors rise on the next publisher run and less is packed. If it persists, the publisher's summary shows the miss and somebody looks. |
 | Two attempts of one run straddle a UTC midnight | The later attempt's relay writes the earlier attempt's records a second time, under the later day, and the publisher folds both. Not observed in the store so far; see [What the store is missing](#what-the-store-is-missing). |
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
@@ -3471,28 +3581,30 @@ variant is declared and its topology warning for a marked direct record in
 a default batch. A repeated-item fixture gives every execution fresh paths
 and proves that records from every execution reach the lane spool.
 
-The per-package coverage gate is tested from recorded profile directories
-rather than by running tests. A fixture holding one workspace member's
-coverage directory proves that converting it alone gives that member's own
-figure, and that merging it with its siblings gives today's shard figure,
-so the two series are shown to be the two readings of one set of profiles.
-A workspace fixture proves that every member under `packages/` is covered
-at whatever depth it sits, that a member added to the fixture's workspace
-array is covered without any other edit, and that only the members in
-`EXCLUDED_FROM_COVERAGE_GATE` are left out. A member defining `deno-test`
-proves that the gate measures that task, that its coverage directory is
-separate from the rest of `test`, and that a test added to `browser-test`
-moves neither the measured half nor the member's place in the gate. The
-packer gets a fixture proving that a covered package's items are not
-reachable by the value, density, or exploration pass, and are not
-repeated. The join gets a fixture of five lanes' reports for one package
-split across them, proving that the total equals the same tests measured
-in one run, and that a package whose items landed in three lanes is scored
-once. A diff touching one, two, and three covered packages proves the
-cap: gated, gated, and not gated at all rather than gated for two of the
-three. And the baseline walk is tested against recorded chains of `main`
-commits: a rise against an ancestor fails, a rise against a run the merge
-base does not contain reports, and a package with no baseline reports.
+The coverage gate is tested from recorded profile directories rather than
+by running tests. A fixture holding one measured set's coverage directory
+proves that converting it alone gives that set's own figure, and that
+merging it with its siblings gives today's shard figure, so the two series
+are shown to be the two readings of one set of profiles. A fixture holding
+two suites' directories over one member proves that neither suite's
+coverage moves the other's number. A workspace fixture proves that every
+member under `packages/` carries a set at whatever depth it sits, that a
+member added to the fixture's workspace array carries one without any
+other edit, and that only the members in `EXCLUDED_FROM_COVERAGE_GATE` are
+left out. A member defining `deno-test` proves that the set holds that
+task's units, that its coverage directory is separate from the rest of
+`test`, and that a test added to `browser-test` moves neither the measured
+half nor the member's place in the gate. The packer gets a fixture proving
+that a measured set's items are not reachable by the value, density, or
+exploration pass, and are not repeated. The join gets a fixture of five
+lanes' reports for one set split across them, proving that the total
+equals the same tests measured in one run, and that a set whose items
+landed in three lanes is scored once. A diff reaching one, two, and three
+measured sets proves the cap: gated, gated, and not gated at all rather
+than gated for two of the three. And the baseline walk is tested against
+recorded chains of `main` commits: a rise against an ancestor fails, a
+rise against a run the merge base does not contain reports, and a set with
+no baseline reports.
 
 The full run's treatment of a flaky test is tested at both ends. In
 `plan()`, a withheld and independent identity is placed under the
@@ -3543,11 +3655,11 @@ test-selection`. Its modes are also how the system is tested by hand.
   publisher measures it, or it is computed from other dials, and for a
   measured one whether the figure shown is still the checked-in seed or
   one the publisher has since written back.
-- `coverage` prints every workspace member, whether it carries the
-  per-package coverage gate, the reason beside it when it does not, the
-  task the gate measures, and the baseline the newest manifest holds for
-  it. This is what somebody uses to answer "why is my package not gated?"
-  and "what am I being compared against?".
+- `coverage` prints every measured set, the suite and the member it pairs,
+  the task the set measures, and the baseline the newest manifest holds
+  for it, and beside them every workspace member that carries no set and
+  the reason it does not. This is what somebody uses to answer "why is my
+  package not gated?" and "what am I being compared against?".
 
 `tasks/ci-lane.ts` keeps a `--dry-run` of its own, because that is how
 continuous integration asks the same question from inside a job.
@@ -3791,15 +3903,13 @@ exercised on the branch on its own.
 - [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
 - [ ] The full run's treatment of a test too flaky for pull requests.
-      `tasks/test-selection/plan.ts` places a withheld, independent
-      identity with the count `executionsFor` already returns for its
-      share rather than the single run the mandatory pass gives, skips it
-      in its file's own invocation so every run of it at one commit shares
-      one shape, gives up runs until what is left fits rather than putting
-      a lane past its bound, and returns a `nonGating` list beside
-      `withheld` naming the identities whose failures do not fail the run.
-      A withheld identity without the independence flag keeps its single
-      run, and a withheld repository gate is in neither list.
+      The count is placed already: `tasks/test-selection/plan.ts` gives
+      every mandatory identity the count `executionsFor` returns for its
+      share, and gives up runs until what is left fits rather than
+      putting a lane past its bound. What is left is that it returns a
+      `nonGating` list beside `withheld` naming the identities whose
+      failures do not fail the run, and that a withheld repository gate
+      is in neither list.
       `tasks/ci-lane.ts` reads each batch's gathered records, exits
       non-zero only where a failing identity is outside `nonGating`, fails
       the lane whenever a batch did not account for every identity it was
@@ -3812,17 +3922,19 @@ exercised on the branch on its own.
       waits there until a later run judges it, and an excluded test that
       stays broken no longer turns `main` red, so nothing bounds what
       accumulates.
-- [ ] A covered package whose lane held a non-gating failure is reported
+- [ ] A measured set whose lane held a non-gating failure is reported
       rather than having a baseline published from it, the same way the
-      per-package gate already reports a package with a failing test.
+      gate already reports a run with a failing test.
 - [ ] `explain <identity>` gains the runs it is given and whether it is
       withheld, replacing the three-way answer that no longer partitions.
 - [ ] Repository-wide coverage measurement moves to the full run and stops
       failing anything.
-- [ ] `tasks/write-coverage-lcov.ts` converts each workspace member's
-      coverage directory on its own as well as merging them, so the full
-      run yields a per-package own-tests figure beside the existing
-      per-shard report. No test changes how it runs.
+- [x] Each suite writes its coverage profiles into a directory of its
+      own, one level per suite and one per member below it, and the lane
+      converts every one of them into a report named for the measured
+      set. `tasks/write-coverage-lcov.ts` carries the conversion as a
+      function `tasks/ci-lane.ts` calls as well as a command. No test
+      changes how it runs.
 - [ ] Delete the hand-maintained sharding: `tasks/test-timing-weights.ts`,
       `tasks/select-runner-test-files.ts`,
       `tasks/run-sharded-test-files.ts`, `INTERNALLY_SHARDED_PACKAGES` and
@@ -3831,14 +3943,28 @@ exercised on the branch on its own.
       matrix. `tasks/weighted-shards.ts` stays and the lane packer calls
       it. Nothing may be balanced by a transcribed number afterwards, and
       `check-test-topology` is what proves the items are all still there.
-- [ ] `tasks/workspace-tests.ts` gives a member's `deno-test` task, where
-      it defines one, a coverage directory separate from the rest of its
-      `test` task, and `packages/ui` and `packages/iframe-sandbox` split
-      their one-string test tasks the way `packages/static` already writes
-      the same split.
-- [ ] The publisher carries each covered member's own-tests figure and its
-      commit in the manifest, along with the exclusion list it used and
-      the batches it found expensive.
+- [ ] `packages/ui` and `packages/iframe-sandbox` split their one-string
+      test tasks the way `packages/static` already writes the same split,
+      so each keeps a measured set over its Deno-only half. The topology
+      already reads `deno-test` where a member defines one, so this is an
+      edit to two manifests and nothing else.
+- [x] The publisher carries each measured set's figure and its commit in
+      the manifest, read from the `perf-metrics` artifact of each `main`
+      run it has not read yet and carried forward from the previous
+      manifest for the rest of the window.
+      `.github/workflows/test-selection.yml` gains `actions: read` for it,
+      and a run without the credential publishes what the previous
+      manifest held rather than failing.
+- [ ] The publisher's summary names the exclusion-list entries that would
+      now fit the run's budget, and the measured sets past
+      `LOCAL_COVERAGE_MAX_SECONDS`. Both read the fitted costs of the
+      lanes, which have none until the lanes run.
+- [ ] A measured batch records its duration under a surface of its own, so
+      that what a unit costs with coverage on is fitted separately from
+      what it costs without. Until then the packer charges a measured
+      unit what an unmeasured run of it costs, which is an underestimate
+      of unknown size; there is nothing to fit until the lanes have run
+      something with coverage on.
 - [ ] Before merging: `plan --verify` against the last `main` run, proving
       the manifest accounts for every item the topology enumerates under
       its exact variant, apart from explicitly unavailable skip entries,
@@ -3863,8 +3989,8 @@ exercised on the branch on its own.
 - [ ] The `ci: full` label.
 - [x] `coverage-comment.yml` generalized into the reporter, with the
       first-failure attribution, the selected-or-not line, the coverage
-      note, the per-package rise note naming which of the three routes let
-      it through, the flaky-new-test note, and the rename suggestion with
+      note, the measured-set rise note naming which of the three routes
+      let it through, the flaky-new-test note, and the rename suggestion with
       its ready-to-append alias line. It is
       `.github/workflows/pull-request-comments.yml`, which now holds both
       comments this repository posts from the trusted context, and
@@ -3879,31 +4005,51 @@ exercised on the branch on its own.
       which are readable before the relay has shipped them. Whether the
       pull request ran a test is settled by its own run's records, and the
       manifest it resolved answers why it did not; the two together are
-      honest both before and after the lanes land. The per-package rise
-      reads a covered package's own-tests figure out of the run's
-      `perf-metrics` artifact, under the metric name
-      `ownTestsCoverageMetric` builds, so it reads the quantity the gate
-      compares rather than the source group of the same name that a
-      selected run only samples. The gate publishes that figure, so the
-      note is silent until the gate lands and needs nothing further
-      then.
+      honest both before and after the lanes land. The measured-set rise
+      reads a set's figure out of the run's `perf-metrics` artifact,
+      under the metric name `measuredSetCoverageMetric` builds, so it
+      reads the quantity the gate compares rather than the source group
+      over the same member that a selected run only samples. The full run
+      publishes those figures, so the note is silent until it does and
+      needs nothing further then.
 - [ ] The reporter's note for a test too flaky for pull requests that
       failed every one of its runs at this commit and passed every one at
       the parent. It needs the full run's extra runs to exist before it can
       say anything, and it says the test is a known flaky one and that the
       run stayed green.
-- [ ] The per-package coverage gate, in two halves. `tasks/ci-lane.ts`
-      makes every item of a covered package the diff touches mandatory,
-      keeps those items out of later passes and out of repeats, and
-      uploads one coverage report per workspace member. `Status`
-      downloads the five, adds them per member, walks the manifest for the
-      nearest-ancestor baseline, checks for a rise, and reads
-      `ACCEPT_COVERAGE_DEBT` from the pull request's description. `Status`
-      works out which packages the gate covers by running the same
-      function the lanes run, cap included, rather than trusting a lane's
-      report. A coverage failure names itself as one, a package with a
-      failing test is reported rather than gated, and a change over the
-      cap turns the gate off with a line saying so.
+- [x] The coverage gate, in two halves. `tasks/ci-lane.ts` makes every
+      unit of a measured set the diff reaches mandatory, keeps those
+      units out of later passes, runs each of them as many times as its
+      own share asks for, turns coverage on for those members alone, and
+      converts what it collected into one report per set.
+      `tasks/coverage-gate.ts` reads the reports, adds them per set,
+      walks the manifest for the nearest baseline the branch contains,
+      checks for a rise, and reads `ACCEPT_COVERAGE_DEBT` from the pull
+      request's description. It works out which sets the gate covers by
+      running the same function the lanes run, cap included, rather than
+      trusting a lane's report. A coverage failure names itself as one, a
+      run with a failing test is reported rather than gated, and a change
+      over the cap forces no set, with a line saying so, and still
+      scores any set some run measured anyway.
+- [ ] The gate's workflow half, which only the lanes can carry. Each
+      `pr-tests` lane uploads what is under its coverage directory as an
+      artifact, `Status` downloads all five into one directory, and
+      `Status` runs `deno run -A tasks/coverage-gate.ts --base <merge
+      base> --reports <that directory> --body <the pull request's
+      description>`, passing `--tests-failed` when any lane did not
+      succeed. Nothing else has to change: which sets are gated, what
+      each is scored over, and what the baseline is are all decided
+      inside that command. Its checkout has to hold the commits the
+      baselines name, because it asks git whether the branch contains
+      one; a checkout too shallow to answer reports every set as having
+      no baseline, which turns the gate off without failing anything.
+- [ ] The full run's half of the same, which only the lanes can carry.
+      Each `full-tests` lane uploads its coverage the same way, and the
+      job that publishes `perf-metrics` merges every report for the
+      repository-wide figure and reads each set's report for the figure
+      `measuredSetCoverageMetric` names. Both come out of the same
+      reports; the merge is what the present `Coverage Check` job already
+      does over the present matrix's artifacts.
 - [ ] `tasks/ci-workflow.test.ts` updated for the new anchors and shapes,
       including that the shared lane ship step carries no job-wide variant.
 - [ ] Documentation, in the same pull request rather than after it:
@@ -3912,14 +4058,14 @@ exercised on the branch on its own.
       trust-boundary amendment and new dataset area in
       `docs/specs/test-records.md`, `docs/development/COVERAGE.md`
       rewritten around a trend for the repository-wide number and around
-      the per-package gate that keeps its teeth,
+      the measured sets that keep their teeth,
       `docs/development/CI_PERFORMANCE.md` around lanes rather than shard
       balance, and `.claude/rules/github-workflows.md` and
       `.claude/rules/tests.md` where "add a job" becomes "add a suite".
       `.claude/rules/workspace-packages.md` gains the `deno-test`
       convention: a package that mixes Deno-only tests with tests needing
       a browser names the Deno-only half `deno-test`, and that half is
-      what the coverage gate measures.
+      what its measured set holds.
 - [ ] The workflow half turned around, once the lanes carry the gates.
       It asks today whether every recording step's identity is in the
       topology, which is the right question while the workflows and the

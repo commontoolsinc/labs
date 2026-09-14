@@ -5,7 +5,7 @@ Normative spec for Phase 1 of
 [README.md](README.md) first; this document assumes its vocabulary.
 MUST/NEVER language is binding on implementers.
 
-## Anchors (verified on main, 2026-08-02; §3d/§2b file:line refs refreshed 2026-08-04 — re-verify before coding)
+## Anchors
 
 - Scheduler: `packages/runner/src/scheduler/` (`execution.ts`,
   `dependency-graph.ts`, `events.ts`, `event-identity.ts`). The scheduler
@@ -14,16 +14,16 @@ MUST/NEVER language is binding on implementers.
 - Runtime construction: `packages/runner/src/runtime.ts` (`new Runtime`),
   builtin registration `packages/runner/src/builtins/index.ts`
   (`registerBuiltins(runtime)`).
-- Store: engine-v3 sqlite per space DID
-  (`packages/toolshed/cache/memory/engine-v3/`), tables `commit`,
-  `revision`, `head`, `branch` — and, since Phase 1 stage B
-  (2026-08-04), `execution_lease` in the reduced §2 shape
-  (`packages/memory/v2/engine.ts` schema;
+- Store: engine-v3 sqlite per space DID (the on-disk layout is
+  composed by `resolveMemoryEngineStoreRootUrl` and
+  `resolveSpaceStoreUrl` in `packages/memory/v2/storage-path.ts`),
+  tables `commit`, `revision`, `head`, `branch`, and `execution_lease`
+  in the reduced §2 shape (`packages/memory/v2/engine.ts` schema;
   `packages/memory/v2/execution-lease.ts` holder side). The v1
-  branch's richer shape was prior art, not substrate (branch
-  `engine.ts:497-507`: branch PK, `lease_generation`, `host_id`,
-  `on_behalf_of`, state `active|draining|revoked`, `expires_at`) and
-  none of it carried over.
+  branch's richer shape was prior art, not substrate (its `engine.ts`:
+  branch PK, `lease_generation`, `host_id`, `on_behalf_of`, state
+  `active|draining|revoked`, `expires_at`) and none of it carried
+  over.
 - Memory server + protocol: `packages/memory/v2.ts`, mounted in toolshed
   at `/api/storage/memory`
   (`packages/toolshed/routes/storage/memory/memory.routes.ts`).
@@ -52,7 +52,10 @@ wave, and once the wave has committed re-announces the documents the
 verb staged to itself as a warm-marked notice — the same carrier as the
 provisioning path's — so the next cycle loads and derives the staged
 piece; the request settles at the verb's own wave commit —
-[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).
+AMENDED 2026-09-11: a verb's transaction stamped `directCommit` commits
+to the store on its own instead of sealing, ahead of the wave; the source
+update's setup transaction is one, per §3e.)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -120,10 +123,10 @@ server analog (runtime-mapping.md N22/N31).
 Activation mechanics: the memory server notifies the ExecutorHost on
 any AUTHORED admission into a space with no live lease — an
 admission-side hook, not a poll (prior art: the no-handler auto-load
-path, `scheduler/events.ts:331-345`). Host boot discovery is a
-per-space check: stream head past `eventWatermark` means undelivered
-events, so activate. A park racing an incoming commit self-heals: the
-hook re-fires on the next admission.
+path in `queueSchedulerEvent`, `scheduler/events.ts`). Host boot
+discovery is a per-space check: stream head past `eventWatermark`
+means undelivered events, so activate. A park racing an incoming
+commit self-heals: the hook re-fires on the next admission.
 
 The EXPLICIT WARM REQUEST *(RULED 2026-08-21 — the owner adopted the
 recommendation set for the home-profile setup-after-park residual;
@@ -204,14 +207,13 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   the engine with no watch registered, while a `sync()` of a held
   document is answered from the replica, and the feed's admitted
   commits (plane (d)) re-read the documents the replica holds — so the
-  runtime walks
-  the schema once, over what it actually reads, and the memory server
-  never walks it for the serving session at all. The one chase the read-through
-  keeps is the frame validator's delivery guarantee: the `cid:` schema
-  documents a read document's link positions and its `schema` metadata
-  member reference, and those a schema document's own refs name, are
-  read with it, to a fixpoint, exactly as a session's frame carries
-  them. Reads
+  runtime walks the schema once, over what it actually reads, and the
+  memory server never walks it for the serving session at all. The
+  read-through preserves the frame validator's delivery guarantee: it
+  reads the `cid:` schema documents referenced by an accessed document's
+  link positions or schema metadata, and follows the schema documents'
+  own references to a fixpoint, just as a session's frame carries them.
+  This applies to content-addressed documents as well. Reads
   run at the engine's head, as delivered frames do; writes and
   foreign-space reads stay on the session. Two rules a session frame
   follows hold here in the read-through's own form. Protocol.md §3's
@@ -220,7 +222,10 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   read of such an instance that finds the lease row lapsed runs the
   renew arm first (the lost-then-reacquire step the renew timer takes,
   taken at the moment the lapse is found) and is served under the
-  reacquired tenure, or withheld as the tenure parks; space-scoped
+  reacquired tenure, or withheld as the tenure parks. During initialization,
+  lease loss withholds the read and invalidates activation; that partially
+  initialized runtime is disposed rather than reused under a new tenure.
+  Space-scoped
   documents and the service's own instances are delivered to any
   session, so they are read without consulting the row. And an address
   the store holds nothing at leaves no record, as a pull that delivered
@@ -259,9 +264,8 @@ construction against *clients* (no code path). Against *other server
 processes* (deploy overlap, partition) it holds via the lease:
 
 - One row per space in `execution_lease`: `(space, holder, expiresAt)`.
-  The table was CREATED in Phase 1 stage B (2026-08-04), reducing the
-  v1 branch's richer shape (see Anchors) to exactly these three
-  fields — prior art, not substrate.
+  The table reduces the v1 branch's richer shape (see Anchors) to
+  exactly these three fields — prior art, not substrate.
 - **`holder` is a PER-PROCESS identity (DR1, RULED 2026-08-03):**
   the SpaceServer's service identity plus a process-instance
   component minted at PROCESS START — stable across every renew and
@@ -283,7 +287,7 @@ processes* (deploy overlap, partition) it holds via the lease:
   the in-process residue is a local obligation, not wire machinery.
 - Acquire with a conditional write; TTL 15 s; renew every 5 s **by direct
   table update — a lease renewal is NEVER a commit** (v1's renewal-adjacent
-  traffic was part of the storm). The renew has TWO drivers (stage C
+  traffic was part of the storm). Periodic renewal has two drivers (stage C
   tuning T3, 2026-08-18): the interval timer, and a MID-WAVE renew issued
   from the serving scheduler's cooperative macrotask yield (§3) once the
   tenure has gone TTL/3 without a renewal — the timer rides the macrotask
@@ -294,6 +298,26 @@ processes* (deploy overlap, partition) it holds via the lease:
   commit. Impl: `space-server.ts` `#renewIfDue` on
   `Runtime.servingYieldObserver`; pinned in
   `executor-cooperative-yield.test.ts` (ii).
+- Renewal starts immediately after acquisition and covers runtime creation,
+  foreign basis reads, and delegated append recovery. Initialization remains
+  distinct from an active serving loop. Before launch, a direct renewal checks
+  that the lease is still live even if synchronous work delayed timer callbacks.
+  A renewal failure or lease-store exception invalidates initialization: the
+  outstanding initialization await finishes, then its runtime is disposed,
+  its renewal timer is cleared, and its lease is released. Observer cleanup
+  failures cannot skip the factory disposer; observer cleanup and disposer
+  failures cannot skip lease release. Host shutdown waits
+  for this lifecycle before returning. After initialization loses its lease,
+  the host clears that activation's in-flight record and re-evaluates live
+  sessions, undelivered events, and retained warm requests. Matching demand
+  starts a fresh tenure after the failure-park backoff; repeated initialization
+  losses extend that backoff, and a committed wave clears the streak. Warm
+  notices arriving during initialization or its cleanup remain obligations of
+  the successor. Initial acquisition refusal on a rival's lease does not
+  schedule another attempt, and host shutdown cancels a pending backoff. A
+  lifecycle-verb request whose activation fails receives the not-served error;
+  the request alone is not a persistent reactivation criterion. These
+  boundaries are covered by `test/executor/activation-lease.test.ts`.
 - On renewal failure or expiry: the SpaceServer MUST stop committing
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
@@ -319,9 +343,19 @@ derived consequences are fully committed. Persisted in the space (one
 well-known doc, updated in the same transaction as derived commits — never
 its own commit).
 
+An event whose sidecar synchronization fails or whose replica view does not
+hold its stored `(eventId, seq)` has not entered the scheduler. A quiet scheduler
+therefore cannot establish coverage for it. The drain retains the earliest such
+sequence across cycles, clamping both input-head and quiescent-tail advancement
+below it. A fresh scan re-evaluates this floor; ending the serving tenure clears
+it. This composes with the foreign-write shadow floor and does not wait for
+sealed-write durability. [Event visibility](events.md#2-lifecycle-end-to-end)
+defines the ordered publication/response barrier before deferral.
+
 ```
 on activate(space):
   acquire lease (else park)
+  start lease renewal through initialization
   runtime = new Runtime(serverPosture)   // flag ON, egress allow,
                                          // builtins registered
   load graph structure for demanded values + queued events (§1 —
@@ -330,6 +364,7 @@ on activate(space):
   re-mark the dirty frontier from the basis index (§3b, §6):
     a node is dirty iff a recorded input seq is behind that doc's head
   subscribe(space, from = the head the index scan ran against)
+  verify the initialization tenure remains live (else dispose and park)
 
 on commits [s..n] arriving (the wave's input batch; commits arriving
 mid-wave belong to the NEXT wave — natural double-buffering, no timers):
@@ -351,13 +386,15 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
   // where rapid-fire coalescing comes from: superseded intermediates
   // are skipped by laziness, not by an explicit drain phase.
   run scheduler to QUIESCENCE — scheduler.idle()
-  (packages/runner/src/scheduler/facade.ts:1191-1301) resolves; it
+  (Scheduler.idle() in packages/runner/src/scheduler/facade.ts)
+  resolves; it
   awaits queued AND parked events, running actions, and demanded pull
   work — the eager/idle-scheduled actions and their cascades included.
   It does NOT await undemanded dirty computeds (pull-based laziness,
   §3b), commit durability, or post-commit async builtin work
-  (run.ts:563-572 rides runtime.settled(), which maps to the outbox
-  here). There is no separate commit for idle-time work.
+  (finalizeReactiveActionCommit in scheduler/run.ts rides
+  runtime.settled(), which maps to the outbox here). There is no
+  separate commit for idle-time work.
   commit one derived-class transaction containing:
     - all derived cell changes of this wave (final values only)
     - consequenceOf: every eventId drained this wave
@@ -368,10 +405,12 @@ on wave budget exhaustion — EITHER trigger (deadline RULED, owner
 2026-08-04): (a) a cascade that will not quiesce within the
 scheduler's pass budget, or (b) the CONSEQUENCE-FLUSH DEADLINE — a
 wave still running at T_flush commits what is sealed so far. ONE
-mechanism for both: commit the wave anyway — the in-memory state is
-a consistent snapshot — count wavesBudgetExhausted, and advance W NOT AT
-ALL: an exhausted wave's commit carries no watermark movement
-(`derivedThrough` stays at the current W). Continuation waves carry the
+mechanism for both: close a wave when it has sealed contributions or pending
+effects, count `wavesBudgetExhausted`, and keep W unchanged. A zero-delta
+cycle with no pending effects closes no wave and makes no durable commit,
+but still increments the exhaustion counter. A committed exhausted wave
+contains a consistent sealed snapshot; its `derivedThrough` stays at the
+current W. Continuation waves carry the
 cascade as dirtiness; W jumps to the top of the pending input batch only
 at true quiescence. Crash recovery stays sound because the basis index
 re-marks the truncated dirty frontier (§3b, §6) and memo hits suppress
@@ -381,13 +420,17 @@ on drain-settle (TRUE quiescence: a settled non-exhausted cycle, no
 contributions, no pending events, the drain empty — S1, RULED
 2026-08-19; protocol.md §4's quiescence-advance amendment):
   additionally advance W over the space's own committed derived tail
-  (the wave commits contiguously above the input coverage point),
+  (own waves and standalone effect completions contiguously above the
+  input coverage point),
   sealed as an advance-only wave and pushed through the ordinary
   watermark-doc channel — client retirement floors that include a
   pushed derived commit's seq become reachable on a quiet space (the
   swatch-stall class fix). At most once per quiescence transition
-  (latched by content-carrying wave commits, consumed on seal); the
-  advance's own bookkeeping commit is never chased; any non-own seq
+  (latched by content-carrying own derived commits, consumed on seal); a
+  completion arriving after an advance chose its target keeps a later advance
+  owed. Each successful advance-only commit is counted even when that newer
+  completion keeps the latch armed. The advance's own bookkeeping commit
+  is never chased; any non-own seq
   above the coverage point stops the advance below it (fail-closed —
   its coverage arrives input-driven). Counted: settleAdvances.
 
@@ -430,9 +473,14 @@ Light waves never reach the deadline and stay single-commit — the
 zero-delta case, which is why this is a trigger on the EXISTING
 exhaustion machinery rather than a new commit topology. T_flush is
 a policy knob (order 50–100 ms), tuned in Phase 6 with the other
-budgets; `wavesBudgetExhausted` counts both triggers, and the
-amplification budget's inspection rule treats deadline flushes
-under load as a legitimate re-baseline reason (testing.md §4).
+budgets. The configured default is 100 ms. `wavesBudgetExhausted` counts
+exhausted cycles, including those with no wave closure or durable commit;
+`waves` counts closures, including vacuous or aborted outcomes. Their ratio
+is not a committed-wave exhaustion fraction. The amplification budget's
+inspection rule treats deadline flushes under load as a reason to inspect
+and, with the required evidence, re-baseline (testing.md §4). The deadline
+allows sealed consequences to become visible under sustained multi-user
+input while full input coverage remains gated on quiescence.
 
 **Sealing order makes the first flush worth flushing**: events and
 their handler consequences MUST seal ahead of deep demanded
@@ -622,7 +670,7 @@ CREATE TABLE scheduler_basis (
                             --   M2 re-keying; scope_key vocabulary
                             --   is the shared `resolveScopeKey` in
                             --   the wire-shape module —
-                            --   packages/memory/v2.ts:120 — per
+                            --   packages/memory/v2.ts — per
                             --   LD3, key-vocabulary.md §3)
   entity_space     TEXT,    -- the input doc's space: foreign reads
                             --   are logged reads too (cross-space
@@ -678,9 +726,8 @@ Rules the shape carries, binding:
   history.
 - **Interim retention is UNBOUNDED, and that is accepted** (S8).
   Rows at `space` and `user:<p>` keys are touched by no session
-  retirement; main's 32-per-action execution-context cap
-  (`packages/memory/v2/engine.ts:55`) dies with the dropped tables
-  and `scheduler_basis` specifies no replacement bound. The
+  retirement, and no execution-context bound exists —
+  `scheduler_basis` specifies none. The
   narrowing rule above removes the one case that would grow without
   a run to overwrite it; everything else is bounded in practice by
   overwrite-in-place per (action, instance). A real bound is the
@@ -718,18 +765,15 @@ stage-C criterion is the backstop: after this migration the basis
 index is the ONLY persisted scheduler state besides W and
 `eventWatermark`.
 
-**WARNING — the drop list is SEVEN tables; main's own constant
-enumerates SIX** (D6). `CORE_SCHEDULER_TABLES`
-(`packages/memory/v2/engine.ts:1275-1282`) lists
-`scheduler_observation`, `scheduler_action_snapshot`,
-`scheduler_observation_replay`, `scheduler_read_index`,
-`scheduler_write_index`, `scheduler_action_state` — and does NOT
-include `scheduler_context_floor`, which is created and dropped
-through separate statements (`engine.ts:2233-2245`). An
-implementation that mechanically drives the migration off that
-constant WILL leave the floor table behind and fail the plan's
-stage-C criterion for a reason that reads like a mystery. Drive the
-drop from the seven-table list above, not from the constant.
+**WARNING — the drop list is SEVEN tables, and an enumeration of the
+observation tables yields SIX** (D6). `scheduler_context_floor` is
+the one such an enumeration misses: it hangs off no observation
+spine. A migration driven off the six-table enumeration leaves the
+floor table behind and fails the plan's stage-C criterion for a
+reason that reads like a mystery.
+`migrateSchedulerObservationTablesToBasis` in
+`packages/memory/v2/engine.ts` drives the drop from the seven-table
+list above; anything that re-derives that list must too.
 
 **NO BACKFILL** (D10). `scheduler_read_index` and
 `scheduler_action_state` rows are NOT migrated into
@@ -742,14 +786,11 @@ migration that reads old rows would have to reinterpret
 `process_generation` history as overwrite-in-place state, which is
 the reshaping this section already rejected.
 
-**Old client / new server compat is already answered** (D11): the
-capability is negotiated at hello, and a client whose server did not
-advertise `persistentSchedulerState` treats the state as absent and
-runs fresh (`packages/runner/src/storage/v2.ts:2142` — the
-`serverFlags?.persistentSchedulerState !== true` degrade path). A
-server that has migrated advertises nothing to negotiate, so an old
-client takes the same fresh path it already takes today. No version
-handshake is added for this.
+**Old client / new server compat is already answered** (D11): a
+migrated server advertises no `persistentSchedulerState` capability
+at hello, and a client from before the migration reads that as absent
+state and runs fresh — the same path it takes against any server that
+does not advertise it. No version handshake is needed.
 
 **Protocol-layer deletions ride the same migration** (D7). With the
 persisted form gone the flag gates nothing, so the following delete
@@ -767,14 +808,14 @@ here so no one re-derives it mid-PR:
 Dev tooling and live docs read these tables directly and break
 silently, since no product test exercises them:
 
-- `packages/state-inspector/scheduler.ts:15-19` (the five-table
-  requirements map) and its readers at `246-281` — the inspector
-  queries every dropped table by name;
+- `packages/state-inspector` — `hasSchedulerBasisTable` in `db.ts`
+  and the basis-row count in `queries.ts` name the table directly, so
+  the inspector follows any change to it by hand;
 - the `cf inspect` CLI surface that renders that output;
-- `packages/memory/v2/sqlite/guard.ts:16-33` — the `CORE_TABLE_NAMES`
-  blocklist that a pattern statement may never reference: the
-  dropped names come OUT and `scheduler_basis` goes IN, or pattern
-  SQL gains a reachable engine table;
+- `packages/memory/v2/sqlite/guard.ts` — the `CORE_TABLE_NAMES`
+  blocklist that a pattern statement may never reference lists
+  `scheduler_basis` and none of the dropped names; a table added to
+  the engine goes IN, or pattern SQL gains a reachable engine table;
 - the specs that described the persisted form — archived by stage C.3:
   `docs/history/specs/persistent-scheduler-state.md`,
   `docs/history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md`
@@ -789,12 +830,9 @@ hand edit: ~110 fixture files under
 `packages/ts-transformers/test/fixtures/` embed the emitted marker,
 so the GOLDEN-REGENERATION procedure is a required step of the
 change, not a follow-up. Plan Phase 1 stage C sizes the full
-surface. (C.1's unconditional consumer deletion is safe for the
-OFF-arm adoption path runtime-mapping.md N62 keeps: the one
-certificate consumer in `facade.ts` —
-`observationMinimumContextRank`, `facade.ts:213` — already
-degrades to the most-restrictive rank on an ABSENT summary, and
-`adoptRemoteObservations` never reads it; verified 2026-08-03.)
+surface. (The OFF-arm observation-adoption path, the one certificate
+consumer outside the transformer, is gone with the observation
+machinery — runtime-mapping.md N62.)
 
 ## 3c. CFC: the enforcement boundary is the action run
 
@@ -1068,13 +1106,14 @@ which is the failure `eventWatermark` advancement exists to prevent.
 **Multi-space seals** (`.inSpace(...)` provisioning): one tx writes one
 space by DEFAULT; a tx crosses only via the explicit opt-in chain —
 `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4698`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:690`). Opted-in writes are
+(`builder/pattern.ts`) → `Runner.enableCrossSpaceChildCommit()`
+(`runner.ts`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts`). Opted-in writes are
 sequenced at the commit step — foreign authored commits first, home
 derived commit after success — per protocol.md §2b (today's
-`commitMultiSpace`/`runSplitCommits`, `v2-transaction.ts:1971/2048`:
-sequential, stop at first failure). The wave does not close until the
+`V2StorageTransaction.#commitMultiSpace()`/`#runSplitCommits()` in
+`v2-transaction.ts`: sequential, stop at first failure). The wave does
+not close until the
 split completes or fails as a unit (same-host store sequencing, not a
 network await).
 
@@ -1149,7 +1188,18 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. Root creation and explicit wish-sidecar opens
+under the writing principal. A served source update (the `setsrc`
+lifecycle verb, [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md))
+moves the pointer in a setup transaction that COMMITS DIRECTLY to the
+store rather than sealing — the serving loop's own derived-class commit,
+serialized with the wave's seals, its own read set validated by the
+store as a client commit's — because module-loading.md lets update
+authority publish only from a transaction that commits to storage
+itself. A wave open at that commit takes a contribution sealed AFTER it,
+whose reads of the docs it wrote saw the commit, as having observed them
+(§3d's conflict set exempts them for that contribution, and the sink
+holds the store to that exact head), so the swap's first derivation
+under the new pattern lands in the same cycle. Root creation and explicit wish-sidecar opens
 fetch system source through the serving runtime's API URL. Those fetches remain
 within verification-coverage.md OW55's source-trust obligation; root ensuring
 adds no source-following probe for an existing root.
@@ -1200,6 +1250,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **In-flight dedupe**: one outstanding effect per (key, result
   target) per space; the target includes its resolved user/session instance.
   A second miss on the same (key, target) attaches to the in-flight effect.
+  Before dispatch, each accepted attachment retains its own release check.
+  A synchronous release refusal selects the next attachment under that
+  attachment's captured run context. Once an attachment dispatches, the key
+  deduplicates until its work and readable completion retire; a thrown error
+  or rejected work promise does not select another attachment.
   Completion acceptance follows the currently selected request in that
   instance, so A→B→A may reuse the original A without accepting a stale B. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
@@ -1284,6 +1339,21 @@ the durable rows of §5 carry APPENDS, never effect state).
   write-free writebacks, and identical re-asserts are idempotent at
   the store. For appends, idempotence is the `eventId` dedupe
   horizon.
+- When several accepted contributions to one document share a
+  wave sequence, their settled local value includes every contribution in
+  local sealing order. Local promotion also preserves that order between
+  verdicts, including in the view that excludes speculative pending layers.
+  An authoritative frame at the same sequence already
+  contains the wave's value and prevents replay of accepted contributions;
+  a newer frame also takes
+  precedence. `memory-v2-wave-promotion.test.ts` covers this boundary across
+  space, user, and session instances, including reordered verdict delivery,
+  withdrawal, and noncommutative appends. Foreign provisioning groups
+  contributions by actor and grant, so one wave can commit several batches
+  to a foreign space in a different order from local sealing. Accepted verdicts
+  for each space follow that space's server sequence, retaining sealing order
+  within each batch. The settled replica therefore matches the engine when
+  nonadjacent contributions share a foreign batch.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.
@@ -1347,6 +1417,15 @@ escalate.
 
 ## 7. Counters (implement with the loop, not after)
 
+`events.visibilityBarriers` counts ordered publication/response attempts for
+lagging event views. `visibilityRecoveries` counts matching identities after
+those attempts, and `visibilityDeferrals` counts scans that still stop at a
+mismatched identity. `deferredRescansArmed` and `deferredRescansFired` count
+scheduled backstops and callbacks that ran during an active tenure, across all
+transient drain outcomes. An armed timer can be unnecessary if input wakes the
+drain first; these counters do not equate each deferral with an elapsed timer
+interval or each cycle with a durable commit.
+
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
@@ -1362,7 +1441,9 @@ demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
 pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
-drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
+drainInFlightSkips, visibilityBarriers, visibilityRecoveries,
+visibilityDeferrals, deferredRescansArmed, deferredRescansFired,
+lt1LeftoversPurged, lt1LateSealsRefused,
 orphanDeliveriesRefused, handlerNotRunDeferrals, loadParkDeferrals,
 loadParkFailures,
 deliveryDeferralsActive, deliveryFailuresActive,
@@ -1386,17 +1467,32 @@ docs never materialized, verification-coverage.md OW46) is a
 health-stats fact instead of an undifferentiated share of the
 per-attempt `structureLoadDeferred` aggregate; the streak clears when
 the root starts or terminalizes;
-`structureLoadTerminal`/`structureLoadRearmed` carry the
-demand-cycle terminal state (stage P2-F, the OW19 design): a root
-confirmed synced with no pattern meta parks TERMINAL — counted per
-terminalization, no per-cycle churn — and a commit touching one of
-the load's observed docs RE-ARMS it (the retry is settle-gated so it
-reads the re-arming commit's applied state); the demanded-structure
-load pass itself runs UNDER §3's flush deadline (single-flighted
-across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts waves whose W
-advance was actually clamped below the input batch head by the
-Phase-2 settle input barrier — inbound foreign novelty still
-shadowed by a parked own write; the clamp is honesty, not failure,
+`structureLoadTerminal`/`structureLoadRearmed` carry the demand-cycle terminal
+state. A root with no pattern metadata is confirmed by a second owning-result
+traversal, including the scoped-to-space fallback. Each traversal syncs the
+complete addresses it reads; cycle detection distinguishes scopes. Confirmation
+does not subscribe to additional addresses formed by combining observed IDs
+with other scopes. A confirmed root parks terminal, counted once, and a commit
+touching an observed document re-arms it. Admissions racing either traversal
+invalidate a no-metadata verdict when they touch an observed document; pending
+foreign novelty hidden by a sealed write also prevents terminalization. These
+invalidated attempts count as deferrals.
+
+The retry follows frame application within the settle loop. Its structure load
+and demanded derivations finish before the watermark covers the triggering
+input. A shadowed retry waits for the replica's shadow-flip signal, allowing
+the wave to commit the sealed writes that make its input visible. The load pass
+runs under §3's flush deadline and is single-flighted across cycles of one
+tenure. Demand departure drops terminal decisions; a new tenure starts its own
+pass. Park cancels structure loading at its next asynchronous boundary, before
+any subsequent piece start. Completion from a parked tenure cannot publish a
+terminal decision; park does not wait for unresolved pattern loading.
+`watermarkClamped` counts
+non-exhausted cycles whose foreign-write shadow floor is below an input batch
+head above W. An event-visibility floor can constrain the same cycle, so the
+counter does not isolate the marginal effect of the shadow floor. The shadow
+clamp covers inbound foreign novelty still hidden by a parked own write; it
+is honesty, not failure,
 and lifts by itself; `storeReads` counts the engine reads that the store
 read-through posture (§1 plane (a)) performs for serving replicas, and
 `storeRefreshes` counts the held documents it re-reads off the feed, both
@@ -1459,9 +1555,13 @@ registry deltas; the label is wall time, review MINOR-3);
 `demandChanged`, the `session.watch.set`/`.add` notifies, and the warm
 request's staged-instance captures — the third kept apart so
 `watchWakes` keeps meaning exactly the session-watch notifies) BEFORE the
-300 ms-grace coalescing — a burst is several notifies but one demand pass,
-so these exceed the pass-wake count (review NIT-5); the service (loopback)
-session's notifies are DROPPED — its tracked-set growth is the serving
+300 ms grace coalesces notifications into one pending callback. Each
+notification advances the demand generation; a notification racing a pass
+can require another pass after it completes. Input-driven cycles reconcile
+demand before a held grace callback fires, so 300 ms is not a universal
+cold-session latency floor. Count notifications, callbacks, passes, wave
+closures, and durable commits separately. The service (loopback) session's
+notifies are DROPPED — its tracked-set growth is the serving
 graph's own reads, not client demand (review MINOR-4). `demandArrivals`
 (top-level) the root-level arrival re-arm's count. The `settle` block is
 SERVER SETTLE per authored input — admission (the feed's admitted-commit

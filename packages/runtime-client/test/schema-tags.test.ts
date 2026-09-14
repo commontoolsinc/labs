@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { JSONSchema } from "@commonfabric/api";
+
 import { tagsFromSchema } from "@/schema-tags.ts";
 
 describe("tagsFromSchema", () => {

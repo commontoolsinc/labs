@@ -5,8 +5,8 @@ Each PR must pass self-review, local validation, CI, and actionable review
 feedback. Passing current-head CI establishes functional acceptance, including
 the browser integration lanes. Track the independent local Chrome teardown
 investigation separately. Report latency as unquantified until eligible paired
-measurements exist. Leave all PRs open and unmerged. Preserve the investigation
-worktree,
+measurements exist. Merge PRs in recommendation and dependency order only after
+their current-head CI and review gates pass. Preserve the investigation worktree,
 unrelated local work, production data, and the server-execution default.
 
 ## Durable ledger and reproducibility

@@ -19,6 +19,7 @@
 //   idle space with no live sessions parks per IDLE_PARK_MS (§1).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -514,6 +515,17 @@ describe("stage F serving loop", () => {
     const settles = () =>
       timing.getTimeStats("executor", "wave", "settle")?.count ?? 0;
     const before = { cycle: cycles(), drain: drains(), settle: settles() };
+    const recorded = Promise.withResolvers<void>();
+    let finalDrains: number | undefined = undefined;
+    const time = timing.time.bind(timing);
+    using _time = stub(timing, "time", (...args) => {
+      const result = time(...args);
+      if (
+        finalDrains !== undefined &&
+        cycles() - before.cycle >= finalDrains
+      ) recorded.resolve();
+      return result;
+    });
 
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
     openClient();
@@ -537,6 +549,11 @@ describe("stage F serving loop", () => {
     // before the cycle that encloses it, so the counts differ by one at an
     // arbitrary observation point and only agree at rest.
     await host.close();
+    // Closing releases the runtimes and leases. The cancelled cycle records
+    // its final span when its remaining transport continuations complete.
+    finalDrains = drains() - before.drain;
+    if (cycles() - before.cycle >= finalDrains) recorded.resolve();
+    await recorded.promise;
 
     // Every cycle runs its drain and its settle, so at rest the three
     // counts agree — a phase recorded on only some paths through the cycle

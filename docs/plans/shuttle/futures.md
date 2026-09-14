@@ -222,15 +222,11 @@ decisions point here where they defer.
    is not the persisted cross-process ambience the non-goals rule out,
    and the line between the two is drawn here on purpose: resume hands
    one shuttle its own past, never another tool the session's present.
-   `ls <target>` reads a child without standing on it, the way `get`
-   already does — `arity` has the `optional` arm and the listing takes a
-   place, so what wants deciding is whether listing a child renumbers the
-   handles, since decision 17 says a listing does and that would retire a
-   `%n` the person was about to use. And a colored prompt, to tell a
-   command from its output in scrollback: the escapes are zero-width, so
-   every width computation on a painted string goes through
-   `visibleWidth`, or the cursor arithmetic that reads terminal columns
-   rather than code points lands in the wrong one at a wrap.
+   And a colored prompt, to tell a command from its output in
+   scrollback: the escapes are zero-width, so every width computation
+   on a painted string goes through `visibleWidth`, or the cursor
+   arithmetic that reads terminal columns rather than code points lands
+   in the wrong one at a wrap.
 7. **Completion that walks a path.** Completion is place-relative: it
    offers what stands where shuttle stands, so a path typed into a target
    — `get %1/zones/0/n` — completes nothing, which is exactly when a

@@ -3,6 +3,7 @@ import * as Path from "@std/path";
 
 import type { FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
+import { StagedMap } from "@commonfabric/utils/staged-map";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
 
@@ -50,6 +51,7 @@ import {
   type Operation,
   type OperationFieldQueryRequest,
   type OperationFieldQueryResult,
+  type OperationWatchSpec,
   parseMemoryProtocolFlags,
   resolveScopeKey,
   type ResponseMessage,
@@ -95,7 +97,6 @@ import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
 import { respondToHello } from "./handshake.ts";
 import {
-  cloneTrackedGraphState,
   createQueryEvaluationCache,
   extendTrackedGraph,
   fromDirtyKey,
@@ -110,6 +111,7 @@ import {
   type QueryTraversalStats,
   refreshTrackedGraph,
   type SlowestQueryRoot,
+  stageTrackedGraphState,
   toDirtyKey,
   type TrackedGraphState,
   trackGraph,
@@ -131,7 +133,6 @@ import {
   groupedQueries,
   holdingsToCacheEntries,
   isEmptySync,
-  mergeWatchesById,
   sameSnapshot,
   sameWatchSpec,
   type SessionCacheEntry,
@@ -4512,7 +4513,18 @@ export class Server {
         message.watches,
         nextOperationCursors,
       );
-      session.watches = message.watches;
+      session.watches = [...message.watches];
+      session.operationWatches = message.watches.filter((watch) =>
+        watch.kind === "operation"
+      );
+      session.watchIndex = new Map(
+        message.watches.map((watch) => [watch.id, watch]),
+      );
+      session.operationTrackedIds = addOperationWatchTrackedIds(
+        new Set(),
+        message.watches,
+        { principal: session.principal, sessionId: session.id },
+      );
       session.operationCursors = nextOperationCursors;
       session.graphs = graphs;
       session.entities = entities;
@@ -4630,12 +4642,19 @@ export class Server {
     try {
       const startedAt = performance.now();
       const engine = aclEngine ?? await this.#openEngine(message.space);
-      const nextOperationCursors = new Map(session.operationCursors);
-      const existingById = new Map(
-        session.watches.map((watch) => [watch.id, watch] as const),
-      );
+      // Resume can share watch containers with an older registry object. Only
+      // the current registry object may publish into those containers.
+      if (this.#sessions.get(message.space, message.sessionId) !== session) {
+        return respondTypedError<WatchAddResult>(
+          message.requestId,
+          toError("SessionError", "Unknown session for space"),
+        );
+      }
+      const nextOperationCursors = new StagedMap(session.operationCursors);
+      const existingById = new StagedMap(session.watchIndex);
+      const newWatches: WatchSpec[] = [];
       for (const watch of message.watches) {
-        const existing = existingById.get(watch.id);
+        const existing = session.watchIndex.get(watch.id);
         if (existing !== undefined && !sameWatchSpec(existing, watch)) {
           return respondTypedError<WatchAddResult>(
             message.requestId,
@@ -4645,11 +4664,11 @@ export class Server {
             ),
           );
         }
+        if (existing === undefined) {
+          newWatches.push(watch);
+          existingById.set(watch.id, watch);
+        }
       }
-
-      const newWatches = message.watches.filter((watch) =>
-        !existingById.has(watch.id)
-      );
 
       if (newWatches.length === 0) {
         const serverSeq = Engine.serverSeq(engine);
@@ -4669,8 +4688,27 @@ export class Server {
         };
       }
 
-      const nextWatches = mergeWatchesById(session.watches, newWatches);
-      const graphs = new Map(session.graphs);
+      const addedWatches = [...existingById.changedKeys()].map((id) =>
+        existingById.get(id)!
+      );
+      const normalizesDuplicates =
+        session.watchIndex.size !== session.watches.length;
+      const nextWatches = !normalizesDuplicates
+        ? session.watches
+        : [...session.watchIndex.values()];
+      const nextOperationWatches = normalizesDuplicates
+        ? nextWatches.filter((watch) => watch.kind === "operation")
+        : session.operationWatches;
+      const addedOperationWatches = addedWatches.filter((watch) =>
+        watch.kind === "operation"
+      );
+      const graphs = new StagedMap(session.graphs);
+      const graphCommits: Array<() => void> = [];
+      const addedInterests = addOperationWatchTrackedIds(
+        new Set(),
+        addedWatches,
+        { principal: session.principal, sessionId: session.id },
+      );
       const identity = this.#sessionScopeIdentity(session);
 
       const updates = new Map<string, SessionCacheEntry>();
@@ -4703,6 +4741,7 @@ export class Server {
           // leave an already-inserted entry over budget.
           this.#enforceEvaluationCacheBudget();
           graphs.set(branch, tracked.state);
+          this.#addMissedToTrackedIds(addedInterests, [tracked.state]);
           for (const [docKey, entity] of tracked.state.entities) {
             recordUpdate(docKey, entity);
           }
@@ -4713,17 +4752,21 @@ export class Server {
           continue;
         }
 
-        const staged = cloneTrackedGraphState(engine, existing);
-        graphs.set(branch, staged);
+        const staged = stageTrackedGraphState(engine, existing);
+        graphCommits.push(staged.commit);
         const extended = extendTrackedGraph(
           message.space,
           engine,
-          staged,
+          staged.value,
           query,
         );
         foldRootAttribution(attribution, extended.stats);
         for (const [docKey, entity] of extended.updates) {
           recordUpdate(docKey, entity);
+        }
+        for (const key of staged.changedMisses()) {
+          const { id, scopeKey } = fromDocKey(key as QueryDocKey);
+          addedInterests.add(toDirtyKey(id, scopeKey));
         }
       }
 
@@ -4740,24 +4783,6 @@ export class Server {
       }
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
-      const entities = new Map(session.entities);
-      for (const [key, entry] of updates) {
-        entities.set(key, entry);
-      }
-      // Rebuilt from provenance — entities, operation watches, and every
-      // graph's misses — never unioned from the previous set: an interest
-      // a refresh RETIRED (a link edited away, its miss released) must
-      // leave the wake set with it, or every later commit to the orphaned
-      // document keeps waking this session.
-      const trackedIds = addOperationWatchTrackedIds(
-        trackedIdsFromEntries(entities.values()),
-        nextWatches,
-        {
-          principal: session.principal,
-          sessionId: message.sessionId,
-        },
-      );
-      this.#addMissedToTrackedIds(trackedIds, graphs.values());
       const sync: SessionSync = {
         type: "sync",
         fromSeq,
@@ -4768,20 +4793,13 @@ export class Server {
         ),
         removes: [],
       };
-      await this.#attachOperationFields(
-        message.space,
-        message.sessionId,
+      this.#attachOperationFieldsWithEngine(
+        engine,
+        session,
         sync,
-        newWatches,
+        newWatches.filter((watch) => watch.kind === "operation"),
         nextOperationCursors,
       );
-      session.entities = entities;
-      session.trackedIds = trackedIds;
-      session.graphs = graphs;
-      session.watches = nextWatches;
-      session.lastSyncedSeq = serverSeq;
-      session.operationCursors = nextOperationCursors;
-      this.#notifyDemandChanged(message.space, "watch", session.principal);
       const response: ResponseMessage<WatchAddResult> = {
         type: "response",
         requestId: message.requestId,
@@ -4798,6 +4816,50 @@ export class Server {
           },
         },
       };
+      // There is no await between graph staging and publication. Evaluation,
+      // operation cursors, and wire conversion can all fail before this point.
+      for (const commit of graphCommits) commit();
+      graphs.commit();
+      nextOperationCursors.commit();
+      existingById.commit();
+      for (const watch of addedWatches) nextWatches.push(watch);
+      session.watches = nextWatches;
+      for (const watch of addedOperationWatches) {
+        nextOperationWatches.push(watch);
+      }
+      session.operationWatches = nextOperationWatches;
+      if (normalizesDuplicates) session.operationTrackedIds = new Set();
+      addOperationWatchTrackedIds(
+        session.operationTrackedIds,
+        normalizesDuplicates ? nextWatches : addedWatches,
+        {
+          principal: session.principal,
+          sessionId: session.id,
+        },
+      );
+      for (const [key, entry] of updates) {
+        session.entities.set(key, entry);
+        addedInterests.add(toDirtyKey(entry.id, entry.scopeKey));
+      }
+      // Extension only adds ownership. Refresh retires changed misses against
+      // all remaining owners; watch replacement rebuilds the complete set.
+      for (const key of addedInterests) session.trackedIds.add(key);
+      // Accepted replacement lists can contain duplicate ids. Normalizing such
+      // a list on addition can remove an operation owner; this exceptional
+      // path rebuilds complete provenance, including any delivered holdings.
+      if (normalizesDuplicates) {
+        session.trackedIds = addOperationWatchTrackedIds(
+          trackedIdsFromEntries(session.entities.values()),
+          nextWatches,
+          { principal: session.principal, sessionId: session.id },
+        );
+        this.#addMissedToTrackedIds(
+          session.trackedIds,
+          session.graphs.values(),
+        );
+      }
+      session.lastSyncedSeq = serverSeq;
+      this.#notifyDemandChanged(message.space, "watch", session.principal);
       recordSlowQueryDuration(
         "session.watch.add",
         message.space,
@@ -5172,6 +5234,42 @@ export class Server {
     }
   }
 
+  /**
+   * Reconciles changed interests against delivered entries, operation watches,
+   * and remaining misses on every branch. A last-owner departure retires the
+   * key; overlapping owners keep it reactive. Full replacement handles removal
+   * of delivered entries and any client-declared holdings outside the graphs.
+   */
+  #reconcileTrackedInterests(
+    session: SessionState,
+    keys: Iterable<string>,
+  ): boolean {
+    let changed = false;
+    for (const key of keys) {
+      const { id, scopeKey } = fromDirtyKey(key);
+      let owned = session.operationTrackedIds.has(key);
+      if (!owned) {
+        const docKey: QueryDocKey = `${session.space}/${scopeKey}/${id}`;
+        for (const [branch, graph] of session.graphs) {
+          if (
+            session.entities.has(cacheKeyForEntity(branch, id, scopeKey)) ||
+            graph.missed.has(docKey)
+          ) {
+            owned = true;
+            break;
+          }
+        }
+      }
+      if (owned) {
+        if (!session.trackedIds.has(key)) {
+          session.trackedIds.add(key);
+          changed = true;
+        }
+      } else if (session.trackedIds.delete(key)) changed = true;
+    }
+    return changed;
+  }
+
   syncSessionForConnection(
     space: string,
     sessionId: string,
@@ -5244,9 +5342,8 @@ export class Server {
           ): Promise<SessionEffectMessage | null> => {
             const serverSeq = toSeq ??
               Engine.serverSeq(await this.#openEngine(space));
-            const mayCarryOperations = session.watches.some((watch) =>
-              watch.kind === "operation"
-            ) && serverSeq > fromSeq;
+            const mayCarryOperations = session.operationWatches.length > 0 &&
+              serverSeq > fromSeq;
             if (!hasPendingCatchUp && !mayCarryOperations) {
               return null;
             }
@@ -5336,8 +5433,8 @@ export class Server {
             const startedAt = performance.now();
             // Per-session refresh rows (`memory/refresh/session/{untouched,
             // touched}`) and, for a touched session, the phase rows
-            // (`memory/refresh/phase/{walk,diff,tracked,frame}` with the
-            // tracked-set rebuild split further): `memory/flush/refresh`
+            // (`memory/refresh/phase/{walk,diff,tracked,frame}`):
+            // `memory/flush/refresh`
             // is a whole pass over every session, so this is what says
             // which sessions a commit cost and where in one session the
             // time went. Every row closes in a `finally`: a refresh that
@@ -5362,6 +5459,7 @@ export class Server {
               const fromSeq = session.lastSyncedSeq;
               const identity = this.#sessionScopeIdentity(session);
               const updates = new Map<string, SessionCacheEntry>();
+              const changedInterests = new Set<string>();
               const walkStartedAt = performance.now();
 
               // Evaluation exceptions — schema-closure corruption included —
@@ -5388,9 +5486,14 @@ export class Server {
                   if (refreshed === null) {
                     continue;
                   }
+                  for (const key of refreshed.changedMisses) {
+                    const { id, scopeKey } = fromDocKey(key as QueryDocKey);
+                    changedInterests.add(toDirtyKey(id, scopeKey));
+                  }
                   for (const [docKey, entity] of refreshed.updates) {
                     const { scopeKey } = fromDocKey(docKey);
                     const entry = toCacheEntry(entity, identity, scopeKey);
+                    changedInterests.add(toDirtyKey(entry.id, entry.scopeKey));
                     updates.set(
                       cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
                       entry,
@@ -5406,7 +5509,7 @@ export class Server {
                   "walk",
                 );
               }
-              if (updates.size === 0) {
+              if (updates.size === 0 && changedInterests.size === 0) {
                 return await emptyCatchUp();
               }
 
@@ -5481,80 +5584,13 @@ export class Server {
               const commitEntities = () => {
                 const trackedStartedAt = performance.now();
                 try {
-                  // (d′) — design §2.8 flag 2: a push pass that changes the
-                  // session's tracked set is a demand change; notify so the
-                  // demand pass sees it without waiting for the next input.
-                  // The set is rebuilt rather than grown, so the change can
-                  // be a same-size swap (a link retargeted from one absent
-                  // document to another) or a shrink — compared by
-                  // membership, exactly as the full-evaluation branch below
-                  // does, and like there the O(tracked) scan runs only when
-                  // a demand observer is attached (the serving posture; its
-                  // NIT-6 note covers the `push-growth` reason on a shrink).
-                  const wantsDemandNotify =
-                    this.#serverExecutionObserver?.demandChanged !== undefined;
-                  const previous = session.trackedIds;
                   for (const [key, entry] of updates) {
                     session.entities.set(key, entry);
                   }
-                  // Rebuilt from provenance rather than grown in place: the
-                  // refresh above may have RETIRED interests (a link edited
-                  // away releases its miss), and a retired interest must
-                  // leave the wake set with it — while a re-walk's new absent
-                  // dead-ends are wake-reactivity the next commit needs.
-                  const entriesAt = performance.now();
-                  const fromEntries = trackedIdsFromEntries(
-                    session.entities.values(),
+                  const changed = this.#reconcileTrackedInterests(
+                    session,
+                    changedInterests,
                   );
-                  const watchesAt = performance.now();
-                  timing.time(
-                    entriesAt,
-                    watchesAt,
-                    "memory",
-                    "refresh",
-                    "tracked",
-                    "entries",
-                  );
-                  session.trackedIds = addOperationWatchTrackedIds(
-                    fromEntries,
-                    session.watches,
-                    {
-                      principal: session.principal,
-                      sessionId: session.id,
-                    },
-                  );
-                  const missedAt = performance.now();
-                  timing.time(
-                    watchesAt,
-                    missedAt,
-                    "memory",
-                    "refresh",
-                    "tracked",
-                    "watches",
-                  );
-                  this.#addMissedToTrackedIds(
-                    session.trackedIds,
-                    session.graphs.values(),
-                  );
-                  timing.time(
-                    missedAt,
-                    "memory",
-                    "refresh",
-                    "tracked",
-                    "missed",
-                  );
-                  let changed = false;
-                  if (wantsDemandNotify) {
-                    changed = previous.size !== session.trackedIds.size;
-                    if (!changed) {
-                      for (const key of session.trackedIds) {
-                        if (!previous.has(key)) {
-                          changed = true;
-                          break;
-                        }
-                      }
-                    }
-                  }
                   if (changed) {
                     this.#notifyDemandChanged(
                       space,
@@ -5784,20 +5820,39 @@ export class Server {
   ): Promise<void> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) return;
-    const operationWatches = (watches ?? session.watches).filter((watch) =>
-      watch.kind === "operation"
-    );
+    const operationWatches = watches === undefined
+      ? session.operationWatches.slice()
+      : watches.filter((watch) => watch.kind === "operation");
     if (operationWatches.length === 0) return;
-    operationActiveWatchCount.record(operationWatches.length);
     const cursors = operationCursors ?? session.operationCursors;
     const engine = await this.#openEngine(space);
-    sync.operationFields = operationWatches.map((watch) => {
+    this.#attachOperationFieldsWithEngine(
+      engine,
+      session,
+      sync,
+      operationWatches,
+      cursors,
+    );
+  }
+
+  /** Attaches operation snapshots synchronously within watch publication. */
+  #attachOperationFieldsWithEngine(
+    engine: Engine.Engine,
+    session: SessionState,
+    sync: SessionSync,
+    watches: readonly OperationWatchSpec[],
+    operationCursors: Map<string, OpCursor>,
+  ): void {
+    if (watches.length === 0) return;
+    operationActiveWatchCount.record(watches.length);
+    const cursors = operationCursors;
+    sync.operationFields = watches.map((watch) => {
       const after = cursors.get(watch.id) ?? watch.query.after;
       const field = Engine.queryOperationField(engine, {
         ...watch.query,
         ...(after === undefined ? {} : { after }),
         principal: session.principal,
-        sessionId,
+        sessionId: session.id,
       });
       if (field.reset === true) {
         operationResetCount.add(1, { source: "watch", codec: field.codec! });

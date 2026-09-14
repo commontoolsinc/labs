@@ -1,6 +1,3 @@
-// Regression tests for specific bug fixes. Each test should reference
-// the issue number (e.g. CT-1158). New regressions go here.
-
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -60,14 +57,14 @@ describe("Pattern Runner - Regressions", () => {
     await storageManager?.close();
   });
 
-  it("should preserve cell references when map truncates with ifElse null values (CT-1158)", async () => {
-    // Regression test for CT-1158: Map truncation was losing cell references
-    // when ifElse returned null. The bug was in map.ts using .get().slice()
-    // which dereferences cells, causing null values to lose their cell refs.
+  it("preserves cell references when map truncates with ifElse null values", async () => {
+    // Map truncation must keep cell references when ifElse returns null:
+    // slicing through `.get()` would dereference the cells and null values
+    // would lose their cell refs.
     //
-    // Repro: Create a map with ifElse that returns null for some items,
-    // then remove an item from the source array. The remaining items should
-    // still be accessible (not undefined due to broken cell references).
+    // Create a map with ifElse that returns null for some items, then remove
+    // an item from the source array. The remaining items must still be
+    // accessible (not undefined due to broken cell references).
 
     const testPattern = pattern<
       { items: Array<{ name: string; visible: boolean }> }

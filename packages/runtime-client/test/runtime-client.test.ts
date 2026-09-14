@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
+
 import { attachOptionsFrom, RuntimeClient } from "@/runtime-client.ts";
 import { findKeyMaterial } from "@/shared/key-material.ts";
 import {
@@ -138,6 +139,35 @@ describe("RuntimeClient", () => {
       expect(requests).toEqual([
         { type: RequestType.SetForwardWorkerConsole, enabled: false },
       ]);
+    });
+  });
+
+  describe("getLoggerCounts", () => {
+    // The method reshapes the response field by field, so a field the worker
+    // sends and the client forgets is invisible to its caller — which is how a
+    // browser harness would find the CFC counters missing with nothing to say
+    // why.
+
+    it("carries the CFC counters through from the response", async () => {
+      const response = {
+        counts: { total: 1 },
+        metadata: {},
+        timing: {},
+        flags: {},
+        cfc: { cfcRelevantTx: 4, dereferenceTracesMax: 9 },
+      };
+      const conn = {
+        on: () => {},
+        request: () => Promise.resolve(response),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      expect((await client.getLoggerCounts()).cfc).toEqual({
+        cfcRelevantTx: 4,
+        dereferenceTracesMax: 9,
+      });
     });
   });
 

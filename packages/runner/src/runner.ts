@@ -187,6 +187,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
   runtimeWritePolicyAuthorization,
+  type TrustSnapshot,
 } from "./cfc/types.ts";
 import {
   prepareSourceClosureVerification,
@@ -1040,6 +1041,15 @@ type SetupResult<R> = {
 export interface PatternSetupCommitReceipt {
   /** Content-addressed pattern pointer written by the transaction. */
   pattern: { identity: string; symbol: string };
+  /** The space whose commit log accepted the transaction. */
+  space: MemorySpace;
+  /**
+   * Position in `space`'s commit log at which storage accepted the
+   * transaction. With `space` it is the coordinate `cf inspect value-at --seq`
+   * and `diff --from/--to` read, and it orders this receipt against every
+   * other commit to the space.
+   */
+  seq: number;
 }
 
 /** Result of running a pattern through an owned setup transaction. */
@@ -1105,6 +1115,35 @@ export interface RunSyncedOptions {
   patternRepository?: string;
   /** Source lifecycle change written atomically with ordinary pattern setup. */
   pieceSourceTransition?: PieceSourceTransition;
+
+  /**
+   * Commit the setup transaction to the store directly rather than sealing
+   * it into a serving wave, so its verdict is the store's own. A serving
+   * runtime's transactions otherwise seal into the cycle's wave, whose
+   * acceptance a later withdrawal can undo, and a receipt or source-update
+   * authority requires the durable verdict. Inert where no seal destination
+   * is installed.
+   */
+  directCommit?: boolean;
+
+  /**
+   * Whether to start the piece once its setup has committed; `true` when
+   * absent. `false` leaves the piece set up under its new pattern and not
+   * run here, for a runtime that runs pieces on demand: a serving runtime's
+   * swap watcher replaces a running piece's graph on the pointer write, and
+   * its demand pass runs an unrun one.
+   */
+  start?: boolean;
+
+  /**
+   * The trust snapshot the owned setup transaction carries, set ahead of
+   * its first read on every attempt: a serving runtime acting on a
+   * requester's behalf supplies the requester's, so a label the setup
+   * mints attributes to them rather than to the serving identity. Absent,
+   * the transaction keeps the runtime's ambient snapshot. Not applied to a
+   * caller-owned transaction, which keeps its owner's.
+   */
+  cfcTrustSnapshot?: TrustSnapshot;
 }
 
 /** Options for a pattern setup whose fresh source revision proves a commit. */
@@ -1430,9 +1469,9 @@ type SchedulerRehydrationSubscriptionOptions = {
   };
 };
 
-// Whether resumed nodes should hold their initial run until the space syncs,
-// from either the rehydration path or the flag-off await-sync path. Used to
-// propagate the intent to cross-space child runs and container-minting builtins.
+// Whether resumed nodes should hold their initial run until the space syncs.
+// Used to propagate the intent to cross-space child runs and container-minting
+// builtins.
 function defersInitialRunUntilSynced(
   options: SchedulerRehydrationSubscriptionOptions,
 ): boolean {
@@ -1651,12 +1690,12 @@ interface SetupStateReuse {
  * that collapses them writes state describing a version that may not be there.
  *
  * `patternIdentity` alone cannot answer this, because an update can move the
- * pointer before any setup runs. `PiecesController`'s roll-forward materialize
- * commits the candidate's identity and then calls `runSynced`, and
- * `PatternUpdater`'s instantiated mode moves the pointer with no setup at all —
- * leaving a root that boots through `PiecesController`'s cold-start setup
- * repair. Either way the pointer already names the pattern being set up, so
- * comparing pointers reports "same pattern" for what is in fact an update. A
+ * pointer before any setup runs. `PiecesController`'s roll-forward heal
+ * commits the candidate's identity and then calls `runSynced`, and when that
+ * second commit fails the root is left with its pointer moved and no setup at
+ * all — to boot through `PiecesController`'s cold-start setup repair. Either
+ * way the pointer already names the pattern being set up, so comparing
+ * pointers reports "same pattern" for what is in fact an update. A
  * caller that hands setup a pattern the pointer does not name yet — `cf piece
  * setsrc`, which positively asserts the pointer has NOT moved, or the ordinary
  * default-root apply — is already recognized as a change without this.
@@ -1753,8 +1792,9 @@ export class Runner {
 
   /**
    * In-flight unloadable-pointer roll-forward commits. Deliberately outside the
-   * scheduler, like `PatternUpdater`'s checks — `dispose()` settles them before
-   * the storage sessions they write through close. Bounded local commits only.
+   * scheduler, like `SourceReconciler`'s passes — `Runtime.dispose()` settles
+   * both before the storage sessions they write through close. Bounded local
+   * commits only.
    */
   #pendingPointerCommits = new Set<Promise<unknown>>();
 
@@ -4704,8 +4744,7 @@ export class Runner {
                     ],
                   );
                 });
-                // Track so dispose() can settle it before storage teardown
-                // (same contract as PatternUpdater's pending checks).
+                // Track so dispose() can settle it before storage teardown.
                 this.#pendingPointerCommits.add(rollForward);
                 rollForward.finally(() =>
                   this.#pendingPointerCommits.delete(rollForward)
@@ -6695,10 +6734,12 @@ export class Runner {
    *   superseded, requeued, lease lost — can undo it. Such a contribution
    *   cannot back a receipt that says `committed`, and waiting for the wave to
    *   settle from inside the action that feeds it can deadlock, so the answer
-   *   is a refusal at the boundary rather than a weaker word for durable. A
-   *   flag-ON client speculating installs no destination and is unaffected;
-   *   its setup is stamped as bookkeeping, which the overlay passes through to
-   *   the real store;
+   *   is a refusal at the boundary rather than a weaker word for durable —
+   *   unless the caller asks for a direct commit (`directCommit`), which the
+   *   serving loop commits to the store outside the wave, its verdict the
+   *   store's own. A flag-ON client speculating installs no destination and
+   *   is unaffected; its setup is stamped as bookkeeping, which the overlay
+   *   passes through to the real store;
    * - a commit that storage rejects throws, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
    * - the required source transition appends a fresh revision, so the setup
@@ -6726,7 +6767,9 @@ export class Runner {
     // which is where it decides anything: a destination installed while the
     // synchronization below is in flight would pass this check and still seal
     // the transaction the receipt would describe.
-    if (this.#runtime.sealDestinationInstalled) {
+    if (
+      this.#runtime.sealDestinationInstalled && options.directCommit !== true
+    ) {
       throw new Error(SEALING_RECEIPT_REFUSAL);
     }
     if (options.pieceSourceTransition === undefined) {
@@ -6813,6 +6856,7 @@ export class Runner {
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: SetupResult<any> | undefined;
     let commit: PatternSetupCommitReceipt | undefined;
+    let committedTx: IExtendedStorageTransaction | undefined;
     const assertExpectedPatternIdentity = (
       cell: Cell<any>,
     ): void => {
@@ -6856,12 +6900,18 @@ export class Runner {
     } else {
       const outcome = await this.#runtime.editWithRetry(
         (tx) => {
+          // The attempt that commits is the last one this callback sees, so
+          // the receipt below names the commit it produced.
+          committedTx = tx;
           // Receipts and source-update authority require this transaction's
-          // durable acceptance. Check each attempt because a seal destination
-          // can be installed during synchronization or between retries.
+          // durable acceptance, which a direct commit supplies and a seal
+          // into the wave does not. Check each attempt because a seal
+          // destination can be installed during synchronization or between
+          // retries.
           if (
             (requireCommit || sourceUpdate !== undefined) &&
-            this.#runtime.sealDestinationInstalled
+            this.#runtime.sealDestinationInstalled &&
+            options?.directCommit !== true
           ) {
             throw new Error(
               requireCommit
@@ -6882,7 +6932,11 @@ export class Runner {
           this.#runtime.stampServerRun(tx, {
             actionId: `piece-run-synced/${resultCell.sourceURI}`,
             kind: "bookkeeping",
+            ...(options?.directCommit === true ? { directCommit: true } : {}),
           });
+          if (options?.cfcTrustSnapshot !== undefined) {
+            tx.setCfcTrustSnapshot(options.cfcTrustSnapshot);
+          }
           assertExpectedPatternIdentity(resultCell.withTx(tx));
           return this.#setupInternal(
             tx,
@@ -6940,7 +6994,17 @@ export class Runner {
             );
           }
           // deno-coverage-ignore-stop
-          commit = { pattern: patternRef };
+          // Recorded on the transaction at its verdict, before the commit
+          // promise resolved, so a resolved commit carries it; like the
+          // pointer above, a missing seq is the type's edge and fails loudly
+          // rather than minting a receipt that names no commit.
+          const seq = committedTx?.committedSeq?.(resultCell.space);
+          if (seq === undefined) {
+            throw new Error(
+              "the pattern setup committed without recording its store seq",
+            );
+          }
+          commit = { pattern: patternRef, space: resultCell.space, seq };
         }
       }
     }
@@ -6951,7 +7015,7 @@ export class Runner {
         await this.#syncCellsForRunningPattern(resultCell, pattern);
       }
 
-      if (setupRes?.needsStart) {
+      if (setupRes?.needsStart && options?.start !== false) {
         if (givenTx) {
           this.#startWithTx(
             givenTx,
@@ -6975,11 +7039,14 @@ export class Runner {
       let currentRef = getPatternIdentityRef(resultCell);
       while (currentRef !== undefined) {
         const loadedRef = currentRef;
+        // A direct commit's caller answers for what it seals into the
+        // serving wave, so the load repairs no cache on its behalf.
         const currentPattern = await this.#runtime.patternManager
           .loadPatternByIdentity(
             loadedRef.identity,
             loadedRef.symbol,
             resultCell.space,
+            { repairCache: options?.directCommit !== true },
           );
         currentRef = getPatternIdentityRef(resultCell);
         if (
@@ -9710,6 +9777,37 @@ export class Runner {
     });
   }
 
+  /**
+   * Pull the result cell once, after this transaction commits successfully.
+   *
+   * The cell is rebuilt from the result's own normalized link, so it carries
+   * whatever schema that link carries — `getCellFromLink` falls back to
+   * `link.schema` when no explicit one is passed. Which of two things the pull
+   * then does depends on that:
+   *
+   * - With no schema, `Cell.pull()` deep-traverses the whole value, and that
+   *   walk is what demands lazy producers under properties nothing declared.
+   * - With one, it descends only declared `properties`
+   *   (`preparePlainSchemaPlan`), so an eager node — `navigateTo`,
+   *   `generateText`, a `fetch*` — sitting under an undeclared property is not
+   *   demanded and its operation may never run. That hazard is latent here
+   *   rather than introduced: it follows from the link's own schema, is
+   *   unmeasured, and wants a decision about what a start pull should demand.
+   *
+   * Which of the two a given result gets is therefore decided by whether its
+   * link carries a schema, and that is not uniform: a non-space output scope
+   * builds its cell through `getCell(space, _resultFor, undefined, tx)`, so a
+   * scoped result pulls schemaless and walks, while a space-scoped one may not.
+   * The same interaction can be safe under one scope and not the other, which
+   * is the strongest argument for settling this deliberately rather than by
+   * whichever direction a caller happens to be patched in.
+   *
+   * What is settled is that narrowing this FURTHER, by passing the pattern's
+   * result schema explicitly, is not the way: it measured about a quarter off a
+   * thread open on the unified inbox and was reverted for exactly the hazard
+   * above, widened to every such pull. See stage 7 of
+   * docs/plans/person-inbox-interaction-cost.md.
+   */
   #pullCellOnceAfterSuccessfulCommit<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
@@ -11063,7 +11161,7 @@ export class Runner {
         resolvedOutputSpot,
       );
     } finally {
-      popFrame(builtinFrame);
+      if (builtinFrame) popFrame(builtinFrame);
     }
 
     // Handle both legacy (just Action) and new (RawBuiltinResult) return formats

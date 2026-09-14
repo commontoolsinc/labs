@@ -1,5 +1,8 @@
 # Collection indexes
 
+For authoring recipes alongside `map`, `filter`, and `reduce`, see
+[reactive collections](../common/concepts/reactive-collections.md).
+
 Array-valued Cells expose `groupBy(selector)` and `keyBy(selector)`. Each
 selector receives one source element. The compiler lowers it to reactive key
 extraction; the runtime owns membership maintenance for each source occurrence.
@@ -76,8 +79,8 @@ a value-only view materializes stored contents.
 
 The [decision record](../history/features/2026-09-11-index-key-enumeration-decision.md)
 records the selected representation and alternatives. The
-[acceptance checklist](../plans/collection-index-contract.md#tagged-enumeration-acceptance)
-tracks validation.
+[executed acceptance contract](../history/plans/collection-index-contract.md#tagged-enumeration-acceptance)
+records the implementation checks.
 
 A Cell key denotes its resolved space, document, path, and scope. Its schema and
 stored contents do not participate in equality. Selecting a Cell preserves that
@@ -142,9 +145,10 @@ storage retention policy.
 Materializer envelopes can introduce scheduler ordering edges proportional to
 source size even when an unrelated lookup does not rerun. These operators make
 no constant-time update guarantee. Group consumers also pay for the members they
-read. Scale measurements and join operators are tracked by the
-[implementation plan](../plans/pattern-computation-cost-implementation.md) and
-[index contract](../plans/collection-index-contract.md).
+read. The [benchmark guide](../development/BENCHMARKS.md) describes the
+reproducible maintenance-phase probe, which separates initialization, linked-row
+changes, membership edits, and lookup retargeting across sizes and key
+distributions.
 
 ## Left lookup joins
 

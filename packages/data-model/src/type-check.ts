@@ -38,6 +38,7 @@ import {
   type FabricContainerValue,
   FabricInstance,
   type FabricPlainObject,
+  type FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
 } from "./interface.ts";
@@ -172,6 +173,26 @@ export function isWalkableObjectNotArray(
 ): value is ReadonlyRecord;
 export function isWalkableObjectNotArray(value: unknown): boolean {
   return isWalkableObjectOrArray(value) && !Array.isArray(value);
+}
+
+/**
+ * Narrows to the `FabricSpecialObject` arms of `FabricValue` -- a
+ * `FabricPrimitive` or a `FabricInstance` -- by one `instanceof`. The class is
+ * abstract, so a value that passes is an instance of one of its two
+ * subclasses, and this says so; `instanceof FabricSpecialObject` alone narrows
+ * to the base, which is neither and so is not a `FabricValue`.
+ *
+ * The first signature takes a value already known to be one of the two, and
+ * only reports; narrowing there would leave the `false` branch with nothing.
+ */
+export function isFabricSpecialObject(
+  value: FabricPrimitive | FabricInstance,
+): boolean;
+export function isFabricSpecialObject(
+  value: unknown,
+): value is FabricPrimitive | FabricInstance;
+export function isFabricSpecialObject(value: unknown): boolean {
+  return value instanceof FabricSpecialObject;
 }
 
 /**

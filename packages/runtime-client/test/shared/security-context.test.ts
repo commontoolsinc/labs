@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
-import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   normalizeOrigin,
   normalizeSpaceHostMap,

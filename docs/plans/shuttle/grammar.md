@@ -547,13 +547,33 @@ not a convenience.
 
 ## Listings, pagination, search
 
-`ls` lists what stands at the place: a space root's facets, the slugs the
+`ls` lists what stands at a place: a space root's facets, the slugs the
 space's index records, the space's pieces, or the keys directly under the
 cell the place names. A row that failed on its own account is still a row —
 a slug the index names and nothing resolves is a name the space has — so it
 carries what went wrong rather than being dropped, and one failed row never
 takes the listing down with it. A read that failed outright is no listing at
 all and raises.
+
+**Which place is `ls`'s operand to say, and the place shuttle stands at
+where the line writes none.** The operand is read through the door every
+reading verb reads one through, so `ls`, `get`, `describe` and `verbs` spell
+a target the same way: a relative path, another piece, a slug, a facet, a
+rooted or complete reference, a `%n` row of the last listing. What a verb
+then does with what that door found is its own, and `ls` parts from `get`
+twice, each time because a listing is not a value. A space root and a facet
+hold no value and are refused there; here they are what a listing is for.
+And the `#argument` suffix, which `get` takes, is refused here — a place
+carries no selection between a piece's two cells, and a listing's rows are
+reached from the place they were listed at. Nothing moves either way:
+listing a child reads it without standing on it, exactly as reading one
+does.
+
+A listed target renumbers, as every listing does: `%n` is a reference until
+the next listing (decision 17), and the rows a target's listing prints are
+the rows the next line's handles name. The alternative is the one thing a
+numbered listing may not be — numbers printed beside rows the next command
+will not take.
 
 A listing says what it is a listing of wherever its rows are not everything
 standing there. `slugs/` is the case that has such a bound: the index names

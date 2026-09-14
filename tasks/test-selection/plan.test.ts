@@ -111,7 +111,9 @@ describe("plan", () => {
       expect(taken?.reason).toBe("changed");
     });
 
-    it("runs a mandatory identity once, whatever its repeat count", () => {
+    it("keeps the repeats of an identity the coverage gate pulled in", () => {
+      // Measuring a set is not a reason to run one of its tests fewer
+      // times than a lane that never measured it would have.
       const manifest = sampleManifest({
         entries: entries(3, () => ({ repeats: 3 })),
       });
@@ -121,7 +123,107 @@ describe("plan", () => {
       ]]);
       const result = run(manifest, { mandatory });
       const taken = selected(result).find((s) => s.entry.test.n === "case 0");
-      expect(taken?.repeats).toBe(1);
+      expect(taken?.repeats).toBe(3);
+    });
+
+    it("charges a lane for every run of a repeated mandatory identity", () => {
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({ cost: 10, repeats: 3 })),
+      });
+      const once = run(
+        sampleManifest({ entries: entries(1, () => ({ cost: 10 })) }),
+        {
+          mandatory: new Map([[
+            testIdentityKey(manifest.entries[0]!.test),
+            "coverage-gate" as const,
+          ]]),
+        },
+      );
+      const thrice = run(manifest, {
+        mandatory: new Map([[
+          testIdentityKey(manifest.entries[0]!.test),
+          "coverage-gate" as const,
+        ]]),
+      });
+      const load = (result: ReturnType<typeof run>) =>
+        result.lanes.reduce((total, lane) => total + lane.projectedSeconds, 0);
+      expect(load(thrice)).toBeGreaterThan(load(once));
+    });
+
+    it("keeps the repeats of an identity the change edited", () => {
+      // A test the change edits is one of the two routes an excluded
+      // identity reaches a lane by, and the count is what makes it prove
+      // itself there.
+      const manifest = sampleManifest({
+        entries: entries(3, () => ({ repeats: 3 })),
+      });
+      const mandatory = new Map([[
+        testIdentityKey(manifest.entries[0]!.test),
+        "changed" as const,
+      ]]);
+      const result = run(manifest, { mandatory });
+      const taken = selected(result).find((s) => s.entry.test.n === "case 0");
+      expect(taken?.repeats).toBe(3);
+    });
+
+    it("keeps the repeats of every identity of the full run", () => {
+      const manifest = sampleManifest({
+        entries: entries(3, () => ({ repeats: 3 })),
+      });
+      const result = run(manifest, { policy: "everything" });
+      expect(selected(result).map((s) => s.repeats)).toEqual([3, 3, 3]);
+    });
+
+    it("gives up a mandatory identity's runs until they fit a lane", () => {
+      // All of one identity's runs go in one lane, so a lane cannot be
+      // added to make room for them, and one observation beats none.
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({ cost: 100, repeats: 3 })),
+      });
+      const result = run(manifest, {
+        mandatory: new Map([[
+          testIdentityKey(manifest.entries[0]!.test),
+          "coverage-gate" as const,
+        ]]),
+        budgetSeconds: 250,
+      });
+      expect(selected(result)[0]?.repeats).toBe(2);
+    });
+
+    it("places a mandatory identity no lane can hold, and says so", () => {
+      // Mandatory means mandatory. Leaving it out would report a pass
+      // over a test that never ran, where placing it produces a lane
+      // that runs long and a figure saying by how much.
+      const manifest = sampleManifest({
+        entries: entries(1, () => ({ cost: 1000, repeats: 3 })),
+      });
+      const key = testIdentityKey(manifest.entries[0]!.test);
+      const result = run(manifest, {
+        mandatory: new Map([[key, "coverage-gate" as const]]),
+        budgetSeconds: 10,
+      });
+      expect(selected(result).map((s) => testIdentityKey(s.entry.test)))
+        .toEqual([key]);
+      // Down to once, and never to nothing.
+      expect(selected(result)[0]?.repeats).toBe(1);
+      expect(result.overBudgetSeconds).toBeGreaterThan(0);
+      // The list of work no lane can hold names the discretionary
+      // identities alone, so nothing reads a required one as dropped.
+      expect(result.unschedulable).toEqual([]);
+    });
+
+    it("never leaves a mandatory identity out, whatever it costs", () => {
+      // Every identity is mandatory here, and each costs more than a
+      // lane's whole budget.
+      const manifest = sampleManifest({
+        entries: entries(4, () => ({ cost: 5000, repeats: 2 })),
+      });
+      const result = run(manifest, {
+        mandatory: everything(manifest),
+        budgetSeconds: 10,
+      });
+      expect(selected(result)).toHaveLength(4);
+      expect(result.unschedulable).toEqual([]);
     });
 
     it("says by how much the mandatory set alone overran", () => {

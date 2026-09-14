@@ -281,6 +281,18 @@ execution, so a test run five times fails a lane spuriously about five
 times as often as its share says. That cost is deliberate, and the
 exclusion is what bounds which tests pay it.
 
+How often an identity runs does not depend on what put it in the lane,
+or on which run it is. An identity a change edited, an identity a
+declaration reached, an identity chosen for what it is worth, and every
+identity of a run over the whole corpus all run the count their share
+asks for.
+
+All of one identity's runs go in one lane, so a lane cannot be added to
+make room for them. An identity that would be repeated and fits in no
+lane runs fewer times, down to once, and a mandatory one is placed at
+that single run however far past a lane's capacity it is; [what must run,
+and what must not](#what-must-run-and-what-must-not) carries the rule.
+
 **An execution is not a retry.** Every one must pass, and any failure
 among them fails the run. Five runs of a test is strictly stricter than
 one, never laxer. Nothing is retried and nothing is masked. Where a
@@ -371,6 +383,22 @@ all; [what the default branch does with an excluded
 identity](#what-the-default-branch-does-with-an-excluded-identity) says
 how it runs there.
 
+**A mandatory identity runs, whatever it costs.** Nothing weighs it
+against a budget, a lane's capacity, or the time the run is trying to
+hold to, and no rule anywhere takes one out. An identity whose own cost
+is past what a lane is killed at is placed in a lane regardless, and what
+that produces is a lane that runs long and says by how much. The
+alternative is a run that reports a pass over a test it decided not to
+run, which is the one failure this design will not have: a consumer is
+told a test did not run, never left to infer it from a green result.
+Weighing cost is for the identities nothing requires, and the list of
+work no lane can hold names those alone.
+
+The count of runs is the one thing that bends. An identity that would be
+repeated and fits nowhere runs fewer times, down to once, since all of
+one identity's runs go in one lane and one observation beats none. Down
+to once and never to nothing.
+
 Two rules force a test in.
 
 - **An identity with no records must run.** This is required of any
@@ -402,6 +430,86 @@ Two rules force a test in.
   source file forces a test in except through a declaration that reaches
   it. Which tests run for it otherwise is what the score decides.
 
+## Coverage
+
+Selection breaks a gate on the repository's whole coverage number: a
+change that runs a fifth of the test time measures a fifth of the
+coverage, and the two sides of that comparison are no longer the same
+thing. One narrower measurement survives, and it is the unit of
+everything here.
+
+A **measured set** is one suite's units over one workspace member's
+lines. Run every unit of the set and what those tests reached in that
+member is complete, whatever selection did anywhere else in the run, so
+the comparison against the default branch stays honest.
+
+A suite declares its measured sets. Each one names the member whose lines
+it counts, the units that measure it, and the paths a change reaches it
+by. Those paths are declarations in the sense above, and reaching one is
+what makes every unit of the set mandatory: the coverage gate adds no
+second way of asking what a change touched. A set every one of whose
+units the configuration deliberately does not run is not a set at all,
+since scoring it would score whatever else happened to write into its
+directory.
+
+Four rules hold of every measurement.
+
+- **Each set is counted on its own.** A set's units write their coverage
+  profiles into a directory named for the suite and the member, and a
+  set's count is converted from that directory alone. Two sets over one
+  member are two counts and are never added together, and neither is
+  added to the source group of the same name, which is the same lines
+  measured by every test in the run.
+- **Measuring a set does not change how often anything runs.** Its units
+  are mandatory, so they leave the selectable set and no later pass
+  takes them again; each runs as many times as its own flake rate asks
+  for, which is the count anything else in the run would have given it,
+  and a repeat reaches that unit and no other. A repeat leaves the set's
+  number where it was, since a count is the union over what the runs
+  reached. Two sets reaching one suite run the union of their units.
+- **A set's lines are its member's own tree**, less the tree of any
+  member nested inside it, counted by the rules the repository-wide
+  metric already uses. A member's browser half is not part of any set,
+  so that adding a test needing a browser costs a member nothing here,
+  and what that half reaches is not counted toward the set.
+- **Nothing about coverage fails a run on the default branch.** That run
+  measures every set, which is where the baselines come from, and merges
+  every report it produced into the one repository-wide figure, which is
+  a trend rather than a gate.
+
+A change forces the sets it reaches when it reaches at most
+`LOCAL_COVERAGE_MAX_SETS` of them. Past that it forces none, rather than
+some of the ones it reached, and what stopped the forcing is reported.
+
+What is scored is a separate question from what is forced. Forcing costs
+a run the whole of a set's unit list, and the cap is what bounds that
+cost. Whether a number may be compared against the baseline turns on
+whether the set ran whole, so every set the change reached that some run
+measured is scored, however that run came to measure it. A run that
+measures every set — which is what the default branch does, and what a
+change may ask for — has produced comparisons exactly as sound as forced
+ones.
+
+A set is compared against the count the same set had at the newest
+default-branch commit the change contains, which the manifest carries.
+Newest is settled by the order of those commits in the default branch's
+own history, and never by when the run that measured one was created: a
+re-run of an older commit produces a later run of an earlier tree.
+
+Five states report rather than fail, and each is one where the
+comparison would be against something other than the change: a set with
+no baseline the change contains, a set the cap left unforced that no run
+measured, a set no report was written for, a set whose reports name no
+line of its member and so measured nothing, and a run with a failing
+test, whose coverage was measured through that failure.
+
+A rise is accepted by an `ACCEPT_COVERAGE_DEBT` marker in the change's
+description, which names the member and the lines, and accepts the rise
+for every measured set over that member. Two markers naming one thing
+are refused, since the author meant one number and would be given the
+other. A marker naming neither a workspace member nor a coverage source
+group fails, because nothing would ever consult it.
+
 ## The manifest
 
 One gzipped JSON object per publisher run, created — never overwritten —
@@ -414,7 +522,8 @@ score and its flake share and the inputs and counts behind both, the
 withheld set with its reason, the
 tests a configuration deliberately does not run, a reference packing into
 lanes, the unschedulable list, a count and digest of known identities, and
-the per-package coverage baselines.
+the coverage baselines, one per measured set per default-branch run
+inside `LOCAL_COVERAGE_BASELINE_DAYS`.
 
 A manifest is **untrusted input**. It is validated whole, and one bad
 field rejects the object rather than leaving a consumer obeying half of

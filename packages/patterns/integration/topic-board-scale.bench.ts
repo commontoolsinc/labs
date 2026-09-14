@@ -19,13 +19,15 @@
 
 import { env } from "@commonfabric/integration";
 import {
+  parseTopicBoardDemand,
   seedIdentity,
   seedTopicBoardOutOfProcess,
   type TopicBoardFixture,
 } from "./topic-board-fixture.ts";
 import { BoardSession } from "./topic-board-session.ts";
 
-const GROUP = "topic board scale";
+const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
+const GROUP = `topic board scale (${DEMAND} demand)`;
 
 /** Board sizes the curve is sampled at. */
 const SIZES = [100, 1000, 10000];
@@ -90,7 +92,7 @@ const note = (message: string): void => {
 note(
   `sizes ${
     SIZES.join(", ")
-  }; building up to ${SCALE_LIMIT} topics at ${env.API_URL}`,
+  }; building up to ${SCALE_LIMIT} topics with ${DEMAND} demand at ${env.API_URL}`,
 );
 
 /**
@@ -110,6 +112,7 @@ function board(topicCount: number): Promise<TopicBoardFixture> {
       spaceName: `${env.SPACE_NAME}-${topicCount}`,
       passphrase: PASSPHRASE,
       topicCount,
+      demand: DEMAND,
       citingTopics: 0,
     }).then((fixture) => {
       note(

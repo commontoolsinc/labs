@@ -271,6 +271,18 @@ module's name is a route only for a program compiled over HTTP, and an author
 controls it either way, so a filename that looks like a route is not a claim
 about anything a host serves.
 
+Opening a missing runtime-supplied piece revalidates the deployment's advertised
+identity. Resolved source may be shared within a reconciler for the same
+destination space, full source URL, and advertised identity. Retention is bounded
+by entry count and source string size. Every caller still compiles and verifies
+that identity in its destination space, including source-closure persistence on
+a compiler cache hit. Compilation or identity failure retires the source used by
+that attempt so a later open can retry. Disposal cancels pending source work and
+prevents an open still syncing or compiling from supplying a pattern. Existing
+pieces continue to reconcile their own recorded origins independently of this
+source sharing. Registry changes continue to invalidate compiled sidecar
+surfaces; retained source contains no compiled patterns or schema references.
+
 A piece that pattern code instantiates — a nested pattern, a piece a handler
 creates with `inSpace` — is detached, and stays detached until its owner points
 it somewhere. The code it runs is a module of the instantiating program, so what

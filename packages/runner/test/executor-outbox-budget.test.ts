@@ -31,7 +31,10 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
-import type { PostCommitSideEffect } from "../src/cfc/types.ts";
+import {
+  POST_COMMIT_RELEASE_REJECTED,
+  type PostCommitSideEffect,
+} from "../src/cfc/types.ts";
 import {
   abandonRunnerAcceptanceEffects,
   RUNNER_ACCEPTANCE_EFFECT_KIND,
@@ -204,6 +207,245 @@ describe("Phase 6 outbox budgets (serving-loop.md §5)", () => {
       },
     ], "The serving wave was withdrawn");
     expect(abandoned).toEqual(["local"]);
+  });
+
+  it("carries the surviving attachment through dispatch and readable completion", async () => {
+    const { outbox, stats } = newBudgetOutbox({ maxOutstandingEffects: 1 });
+    const blockerStarted = Promise.withResolvers<void>();
+    const blocker = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const work = Promise.withResolvers<void>();
+    const readable = Promise.withResolvers<void>();
+    const key = "fetchTest:attached";
+    const tx = {} as IExtendedStorageTransaction;
+    const first = {
+      actionId: "first",
+      kind: "derivation" as const,
+      acting: { user: "user:alice", session: "first-session" },
+    };
+    const survivor = {
+      ...first,
+      actionId: "survivor",
+      acting: { user: "user:alice", session: "second-session" },
+    };
+    const calls: string[] = [];
+    const carried: Array<ReturnType<SpaceOutbox["carriageFor"]>> = [];
+    outbox.admitSealedEffects([{
+      tx,
+      context: undefined,
+      effects: [{
+        id: "fetchTest:blocker",
+        kind: "fetchTest-start",
+        flush: () => {
+          blockerStarted.resolve();
+          return blocker.promise;
+        },
+      }],
+    }]);
+    try {
+      await blockerStarted.promise;
+      outbox.admitSealedEffects([
+        {
+          tx,
+          context: first,
+          effects: [{
+            id: key,
+            kind: "fetchTest-start",
+            flush: () => {
+              calls.push("rejected");
+              return POST_COMMIT_RELEASE_REJECTED;
+            },
+          }],
+        },
+        {
+          tx,
+          context: survivor,
+          effects: [{
+            id: key,
+            kind: "fetchTest-start",
+            flush: () => {
+              calls.push("survivor");
+              carried.push(outbox.carriageFor(key));
+              outbox.observeAsyncWork(work.promise);
+              started.resolve();
+            },
+          }],
+        },
+      ]);
+      blocker.resolve();
+      await started.promise;
+      expect(calls).toEqual(["rejected", "survivor"]);
+      expect(carried).toEqual([survivor]);
+      expect(outbox.outstandingCount).toBe(1);
+      expect(outbox.carriageFor(key)).toEqual(survivor);
+      outbox.deferRetirement(key, readable.promise);
+      work.resolve();
+      await waitUntil(
+        () => stats.outbox.completed === 2,
+        "both dispatched requests to complete",
+      );
+      expect(outbox.inflightCount).toBe(1);
+      outbox.admitSealedEffects([{
+        tx,
+        context: first,
+        effects: [{
+          id: key,
+          kind: "fetchTest-start",
+          flush: () => {
+            calls.push("duplicate");
+          },
+        }],
+      }]);
+      expect(calls).toEqual(["rejected", "survivor"]);
+      expect(outbox.carriageFor(key)).toEqual(survivor);
+      readable.resolve();
+      await outbox.settle();
+      expect(stats.outbox.queued).toBe(2);
+      expect(stats.outbox.completed).toBe(2);
+      expect(stats.outbox.failed).toBe(0);
+      expect(stats.memo.inflight).toBe(0);
+      expect(outbox.outstandingCount).toBe(0);
+      expect(outbox.carriageFor(key)).toBeUndefined();
+    } finally {
+      outbox.close();
+      blocker.resolve();
+      work.resolve();
+      readable.resolve();
+      await outbox.settle();
+    }
+  });
+
+  for (const failure of ["throw", "reject"]) {
+    it(`keeps a dispatched ${failure} from promoting another attachment`, async () => {
+      const { outbox, stats } = newBudgetOutbox({ maxOutstandingEffects: 1 });
+      const blockerStarted = Promise.withResolvers<void>();
+      const blocker = Promise.withResolvers<void>();
+      const tx = {} as IExtendedStorageTransaction;
+      const calls: string[] = [];
+      outbox.admitSealedEffects([{
+        tx,
+        context: undefined,
+        effects: [{
+          id: "fetchTest:blocker",
+          kind: "fetchTest-start",
+          flush: () => {
+            blockerStarted.resolve();
+            return blocker.promise;
+          },
+        }],
+      }]);
+      try {
+        await blockerStarted.promise;
+        outbox.admitSealedEffects([{
+          tx,
+          context: undefined,
+          effects: [
+            {
+              id: "fetchTest:failing",
+              kind: "fetchTest-start",
+              flush: () => {
+                calls.push("first");
+                const error = new Error("Dispatched request failed");
+                if (failure === "throw") throw error;
+                return Promise.reject(error);
+              },
+            },
+            {
+              id: "fetchTest:failing",
+              kind: "fetchTest-start",
+              flush: () => {
+                calls.push("second");
+              },
+            },
+          ],
+        }]);
+        blocker.resolve();
+        await outbox.settle();
+        expect(calls).toEqual(["first"]);
+        expect(stats.outbox.failed).toBe(1);
+        expect(stats.outbox.completed).toBe(1);
+        expect(outbox.inflightCount).toBe(0);
+        expect(outbox.outstandingCount).toBe(0);
+      } finally {
+        outbox.close();
+        blocker.resolve();
+        await outbox.settle();
+      }
+    });
+  }
+
+  it("admits a replacement immediately after every attachment fails release", async () => {
+    const { outbox, stats } = newBudgetOutbox({});
+    const work = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const readable = Promise.withResolvers<void>();
+    const tx = {} as IExtendedStorageTransaction;
+    const key = "fetchTest:replacement";
+    const calls: string[] = [];
+    const replacement = {
+      actionId: "replacement",
+      kind: "derivation" as const,
+    };
+    outbox.admitSealedEffects([{
+      tx,
+      context: undefined,
+      effects: [{
+        id: key,
+        kind: "fetchTest-start",
+        flush: () => {
+          calls.push("rejected");
+          return POST_COMMIT_RELEASE_REJECTED;
+        },
+      }],
+    }]);
+    outbox.admitSealedEffects([{
+      tx,
+      context: replacement,
+      effects: [{
+        id: key,
+        kind: "fetchTest-start",
+        flush: () => {
+          calls.push("replacement");
+          started.resolve();
+          return work.promise;
+        },
+      }],
+    }]);
+    try {
+      await started.promise;
+      outbox.deferRetirement(key, readable.promise);
+      work.resolve();
+      await waitUntil(
+        () => stats.outbox.completed === 2,
+        "the replacement to complete behind its readability barrier",
+      );
+      expect(outbox.inflightCount).toBe(1);
+      expect(outbox.carriageFor(key)).toEqual(replacement);
+      outbox.admitSealedEffects([{
+        tx,
+        context: undefined,
+        effects: [{
+          id: key,
+          kind: "fetchTest-start",
+          flush: () => {
+            calls.push("duplicate");
+          },
+        }],
+      }]);
+      expect(calls).toEqual(["rejected", "replacement"]);
+      readable.resolve();
+      await outbox.settle();
+      expect(calls).toEqual(["rejected", "replacement"]);
+      expect(stats.outbox.queued).toBe(2);
+      expect(stats.outbox.failed).toBe(0);
+      expect(stats.memo.inflight).toBe(0);
+      expect(outbox.inflightCount).toBe(0);
+    } finally {
+      outbox.close();
+      work.resolve();
+      readable.resolve();
+      await outbox.settle();
+    }
   });
 
   it("paces network dispatches by the egress token bucket", async () => {

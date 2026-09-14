@@ -28,7 +28,7 @@ import {
   type PieceController,
   type PiecesController,
 } from "./pieces-controller.ts";
-import { topicAt } from "./topic-board-fixture.ts";
+import { demandTopicBoard, topicAt } from "./topic-board-fixture.ts";
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
 const { API_URL, SPACE_NAME } = env;
@@ -93,7 +93,7 @@ describe("topic-board-child-contract", () => {
     board = await cc.create(program, { start: true });
     // Held live for the whole suite so each `addTopic` lands against an
     // up-to-date list, the same reason the seeding fixture holds it.
-    releaseBoard = cc.getResult(board.getCell()).sink(() => {});
+    releaseBoard = demandTopicBoard(board);
 
     // Index 0 is filed with a body; index 1 mentions it.
     await board.result.set(
@@ -205,7 +205,7 @@ describe("topic-board-pivot-contract", () => {
       },
     );
     board = await cc.create(program, { start: true });
-    releaseBoard = cc.getResult(board.getCell()).sink(() => {});
+    releaseBoard = demandTopicBoard(board);
 
     for (const title of ["Graph target", "Graph source", "Graph third"]) {
       await board.result.set({ title, agentName: "Sol" }, ["addTopic"]);

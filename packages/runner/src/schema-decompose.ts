@@ -340,8 +340,8 @@ function containsCidPrefixedRef(schema: JSONSchemaObj): boolean {
  * The tagged hash a stored document's {@link SCHEMA_META_MEMBER}
  * references: one for the reference form, none for the inline or absent
  * forms. Throws {@link MalformedSchemaMetaError} for the malformed form.
- * A `cid:` schema document's own `schema` member is not a metadata
- * position, and callers exclude those documents before asking.
+ * This inspects document-level metadata. A `schema` keyword inside a schema
+ * document's `value` belongs to that schema and is not a metadata position.
  */
 export function collectSchemaMetaRefHashes(
   document: unknown,

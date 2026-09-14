@@ -224,18 +224,21 @@ export async function copyUnlaunchedMembers(
   );
 }
 
-async function main(): Promise<void> {
-  const [profileDir, outputPath] = Deno.args;
-  if (!profileDir || !outputPath) {
-    console.error(
-      "Usage: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts <profile-dir> <output.lcov>",
-    );
-    Deno.exit(2);
-  }
-
-  // Ahead of every path below, each of which returns or exits: the record says
-  // what the report does not cover, so a report written without it says more
-  // than the run measured.
+/**
+ * Converts every coverage profile under `profileDir` into one LCOV report
+ * at `outputPath`, and says whether the report accounts for everything
+ * the profiles named.
+ *
+ * A report is written whatever the outcome, so a caller collecting it as
+ * a build artifact still finds one to collect and reads the outcome from
+ * the answer rather than from the file.
+ */
+export async function writeLcovReport(
+  profileDir: string,
+  outputPath: string,
+): Promise<{ ok: boolean }> {
+  // Ahead of every path below: the record says what the report does not
+  // cover, so a report written without it says more than the run measured.
   await copyUnlaunchedMembers(profileDir, outputPath);
 
   const profileFiles = await collectCoverageProfileFiles(profileDir);
@@ -244,7 +247,7 @@ async function main(): Promise<void> {
       outputPath,
       `No coverage profile files found in ${profileDir}`,
     );
-    return;
+    return { ok: true };
   }
 
   const removedEmptyProfiles = await removeEmptyCoverageProfiles(profileFiles);
@@ -260,7 +263,7 @@ async function main(): Promise<void> {
       outputPath,
       `No non-empty coverage profile files remain in ${profileDir}`,
     );
-    return;
+    return { ok: true };
   }
 
   await Deno.mkdir(path.dirname(outputPath), { recursive: true });
@@ -297,9 +300,6 @@ async function main(): Promise<void> {
   };
 
   if (!result.success) {
-    // An output file is left behind whatever the outcome, so a caller that
-    // collects the report as a build artifact still finds one to collect and
-    // reads the outcome from this step.
     await writeEmptyLcovFile(outputPath);
 
     // `deno coverage` leaves test files out of a report by design, so profiles
@@ -313,7 +313,7 @@ async function main(): Promise<void> {
       console.warn(
         `deno coverage found nothing to report in ${profileDir}; wrote empty LCOV report to ${outputPath}.`,
       );
-      return;
+      return { ok: true };
     }
 
     console.error(
@@ -321,7 +321,7 @@ async function main(): Promise<void> {
     );
     if (lost.length > 0) reportLostFiles();
     console.error(stderr.trim());
-    Deno.exit(1);
+    return { ok: false };
   }
 
   await Deno.writeTextFile(
@@ -334,10 +334,22 @@ async function main(): Promise<void> {
   if (lost.length > 0) {
     console.error(`Wrote the LCOV report that did convert to ${outputPath}.`);
     reportLostFiles();
-    Deno.exit(1);
+    return { ok: false };
   }
 
   console.log(`Wrote LCOV coverage report to ${outputPath}`);
+  return { ok: true };
+}
+
+async function main(): Promise<void> {
+  const [profileDir, outputPath] = Deno.args;
+  if (!profileDir || !outputPath) {
+    console.error(
+      "Usage: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts <profile-dir> <output.lcov>",
+    );
+    Deno.exit(2);
+  }
+  if (!(await writeLcovReport(profileDir, outputPath)).ok) Deno.exit(1);
 }
 
 if (import.meta.main) {

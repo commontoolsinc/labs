@@ -351,6 +351,36 @@ function collectionAt(slug: string): VerbDeps {
   };
 }
 
+/**
+ * Helper for the cases below, which answers a listing's read and the read a
+ * `cd` checks its path with by walking `value`, so a listing taken at a path
+ * and a move onto one of its rows agree about what stands where.
+ *
+ * Both reads walk the one value because the property the cases ask about
+ * spans them: a listing numbers rows at the place it read, and the mover
+ * takes a handle back to that place. Two fixtures answering one tree apiece
+ * would let the two agree here and disagree in the tree.
+ */
+function walking(value: unknown): VerbDeps {
+  const at = (path: readonly (string | number)[]) => {
+    let held: unknown = value;
+    for (const segment of path) {
+      held = (held as Record<string, unknown> | undefined)?.[String(segment)];
+    }
+    return Promise.resolve(held);
+  };
+  return {
+    ...READS_NOTHING,
+    resolvePieceReference: (_pieces, token, path) =>
+      Promise.resolve({ piece: token, pathAfter: [...path] }),
+    getCellValue: (_config, path) => at(path),
+    listing: {
+      ...READS_NOTHING.listing,
+      getCellValue: (_config, path) => at(path),
+    },
+  };
+}
+
 /** Helper for the cases below, which stands `keys` in for a cell's keys. */
 function cellKeys(keys: string[]): VerbDeps {
   return listedCell(Object.fromEntries(keys.map((key) => [key, "a value"])));
@@ -448,7 +478,7 @@ const VERB_ARITY: readonly (readonly [
   ["get", "optional"],
   ["help", "optional"],
   ["link", "pair"],
-  ["ls", "none"],
+  ["ls", "optional"],
   ["more", "none"],
   ["pwd", "none"],
   ["set", "pair"],
@@ -1958,6 +1988,124 @@ describe("verbs", () => {
         },
       });
       expect(listed).toBe(1);
+    });
+
+    it("lists at the place the operand names rather than at the one shuttle stands at", async () => {
+      // The whole of what the operand is for: reading a child without
+      // standing on it. An `ls` that dropped its operand would list the
+      // piece root — `title` and `settings` — and one still declaring it
+      // takes none would refuse the line before any read.
+
+      expect(
+        textOf(
+          await runLine(
+            "ls settings",
+            atPiece(),
+            walking({ title: "a", settings: { depth: 1, note: "n" } }),
+          ),
+        ),
+      ).toBe("%1 depth\n%2 note");
+    });
+
+    it("lists a facet the operand names, which is a place and no piece", async () => {
+      // `describe` and `verbs` aim through a door that narrows what it finds
+      // to a piece, and a facet is refused there. `ls` aims through the door
+      // under it, so a facet is a place it lists — listing being what a facet
+      // is for, and what `get` turns a facet down with names this verb.
+
+      expect(
+        textOf(
+          await runLine("ls slugs", shuttleIn(), {
+            ...READS_NOTHING,
+            listing: {
+              ...READS_NOTHING.listing,
+              listSpaceSlugs: () =>
+                Promise.resolve([{ slug: "board", piece: HANDLE }]),
+            },
+          }),
+        ),
+      ).toBe(
+        "<the space's slug index names these, and a slug it never recorded " +
+          "still resolves>\n%1 board",
+      );
+    });
+
+    it("numbers the rows of the place it listed, so `cd %n` reaches one of them", async () => {
+      // Decision 17 makes `%n` a reference until the next listing, so a
+      // listing taken at a target numbers that target's rows. Numbered
+      // against where shuttle stands instead, `%1` would name `depth` under
+      // the piece root, which is no key there and is refused — rows shown
+      // that the next line will not take.
+
+      const shuttle = atPiece();
+      const deps = walking({ title: "a", settings: { depth: 1, note: "n" } });
+      await runLine("ls settings", shuttle, deps);
+      await runLine("cd %1", shuttle, deps);
+      expect(shuttle.place.place.position)
+        .toMatchObject({ path: ["settings", "depth"] });
+    });
+
+    it("leaves the place where it stood, listing a target being a read", async () => {
+      // The target is a facet, which is a place a move lands on outright:
+      // an `ls <target>` that moved as well as listed would be standing in
+      // `slugs/` when this line ended, and a target a move only reaches
+      // pending could not tell the two apart.
+
+      const shuttle = shuttleIn();
+      const before = shuttle.place.place;
+      await runLine("ls slugs", shuttle, {
+        ...READS_NOTHING,
+        listing: {
+          ...READS_NOTHING.listing,
+          listSpaceSlugs: () => Promise.resolve([]),
+        },
+      });
+      expect(shuttle.place.place).toBe(before);
+    });
+
+    it("refuses the `#argument` suffix, and lists nothing", async () => {
+      // The one spelling `get` takes that this cannot. A place carries no
+      // selection between a piece's two cells, and a row is reached from the
+      // place it was listed at, so an arguments listing would hand out
+      // numbers that walk the result. `READS_NOTHING` is what says the
+      // refusal came before any listing was read.
+
+      expect(
+        reasonOf(await runLine("ls .#argument", atPiece(), READS_NOTHING)),
+      ).toBe(
+        "`#argument` selects one of a piece's two cells, and a listing's " +
+          "rows are reached from the place they were listed at, which " +
+          "carries no such selection. `get` reads that cell.",
+      );
+    });
+
+    it("refuses an operand that reaches nothing in the words `get` refuses it in", async () => {
+      // Two verbs aiming through one door fail through it, so the sentence a
+      // person reads is one sentence rather than two free to drift. Each is
+      // pinned as well as compared, since two verbs that both stopped
+      // refusing would agree on whatever they returned instead.
+
+      const refusals: readonly (readonly [string, string])[] = [
+        [
+          "#favorites",
+          "`#favorites` names an entry point rather than a cell under this " +
+          "place. `wish #favorites` reads what it resolves to.",
+        ],
+        [
+          "%1",
+          "`%1` names no row: no listing has numbered one yet. `ls` lists " +
+          "what stands here and numbers what it lists.",
+        ],
+      ];
+      for (const [operand, reason] of refusals) {
+        for (const verb of ["ls", "get"]) {
+          const line = `${verb} ${operand}`;
+          expect({
+            line,
+            reason: reasonOf(await runLine(line, atPiece(), READS_NOTHING)),
+          }).toEqual({ line, reason });
+        }
+      }
     });
 
     it("raises what a read that failed outright raised", async () => {

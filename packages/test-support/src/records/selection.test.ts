@@ -236,8 +236,18 @@ describe("selection", () => {
       [
         "a baseline with no member",
         withField("coverageBaselines", [{
+          suite: "workspace-unit",
           commit: "c",
-          day: "2026-08-20",
+          createdAt: "2026-08-20T00:00:00.000Z",
+          uncoveredLines: 0,
+        }]),
+      ],
+      [
+        "a baseline with no suite",
+        withField("coverageBaselines", [{
+          member: "packages/memory",
+          commit: "c",
+          createdAt: "2026-08-20T00:00:00.000Z",
           uncoveredLines: 0,
         }]),
       ],
@@ -498,9 +508,10 @@ describe("selection", () => {
           phase: "compile",
         }],
         coverageBaselines: [{
+          suite: "workspace-unit",
           member: "packages/memory",
           commit: "c",
-          day: "2026-08-20",
+          createdAt: "2026-08-20T00:00:00.000Z",
           uncoveredLines: 3,
         }],
         withheld: [{

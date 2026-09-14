@@ -630,7 +630,10 @@ update chain cold-reload-stable.
 
 A source update carrying proposed authority requires an owned setup transaction
 that commits to storage. A serving wave's withdrawable acceptance cannot publish
-runtime authority and is refused at this boundary.
+runtime authority and is refused at this boundary. On a serving runtime the
+served `setsrc` verb's setup transaction therefore commits directly to the
+store, outside the wave, and registers its authority from that verdict
+([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)).
 
 `piece setsrc --check` compiles and reviews the candidate without saving it or
 repairing the current source's compiled cache. It issues no storage writes and

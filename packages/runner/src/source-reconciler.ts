@@ -32,12 +32,14 @@
  */
 
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 
 import type { Pattern } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
+import type { RuntimeProgram } from "./harness/types.ts";
 import {
   classifyPieceOriginString,
   type PieceOriginKind,
@@ -220,12 +222,47 @@ type SourcePass = {
   done: Promise<unknown>;
 };
 
+/** Maximum retained source text and key size, measured in UTF-16 code units. */
+const SUPPLIED_SOURCE_MAX_WEIGHT = 4 * 1024 * 1024;
+
+/** The string weight of one resolved program and its lookup key. */
+function suppliedSourceWeight(key: string, program: RuntimeProgram): number {
+  let weight = key.length + program.main.length +
+    (program.mainExport?.length ?? 0);
+  for (const file of program.files) {
+    weight += file.name.length + file.contents.length;
+  }
+  for (const name of program.dataFiles ?? []) weight += name.length;
+  for (const name of program.sourceRoots ?? []) weight += name.length;
+  return weight;
+}
+
+/** Give a compiler its own source containers while sharing immutable strings. */
+function copySourceProgram(program: RuntimeProgram): RuntimeProgram {
+  return {
+    ...program,
+    files: program.files.map((file) => ({ ...file })),
+    ...(program.dataFiles === undefined
+      ? {}
+      : { dataFiles: [...program.dataFiles] }),
+    ...(program.sourceRoots === undefined
+      ? {}
+      : { sourceRoots: [...program.sourceRoots] }),
+  };
+}
+
 export class SourceReconciler {
   readonly #runtime: Runtime;
   readonly #pending = new Map<string, PendingReconcile>();
   readonly #fabricFollowers = new Map<string, FabricFollower>();
   readonly #stoppedFabricFollowers = new Set<string>();
   readonly #passes = new Set<SourcePass>();
+  readonly #suppliedSources = new LRUCache<string, RuntimeProgram>({
+    capacity: 32,
+    maxWeight: SUPPLIED_SOURCE_MAX_WEIGHT,
+    weigh: suppliedSourceWeight,
+  });
+  readonly #suppliedSourceFlights = new Map<string, Promise<RuntimeProgram>>();
   #disposed = false;
 
   constructor(runtime: Runtime) {
@@ -277,6 +314,7 @@ export class SourceReconciler {
       // the piece exists at all, and a caller's snapshot predates the run that
       // created it.
       let piece = await resultCell.withTx().sync();
+      if (this.#disposed) return undefined;
       // The supplied origin is settled once, before either path uses it, so
       // that resolving one and recording one cannot disagree about what the
       // runtime is allowed to supply.
@@ -351,6 +389,8 @@ export class SourceReconciler {
   /** Abort network work and keep it away from storage teardown. */
   async dispose(): Promise<void> {
     this.#disposed = true;
+    this.#suppliedSources.clear();
+    this.#suppliedSourceFlights.clear();
     for (const { abort } of this.#pending.values()) abort.abort();
     for (const { abort } of this.#passes) abort.abort();
     for (const { cancel } of this.#fabricFollowers.values()) cancel();
@@ -679,12 +719,11 @@ export class SourceReconciler {
    * The pattern a supplied origin currently names, for a piece that does not
    * exist yet.
    *
-   * The `?identity` route answers first here too. A space that already holds
-   * the artifact for what it advertises — another surface opened in this space,
-   * or this one in an earlier session — runs that pattern without downloading
-   * any source at all. Only a space that does not compiles the closure, and
-   * source that does not produce the identity its own host advertises is not
-   * the source that origin names.
+   * Each open revalidates the advertised identity and compiles into its own
+   * destination space, including the source-closure persistence of a compiler
+   * cache hit. Opens for the same destination, target and advertised identity
+   * share resolved source. Each caller verifies that source compiles to the
+   * advertised identity before answering with a pattern.
    */
   async #resolveSupplied(
     space: MemorySpace,
@@ -698,39 +737,80 @@ export class SourceReconciler {
       // resolving for does not exist yet.
       if ("detail" in answer) return undefined;
       const advertised = answer.identity;
-      // Resolved and compiled even for an identity this runtime already holds
-      // in memory, rather than answered from that. What the caller needs is
-      // not a pattern object: it is this space holding the source closure
-      // behind it, which its creation revision retains and which a later
-      // cross-space child of the surface replicates out of. The in-memory
-      // artifact index is keyed by identity alone, so answering from it would
-      // hand back a pattern whose closure the space never received. Compiling
-      // is what puts it there, and for an identity already compiled elsewhere
-      // that is a cache hit plus the replication the hit fires.
+      // The destination must hold the closure behind its creation revision.
+      // A compiler hit still performs the destination's persistence work.
       await prepareSourceClosureVerification();
-
-      const resolved = await this.#runtime.harness.resolve(
-        new HttpProgramResolver(target.href, fetch),
+      const key = JSON.stringify([space, target.href, advertised]);
+      const resolved = await this.#resolveSuppliedSource(
+        key,
+        target,
+        fetch,
+        signal,
       );
-      // Compiling writes to this space's caches, so a pass that has been
-      // stopped stops here rather than paying for source nobody will run.
-      if (signal.aborted) return undefined;
-      const compiled = await this.#runtime.patternManager.compilePattern(
-        resolved,
-        { space },
-      );
-      const ref = this.#runtime.patternManager.getArtifactEntryRef(compiled);
-      if (ref?.identity !== advertised) {
-        logger.warn("advertised-identity-mismatch", () => [
-          "resolved source did not compile to the identity its origin advertises",
-          space,
-          advertised,
-          ref,
-        ]);
-        return undefined;
+      try {
+        // Compiling writes to storage; a stopped pass must leave it alone.
+        signal.throwIfAborted();
+        const compiled = await this.#runtime.patternManager.compilePattern(
+          copySourceProgram(resolved),
+          { space },
+        );
+        signal.throwIfAborted();
+        const ref = this.#runtime.patternManager.getArtifactEntryRef(compiled);
+        if (ref?.identity !== advertised) {
+          this.#forgetSuppliedSource(key, resolved);
+          logger.warn("advertised-identity-mismatch", () => [
+            "resolved source did not compile to the identity its origin advertises",
+            space,
+            advertised,
+            ref,
+          ]);
+          return undefined;
+        }
+        return compiled;
+      } catch (error) {
+        this.#forgetSuppliedSource(key, resolved);
+        throw error;
       }
-      return compiled;
     });
+  }
+
+  /** Share supplied-source downloads, whose callers share disposal ownership. */
+  async #resolveSuppliedSource(
+    key: string,
+    target: URL,
+    fetch: typeof globalThis.fetch,
+    signal: AbortSignal,
+  ): Promise<RuntimeProgram> {
+    signal.throwIfAborted();
+    const cached = this.#suppliedSources.get(key);
+    if (cached !== undefined) return cached;
+    const pending = this.#suppliedSourceFlights.get(key);
+    if (pending !== undefined) return await pending;
+    const flight = this.#runtime.harness.resolve(
+      new HttpProgramResolver(target.href, fetch),
+    ).then((program) => {
+      signal.throwIfAborted();
+      const retained = copySourceProgram(program);
+      // LRUCache retains a single oversized entry; source retention has a hard
+      // string budget, so such a program serves only the callers in flight.
+      if (suppliedSourceWeight(key, retained) <= SUPPLIED_SOURCE_MAX_WEIGHT) {
+        this.#suppliedSources.put(key, retained);
+      }
+      return retained;
+    }).finally(() => {
+      if (this.#suppliedSourceFlights.get(key) === flight) {
+        this.#suppliedSourceFlights.delete(key);
+      }
+    });
+    this.#suppliedSourceFlights.set(key, flight);
+    return await flight;
+  }
+
+  /** A late failure may retire only the source used by its own attempt. */
+  #forgetSuppliedSource(key: string, program: RuntimeProgram): void {
+    if (this.#suppliedSources.get(key) === program) {
+      this.#suppliedSources.delete(key);
+    }
   }
 
   /**
@@ -792,8 +872,15 @@ export class SourceReconciler {
   #track<T>(
     pass: (signal: AbortSignal) => Promise<T | undefined>,
   ): Promise<T | undefined> {
+    if (this.#disposed) return Promise.resolve(undefined);
     const abort = new AbortController();
-    const done: Promise<T | undefined> = pass(abort.signal)
+    // Register the pass before invoking caller-supplied fetch code, which can
+    // initiate disposal synchronously.
+    const done: Promise<T | undefined> = Promise.resolve()
+      .then(() => {
+        abort.signal.throwIfAborted();
+        return pass(abort.signal);
+      })
       .catch((error) => {
         logger.warn("source-pass-failed", () => [
           "resolving supplied source failed",

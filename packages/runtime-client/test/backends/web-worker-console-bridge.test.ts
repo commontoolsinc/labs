@@ -4,8 +4,13 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { getLogger } from "@commonfabric/utils/logger";
 import { CompilerStackLoadError } from "@commonfabric/runner";
+
 import {
   ClientNotificationType,
   isWorkerConsoleNotification,
@@ -15,10 +20,6 @@ import {
   TransportNotificationType,
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
 
 // The worker entry (`backends/web-worker/index.ts`) installs a `message`
 // listener on `self` (which is `globalThis` under Deno) and reads

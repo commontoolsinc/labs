@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { isAbsolute, resolve } from "@std/path";
 import {
   ClaudeAgentSdkDriver,
   type ClaudeSdkAdapter,
@@ -940,4 +941,410 @@ Deno.test("Claude prompt env excludes another source's temporary globals", async
     if (previous === undefined) Deno.env.delete(key);
     else Deno.env.set(key, previous);
   }
+});
+
+function sdkWithoutSessions(calls: Array<{ method: string; args: unknown[] }>) {
+  return {
+    listSessions: (options?: Record<string, unknown>) => {
+      calls.push({ method: "listSessions", args: [options] });
+      return Promise.resolve([]);
+    },
+    getSessionInfo: (id: string) => {
+      calls.push({ method: "getSessionInfo", args: [id] });
+      return Promise.resolve(undefined);
+    },
+    getSessionMessages: () => Promise.resolve([]),
+    renameSession: (id: string, title: string) => {
+      calls.push({ method: "renameSession", args: [id, title] });
+      return Promise.resolve();
+    },
+    query: (params: { prompt: string; options?: Record<string, unknown> }) => {
+      calls.push({ method: "query", args: [params] });
+      return fakeQuery([
+        { type: "system", subtype: "init", session_id: "ignored" },
+        { type: "result", subtype: "success" },
+      ]);
+    },
+  };
+}
+
+const NEW_SESSION_ID = "6f1a3c0e-9d2b-4c7a-8e5f-0123456789ab";
+
+Deno.test("Claude driver lists the source directory's sessions when `cwd` is configured", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const scoped = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdkWithoutSessions(calls),
+  );
+  await scoped.listSessions();
+  assertEquals(calls, [{
+    method: "listSessions",
+    args: [{ limit: 100, offset: 0, dir: "/work/labs" }],
+  }]);
+
+  calls.length = 0;
+  const unscoped = new ClaudeAgentSdkDriver(
+    { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
+    sdkWithoutSessions(calls),
+  );
+  await unscoped.listSessions();
+  assertEquals(calls, [{
+    method: "listSessions",
+    args: [{ limit: 100, offset: 0 }],
+  }]);
+});
+
+Deno.test("Claude driver starts a session under a caller-chosen id in its source's directory, titled through the query", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const events: string[] = [];
+  const sdk = {
+    ...sdkWithoutSessions(calls),
+    query: (params: { prompt: string; options?: Record<string, unknown> }) => {
+      calls.push({ method: "query", args: [params] });
+      const generator = (async function* () {
+        events.push("yield:init");
+        yield { type: "system", subtype: "init", session_id: NEW_SESSION_ID };
+        events.push("yield:result");
+        yield { type: "result", subtype: "success" };
+      })();
+      return Object.assign(generator, {
+        interrupt: () => Promise.resolve(),
+        setPermissionMode: () => Promise.resolve(),
+        setModel: () => Promise.resolve(),
+        close: () => undefined,
+      });
+    },
+  };
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdk,
+  );
+
+  // The source's own directory, spelled with a trailing separator: the same
+  // place once resolved.
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Work on topic #7",
+    cwd: "/work/labs/",
+    title: "topic #7: the workbench",
+  }, {
+    onSessionActive: () => {
+      events.push("active");
+      return Promise.resolve();
+    },
+  });
+  assertEquals(outcome.status, "succeeded");
+  assertEquals(outcome.result, {
+    nativeSessionId: NEW_SESSION_ID,
+    cwd: "/work/labs",
+    title: "topic #7: the workbench",
+  });
+  // The session is refreshed only once the SDK has emitted for it.
+  assertEquals(events, ["yield:init", "active", "yield:result"]);
+  const query = calls.find((call) => call.method === "query")?.args[0] as {
+    prompt: string;
+    options: Record<string, unknown>;
+  };
+  assertEquals(query.prompt, "Work on topic #7");
+  assertEquals(query.options.sessionId, NEW_SESSION_ID);
+  assertEquals(query.options.cwd, "/work/labs");
+  assertEquals(query.options.title, "topic #7: the workbench");
+  assertEquals(query.options.resume, undefined);
+  // The SDK titles the session from its first message; nothing renames it.
+  assertEquals(calls.some((call) => call.method === "renameSession"), false);
+
+  // A prompt that follows resumes in the started directory without a lookup.
+  calls.length = 0;
+  const followUp = await driver.prompt(NEW_SESSION_ID, { text: "Continue" });
+  assertEquals(followUp.status, "succeeded");
+  assertEquals(calls.map((call) => call.method), ["query"]);
+  const resumed = calls[0].args[0] as { options: Record<string, unknown> };
+  assertEquals(resumed.options.resume, NEW_SESSION_ID);
+  assertEquals(resumed.options.cwd, "/work/labs");
+});
+
+Deno.test("Claude driver starts an unscoped source's session in the directory the start names, made absolute", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const driver = new ClaudeAgentSdkDriver(
+    { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
+    sdkWithoutSessions(calls),
+  );
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    cwd: "relative/checkout",
+  });
+  assertEquals(outcome.status, "succeeded");
+  const query = calls.find((call) => call.method === "query")?.args[0] as {
+    options: Record<string, unknown>;
+  };
+  assertEquals(isAbsolute(String(query.options.cwd)), true);
+  assertEquals(query.options.cwd, resolve("relative/checkout"));
+  assertEquals(outcome.result?.cwd, resolve("relative/checkout"));
+});
+
+Deno.test("Claude driver refuses a start it cannot begin: a stopped driver, a failed lookup, a cancellation during the lookup", async () => {
+  const source = {
+    id: "claude-code:labs",
+    driver: "claude-agent-sdk" as const,
+    enabled: true,
+    cwd: "/work/labs",
+  };
+
+  // A stopped driver refuses before touching the SDK.
+  const stoppedCalls: Array<{ method: string; args: unknown[] }> = [];
+  const stopped = new ClaudeAgentSdkDriver(
+    source,
+    sdkWithoutSessions(stoppedCalls),
+  );
+  await stopped.stop();
+  assertEquals(
+    (await stopped.startSession(NEW_SESSION_ID, { text: "Hi" })).error?.code,
+    "claude-driver-stopped",
+  );
+  assertEquals(stoppedCalls, []);
+
+  // A lookup the SDK cannot answer fails the start, retryably.
+  const unanswered = new ClaudeAgentSdkDriver(source, {
+    ...sdkWithoutSessions([]),
+    getSessionInfo: () => Promise.reject(new Error("metadata unavailable")),
+  });
+  const lookupFailed = await unanswered.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+  });
+  assertEquals(lookupFailed.error?.code, "claude-session-lookup-failed");
+  assertEquals(lookupFailed.error?.retryable, true);
+
+  // A cancellation admitted during the lookup wins over the lookup's
+  // answer, whether it resolves or rejects.
+  for (const lookupRejects of [false, true]) {
+    let releaseLookup!: () => void;
+    const lookupBlocked = new Promise<void>((resolve) =>
+      releaseLookup = resolve
+    );
+    let markLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) =>
+      markLookupStarted = resolve
+    );
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const driver = new ClaudeAgentSdkDriver(source, {
+      ...sdkWithoutSessions(calls),
+      getSessionInfo: async () => {
+        markLookupStarted();
+        await lookupBlocked;
+        if (lookupRejects) throw new Error("metadata unavailable");
+        return undefined;
+      },
+    });
+    try {
+      const start = driver.startSession(NEW_SESSION_ID, { text: "Hi" });
+      await lookupStarted;
+      assertEquals((await driver.cancel(NEW_SESSION_ID)).status, "succeeded");
+      releaseLookup();
+      const outcome = await start;
+      assertEquals(outcome.status, "failed", String(lookupRejects));
+      assertEquals(outcome.error?.code, "cancelled", String(lookupRejects));
+      assertEquals(calls.some((call) => call.method === "query"), false);
+    } finally {
+      releaseLookup();
+    }
+  }
+});
+
+Deno.test("Claude driver refuses to start a session that already exists", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const sdk = {
+    ...sdkWithoutSessions(calls),
+    getSessionInfo: (id: string) => {
+      calls.push({ method: "getSessionInfo", args: [id] });
+      return Promise.resolve({
+        sessionId: id,
+        summary: "Existing",
+        cwd: "/work/labs",
+        lastModified: 1_000,
+      });
+    },
+  };
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdk,
+  );
+  const outcome = await driver.startSession(NEW_SESSION_ID, { text: "Hi" });
+  assertEquals(outcome.status, "failed");
+  assertEquals(outcome.error?.code, "claude-session-exists");
+  assertEquals(calls.map((call) => call.method), ["getSessionInfo"]);
+});
+
+Deno.test("Claude driver refuses a start whose id or directory is unusable", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const scoped = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdkWithoutSessions(calls),
+  );
+  assertEquals(
+    (await scoped.startSession("not-a-uuid", { text: "Hi" })).error?.code,
+    "claude-session-id-invalid",
+  );
+  // A start runs in the source's directory, so any other directory is
+  // refused: another checkout, a sibling that shares the prefix, a
+  // subdirectory the SDK would list as a project of its own, a relative path.
+  for (
+    const cwd of [
+      "/work/other",
+      "/work/labs-sibling",
+      "/work/labs/packages/patterns",
+      "labs",
+    ]
+  ) {
+    assertEquals(
+      (await scoped.startSession(NEW_SESSION_ID, { text: "Hi", cwd })).error
+        ?.code,
+      "claude-start-cwd-not-source",
+      cwd,
+    );
+  }
+  const unscoped = new ClaudeAgentSdkDriver(
+    { id: "claude-code:default", driver: "claude-agent-sdk", enabled: true },
+    sdkWithoutSessions(calls),
+  );
+  assertEquals(
+    (await unscoped.startSession(NEW_SESSION_ID, { text: "Hi" })).error?.code,
+    "claude-start-cwd-required",
+  );
+  assertEquals(calls, []);
+});
+
+Deno.test("Claude driver applies a start's mode to the first turn, drops it when the start fails, and refuses one it does not advertise", async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const driver = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    sdkWithoutSessions(calls),
+  );
+  assertEquals(
+    (await driver.startSession(NEW_SESSION_ID, {
+      text: "Hi",
+      mode: "bypassPermissions",
+    })).status,
+    "unsupported",
+  );
+  assertEquals(calls.map((call) => call.method), []);
+
+  const outcome = await driver.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    mode: "acceptEdits",
+  });
+  assertEquals(outcome.status, "succeeded");
+  const query = calls.find((call) => call.method === "query")?.args[0] as {
+    options: Record<string, unknown>;
+  };
+  assertEquals(query.options.permissionMode, "acceptEdits");
+  assertEquals(query.options.allowDangerouslySkipPermissions, undefined);
+
+  // A start that fails keeps no mode, so a retry under the same id without
+  // one runs in the driver's default mode.
+  const retries: Array<{ method: string; args: unknown[] }> = [];
+  let queries = 0;
+  const flaky = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    {
+      ...sdkWithoutSessions(retries),
+      query: (
+        params: { prompt: string; options?: Record<string, unknown> },
+      ) => {
+        retries.push({ method: "query", args: [params] });
+        queries++;
+        return queries === 1
+          ? fakeQuery([{ type: "result", subtype: "error_during_execution" }])
+          : fakeQuery([
+            { type: "system", subtype: "init", session_id: NEW_SESSION_ID },
+            { type: "result", subtype: "success" },
+          ]);
+      },
+    },
+  );
+  assertEquals(
+    (await flaky.startSession(NEW_SESSION_ID, { text: "Hi", mode: "plan" }))
+      .status,
+    "failed",
+  );
+  assertEquals(
+    (await flaky.startSession(NEW_SESSION_ID, { text: "Hi" })).status,
+    "succeeded",
+  );
+  const retried = retries.filter((call) => call.method === "query").at(-1)
+    ?.args[0] as { options: Record<string, unknown> };
+  assertEquals(retried.options.permissionMode, undefined);
+
+  // An SDK that throws while constructing the query fails the start the
+  // same way, and the mode is dropped the same way.
+  const throwing: Array<{ method: string; args: unknown[] }> = [];
+  let constructions = 0;
+  const brittle = new ClaudeAgentSdkDriver(
+    {
+      id: "claude-code:labs",
+      driver: "claude-agent-sdk",
+      enabled: true,
+      cwd: "/work/labs",
+    },
+    {
+      ...sdkWithoutSessions(throwing),
+      query: (
+        params: { prompt: string; options?: Record<string, unknown> },
+      ) => {
+        throwing.push({ method: "query", args: [params] });
+        constructions++;
+        if (constructions === 1) throw new Error("no claude binary");
+        return fakeQuery([
+          { type: "system", subtype: "init", session_id: NEW_SESSION_ID },
+          { type: "result", subtype: "success" },
+        ]);
+      },
+    },
+  );
+  // A mode set before the start is what a failed start restores.
+  assertEquals(
+    (await brittle.setMode(NEW_SESSION_ID, "plan")).status,
+    "succeeded",
+  );
+  const thrown = await brittle.startSession(NEW_SESSION_ID, {
+    text: "Hi",
+    mode: "acceptEdits",
+  });
+  assertEquals(thrown.status, "failed");
+  assertEquals(thrown.error?.code, "claude-query-failed");
+  assertEquals(
+    (await brittle.startSession(NEW_SESSION_ID, { text: "Hi" })).status,
+    "succeeded",
+  );
+  const afterThrow = throwing.filter((call) => call.method === "query").at(-1)
+    ?.args[0] as { options: Record<string, unknown> };
+  assertEquals(afterThrow.options.permissionMode, "plan");
 });
