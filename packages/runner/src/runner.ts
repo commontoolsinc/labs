@@ -254,20 +254,6 @@ const RESULT_SHORTCUT_LIMIT = 4096;
  */
 const NAMING_PROBE_BUDGET = 256;
 
-const EAGER_RESULT_BUILTIN_REFS = new Set([
-  "fetchBinary",
-  "fetchJson",
-  "fetchJsonUnchecked",
-  "fetchProgram",
-  "fetchText",
-  "generateObject",
-  "generateText",
-  "llm",
-  "llmDialog",
-  "navigateTo",
-  "streamData",
-]);
-
 type InternalCellDescriptor = {
   partialCause: JSONValue;
 
@@ -2115,7 +2101,6 @@ export class Runner {
       resultCell: Cell<T>,
       pattern: Pattern,
       inputs: FabricValue,
-      pullOnceAfterStart?: boolean,
       markCreateOnlyResult?: boolean,
       speculativeConsequence?: { eventId: string },
     ): Cancel;
@@ -2207,7 +2192,6 @@ export class Runner {
         resultCell,
         pattern,
         inputs,
-        pullOnceAfterStart,
         markCreateOnlyResult,
         speculativeConsequence,
       ) =>
@@ -2216,7 +2200,6 @@ export class Runner {
           resultCell,
           pattern,
           inputs,
-          pullOnceAfterStart,
           markCreateOnlyResult,
           speculativeConsequence,
         ),
@@ -5475,7 +5458,6 @@ export class Runner {
     resultCell: Cell<T>,
     givenPattern?: Pattern,
     options: RunnerRunOptions = {},
-    pullOnceAfterStart: boolean = false,
     speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
@@ -5551,7 +5533,6 @@ export class Runner {
                 resultCell,
                 "start",
                 startLifecycleEpoch,
-                pullOnceAfterStart,
                 ownership,
                 installedRegistration,
               )
@@ -5564,10 +5545,6 @@ export class Runner {
               "Error committing deferred start transaction",
               error,
             );
-            return;
-          }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.#pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
           ownership.cancel();
@@ -6029,7 +6006,6 @@ export class Runner {
             resultCell,
             "start",
             startLifecycleEpoch,
-            false,
             ownership,
             started.installedCancel,
           )
@@ -6144,7 +6120,6 @@ export class Runner {
     resultCell: Cell<T>,
     label: string,
     scheduledLifecycleEpoch: number,
-    pullOnceAfterStart: boolean,
     ownership: DeferredCancelOwnership,
     installedRegistration: Cancel | undefined,
   ): boolean {
@@ -6231,16 +6206,7 @@ export class Runner {
             resultCell,
             ownership,
           );
-          if (started) {
-            if (pullOnceAfterStart && !ownership.isCancelled()) {
-              this.#pullCellOnceInPullMode(
-                this.#runtime.getCellFromLink<T>(
-                  resultCell.getAsNormalizedFullLink(),
-                ),
-              );
-            }
-            return;
-          }
+          if (started) return;
           if (!ownership.isCancelled()) {
             // A recovery that resolves without leaving the piece running,
             // with nobody having stopped it, is the silent no-context
@@ -6358,7 +6324,6 @@ export class Runner {
     resultCell: Cell<T>,
     pattern: Pattern,
     inputs: FabricValue,
-    pullOnceAfterStart = false,
     markCreateOnlyResult = false,
     speculativeConsequence?: { eventId: string },
   ): Cancel {
@@ -6430,7 +6395,6 @@ export class Runner {
                 resultCell,
                 "cross-space pattern",
                 startLifecycleEpoch,
-                pullOnceAfterStart,
                 ownership,
                 installedRegistration,
               )
@@ -6443,10 +6407,6 @@ export class Runner {
               "Error committing deferred cross-space pattern transaction",
               error,
             );
-            return;
-          }
-          if (pullOnceAfterStart && !ownership.isCancelled()) {
-            this.#pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
           ownership.cancel();
@@ -6638,7 +6598,6 @@ export class Runner {
     let installedCancel: Cancel | undefined;
     let cancelDeferredStart: Cancel | undefined;
     if (needsStart) {
-      const pullOnceAfterStart = this.#patternNeedsOneShotPull(pattern);
       if (
         tx.tx.immediate === true &&
         (tx.tx as { deferRunnerStartUntilCommit?: boolean })
@@ -6649,7 +6608,6 @@ export class Runner {
           resultCell,
           pattern,
           options,
-          pullOnceAfterStart,
         );
       } else {
         installedCancel = this.#startWithTx(
@@ -6658,9 +6616,6 @@ export class Runner {
           pattern,
           options,
         );
-        if (pullOnceAfterStart) {
-          this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell);
-        }
       }
     }
 
@@ -9547,7 +9502,6 @@ export class Runner {
         resultPattern,
         undefined,
         true,
-        true,
         speculativeConsequence,
       );
       addCancel(cancelDeferredStart);
@@ -9742,79 +9696,10 @@ export class Runner {
         resultCell,
         resultSetup.pattern,
         {},
-        this.#patternNeedsOneShotPull(resultSetup.pattern),
         speculativeConsequence,
       )
       : undefined;
     return { resultCell, cancelDeferredStart };
-  }
-
-  #patternNeedsOneShotPull(pattern?: Pattern): boolean {
-    if (!pattern) {
-      return false;
-    }
-    return pattern.nodes.some(({ module }) => {
-      if (module.type !== "ref" || typeof module.implementation !== "string") {
-        return false;
-      }
-      return EAGER_RESULT_BUILTIN_REFS.has(module.implementation);
-    });
-  }
-
-  /**
-   * Pull the result cell once, after this transaction commits successfully.
-   *
-   * The cell is rebuilt from the result's own normalized link, so it carries
-   * whatever schema that link carries — `getCellFromLink` falls back to
-   * `link.schema` when no explicit one is passed. Which of two things the pull
-   * then does depends on that:
-   *
-   * - With no schema, `Cell.pull()` deep-traverses the whole value, and that
-   *   walk is what demands lazy producers under properties nothing declared.
-   * - With one, it descends only declared `properties`
-   *   (`preparePlainSchemaPlan`), so an eager node — `navigateTo`,
-   *   `generateText`, a `fetch*` — sitting under an undeclared property is not
-   *   demanded and its operation may never run. That hazard is latent here
-   *   rather than introduced: it follows from the link's own schema, is
-   *   unmeasured, and wants a decision about what a start pull should demand.
-   *
-   * Which of the two a given result gets is therefore decided by whether its
-   * link carries a schema, and that is not uniform: a non-space output scope
-   * builds its cell through `getCell(space, _resultFor, undefined, tx)`, so a
-   * scoped result pulls schemaless and walks, while a space-scoped one may not.
-   * The same interaction can be safe under one scope and not the other, which
-   * is the strongest argument for settling this deliberately rather than by
-   * whichever direction a caller happens to be patched in.
-   *
-   * What is settled is that narrowing this FURTHER, by passing the pattern's
-   * result schema explicitly, is not the way: it measured about a quarter off a
-   * thread open on the unified inbox and was reverted for exactly the hazard
-   * above, widened to every such pull. See stage 7 of
-   * docs/plans/person-inbox-interaction-cost.md.
-   */
-  #pullCellOnceAfterSuccessfulCommit<T = any>(
-    tx: IExtendedStorageTransaction,
-    resultCell: Cell<T>,
-  ): void {
-    const resultLink = resultCell.getAsNormalizedFullLink();
-    tx.addCommitCallback((_committedTx, result) => {
-      if (result.error) {
-        return;
-      }
-      this.#pullCellOnceInPullMode(
-        this.#runtime.getCellFromLink<T>(resultLink),
-      );
-    });
-  }
-
-  #pullCellOnceInPullMode<T = any>(cell: Cell<T>): void {
-    void cell.pull().catch((error) => {
-      logger.error(
-        "runner-start",
-        "Transient result pull failed after commit",
-        error,
-      );
-    });
   }
 
   #writeJavaScriptActionResult(
@@ -9967,7 +9852,6 @@ export class Runner {
         );
         this.releaseChild(resultCell, undefined);
       });
-      this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
 
     const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??

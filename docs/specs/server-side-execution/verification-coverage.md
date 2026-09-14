@@ -6324,9 +6324,8 @@ supply; OW29/OW32/OW34 closed):
     not-running. If another start took the key during the wait, the
     recovery yields exactly as `Runner.#startWithTx()` yields on an owned
     key. The recovery arm commits nothing (store-door pin: zero
-    `commitNative` calls post-refusal), mints no transaction, and
-    re-issues the one-shot pull the refused commit's success arm
-    would have issued. Log keys: `deferred-start-catchup` (recovery
+    `commitNative` calls post-refusal) and mints no transaction. Log
+    keys: `deferred-start-catchup` (recovery
     scheduled), `deferred-start-catchup-failed` (walk failed —
     loud, the piece has no client context). The two design checks
     flagged to the owner, resolved with evidence before code:
@@ -6335,9 +6334,8 @@ supply; OW29/OW32/OW34 closed):
     ORIGINATING committed tx's products (root doc, patternIdentity
     meta, argument link, setup state; the deferred callback only
     arms on that commit's success) plus in-memory context the
-    recovery re-creates; the two startTx-success-gated products are
-    the one-shot pull (the recovery re-issues it) and the
-    pattern-updater schedule (the walk's own instantiation tx
+    recovery re-creates; the one startTx-success-gated product is
+    the pattern-updater schedule (the walk's own instantiation tx
     re-arms it); the startTx's staged materialization writes are
     exactly what the SERVER already materialized (deterministic,
     cause-derived ids). (2) §3d restated in serving-loop.md §3d's

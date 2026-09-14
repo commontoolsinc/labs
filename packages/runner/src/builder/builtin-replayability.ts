@@ -11,10 +11,8 @@
  * (non-replayable builtins may write through their inputs — e.g. `llmDialog`
  * pushes onto `inputs.key("messages")`).
  *
- * This is deliberately NOT derived from `isEffect` (scheduler semantics,
- * incomplete on the fetch family — do not complete or repurpose it) and NOT
- * merged with the scheduler-facing `EAGER_RESULT_BUILTIN_REFS` set
- * (runner.ts) — same shape, different concern.
+ * This is deliberately NOT derived from `isEffect`, which carries scheduler
+ * semantics — a demand root — rather than anything about replay.
  *
  * Reciprocal note lives at `builtins/index.ts` (`registerBuiltins`): when a
  * builtin is added there, record it here — either as replayable or in the

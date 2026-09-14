@@ -3755,7 +3755,7 @@ export function llmDialog(
     }
   };
 
-  return { action, isEffect: true };
+  return { action };
 }
 
 async function startRequest(

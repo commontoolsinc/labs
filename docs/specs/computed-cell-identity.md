@@ -319,14 +319,12 @@ invisible to the builder — so replayability is decided by name against
 non-replayable, including the documented set `fetchBinary`, `fetchText`,
 `fetchJson`, `fetchJsonUnchecked`, `fetchProgram`, `streamData`, `llm`,
 `llmDialog`, `compileAndRun`, `generateObject`, `generateText`,
-`navigateTo`, `wish`, and `sqliteQuery` (a server round-trip; an effect
-like `llm`, even though its name suggests a query). The registry is
-deliberately NOT derived from the scheduler's `isEffect` (incomplete on the
-fetch family, and it carries scheduler semantics — do not complete or
-repurpose it) and NOT merged with the scheduler-facing
-`EAGER_RESULT_BUILTIN_REFS` set — same shape, different concern. A
-reciprocal comment at `registerBuiltins` (`builtins/index.ts`) keeps the
-registry in sync when builtins are added.
+`navigateTo`, `wish`, and `sqliteQuery` (a server round-trip, even though
+its name suggests a query). The registry is deliberately NOT derived from
+the scheduler's `isEffect`, which carries scheduler semantics — a standing
+demand root, which of these only `navigateTo` is — and says nothing about
+replay; do not repurpose it. A reciprocal comment at `registerBuiltins`
+(`builtins/index.ts`) keeps the registry in sync when builtins are added.
 
 #### Accepted consequence: result-surface exposure
 
