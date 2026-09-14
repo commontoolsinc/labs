@@ -1311,9 +1311,17 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     );
     const wavesBefore = host!.stats().waves;
     const EDITS = 20;
+    // Sampled for the control below: a client write the server has taken
+    // leaves the loop with an input to cover, so it reads busy there.
+    let sawLoopBusy = false;
+    const noteLoopBusy = () => {
+      sawLoopBusy ||= host!.spaceServer(space)?.suspendedOnInput === false;
+    };
     for (let i = 1; i <= EDITS; i++) {
       await setup.writeDraft(alice, `a${i}`);
+      noteLoopBusy();
       await setup.writeDraft(bob, `b${i}`);
+      noteLoopBusy();
     }
     await waitUntil(
       () =>
@@ -1322,12 +1330,43 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       "both instances to converge on the last edit",
       30_000,
     );
-    // Quiescence: no further waves once the inputs stop (the storm was
-    // 4,427 waves / 5 min at the deadline cadence, without inputs).
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // Quiescence, observed rather than waited out (waiting-in-tests.md's
+    // "Proving a negative"): the loop suspends on its input wait and the
+    // serving runtime's scheduler settles. The storm this step pins is a
+    // loop whose cycles keep finding work of their own, and such a loop
+    // never suspends — `#hasWork()` holds at the end of each cycle and
+    // the next begins — so the suspension IS the settling, with no
+    // interval to size. Its companion covers the other producer: a run a
+    // wave re-armed leaves the scheduler unsettled until it has run.
+    //
+    // The interval this replaced was the wrong instrument as well as the
+    // expensive one, and the difference is reproducible: hold
+    // `#hasWork()` true and the wait below fails by name, while three
+    // seconds of interval pass. The 4,427-wave storm ran at the
+    // production flush deadline, tens of milliseconds; this host's is
+    // five seconds, so a storm of exactly that shape commits nothing at
+    // all inside a window a test could afford to wait out.
+    //
+    // What no barrier here can rule out is a wave the loop commits after
+    // both have settled, which takes a wake from something neither shows
+    // — an outbox effect landing, a frame arriving. Nothing the test can
+    // post is ordered after such a wake, so the claim is the settled
+    // state and the bound below, never the absence of every later wave.
+    const server = host!.spaceServer(space)!;
+    await waitUntil(
+      async () => {
+        if (!server.suspendedOnInput) return false;
+        await servingRuntime!.idle();
+        return server.suspendedOnInput;
+      },
+      "the serving loop to suspend on its input wait with its runtime settled",
+    );
     const wavesAtQuiescence = host!.stats().waves;
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(host!.stats().waves).toBe(wavesAtQuiescence);
+    // The control for that wait, and the reason it is not vacuous: the
+    // same reading, taken while the edits above were being covered, went
+    // false. A reading pinned true would satisfy the wait on its first
+    // poll and leave every claim resting on it unasserted.
+    expect(sawLoopBusy).toBe(true);
     // Bounded by the inputs plus a small constant (one wave may carry
     // several inputs; a discovery re-arm runs inside its wave).
     expect(wavesAtQuiescence - wavesBefore).toBeLessThanOrEqual(

@@ -2875,9 +2875,11 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   cycle — N instance runs writing one collapsed local doc + patches
   diffed against a sibling's value — is pinned UNBUILT in the HARNESS:
   `executor-fan-out.test.ts` (i) — two users, 20 divergent authored
-  edits each, waves ≤ 2·edits + 8, quiescent after the last edit (no
-  wave in a 3 s window), zero `wave-commit-rejected … missing path`,
-  neither instance ever holding the sibling's value. But "UNCONSTRUCTIBLE
+  edits each, waves ≤ 2·edits + 8, quiescent after the last edit (the
+  loop suspends on its input wait with its runtime settled, which a loop
+  whose cycles keep finding work never does), zero
+  `wave-commit-rejected … missing path`, neither instance ever holding
+  the sibling's value. But "UNCONSTRUCTIBLE
   now" OVERCLAIMED against the LIVE gate: the independent review's
   lunch run 4 still showed a churning serving loop (331
   `wavesBudgetExhausted`, `wave-commit-rejected … path is not
