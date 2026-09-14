@@ -189,6 +189,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [JSON Pointer encoding](development/performance/2026-09-14-encode-pointer.md) — interleaved encoder and Map lookup measurements, guarded escaping, semantic checks, and limits on deployed impact.
+- [JSON Pointer encoding measurements](development/performance/2026-09-14-encode-pointer.results.json) — raw Deno reports, adjacent paired samples, source hashes, and replay drivers.
+
 - [Consumed label-map width](development/performance/2026-09-14-cfc-consumed-label-index.md) — paired measurements of per-document metadata validation and indexed path lookup, predicate and order regressions, and bounded nested-array probes that leave the Loom gap unresolved.
 - [Consumed label-map width measurements](development/performance/2026-09-14-cfc-consumed-label-index.results.json) — paired collector samples, load readings, source hashes, diagnostic drivers, and nested-array probe output.
 
