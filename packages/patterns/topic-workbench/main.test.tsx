@@ -5,7 +5,8 @@
  * attach is idempotent and joins the live row, detach removes it, the
  * spawn command composes from the picked checkout and prompt, a start
  * sends the connector a `start` command and records it as pending until the
- * index carries the session it named (a start with no queue stays pending
+ * index carries the session it named (a confirmed start stays attached once
+ * the index marks its session deleted; a start with no queue stays pending
  * and can be dismissed), the rail's own buttons attach and detach a row and
  * add the topic's words to the prompt, and a verb call without both ids is
  * refused.
