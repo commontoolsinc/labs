@@ -279,17 +279,6 @@ const createContext = (
             artifactRootHostPath.startsWith(`${path}/`)),
       );
     },
-    describeHostMountCovering(path: string) {
-      // The one mount these cases model is the workspace.
-      return path === workspaceHostPath ||
-          path.startsWith(`${workspaceHostPath}/`)
-        ? {
-          kind: "workspace",
-          hostPath: workspaceHostPath,
-          sandboxPath: "/workspace",
-        }
-        : undefined;
-    },
     hostPathToWorkspacePath(path: string) {
       return path === workspaceHostPath
         ? "/workspace"

@@ -130,7 +130,6 @@ const createContext = (options: ContextOptions): HarnessToolContext => {
     resolveHostPath: (path) => `/tmp/cf-harness-workspace${path}`,
     resolveHostRootPath: () => "/tmp/cf-harness-workspace",
     hostPathToWorkspacePath: () => undefined,
-    describeHostMountCovering: () => undefined,
     isHostPathWithinWorkspace: () => Promise.resolve(true),
     isHostPathWithinArtifactRoot: () => Promise.resolve(false),
     doesHostPathIntersectArtifactRoot: () => Promise.resolve(false),

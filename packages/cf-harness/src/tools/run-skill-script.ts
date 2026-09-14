@@ -843,16 +843,6 @@ const resolveAcquiredSkillScript = (
   skillName: string,
   path: string,
 ): SkillScriptResolution => {
-  if (context.skillActivations === undefined) {
-    return {
-      ok: false,
-      error: {
-        code: "skill_activations_missing",
-        message:
-          "run_skill_script requires an explicitly activated skill; configure --skill before using this tool",
-      },
-    };
-  }
   const acquired = findAcquiredSkill(context.acquiredSkills, skillName);
   if (acquired === undefined) {
     return {
@@ -867,8 +857,10 @@ const resolveAcquiredSkillScript = (
   // as a handle activates under `handle:<token>`, so there is no registry name
   // to match; what the run holds is the pin the bytes were read at, and that
   // is what says this run was given this skill rather than merely knowing of
-  // it.
-  const activation = context.skillActivations.activations.find((candidate) =>
+  // it. A run that activated nothing at all reaches the same answer by the
+  // same route, so there is no separate no-activations arm here as there is on
+  // the registry side, where the registry's own absence is a different fact.
+  const activation = context.skillActivations?.activations.find((candidate) =>
     candidate.acquisition?.registryId === pin.id &&
     candidate.acquisition?.commitSha === pin.commitSha
   );

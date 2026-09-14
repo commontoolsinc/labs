@@ -174,6 +174,22 @@ describe("acquiring a skill's scripts outside every run root", () => {
     ).toThrow(".acquired-skills");
   });
 
+  it("hands the acquisition to the tools of the run that holds it", async () => {
+    // The record reaches `run_skill_script` through the tool context, so a pin
+    // this run acquired gets past "no skill acquired at this pin" and stops at
+    // activation — the gate that says the run was GIVEN the skill.
+    const engine = engineWith([]);
+    await engine.materializeAcquiredSkill(oneScript);
+
+    const result = await engine.invokeBuiltinTool("run_skill_script", {
+      skill: `${REGISTRY_ID}@${COMMIT_SHA}`,
+      path: "scripts/report.sh",
+    });
+
+    expect(result.output.status).toBe("error");
+    expect(result.output.error?.code).toBe("skill_not_activated");
+  });
+
   it("refuses when the workspace itself covers the artifact tree", async () => {
     const nested = join(workspace, "artifacts");
     await Deno.mkdir(nested);

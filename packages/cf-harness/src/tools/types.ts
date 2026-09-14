@@ -180,21 +180,6 @@ export interface HarnessToolContext {
   resolveHostRootPath(path: string): string;
   hostPathToWorkspacePath(path: string): string | undefined;
 
-  /**
-   * The sandbox mount covering a host path, or `undefined` when none does.
-   *
-   * A run reads what it mounts, so this answers "could this run see a file
-   * here?" of a host path. `acquire_skill` asks it of the directory it is
-   * about to write a skill's scripts into, and refuses naming the mount
-   * rather than writing bytes the planner could read.
-   */
-  describeHostMountCovering(path: string): {
-    kind: string;
-    name?: string;
-    hostPath: string;
-    sandboxPath: string;
-  } | undefined;
-
   isHostPathWithinWorkspace(
     path: string,
     options?: { allowMissing?: boolean },

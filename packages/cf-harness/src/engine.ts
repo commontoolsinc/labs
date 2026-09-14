@@ -2462,15 +2462,6 @@ export class CfHarnessEngine {
       resolveHostRootPath: (path: string) => this.#resolveHostRootPath(path),
       hostPathToWorkspacePath: (path: string) =>
         this.#hostPathToWorkspacePath(path),
-      describeHostMountCovering: (path: string) => {
-        const mount = this.#hostMountCovering(path);
-        return mount === undefined ? undefined : {
-          kind: mount.kind,
-          ...(mount.name !== undefined ? { name: mount.name } : {}),
-          hostPath: mount.hostPath,
-          sandboxPath: mount.sandboxPath,
-        };
-      },
       isHostPathWithinWorkspace: (
         path: string,
         options?: { allowMissing?: boolean },
