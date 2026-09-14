@@ -149,7 +149,10 @@ writer, links the queue into the piece's `commands` input, and reads commands
 from it beside the debug view's queue. A producer whose pattern declares no
 authorization fails startup. Producer IDs must be unique. A producer's queue is
 bound before commands are subscribed. Removing a producer from the configuration
-leaves its queue and the piece's link in place; the queue is no longer read.
+leaves its queue and the piece's link in place; the queue is no longer read. The
+queue's writer is the handler's module identity as read at startup, so a
+`setsrc` that changes the producer's pattern leaves the queue refusing the new
+module's writes until the host restarts and binds the queue again.
 
 The source fields are the connector's `AgentSourceConfig` contract:
 

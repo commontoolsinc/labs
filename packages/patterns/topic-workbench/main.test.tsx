@@ -4,9 +4,11 @@
  * deleted rows dropped, a session naming the topic is offered as related,
  * attach is idempotent and joins the live row, detach removes it, the
  * spawn command composes from the picked checkout and prompt, a start
- * sends the connector a `start` command and attaches the session it named,
- * the rail's own buttons attach and detach a row and add the topic's words
- * to the prompt, and a verb call without both ids is refused.
+ * sends the connector a `start` command and records it as pending until the
+ * index carries the session it named (a start with no queue stays pending
+ * and can be dismissed), the rail's own buttons attach and detach a row and
+ * add the topic's words to the prompt, and a verb call without both ids is
+ * refused.
  */
 import {
   action,
@@ -30,6 +32,7 @@ import {
 import Workbench, {
   type Attachment,
   type CommandValue,
+  type PendingStart,
   type SessionIndexView,
   type StartableSourcesView,
   type TopicView,
@@ -161,7 +164,22 @@ export default pattern(() => {
   });
   const attached = new Writable<Attachment[] | Default<[]>>([]);
   const commands = new Writable<CommandValue[] | Default<[]>>([]);
-  const wb = Workbench({ topic, sessions: index, attached, commands });
+  const pendingStarts = new Writable<PendingStart[] | Default<[]>>([]);
+  const wb = Workbench({
+    topic,
+    sessions: index,
+    attached,
+    commands,
+    pendingStarts,
+  });
+  // A workbench whose host has bound no queue yet: a start reaches nothing.
+  const noQueuePending = new Writable<PendingStart[] | Default<[]>>([]);
+  const noQueue = Workbench({
+    topic,
+    sessions: index,
+    attached: new Writable<Attachment[] | Default<[]>>([]),
+    pendingStarts: noQueuePending,
+  });
 
   const assert_header = assert(() =>
     wb[NAME] === "Workbench: Workbench topic" &&
@@ -252,7 +270,8 @@ export default pattern(() => {
   );
 
   // A start sends one `start` command for the Claude source, named after the
-  // topic and carrying the kickoff, and attaches the session it minted.
+  // topic and carrying the kickoff, and records the session it minted as
+  // pending: nothing attaches until the index carries the session.
   const action_start = action(() => {
     wb.startSession.send();
   });
@@ -271,12 +290,70 @@ export default pattern(() => {
       "topic #7: Workbench topic" &&
     firstCommand(commands.get())?.payload?.text === wb.kickoff
   );
+  const assert_start_pending = assert(() =>
+    wb.attachedSessions.length === 1 &&
+    wb.pendingStarts.length === 1 &&
+    wb.pendingStarts[0]?.nativeSessionId ===
+      firstCommand(commands.get())?.nativeSessionId &&
+    wb.pendingStarts[0]?.commandId === firstCommand(commands.get())?.id &&
+    wb.pendingStarts[0]?.title === "topic #7: Workbench topic" &&
+    hasText(wb[UI], "Starting · 1")
+  );
+
+  // The connector publishes the session: the start is confirmed and counts
+  // as attached, joined with its live row.
+  const action_confirm_start = action(() => {
+    const started = firstCommand(commands.get())?.nativeSessionId ?? "";
+    const current = index.get();
+    index.set({
+      ...current,
+      sessions: [
+        ...current.sessions,
+        {
+          sourceId: "claude",
+          nativeSessionId: started,
+          title: "topic #7: Workbench topic",
+          cwd: "/w/labs",
+          gitRepo: null,
+          gitBranch: "main",
+          gitWorktreeRoot: null,
+          updatedAt: "2026-09-08T13:00:00.000Z",
+          active: true,
+          archived: false,
+          syncStatus: "complete",
+        },
+      ],
+    });
+  });
   const assert_start_attached = assert(() =>
+    wb.pendingStarts.length === 0 &&
     wb.attachedSessions.length === 2 &&
     wb.attachedSessions[1]?.nativeSessionId ===
       firstCommand(commands.get())?.nativeSessionId &&
     wb.attachedSessions[1]?.title === "topic #7: Workbench topic" &&
-    wb.attachedSessions[1]?.sourceId === "claude"
+    wb.attachedSessions[1]?.sourceId === "claude" &&
+    wb.attachedSessions[1]?.gitBranch === "main" &&
+    wb.recentSessions.every((row) =>
+      row.nativeSessionId !== firstCommand(commands.get())?.nativeSessionId
+    )
+  );
+
+  // With no queue bound, a start records nothing as attached: it stays
+  // pending, and Dismiss clears it.
+  const action_start_without_queue = action(() => {
+    noQueue.spawnPrompt.set("Start without a queue.");
+    noQueue.startSession.send();
+  });
+  const assert_start_without_queue_pending = assert(() =>
+    noQueue.attachedSessions.length === 0 &&
+    noQueue.pendingStarts.length === 1 &&
+    noQueuePending.get().length === 1
+  );
+  const action_dismiss_start = action(() => {
+    clickInRow(noQueue[UI], "topic #7: Workbench topic", "Dismiss");
+  });
+  const assert_start_dismissed = assert(() =>
+    noQueue.pendingStarts.length === 0 && noQueuePending.get().length === 0
   );
 
   // A start through the Codex source sends nothing: its driver cannot start
@@ -296,8 +373,9 @@ export default pattern(() => {
   });
   const assert_clicked_attached = assert(() =>
     wb.attachedSessions.length === 3 &&
-    wb.attachedSessions[2]?.nativeSessionId === "bbb" &&
-    wb.attachedSessions[2]?.title === "something unrelated" &&
+    wb.attachedSessions.some((row) =>
+      row.nativeSessionId === "bbb" && row.title === "something unrelated"
+    ) &&
     wb.recentSessions.every((row) => row.nativeSessionId !== "bbb")
   );
   const action_click_detach = action(() => {
@@ -348,7 +426,14 @@ export default pattern(() => {
       { assertion: assert_spawn_command },
       { action: action_start },
       { assertion: assert_start_command },
+      { assertion: assert_start_pending },
+      { action: action_confirm_start },
       { assertion: assert_start_attached },
+      { action: action_start_without_queue },
+      { assertion: assert_start_without_queue_pending },
+      { render: noQueue[UI] },
+      { action: action_dismiss_start },
+      { assertion: assert_start_dismissed },
       { action: action_start_codex },
       { assertion: assert_codex_start_refused },
       { action: action_click_attach },
