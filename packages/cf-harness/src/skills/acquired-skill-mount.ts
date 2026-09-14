@@ -185,6 +185,14 @@ export const acquiredSkillScriptSurface = (
  * {@link acquiredSkillScriptSurface} — and a run backed with no such entry
  * receives no tool.
  */
+export const acquiredSkillScriptBacking = (
+  ownedSandboxConfig: DockerRunscSandboxConfig | undefined,
+  acquiredSkills: readonly HarnessAcquiredSkill[] | undefined,
+): boolean =>
+  (acquiredSkills ?? []).some((skill) =>
+    acquiredSkillMountBacks(ownedSandboxConfig?.additionalMounts, skill)
+  );
+
 /**
  * Whether these mounts are the ones this skill's bytes were put behind.
  *
@@ -205,12 +213,4 @@ export const acquiredSkillMountBacks = (
     mount.hostPath === skill.hostRoot &&
     mount.sandboxPath === skill.sandboxRoot &&
     mount.readOnly
-  );
-
-export const acquiredSkillScriptBacking = (
-  ownedSandboxConfig: DockerRunscSandboxConfig | undefined,
-  acquiredSkills: readonly HarnessAcquiredSkill[] | undefined,
-): boolean =>
-  (acquiredSkills ?? []).some((skill) =>
-    acquiredSkillMountBacks(ownedSandboxConfig?.additionalMounts, skill)
   );
