@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { createFileSystemHarnessArtifactStore } from "../../src/artifacts.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
+import { skillsShValueDigest } from "../../src/skills-sh/acquisition.ts";
 import { AcquiredSkillDirectoryReadableError } from "../../src/skills/acquired-skill-mount.ts";
 import type {
   DockerRunscSandboxConfig,
@@ -89,7 +90,7 @@ describe("acquiring a skill's scripts outside every run root", () => {
     commitSha: COMMIT_SHA,
     scripts: [{
       path: "scripts/report.sh",
-      text: SCRIPT_TEXT,
+      bytes: new TextEncoder().encode(SCRIPT_TEXT),
       valueDigest: "sha256:acquired",
     }],
   };
@@ -123,12 +124,48 @@ describe("acquiring a skill's scripts outside every run root", () => {
     expect(script.valueDigest).toBe("sha256:acquired");
     expect(script.sandboxPath).toBe("/acquired-skill/scripts/report.sh");
     expect(await Deno.readTextFile(script.hostPath)).toBe(SCRIPT_TEXT);
+    expect(script.sizeBytes).toBe(
+      new TextEncoder().encode(SCRIPT_TEXT).byteLength,
+    );
     // Outside the run root, so the artifact tree the parent's file tools
     // reserve does not contain it.
     expect(script.hostPath.startsWith(join(artifactRoot, "run-1/"))).toBe(
       false,
     );
     expect(engine.getRunState().acquiredSkills?.skills).toEqual([acquired]);
+  });
+
+  it("writes back the exact bytes the pin served, byte-order mark included", async () => {
+    // The acquisition digests the BYTES the commit served and this writes what
+    // an execution re-reads and compares against that digest, so the two have
+    // to be the same bytes. A UTF-8 byte-order mark is where a decoded string
+    // stops being them: it is an encoding artifact rather than a character, so
+    // decoding drops it, and the digest and the size would both describe a
+    // file GitHub never served — a pinned script that opens with one could
+    // then never execute.
+    const bytes = new Uint8Array([
+      0xEF,
+      0xBB,
+      0xBF,
+      ...new TextEncoder().encode(SCRIPT_TEXT),
+    ]);
+    const engine = engineWith([]);
+
+    const acquired = await engine.materializeAcquiredSkill({
+      registryId: REGISTRY_ID,
+      commitSha: COMMIT_SHA,
+      scripts: [{
+        path: "scripts/report.sh",
+        bytes,
+        valueDigest: skillsShValueDigest(bytes),
+      }],
+    });
+
+    const script = acquired.scripts[0]!;
+    const written = await Deno.readFile(script.hostPath);
+    expect(written).toEqual(bytes);
+    expect(skillsShValueDigest(written)).toBe(script.valueDigest);
+    expect(script.sizeBytes).toBe(bytes.byteLength);
   });
 
   it("refuses, naming the mount, when a mount of this run covers the directory", async () => {

@@ -179,11 +179,14 @@ export interface HarnessArtifactStore {
   /**
    * Writes one acquired script into {@link acquiredSkillsDir} under
    * `relativeDir`, and returns the host path it landed at.
+   *
+   * Takes bytes, since what lands here is re-read and compared against the
+   * digest the acquisition took over the bytes the pinned commit served.
    */
   writeAcquiredSkillScript?(
     relativeDir: string,
     path: string,
-    text: string,
+    bytes: Uint8Array,
   ): Promise<string>;
 
   persistToolOutput(
@@ -308,7 +311,7 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   async writeAcquiredSkillScript(
     relativeDir: string,
     scriptPath: string,
-    text: string,
+    bytes: Uint8Array,
   ): Promise<string> {
     const target = join(this.acquiredSkillsDir, relativeDir, scriptPath);
     if (!isPathWithinRoot(resolve(target), resolve(this.acquiredSkillsDir))) {
@@ -317,7 +320,7 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
       );
     }
     await ensureDir(dirname(target));
-    await Deno.writeTextFile(target, text);
+    await Deno.writeFile(target, bytes);
     return target;
   }
 

@@ -1661,10 +1661,12 @@ export class CfHarnessEngine {
    * Writes one acquired skill's scripts where a run that holds its handle can
    * execute them, and records where they went.
    *
-   * The directory is a sibling of the run root rather than a child of it, and
-   * the check here is what makes that mean something: `acquire_skill` runs in
-   * the PARENT, so a script the parent's sandbox can reach is a script the
-   * planner can read — the one property the hostile-skill receipt rests on.
+   * The bytes land at `<artifactRoot>/.acquired-skills/<runId>/<commitSha>/
+   * <slug>` — under the artifact root's one non-run directory, inside no run
+   * root — and the check here is what makes that mean something:
+   * `acquire_skill` runs in the PARENT, so a script the parent's sandbox can
+   * reach is a script the planner can read — the one property the
+   * hostile-skill receipt rests on.
    * Every mount is asked, the workspace and each `--host-mount` alike, because
    * an operator mount over the artifact tree is the same hole as an artifact
    * root inside the workspace. A covering mount refuses, named.
@@ -1683,7 +1685,7 @@ export class CfHarnessEngine {
       commitSha: string;
       scripts: readonly {
         path: string;
-        text: string;
+        bytes: Uint8Array;
         valueDigest: string;
       }[];
     },
@@ -1714,14 +1716,14 @@ export class CfHarnessEngine {
       const hostPath = await store.writeAcquiredSkillScript(
         relativeDir,
         script.path,
-        script.text,
+        script.bytes,
       );
       scripts.push({
         path: script.path,
         hostPath,
         sandboxPath: `${ACQUIRED_SKILL_MOUNT_PATH}/${script.path}`,
         valueDigest: script.valueDigest,
-        sizeBytes: new TextEncoder().encode(script.text).byteLength,
+        sizeBytes: script.bytes.byteLength,
       });
     }
     const acquired: HarnessAcquiredSkill = {

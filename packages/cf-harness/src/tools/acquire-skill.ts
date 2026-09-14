@@ -273,7 +273,7 @@ export const acquireSkillTool: HarnessToolDefinition<
             commitSha: resolvedPin.commitSha,
             scripts: acquired.scripts.map((script) => ({
               path: script.path,
-              text: script.text,
+              bytes: script.bytes,
               valueDigest: script.valueDigest,
             })),
           });

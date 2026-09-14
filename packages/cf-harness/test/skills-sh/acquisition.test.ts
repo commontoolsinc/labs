@@ -216,7 +216,9 @@ describe("skills.sh pinned acquisition", () => {
       "scripts/first.py",
       "scripts/second.sh",
     ]);
-    expect(acquired.scripts[0].text).toBe("# scripts/first.py\n");
+    expect(acquired.scripts[0].bytes).toEqual(
+      new TextEncoder().encode("# scripts/first.py\n"),
+    );
     // Every fetch names the one pinned commit, the instructions first.
     expect(urls).toEqual([
       BUILDGREAT_TREE_URL,

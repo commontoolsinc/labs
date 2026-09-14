@@ -106,11 +106,16 @@ export class SkillsShAcquisitionError extends Error {
  * `path` is relative to the skill root, so it is what the skill's own prose
  * names and what an allowlist entry matches; the digest is over the exact
  * bytes fetched, as `SKILL.md`'s is.
+ *
+ * The payload is those bytes rather than a decoded string. Decoding is lossy
+ * at exactly the point the digest is checked: a UTF-8 byte-order mark is not
+ * a character, so a decode drops it and every later byte count and digest
+ * would describe a file the pinned commit never served.
  */
 export interface SkillsShAcquiredScript {
   readonly path: string;
   readonly sourceUrl: string;
-  readonly text: string;
+  readonly bytes: Uint8Array;
   readonly valueDigest: string;
 }
 
@@ -514,11 +519,10 @@ export const acquireSkillsShPinnedSkill = async (
       scriptResponse,
       displayPath(relativePath),
     );
-    let scriptText: string;
+    // Decoded only to refuse what is not UTF-8. The bytes are what travels on,
+    // so the decoded string is deliberately discarded.
     try {
-      scriptText = new TextDecoder("utf-8", { fatal: true }).decode(
-        scriptBytes,
-      );
+      new TextDecoder("utf-8", { fatal: true }).decode(scriptBytes);
     } catch {
       throw acquisitionError(
         "invalid_skill_text",
@@ -528,7 +532,7 @@ export const acquireSkillsShPinnedSkill = async (
     scripts.push({
       path: relativePath,
       sourceUrl: scriptUrl,
-      text: scriptText,
+      bytes: scriptBytes,
       valueDigest: skillsShValueDigest(scriptBytes),
     });
   }

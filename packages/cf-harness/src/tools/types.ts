@@ -179,7 +179,6 @@ export interface HarnessToolContext {
   resolveHostPath(path: string): string;
   resolveHostRootPath(path: string): string;
   hostPathToWorkspacePath(path: string): string | undefined;
-
   isHostPathWithinWorkspace(
     path: string,
     options?: { allowMissing?: boolean },
@@ -219,7 +218,11 @@ export interface HarnessToolContext {
   materializeAcquiredSkill?(options: {
     registryId: string;
     commitSha: string;
-    scripts: readonly { path: string; text: string; valueDigest: string }[];
+    scripts: readonly {
+      path: string;
+      bytes: Uint8Array;
+      valueDigest: string;
+    }[];
   }): Promise<HarnessAcquiredSkill>;
 
   /** The skills this run has acquired scripts for, as it stands. */

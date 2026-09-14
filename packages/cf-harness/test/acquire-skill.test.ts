@@ -423,7 +423,7 @@ describe("acquire-skill", () => {
     loadedPaths: ["SKILL.md", "scripts/report.sh"] as const,
     scripts: [{
       path: "scripts/report.sh",
-      text: "#!/usr/bin/env bash\necho acquired\n",
+      bytes: new TextEncoder().encode("#!/usr/bin/env bash\necho acquired\n"),
       valueDigest: "sha256:script",
     }],
   };
@@ -490,7 +490,7 @@ describe("acquire-skill", () => {
       commitSha: MEMBRANE_SHA,
       scripts: [{
         path: "scripts/report.sh",
-        text: "#!/usr/bin/env bash\necho acquired\n",
+        bytes: new TextEncoder().encode("#!/usr/bin/env bash\necho acquired\n"),
         valueDigest: "sha256:script",
       }],
     }]);
