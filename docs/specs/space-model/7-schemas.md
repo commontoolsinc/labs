@@ -85,7 +85,7 @@ Schemas influence runtime behavior:
   mismatch under a `required` property throws a `SchemaMismatchError` at that
   access. The runner disposes of one as an argument that did not resolve — an
   undefined result, not a fault — which is what an eager read's `undefined`
-  produces anyway. 
+  produces anyway.
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 

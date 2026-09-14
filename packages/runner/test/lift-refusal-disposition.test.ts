@@ -28,14 +28,19 @@ describe("lift refusal disposition", () => {
 
   /**
    * Runs the pattern in the given posture over two valid rows, then replaces
-   * the second row with one that lacks its required label, and returns what
-   * the demanded `second` read before and after, and what reached the error
-   * channel.
+   * the second row with one that lacks its required label, then repairs it.
+   * Keeps the result demanded throughout and records each settled value and
+   * anything that reached the error channel.
    */
   async function breakSecondRow(
     lazyMaterialization: boolean,
   ): Promise<
-    { before: string | undefined; after: string | undefined; errors: Error[] }
+    {
+      before: string | undefined;
+      after: string | undefined;
+      recovered: string | undefined;
+      errors: Error[];
+    }
   > {
     env = createSchedulerTestRuntime(import.meta.url, {
       experimental: { lazyMaterialization },
@@ -64,19 +69,28 @@ describe("lift refusal disposition", () => {
     await tx.commit();
     env.tx = runtime.edit();
     const second = result.key("second");
-    const before = await second.pull();
-
     const errors: Error[] = [];
     runtime.scheduler.onError((error) => {
       errors.push(error);
     });
-    const write = runtime.edit();
-    items.key(1).withTx(write).set({ note: 2 } as unknown as Item);
-    expect((await write.commit()).error).toBeUndefined();
-    const after = await second.pull();
-    await runtime.idle();
-    await runtime.scheduler.idleWithPendingCommits();
-    return { before, after, errors };
+    const cancel = second.sink(() => {});
+    try {
+      await runtime.settled(Infinity);
+      const before = second.get();
+      const write = runtime.edit();
+      items.key(1).withTx(write).set({ note: 2 } as unknown as Item);
+      expect((await write.commit()).error).toBeUndefined();
+      await runtime.settled(Infinity);
+      const after = second.get();
+
+      const repair = runtime.edit();
+      items.key(1).withTx(repair).set({ label: "recovered" });
+      expect((await repair.commit()).error).toBeUndefined();
+      await runtime.settled(Infinity);
+      return { before, after, recovered: second.get(), errors };
+    } finally {
+      cancel();
+    }
   }
 
   it("writes an undefined result when the body's synchronous read refuses under the view", async () => {
@@ -84,6 +98,7 @@ describe("lift refusal disposition", () => {
     expect(outcome.before).toBe("bb");
     expect(outcome.errors).toEqual([]);
     expect(outcome.after).toBeUndefined();
+    expect(outcome.recovered).toBe("recovered");
   });
 
   it("writes an undefined result for the same data when the argument is read eagerly", async () => {
@@ -91,5 +106,6 @@ describe("lift refusal disposition", () => {
     expect(outcome.before).toBe("bb");
     expect(outcome.errors).toEqual([]);
     expect(outcome.after).toBeUndefined();
+    expect(outcome.recovered).toBe("recovered");
   });
 });
