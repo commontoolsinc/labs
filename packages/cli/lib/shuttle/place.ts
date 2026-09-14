@@ -794,8 +794,7 @@ export class CurrentPlace {
    * the scope sits last rather than where a reference carries it.
    */
   label(): string {
-    const place = this.#here.place;
-    return `${labelPosition(place.position)} ${renderScope(place.scope)}`;
+    return labelForPlace(this.#here.place);
   }
 
   /**
@@ -1655,14 +1654,19 @@ export function scopeMoveHint(operand: string): string {
 /**
  * The member an operand writes to select a piece's arguments cell, which is
  * the selection `--input` spells as a flag.
+ *
+ * Exported because it is written as well as read: a verb that says where a
+ * write landed and a watch that names the cell it watches each spell the
+ * selection back, and one string is what keeps the spelling a person types
+ * and the spelling they are shown the same one.
  */
-const ARGUMENT_MEMBER = "#argument";
+export const ARGUMENT_MEMBER = "#argument";
 
 /**
  * The spellings a refusal about the member teaches, each one a read the
  * grammar takes: the member on the `.` head, and on a piece segment.
  */
-const MEMBER_SPELLINGS = "`get .#argument/title` or " +
+export const MEMBER_SPELLINGS = "`get .#argument/title` or " +
   "`get /slugs/board#argument/title`";
 
 /**
@@ -2118,6 +2122,30 @@ export function messageOf(thrown: unknown): string {
 }
 
 /**
+ * The cell `place` names written short, which is the form the prompt carries
+ * for the place shuttle stands at and a watch carries for the cell it watches.
+ *
+ * It is one rendering rather than two because it makes one promise: the piece
+ * is written by the name the space's index confirmed for it and by its handle
+ * otherwise, nothing is cut down to a prefix, and the scope is written out.
+ * A reader who has learned to read the prompt reads a watch's name with no
+ * second convention, and neither is an address — {@link referenceForPlace} is
+ * what a seam takes and `pwd` is what a person copies.
+ *
+ * `input` selects the piece's arguments cell, which is the one thing a place
+ * cannot carry: a place is result-rooted, so nothing here writes the member
+ * for a *place*. What this names is a cell, and a piece has two — so a caller
+ * naming the arguments one says which, and it is written where an operand
+ * selects it, on the piece segment ({@link ARGUMENT_MEMBER}): `board#argument/title`.
+ * Written after the path it would name the result key `title#argument`, which
+ * is a cell of its own. Without it two cells of one piece are one name, and a
+ * listing of them says the same thing twice.
+ */
+export function labelForPlace(place: Place, input = false): string {
+  return `${labelPosition(place.position, input)} ${renderScope(place.scope)}`;
+}
+
+/**
  * The space-relative reference naming the cell `place` stands on, which is
  * what a `cf` seam reading a `--cell` takes.
  *
@@ -2129,13 +2157,19 @@ export function messageOf(thrown: unknown): string {
  * so writing it here would say a second time what the config says once. The
  * scope is written because that context has none to leave it to.
  *
- * A place is result-rooted, so nothing here writes the `#argument` member. An
+ * A place is result-rooted, so a seam is handed no `#argument` member: an
  * operand that selects the arguments cell says so through the flag the seam
  * reads it on, which is where the selection is a parameter rather than part of
- * the address.
+ * the address. `input` writes the member on the piece segment for a caller
+ * that names a piece's arguments cell for itself rather than for a seam — a
+ * watch keying the cell it watches — where writing it after the path would
+ * name a result key instead.
  */
-export function referenceForPlace(place: PiecePlace): string {
-  return renderCellReference(cellOf(place), { space: place.position.space });
+export function referenceForPlace(place: PiecePlace, input = false): string {
+  return renderCellReference(
+    { ...cellOf(place), ...(input ? { member: "argument" as const } : {}) },
+    { space: place.position.space },
+  );
 }
 
 /**
@@ -2193,17 +2227,20 @@ function renderPosition(place: Place): string {
  * here, a short form being no reference for it to mark one in, so a container
  * takes it and reads as the walk down from the root that it is.
  */
-function labelPosition(position: Position): string {
+function labelPosition(position: Position, input = false): string {
   switch (position.kind) {
     case "root":
       return encodeJsonPointer(["", ""]);
     case "facet":
       return encodeJsonPointer(["", position.facet, ""]);
-    case "piece":
-      return encodeJsonPointer([
-        position.name ?? position.piece,
-        ...position.path.map(String),
-      ]);
+    case "piece": {
+      // The member rides the piece segment, where an operand selects it.
+      const piece = encodeJsonPointer([position.name ?? position.piece]) +
+        (input ? ARGUMENT_MEMBER : "");
+      return position.path.length === 0
+        ? piece
+        : `${piece}/${encodeJsonPointer(position.path.map(String))}`;
+    }
   }
 }
 

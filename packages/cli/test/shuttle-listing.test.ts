@@ -655,6 +655,7 @@ describe("listing", () => {
         callable: true,
         piece: false,
         slug: false,
+        watch: false,
       };
       for (const [kind, marked] of Object.entries(annotated)) {
         expect(lines({ rows: [row("a", kind as RowKind)] })[0])

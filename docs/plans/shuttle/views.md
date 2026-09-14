@@ -26,9 +26,26 @@ disciplines it leans on are in
 ## The v1 views
 
 **Value view** — `watch <ref>`. One cell or subtree, rendered as structured
-JSON: scrollable, references followable, and live — a changed value briefly
-shows its transition (`14 → 15`) before settling, so a change is seen
-rather than inferred.
+JSON: scrollable, references followable, and live — the frame redraws as the
+cell settles, so what it shows is what the cell holds now.
+
+A changed value is to show the transition it made (`14 → 15`) in a row above
+it, so that a change is seen rather than inferred. That row **stands until
+another change replaces it rather than expiring**: nothing here waits on a
+clock, and a row that took itself away would need one. That is a ruling and it
+holds — what is deferred is the feature, not the decision. It needs a per-leaf
+diff over arbitrary fabric values, and that is harder than it looks. Deciding
+presence by indexing gets it wrong both ways. An absent key or index and one
+holding `undefined` read the same, so a key holding `undefined` that went, or an
+array that grew or shrank by an `undefined`, reads as no change. And a key named
+for something `Object.prototype` carries reads as present on the side that does
+not hold it, so a key that went reads as though it held the inherited member.
+Comparing the leaves themselves needs fabric-aware equality, a special value
+keeping its state in private fields. It returns when that diff has a test
+surface of its own
+([#7444](https://github.com/commontoolsinc/labs/issues/7444)).
+Until then the frame shows the value and the event line above the prompt says
+which cell changed.
 
 **List view** — `browse [<ref>]`. A paged listing of whatever stands below
 the reference — a facet, a collection, search results. Rows carry the same
@@ -58,7 +75,7 @@ the other two.
 handle — and opens the value view as one lens onto it. `q` closes the lens
 and leaves the watch armed. While the prompt is up, an armed watch shows
 its changes as **event lines**: each settled change appends one line —
-`watch topics/3: replies 14 → 15` — and the prompt is redrawn beneath it,
+`watch topics/3 @space: changed` — and the prompt is redrawn beneath it,
 so cause and effect interleave in one transcript that doubles as a
 record. (A pinned strip rendering armed watches live above the prompt is
 designed and deferred: [`futures.md`](futures.md).)
@@ -80,24 +97,35 @@ command runs with the view's `%n` handles bound to its rows, and the view
 repaints on the result. On `q`, the last view's handles stay valid at the
 prompt (decision 17), so "look, leave, act" needs no retyping.
 
+The value view answers to the motions and the way out — `q`, `j`/`k` and
+the arrows, `g` and `G` — and to `ctrl-c` beside `q`, a full screen wanting
+the way out every terminal program answers to. The rest of the table above
+arrives with the slice that adds it, which
+[`build-sequence.md`](build-sequence.md) names.
+
 ## Reuse of the `cf view` substrate
 
-`pager.ts` (raw mode, frame rendering, restore-on-every-exit), `keys.ts`,
-and `ansi.ts` are the terminal layer to build on; `session.ts` is the
-pattern to follow rather than import — shuttle views hold different state.
-`pager.ts` is where the raw-mode coupling lives, and it is the piece
-shuttle wants; `mod.ts` and `loadinput.ts` own the rest of `cf view`'s
-stdio — probing whether stdout and stdin are terminals, writing plain
-output, reading a piped document — which is one-shot-command concern a
-shell drives for itself. Each is reached by a relative path: the shell is
-this package's own code, so calling one of them costs no export entry
+`keys.ts` and `ansi.ts` are the terminal layer shuttle's views build on:
+key decoding, and the escape vocabulary a frame is drawn in. `session.ts`
+is the pattern to follow rather than import — shuttle views hold different
+state — and `mod.ts` and `loadinput.ts` own the rest of `cf view`'s stdio,
+probing whether stdout and stdin are terminals, writing plain output and
+reading a piped document, which is one-shot-command concern a shell drives
+for itself. Each is reached by a relative path: the shell is this package's
+own code, so calling one of them costs no export entry
 ([`build-sequence.md`](build-sequence.md)).
 
-One adaptation to verify early in B3: `cf view` pages a static document,
-so its frame loop may be key-driven only. Shuttle views repaint on two
-event sources — keys and settled runtime changes — and the loop must
-multiplex them. If the substrate's loop cannot, that generalization is B3's
-first work item, made in `packages/cli` where the substrate lives.
+`pager.ts` is not among them, and the reason is the keyboard rather than
+the drawing. Its loop takes a single blocking `await tty.read(buf)` and
+redraws from what that read returns, so it multiplexes nothing against the
+keys: what else redraws it is a timer or a window resize, and a settled
+runtime change is neither. Shuttle's prompt loop already multiplexes — it
+races the keys against the line in flight — and, decisively, it *owns* the
+key stream: one key it has asked for is one no view running beside it could
+read. So a view is a state of that loop rather than a program beside it,
+drawn through the terminal module the prompt already writes its lines
+through. That holds for every view here, the list view and the piece
+overview included.
 
 ## Live discipline
 
