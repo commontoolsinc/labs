@@ -1187,10 +1187,13 @@ export class AgentFabricTarget implements CommandTarget {
           await flushGraphs();
         }
       }
-      // A retained session keeps the row and graph its last read produced.
-      // Retention rests on a complete copy being there; where one is not,
-      // the inventory cannot vouch for the session and stops being complete,
-      // so nothing absent from it is deleted on its word.
+      // A retained session keeps the row and graph its last read produced,
+      // taking only the refreshed source capabilities. Retention rests on a
+      // complete copy being there; where one is not, the retention is an
+      // error like a failed read: the inventory cannot vouch for the session
+      // and stops being complete, so nothing absent from it is deleted on its
+      // word, and the session's row, where there is one, is marked partial
+      // below with the other errors.
       let sourceComplete = source.complete;
       const sourceErrors = [...source.errors];
       for (const summary of source.retained ?? []) {

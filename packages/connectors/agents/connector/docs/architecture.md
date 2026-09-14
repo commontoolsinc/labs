@@ -82,10 +82,12 @@ committed.
 The target compares snapshot hashes with the previous index. It does not rewrite
 an unchanged session graph. It still refreshes source capabilities, recent
 message previews, and synchronization status in the indexes. A retained session
-keeps its row and graph without any of that. Retention rests on a complete
-published copy being there: a retention nothing complete backs makes the
-source's inventory incomplete, so a session absent from that inventory is not
-deleted on its word.
+keeps its graph and its message previews; its row takes the refreshed source
+capabilities and stays complete. Retention rests on a complete published copy
+being there: a retention nothing complete backs makes the source's inventory
+incomplete, so a session absent from that inventory is not deleted on its word,
+and marks the retained session's row, where there is one, partial as a failed
+read does.
 
 A complete source inventory marks previously known missing sessions as deleted.
 An incomplete inventory preserves prior sessions and marks affected sessions

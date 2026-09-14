@@ -2614,6 +2614,35 @@ Deno.test("publication keeps a retained session and vouches only for complete co
       nativeSessionId: "session-2",
       message: "retained session has no complete published copy",
     }]);
+
+    // Retaining a session whose prior row is not complete is an error like a
+    // failed read: the row is marked partial, not restored to complete.
+    await target.publish([{
+      source,
+      sessions: [],
+      retained: [snapshot.summary],
+      errors: [],
+      complete: true,
+    }], { observationSequence: target.beginSessionObservation() });
+    const partialIndex = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    assertEquals(
+      (partialIndex.sessions as Array<Record<string, unknown>>).map((row) => [
+        row.nativeSessionId,
+        row.syncStatus,
+        row.contentHash,
+      ]),
+      [["session-1", "partial", priorState!.contentHash]],
+    );
+    const partialSource =
+      (partialIndex.sources as Array<Record<string, unknown>>)[0];
+    assertEquals(partialSource.complete, false);
+    assertEquals(partialSource.errors, [{
+      nativeSessionId: "session-1",
+      message: "retained session has no complete published copy",
+    }]);
   } finally {
     await runtime.dispose();
     await storageManager.close();
