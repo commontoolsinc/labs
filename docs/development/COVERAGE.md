@@ -1026,12 +1026,15 @@ coverage-transformed module bytes between runs without mixing them with ordinary
 compiled bytes.
 
 With that file set, the pattern-test orchestrator in `tasks/integration.ts`
-fills it before any test runs: one `cf test --compile-only` process per program
-root compiles every file's program and runs nothing, so the test processes that
-follow, five at a time, all start from a full cache. A `cf test` process seeds
-from the file only as it starts, so without that pass the processes started
-together on a cold cache each compile the modules they share. The compile-only
-process writes no coverage, since nothing ran.
+fills it before any test runs. It sorts the shard's files by path, cuts them
+into runs of neighbors of about a fifth of the shard each, never across a
+program root, and hands each run to a `cf test --compile-only` process, five
+at a time; each compiles its files' programs and runs nothing. Files that sit
+together share most of their modules, so each run compiles those once, and the
+test processes that follow, five at a time, all start from a full cache. A
+`cf test` process seeds from the file only as it starts, so without that pass
+the processes started together on a cold cache each compile the modules they
+share. The compile-only process writes no coverage, since nothing ran.
 
 The persistent cell cache stores each module's span list as one JSON string.
 This keeps reporting metadata in one value instead of expanding every span

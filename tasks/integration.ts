@@ -297,12 +297,15 @@ export function selectPatternTestFiles(
 /**
  * Compiles every file's program into the compile byte cache through
  * `cf test --compile-only`, ahead of the test runs. The files are sorted by
- * path within each program root and cut into `concurrency` runs of
- * neighbors, one process each: files that sit together share most of their
- * modules, so each such run compiles those once, and the runs overlap only
- * where a directory straddles a cut. A file that fails to compile is
- * reported by its own run, with the error; this pass says only how many
- * did, and how long it took.
+ * path and cut into runs of neighbors, one process each, `concurrency` of
+ * them at a time: files that sit together share most of their modules, so
+ * each such run compiles those once, and the runs overlap only where a
+ * directory straddles a cut. A run is sized from the shard as a whole, about
+ * a `concurrency`th of it, so the count of processes stays near
+ * `concurrency` however the files divide among program roots; a run never
+ * straddles a root, since each process is handed one. A file that fails to
+ * compile is reported by its own run, with the error; this pass says only
+ * how many did, and how long it took.
  */
 async function precompilePatternTests(
   cfCmd: string[],
@@ -334,23 +337,31 @@ async function precompilePatternTests(
   const compileNext = async (): Promise<void> => {
     while (nextIndex < groups.length) {
       const files = groups[nextIndex++];
-      const result = await runCommand(
-        [
-          ...cfCmd,
-          "test",
-          "--compile-only",
-          "--root",
-          path.join(rootDir, patternRoot(files[0])),
-          ...files,
-        ],
-        {
-          cwd: rootDir,
-          env: {
-            CF_TEST_RECORDS_DIR: "",
-            EXPERIMENTAL_SERVER_EXECUTION: "false",
+      // A child that cannot spawn is this group's failure, and its files are
+      // then compiled by their own runs; it does not end the pass, nor the
+      // test pool after it.
+      let result: Awaited<ReturnType<typeof runCommand>>;
+      try {
+        result = await runCommand(
+          [
+            ...cfCmd,
+            "test",
+            "--compile-only",
+            "--root",
+            path.join(rootDir, patternRoot(files[0])),
+            ...files,
+          ],
+          {
+            cwd: rootDir,
+            env: {
+              CF_TEST_RECORDS_DIR: "",
+              EXPERIMENTAL_SERVER_EXECUTION: "false",
+            },
           },
-        },
-      );
+        );
+      } catch (error) {
+        result = { success: false, code: 127, stderr: String(error) };
+      }
       if (!result.success) {
         failed++;
         console.log(
