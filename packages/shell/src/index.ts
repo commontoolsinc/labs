@@ -87,3 +87,4 @@ const _navigation = new Navigation(root);
 // module is awaiting the KeyStore, only for Navigation's initial URL apply to
 // overwrite that newer view when bootstrap resumes.
 globalThis.app = root;
+globalThis.dispatchEvent(new Event("cf-shell-ready"));

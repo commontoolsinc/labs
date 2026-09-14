@@ -200,6 +200,65 @@ describe("shell-failure-reports", () => {
 
       await waitForShellReady(page);
     });
+
+    it("waits for publication announced after an earlier readiness event", async () => {
+      await load("/shell");
+      await page.evaluate(() => {
+        globalThis.setInterval = () => {
+          throw new Error("The shell readiness wait must not poll.");
+        };
+        const target: EventTarget = globalThis;
+        const add = target.addEventListener.bind(target);
+        const remove = target.removeEventListener.bind(target);
+        const listeners = new Set<EventListenerOrEventListenerObject>();
+        target.addEventListener = (type, listener, options) => {
+          if (type === "cf-shell-ready" && listener) listeners.add(listener);
+          add(type, listener, options);
+        };
+        target.removeEventListener = (type, listener, options) => {
+          if (type === "cf-shell-ready" && listener) listeners.delete(listener);
+          remove(type, listener, options);
+        };
+        let published: typeof globalThis.app | undefined;
+        let reads = 0;
+        Object.defineProperty(globalThis, "app", {
+          configurable: true,
+          get() {
+            reads++;
+            if (reads === 1) {
+              queueMicrotask(() => {
+                globalThis.dispatchEvent(new Event("cf-shell-ready"));
+              });
+            } else if (reads === 2) {
+              queueMicrotask(() => {
+                published = {
+                  serialize: () => ({ view: { builtin: "home" } }),
+                } as typeof globalThis.app;
+                globalThis.dispatchEvent(new Event("cf-shell-ready"));
+              });
+            }
+            return published;
+          },
+        });
+        Object.defineProperty(globalThis, "shellReadinessListeners", {
+          get: () => listeners.size,
+        });
+      });
+
+      await waitForShellReady(page);
+
+      const result = await page.evaluate(() => {
+        const fixture = globalThis as typeof globalThis & {
+          shellReadinessListeners: number;
+        };
+        return {
+          listeners: fixture.shellReadinessListeners,
+          view: globalThis.app.serialize().view,
+        };
+      });
+      expect(result.view).toEqual({ builtin: "home" });
+      expect(result.listeners).toBe(0);
+    });
   });
 
   describe("describeShellReadyFailure()", () => {
