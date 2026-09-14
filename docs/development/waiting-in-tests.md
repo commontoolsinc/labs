@@ -553,12 +553,18 @@ deadlocks on the runtime's own machinery, not on any sleep it wrote.
 So the runner clock sorts a positive-delay `setTimeout` by who scheduled it,
 using the immediate stack frame:
 
-- A timer scheduled from `src/` — the runtime's own — **auto-advances**: when
-  the event loop would otherwise go idle, logical time jumps to the earliest
-  pending one and fires it, in fire order, with `Date.now` and `performance.now`
-  moving in lockstep. So a throttle window or a backoff retry elapses instantly
-  and deterministically, and the reactive waits above resolve on their own, with
-  no real time passing.
+- A timer scheduled from `src/` — the runtime's own — **auto-advances**: once
+  the event loop is idle, every zero-delay turn that was armed having run,
+  logical time jumps to the earliest pending one and fires it, in fire order,
+  with `Date.now` and `performance.now` moving in lockstep. So a throttle window
+  or a backoff retry elapses instantly and deterministically, and the reactive
+  waits above resolve on their own, with no real time passing — and never ahead
+  of a turn that was already queued. That last clause is what keeps a frame's
+  delivery ahead of a production deadline: the loopback transport and the
+  memory server's refresh each take a turn per frame, and the pump lets the
+  whole chain run before it jumps. Why it has to is worked through in [the
+  rationale
+  document](waiting-in-tests-rationale.md#the-pump-waits-for-the-loop-to-go-idle).
 - A timer scheduled from a `test/` file — a wall-clock sleep — **freezes**, so a
   test that waits on one still deadlocks and the sanitizer reports it. Delete
   the sleep and wait on `runtime.idle()`/`cell.pull()`/`runtime.settled()`,
@@ -578,6 +584,20 @@ step that lets the window elapse uses `clock.tick`. `clock.reset()` returns
 logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
+
+The idle rule decides how a test may wait. A loop of round trips — `pull()`,
+`idle()`, `synced()`, repeated a fixed number of times — never lets the loop go
+idle, so no production timer fires inside it: the memory server's refresh
+cadence, a convergence backoff, a claim's staleness bound all stand still, and
+a value the fan-out would have delivered never arrives. That is the timing
+dependence such a loop has, failing the same way every time rather than
+passing on the cadence of the loop. Wait on the event instead —
+`waitForCellValue` on the cell that will change, `synced()` on the commit whose
+marker the fan-out carries, `clock.tick()` where the test genuinely measures a
+window — and the wait itself idles the loop, which is what fires the timer. A
+`pull()` computes and reads; for a document the replica already holds it
+fetches nothing, so what it returns after another replica's write is what the
+fan-out has delivered so far.
 
 One file stays on the real clock, listed with its reason in the runner preload's
 `realClockFiles` list. It is a resume test that holds the per-element documents
@@ -613,6 +633,27 @@ than a wait with a deadline — a healthy test never approaches the count, and
 what it reports is a livelock. Where the ceiling sits and why is in [the
 rationale
 document](waiting-in-tests-rationale.md#sizing-the-auto-advance-runaway-ceiling).
+
+### A production backstop cannot carry a test
+
+A production backstop — a timer that lets a wait give up and proceed as if the
+event it waited for had arrived — is the one kind of `src/` timer the pump must
+not be allowed to fire quietly. It fires the moment nothing else is pending, so
+a test whose awaited event never arrives passes anyway, riding a logical jump
+in place of the event; and where the module's logger sits above the warn the
+backstop logs, the count behind that warn is the only trace. The runner preload
+therefore installs a guard over every test, `test/support/silent-backstop-guard.ts`,
+that snapshots the count behind each listed backstop around the test body and
+fails the test when one moved, naming the backstop and what its firing means.
+
+The listed backstop is the conflict read-repair wait in `src/storage/v2.ts`: a
+commit's rejection returns after `CONFLICT_READ_REPAIR_TIMEOUT_MS` when the
+caught-up frame its retry is gated on never arrives. A test that trips the
+guard is either withholding that frame — a manual fan-out it never flushed — or
+has found a regression in the caught-up path. Either way the remedy is the
+event, never a wider backstop. `test/silent-backstop-guard.test.ts` holds the
+guard to this by running a test built to ride the backstop under the package
+preload and expecting the guard to fail it.
 
 One consequence is worth stating because it is easy to trip over. A test that
 guards a wait with its own wall-clock deadline — a `setTimeout(reject, ms)` — has

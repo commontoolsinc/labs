@@ -9,14 +9,16 @@
 //   - "auto-advance": positive-delay timers are sorted by who scheduled them.
 //     A timer armed from `src/` (production code — the runtime's own scheduler,
 //     storage, and wake shaper arm throttle windows, backoff, and conflict
-//     retries) AUTO-ADVANCES: when the event loop would otherwise idle, logical
-//     time jumps to the earliest pending one and fires it, in order, with
-//     `Date.now` and `performance.now` moving in lockstep. So a window elapses
-//     instantly and deterministically, and the reactive waits that await it
-//     resolve on their own — no real sleeping. A timer armed from a `test/` file
-//     (a wall-clock sleep) FREEZES: it never fires, so a test that waits on one
-//     deadlocks, which Deno's async-op sanitizer reports at once. The controls
-//     are a global `clock` with `settle()`, `tick(ms)`, and `reset()`.
+//     retries) AUTO-ADVANCES: once the event loop is idle — every zero-delay
+//     turn that was armed has run — logical time jumps to the earliest pending
+//     one and fires it, in order, with `Date.now` and `performance.now` moving
+//     in lockstep. So a window elapses instantly and deterministically, and the
+//     reactive waits that await it resolve on their own — no real sleeping,
+//     and never ahead of a turn that was already queued. A timer armed from a
+//     `test/` file (a wall-clock sleep) FREEZES: it never fires, so a test
+//     that waits on one deadlocks, which Deno's async-op sanitizer reports at
+//     once. The controls are a global `clock` with `settle()`, `tick(ms)`, and
+//     `reset()`.
 //
 //   - "freeze-all": every positive-delay timer FREEZES regardless of caller,
 //     and only `setTimeout`/`clearTimeout` are replaced (`setInterval`,
@@ -89,6 +91,12 @@ interface Timer {
 // suite — the heaviest user of auto-advance — one test reaches 160 fires and
 // every other one stays under a hundred.
 const AUTO_ADVANCE_LIMIT = 2_000;
+
+// How many consecutive turns the auto-advance pump yields to before calling the
+// zero-delay work that keeps re-arming a livelock. Each yield is one turn of
+// the real event loop, the same cost as one round of `settle()`, whose guard
+// this matches; a healthy test's turn chains end within a few dozen.
+const AUTO_ADVANCE_STARVATION_LIMIT = 100_000;
 
 /** Which behavior a package's preload selects. */
 export type FakeClockMode = "auto-advance" | "freeze-all";
@@ -239,19 +247,17 @@ function freezeAround(
       }
     };
 
-    // Auto-advance: fire the earliest future production timer, jumping the clock
-    // to it, so the runtime's reactive waits resolve without real time passing.
-    // The earliest future timer to fire. `onlyProd` restricts to the runtime's
-    // own timers (used by the auto-advance pump, so a test's frozen sleep is
-    // never fired on its own); `tick` passes false, advancing test timers too,
-    // so a test can model a slow async step with `setTimeout` and step through
-    // it explicitly.
+    // The earliest positive-delay timer due by `limit`. One armed for the
+    // instant the clock already stands at — the second of two armed together,
+    // once the first has fired — is due, not past, so both fire. `onlyProd`
+    // restricts to the runtime's own timers (used by the
+    // auto-advance pump, so a test's frozen sleep is never fired on its own);
+    // `tick` passes false, advancing test timers too, so a test can model a
+    // slow async step with `setTimeout` and step through it explicitly.
     const nextTimer = (limit: number, onlyProd: boolean): Timer | undefined => {
       let next: Timer | undefined;
       for (const tm of timers.values()) {
-        if (tm.kind === "zero" || tm.fireAt <= elapsed || tm.fireAt > limit) {
-          continue;
-        }
+        if (tm.kind === "zero" || tm.fireAt > limit) continue;
         if (onlyProd && tm.kind !== "prod") continue;
         if (!next || tm.fireAt < next.fireAt) next = tm;
       }
@@ -273,9 +279,36 @@ function freezeAround(
       }
       return worst;
     };
+    // Auto-advance: fire the earliest production timer due, jumping the clock
+    // to it, so the runtime's reactive waits resolve without real time passing.
+    // Only once the loop is idle. A zero-delay turn still armed — or a kick
+    // already queued to run one — is work the real clock runs before any
+    // positive-delay timer, and a frame crosses the loopback transport and the
+    // memory server's refresh a turn at a time; so the pump yields to it,
+    // re-queuing itself behind the pending kick, and jumps only when no turn
+    // is left. That keeps a production backstop — the storage layer's 30 s
+    // conflict read-repair wait, for one — from firing between the turns that
+    // deliver the frame it waits for. A turn chain that never ends starves the
+    // pump rather than hanging the test: past the starvation limit it throws,
+    // naming the condition, as `settle()` does for zero-delay work that
+    // regenerates.
+    let yields = 0;
     const autoAdvance = () => {
       autoScheduled = false;
       if (ticking) return;
+      if (hasPendingZero()) {
+        if (++yields > AUTO_ADVANCE_STARVATION_LIMIT) {
+          throw new Error(
+            `clock auto-advance starved: zero-delay work re-armed itself ` +
+              `${AUTO_ADVANCE_STARVATION_LIMIT} turns in a row, so logical ` +
+              "time never moved. A turn that always arms another cannot " +
+              "settle; the loop it feeds needs a condition that changes.",
+          );
+        }
+        scheduleAuto();
+        return;
+      }
+      yields = 0;
       const next = nextProd(Infinity);
       if (!next) return;
       const site = next.site ?? "an unrecorded site";
@@ -290,7 +323,7 @@ function freezeAround(
             "preload's realClockFiles.",
         );
       }
-      elapsed = next.fireAt;
+      elapsed = Math.max(elapsed, next.fireAt);
       if (next.interval === undefined) timers.delete(next.id);
       else next.fireAt = elapsed + next.interval;
       next.cb(...next.args);
@@ -313,7 +346,7 @@ function freezeAround(
             await settle();
             const next = nextTimer(target, false);
             if (!next) break;
-            elapsed = next.fireAt;
+            elapsed = Math.max(elapsed, next.fireAt);
             if (next.interval === undefined) timers.delete(next.id);
             else next.fireAt = elapsed + next.interval;
             next.cb(...next.args);
@@ -334,6 +367,7 @@ function freezeAround(
         elapsed = 0;
         seq = 1;
         autoCount = 0;
+        yields = 0;
         ticking = false;
         kickScheduled = false;
         autoScheduled = false;

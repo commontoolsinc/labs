@@ -53,6 +53,8 @@ import {
 } from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
+// PROBE-ONLY IMPORT
+import { txToReactivityLog } from "../scheduler/reactivity.ts";
 import { mapSubschemas } from "../schema-walk.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
@@ -956,7 +958,9 @@ export function llm(
 
   let requestSequence = 0;
 
-  return (tx: IExtendedStorageTransaction) => {
+  // PROBE-ONLY WRAPPER
+  let probeRun = 0;
+  const probeBody = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       system,
