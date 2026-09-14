@@ -30,6 +30,7 @@
 import type { CellScope } from "@commonfabric/api";
 import {
   type CommitPrecondition,
+  type ConfirmedRead,
   type DerivedWriteAnnotation,
   type Operation,
   resolveScopeKey,
@@ -427,6 +428,13 @@ export interface WaveSpaceCommit {
 
   preconditions: CommitPrecondition[];
 
+  /** The read set the store validates as it does a client commit's — a
+   * read whose document moved past its seq at its path refuses the whole
+   * batch. A wave's batch carries none, its concurrency check being the
+   * per-doc re-verification above; the serving loop's direct commit
+   * carries its transaction's own reads. */
+  confirmedReads?: ConfirmedRead[];
+
   /** Owning contribution index per precondition — home batch only; lets a
    * reported precondition failure resolve per write class. */
   preconditionOwners?: number[];
@@ -795,6 +803,19 @@ export class WaveAccumulator
   implements TransactionSealDestination, ITransactionSealSink {
   readonly #space: MemorySpace;
   readonly #basisSeq: number;
+
+  /**
+   * The serving loop's own direct commits landed while this wave was open
+   * ({@link noteOwnCommit}), each with the doc instances it wrote and the
+   * number of contributions sealed before it. A contribution sealed after
+   * one read the replica with that commit applied, so a doc it writes that
+   * sits exactly at the commit's seq is not a conflict for it.
+   */
+  readonly #ownCommits: Array<{
+    seq: number;
+    keys: Set<string>;
+    sealedBefore: number;
+  }> = [];
   readonly #scopeKeyIdentity: ScopeKeyIdentity;
   readonly #replicaFor: (space: MemorySpace) => ISpaceReplica;
   readonly #lease: WaveLease | undefined;
@@ -994,6 +1015,29 @@ export class WaveAccumulator
 
   get contributionCount(): number {
     return this.#contributions.length;
+  }
+
+  /**
+   * Record a direct commit of the serving loop's own that landed at `seq`
+   * and is applied to the replica, while this wave is open, writing `docs`
+   * (docs/features/server-pattern-lifecycle.md). The commit step then
+   * treats a doc in `docs` sitting at exactly `seq` as observed, not
+   * conflicting, for a contribution sealed from now on that read the doc at
+   * `seq` or later and read no doc in `docs` earlier than `seq`. A
+   * contribution sealed earlier, one with no read of the doc to show it
+   * saw the commit, or one that read any of `docs` before the commit
+   * reached the replica keeps the ordinary conflict, since its write may
+   * rest on state the commit replaced.
+   */
+  noteOwnCommit(
+    seq: number,
+    docs: ReadonlyArray<{ id: string; scopeKey: ScopeKey }>,
+  ): void {
+    this.#ownCommits.push({
+      seq,
+      keys: new Set(docs.map((doc) => docInstanceKey(doc.id, doc.scopeKey))),
+      sealedBefore: this.#contributions.length,
+    });
   }
 
   /** Contributions whose run kind is anything but the loop's own
@@ -1761,6 +1805,42 @@ export class WaveAccumulator
       if ((heads.get(key) ?? 0) > this.#basisSeq) conflicted.add(key);
     }
 
+    /** The head a contribution observed on a conflicted doc through one of
+     * the loop's own direct commits, or `undefined` when the doc moved for
+     * some other reason, the contribution was sealed before the commit,
+     * none of its reads of the doc shows it saw the commit, or a read of
+     * any doc the commit wrote predates it. */
+    const observedOwnCommit = (
+      key: string,
+      contribution: WaveContribution,
+    ): number | undefined => {
+      const head = heads.get(key);
+      const own = this.#ownCommits.find((candidate) =>
+        candidate.seq === head && candidate.keys.has(key) &&
+        contribution.index >= candidate.sealedBefore
+      );
+      if (own === undefined) return undefined;
+      const home = this.#homeSealed(contribution);
+      if (home === undefined) return undefined;
+      const { confirmed, pending } = home.sealed.commit.reads;
+      let observed = false;
+      for (
+        const { read, seq } of [
+          ...confirmed.map((read) => ({ read, seq: read.seq })),
+          ...pending.map((read) => ({ read, seq: read.basisSeq ?? 0 })),
+        ]
+      ) {
+        const readKey = docInstanceKey(
+          read.id,
+          this.#scopeKeyFor(read.scope, contribution.context),
+        );
+        if (!own.keys.has(readKey)) continue;
+        if (seq < own.seq) return undefined;
+        if (readKey === key) observed = true;
+      }
+      return observed ? head : undefined;
+    };
+
     const resolveConflicts = async (): Promise<void> => {
       for (const contribution of this.#contributions) {
         if (
@@ -1776,6 +1856,15 @@ export class WaveAccumulator
             droppedDocs[contribution.index].has(key) ||
             rebasedDocs[contribution.index].has(key)
           ) {
+            continue;
+          }
+          const observed = observedOwnCommit(key, contribution);
+          if (observed !== undefined) {
+            // The doc moved by a direct commit this contribution read at
+            // or after: its write stands, and the sink re-verifies the doc
+            // still sits exactly there.
+            rebasedDocs[contribution.index].add(key);
+            rebasedHeads.set(key, observed);
             continue;
           }
           if (contribution.context.kind === "derivation") {

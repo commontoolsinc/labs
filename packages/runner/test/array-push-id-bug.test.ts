@@ -1,7 +1,7 @@
 /**
  * `Cell.push` anchors an element that carries no explicit identity, so it is
  * stored as its own entity document and the array holds a link to it rather
- * than inline data (CT-1173).
+ * than inline data.
  */
 
 import { expect } from "@std/expect";
@@ -18,7 +18,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("CT-1173: array push anchors its elements", () => {
+describe("array push anchors its elements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -57,7 +57,7 @@ describe("CT-1173: array push anchors its elements", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame);
+    const pushed = pushFrame(frame);
 
     try {
       // Minted inside the frame: `Cell.push` anchors from the frame its cell was
@@ -72,7 +72,7 @@ describe("CT-1173: array push anchors its elements", () => {
       inFrame.push({ name: "Alice" });
       inFrame.push({ name: "Bob" });
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
 
     // Read back the raw array data
@@ -92,14 +92,14 @@ describe("CT-1173: array push anchors its elements", () => {
       const item = result[i];
       console.log(`Item ${i}:`, item, "isLink:", isPrimitiveCellLink(item));
 
-      // If the fix is working, items should be cell links
-      // If the bug exists, items would be inline objects like { name: "Alice" }
+      // Each item is a cell link, never an inline object like
+      // `{ name: "Alice" }`.
       expect(isPrimitiveCellLink(item)).toBe(true);
     }
   });
 
   it("should persist all fields correctly for second+ items", () => {
-    // This specifically tests the persistence issue from the bug report
+    // Every field of every pushed item, not only the first, survives the push.
     const arrayCell = runtime.getCell<
       { name: string; priority: number; createdAt: number }[]
     >(
@@ -118,7 +118,7 @@ describe("CT-1173: array push anchors its elements", () => {
       generatedIdCounter: 0,
       inHandler: true,
     };
-    pushFrame(frame);
+    const pushed = pushFrame(frame);
 
     try {
       // Push multiple items with all fields populated
@@ -126,7 +126,7 @@ describe("CT-1173: array push anchors its elements", () => {
       arrayCell.push({ name: "Bob", priority: 2, createdAt: 2000 });
       arrayCell.push({ name: "Charlie", priority: 3, createdAt: 3000 });
     } finally {
-      popFrame();
+      popFrame(pushed);
     }
 
     // Read back via the cell's get() method (which resolves links)

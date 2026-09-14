@@ -15,10 +15,10 @@ import {
   fabricFromNativeValue,
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
+  isFabricSpecialObject,
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -1076,6 +1076,13 @@ export class CellImpl<T extends FabricValue>
    */
   #causeContainer: CauseContainer;
 
+  /**
+   * The frame on top of the stack when this cell was constructed. A runtime
+   * keeps a frame on the stack from its construction until its disposal, so a
+   * cell has no frame only when it is built after the runtime it came from was
+   * disposed, as deriving one with `key()` from a cell that already has a full
+   * link does.
+   */
   #frame: Frame | undefined;
 
   #kind: CellKind;
@@ -1284,14 +1291,6 @@ export class CellImpl<T extends FabricValue>
 
     // Otherwise, let's attempt to derive the id:
 
-    // We must be in a frame context to derive the id.
-    if (!this.#frame) {
-      throw new Error(
-        "Cannot create cell link - no frame context\n" +
-          "help: create cells inside pattern/handler/lift, or use .for(cause) for explicit identity",
-      );
-    }
-
     const space = this.#_link.space ?? this.#causeContainer.space ??
       this.#frame?.space;
 
@@ -1306,7 +1305,7 @@ export class CellImpl<T extends FabricValue>
     // Used passed in cause (via .for()), for events fall back to per-frame
     // counter.
     const cause = this.#causeContainer.cause ??
-      (this.#frame.inHandler
+      (this.#frame?.inHandler
         ? { count: this.#frame.generatedIdCounter++ }
         : undefined);
 
@@ -1318,7 +1317,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, this.#frame.cause));
+    const id = toURI(createRef({ frame: cause }, this.#frame?.cause));
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
@@ -2708,16 +2707,11 @@ export class CellImpl<T extends FabricValue>
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by content, mirroring the server's keyless dedup. Under a frame, the
-    // content comparison runs against a fabric-normalized COPY of the candidate
-    // (a native `Date` must match its stored `FabricEpochNsec` form); the
-    // original candidate -- not the copy -- is what an accepted add writes, so
-    // no identity the write path relies on is disturbed. A frameless
-    // `addUnique` compares the raw candidate: the write boundary that would
-    // normalize it runs only under a frame, and a raw comparison also tolerates
-    // annotation-carrying values (e.g. `get()` results) that the strict
-    // conversion rejects.
-    const normalizeForComparison = this.#frame !== undefined;
+    // by content, mirroring the server's keyless dedup. The content comparison
+    // runs against a fabric-normalized COPY of the candidate (a native `Date`
+    // must match its stored `FabricEpochNsec` form); the original candidate --
+    // not the copy -- is what an accepted add writes, so no identity the write
+    // path relies on is disturbed.
     const alreadyPresent = (candidate: FabricValue) => {
       if (isCell(candidate)) {
         return existing.some((element) =>
@@ -2743,9 +2737,9 @@ export class CellImpl<T extends FabricValue>
       // compare as themselves -- the write boundary passes them through
       // unconverted, and the strict conversion would reject their
       // non-string-keyed internals.
-      const comparable = normalizeForComparison && !isCellLink(candidate)
-        ? fabricFromNativeValue(flattenBuilderArtifacts(candidate))
-        : candidate;
+      const comparable = isCellLink(candidate)
+        ? candidate
+        : fabricFromNativeValue(flattenBuilderArtifacts(candidate));
       return existing.some((element) => valueEqual(element, comparable));
     };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
@@ -3019,8 +3013,7 @@ export class CellImpl<T extends FabricValue>
       return true;
     }
 
-    return ref instanceof FabricSpecialObject &&
-      element instanceof FabricSpecialObject &&
+    return isFabricSpecialObject(ref) && isFabricSpecialObject(element) &&
       valueEqual(element, ref);
   }
 
@@ -3762,8 +3755,14 @@ export class CellImpl<T extends FabricValue>
     name?: unknown;
     external?: unknown;
   } {
+    // Exporting a cell is a step in building a pattern, and the builder checks
+    // the exported frame against the one it is building under.
     if (!this.#frame) {
-      throw new Error("Cannot export cell: no frame context.");
+      throw new Error(
+        "Cannot export a cell with no frame\n" +
+          "help: this cell was built after the runtime it came from was " +
+          "disposed, so it cannot take part in building a pattern",
+      );
     }
     return {
       cell: this.#causeContainer.cell,
@@ -4856,7 +4855,7 @@ function containsCycle(value: unknown): boolean {
   const walk = (node: unknown): boolean => {
     if (
       node === null || typeof node !== "object" || isCell(node) ||
-      isCellLink(node) || node instanceof FabricSpecialObject
+      isCellLink(node) || isFabricSpecialObject(node)
     ) {
       return false;
     }

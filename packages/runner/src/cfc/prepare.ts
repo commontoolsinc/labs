@@ -117,6 +117,7 @@ import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+import { isPrefix } from "./path-prefix-index.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type CfcRefusalDetail,
@@ -189,15 +190,6 @@ const LINK_SOURCE_SCHEMA_META = {
   ...authorizationRead,
   ...internalVerifierRead,
 };
-
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
 
 const labelAtPath = (
   metadata: CfcMetadata | undefined,
@@ -6605,7 +6597,7 @@ export const prepareBoundaryCommit = (
     // The schema write-policy requirement quantifies over the paths a
     // schema could describe. A raw meta-seam write is not one, so demanding
     // a policy input for it rejects every meta write on a labeled document —
-    // slug assignment, the pattern updater's identity swap, setup over an
+    // slug assignment, a pointer repair's identity swap, setup over an
     // existing piece, and the source-lifecycle transitions. These paths stay
     // flow-label targets: the write above still carries the transaction's
     // join onto the document, so nothing is laundered by skipping them here.

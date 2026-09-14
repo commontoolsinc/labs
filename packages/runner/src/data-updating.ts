@@ -10,8 +10,8 @@ import {
   cloneIfNecessary,
   fabricFromNativeValue,
   type FabricPlainObject,
-  FabricSpecialObject,
   type FabricValue,
+  isFabricSpecialObject,
   isKeyableObjectNotArray,
   shallowFabricFromNativeObjectElseUndefined,
   toCompactDebugString,
@@ -1901,7 +1901,7 @@ export function normalizeAndDiff(
   // serialization (via each type's `[CODEC]`). Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
   // not on the redirect itself.
-  if (newValue instanceof FabricSpecialObject) {
+  if (isFabricSpecialObject(newValue)) {
     diffLogger.debug(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,

@@ -233,6 +233,10 @@ type CfcInstrumentationHooks = {
 
   onPreparedTx?(): void;
 
+  /** Records a dereference trace and the transaction's resulting trace count.
+   * Measurement only; observations are classified by their read metadata. */
+  onDereferenceTrace?(held: number): void;
+
   /**
    * CFC prepare refused this transaction. `reasons` are the PLAIN reason
    * texts (the verdict tag is a classification channel and never leaves the
@@ -1919,6 +1923,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
     traces.push(deepFreeze(trace));
+    this.#cfcInstrumentation.onDereferenceTrace?.(traces.length);
     if (changesDigest) {
       this.invalidateCfc("dereference-trace-added");
     }

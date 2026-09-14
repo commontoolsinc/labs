@@ -1004,11 +1004,14 @@ are MOOT while (d′) stands.*
 - **Resubscribe cost:** O(union) — `registration.ts:238–319` →
   `setSchedulerDependencies` (sort/compact ×2) → `updateDependents`
   (eager telemetry payload) → `updateDependentEdgesForLog` →
-  `applyActionReadDelta` (four `addressesToPathByEntity` passes);
+  `applyActionReadDelta` (four `addressesToPathByEntity` calls, the two
+  over the previous log answered from the grouping memoized on it);
   67 ms at 67 K reads.
 - **Read anatomy per property ≈ 7 activities:** `getOwnPropertyDescriptor`
   and `get` traps each build a child view (sigil probe read at
-  `[…child,"/","link@1"]`, a parent probe, a SHAPE read), a `toJSON`
+  `[…child,"/","link@1"]`, a parent probe — journaled once per position
+  and transaction, since link resolution memoizes each probe's outcome
+  on the snapshot memo — a SHAPE read), a `toJSON`
   probe per object, `ownKeys`, one recursive whole-array read per
   array — with the cache check AFTER `resolveLink` and the SHAPE read
   (`query-result-proxy.ts:246–256, 351–359, 639–652, 731–790`). A
@@ -1419,11 +1422,12 @@ render preserved (§6).
   reads to the wrapped tx; `extraTx` is consulted only when minting
   child cells, which the schema-less path never does); then
   `prepareTxForCommit` + `commit` on both txs → FOUR
-  `flowLabelWorkExists` probes per run (two expensive), each
-  `forEachFlowObservation` → `probeBelongsToDereference` →
-  `sources.some(isPrefix)` = O(reads × sources) = O(E²) — computing
-  `false` (the sidecar has no labelMap). T1 halved the count; the shape
-  is unchanged.
+  `flowLabelWorkExists` probes per run. Each `forEachFlowObservation`
+  classifies reads from their metadata: a link-resolution probe consumes
+  reference confidentiality as `followRef`, and content reads consume the
+  target's labels. Trace membership does not exempt either read. Measure the
+  observation walk and label lookup separately; trace count alone does not
+  establish their cost.
 - **The demand leak (C Q4):** the sink's dependency log = every sidecar
   path touched PLUS every path of every payload-linked doc it walked
   into; as an effect its dependencies are DEMAND — an old event payload

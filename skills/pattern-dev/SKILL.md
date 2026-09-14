@@ -142,6 +142,22 @@ Also follow its binding guidance: when a control is already bound to a cell,
 usually via `$value` or `$checked`, do not add a handler that simply writes the
 same value back into that same cell.
 
+A display cap bounds the render, not the transaction. The number that decides
+what an interaction costs is how many rows a query returned, not how many are on
+screen: a pane showing six of 150 returned messages pays for the 150, and the
+same pane showing 38 of 52 is faster than it. Nothing at authoring time says so
+— a `slice(0, LIMIT)` in the render reads as if it bounded the work — so hold
+down what the statement returns (a `LIMIT`, a narrower predicate) rather than
+what the list shows. The worked measurement is
+`docs/history/development/performance/2026-09-11-person-inbox-click-cost.md`.
+
+The other half of the same point: an interaction dispatched before the runtime
+has settled the previous one is not free. Clicking through a list faster than it
+settles used to leave every later interaction slower for the rest of that
+session; that specific cause is fixed, but a UI that fires writes faster than
+the graph converges is still paying queueing it does not have to. Where a
+control can be held during settle, hold it.
+
 Runtime notes:
 
 - Use the `cf` skill, or read `skills/cf/SKILL.md`, when you need CLI command

@@ -8,6 +8,7 @@ const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
 export type AgentCommandType =
   | "prompt"
+  | "start"
   | "cancel"
   | "rename"
   | "set-mode"
@@ -39,7 +40,7 @@ export function commandDraftError(fields: CommandDraftFields): string {
   if (CONTROL_CHARACTER.test(nativeSessionId)) {
     return "Session IDs cannot contain control characters.";
   }
-  if (fields.type === "prompt") {
+  if (fields.type === "prompt" || fields.type === "start") {
     if (!fields.promptText.trim()) return "Enter a prompt.";
     if (fields.promptText.length > 128 * 1_024) {
       return "Prompts are limited to 128 KiB.";
@@ -71,6 +72,7 @@ export function commandPayload(
 ): Record<string, unknown> {
   switch (fields.type) {
     case "prompt":
+    case "start":
       return { text: fields.promptText.trim() };
     case "cancel":
       return {};

@@ -7,10 +7,10 @@ import {
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   hashStringOf,
   isDeepFrozen,
+  isFabricSpecialObject,
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
   toIndentedDebugString,
@@ -3993,7 +3993,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               // construction (removable with the other brand exemptions
               // once the generator skips the brand — see
               // opaqueLeafMissesRequired's doc comment).
-              if (doc.value instanceof FabricSpecialObject) {
+              if (isFabricSpecialObject(doc.value)) {
                 if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
                 if (
                   !(req in (doc.value as unknown as Record<string, unknown>))
@@ -4474,7 +4474,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         : fail(TRAVERSE_FAILURES.invalidArray);
     }
 
-    if (doc.value instanceof FabricSpecialObject) {
+    if (isFabricSpecialObject(doc.value)) {
       // A `FabricPrimitive` is an opaque leaf; see the value-type dispatch's
       // arm (the plan compiles from the same schema family, so the same
       // posture applies here).
@@ -5507,7 +5507,7 @@ export function canBranchMatch(
         // runtime existence and is satisfied by construction (removable
         // with the other brand exemptions once the generator skips the
         // brand — see opaqueLeafMissesRequired's doc comment).
-        if (value instanceof FabricSpecialObject) {
+        if (isFabricSpecialObject(value)) {
           if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(req as string in value)) return false;
           continue;

@@ -1,5 +1,5 @@
-// Server-execution v2 Phase 3 (D-v2-1): events-down, end to end against
-// a real memory server, a live ExecutorHost, and flag-ON clients.
+// Server-execution events-down, end to end against a real memory server, a
+// live ExecutorHost, and flag-ON clients.
 //
 // - the FULL loop: a client fire commits ONLY the event; the
 //   SpaceServer drains it, runs the handler AUTHORITATIVELY, and
@@ -8,18 +8,16 @@
 //   per-stream `eventWatermark` advanced in the SAME transaction
 //   (events.md §2, §4); the client's echo retires on the consequence
 //   signal and the authoritative value renders;
-// - exactly-once across restart (the plan's kill-between gate): an
-//   append committed with NO serving host is drained once at
-//   activation (serving-loop.md §6 step 4); a second activation
-//   re-runs nothing (the consequenced mark + the watermark exclude
-//   it);
+// - exactly-once across restart: an append committed with NO serving host
+//   is drained once at activation (serving-loop.md §6 step 4); a second
+//   activation re-runs nothing (the consequenced mark + the watermark
+//   exclude it);
 // - the ERROR arm: a throwing handler's error IS the consequence
 //   (events.md §5) — the entry carries it, the stream does not wedge;
 // - the DROP arm: an event whose piece can NEVER start defers for the
 //   bounded creation-race window, then hardens into the
 //   `{status: "dropped", reason}` notice (events.md §5's predicate;
-//   OW19's conflation caution bounds the deferral, it does not erase
-//   the drop);
+//   the deferral is bounded, and does not erase the drop);
 // - the SKIP arm: an at-or-below-horizon duplicate admission is
 //   skipped at processing, counted `skippedIdempotent`, and passed by
 //   the frontier (events.md §4/§5; the model's C2-dedupe pin);
@@ -134,21 +132,21 @@ class GatedStorageManager extends EmulatedStorageManager {
    * arms events.md §2's arrival order must survive (the other, the
    * index-addressed view-lag check, is the same barrier contract at the
    * same seam; its live shape is asynchronous frame delivery under
-   * load, OW45 arm B's b01 red). STATIC on purpose: the host may rotate
-   * runtime tenures (each with a fresh manager), and the seam must hold
-   * across every tenure of the pass under test. */
+   * load). STATIC on purpose: the host may rotate runtime tenures (each
+   * with a fresh manager), and the seam must hold across every tenure of
+   * the pass under test. */
   static syncThrowWhen: ((id: string) => boolean) | undefined;
 
   /** How many syncs the throw seam refused — each drain pass that
    * touched the failing sidecar counts one. */
   static syncThrowHits = 0;
 
-  /** The FOURTH seam, the HEAD-EVENT LOAD-PARK FAILURE arm (the OW45
-   * residue member's live shape): a served event's dispatch preflight
-   * parks on an in-flight replica load its closure reads, and that
-   * load FAILS. In production the failure is a serving session revoked
-   * by the genesis ACL landing after activation — transient, healing
-   * on the next mount, and NOT events.md §5's "no runnable handler".
+  /** The FOURTH seam, the HEAD-EVENT LOAD-PARK FAILURE arm: a served
+   * event's dispatch preflight parks on an in-flight replica load its
+   * closure reads, and that load FAILS. In production the failure is a
+   * serving session revoked by the genesis ACL landing after activation —
+   * transient, healing on the next mount, and NOT events.md §5's "no
+   * runnable handler".
    * While armed, the named doc reads as an in-flight load (so a head
    * event whose closure reads it parks) and the park's settle REJECTS
    * with that error's text. STATIC for the same reason as the sync
@@ -301,13 +299,12 @@ const THROW_PATTERN = [
 ].join("\n");
 
 /** Verbs with DECLARED results and no cell writes of their own — the
- * serving-side receipt/result-write pins (owner-ruled 2026-08-29;
- * events.md §4 "Result carriage"). `probe` returns a plain value derived
- * from the event payload; `quiet` returns nothing (the `{}` existence
- * witness). Both bind `{}` — no context cells — so the handlings'
- * cause-derived receipt addresses depend on nothing but the pattern and
- * the invocation id, and their only durable consequence is the receipt
- * itself. */
+ * serving-side receipt/result-write pins (events.md §4 "Result carriage").
+ * `probe` returns a plain value derived from the event payload; `quiet`
+ * returns nothing (the `{}` existence witness). Both bind `{}` — no context
+ * cells — so the handlings' cause-derived receipt addresses depend on
+ * nothing but the pattern and the invocation id, and their only durable
+ * consequence is the receipt itself. */
 const DECLARED_RESULT_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const probe = handler<{ n?: number }, Record<string, never>>(",
@@ -324,7 +321,7 @@ const DECLARED_RESULT_PATTERN = [
  * does not hold at fire time: the served dispatch's argument read fails the
  * schema (`isValidArgument === false`, runner.ts's "-- not running" skip)
  * until a later authored write supplies it — the mark/effects-atomicity
- * pin's reproduction of the a04 write-side member. */
+ * pin's construction. */
 const GATED_BUMP_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const bump = handler<unknown, { value: Writable<number>; gate: number }>(",
@@ -362,8 +359,7 @@ const ORDERED_LOG_PATTERN = [
  * perfectly runnable — the construction the in-queue arrival-order barrier
  * actually needs. (In the shared-closure pattern a later-arrived B parks on
  * the same failing doc and self-defers through the HEAD arm, so removing the
- * barrier changes nothing and the pin cannot discriminate it — independent
- * review F3.) */
+ * barrier changes nothing and the pin cannot discriminate it.) */
 const DISJOINT_CLOSURE_LOG_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const pushA = handler<",
@@ -388,8 +384,7 @@ const DISJOINT_CLOSURE_LOG_PATTERN = [
  * argument-did-not-resolve skip and is WITHDRAWN (handler-not-run) —
  * while `pushB`'s closure reads only the shared log and is perfectly
  * runnable. The construction the handler-not-run arrival-order barrier
- * pin needs (review-6459 F1): a healthy later arrival queued behind a
- * withdrawn head. */
+ * pin needs: a healthy later arrival queued behind a withdrawn head. */
 const GATED_ORDERED_LOG_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const pushA = handler<unknown, { log: Writable<string[]>; gate: number }>(",
@@ -406,18 +401,18 @@ const GATED_ORDERED_LOG_PATTERN = [
   ">(({ log, gate }) => ({ log, a: pushA({ log, gate }), b: pushB({ log }) }));",
 ].join("\n");
 
-const ow54ProfileViewSchema: JSONSchema = {
+const profileViewSchema: JSONSchema = {
   type: "object",
   properties: {
     name: { type: "string", ifc: { confidentiality: ["secret"] } },
   },
 } as JSONSchema;
 
-const ow54PreparedEnvelopeSchema: JSONSchema = {
+const preparedEnvelopeSchema: JSONSchema = {
   type: "object",
   properties: {
-    result: ow54ProfileViewSchema,
-    candidates: { type: "array", items: ow54ProfileViewSchema },
+    result: profileViewSchema,
+    candidates: { type: "array", items: profileViewSchema },
   },
 } as JSONSchema;
 
@@ -488,7 +483,7 @@ describe("Phase 3 events-down (serving side)", () => {
         return Promise.resolve({
           error: {
             name: "WaveCommitRejected",
-            message: "forced OW54 processing-state write rejection",
+            message: "forced processing-state write rejection",
           },
         });
       }
@@ -756,9 +751,9 @@ describe("Phase 3 events-down (serving side)", () => {
 
     host = newHost();
     const before = Engine.serverSeq(engine);
-    // The durable-ack coupling (verdict blocker, 2026-08-12): the send's
-    // settle callback fires from the append + authoritative consequence
-    // outcome — captured here, asserted after the consequence lands.
+    // The durable-ack coupling: the send's settle callback fires from the
+    // append + authoritative consequence outcome — captured here, asserted
+    // after the consequence lands.
     let ackStatus: string | undefined;
     // The sender's own act — the append — settles `onAppended` on its
     // own, ahead of the handling: a caller that only needs its event on
@@ -869,7 +864,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("exactly-once under an HONEST flush deadline (stage C tuning): a fire that lands while the serving scheduler is mid-settle is drained ONCE — the re-drains that follow every cut cycle skip the still-in-flight copy; the counter reads exactly 1 and ONE commit consequences the event (mutation: the drain's in-flight guard removed → a copy per cut cycle, processed ≫ appended, value ≫ 1)", async () => {
+  it("drains a fire exactly once under an HONEST flush deadline: a fire that lands while the serving scheduler is mid-settle is drained ONCE — the re-drains that follow every cut cycle skip the still-in-flight copy; the counter reads exactly 1 and ONE commit consequences the event (mutation: the drain's in-flight guard removed → a copy per cut cycle, processed ≫ appended, value ≫ 1)", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
@@ -979,7 +974,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("the guard holds through the SEAL→OUTCOME window (stage C tuning; self-review finding 1): a re-drain that reaches the entry AFTER its copy's consequence has SEALED into a wave the store has not yet committed skips it — the copy is released by the wave OUTCOME, never at seal (mutation: release at the seal → that re-drain queues a second copy: processed 2, value 2)", async () => {
+  it("holds the guard through the SEAL→OUTCOME window: a re-drain that reaches the entry AFTER its copy's consequence has SEALED into a wave the store has not yet committed skips it — the copy is released by the wave OUTCOME, never at seal (mutation: release at the seal → that re-drain queues a second copy: processed 2, value 2)", async () => {
     // The window the exactly-once pin above cannot see (it passes with
     // EITHER release point): the copy's mark rides an uncommitted wave
     // while the entry is still pending in the store, and a re-drain
@@ -1251,12 +1246,11 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("rapid-fire coalescing under CONSTRUCTED queue depth (the RULED sx2-gate re-tensing, 2026-08-21 — owner: \"i like (3) as well\"): K events queued ahead of ONE drain yield K completed runs, each consequenced exactly once, in EXACTLY ONE consequence-carrying derived commit (D-v2-2's commit-level batching; testing.md §5 row 3's discriminating half)", async () => {
+  it("coalesces rapid fires under CONSTRUCTED queue depth: K events queued ahead of ONE drain yield K completed runs, each consequenced exactly once, in EXACTLY ONE consequence-carrying derived commit (commit-level batching; testing.md §5 row 3's discriminating half)", async () => {
     // The live sx2-events surface cannot assert a derived-commit ratio:
     // its append queue serializes one commit round trip per event, so
     // how many appends a wave finds queued is the ratio of round-trip
-    // time to wave time — a LOAD RATIO with no test lever (the census's
-    // item-4 flake; ow-sx2-coalescing-gate.md §1 claim 1). This pin
+    // time to wave time — a LOAD RATIO with no test lever. This pin
     // CONSTRUCTS the criterion's premise instead: fire K with NO
     // serving host (each append commits durably, nothing processes
     // them), then bring the host up — the activation reprocess scan
@@ -1264,9 +1258,8 @@ describe("Phase 3 events-down (serving side)", () => {
     // wave takes the whole batch. With a flush deadline far above the
     // batch's work there is no deadline cut to split it, so the
     // batching contract is exact and load-independent: ONE derived
-    // commit consequences all K (a per-handler-run commit — the v1
-    // failure the criterion exists to catch — reads as K commits
-    // here, deterministically).
+    // commit consequences all K (a per-handler-run commit reads as K
+    // commits here, deterministically).
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
@@ -1371,7 +1364,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("mark/effects atomicity at the DISPATCH layer (events.md §4, RULED 2026-08-27 — the a04 write-side member): a served dispatch whose handler argument cannot resolve is WITHDRAWN, never sealed — the pre-stamped mark must not commit alone; the entry stays pending, re-drains once the argument resolves, and mark + effects land in ONE commit exactly once (mutation: the finalize withdrawal removed → the a04 1-op mark-only consequence, the event permanently consumed with zero effects)", async () => {
+  it("keeps mark and effects atomic at the DISPATCH layer (events.md §4): a served dispatch whose handler argument cannot resolve is WITHDRAWN, never sealed — the pre-stamped mark must not commit alone; the entry stays pending, re-drains once the argument resolves, and mark + effects land in ONE commit exactly once (mutation: the finalize withdrawal removed → a 1-op mark-only consequence, the event permanently consumed with zero effects)", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(
@@ -1408,14 +1401,14 @@ describe("Phase 3 events-down (serving side)", () => {
       (host!.stats().events as { handlerNotRunDeferrals?: number })
         .handlerNotRunDeferrals ?? 0;
 
-    // The unresolvable dispatch resolves: post-fix as a counted
-    // handler-not-run deferral with the entry still pending; PRE-FIX
-    // (watched red) as the a04 shape — the entry consequenced with zero
-    // effects before any deferral exists (seqs 53/56: a 1-op 802-byte
-    // derived commit carrying ONLY the mark).
+    // The unresolvable dispatch resolves as a counted handler-not-run
+    // deferral with the entry still pending. The shape ruled out is the
+    // entry consequenced with zero effects before any deferral exists (a
+    // 1-op derived commit carrying ONLY the mark); the wait accepts that
+    // too, so a mutation fails fast instead of hanging.
     await waitUntil(
       () => deferrals() >= 1 || readEntry()?.consequenced === true,
-      "the unresolvable dispatch to resolve (deferral post-fix / mark pre-fix)",
+      "the unresolvable dispatch to resolve (deferral or mark)",
     );
     expect(readEntry()?.consequenced).not.toBe(true);
     expect(readEntry()?.status).toBeUndefined();
@@ -1475,7 +1468,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it('the handler-not-run withdrawal carries the arrival-order BARRIER (events.md §2 + §5, review-6459 F1): a later-arrived same-space served event queued behind the withdrawn head defers with it instead of overtaking, and the healed re-drain lands both consequences in arrival order (mutation: empty the finalize sweep → B seals while A is still pending and the durable log reads ["B","A"] against arrival [a1,b1] — the b01 inversion)', async () => {
+  it('carries the arrival-order BARRIER on a handler-not-run withdrawal (events.md §2 + §5): a later-arrived same-space served event queued behind the withdrawn head defers with it instead of overtaking, and the healed re-drain lands both consequences in arrival order (mutation: empty the finalize sweep → B seals while A is still pending and the durable log reads ["B","A"] against arrival [a1,b1] — the b01 inversion)', async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -1557,17 +1550,17 @@ describe("Phase 3 events-down (serving side)", () => {
       "b1's append to land on its own sidecar",
     );
 
-    // b1's dispatch resolves one way or the other: post-fix it is swept
-    // behind the withdrawn a1 (an arrival-barrier deferral, counted in
-    // loadParkDeferrals — "every head and barrier deferral"); PRE-FIX
-    // (watched red) it dispatches next out of the same pass and SEALS
-    // while a1 is still pending — the review's 213ms overtake probe,
-    // stored log ["B"].
+    // b1's dispatch resolves one way or the other: with the barrier it is
+    // swept behind the withdrawn a1 (an arrival-barrier deferral, counted
+    // in loadParkDeferrals — "every head and barrier deferral"); without
+    // it, b1 dispatches next out of the same pass and SEALS while a1 is
+    // still pending, stored log ["B"]. The wait accepts both, so a
+    // mutation fails fast instead of hanging.
     await waitUntil(
       () =>
         (stats().handlerNotRunDeferrals ?? 0) >= 1 &&
         ((stats().loadParkDeferrals ?? 0) >= 1 || storedLog().length >= 1),
-      "b1's dispatch to resolve (barrier post-fix / overtake pre-fix)",
+      "b1's dispatch to resolve (barrier or overtake)",
     );
     expect(storedLog()).toEqual([]);
 
@@ -1727,7 +1720,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("a permanently unresolvable argument hardens into a §5 DROP whose notice names the REAL class (review-6459 F2): the handler was runnable and dispatched — the deferrals were withdrawn dispatches, not load attempts, and the durable drop record must not say otherwise", async () => {
+  it("hardens a permanently unresolvable argument into a §5 DROP whose notice names the REAL class: the handler was runnable and dispatched — the deferrals were withdrawn dispatches, not load attempts, and the durable drop record must not say otherwise", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, GATED_BUMP_PATTERN, {
@@ -1757,19 +1750,17 @@ describe("Phase 3 events-down (serving side)", () => {
     // NEVER heal the gate: the 250ms backstop re-dispatches the entry
     // through the whole 8-deferral budget (~2s), each dispatch
     // withdrawn (handler-not-run), and the terminal §5 notice seals.
-    // This also exercises the threshold machinery end-to-end with THIS
-    // cause (the review's coverage gap: it was code-traced, not
-    // test-run).
+    // This also exercises the threshold machinery end-to-end with THIS cause.
     await waitUntil(
       () => readEntry()?.status === "dropped",
       "the terminal §5 DROP notice to seal",
       30_000,
     );
     const entry = readEntry()!;
-    // THE PIN: the drop record names the real class. The old
+    // THE PIN: the drop record names the real class. The load-attempt
     // boilerplate — "no runnable handler after 8 deferred load
-    // attempts" — was false in both clauses for this cause: a handler
-    // existed, loaded and runnable, and the deferrals were dispatches
+    // attempts" — is false in both clauses for this cause: a handler
+    // exists, loaded and runnable, and the deferrals are dispatches
     // whose transaction was withdrawn, not load attempts.
     expect(entry.reason).toContain(
       "handler did not run after 8 withdrawn dispatches",
@@ -1849,7 +1840,7 @@ describe("Phase 3 events-down (serving side)", () => {
       const cell = clientRuntime.getCell(
         space,
         poisonedDocName,
-        ow54PreparedEnvelopeSchema,
+        preparedEnvelopeSchema,
         tx,
       );
       cell.set({ candidates: [{ name: "Bob" }] });
@@ -1911,7 +1902,7 @@ describe("Phase 3 events-down (serving side)", () => {
     await servingRuntime!.getCell(
       space,
       poisonedDocName,
-      ow54PreparedEnvelopeSchema,
+      preparedEnvelopeSchema,
     ).sync();
 
     // The probe keeps the actual preparation and commit paths: only the first
@@ -1935,14 +1926,14 @@ describe("Phase 3 events-down (serving side)", () => {
         const resolved = servingRuntime!.getCell<{ name: string }>(
           space,
           `${poisonedDocName}-resolved`,
-          ow54ProfileViewSchema,
+          profileViewSchema,
           tx,
         );
         resolved.set({ name: "Ada" });
         servingRuntime!.getCell(
           space,
           poisonedDocName,
-          ow54PreparedEnvelopeSchema,
+          preparedEnvelopeSchema,
           tx,
         ).set({ result: resolved, candidates: [] });
         const fault = stub(tx, "getCfcState", () => {
@@ -2264,7 +2255,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("the renderer-trust attestation rides the durable entry and is RE-MARKED at the served dispatch (fan-out stage B, OW34's sister-mark carriage): a fire whose event carried the process-local renderer-trust mark appends `rendererTrusted: true`, the served handler sees a renderer-trusted event; an unmarked fire appends no attestation and the served handler sees none; a forged attestation value is refused at admission", async () => {
+  it("carries the renderer-trust attestation on the durable entry and RE-MARKS it at the served dispatch: a fire whose event carried the process-local renderer-trust mark appends `rendererTrusted: true`, the served handler sees a renderer-trusted event; an unmarked fire appends no attestation and the served handler sees none; a forged attestation value is refused at admission", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
@@ -2482,12 +2473,12 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  /** The serving-side receipt/result write (owner-ruled 2026-08-29;
-   * events.md §4 "Result carriage"): fire a result-declaring verb, then
-   * a `send` helper the three pins below share. The commit callback is
-   * the durable-ack coupling's — it settles only after the handling
-   * CONSEQUENCED — and hands back the echo's transaction, whose
-   * `handlingReceiptLink` is the cause-derived receipt address. */
+  /** The serving-side receipt/result write (events.md §4 "Result
+   * carriage"): fire a result-declaring verb, then a `send` helper the
+   * three pins below share. The commit callback is the durable-ack
+   * coupling's — it settles only after the handling CONSEQUENCED — and
+   * hands back the echo's transaction, whose `handlingReceiptLink` is the
+   * cause-derived receipt address. */
   const fireVerb = (
     result: Cell<Record<string, unknown>>,
     verb: string,
@@ -2528,7 +2519,7 @@ describe("Phase 3 events-down (serving side)", () => {
       { seq: number; class: string; consequenceOf: string | null }
     >;
 
-  it("the ruled result carriage (owner, 2026-08-29): a served result-declaring handler WRITES its receipt — the declared value, in the handling's OWN consequence commit (mark and result atomic), by the serving side alone; the client's echo publishes the same cause-derived address and never writes (mutation: drop the serving write → no receipt doc; write outside the handler tx → consequenceOf linkage breaks; re-enable the client write → an authored commit appears)", async () => {
+  it("writes a served result-declaring handler's receipt (result carriage): the declared value lands in the handling's OWN consequence commit (mark and result atomic), by the serving side alone; the client's echo publishes the same cause-derived address and never writes (mutation: drop the serving write → no receipt doc; write outside the handler tx → consequenceOf linkage breaks; re-enable the client write → an authored commit appears)", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
@@ -2602,7 +2593,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("the ruled result carriage, value-less arm: a served handler that returns undefined STILL writes its receipt — the `{}` existence witness (owner: 'even if the value is undefined'), one derived commit, atomic with the mark", async () => {
+  it("writes a receipt for a served handler that returns `undefined` (result carriage, value-less arm): the `{}` existence witness, one derived commit, atomic with the mark", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
@@ -2649,7 +2640,7 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("the ruled result carriage, CAS-loss arm: a receipt that ALREADY exists when the serving run goes to write is a LOUD NO-OP — the standing value wins, no second write, and the wave still commits (mark + consequences land); the pre-created cell comes from the real OFF-arm client writer under the SAME invocation id, so the pin also proves the cross-arm address agreement (mutation: drop the existence check → the receipt is overwritten and a derived writer appears; make CAS-loss fail the wave → the entry never consequences)", async () => {
+  it("treats a receipt that ALREADY exists when the serving run goes to write as a LOUD NO-OP (result carriage, CAS-loss arm): the standing value wins, no second write, and the wave still commits (mark + consequences land); the pre-created cell comes from the real OFF-arm client writer under the SAME invocation id, so the pin also proves the cross-arm address agreement (mutation: drop the existence check → the receipt is overwritten and a derived writer appears; make CAS-loss fail the wave → the entry never consequences)", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const names = { arg: "cas-loss-arg", result: "cas-loss-result" };
@@ -2920,15 +2911,15 @@ describe("Phase 3 events-down (serving side)", () => {
     expect(Engine.selectPendingStreamEventDocs(engine).length).toBe(0);
   });
 
-  it("a deferral consumes REAL TIME, never back-to-back waves: the drop cannot land inside the creation-race window (verdict blocker, 2026-08-12)", async () => {
-    // Pre-fix, a deferral set #eventScanOwed synchronously, #hasWork()
-    // spun the next wave at once, and the whole 8-slot budget burned
-    // in immediate succession — an event whose creation input was
-    // milliseconds away was permanently dropped. Post-fix each retry
-    // waits for input or the 250ms backstop tick, so the budget spans
-    // >= threshold * tick of wall clock. The pin: at +500ms the entry
-    // must still be PENDING (at most ~2 ticks consumed); the drop
-    // still arrives eventually (the DROP-arm test above).
+  it("consumes REAL TIME on a deferral, never back-to-back waves: the drop cannot land inside the creation-race window", async () => {
+    // Each retry waits for input or the 250ms backstop tick, so the budget
+    // spans >= threshold * tick of wall clock. Were a deferral to set
+    // #eventScanOwed synchronously, #hasWork() would spin the next wave at
+    // once and the whole 8-slot budget would burn in immediate succession —
+    // an event whose creation input was milliseconds away permanently
+    // dropped. The pin: at +500ms the entry must still be PENDING (at most
+    // ~2 ticks consumed); the drop still arrives eventually (the DROP-arm
+    // test above).
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     host = newHost();
@@ -2966,13 +2957,13 @@ describe("Phase 3 events-down (serving side)", () => {
       .toBeGreaterThanOrEqual(1);
   });
 
-  it("an event-only admission RACING a park reactivates the space — the fire-time gate honors the undelivered-events criterion, not just live sessions (verdict blocker, 2026-08-12)", async () => {
-    // Pre-fix, #reactivateAfterPark's fire-time gate required a live
-    // client session: a delegated cross-space delivery (no client
-    // anywhere) that raced a park chained the reactivation, which then
-    // DECLINED — the delivered event sat unserved until some unrelated
-    // trigger. serving-loop.md §1's ACTIVE criterion is sessions OR
-    // undelivered events; the gate must check both.
+  it("reactivates the space on an event-only admission RACING a park: the fire-time gate honors the undelivered-events criterion, not just live sessions", async () => {
+    // serving-loop.md §1's ACTIVE criterion is sessions OR undelivered
+    // events, and #reactivateAfterPark's fire-time gate must check both. A
+    // gate requiring a live client session would DECLINE the reactivation a
+    // delegated cross-space delivery (no client anywhere) chains when it
+    // races a park, and the delivered event would sit unserved until some
+    // unrelated trigger.
     const engine = await server.engineForSpace(space);
     host = newHost();
     const parkRaceStream = { id: "of:park-race-piece", path: ["stream"] };
@@ -3184,18 +3175,17 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("C8d through the PRODUCTION cascade path (review 2026-08-11 M2): a raced parent's requeue folds its same-wave cascade child — no orphan consequence, exactly-once on retry", async () => {
-    // The reviewer's failure scenario at 71718250c: the C8d fold keyed
-    // on `context.parentEventId`, which NOTHING in production set — the
-    // LT1 same-space emission queued its cascade with only
-    // {eventId, served:{firedAt}}. So when a drained parent P's
-    // consequence raced into REQUEUE, its same-wave cascade child C
-    // COMMITTED (the orphan), and P's retry re-emitted the cascade
-    // under a FRESH id — C's consequence applied TWICE. This test
-    // drives the WHOLE production chain (cell.ts's emission carriage →
-    // the dispatch stamp → the SpaceServer's #stampRun → the wave
-    // fold), deterministically: the settle gate holds the sealed wave
-    // open while a rival authored commit races P's consequence.
+  it("folds a raced parent's same-wave cascade child on requeue through the PRODUCTION cascade path (C8d): no orphan consequence, exactly-once on retry", async () => {
+    // The LT1 same-space emission stamps the emitter's eventId as the
+    // cascade's `parentEventId` (cell.ts), and the C8d fold keys on that
+    // thread (wave.ts). Without it, when a drained parent P's consequence
+    // races into REQUEUE, its same-wave cascade child C COMMITS (the
+    // orphan), and P's retry re-emits the cascade under a FRESH id — C's
+    // consequence applied TWICE. This test drives the WHOLE production
+    // chain (cell.ts's emission carriage → the dispatch stamp → the
+    // SpaceServer's #stampRun → the wave fold), deterministically: the
+    // settle gate holds the sealed wave open while a rival authored commit
+    // races P's consequence.
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -3407,9 +3397,9 @@ describe("Phase 3 events-down (serving side)", () => {
     }
 
     // The wave commits: P requeues (its consequence raced the rival);
-    // C FOLDS with it — pre-fix C's +10 COMMITTED here (the orphan),
-    // and P's retry re-emitted the cascade under a FRESH id, applying
-    // it AGAIN (child 30). With the fold, the retry's re-emission is
+    // C FOLDS with it — without the fold C's +10 would COMMIT here (the
+    // orphan), and P's retry would re-emit the cascade under a FRESH id,
+    // applying it AGAIN (child 30). With the fold, the retry's re-emission is
     // the ONLY application: the child lands at 20, exactly once, and
     // every entry consequences. (The PARENT's final value is
     // deliberately not pinned tight: the retry's read races the rival
@@ -3431,7 +3421,7 @@ describe("Phase 3 events-down (serving side)", () => {
       30_000,
     );
     // The settle beat: the child value must STAY 20 — never 30 (the
-    // pre-fix double: orphan commit + fresh-id re-emission re-apply).
+    // double an orphan commit plus a fresh-id re-emission would produce).
     await new Promise((resolve) => setTimeout(resolve, 700));
     expect(engineValueOf(childArgId)).toBe(20);
     expect([2, 1001]).toContain(engineValueOf(parentArgId));
@@ -3439,17 +3429,16 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelParentDemand();
   });
 
-  // Stage C build W3 — (α): ONE durable entry, ONE completed run
-  // (events.md §4, RULED 2026-08-18; register OW35). The pins below drive
-  // RAW handlers on the serving runtime (the production chain from the
-  // emitting run's `send` through cell.ts's serving arm, the dispatch
-  // stamp, the SpaceServer's #stampRun, the wave's batch/fold, and the
-  // drain — only the handler bodies are test code, so their timing is
-  // controllable): a parent handler that spins past the flush deadline
-  // (the QUEUED leftover — #5969's Bob trace, the lunch gate's l1), an
-  // async child that is still RUNNING when the deadline closes its wave
-  // (the in-flight residue the purge cannot reach), and a DERIVATION
-  // emitter whose sidecar append the wave supersedes (the orphan).
+  // (α): ONE durable entry, ONE completed run (events.md §4). The pins
+  // below drive RAW handlers on the serving runtime (the production chain
+  // from the emitting run's `send` through cell.ts's serving arm, the
+  // dispatch stamp, the SpaceServer's #stampRun, the wave's batch/fold, and
+  // the drain — only the handler bodies are test code, so their timing is
+  // controllable): a parent handler that spins past the flush deadline (the
+  // QUEUED leftover), an async child that is still RUNNING when the
+  // deadline closes its wave (the in-flight residue the purge cannot
+  // reach), and a DERIVATION emitter whose sidecar append the wave
+  // supersedes (the orphan).
 
   /** Bare stream + value docs for the (α) pins, created by the CLIENT
    * (client commits land natively; the serving runtime's writes must
@@ -3593,7 +3582,7 @@ describe("Phase 3 events-down (serving side)", () => {
     };
   };
 
-  it("(α1)+(α1b)+(α4) the QUEUED leftover and the in-flight one, side by side: a served parent emits TWO LT1 cascade children; the first is still RUNNING when the flush deadline fires (an async handler parked on a test gate), the second sits QUEUED behind it — the deadline decision PURGES the queued copy (no notice on its entry) and the running copy, completing after its wave closed, is REFUSED at the seal; the next drain delivers both entries ONCE each with a streamEntry; per-event: one consequence commit each, the child effect applied exactly twice in total (mutations: purge skipped → the queued copy runs after the close and is refused at the seal instead, `lt1LeftoversPurged` 0 / `lt1LateSealsRefused` 2; seal refusal AND the orphan arm's absent-emitter clause skipped → the effect applied THREE times, the lunch double; all three seats off → four times, observed only with the counter asserts relaxed — as written the pin reddens first on the purge counter)", async () => {
+  it("purges the QUEUED leftover and refuses the in-flight one, side by side ((α1)+(α1b)+(α4)): a served parent emits TWO LT1 cascade children; the first is still RUNNING when the flush deadline fires (an async handler parked on a test gate), the second sits QUEUED behind it — the deadline decision PURGES the queued copy (no notice on its entry) and the running copy, completing after its wave closed, is REFUSED at the seal; the next drain delivers both entries ONCE each with a streamEntry; per-event: one consequence commit each, the child effect applied exactly twice in total (mutations: purge skipped → the queued copy runs after the close and is refused at the seal instead, `lt1LeftoversPurged` 0 / `lt1LateSealsRefused` 2; seal refusal AND the orphan arm's absent-emitter clause skipped → the effect applied THREE times; all three seats off → four times, observed only with the counter asserts relaxed — as written the pin reddens first on the purge counter)", async () => {
     const w = await w3Setup("w3-purge", { flushDeadlineMs: 100 });
     const cancels: Array<() => void> = [];
     const gate = Promise.withResolvers<void>();
@@ -3650,15 +3639,14 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
       expect(host!.stats().events.lt1LateSealsRefused).toBe(0);
 
-      // The purge's DISCRIMINATOR (independent review m1): keep the gate
-      // held across several more flush deadlines with the drain's
-      // `streamEntry`-bearing copies c1'/c2' sitting QUEUED behind the
-      // parked c1 — every cut cycle runs the purge over that queue, and
-      // the purge must never reach a drain copy (`served.streamEntry !==
-      // undefined`). An over-reaching predicate (`served !== undefined`
+      // The purge's DISCRIMINATOR: keep the gate held across several more flush
+      // deadlines with the drain's `streamEntry`-bearing copies c1'/c2' sitting
+      // QUEUED behind the parked c1 — every cut cycle runs the purge over that
+      // queue, and the purge must never reach a drain copy (`served.streamEntry
+      // !== undefined`). An over-reaching predicate (`served !== undefined`
       // alone) purges them here: the count climbs past 1 and the drop
-      // chokepoint writes a `dropped` notice onto the durable entries —
-      // a LOST delivery the α pins' original timing could not see.
+      // chokepoint writes a `dropped` notice onto the durable entries — a LOST
+      // delivery the α pins' original timing could not see.
       await new Promise((resolve) => setTimeout(resolve, 450));
       expect(host!.stats().wavesBudgetExhausted).toBeGreaterThan(1);
       expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
@@ -3709,7 +3697,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("(α1b)+(α4) the IN-FLIGHT residue: an LT1 cascade copy still RUNNING when the deadline closes its appending wave seals into a LATER wave and is REFUSED at the seal destination (before it enters any wave — the drain's copy, running next, reads clean state); the drain's copy is the one completed run (mutation: refusal skipped → the copy's consequences commit unmarked beside the drain's marked copy, the child's effect applied twice — the lunch gate's vote-toggle double)", async () => {
+  it("refuses the IN-FLIGHT residue at the seal ((α1b)+(α4)): an LT1 cascade copy still RUNNING when the deadline closes its appending wave seals into a LATER wave and is REFUSED at the seal destination (before it enters any wave — the drain's copy, running next, reads clean state); the drain's copy is the one completed run (mutation: refusal skipped → the copy's consequences commit unmarked beside the drain's marked copy, the child's effect applied twice)", async () => {
     const w = await w3Setup("w3-late", { flushDeadlineMs: 150 });
     const cancels: Array<() => void> = [];
     const childGate = Promise.withResolvers<void>();
@@ -3803,15 +3791,11 @@ describe("Phase 3 events-down (serving side)", () => {
       // The handler on s2 records every payload tag it handles — the
       // consequence witness (s1 is unused here) — and for the
       // derivation's "ping" it ARMS the settle gate as its first act
-      // (#6184's arming, adopted here from the SIBLING step: this
-      // step's gate previously polled the sealed overlay, the exact
-      // shape #6184 replaced there — CT-2060's open question of
-      // whether the remaining polled gates should adopt the arming).
+      // (the same arming as the SIBLING step).
       // `armingGap` is the construction's own discriminator: the QUEUE
       // seam below must have armed the hold BEFORE the copy's run
       // reaches this handler — a gap means the gate could still be
-      // sampled unarmed after the copy's contributions sealed, which
-      // is exactly the CI flake's window.
+      // sampled unarmed after the copy's contributions sealed.
       const servingSeen = w.servingC;
       let holdArmed = false;
       let armingGap = false;
@@ -3851,11 +3835,10 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(seenView()).toEqual([]);
 
       // Hold the wave open for the cycle that RUNS the copy — the same
-      // two-seam arming as the SIBLING step (CT-2060; OW57's owed
-      // construction): the QUEUE seam arms when the LT1 copy is queued
-      // for dispatch, and the handler arms again as its first act
-      // (#6184's belt). The queue seam is the one point every path to
-      // the copy's run traverses BEFORE the run — the same-wave
+      // two-seam arming as the SIBLING step: the QUEUE seam arms when the
+      // LT1 copy is queued for dispatch, and the handler arms again as its
+      // first act (belt and suspenders). The queue seam is the one point
+      // every path to the copy's run traverses BEFORE the run — the same-wave
       // in-process copy is queued synchronously with the emitter's
       // sealed append (cell.ts's LT1 arm: the raw entries write and
       // `scheduler.queueEvent` sit in one synchronous block, no
@@ -3866,8 +3849,7 @@ describe("Phase 3 events-down (serving side)", () => {
       // contributions sealed. A drain-side sidecar-SYNC seam cannot do
       // this: the same-wave copy's entry is a sealed-wave write the
       // drain's durable query never sees, so nothing syncs the sidecar
-      // before the copy runs in that cycle (the Codex P1 finding on
-      // this PR, confirmed in code). Idle settles pass: nothing arms
+      // before the copy runs in that cycle. Idle settles pass: nothing arms
       // until THIS step's stream event is queued.
       const s2StreamId = w.servingS2.getAsNormalizedFullLink().id;
       const originalQueueEvent = w.serving.scheduler.queueEvent.bind(
@@ -3917,8 +3899,7 @@ describe("Phase 3 events-down (serving side)", () => {
 
       // The construction's own discriminator: the hold was armed BEFORE
       // the copy's run reached the handler. Red under handler-only
-      // arming (#6184) and under a drain-sync seam alike — both leave
-      // the gap the CI flake rode.
+      // arming and under a drain-sync seam alike — both leave that gap.
       expect(armingGap).toBe(false);
 
       const s2Sidecar = w.sidecarOf(w.s2);
@@ -3963,7 +3944,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  // The same-eventId SIBLING shape (independent review of W3, B1 / M1):
+  // The same-eventId SIBLING shape:
   // an event can contribute SEVERAL transactions to one wave — the
   // handler run plus a separate event-handler-stamped tx carrying the
   // same eventId, in production the served navigateTo's intent tx
@@ -3997,7 +3978,7 @@ describe("Phase 3 events-down (serving side)", () => {
     side.commit();
   };
 
-  it("(α1b)+(α4) + a same-eventId SIBLING tx (independent review B1 — a LOST delivery on the build tip, a regression vs the W1 base): an ASYNC LT1 cascade child commits a separate event-handler-stamped tx carrying its own eventId (the served navigateTo intent shape) BEFORE an await that spans the flush deadline; the sibling seals into the appending wave and survives, the handler's own tx seals late and is REFUSED — the entry must land UNMARKED (only the LT1 copy's OWN run may mark its seq-less entry, never a sibling) so the drain re-delivers it: the child's effect lands exactly once, one consequence commit names the event, the sibling's write stands (mutation: the `lt1 === true` gate on the seq-less marking removed → the sibling's survival marks the entry consequenced, the refused copy is never re-delivered, the effect lands ZERO times — `processed` 1, `counterC` 0)", async () => {
+  it("leaves the entry UNMARKED when a same-eventId SIBLING tx survives the wave its handler's own tx misses ((α1b)+(α4)): an ASYNC LT1 cascade child commits a separate event-handler-stamped tx carrying its own eventId (the served navigateTo intent shape) BEFORE an await that spans the flush deadline; the sibling seals into the appending wave and survives, the handler's own tx seals late and is REFUSED — the entry must land UNMARKED (only the LT1 copy's OWN run may mark its seq-less entry, never a sibling) so the drain re-delivers it: the child's effect lands exactly once, one consequence commit names the event, the sibling's write stands (mutation: the `lt1 === true` gate on the seq-less marking removed → the sibling's survival marks the entry consequenced, the refused copy is never re-delivered, the effect lands ZERO times — `processed` 1, `counterC` 0)", async () => {
     const w = await w3Setup("w3-sibling-late", { flushDeadlineMs: 150 });
     const cancels: Array<() => void> = [];
     const childGate = Promise.withResolvers<void>();
@@ -4063,9 +4044,9 @@ describe("Phase 3 events-down (serving side)", () => {
       );
       // Several deadlines later (the gate still held): the sibling is
       // durable, and the entry it rode beside is UNMARKED — the sibling's
-      // survival is not the handler's completion. (On the build tip the
-      // entry was marked here: `survivedEventIds` admitted any surviving
-      // event-handler contribution with the eventId.)
+      // survival is not the handler's completion. (Were `survivedEventIds`
+      // to admit any surviving event-handler contribution with the eventId,
+      // the entry would be marked here.)
       await new Promise((resolve) => setTimeout(resolve, 800));
       expect(w.engineN(sideServing)).toBe(1);
       expect(w.entriesOf(s2Sidecar)[0].consequenced).not.toBe(true);
@@ -4095,8 +4076,8 @@ describe("Phase 3 events-down (serving side)", () => {
       const childEntry = w.entriesOf(s2Sidecar)[0];
       const stats = host!.stats();
       // THE PIN: the handler's non-idempotent effect landed exactly ONCE
-      // (the drain's completed run — never zero: the RULED sentence is
-      // one durable entry, one COMPLETED run), the sibling's write stands
+      // (the drain's completed run — never zero: the contract is one
+      // durable entry, one COMPLETED run), the sibling's write stands
       // once (it survived the appending wave; nothing withdrew it), the
       // handler body ran twice (the refused copy + the drain's), one
       // refusal, no purge, no orphan, no notice on the entry.
@@ -4109,16 +4090,16 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(stats.events.orphanDeliveriesRefused).toBe(0);
       expect(stats.events.processed).toBe(2);
       expect(stats.events.appended).toBe(1);
-      // The store-side per-event commit count reads TWO here — the
-      // sibling's contribution named the event in the appending wave's
-      // commit, the drain's completed run names it one wave later: the
-      // event's contributions SPLIT across two waves (the appending wave
-      // "could not process" the entry, events.md §2 — it commits as
-      // durable input and reprocesses; the sibling's early landing is
-      // idempotent on the re-run by navigateTo's nonce dedupe). Recorded
-      // as what it is: this count over-counts a split delivery exactly as
-      // it under-counts a same-wave double (W0's l1) — the handler's
-      // effect is the run-count witness, never this number.
+      // The store-side per-event commit count reads TWO here — the sibling's
+      // contribution named the event in the appending wave's commit, the
+      // drain's completed run names it one wave later: the event's
+      // contributions SPLIT across two waves (the appending wave "could not
+      // process" the entry, events.md §2 — it commits as durable input and
+      // reprocesses; the sibling's early landing is idempotent on the re-run by
+      // navigateTo's nonce dedupe). Recorded as what it is: this count
+      // over-counts a split delivery exactly as it under-counts a same-wave
+      // double — the handler's effect is the run-count witness, never this
+      // number.
       expect(w.consequenceCommitsOf(childEntry.eventId)).toBe(2);
       expect(childEntry.consequenced).toBe(true);
       expect(childEntry.status).toBeUndefined();
@@ -4129,7 +4110,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("(α3) + a same-eventId SIBLING tx (independent review M1): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1) — the commit-sink gate makes the race deterministic", async () => {
+  it("takes a same-eventId SIBLING tx down with an orphan-refused handler contribution ((α3)): the LT1 copy of a DERIVATION emitter's superseded append commits a sibling event-handler-stamped tx (the served navigateTo intent shape) inside the same wave; the orphan refusal must take the SIBLING down with the handler's contribution — neither half of an orphan lands (a navigation intent enacted for an event with zero durable entries is events.md §4's FORBIDDEN half-delivery); the refusal is counted once per EVENT (mutation: the sibling fold removed → the handler half is refused, the intent half LANDS — `side` 1) — the commit-sink gate makes the race deterministic", async () => {
     const prefix = "w3-sibling-orphan";
     const w = await w3Setup(prefix, { flushDeadlineMs: 30_000 });
     const cancels: Array<() => void> = [];
@@ -4191,7 +4172,7 @@ describe("Phase 3 events-down (serving side)", () => {
       // Pause the exact home-space wave after the emitter append and its
       // handler/sibling consequences have accumulated, but immediately before
       // the WaveCommitSink performs its head-checked store commit. This is the
-      // persistence boundary whose race OW57 needs: a rival can now advance
+      // persistence boundary whose race this pin needs: a rival can now advance
       // the sidecar head deterministically, and releasing this wave exercises
       // the production sink's conflict reconciliation without relying on
       // scheduler timing or the storage manager's earlier settle hook.
@@ -4282,7 +4263,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it("arrival order across streams survives a drain deferral: an earlier-arrived event whose sidecar defers (sync failure here; the view-lag check is the same barrier) HOLDS later arrivals back instead of being overtaken (events.md §2's ordering sentence; the OW45 arm-B b01 red — a deferred Create-Another consequenced after the final Create, leaving the terminal state wrong; mutation: the deferral arms back to `continue` → the log reads A,B,A)", async () => {
+  it("holds arrival order across streams through a drain deferral: an earlier-arrived event whose sidecar defers (sync failure here; the view-lag check is the same barrier) HOLDS later arrivals back instead of being overtaken (events.md §2's ordering sentence; the live shape is a deferred Create-Another consequenced after the final Create, leaving the terminal state wrong; mutation: the deferral arms back to `continue` → the log reads A,B,A)", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -4566,8 +4547,9 @@ describe("Phase 3 events-down (serving side)", () => {
       );
 
       // PIN 1 — the failure is a DEFERRAL, not a drop: nothing was
-      // sealed. Pre-fix both entries carry {status: "dropped",
-      // consequenced: true} within a wave of the first failure.
+      // sealed. The shape ruled out is both entries carrying
+      // {status: "dropped", consequenced: true} within a wave of the first
+      // failure.
       expect(
         allEntries().filter((entry) =>
           (entry as { status?: string }).status !== undefined
@@ -4581,8 +4563,8 @@ describe("Phase 3 events-down (serving side)", () => {
       // PIN 2 — the ordering barrier: B1 (later arrival, its own healthy
       // sidecar) must not overtake the deferred A2. PIN 4 is where the
       // barrier actually bites (mutation: skip the barrier loop in
-      // `failHeadEventLoadPark` → the log reads ["A","B","A"], the same
-      // overtake shape as the OW45 arm-B b01 red).
+      // `failHeadEventLoadPark` → the log reads ["A","B","A"], the
+      // overtake shape).
       expect(storedLog(), "later arrivals hold behind the deferred event")
         .toEqual(["A"]);
       // PIN 3 — the deferral is VISIBLE: the serving stats carry it, and
@@ -4609,12 +4591,11 @@ describe("Phase 3 events-down (serving side)", () => {
       // PIN 4 — exactly-once ((α)) AND arrival order: one consequence per
       // event, A2 before B1. A re-delivery would read ["A","A","A","B"].
       expect(storedLog()).toEqual(["A", "A", "B"]);
-      // No-residual-re-delivery, proved CAUSALLY rather than by waiting
-      // out a fixed delay (independent review P1: a re-delivery slower
-      // than the timer would pass undetected, and the timer taxes every
-      // green run). Once every entry is consequenced AND the watermark
-      // has advanced past the last of them, the drain's pending-entry
-      // scan can no longer select any of them — a re-delivery is
+      // No-residual-re-delivery, proved CAUSALLY rather than by waiting out a
+      // fixed delay (a re-delivery slower than the timer would pass undetected,
+      // and the timer taxes every green run). Once every entry is consequenced
+      // AND the watermark has advanced past the last of them, the drain's
+      // pending-entry scan can no longer select any of them — a re-delivery is
       // excluded by construction, not by having failed to show up yet.
       const lastSeq = Math.max(...allEntries().map((entry) => entry.seq ?? 0));
       await waitUntil(
@@ -4645,7 +4626,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it('the load-park barrier reaches entries the drain has NOT queued yet: a park failure landing MID-PASS stops the pass, instead of letting the next-arrived entry queue behind the barrier\'s back and overtake (the scheduler-side barrier can only hold what is already IN the event queue, and each new sidecar\'s sync() is an await — so the gap is real; held open here with the drain\'s sync gate on B\'s sidecar. Mutation: drop the #loadParkDeferredInPass check in #drainStreamEvents → B1 queues into the healed load and the log reads ["A","B","A"], the OW45 arm-B b01 overtake shape)', async () => {
+  it('stops the pass on a park failure landing MID-PASS, so the load-park barrier reaches entries the drain has NOT queued yet instead of letting the next-arrived entry queue behind the barrier\'s back and overtake (the scheduler-side barrier can only hold what is already IN the event queue, and each new sidecar\'s sync() is an await — so the gap is real; held open here with the drain\'s sync gate on B\'s sidecar. Mutation: drop the #loadParkDeferredInPass check in #drainStreamEvents → B1 queues into the healed load and the log reads ["A","B","A"] — the overtake shape)', async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -4787,7 +4768,7 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  it('the IN-QUEUE arrival-order barrier, discriminated: a later-arrived event whose closure does NOT touch the failing doc — so it is perfectly runnable and already QUEUED behind the parked head — defers with the head instead of overtaking it (events.md §2; independent review F3: the previous construction had both handlers reading the armed doc, so a barrier-less B parked on the same failure and self-deferred through the HEAD arm, making the in-queue half undiscriminable. Here the park rejection is DEFERRED until both entries are provably queued, so the mid-pass half cannot be what saves the order. Mutation: empty the barrier loop in failHeadEventLoadPark → B1 consequences while A2 is deferred and the log reads ["A","B","A"])', async () => {
+  it('discriminates the IN-QUEUE arrival-order barrier: a later-arrived event whose closure does NOT touch the failing doc — so it is perfectly runnable and already QUEUED behind the parked head — defers with the head instead of overtaking it (events.md §2; with both handlers reading the armed doc, a barrier-less B would park on the same failure and self-defer through the HEAD arm, making the in-queue half undiscriminable. Here the park rejection is DEFERRED until both entries are provably queued, so the mid-pass half cannot be what saves the order. Mutation: empty the barrier loop in failHeadEventLoadPark → B1 consequences while A2 is deferred and the log reads ["A","B","A"])', async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
 
@@ -4956,7 +4937,7 @@ describe("Phase 3 events-down (serving side)", () => {
       // Warm the piece and identify the ordinary handler-write operation that
       // stands in for the sqlite operation rejected by the real engine sink.
       // This decorator sits after the sink's typed producer boundary: the
-      // regression below exercises the wave-owner and SpaceServer handoff,
+      // case below exercises the wave-owner and SpaceServer handoff,
       // while memory's sqlite tests exercise the real evaluator rollback.
       bump();
       await clientRuntime.idle();

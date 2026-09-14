@@ -1,5 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { FabricSpecialObject } from "./interface.ts";
+import { isFabricSpecialObject } from "./type-check.ts";
 import { valueEqual } from "./valueEqual.ts";
 
 /**
@@ -63,8 +63,8 @@ export function fabricAwareEqual(a: unknown, b: unknown): boolean {
  * either side is a `FabricSpecialObject` and declining the rest.
  */
 function specialObjectEqual(a: object, b: object): boolean | undefined {
-  const aIsSpecial = a instanceof FabricSpecialObject;
-  const bIsSpecial = b instanceof FabricSpecialObject;
+  const aIsSpecial = isFabricSpecialObject(a);
+  const bIsSpecial = isFabricSpecialObject(b);
 
   if (!(aIsSpecial || bIsSpecial)) return undefined;
   if (!(aIsSpecial && bIsSpecial)) return false;

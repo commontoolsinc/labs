@@ -3,14 +3,14 @@
 Normative. Assumes [README.md](README.md); details Phases 1–4 surface
 between client, memory server, and SpaceServer.
 
-## Anchors (verified on main, 2026-08-02; §2b file:line refs refreshed 2026-08-04 — re-verify before coding)
+## Anchors
 
 - Memory server: `packages/memory/v2.ts`, toolshed mount
   `/api/storage/memory` (`packages/toolshed/routes/storage/memory/`).
 - Client storage stack: `packages/runner/src/storage/` (`interface.ts`,
   `extended-storage-transaction.ts`, `query.ts`, `reactivity-log.ts`).
 - Store tables: `commit`, `revision`, `head`, `branch` (engine-v3), and
-  `execution_lease` since Phase 1 stage B (serving-loop.md §2 — the
+  `execution_lease` (serving-loop.md §2 — the
   reduced three-field shape; the v1-branch shape was prior art only).
 
 ## 1. Commit classes
@@ -84,12 +84,14 @@ snapshot — as a step of a wave cycle
 The scheduler tell is unchanged: the verb's writes are still commits made
 outside the scheduler, made now by the serving side on the requester's
 behalf, the registry entry and the slug in the same transaction as the
-piece. A source replacement stays the client's authored act: it publishes
-module update authority, which module-loading.md requires from an owned
-setup transaction that commits to storage, and a wave's withdrawable
-acceptance cannot supply that. Every other client of the piece controller —
-the shell, the background piece service — keeps the client-side shape
-until its own migration.)*
+piece. A source replacement (AMENDED 2026-09-11) is a served verb too:
+it publishes module update authority, which module-loading.md requires
+from an owned setup transaction that commits to storage, and since a
+wave's withdrawable acceptance cannot supply that, its setup transaction
+commits directly to the store as the serving loop's own derived-class
+commit, outside the wave (serving-loop.md §3e). Every other client of
+the piece controller — the shell, the background piece service — keeps
+the client-side shape until its own migration.)*
 
 **The `system` class is PRODUCER-defined, its contents exemplary
 (RULED 2026-08-05).** The stamp rides the memory server's generic
@@ -195,8 +197,8 @@ session open, never sent per commit — and scoped writes inside the
 transaction name only the scope KIND (`scope: "user"`). It is the
 memory server that maps kind → concrete `scope_key` at admission,
 derived from the session that had the commit (the shared
-`resolveScopeKey`, `packages/memory/v2.ts:120-147` — the wire-shape
-module owns the one definition per LD3). That model is UNCHANGED for
+`resolveScopeKey` in `packages/memory/v2.ts` — the wire-shape module
+owns the one definition per LD3). That model is UNCHANGED for
 every `authored` commit: clients never name keys, per commit or
 otherwise; their keys keep deriving from the authenticated session.
 
@@ -228,9 +230,11 @@ quote above before "fixing" it:
 - *"`resolveScopeKey` throws without a principal / would resolve
   `user:<serviceDID>` here."* The function itself is a pure
   constructor; it is its admission-side CALLERS that feed it
-  identity derived from the authenticated session (`applyCommit`,
-  `packages/memory/v2/server.ts:2060-2063` →
-  `engine.ts:2031-2032`) — the client-commit model. Server-side
+  identity derived from the authenticated session
+  (`#decideTransaction()` in `packages/memory/v2/server.ts` threads
+  the session's principal and id into `Engine.applyCommit`, whose
+  `applyCommitTransaction` constructs the key) — the client-commit
+  model. Server-side
   runs never derive identity from their own session: identity
   arrives WITH the work (the demand, or the stamped `firedAt`) and
   is carried into keys, not resolved from ambient state (scopes.md
@@ -326,7 +330,7 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS. *(Phase-1 bound, stage D/F: the landed validation is carriage PRESENCE + COMPLETENESS — authored class only, non-empty `actingPrincipal` + `capabilityRef`, a sessionless batch refused for session-scoped writes (scopes.md §5) — with scoped writes keyed from the carried identity; RESOLVING the grant against the target doc/stream awaits per-doc grants, which today's ACL model does not hold, and is the named owed hardening — verification-coverage.md OW13.)* **Genesis of a provisioned space (RULED 2026-08-18):** the FIRST commit into a `.inSpace()`-minted space is its ACL, signed by the SPACE'S OWN identity (its keys derive from the creation name, CT-1650), and that same commit names the ACTING user OWNER (`{ [actor]: "OWNER", "*": "WRITE" }` — the shape a client mints); every later write into the space is the actor's, through this row's delegated carriage or a client's own session; the serving identity is neither owner nor actor at any step and appears nowhere in the ACL (verification-coverage.md OW31 — the build is owed post-merge, before the flip). |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
-| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (the shared `resolveScopeKey`, `packages/memory/v2.ts:120-147`). *(Fan-out stage A, 2026-08-16 — the runner ISSUES these: a serving runtime's per-instance run whose read of a scoped doc names an instance other than the runtime's own — the demand-supplied identity's — loads it as an explicit-instance read (`Cell.sync`/`syncCell` with the run identity, the transaction layer's kick for a never-loaded instance, the presync of a served event's inputs as the event's actor), so the serving replica holds that principal's instance keyed apart from the service's; own-identity reads name nothing and keep the no-key admission fast path. A live lease holder may name TWO instances of one (branch, id, scope) — its frames carry `scope_key` (§3) — the wire collapse guard now applies to non-holders only.)* |
+| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (the shared `resolveScopeKey` in `packages/memory/v2.ts`). *(Fan-out stage A, 2026-08-16 — the runner ISSUES these: a serving runtime's per-instance run whose read of a scoped doc names an instance other than the runtime's own — the demand-supplied identity's — loads it as an explicit-instance read (`Cell.sync`/`syncCell` with the run identity, the transaction layer's kick for a never-loaded instance, the presync of a served event's inputs as the event's actor), so the serving replica holds that principal's instance keyed apart from the service's; own-identity reads name nothing and keep the no-key admission fast path. A live lease holder may name TWO instances of one (branch, id, scope) — its frames carry `scope_key` (§3) — the wire collapse guard now applies to non-holders only.)* |
 
 That is the ENTIRE admission surface — the last row is the one
 READ-side check; every row above it is commit admission. No scope
@@ -508,9 +512,12 @@ recompute rule, RULED 2026-08-05).
 The storage layer already enforces the load-bearing rule: **one
 transaction writes one space — by DEFAULT, with one explicit opt-in.**
 A transaction FAILS if a writer for a different space was already
-opened on it (anchor: `packages/runner/src/storage/interface.ts`
-`writer(space)`) unless it opted in through `enableMultiSpaceWrites`
-(`interface.ts:690`), reachable only via the `.inSpace()` chain below —
+opened on it (`V2StorageTransaction.#claimWriteSpace()` in
+`packages/runner/src/storage/v2-transaction.ts` returns the
+`StorageTransactionWriteIsolationError` that
+`packages/runner/src/storage/interface.ts` declares) unless it opted
+in through `enableMultiSpaceWrites` (`interface.ts`), reachable only
+via the `.inSpace()` chain below —
 which is what makes an UNMARKED crossing always a bug. Reads cross
 freely (serving-loop.md §3b; cross-space label metadata flows with
 them). v2 keeps that invariant and adds the class discipline:
@@ -552,12 +559,13 @@ section.
 even mint new ones — from a handler (`profile-create.tsx`,
 `ProfileHome.inSpace()`). The real chain is an explicit opt-in
 end to end: `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4698`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:690`) →
-`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:1971/2048` —
-sequential, stop at first failure): today already foreign-first,
-home-after-success. v2 keeps the API, the split, and the order,
+(`builder/pattern.ts`) → `Runner.enableCrossSpaceChildCommit()`
+(`runner.ts`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts`) →
+`V2StorageTransaction.#commitMultiSpace()`/`#runSplitCommits()`
+(`v2-transaction.ts` — sequential, stop at first failure): today
+already foreign-first, home-after-success. v2 keeps the API, the
+split, and the order,
 relocated into the wave's commit step:
 
 - Provisioning writes seal as AUTHORED-class commits into the
@@ -621,10 +629,12 @@ the target's `eventWatermark` makes processing exactly-once.
   that a client never holds a foreign instance. A subscriber
   therefore receives ONLY the rows whose `scope_key` is in its
   APPLICABLE SET — `space`, `user:me`, `session:me:<sid>` — the
-  shape main already computes for the observation path
-  (`packages/memory/v2/server.ts:185-201`,
-  `schedulerApplicableContextKeys`). The commit's remaining rows are
-  invisible to that subscriber: not redacted, not empty — absent.
+  predicate `scopeKeyApplicableTo` in `packages/memory/v2.ts`,
+  applied per session by `syncSessionForConnection` in
+  `packages/memory/v2/server.ts` (a CURRENT lease holder admitted
+  explicit-instance reads is exempt, per §2's read row). The commit's
+  remaining rows are invisible to that subscriber: not redacted, not
+  empty — absent.
   This pairs with scopes.md §7 M4's re-keying: the push path must
   key dirtiness by `scope_key`, and the same key decides delivery.
   *(Fan-out stage A, 2026-08-16 — the ONE wire addition on the push

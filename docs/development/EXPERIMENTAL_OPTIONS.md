@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-10. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-11. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -82,17 +82,17 @@ this category default off unless their section says otherwise.
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
-and read by
-`experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
-background piece service all go through that one mapping, so their wirings
+and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
+the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines
-through the same canonical parser.
-`EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
-env-reachable — a flag that deliberately is not, `commitPreconditions` today,
-is mapped to `null` there, which records the decision rather than leaving an
-omission. The mapping accepts exactly `"true"` and `"false"`; any other
-value is ignored with a warning rather than coerced. See
-[How flags propagate](#how-flags-propagate).
+through the same canonical parser, for the flags it defines;
+`packages/shell/felt.config.ts` and `packages/shell/src/lib/env.ts` are the
+authority on which those are. `EXPERIMENTAL_ENV_VARS` itself is the authority on
+which flags are env-reachable — a flag that deliberately is not,
+`commitPreconditions` today, is mapped to `null` there, which records the
+decision rather than leaving an omission. The mapping accepts exactly `"true"`
+and `"false"`; any other value is ignored with a warning rather than coerced.
+See [How flags propagate](#how-flags-propagate).
 
 A client that is not built alongside the server it talks to — the `cf` binary
 among them — starts from the posture that deployment publishes rather than
@@ -430,12 +430,18 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
+- **Status on 2026-09-11 (the served source update).** Under ON,
+  `setsrc` runs on the space's serving runtime as well, and `cf piece
+  setsrc` requests it: the update's setup transaction commits directly to
+  the store, outside the wave, since a source update's module authority
+  needs a transaction that commits to storage itself
+  ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)).
+  `cf piece setsrc --check` stays client-side. OFF is unchanged.
 - **Status on 2026-09-10 (the lifecycle verbs).** Under ON, `upload` and
   `instantiate` run on the space's serving runtime as steps of a wave cycle
   and `cf piece new` requests them
-  ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md));
-  `setsrc` stays client-side, since a source update's module authority
-  needs a transaction that commits to storage itself. OFF is unchanged.
+  ([`server-pattern-lifecycle.md`](../features/server-pattern-lifecycle.md)).
+  OFF is unchanged.
 - **Status on 2026-09-10.** The first-party default remains OFF and
   the ON soak is paused. OW28's served `compileAndRun` outbox/completion and
   scoped child selection have direct lifecycle coverage. The Phase-7 gate
@@ -512,24 +518,42 @@ server](#clients-that-are-not-built-alongside-their-server).
 
 ### `lazyMaterialization`
 
-**Last checked:** 2026-08-09. **Status:** implemented, on by default.
+**Last checked:** 2026-09-12. **Status:** implemented, on by default.
 
 - **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
   `new Runtime({ experimental: { lazyMaterialization: false } })` as a temporary
-  rollback override.
+  rollback override. The flag is server-authoritative for deployed clients
+  (`EXPERIMENTAL_FLAG_AUTHORITY`), so a server's `false` carries the `cf`
+  clients it serves. The browser shell has no build-time define for this
+  flag, so a shell build runs the runtime default and the override does not
+  reach it: a server rolled back serves browsers running the other arm.
 - **Purpose.** Materialize a lift's argument lazily. The runner marks the
   action's transaction (`markLazyMaterialize`), and `Cell.get()` on a marked
   transaction hands back a schema-observing view instead of building everything
   the schema selects in one pass. The body reads the paths it touches and
   nothing else; a reader that touches data the schema no longer describes
-  refuses, and the run is disposed of as an argument that did not resolve.
-  Unmarked transactions read exactly as they did before.
+  refuses, and the run is disposed of as an argument that did not resolve,
+  except that a refusal a synchronous lift body throws leaves the previous
+  result standing until the fix the [design plan's Stage
+  5](../plans/lazy-cell-materialization.md) names lands. Unmarked transactions
+  read exactly as they did before.
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Status against the test suites.** Both suites pass either way: the runner unit
-suite and the whole integration suite are green with the flag on and with it
-off.
+**Status against the test suites.** The runner unit and integration suite lanes
+have run at the default posture on every merge, and no failure in them has been
+attributed to the flag. The runner unit suite's runtimes read no environment, so
+the variable does not put that suite in the off posture. The generated-patterns
+integration harness and four of the runner integration files read it; the rest
+of the runner integration lane keeps the built-in default whatever the variable
+says. With the built-in default flipped at its source, the runner unit suite
+passes except for five tests: three stating contracts only the view holds (a
+proxy access count, a lookup that does not re-run on a non-key edit, and the
+unresolved-input refusal), one a crash the eager path keeps, and one asserting
+the default itself. The integration suites have not been run at the off posture;
+the [rollout
+evidence](../history/development/performance/2026-09-11-lazy-materialization-f3-rollout-evidence.md)
+holds the detail.
 
 One behavior difference is deliberate rather than a defect, and it is the point
 of the mode: a lift that FORWARDS its argument onward without reading through it
@@ -548,7 +572,9 @@ readings on a marked transaction pin — the schema view and the schema-less
 proxy; unmarked reads are untouched, so the standing handle long-lived consumers
 rely on keeps tracking current state.
 
-Still unbuilt, and recorded in the plan: handlers materialize eagerly.
+Handlers materialize eagerly by decision: the [handler context
+record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+holds the measurements and the conditions for revisiting.
 
 ### `readerSchemaPrecedence`
 
@@ -1539,7 +1565,7 @@ they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
-LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
+LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
 mapping.
 
@@ -1659,7 +1685,7 @@ shutdown able to reach it. An aborted signal is the one failure that does not
 resolve to the environment: it throws the abort reason, because the caller has
 stopped wanting a posture at all.
 
-Presets that run against local emulated storage — `cf test`, `cf dev`, the
+Presets that run against local emulated storage — `cf test`, `cf check`, the
 pattern harnesses — have no server to ask and keep reading the environment
 alone. The background piece service's own main and worker processes have one
 but do not ask it: they are deployed with the same environment as the toolshed

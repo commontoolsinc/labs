@@ -3160,6 +3160,19 @@ export type LoggerCountsResponse = {
    * The flags currently set, by logger.
    */
   flags: LoggerFlagsData;
+
+  /**
+   * The runtime's CFC counters, in the same round trip. They answer questions
+   * the logger's own rows cannot — how many flow-label probes were evaluated
+   * rather than memoized, and how large a dereference-trace set any one
+   * transaction held — and a client reading them against the timings wants
+   * both from the same moment.
+   *
+   * A record of counters rather than the runner's `CfcRuntimeStats`: a
+   * response crosses the boundary as a `FabricValue`, which an interface with
+   * no index signature does not satisfy, and every counter there is a number.
+   */
+  cfc: Record<string, number>;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */

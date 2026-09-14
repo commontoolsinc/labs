@@ -936,6 +936,7 @@ export function findAllWriteRedirectCells<T>(
         // contents and nested references belong to the action's later reads.
         const target = resolveLink(baseCell.runtime, tx, link, "top", {
           markIfcCrossings: true,
+          requestMissingDocs: false,
         });
         const next = tx.runWithAmbientReadMeta(
           { ...ignoreReadForScheduling, ...linkResolutionProbe },

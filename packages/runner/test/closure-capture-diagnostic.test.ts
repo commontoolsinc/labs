@@ -1,16 +1,16 @@
-// Unit coverage for the unified closure-capture diagnostic message (CT-1626).
-// Both construction-time throw sites (builder/node-utils.ts and
-// builder/pattern.ts) route through `closureCaptureErrorMessage`, so this pins
-// the shared wording: it names the offending cell, surfaces a source location
-// when one is available, and recommends the actual escape hatches
-// (mapWithPattern / computed) rather than the old "wrap in a derive" guidance.
+// Unit coverage for the unified closure-capture diagnostic message. Both
+// construction-time throw sites (builder/node-utils.ts and builder/pattern.ts)
+// route through `closureCaptureErrorMessage`, so this pins the shared wording:
+// it names the offending cell, surfaces a source location when one is
+// available, and recommends the actual escape hatches (mapWithPattern /
+// computed).
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { closureCaptureErrorMessage } from "../src/builder/closure-capture-diagnostic.ts";
 
-describe("closureCaptureErrorMessage (CT-1626)", () => {
+describe("closureCaptureErrorMessage()", () => {
   it("describes the captured cell's name, path, and scope", () => {
     const message = closureCaptureErrorMessage({
       capturedCell: {
