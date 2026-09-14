@@ -1347,19 +1347,25 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // five seconds, so a storm of exactly that shape commits nothing at
     // all inside a window a test could afford to wait out.
     //
-    // What no barrier here can rule out is a wave the loop commits after
-    // both have settled, which takes a wake from something neither shows
-    // — an outbox effect landing, a frame arriving. Nothing the test can
-    // post is ordered after such a wake, so the claim is the settled
-    // state and the bound below, never the absence of every later wave.
-    const server = host!.spaceServer(space)!;
+    // Both settles run INSIDE the predicate, between two readings of the
+    // suspension: a frame the memory server still held, or a run the
+    // scheduler still owed, un-suspends the loop before the second
+    // reading rather than landing after the wait returns. What stays out
+    // of reach is a wake from work neither settle covers — a structure
+    // load completing is the one this pattern could produce, having no
+    // external effects of its own. Nothing the test can post is ordered
+    // after such a wake, so the claim is the settled state and the bound
+    // below, never the absence of every later wave.
+    const spaceServer = host!.spaceServer(space)!;
     await waitUntil(
       async () => {
-        if (!server.suspendedOnInput) return false;
+        if (!spaceServer.suspendedOnInput) return false;
+        await server.idle();
         await servingRuntime!.idle();
-        return server.suspendedOnInput;
+        return spaceServer.suspendedOnInput;
       },
-      "the serving loop to suspend on its input wait with its runtime settled",
+      "the serving loop to suspend on its input wait with the server's " +
+        "fan-out drained and its runtime settled",
     );
     const wavesAtQuiescence = host!.stats().waves;
     // The control for that wait, and the reason it is not vacuous: the
