@@ -16,7 +16,7 @@ const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
  * name does. Both forms go through one key, one uniqueness rule and one
  * membership test, because what the operator is deciding is the same thing.
  */
-const acquiredSkillPin = (
+export const parseAcquiredSkillPin = (
   skill: string,
 ): { readonly id: string; readonly commitSha: string } | undefined => {
   const at = skill.lastIndexOf("@");
@@ -37,7 +37,7 @@ const acquiredSkillPin = (
  * name, or an acquired skill's pin.
  */
 export const isAllowedSkillScriptSkill = (skill: string): boolean =>
-  SKILL_NAME_PATTERN.test(skill) || acquiredSkillPin(skill) !== undefined;
+  SKILL_NAME_PATTERN.test(skill) || parseAcquiredSkillPin(skill) !== undefined;
 
 export const normalizeSkillScriptPath = (path: string): string => {
   const trimmed = path.trim();

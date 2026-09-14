@@ -20,12 +20,14 @@ import type {
   HarnessSkillScriptRuntime,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { harnessSkillScriptMetadata } from "../skills/registry.ts";
 import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
+  parseAcquiredSkillPin,
 } from "../skills/scripts.ts";
 import { createClearedHostProcessEnv } from "./host-process-env.ts";
-import type { HarnessToolDefinition } from "./types.ts";
+import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 10 * 60_000;
@@ -142,6 +144,7 @@ export const runSkillScriptToolDescriptor: HarnessToolDescriptor = {
       digestMatchesRegistry: { type: "boolean" },
       registrySizeBytes: { type: "integer", minimum: 0 },
       observedSizeBytes: { type: "integer", minimum: 0 },
+      acquisition: { type: "object" },
       stdout: { type: "string" },
       stderr: { type: "string" },
       exitCode: { type: "number" },
@@ -670,6 +673,268 @@ const executionForScript = (
   };
 };
 
+/**
+ * A script one `run_skill_script` call resolved, with where it may be read
+ * from and how its bytes were pinned.
+ *
+ * A registry skill's script and an acquired skill's are executed by the same
+ * code below, so both arrive here as one shape. What separates them is
+ * {@link ResolvedSkillScript.acquisition}: a registry script's digest was
+ * pinned by the run-start registry snapshot, an acquired script's by the bytes
+ * the pinned commit served, and the record has to say which.
+ */
+interface ResolvedSkillScript {
+  /** What the allowlist, the record and the model all call this skill. */
+  skillName: string;
+
+  /** The skill's directory on the host, for a script that runs there. */
+  hostSkillDir: string;
+
+  /** The same directory, as the sandbox that runs the script sees it. */
+  sandboxSkillDir: string;
+
+  resource: HarnessSkillResourceRecord;
+
+  /** Directories the script's real path must still resolve inside. */
+  containmentRoots: readonly string[];
+
+  /** Where an acquired script came from; absent for a registry skill's. */
+  acquisition?: HarnessSkillAcquisition;
+}
+
+type SkillScriptResolution =
+  | { ok: true; resolved: ResolvedSkillScript }
+  | {
+    ok: false;
+    error: RunSkillScriptToolError;
+    resource?: HarnessSkillResourceRecord;
+    acquisition?: HarnessSkillAcquisition;
+  };
+
+const resolveRegistrySkillScript = (
+  context: HarnessToolContext,
+  skillName: string,
+  path: string,
+): SkillScriptResolution => {
+  if (context.skillRegistry === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_registry_missing",
+        message:
+          "run_skill_script requires a run-start skill registry; configure --skills-root before using this tool",
+      },
+    };
+  }
+  if (context.skillActivations === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_activations_missing",
+        message:
+          "run_skill_script requires an explicitly activated skill; configure --skill before using this tool",
+      },
+    };
+  }
+  const skill = findSkill(context.skillRegistry.skills, skillName);
+  if (skill === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_not_found",
+        message: `skill not found in registry: ${skillName}`,
+      },
+    };
+  }
+  if (
+    !context.skillActivations.activations.some((activation) =>
+      activation.name === skill.name
+    )
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_not_activated",
+        message: `skill is not activated for this run: ${skill.name}`,
+      },
+    };
+  }
+  if (
+    !isSkillScriptAllowlisted(context.allowedSkillScripts, {
+      skill: skillName,
+      path,
+    })
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: "script_not_allowlisted",
+        message:
+          `skill script is not exactly allowlisted: ${skill.name}:${path}`,
+      },
+    };
+  }
+  const resource = findResource(skill, path);
+  if (resource === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "script_not_indexed",
+        message:
+          `script not found in run-start registry for skill ${skill.name}: ${path}`,
+      },
+    };
+  }
+  if (resource.kind !== "script") {
+    return {
+      ok: false,
+      error: {
+        code: "resource_not_script",
+        message: `resource is not a script resource: ${path}`,
+      },
+      resource,
+    };
+  }
+  return {
+    ok: true,
+    resolved: {
+      skillName: skill.name,
+      hostSkillDir: skill.skillDir,
+      sandboxSkillDir: skill.sandboxSkillDir,
+      resource,
+      containmentRoots: [skill.skillDir, context.skillRegistry.skillsRoot],
+    },
+  };
+};
+
+/**
+ * The acquired skill a pin names, among the ones this run holds.
+ *
+ * The pin is the whole identity: an acquired skill has no registry name, and
+ * two acquisitions of one skill at two commits are two different sets of bytes
+ * for the operator to decide about separately.
+ */
+const findAcquiredSkill = (
+  acquiredSkills: readonly HarnessAcquiredSkill[] | undefined,
+  pin: string,
+): HarnessAcquiredSkill | undefined =>
+  acquiredSkills?.find((skill) => skill.pin === pin);
+
+const resolveAcquiredSkillScript = (
+  context: HarnessToolContext,
+  pin: { readonly id: string; readonly commitSha: string },
+  skillName: string,
+  path: string,
+): SkillScriptResolution => {
+  if (context.skillActivations === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_activations_missing",
+        message:
+          "run_skill_script requires an explicitly activated skill; configure --skill before using this tool",
+      },
+    };
+  }
+  const acquired = findAcquiredSkill(context.acquiredSkills, skillName);
+  if (acquired === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_not_found",
+        message: `no skill acquired by this run at pin: ${skillName}`,
+      },
+    };
+  }
+  // Activation by the acquisition rather than by a name. A skill handed over
+  // as a handle activates under `handle:<token>`, so there is no registry name
+  // to match; what the run holds is the pin the bytes were read at, and that
+  // is what says this run was given this skill rather than merely knowing of
+  // it.
+  const activation = context.skillActivations.activations.find((candidate) =>
+    candidate.acquisition?.registryId === pin.id &&
+    candidate.acquisition?.commitSha === pin.commitSha
+  );
+  if (activation === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "skill_not_activated",
+        message: `acquired skill is not activated for this run: ${skillName}`,
+      },
+    };
+  }
+  if (
+    !isSkillScriptAllowlisted(context.allowedSkillScripts, {
+      skill: skillName,
+      path,
+    })
+  ) {
+    return {
+      ok: false,
+      error: {
+        code: "script_not_allowlisted",
+        message:
+          `skill script is not exactly allowlisted: ${skillName}:${path}`,
+      },
+      acquisition: activation.acquisition,
+    };
+  }
+  const script = acquired.scripts.find((candidate) => candidate.path === path);
+  if (script === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: "script_not_indexed",
+        message: `script not acquired at pin ${skillName}: ${path}`,
+      },
+      acquisition: activation.acquisition,
+    };
+  }
+  return {
+    ok: true,
+    resolved: {
+      skillName,
+      hostSkillDir: acquired.hostRoot,
+      sandboxSkillDir: acquired.sandboxRoot,
+      resource: {
+        path: script.path,
+        kind: "script",
+        resourcePath: script.hostPath,
+        sandboxResourcePath: script.sandboxPath,
+        sizeBytes: script.sizeBytes,
+        // The digest taken at acquisition, over the bytes the pinned commit
+        // served. The execution re-checks the file against it, so a host-side
+        // edit between acquisition and execution refuses — the same guarantee
+        // the run-start snapshot gives a registry script.
+        digest: script.valueDigest,
+        contentKind: "text",
+        diagnostics: [],
+      },
+      containmentRoots: [acquired.hostRoot],
+      acquisition: activation.acquisition,
+    },
+  };
+};
+
+/**
+ * The script a `skill` and a `path` name, from the registry or from what this
+ * run acquired.
+ *
+ * Which of the two is asked is decided by the form of `skill` alone: a pin is
+ * an acquired skill's whole name, and a registry name can never be one.
+ */
+const resolveSkillScript = (
+  context: HarnessToolContext,
+  skillName: string,
+  path: string,
+): SkillScriptResolution => {
+  const pin = parseAcquiredSkillPin(skillName);
+  return pin === undefined
+    ? resolveRegistrySkillScript(context, skillName, path)
+    : resolveAcquiredSkillScript(context, pin, skillName, path);
+};
+
 const baseOutput = (
   options: {
     outputId: string;
@@ -701,6 +966,7 @@ const errorOutput = (
     executionTarget?: HarnessSkillScriptExecutionTarget;
     diagnostics?: HarnessSkillDiagnostic[];
     resource?: HarnessSkillResourceRecord;
+    acquisition?: HarnessSkillAcquisition;
     observedDigest?: string;
     observedSizeBytes?: number;
   },
@@ -717,8 +983,23 @@ const errorOutput = (
     ? {
       runtime: options.resource.script?.runtime,
       sandboxResourcePath: options.resource.sandboxResourcePath,
+    }
+    : {}),
+  // The registry fields name the run-start snapshot, which an acquired script
+  // was never in; `acquisition` is what stands in their place, so a reader
+  // never finds both set and never finds neither.
+  ...(options.acquisition !== undefined
+    ? { acquisition: options.acquisition }
+    : options.resource !== undefined
+    ? {
       registryDigest: options.resource.digest,
       registrySizeBytes: options.resource.sizeBytes,
+      ...(options.observedDigest !== undefined
+        ? {
+          digestMatchesRegistry:
+            options.observedDigest === options.resource.digest,
+        }
+        : {}),
     }
     : {}),
   ...(options.observedDigest !== undefined
@@ -726,11 +1007,6 @@ const errorOutput = (
     : {}),
   ...(options.observedSizeBytes !== undefined
     ? { observedSizeBytes: options.observedSizeBytes }
-    : {}),
-  ...(options.observedDigest !== undefined && options.resource !== undefined
-    ? {
-      digestMatchesRegistry: options.observedDigest === options.resource.digest,
-    }
     : {}),
   error: {
     code: options.code,
@@ -825,129 +1101,36 @@ export const runSkillScriptTool: HarnessToolDefinition<
       return output;
     }
 
-    if (context.skillRegistry === undefined) {
+    const resolution = resolveSkillScript(context, input.skill, normalizedPath);
+    if (!resolution.ok) {
       const output = errorOutput({
         outputId,
         skill: input.skill,
         path: normalizedPath,
-        code: "skill_registry_missing",
-        message:
-          "run_skill_script requires a run-start skill registry; configure --skills-root before using this tool",
-      });
-      await context.recordSkillScriptExecution(
-        buildExecutionRecord({ output, runId: context.runId, executedAt }),
-      );
-      return output;
-    }
-    if (context.skillActivations === undefined) {
-      const output = errorOutput({
-        outputId,
-        skill: input.skill,
-        path: normalizedPath,
-        code: "skill_activations_missing",
-        message:
-          "run_skill_script requires an explicitly activated skill; configure --skill before using this tool",
-      });
-      await context.recordSkillScriptExecution(
-        buildExecutionRecord({ output, runId: context.runId, executedAt }),
-      );
-      return output;
-    }
-
-    const skill = findSkill(context.skillRegistry.skills, input.skill);
-    if (skill === undefined) {
-      const output = errorOutput({
-        outputId,
-        skill: input.skill,
-        path: normalizedPath,
-        code: "skill_not_found",
-        message: `skill not found in registry: ${input.skill}`,
-      });
-      await context.recordSkillScriptExecution(
-        buildExecutionRecord({ output, runId: context.runId, executedAt }),
-      );
-      return output;
-    }
-    if (
-      !context.skillActivations.activations.some((activation) =>
-        activation.name === skill.name
-      )
-    ) {
-      const output = errorOutput({
-        outputId,
-        skill: skill.name,
-        path: normalizedPath,
-        code: "skill_not_activated",
-        message: `skill is not activated for this run: ${skill.name}`,
-      });
-      await context.recordSkillScriptExecution(
-        buildExecutionRecord({ output, runId: context.runId, executedAt }),
-      );
-      return output;
-    }
-    if (
-      !isSkillScriptAllowlisted(context.allowedSkillScripts, {
-        skill: skill.name,
-        path: normalizedPath,
-      })
-    ) {
-      const output = errorOutput({
-        outputId,
-        skill: skill.name,
-        path: normalizedPath,
-        code: "script_not_allowlisted",
-        message:
-          `skill script is not exactly allowlisted: ${skill.name}:${normalizedPath}`,
-      });
-      await context.recordSkillScriptExecution(
-        buildExecutionRecord({ output, runId: context.runId, executedAt }),
-      );
-      return output;
-    }
-
-    const resource = findResource(skill, normalizedPath);
-    if (resource === undefined) {
-      const output = errorOutput({
-        outputId,
-        skill: skill.name,
-        path: normalizedPath,
-        code: "script_not_indexed",
-        message:
-          `script not found in run-start registry for skill ${skill.name}: ${normalizedPath}`,
-      });
-      await context.recordSkillScriptExecution(
-        buildExecutionRecord({ output, runId: context.runId, executedAt }),
-      );
-      return output;
-    }
-    if (resource.kind !== "script") {
-      const output = errorOutput({
-        outputId,
-        skill: skill.name,
-        path: normalizedPath,
-        code: "resource_not_script",
-        message: `resource is not a script resource: ${normalizedPath}`,
-        resource,
+        code: resolution.error.code,
+        message: resolution.error.message,
+        resource: resolution.resource,
+        acquisition: resolution.acquisition,
       });
       await context.recordSkillScriptExecution(
         buildExecutionRecord({
           output,
           runId: context.runId,
           executedAt,
-          resourcePath: resource.resourcePath,
+          resourcePath: resolution.resource?.resourcePath,
         }),
       );
       return output;
     }
+    const { acquisition, skillName } = resolution.resolved;
+    let resource = resolution.resolved.resource;
 
-    let resolvedSkillsRoot: string;
-    let resolvedSkillDir: string;
+    let resolvedContainmentRoots: string[];
     let resolvedResourcePath: string;
     try {
-      resolvedSkillsRoot = await Deno.realPath(
-        context.skillRegistry.skillsRoot,
+      resolvedContainmentRoots = await Promise.all(
+        resolution.resolved.containmentRoots.map((root) => Deno.realPath(root)),
       );
-      resolvedSkillDir = await Deno.realPath(skill.skillDir);
       resolvedResourcePath = await Deno.realPath(resource.resourcePath);
     } catch (error) {
       const code = error instanceof Deno.errors.NotFound
@@ -957,11 +1140,12 @@ export const runSkillScriptTool: HarnessToolDefinition<
         : "unknown";
       const output = errorOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         code,
         message: error instanceof Error ? error.message : String(error),
         resource,
+        acquisition,
       });
       await context.recordSkillScriptExecution(
         buildExecutionRecord({
@@ -974,17 +1158,20 @@ export const runSkillScriptTool: HarnessToolDefinition<
       return output;
     }
     if (
-      !isPathWithinRoot(resolvedSkillDir, resolvedResourcePath) ||
-      !isPathWithinRoot(resolvedSkillsRoot, resolvedResourcePath)
+      !resolvedContainmentRoots.every((root) =>
+        isPathWithinRoot(root, resolvedResourcePath)
+      )
     ) {
       const output = errorOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         code: "script_outside_root",
-        message:
-          `script no longer resolves inside the skill directory and configured skills root: ${normalizedPath}`,
+        message: acquisition === undefined
+          ? `script no longer resolves inside the skill directory and configured skills root: ${normalizedPath}`
+          : `script no longer resolves inside the acquired skill's directory: ${normalizedPath}`,
         resource,
+        acquisition,
       });
       await context.recordSkillScriptExecution(
         buildExecutionRecord({
@@ -1003,11 +1190,12 @@ export const runSkillScriptTool: HarnessToolDefinition<
       if (!stat.isFile) {
         const output = errorOutput({
           outputId,
-          skill: skill.name,
+          skill: skillName,
           path: normalizedPath,
           code: "script_not_file",
           message: `script is not a file: ${normalizedPath}`,
           resource,
+          acquisition,
         });
         await context.recordSkillScriptExecution(
           buildExecutionRecord({
@@ -1028,11 +1216,12 @@ export const runSkillScriptTool: HarnessToolDefinition<
         : "unknown";
       const output = errorOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         code,
         message: error instanceof Error ? error.message : String(error),
         resource,
+        acquisition,
       });
       await context.recordSkillScriptExecution(
         buildExecutionRecord({
@@ -1053,12 +1242,14 @@ export const runSkillScriptTool: HarnessToolDefinition<
     ) {
       const output = errorOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         code: "script_snapshot_mismatch",
-        message:
-          "Skill script differs from the run-start registry snapshot; refusing to execute active code.",
+        message: acquisition === undefined
+          ? "Skill script differs from the run-start registry snapshot; refusing to execute active code."
+          : "Skill script differs from the bytes acquired at this pin; refusing to execute active code.",
         resource,
+        acquisition,
         observedDigest,
         observedSizeBytes,
       });
@@ -1073,15 +1264,32 @@ export const runSkillScriptTool: HarnessToolDefinition<
       return output;
     }
 
+    if (acquisition !== undefined) {
+      // An acquired script has no registry scan behind it to have derived
+      // this. What decides a script's runtime is its shebang and its
+      // extension, and the registry's own derivation is what reads them, so
+      // the same file gets the same runtime whichever path it arrived by.
+      resource = {
+        ...resource,
+        script: harnessSkillScriptMetadata({
+          path: resource.path,
+          executable: false,
+          content,
+          contentKind: resource.contentKind,
+        }),
+      };
+    }
+
     const scriptExecutionPlan = executionForScript(resource, args, content);
     if (!scriptExecutionPlan.ok) {
       const output = errorOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         code: scriptExecutionPlan.error.code,
         message: scriptExecutionPlan.error.message,
         resource,
+        acquisition,
         observedDigest,
         observedSizeBytes,
       });
@@ -1098,7 +1306,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
     const scriptExecution = scriptExecutionPlan.execution;
 
     let hostAgentBrowserCdpOrigin: string | undefined;
-    if (executionTarget === "host" && skill.name === "agent-browser") {
+    if (executionTarget === "host" && skillName === "agent-browser") {
       const browserLease = resolveHostAgentBrowserLeaseOrigin(
         args,
         context.browserAccess?.cdpUrl,
@@ -1107,12 +1315,13 @@ export const runSkillScriptTool: HarnessToolDefinition<
       if (browserLease.error !== undefined) {
         const output = errorOutput({
           outputId,
-          skill: skill.name,
+          skill: skillName,
           path: normalizedPath,
           executionTarget,
           code: "permission_denied",
           message: browserLease.error,
           resource,
+          acquisition,
           observedDigest,
           observedSizeBytes,
         });
@@ -1144,13 +1353,14 @@ export const runSkillScriptTool: HarnessToolDefinition<
     ) {
       const output = errorOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         executionTarget,
         code: "permission_denied",
         message:
           "host skill scripts must execute from a workspace path outside cf-harness artifacts",
         resource,
+        acquisition,
         observedDigest,
         observedSizeBytes,
       });
@@ -1166,8 +1376,8 @@ export const runSkillScriptTool: HarnessToolDefinition<
     }
     const sandboxEnv = {
       CF_HARNESS_RUN_ID: context.runId,
-      SKILL_NAME: skill.name,
-      SKILL_DIR: skill.sandboxSkillDir,
+      SKILL_NAME: skillName,
+      SKILL_DIR: resolution.resolved.sandboxSkillDir,
       SKILL_SCRIPT: resource.sandboxResourcePath,
       CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: executionTarget,
     };
@@ -1179,8 +1389,8 @@ export const runSkillScriptTool: HarnessToolDefinition<
         clearEnv: true,
         env: createClearedHostProcessEnv({
           CF_HARNESS_RUN_ID: context.runId,
-          SKILL_NAME: skill.name,
-          SKILL_DIR: skill.skillDir,
+          SKILL_NAME: skillName,
+          SKILL_DIR: resolution.resolved.hostSkillDir,
           SKILL_SCRIPT: resource.resourcePath,
           CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: executionTarget,
           ...(hostAgentBrowserCdpOrigin !== undefined
@@ -1211,6 +1421,13 @@ export const runSkillScriptTool: HarnessToolDefinition<
           ...(scriptExecution.stdinText !== undefined
             ? { stdinText: scriptExecution.stdinText }
             : {}),
+          // Confidentiality only, and no integrity — including for an
+          // acquired script, whose acquisition minted an ExternalIngest atom
+          // that would otherwise belong on this invocation. A non-empty
+          // `integrity` array in `cfcInputLabels` makes the sandbox fail to
+          // start (CT-2302), so an acquired script labeled with its own
+          // provenance would not run at all. The provenance rides the output
+          // instead, in `acquisition`, and the execution record with it.
           ...(input.cfcInputLabels !== undefined
             ? { cfcInputLabels: input.cfcInputLabels }
             : {}),
@@ -1224,7 +1441,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
     const output: RunSkillScriptToolOutput = {
       ...baseOutput({
         outputId,
-        skill: skill.name,
+        skill: skillName,
         path: normalizedPath,
         status: "executed",
         executionTarget,
@@ -1234,10 +1451,15 @@ export const runSkillScriptTool: HarnessToolDefinition<
       args,
       cwd,
       sandboxResourcePath: resource.sandboxResourcePath,
-      registryDigest: resource.digest,
+      // Exactly one of the two, as on a refusal: the registry fields name the
+      // run-start snapshot an acquired script was never in, and `acquisition`
+      // names the pin whose bytes an acquired script was checked against.
+      ...(acquisition !== undefined ? { acquisition } : {
+        registryDigest: resource.digest,
+        digestMatchesRegistry: true,
+        registrySizeBytes: resource.sizeBytes,
+      }),
       observedDigest,
-      digestMatchesRegistry: true,
-      registrySizeBytes: resource.sizeBytes,
       observedSizeBytes,
       // A host agent-browser script holds the lease endpoint in its
       // environment and may echo it, so echoes are scrubbed from what the

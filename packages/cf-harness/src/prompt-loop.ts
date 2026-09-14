@@ -55,13 +55,13 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
-import { HARNESS_ACQUIRED_SKILLS_TYPE } from "./contracts/skill.ts";
-import type {
-  HarnessSkillAcquisition,
-  HarnessSkillActivation,
-  HarnessSkillRegistry,
+import {
+  HARNESS_ACQUIRED_SKILLS_TYPE,
+  HARNESS_SKILL_ACTIVATIONS_TYPE,
+  type HarnessSkillAcquisition,
+  type HarnessSkillActivation,
+  type HarnessSkillRegistry,
 } from "./contracts/skill.ts";
-import { HARNESS_SKILL_ACTIVATIONS_TYPE } from "./contracts/skill.ts";
 import {
   asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,

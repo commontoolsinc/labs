@@ -452,15 +452,13 @@ const scriptMetadataForResource = (
     content: Uint8Array;
     contentKind: HarnessSkillResourceContentKind;
   },
-): HarnessSkillScriptMetadata => {
-  const shebang = extractShebang(options.content, options.contentKind);
-  const mode = options.stat.mode ?? 0;
-  return {
-    executable: (mode & 0o111) !== 0,
-    ...(shebang !== undefined ? { shebang } : {}),
-    runtime: scriptRuntimeFromPath(options.path, shebang),
-  };
-};
+): HarnessSkillScriptMetadata =>
+  harnessSkillScriptMetadata({
+    path: options.path,
+    executable: ((options.stat.mode ?? 0) & 0o111) !== 0,
+    content: options.content,
+    contentKind: options.contentKind,
+  });
 
 const collectSkillResources = async (
   options: {
