@@ -71,9 +71,7 @@ execution.
    reference" yields an address that does not resolve outside the fabric
    (#6995).
 
-S5 is separately deferred and unscheduled: cross-space personal bindings, the
-compact `<collection>-42` spelling, and prose scanning.
-
+S5 is separately deferred and unscheduled; its scope is listed under S5 below.
 
 ## Decisions, ruled 2026-09-03
 
