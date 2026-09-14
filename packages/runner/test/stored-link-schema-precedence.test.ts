@@ -1,15 +1,17 @@
 /**
  * What a link's own stored schema decides for a reader that declared one.
  *
- * A link stored in a document may carry a schema, and link resolution adopts
- * it in place of the schema the reader carries in: the stored one describes
- * the value at the link's target, where the reader's describes the value at
- * the source. A schema that constrains nothing — JSON Schema `true`, or an
- * empty object — describes neither, so the reader's schema keeps traveling
- * and governs the projection, which is what makes an element read by its own
- * path project the same as that element read within its array. A stored
- * schema that does constrain still governs, and a stored `false` still
- * selects nothing.
+ * A link stored in a document may carry a schema. Link resolution — the
+ * address-level walk behind `resolveAsCell()` — adopts a stored schema that
+ * constrains in place of the schema the reader carries in, and keeps the
+ * reader's across one that constrains nothing (JSON Schema `true`, or an
+ * empty object). A read's projection is decided separately, by reader
+ * precedence (`combineSchemaForLink`): the reader's shape governs whether the
+ * element is read by its own path or within its array, a stored schema shapes
+ * only a reader that brought no shape, and `default` is the one keyword a
+ * stored schema contributes to a shaped reader. A reader typed `unknown`
+ * counts as bringing no shape at the read's entry; a stored `unknown` is a
+ * shape the reader outranks.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -30,6 +32,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("stored link schema precedence");
 const space = signer.did();
+const otherSpace =
+  (await Identity.fromPassphrase("stored link schema precedence, other space"))
+    .did();
 
 type Row = { title: string };
 type Holder = { rows: Row[] };
@@ -147,19 +152,88 @@ describe("stored-link-schema-precedence", () => {
   });
 
   describe("a stored schema that constrains", () => {
-    it("governs the projection in place of the reader's row schema", () => {
+    /** A stored shape that selects a different property than the reader. */
+    const glazeSchema = {
+      type: "object",
+      properties: { glaze: { type: "string" } },
+    } as const satisfies JSONSchema;
+
+    it("projects an element by path the same way as within its array", () => {
+      const holder = holderOverLinkCarrying(glazeSchema);
+
+      expect(projectionOf(elementByPath(holder)))
+        .toEqual(projectionOf(elementWithinArray(holder)));
+      expect(projectionOf(elementByPath(holder))).toEqual({ title: "cruller" });
+    });
+
+    it("reads through a stored `false` when the reader brought a shape", () => {
+      const holder = holderOverLinkCarrying(false);
+
+      expect(projectionOf(elementByPath(holder))).toEqual({ title: "cruller" });
+    });
+
+    it("resolves the element link to the stored schema", () => {
+      const holder = holderOverLinkCarrying(glazeSchema);
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: rowSchema as JSONSchema,
+      };
+
+      expect(resolveLink(runtime, tx, readerLink).schema).toEqual(glazeSchema);
+    });
+  });
+
+  describe("an `unknown` at the read's entry", () => {
+    const unknownSchema = { type: "unknown" } as const satisfies JSONSchema;
+
+    it("adopts the stored schema for a reader typed `unknown`", () => {
       const holder = holderOverLinkCarrying({
         type: "object",
         properties: { glaze: { type: "string" } },
       });
+      const element = holder.key("rows").key(0).asSchema(unknownSchema).get();
 
-      expect(projectionOf(elementByPath(holder))).toEqual({ glaze: "maple" });
+      expect(projectionOf(element)).toEqual({ glaze: "maple" });
     });
 
-    it("selects nothing when the stored schema is `false`", () => {
-      const holder = holderOverLinkCarrying(false);
+    it("projects a shaped reader through a stored `unknown` by path the same way as within its array", () => {
+      const holder = holderOverLinkCarrying(unknownSchema);
 
-      expect(elementByPath(holder)).toBeUndefined();
+      expect(projectionOf(elementByPath(holder)))
+        .toEqual(projectionOf(elementWithinArray(holder)));
+      expect(projectionOf(elementByPath(holder))).toEqual({ title: "cruller" });
+    });
+  });
+
+  describe("a link into another space", () => {
+    // The stored schema of a minted link travels as a `cid:` document in the
+    // space holding the link, so a read that adopted it at the target would
+    // look for that document in the wrong space. The reader's shape governs
+    // there as anywhere, and the read never has to.
+
+    it("projects an element by path through the reader's row schema", async () => {
+      const row = runtime.getCell(
+        otherSpace,
+        `row-${seq}-other`,
+        rowSchema,
+        tx,
+      );
+      row.set({ title: "cruller" });
+      // One transaction writes one space: the row lands before the holder.
+      await tx.commit();
+      tx = runtime.edit();
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-other`,
+        holderSchema,
+        tx,
+      );
+      holder.set({ rows: [row] } as never);
+
+      expect(projectionOf(elementByPath(holder))).toEqual({ title: "cruller" });
+      expect(projectionOf(elementByPath(holder)))
+        .toEqual(projectionOf(elementWithinArray(holder)));
     });
   });
 

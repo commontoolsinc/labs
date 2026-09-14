@@ -55,6 +55,37 @@ Chains compose hop by hop: `combine(combine(reader, link1), link2)`. Once
 a shaped schema is traveling — the reader's own, or a link schema an
 agnostic reader adopted — later links no longer reshape it.
 
+### The read entry
+
+A read addressed at a slot that holds a link — a keyed cell's `get()`, a
+sink on the resolved target of a handle — crosses that link before its
+traversal starts. The entry resolves the address first (`resolveLink`,
+which carries the stored schema of a constraining link, and the reader's
+across one that constrains nothing), then chooses the traversal's schema
+by the same precedence as any hop (`entrySelectorSchema` in
+[`packages/runner/src/schema.ts`](../../packages/runner/src/schema.ts)):
+the reader's shape stands, and the stored schema shapes only a reader
+that brought none. An element read by its own path therefore projects the
+same as that element read within its array, and a read that crosses into
+another space never adopts a stored schema whose `cid:` closure lives in
+the space it left. The eager traversal and the lazy view start from the
+one schema.
+
+`{ "type": "unknown" }` is the entry's one exception, in both directions.
+At the entry `unknown` does not say whether the value is not available
+yet or does not exist, and the two directions answer that differently:
+
+- A reader typed `unknown` counts as bringing no shape and adopts the
+  stored schema. At the entry that type names the handle a caller keyed
+  into (`{ "type": "unknown", "asCell": ["cell"] }` list items are the
+  common source), and the stored schema is what describes the value the
+  handle reaches. A later hop met under `unknown` keeps its reference
+  semantics as the rule above says.
+- A stored `unknown` — the schema a `Writable<unknown>` slot stamps on the
+  link it is set to — is a shape the reader outranks like any other. A
+  shaped reader reads through it; a reader that brought no shape holds
+  the reference.
+
 The strict pseudo-intersection (`combineSchema`) remains in use for one
 job: merging a compound schema's base keywords with its own
 `anyOf`/`oneOf` branches, where both parts were authored as one
@@ -189,8 +220,12 @@ a shaped reader reads on, and what it legibly declares still marks).
 `packages/runner/test/schema-ifc.test.ts` pins the closure loader's
 broken-declaration arms.
 `packages/runner/test/stored-link-schema-precedence.test.ts` pins the
-cell-level reads, including the asCell handle regression and the inherited
-default. `packages/runner/test/reader-schema-precedence-config.test.ts`
+cell-level reads — the entry rule (by path as within the array, a stored
+`false` under a shaped reader, both `unknown` directions, a link into
+another space), the asCell handle regression, and the inherited default.
+`packages/runner/test/inspace-child-owner-seed.test.ts` reads a seeded
+profile name through an `unknown`-typed handle, the entry's reader-side
+exception at work. `packages/runner/test/reader-schema-precedence-config.test.ts`
 and the ambient-flag family in
 `packages/runner/test/experimental-options.test.ts` pin the
 construction-set ambient lifecycle (no teardown reset);
