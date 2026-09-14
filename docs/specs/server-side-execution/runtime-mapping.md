@@ -150,16 +150,20 @@ Status legend:
 
 **N2 (eager effects split).** The `isEffect` bit means one thing to the
 scheduler: a standing demand root, a node that runs whether or not anything
-reads it. Two kinds of node carry it: `navigateTo` (`isEffect: true` in
-`builtins/navigate-to.ts`), whose whole purpose is the side effect, and
-render/UI sinks. The network built-ins (`llm`, `generateText`,
-`generateObject`, `sqliteQuery`, the `fetch` family, `streamData`,
-`llmDialog` — `registerBuiltins` in `builtins/index.ts`) are computations:
-a node nobody reads is a no-op, and one a live reader reaches runs when it
-is read, or once on registration under a live parent through provisional
-demand (scheduler-v2 §5.3). A computation whose writes land in captured
-`Writable` inputs holds demand as a materializer (scheduler-v2 §4.3) and
-needs no special bit. v2 splits the effect population by §3.5 class: the network
+reads it. Three kinds of node carry it: `navigateTo` (`isEffect: true` in
+`builtins/navigate-to.ts`), whose whole purpose is the side effect;
+render/UI sinks; and `llmDialog`, which writes its turns into the caller's
+`messages` cell and re-mints the element documents of its `flattenedTools`
+write on every run — a write the idempotency recheck would flag, so the bit
+stays on it until that write is made stable, at which point it is a
+computation with a materializer envelope over `messages` like any other.
+The network built-ins (`llm`, `generateText`, `generateObject`,
+`sqliteQuery`, the `fetch` family, `streamData` — `registerBuiltins` in
+`builtins/index.ts`) are computations: a node nobody reads is a no-op, and
+one a live reader reaches runs when it is read, or once on registration
+under a live parent through provisional demand (scheduler-v2 §5.3). A
+computation whose writes land in captured `Writable` inputs holds demand as
+a materializer (scheduler-v2 §4.3) and needs no special bit. v2 splits the effect population by §3.5 class: the network
 built-ins become server-only memoized nodes, navigateTo becomes the split
 contract, render sinks stay client-side. The scheduler's
 effect/computation distinction itself ports unchanged; only the

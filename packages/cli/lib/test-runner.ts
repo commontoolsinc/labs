@@ -1082,6 +1082,7 @@ export async function runTestPattern(
     : undefined;
   let writeLocalPatternCoverage = patternCoverage !== undefined;
   let continuousUiCancel: (() => void) | undefined;
+  let resultDemandCancel: (() => void) | undefined;
   const continuousUiErrors: Error[] = [];
 
   // Collect pattern-code console.error / console.warn calls (channel 1: harness
@@ -1409,6 +1410,19 @@ export async function runTestPattern(
         }
       },
     );
+
+    // Hold the pattern's result live for the run, as a rendered pattern's is.
+    // A built-in in the result — a fetch, a model call — is a computation that
+    // runs when something reads it, and a test has no renderer to do the
+    // reading: its assertions read only what they name, and a `settle` step
+    // before the first of them would otherwise have nothing in flight to wait
+    // for. The pull first, so the reads that reach documents not yet loaded
+    // converge before the steps begin; the sink then keeps the demand standing.
+    await withPhase(
+      ["runTestPattern", "resultDemand"],
+      () => patternResult.pull(),
+    );
+    resultDemandCancel = patternResult.sink(() => {});
 
     if (options.continuousUI) {
       continuousUiCancel = await withPhase(
@@ -2210,6 +2224,8 @@ export async function runTestPattern(
     consoleCaptureActive = false;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
+    resultDemandCancel?.();
+    resultDemandCancel = undefined;
     // Tear the whole runtime down, not just its engine: that is what stops it
     // WRITING (`Runtime.dispose`'s JSDoc has the mechanism). It matters here
     // because a caller-supplied store outlives this call and gets READ — the

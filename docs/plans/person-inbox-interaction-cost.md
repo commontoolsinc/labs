@@ -406,10 +406,12 @@ is a demand root, a computation that writes captured `Writable` inputs is a
 materializer with standing demand, and a computation registered during a live
 run gets provisional demand once — and the built-ins the pull was forcing are
 computations whose work is a no-op when nothing reads it. `generateText`,
-`generateObject`, `llm`, `sqliteQuery` and `llmDialog` were registered as
-effects to keep the pull's promise; they are computations now, the `fetch`
-family and `streamData` were always computations, and `navigateTo` stays an
-effect because the navigation is the point. With no eager set to serve, both
+`generateObject`, `llm` and `sqliteQuery` were registered as effects to keep
+the pull's promise; they are computations now, the `fetch` family and
+`streamData` were always computations, and `navigateTo` stays an effect
+because the navigation is the point. `llmDialog` keeps the bit for now: its
+`flattenedTools` write re-mints element documents on every run, which the
+idempotency recheck flags the moment the bit comes off. With no eager set to serve, both
 start pulls are removed, and a child instantiated from a lift walks nothing at
 start: its result is read by whoever reads it.
 
