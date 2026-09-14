@@ -2,6 +2,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { type Primitive } from "@commonfabric/utils/types";
 
+import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import {
   type FabricArray,
@@ -49,8 +50,9 @@ type VisitSubtypeOfForm<DomainExtra> = {
 /**
  * Similar to `VisitSubtypeOfForm`, but for `recurse`. Unlike that one, though,
  * this one is _always_ propagated in the engine after getting a plain `recurse`
- * result, on the theory that if we're going to iterate the one extra allocation
- * is small potatoes, and it keeps the code a wee bit simpler.
+ * result, on the theory that if we're going to recurse -- a relatively
+ * heavyweight operation -- the one extra allocation is small potatoes, and it
+ * keeps the code a wee bit simpler.
  */
 type RecurseOfForm = {
   readonly type: "recurseOf";
@@ -169,9 +171,31 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       }
 
       case "recurseOf": {
-        return (result.containerTag === VALUE_TAGS.Array)
-          ? this.#iterateArray(result)
-          : this.#iterateMap(result);
+        switch (result.containerTag) {
+          case VALUE_TAGS.Array: {
+            return this.#recurseFabricArray(result);
+          }
+
+          case VALUE_TAGS.FabricInstance: {
+            return this.#recurseFabricInstance(result);
+          }
+
+          case VALUE_TAGS.Object: {
+            return this.#recurseFabricPlainObject(result);
+          }
+
+          default: {
+            // deno-coverage-ignore-start
+
+            // This is a defense-in-depth protection against bugs in this
+            // submodule: `containerTag` is typed as exactly the three cases
+            // above, so nothing else can reach here.
+            throw new Error(
+              `Shouldn't happen: Got unrecognized \`containerTag\`: \`${result.containerTag}\``,
+            );
+          }
+            // deno-coverage-ignore-stop
+        }
       }
 
       default: {
@@ -345,10 +369,10 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iterates over all the elements in an array, in response to a `recurse`
-   * result.
+   * Recurses into a `FabricArray`, iterating over all its elements, in response
+   * to a `recurse` result.
    */
-  #iterateArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
+  #recurseFabricArray(result: RecurseOfForm): BaselineVisitResult<ResultType> {
     const { container, doValues } = result;
     const array = container as FabricArray;
     const vis = this.#visitor;
@@ -375,7 +399,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         if (idxNumber !== (lastIdx + 1)) {
           // There's a gap just before this element.
-          const result = vis.visitedArrayGap(
+          const result = vis.visitedFabricArrayGap(
             array,
             lastIdx + 1,
             idxNumber - lastIdx - 1,
@@ -395,8 +419,8 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value from `elemResult` into
-        // `visitedArrayElement()` and not the original `element`.
-        const result = vis.visitedArrayElement(array, idxNumber, element);
+        // `visitedFabricArrayElement()` and not the original `element`.
+        const result = vis.visitedFabricArrayElement(array, idxNumber, element);
         if (result?.type === "mainResult") {
           return result;
         }
@@ -404,7 +428,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       if (array.length !== (lastIdx + 1)) {
         // There's a gap at the end of the array.
-        const result = vis.visitedArrayGap(
+        const result = vis.visitedFabricArrayGap(
           array,
           lastIdx + 1,
           array.length - lastIdx - 1,
@@ -421,14 +445,56 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
   }
 
   /**
-   * Iterates over all the elements in a map-like value, in response to a
-   * `recurse` result.
+   * Recurses into a `FabricInstance`, in response to a `recurse` result. The
+   * recursion consists of a single sub-value visit, of the instance's state,
+   * per its normal codec.
    */
-  #iterateMap(result: RecurseOfForm): BaselineVisitResult<ResultType> {
-    const { container: looseTypedContainer, containerTag, doKeys, doValues } =
-      result;
-    const container =
-      looseTypedContainer as (FabricInstance | FabricPlainObject);
+  #recurseFabricInstance(
+    result: RecurseOfForm,
+  ): BaselineVisitResult<ResultType> {
+    const { container, doValues } = result;
+    const instance = container as FabricInstance;
+    const vis = this.#visitor;
+
+    if (!doValues) {
+      // `result` represents a no-op `recurse`. Though pointless, nothing
+      // prevents a client from returning it as a visit result, so just handle
+      // it gracefully here.
+      return undefined;
+    }
+
+    const state = codecOf(instance).encode(instance, NULL_LIVE_ENVIRONMENT);
+    this.#stack.push(instance);
+
+    try {
+      const stateResult = this.#visitValue(state);
+      if (stateResult?.type === "mainResult") {
+        return stateResult;
+      }
+
+      // TODO(danfuzz): When we have a non-`mainResult` visit-result type, we'll
+      // want to pass the result value from the visits immediately above instead
+      // of the original `state`.
+      const result = vis.visitedFabricInstance(instance, state);
+      if (result?.type === "mainResult") {
+        return result;
+      }
+
+      return undefined;
+    } finally {
+      this.#stack.popExpect(instance);
+    }
+  }
+
+  /**
+   * Recurses into a `FabricPlainObject`, iterating over all its entries, in
+   * response to a `recurse` result.
+   */
+  #recurseFabricPlainObject(
+    result: RecurseOfForm,
+  ): BaselineVisitResult<ResultType> {
+    const { container, doKeys, doValues } = result;
+    const plainObj = container as FabricPlainObject;
     const vis = this.#visitor;
 
     if (!(doKeys || doValues)) {
@@ -438,18 +504,12 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
       return undefined;
     }
 
-    const mappings = (containerTag === VALUE_TAGS.Object)
-      ? Object.entries(container)
-      : (() => {
-        // TODO(danfuzz): This is where we finally need to sort out
-        // `FabricInstance` iteration.
-        throw new Error("`FabricInstance` not yet visitable");
-      })();
+    const entries = Object.entries(plainObj);
 
-    this.#stack.push(container);
+    this.#stack.push(plainObj);
 
     try {
-      for (const [key, value] of mappings) {
+      for (const [key, value] of entries) {
         if (doKeys) {
           const keyResult = this.#visitValue(key);
           if (keyResult?.type === "mainResult") {
@@ -467,7 +527,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         // TODO(danfuzz): When we have a non-`mainResult` visit-result type,
         // we'll want to pass the result value(s) from the visits immediately
         // above instead of the original `key` and `value`.
-        const result = vis.visitedMapping(container, key, value);
+        const result = vis.visitedFabricPlainObjectEntry(plainObj, key, value);
         if (result?.type === "mainResult") {
           return result;
         }
@@ -475,7 +535,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
 
       return undefined;
     } finally {
-      this.#stack.popExpect(container);
+      this.#stack.popExpect(plainObj);
     }
   }
 
