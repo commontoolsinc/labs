@@ -288,11 +288,10 @@ export type FabricSpecialObjectPlus<PlusType> =
 //
 
 /**
- * Abstract base class for the `FabricValue`s that participate in the fabric
- * protocol as primitives. An instance is always frozen, passes through the
- * native conversions unchanged, and holds no arbitrary outgoing `FabricValue`
- * reference. `FabricSpecialObject` says how this differs from
- * `FabricInstance`.
+ * The `FabricValue`s that participate in the fabric protocol as primitives. An
+ * instance is always frozen, passes through the native conversions unchanged,
+ * and holds no arbitrary outgoing `FabricValue` reference.
+ * `FabricSpecialObject` says how this differs from `FabricInstance`.
  */
 export interface FabricPrimitive {
   /**
@@ -346,10 +345,10 @@ export interface FabricInstancePlus<PlusType> {
 }
 
 /**
- * Interface for `FabricValue` objects that participate in the fabric protocol
- * as non-primitives. A `FabricInstance` may hold and expose arbitrary outgoing
- * `FabricValue` references, and is mutable until frozen. `FabricSpecialObject`
- * says how this differs from `FabricPrimitive`.
+ * The `FabricValue`s that participate in the fabric protocol as non-primitives.
+ * An instance may hold and expose arbitrary outgoing `FabricValue` references,
+ * and is mutable until frozen. `FabricSpecialObject` says how this differs
+ * from `FabricPrimitive`.
  */
 export type FabricInstance = FabricInstancePlus<never>;
 
