@@ -8,6 +8,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
 
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -258,6 +259,80 @@ describe("stored-argument-validation", () => {
       expect(validateSchemaValue(schema, result, schema, {
         acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
       })).toBeUndefined();
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("preserves stored instances while deferring unreadable links", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const failure = FabricError.fromNativeError(new Error("stored failure"));
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ pending: absent, failure });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { pending: { type: "string" }, failure: true },
+        required: ["pending", "failure"],
+      };
+      expect(storedArgumentValidationIssue(argument, schema, undefined, tx))
+        .toBeUndefined();
+
+      const raw = argument.getRaw() as { failure: unknown };
+      const snapshot = Object.freeze({
+        pending: undefined,
+        failure: raw.failure,
+      });
+      const view = overlayUnreadableLinkPlaceholders(
+        tx,
+        argument.getAsNormalizedFullLink(),
+        raw,
+        snapshot,
+      ) as { failure: unknown };
+      expect(view.failure).toBe(snapshot.failure);
+
+      const incompatible: JSONSchema = {
+        ...schema,
+        properties: {
+          pending: { type: "string" },
+          failure: { type: "string" },
+        },
+      };
+      expect(
+        storedArgumentValidationIssue(argument, incompatible, undefined, tx),
+      )
+        .toBe("failure: value does not match type string");
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("keeps absent snapshot fields absent unless their raw value is a link", () => {
+    const tx = runtime.edit();
+    try {
+      const absent = runtime.getCell(space, "absent", undefined, tx);
+      const argument = runtime.getCell(space, "argument", undefined, tx);
+      argument.set({ pending: absent, extra: 1 });
+      const snapshot = Object.freeze({ pending: undefined });
+      const view = overlayUnreadableLinkPlaceholders(
+        tx,
+        argument.getAsNormalizedFullLink(),
+        argument.getRaw(),
+        snapshot,
+      );
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { pending: { type: "string" } },
+        required: ["pending"],
+        additionalProperties: false,
+      };
+      expect(Object.keys(view as object)).toEqual(["pending"]);
+      expect(validateSchemaValue(schema, view, schema, {
+        acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
+      })).toBeUndefined();
+      expect(snapshot).toEqual({ pending: undefined });
+      expect(argument.getRaw()).toMatchObject({ extra: 1 });
     } finally {
       tx.abort();
     }

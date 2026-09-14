@@ -1,6 +1,7 @@
 /** Validates stored arguments without treating unreadable links as invalid values. */
 
 import {
+  FabricInstance,
   type FabricValue,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
@@ -81,14 +82,11 @@ function overlayAddressKey(link: NormalizedFullLink): string {
  * link sigil's own JSON — so path segments are walked in memory and links
  * met along the way are followed.
  *
- * `chain` carries the link addresses of the CURRENT descent; every key this
- * walk adds is removed on the way out, whichever exit is taken — sibling
- * slots routinely share targets (one profile linked from `profiles`, `mru`,
- * and `defaultProfile` at once), and a leftover key would misread the
- * second sibling as a cycle. The repeat-address guard is the walk's
- * termination backstop, and the reason it is exported: the staging
- * materialization happens to throw on the cyclic shapes reachable today
- * before any walk runs, so only a direct test can exercise termination.
+ * `chain` carries the addresses visited within one alias sequence, including
+ * any addresses the caller supplies. Every key this walk adds is removed on
+ * exit, preserving the caller's set. The overlay starts a fresh chain for each
+ * link it resolves. The repeat-address guard terminates alias-only cycles;
+ * direct callers can exercise it without first materializing the linked graph.
  */
 export function readStoredLinkChainRaw(
   tx: IExtendedStorageTransaction,
@@ -236,8 +234,13 @@ function overlayUnreadableLinkPlaceholdersInternal(
         materialized,
         context,
       );
+    // The same snapshot also reuses an unavailable raw read's unchanged value.
     byValue.set(materialized, result);
     return result;
+  }
+  // The validator judges instances whole, so preserve its input for that verdict.
+  if (raw instanceof FabricInstance || materialized instanceof FabricInstance) {
+    return materialized;
   }
   if (
     !isWalkableObjectOrArray(raw) || !isWalkableObjectOrArray(materialized)

@@ -674,9 +674,10 @@ them. Fields the schema does not inspect need no recursive expansion. The view
 preserves shared containers and cycles, keyed by normalized stored location and
 materialized snapshot so distinct defaults stay distinct. A link materialized
 as `undefined` reads as an opaque placeholder; literal absences, readable values,
-and opaque Cell handles retain their validation rules. A recursive schema over
-a cyclic value still reaches the validator's recursion guard. The view is local
-to the validation and changes no stored or materialized input.
+and opaque Cell handles retain their validation rules. `FabricInstance` values
+remain whole for the validator to judge. A recursive schema over a cyclic value
+still reaches the validator's recursion guard. The view is local to the validation
+and changes no stored or materialized input.
 
 A source update can preserve a committed direct handle under an unchanged
 consumer input contract. The serialized link values must compare equal under
