@@ -149,10 +149,11 @@ What works today:
   - `loom_compose`, `loom_inspect`, and `loom_authoring_context` (present only
     with `--loom-authoring-config`; collections and verified commit receipts,
     separate from Pattern Instance deployment)
-  - `query_docs` (present when the run resolves a documentation corpus; asks one
-    question of operator-provisioned reference material and returns a bounded
-    answer plus inert citations, never the documents; see
-    [Querying the documentation corpus](#querying-the-documentation-corpus))
+  - `research` (present when the run resolves a documentation corpus or pattern
+    index; performs bounded, iterative Common Fabric research over exact docs,
+    skills, published pattern source and dependencies, and safe handle shapes,
+    then returns a host-admitted implementation kit; see
+    [Researching Common Fabric](#researching-common-fabric))
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
@@ -176,8 +177,8 @@ What works today:
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser/web_fetch/web_search/pattern-author child profiles, retained
-  child run references, and a sanitized summary/state return channel, plus the
-  internal `explore` profile `query_docs` runs, which a delegation cannot name
+  child run references, and a sanitized summary/state return channel, plus a
+  bounded private research loop that is not a delegable profile
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -1204,10 +1205,11 @@ the skill and what it said.
 
 `delegate_task` also takes up to eight optional `patternRefs`, each containing a
 `patternId` and an optional bounded parent note. The harness resolves an id only
-from successful `search_patterns` results retained by that parent run and
-restored from its persisted transcript on resume; it neither trusts
-model-retyped metadata nor fetches the index during delegation. A known id gives
-the child a neutral generated block with the record's kind, quality,
+from successful `search_patterns` results or host-confirmed `research` records
+retained by that parent run; search results are restored from its persisted
+transcript on resume, while research records live in run state. It neither
+trusts model-retyped metadata nor fetches the index during delegation. A known
+id gives the child a neutral generated block with the record's kind, quality,
 description, match evidence, import hint, argument shape, result shape, and the
 note verbatim. An id absent from the parent's record is omitted from child
 context and returned by name in `patternRefRefusals` with reason
@@ -1219,60 +1221,77 @@ somewhere, attached metadata accompanies it, and trusted-side code resolves it.
 They deliberately remain separate until experience supplies a concrete reason to
 unify them.
 
-### Querying the documentation corpus
+### Researching Common Fabric
 
-`query_docs` takes one question and returns a short answer with the sections it
-came from. It is on the parent surface and on the `pattern-author` child's,
-which is where it matters: that child has no `delegate_task` and the subagent
-manifest pins the depth at one, so an explore agent is a tool on its surface or
-it is unreachable from the one context that needs it.
+`research` takes a whole Common Fabric task or a focused follow-up and returns a
+structured implementation kit. It is on the parent surface and the
+`pattern-author` child's surface whenever the run can supply a documentation
+corpus or pattern index. This is a private tool loop, not web research and not a
+delegable child profile. The gateway transport uses `gemini-3.5-flash`; the
+owner-authenticated Codex transport uses `gpt-5.6-luna`.
 
-The corpus is Markdown split at headings into sections, read on the host from
-the roots the run resolved and never through the sandbox mount. Configure them
-with a repeatable `--docs-corpus-root <path>`. A run that names none and is
-running out of a labs checkout defaults to that checkout's `docs/common`,
-`docs/development`, and `skills`, so a console started with no documentation
-configuration is not documentation-blind. Either way the resolved roots and
-where they came from are recorded in `run-state.json` under `docsCorpus` and
-printed in operator output as a `docsCorpus:` line; a run that resolved none
-says so on that line, and `query_docs` is absent from its tool surface.
+The private model can search the operator-provisioned docs and skills corpus,
+open exact section windows, search the published pattern index, inspect a
+pattern with its complete multi-file program and dependencies, open bounded
+source-file windows, and inspect the shape of general handles available to the
+calling run. It cannot delegate, execute commands, write files, browse the web,
+or mutate Fabric. Documentation sections remain complete at ingestion; an exact
+read returns `nextOffset` until the section is finished, so an example after the
+first 4,000 characters is reachable rather than silently lost.
 
-Every section the loader admits carries an integrity endorsement — a `Resource`
-atom of class `CommonFabricHarnessOperatorProvisionedReference` whose subject is
-the root it was read under, minted from the operator's own configuration and
-never from the read bytes. Only an endorsed section is eligible for an answer,
-so text written into the workspace by an earlier child is not corpus and cannot
-reach one. Operator-provisioned documentation is trusted for confidentiality —
-we mount it, and it carries no secret — and endorsed for integrity provenance,
-which is what lets a reader of a run tell reference material apart from
-workspace text rather than trusting the mount.
+The documentation corpus is Markdown split at headings and read on the host from
+the roots the run resolved, never through the sandbox mount. Configure it with
+repeatable `--docs-corpus-root <path>` flags. A run from a labs checkout that
+names no root defaults to that checkout's `docs/common`, `docs/development`, and
+`skills`. The resolved roots and their source are recorded under `docsCorpus` in
+`run-state.json` and printed in operator output. Every admitted section carries
+a `Resource` integrity atom of class
+`CommonFabricHarnessOperatorProvisionedReference` naming its root. Workspace
+text cannot enter this corpus.
 
-The answer is produced by the `explore` profile: a cheap model with no tools at
-all, one turn, handed the selected sections and nothing else. It is one model
-call rather than a child run, so no subagent is spawned and the depth-one
-invariant is untouched; the call is recorded like every other, as a model
-attempt in the run report and with its tokens in the run's descendant usage.
-Which cheap model answers is the run's transport's to say — a transport serves
-only its own models, and a name it does not serve is a refused request rather
-than a fallback — so the gateway answers on `gemini-3.5-flash` and the Codex
-Responses transport on `gpt-5.6-luna`. The model that answered is on the
-artifact, in `exploreRecord.model`. A call that ended with no answer — the
-provider refused it, or what came back was not a reply the tool could read — is
-counted on the run, its children's included, and printed in operator output as a
-`docsQueryFailures:` line: the model reads an ordinary tool error and carries
-on, so without that count a documentation-blind run leaves no trace an operator
-sees. What was sent — the model, the question, each section by path and heading
-with the endorsement atoms it carries, and the two messages verbatim — is kept
-on the tool-output artifact under the call's output id as `exploreRecord`, and
-stripped before the answer reaches the caller.
+Search results are leads, not citations. The private loop must open the exact
+material it relies on. Each admitted read records its source kind, exact
+location and range, total length, content digest, and a source id derived from
+that identity. Repeated headings remain distinct. An inspected pattern is
+confirmed only after its indexed source computes to the requested pattern id;
+the narrowly identified compiler case unsupported by the light identity path is
+recorded as deferred rather than misreported as verified. An identity mismatch
+is always refused.
 
-A citation is a path and a heading. It carries no text and no handle, so
-following one is a separate `read_file`. A citation naming a section the corpus
-does not hold is dropped rather than returned.
+The returned kit distinguishes `complete` from `incomplete`, recommends direct
+run, composition, authoring, or a focused API answer, and carries admitted
+patterns, described external-handle bindings, ordered steps, rules,
+verification, exact citations, and explicit blockers. Direct-run and composition
+kits require verified published source and a complete invocation or source
+recipe. Authoring kits require complete source. Focused API answers may consist
+only of cited rules. `inputs` contains only existing general handles that the
+loop successfully inspected; types, defaults, literals, and new local state
+belong in the recipe, and `[]` is correct when no external data is required.
+Every API shown by an example, comments included, must cite an exact opened
+read. Routine reversible choices are stated as assumptions; only real blockers
+belong in `missing`.
 
-Not built yet: the optional `fullTextRef`, a capability-scoped handle over the
-retrieved text minted by the route `acquire_skill` uses, and any policy that
-would declassify it.
+The model-facing tool result contains the admitted kit and explicit guidance not
+to treat an incomplete kit as complete. The full private transcript, exact read
+provenance, confirmed pattern records, handle descriptions, and consumed budgets
+remain in the tool-output artifact under `researchRecord`; the transcript
+omission record points to that field. Provider errors, cancellation, budget
+exhaustion, and malformed synthesis retain the same partial record and increment
+`researchFailures`. Private token use is included in total run usage.
+
+Successful kits and their host-confirmed records are retained in run state and
+passed intact to a delegated child. Handles bound by a kit are seeded into that
+child even when its goal does not repeat their tokens. A pattern author starts
+from an inherited kit and uses `research` only for unresolved follow-ups rather
+than repeating the initial pass. Locally authored source artifacts record the
+research run ids that shaped them. The current pattern-index publication API has
+no research-association field, so that provenance remains local instead of being
+sent as an ignored index property.
+
+`query_docs` remains accepted only as a CLI or persisted-policy input alias and
+is normalized to `research` at the use boundary. Existing transcript and run
+state bytes are not rewritten, and the model is never offered two competing
+documentation tools.
 
 ### Running patterns against a Fabric space
 

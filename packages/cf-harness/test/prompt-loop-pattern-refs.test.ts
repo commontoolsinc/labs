@@ -15,6 +15,8 @@ import { CfHarnessEngine } from "../src/engine.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
+import type { HarnessResearchRunSummary } from "../src/contracts/research.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -427,7 +429,7 @@ Context:
 Keep the answer concise.
 
 Published pattern references selected by the parent:
-These records from the parent's earlier searches are available for this delegated task.
+These records from the parent's earlier searches or host-confirmed research are available for this delegated task.
 
 Pattern 1: pat-expenses
 Kind: part
@@ -508,5 +510,132 @@ Use this as available evidence; do not assume it is mandatory.`,
     const result = await runAttachedDelegation();
 
     expect(result.recorded).toEqual([SEARCH_HIT.patternId]);
+  });
+
+  it("rehydrates a host-confirmed research pattern from resumed run state", async () => {
+    const confirmedPattern = {
+      patternId: PATTERN_RECORD.patternId,
+      ownerDid: PATTERN_RECORD.ownerDid,
+      createdAt: PATTERN_RECORD.createdAt,
+      description: PATTERN_RECORD.description,
+      hashtags: PATTERN_RECORD.hashtags,
+      dependencies: [],
+      importHint: `import X from "cf:pattern:${SEARCH_HIT.patternId}"`,
+      argumentType: "{ amounts: number[] }",
+      resultType: "{ total: number }",
+      main: "/main.tsx",
+      files: ["/main.tsx"],
+      sourceIdentityVerified: true,
+      identityVerification: {
+        status: "verified",
+        method: "light-entry-identity",
+      },
+    } as const;
+    const researchRun = {
+      type: "cf-harness.research-run",
+      researchRunId: "run-research-resume:research:1",
+      outputId: "run-research-resume:research:1",
+      kit: {
+        status: "complete",
+        task: "Reuse the expense total.",
+        summary: "Run the confirmed pattern.",
+        recommendation: {
+          kind: "direct-run",
+          rationale: "Its indexed source identity was verified.",
+        },
+        inputs: [],
+        patterns: [confirmedPattern],
+        steps: ["Run the published pattern."],
+        example: {
+          kind: "run-pattern-input",
+          content: JSON.stringify({
+            patternId: SEARCH_HIT.patternId,
+            inputs: { amounts: [] },
+          }),
+          sourceIds: ["pattern-metadata:resume"],
+        },
+        rules: [],
+        verification: ["Check the total."],
+        sources: [{
+          sourceId: "pattern-metadata:resume",
+          kind: "pattern-metadata",
+          location: `cf:pattern:${SEARCH_HIT.patternId}`,
+          offset: 0,
+          end: 1,
+          totalChars: 1,
+          digest: `sha256:${"0".repeat(64)}`,
+        }],
+        missing: [],
+      },
+      confirmedPatterns: [confirmedPattern],
+      describedHandles: [],
+      completedAt: "2026-09-14T00:00:00.000Z",
+    } satisfies HarnessResearchRunSummary;
+    const resumedState: HarnessRunState = {
+      runId: "run-research-resume",
+      status: "failed",
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:01.000Z",
+      cfcEnforcementMode: "disabled",
+      currentDir: "/workspace",
+      model: "gpt-5.4",
+      researchRuns: [researchRun],
+      policyEvents: [],
+      toolOutputs: [],
+      failureRecords: [],
+    };
+    const requests: unknown[] = [];
+    const turns = [
+      toolCallTurn("call-delegate", "delegate_task", {
+        goal: "Use the confirmed research pattern.",
+        patternRefs: [{ patternId: SEARCH_HIT.patternId }],
+      }),
+      assistantTurn("Child used the confirmed pattern."),
+      assistantTurn("Parent received the result."),
+    ];
+    const fetchFn: typeof fetch = (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      const turn = turns[requests.length - 1];
+      if (turn === undefined) {
+        throw new Error("scripted model ran out of turns");
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
+          status: 200,
+        }),
+      );
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: resumedState,
+      }),
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+      fetchFn,
+    });
+
+    const result = await loop.runTranscript({
+      transcript: [{ role: "user", content: "Continue the resumed run." }],
+      promptSlotBinding: directPromptSlotBinding,
+    });
+    const childPrompt = chatViewOfRequest(requests[1]).messages.at(-1)
+      ?.content ?? "";
+    const delegateMessage = result.transcript.find((message) =>
+      message.role === "tool" && message.toolName === "delegate_task"
+    );
+    if (delegateMessage?.role !== "tool") {
+      throw new Error("expected a delegate result");
+    }
+    const delegateOutput = JSON.parse(delegateMessage.content) as {
+      patternRefRefusals?: unknown;
+    };
+
+    expect(childPrompt).toContain(SEARCH_HIT.patternId);
+    expect(childPrompt).toContain(PATTERN_RECORD.description);
+    expect(childPrompt).toContain(researchRun.researchRunId);
+    expect(delegateOutput.patternRefRefusals).toBeUndefined();
+    expect(result.runState.researchRuns).toEqual([researchRun]);
   });
 });

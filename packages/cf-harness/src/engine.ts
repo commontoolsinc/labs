@@ -36,9 +36,10 @@ import {
   type HarnessDocsCorpus,
   loadHarnessDocsCorpus,
 } from "./docs-corpus/corpus.ts";
-import type { HarnessExploreQueryRunner } from "./docs-corpus/explore.ts";
+import type { HarnessResearchRunner } from "./research/runner.ts";
 import type { HarnessToolContext } from "./tools/types.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
+import type { HarnessResearchRunSummary } from "./contracts/research.ts";
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
@@ -145,8 +146,10 @@ import type {
 import { resolvePatternRefs } from "./pattern-refs.ts";
 import {
   addHarnessDocsQueryFailures,
+  addHarnessResearchFailures,
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
+  appendHarnessResearchRun,
   appendToHarnessRunState,
   createHarnessRunState,
   type HarnessRunState,
@@ -221,9 +224,9 @@ import type {
   SearchSkillsToolOutput,
 } from "./tools/search-skills.ts";
 import {
-  type QueryDocsToolInput,
-  type QueryDocsToolOutput,
-} from "./tools/query-docs.ts";
+  type ResearchToolInput,
+  type ResearchToolOutput,
+} from "./tools/research.ts";
 import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
@@ -255,7 +258,7 @@ export interface BuiltinToolInputMap {
   record_feedback: RecordFeedbackToolInput;
   search_skills: SearchSkillsToolInput;
   acquire_skill: AcquireSkillToolInput;
-  query_docs: QueryDocsToolInput;
+  research: ResearchToolInput;
   loom_compose: LoomComposeToolInput;
   loom_inspect: LoomReadToolInput;
   loom_authoring_context: LoomReadToolInput;
@@ -279,7 +282,7 @@ export interface BuiltinToolOutputMap {
   record_feedback: RecordFeedbackToolOutput;
   search_skills: SearchSkillsToolOutput;
   acquire_skill: AcquireSkillToolOutput;
-  query_docs: QueryDocsToolOutput;
+  research: ResearchToolOutput;
   loom_compose: LoomAuthoringToolOutput;
   loom_inspect: LoomAuthoringToolOutput;
   loom_authoring_context: LoomAuthoringToolOutput;
@@ -326,6 +329,12 @@ export interface CreateHarnessEngineOptions
    * it.
    */
   inheritedFabricSessionPosture?: CfcPostureReport;
+
+  /**
+   * Parent research retained verbatim for a delegated child. These are
+   * admitted kits and host-confirmed records, not the private read transcript.
+   */
+  inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
 
   /**
    * Injection seam for the render gate's probe runtime, mirroring
@@ -523,7 +532,7 @@ export class CfHarnessEngine {
   readonly #skillsShAcquisitionClientFactory?:
     HarnessSkillsShAcquisitionClientFactory;
   #docsCorpus?: Promise<HarnessDocsCorpus>;
-  #exploreQueryRunner?: HarnessExploreQueryRunner;
+  #researchRunner?: HarnessResearchRunner;
   #patternIndexLedger?: PatternIndexLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
@@ -984,6 +993,9 @@ export class CfHarnessEngine {
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
+        ...(options.inheritedResearchRuns !== undefined
+          ? { researchRuns: [...options.inheritedResearchRuns] }
+          : {}),
         skillsRoot: this.config.skillsRootRecord,
         lineage: options.lineage,
         now: this.#now(),
@@ -1115,7 +1127,7 @@ export class CfHarnessEngine {
     return this.#skillsShSearchClientFactory;
   }
 
-  /** Whether this run configures a documentation corpus for `query_docs`. */
+  /** Whether this run configures a documentation corpus for research. */
   get docsCorpusAvailable(): boolean {
     return (this.docsCorpus?.roots ?? []).length > 0;
   }
@@ -1144,12 +1156,12 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Gives this run a way to answer a documentation question. The model belongs
-   * to the prompt loop, so the loop supplies the runner and the engine carries
-   * it to the tool.
+   * Gives this run a bounded Common Fabric research loop. The model belongs to
+   * the prompt loop, so the loop supplies the runner and the engine carries it
+   * to the tool.
    */
-  setExploreQueryRunner(runner: HarnessExploreQueryRunner): void {
-    this.#exploreQueryRunner = runner;
+  setResearchRunner(runner: HarnessResearchRunner): void {
+    this.#researchRunner = runner;
   }
 
   /** Whether this run can acquire a pinned external skill. */
@@ -1189,13 +1201,32 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Counts documentation queries this run could not get an answer for, its
-   * descendants' included. A `query_docs` failure is a normal tool error to
-   * the model that asked, so without this a docs-blind run leaves no trace in
-   * the one place an operator reads.
+   * Counts legacy documentation-query failures retained by resumed run state.
+   * New calls use {@link recordResearchFailures}; this method remains so a
+   * parent can roll up an older child's durable count without rewriting it.
    */
   recordDocsQueryFailures(count: number): HarnessRunState {
     this.#runState = addHarnessDocsQueryFailures(
+      this.#runState,
+      count,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
+  /** Retains one admitted implementation kit for resume and delegation. */
+  recordResearchRun(run: HarnessResearchRunSummary): HarnessRunState {
+    this.#runState = appendHarnessResearchRun(
+      this.#runState,
+      run,
+      this.#now(),
+    );
+    return this.getRunState();
+  }
+
+  /** Counts bounded research calls that returned no kit. */
+  recordResearchFailures(count: number): HarnessRunState {
+    this.#runState = addHarnessResearchFailures(
       this.#runState,
       count,
       this.#now(),
@@ -2289,9 +2320,16 @@ export class CfHarnessEngine {
       ...(this.docsCorpusAvailable
         ? { getDocsCorpus: () => this.getDocsCorpus() }
         : {}),
-      ...(this.#exploreQueryRunner !== undefined
-        ? { runExploreQuery: this.#exploreQueryRunner }
+      ...(this.#researchRunner !== undefined
+        ? { runResearch: this.#researchRunner }
         : {}),
+      researchRuns: this.#runState.researchRuns ?? [],
+      recordResearchRun: (run: HarnessResearchRunSummary) => {
+        this.recordResearchRun(run);
+      },
+      recordResearchFailure: () => {
+        this.recordResearchFailures(1);
+      },
       ...(this.#skillsShSearchClientFactory !== undefined
         ? { getSkillsShSearchClient: this.#skillsShSearchClientFactory }
         : {}),

@@ -98,7 +98,7 @@ export interface HarnessSessionConfig {
   /** Skills preloaded into the run's opening context, by name. */
   skillNames: readonly string[];
 
-  /** Reference trees `query_docs` answers out of, and where they came from. */
+  /** Reference trees `research` may inspect, and where they came from. */
   docsCorpus?: HarnessDocsCorpusRecord;
 
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];

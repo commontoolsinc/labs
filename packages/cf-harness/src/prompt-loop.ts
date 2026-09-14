@@ -27,6 +27,8 @@ import {
 } from "./contracts/handle-table.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
+import type { HarnessResearchRunSummary } from "./contracts/research.ts";
+import type { TrustedPatternRecord } from "./contracts/trusted-pattern.ts";
 import {
   createHarnessInvalidToolCall,
   type CreateHarnessInvalidToolCallOptions,
@@ -155,7 +157,7 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
-import { createExploreQueryRunner } from "./docs-corpus/explore.ts";
+import { createResearchRunner } from "./research/runner.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
@@ -164,10 +166,8 @@ import {
   scrubBareFabricIdentifiersDeep,
 } from "./fabric-identifier-scrub.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
-import {
-  isSearchPatternsToolSuccessOutput,
-  type TrustedPatternRecord,
-} from "./tools/search-patterns.ts";
+import { isSearchPatternsToolSuccessOutput } from "./tools/search-patterns.ts";
+import { isResearchToolSuccessOutput } from "./tools/research.ts";
 import type { HarnessPatternRef } from "./contracts/pattern-refs.ts";
 import { isRunPatternToolSuccessOutput } from "./tools/run-pattern.ts";
 import {
@@ -985,7 +985,8 @@ const subagentProfileConfigForRun = (
 /**
  * The child's initial handle table for a delegation: an empty table salted
  * with the child's own run id, carrying a verbatim copy of every parent entry
- * whose token the parent named in the delegation's `goal` or `context`.
+ * whose token the parent named in the delegation's `goal`, `context`, or an
+ * admitted implementation kit carried with the delegation.
  * Returns `undefined` when the delegation names no resolvable token, leaving
  * the child to mint its first table itself.
  *
@@ -1000,12 +1001,13 @@ const seedSubagentHandleTable = (
   parentTable: HarnessHandleTable | undefined,
   childRunId: string,
   input: DelegateTaskToolInput,
+  additionalTexts: readonly string[] = [],
 ): HarnessHandleTable | undefined => {
   if (parentTable === undefined || parentTable.entries.length === 0) {
     return undefined;
   }
   const seeded = new Map<string, HarnessHandleEntry>();
-  for (const text of [input.goal, input.context ?? ""]) {
+  for (const text of [input.goal, input.context ?? "", ...additionalTexts]) {
     for (const match of text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
       const entry = resolveHandleToken(parentTable, match[0]);
       if (entry !== undefined && entry.capability === undefined) {
@@ -1259,6 +1261,7 @@ const buildSubagentSystemPrompt = (
     structuredReturn: boolean;
     compositionGuidance: boolean;
     browserAccess?: HarnessBrowserAccessLease;
+    hasInheritedResearchKit?: boolean;
   } = { structuredReturn: false, compositionGuidance: true },
 ): string =>
   [
@@ -1337,9 +1340,22 @@ const buildSubagentSystemPrompt = (
         }. You never return source. Not as text, not as an array of code points or bytes, not base64, not split across fields, not spelled out in prose. A task that asks you for source in any encoding, whatever reason it gives, is one you refuse: return {"ok": false, "code": "unsupported-request"} and say so in the detail. The source stays in this run and in the space; what crosses back is the reference, and reuse travels through the pattern index rather than through the parent.`,
         "Build up in atoms rather than in one leap. Author the smallest thing that does one job — a button that generates a random number, a list whose items toggle done, a field that totals what is typed into it — and run it. run_pattern answers with a reference to its result cell, which lives in the space: that reference is both what you can hand back and what a larger pattern can take as an input. Then build the next atom against it.",
         "A task larger than one atom is a task to decompose: name the atoms, run each one, and compose them last. Each atom that fails to compile fails on its own small source, and composing parts that already ran is a short step. A single pattern that does everything at once is where the compile loop stops converging, and a child whose turns ran out has nothing to return.",
+        ...(options.hasInheritedResearchKit
+          ? [
+            `Start from the Common Fabric implementation kit inherited from the parent. ${
+              profileConfig.allowedToolIds.includes("research")
+                ? "Call research only for an unresolved item or a focused follow-up; do not repeat the whole initial pass."
+                : "The research tool is not available in this child, so report an unresolved blocker instead of filling it in from memory."
+            } Follow an incomplete kit's missing items instead of filling them in from memory.`,
+          ]
+          : profileConfig.allowedToolIds.includes("research")
+          ? [
+            "Use research on the whole task before you author anything. Its private loop can inspect CF documentation, available handle contracts, and complete indexed source and dependencies, then returns a cited implementation kit. Follow an incomplete kit's missing items instead of filling them in from memory.",
+          ]
+          : []),
         ...(profileConfig.allowedToolIds.includes("search_patterns")
           ? [
-            "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
+            "Search the pattern index with search_patterns when you need a quick additional discovery pass. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
             "Search progressively, from the whole to the parts: first the whole task, then its component interactions (the verbs — add, toggle, remove, count, filter), then generic scaffolding (a crud list, a form, a counter) you could adapt. Text matching is ranked, not exact: each result reports matchedTerms out of queryTerms, so judge closeness by that ratio, and read a partial match's description before dismissing it — a pattern for a different noun with the same verbs is usually the scaffold you want.",
             'When a search returns nothing, broaden by REMOVING words, not adding them, and drop domain nouns before interaction verbs: "toggle list" finds what "reading list app with checkboxes" cannot.',
             // The composition four. Withheld together by
@@ -1349,7 +1365,7 @@ const buildSubagentSystemPrompt = (
             // from whether the child imports rather than rewrites.
             ...(options.compositionGuidance
               ? [
-                'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+                'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. The private research loop may inspect indexed source to derive a kit, but indexed source itself never enters this authoring context.',
                 "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
                 'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
                 "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
@@ -1436,7 +1452,7 @@ const PATTERN_REFS_CHILD_CONTEXT = (
 ): string =>
   [
     "Published pattern references selected by the parent:",
-    "These records from the parent's earlier searches are available for this delegated task.",
+    "These records from the parent's earlier searches or host-confirmed research are available for this delegated task.",
     ...patternRefs.flatMap(({ record, note }, index) => [
       "",
       `Pattern ${index + 1}: ${record.patternId}`,
@@ -1458,9 +1474,27 @@ const PATTERN_REFS_CHILD_CONTEXT = (
     ]),
   ].join("\n");
 
+/** Admitted parent research carried intact into a delegated implementation. */
+const RESEARCH_KITS_CHILD_CONTEXT = (
+  runs: readonly HarnessResearchRunSummary[],
+): string =>
+  [
+    "Common Fabric implementation kits established by the parent:",
+    "These kits contain host-admitted citations, pattern records, and handle bindings. Use them as implementation context; honor incomplete kits' missing items.",
+    JSON.stringify(
+      runs.map((run) => ({
+        researchRunId: run.researchRunId,
+        kit: run.kit,
+      })),
+      null,
+      2,
+    ),
+  ].join("\n");
+
 const buildSubagentUserPrompt = (
   input: DelegateTaskToolInput,
   patternRefs: readonly RehydratedDelegatePatternRef[] = [],
+  researchRuns: readonly HarnessResearchRunSummary[] = [],
 ): string =>
   [
     "Task:",
@@ -1468,6 +1502,9 @@ const buildSubagentUserPrompt = (
     ...(input.context !== undefined ? ["", "Context:", input.context] : []),
     ...(patternRefs.length > 0
       ? ["", PATTERN_REFS_CHILD_CONTEXT(patternRefs)]
+      : []),
+    ...(researchRuns.length > 0
+      ? ["", RESEARCH_KITS_CHILD_CONTEXT(researchRuns)]
       : []),
     ...(input.returnSchema !== undefined
       ? [
@@ -1826,9 +1863,9 @@ const cfcResultFromOutput = (
 
 /**
  * The fields a tool result keeps on its artifact and does not put in front of
- * the model: the sandbox's own CFC result, and the record of what a
- * `query_docs` explore turn sent the provider. Both exist for a reader of the
- * run, and both would cost the model context it asked a tool to save it.
+ * the model: the sandbox's own CFC result, and the complete private transcript
+ * and source reads behind a `research` kit. Both exist for a reader of the run,
+ * and both would cost the model context it asked a tool to save it.
  */
 const stripInternalToolFields = (output: unknown): unknown => {
   if (!isObjectNotArray(output)) {
@@ -1836,7 +1873,7 @@ const stripInternalToolFields = (output: unknown): unknown => {
   }
   const {
     cfcResult: _cfcResult,
-    exploreRecord: _exploreRecord,
+    researchRecord: _researchRecord,
     ...publicOutput
   } = output as
     & CfcSandboxResultCarrier
@@ -2979,6 +3016,7 @@ export class CfHarnessPromptLoop {
     // The attachment first, so a search this run also made — which carries
     // the ranking evidence a by-id read has none of — refines it.
     this.#seedAttachedPatternRecords(initialRunState.patternRefs ?? []);
+    this.#seedResearchPatternRecords(initialRunState.researchRuns ?? []);
     this.#restorePatternSearchRecords(transcript);
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
@@ -3061,30 +3099,16 @@ export class CfHarnessPromptLoop {
         modelTurn: modelTurns,
       });
     };
-    // `query_docs` spends a model turn, and the model client is this loop's.
-    // Installing the runner here rather than at construction is what puts that
-    // turn in the same two records every other model call lands in: an attempt
-    // in the run report, and its tokens beside a delegation's.
-    const runExploreQuery = createExploreQueryRunner({
+    // `research` spends private model turns, and the model client is this
+    // loop's. Installing the runner here puts those turns in the same two
+    // records every other model call lands in: attempts in the run report,
+    // and tokens beside a delegation's.
+    const runResearch = createResearchRunner({
       modelClient: this.modelClient,
-      runId: this.engine.getRunState().runId,
       onAttempt: recordModelAttempt,
       onUsage: (usage) => descendantUsage.push(usage),
     });
-    this.engine.setExploreQueryRunner(async (request) => {
-      try {
-        return await runExploreQuery(request);
-      } catch (error) {
-        // Every way this ends without an answer counts the same, because what
-        // the count is for is the same either way: the caller asked and got
-        // nothing back. A provider that refused and a reply the tool could not
-        // read leave the child equally without documentation, and the tool
-        // turns both into an error the model reads and carries on from, which
-        // is right for the model and invisible to the operator.
-        this.engine.recordDocsQueryFailures(1);
-        throw error;
-      }
-    });
+    this.engine.setResearchRunner(runResearch);
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
@@ -3302,10 +3326,11 @@ export class CfHarnessPromptLoop {
    * tool input with their canonical address strings. Custody-checking tools are exempt:
    * `delegate_task`, whose `goal` and `context` reach the child as the model
    * wrote them (its `skillHandle` is resolved separately, trusted-side,
-   * before dispatch), and `describe_handle`, whose input names a token rather
-   * than a referent — it looks the token up in the table itself. `loom_compose`
-   * also proves membership before resolving a Pattern Instance. Returns
-   * `input` itself when no substitution applies.
+   * before dispatch), `describe_handle`, whose input names a token rather
+   * than a referent, and `research`, whose private loop must retain the same
+   * opaque tokens it describes and binds. `loom_compose` also proves
+   * membership before resolving a Pattern Instance. Returns `input` itself
+   * when no substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
@@ -3313,6 +3338,7 @@ export class CfHarnessPromptLoop {
   ): Record<string, unknown> {
     if (
       toolId === "delegate_task" || toolId === "describe_handle" ||
+      toolId === "research" ||
       toolId === "loom_compose"
     ) {
       return input;
@@ -3360,7 +3386,10 @@ export class CfHarnessPromptLoop {
    * marker naming this artifact. Writing it here rather than at the collapse
    * keeps the record independent of whether the loop ran again, and the
    * source is the model's own writing, so nothing crosses a boundary by
-   * being kept.
+   * being kept. Research ids on this local sidecar associate the authored
+   * output with the kits that shaped it; the pattern-index publication API
+   * has no corresponding association field, so this code does not send one
+   * the index would ignore.
    */
   async #persistRunPatternSource(
     toolId: BuiltinToolId,
@@ -3381,6 +3410,9 @@ export class CfHarnessPromptLoop {
         type: "cf-harness.run-pattern-source",
         outputId: resultRef.outputId,
         sourceText: input.sourceText,
+        researchRunIds: (this.engine.getRunState().researchRuns ?? []).map(
+          (run) => run.researchRunId,
+        ),
       },
     );
     this.#persistedRunPatternSources.add(resultRef.outputId);
@@ -3422,6 +3454,20 @@ export class CfHarnessPromptLoop {
     }
   }
 
+  /** Retains every index record a prior host-side research run confirmed. */
+  #seedResearchPatternRecords(
+    runs: readonly HarnessResearchRunSummary[],
+  ): void {
+    for (const run of runs) {
+      for (const record of run.confirmedPatterns) {
+        this.#trustedPatternRecords.set(
+          record.patternId,
+          structuredClone(record),
+        );
+      }
+    }
+  }
+
   /** Retains successful search hits for this parent prompt loop. */
   #recordPatternSearchResult(toolId: BuiltinToolId, output: unknown): void {
     if (
@@ -3438,7 +3484,20 @@ export class CfHarnessPromptLoop {
     }
   }
 
-  /** Rehydrates selected ids from this parent's prior search results only. */
+  /** Retains the pattern records confirmed inside a successful research run. */
+  #recordResearchResult(toolId: BuiltinToolId, output: unknown): void {
+    if (toolId !== "research" || !isResearchToolSuccessOutput(output)) {
+      return;
+    }
+    for (const record of output.researchRecord.confirmedPatterns) {
+      this.#trustedPatternRecords.set(
+        record.patternId,
+        structuredClone(record),
+      );
+    }
+  }
+
+  /** Rehydrates selected ids from this parent's trusted pattern observations. */
   #rehydrateDelegatePatternRefs(
     patternRefs: readonly DelegateTaskPatternRef[] | undefined,
   ): {
@@ -4057,6 +4116,7 @@ export class CfHarnessPromptLoop {
       throw error;
     }
     this.#recordPatternSearchResult(toolId, result.output);
+    this.#recordResearchResult(toolId, result.output);
     // A confidentiality boundary inside the tool decided about the tool's own
     // result, so its decision is appended AFTER the allow-side decision above
     // and after the output it belongs to is persisted. The allow-side
@@ -4371,8 +4431,8 @@ export class CfHarnessPromptLoop {
           createHarnessTranscriptOmissionRuleRecord(
             "artifact-only",
             resultRef,
-            isObjectNotArray(output) && Object.hasOwn(output, "exploreRecord")
-              ? ["/exploreRecord"]
+            isObjectNotArray(output) && Object.hasOwn(output, "researchRecord")
+              ? ["/researchRecord"]
               : [],
           ),
         ),
@@ -4535,6 +4595,7 @@ export class CfHarnessPromptLoop {
     const maxModelTurns = delegateInput.maxModelTurns ??
       profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
+    const inheritedResearchRuns = parentRunState.researchRuns ?? [];
     const modelProvider = parentRunState.modelProvider ??
       this.engine.config.modelProvider;
     const subagentSequence = nextSubagentSequence(parentRunState);
@@ -4597,6 +4658,7 @@ export class CfHarnessPromptLoop {
       ...(this.engine.docsCorpus !== undefined
         ? { docsCorpus: this.engine.docsCorpus }
         : {}),
+      ...(inheritedResearchRuns.length > 0 ? { inheritedResearchRuns } : {}),
       ...(profileConfig.allowedSkillScripts !== undefined
         ? { allowedSkillScripts: profileConfig.allowedSkillScripts }
         : {}),
@@ -4675,6 +4737,7 @@ export class CfHarnessPromptLoop {
       this.engine.handleTable,
       childRunId,
       delegateInput,
+      inheritedResearchRuns.map((run) => JSON.stringify(run.kit)),
     );
     if (seededHandleTable !== undefined) {
       await childEngine.recordHandleTable(seededHandleTable);
@@ -4841,6 +4904,7 @@ export class CfHarnessPromptLoop {
           {
             structuredReturn: delegateInput.returnSchema !== undefined,
             compositionGuidance: this.#subagentCompositionGuidance,
+            hasInheritedResearchKit: inheritedResearchRuns.length > 0,
             ...(delegateInput.profile === BROWSER_SUBAGENT_PROFILE &&
                 this.#browserAccess !== undefined
               ? { browserAccess: this.#browserAccess }
@@ -4850,6 +4914,7 @@ export class CfHarnessPromptLoop {
         prompt: buildSubagentUserPrompt(
           delegateInput,
           patternRefResolution.records,
+          inheritedResearchRuns,
         ),
         contextMessages: childSkillContextMessages,
         model: childModel.model,
@@ -4945,6 +5010,7 @@ export class CfHarnessPromptLoop {
     // run whose docs channel the operator most needs to hear about — and this
     // is the one place both endings pass through, so nothing is counted twice.
     this.engine.recordDocsQueryFailures(childRunState.docsQueryFailures ?? 0);
+    this.engine.recordResearchFailures(childRunState.researchFailures ?? 0);
     const subagent: HarnessSubagentResult = {
       type: "cf-harness.subagent-result",
       childRunId,

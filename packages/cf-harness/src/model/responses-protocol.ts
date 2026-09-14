@@ -2,7 +2,7 @@ import { encodeHex } from "@std/encoding/hex";
 
 import { sha256 } from "@commonfabric/content-hash";
 
-import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import type { HarnessModelToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessProviderContinuation,
@@ -288,7 +288,7 @@ export const toResponsesInput = async (
 };
 
 export const toResponsesTools = (
-  tools: readonly HarnessToolDescriptor[],
+  tools: readonly HarnessModelToolDescriptor[],
 ): ResponsesInputItem[] =>
   tools.map((tool) => ({
     type: "function",

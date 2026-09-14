@@ -487,11 +487,11 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs | loom_compose | loom_inspect | loom_authoring_context);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | research | loom_compose | loom_inspect | loom_authoring_context);
                                 run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
                                 search_skills and acquire_skill require --skills-registry-url,
-                                query_docs requires a resolved documentation corpus,
+                                research requires a documentation corpus or pattern index (query_docs is a deprecated input alias),
                                 and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
@@ -504,13 +504,13 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
-  --docs-corpus-root <path>     Reference tree query_docs answers out of (repeatable)
+  --docs-corpus-root <path>     Reference tree research may inspect (repeatable)
   --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
-  --no-docs-corpus              Resolve no documentation corpus, so query_docs is absent
+  --no-docs-corpus              Resolve no documentation corpus for research
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
                                 (no default; select one here, through
@@ -665,7 +665,7 @@ const CLI_PARENT_TOOL_IDS = [
   "record_feedback",
   "search_skills",
   "acquire_skill",
-  "query_docs",
+  "research",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -739,7 +739,9 @@ const parseModelProvider = (
 const parseBuiltinToolId = (
   input: string,
 ): BuiltinToolId | undefined =>
-  (CLI_PARENT_TOOL_IDS as readonly string[]).includes(input)
+  input === "query_docs"
+    ? "research"
+    : (CLI_PARENT_TOOL_IDS as readonly string[]).includes(input)
     ? input as BuiltinToolId
     : undefined;
 
@@ -2453,9 +2455,9 @@ const summarizeToolCallArguments = (
         return typeof parsed.id === "string"
           ? `id=${JSON.stringify(parsed.id)}`
           : undefined;
-      case "query_docs":
-        return typeof parsed.question === "string"
-          ? `question=${JSON.stringify(parsed.question)}`
+      case "research":
+        return typeof parsed.task === "string"
+          ? `task=${JSON.stringify(parsed.task)}`
           : undefined;
       case "record_feedback": {
         // The note is the model's prose about a run and can quote what the
@@ -2565,7 +2567,7 @@ export const formatCfHarnessCliResult = (
   const docsCorpus = result.runState.docsCorpus;
   lines.push(
     docsCorpus === undefined || docsCorpus.roots.length === 0
-      ? "docsCorpus: none — query_docs is absent and children cannot look documentation up"
+      ? "docsCorpus: none — research cannot consult local documentation"
       : `docsCorpus: ${docsCorpus.source} ${docsCorpus.roots.join(", ")}`,
   );
   const skillsRoot = result.runState.skillsRoot;
@@ -2577,7 +2579,13 @@ export const formatCfHarnessCliResult = (
   const docsQueryFailures = result.runState.docsQueryFailures ?? 0;
   if (docsQueryFailures > 0) {
     lines.push(
-      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children that ended with no answer`,
+      `docsQueryFailures: ${docsQueryFailures} — legacy query_docs calls in this run or its children that ended with no answer`,
+    );
+  }
+  const researchFailures = result.runState.researchFailures ?? 0;
+  if (researchFailures > 0) {
+    lines.push(
+      `researchFailures: ${researchFailures} — research calls in this run or its children that returned no kit`,
     );
   }
   if (

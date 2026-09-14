@@ -1,5 +1,5 @@
 /**
- * The documentation corpus `query_docs` answers out of: how a Markdown file
+ * The documentation corpus `research` inspects: how a Markdown file
  * becomes addressable sections, which sections a question reaches, and the
  * endorsement that says a section is operator-provisioned reference material.
  */
@@ -72,6 +72,17 @@ describe("docs-corpus", () => {
 
       expect(sections).toHaveLength(1);
       expect(sections[0].text).toContain("# not a heading");
+    });
+
+    it("retains section text beyond 4,000 characters", () => {
+      const marker = "complete example after the former boundary";
+      const sections = splitMarkdownSections(
+        document,
+        `# Long contract\n\n${"prefix ".repeat(700)}${marker}\n`,
+      );
+
+      expect(sections[0].text.length).toBeGreaterThan(4_000);
+      expect(sections[0].text).toContain(marker);
     });
   });
 

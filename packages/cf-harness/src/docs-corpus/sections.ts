@@ -12,9 +12,6 @@ import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { HarnessDocsCorpusSection } from "../contracts/docs-corpus.ts";
 
-/** Longest section text the corpus keeps, in characters. */
-export const MAX_SECTION_TEXT_LENGTH = 4_000;
-
 /** How many sections an answer is built out of unless a caller says fewer. */
 export const DEFAULT_SELECTED_SECTIONS = 8;
 
@@ -58,12 +55,8 @@ const STOP_WORDS = new Set([
 
 const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/;
 
-const trimSectionText = (lines: readonly string[]): string => {
-  const text = lines.join("\n").trim();
-  return text.length > MAX_SECTION_TEXT_LENGTH
-    ? text.slice(0, MAX_SECTION_TEXT_LENGTH)
-    : text;
-};
+const sectionText = (lines: readonly string[]): string =>
+  lines.join("\n").trim();
 
 /**
  * The sections of one Markdown document. Text above the first heading becomes
@@ -84,9 +77,9 @@ export const splitMarkdownSections = (
   let lines: string[] = [];
   let inFence = false;
   const flush = () => {
-    const sectionText = trimSectionText(lines);
-    if (sectionText.length > 0) {
-      sections.push({ ...document, heading, text: sectionText });
+    const text = sectionText(lines);
+    if (text.length > 0) {
+      sections.push({ ...document, heading, text });
     }
     lines = [];
   };
@@ -156,6 +149,38 @@ export interface SelectSectionsOptions {
   maxChars?: number;
 }
 
+/** One section and its deterministic lexical score for a query. */
+export interface RankedDocsCorpusSection {
+  /** Section found in the corpus. */
+  section: HarnessDocsCorpusSection;
+
+  /** Weighted occurrences of the query terms. */
+  score: number;
+}
+
+/**
+ * Every section that lexically matches `query`, in deterministic best-first
+ * order. The section remains whole: callers that expose text apply their own
+ * read window, so ranking a long section never destroys its tail.
+ */
+export const rankSections = (
+  sections: readonly HarnessDocsCorpusSection[],
+  query: string,
+): readonly RankedDocsCorpusSection[] => {
+  const terms = questionTerms(query);
+  if (terms.length === 0) {
+    return [];
+  }
+  return sections
+    .map((section) => ({ section, score: scoreSection(section, terms) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) =>
+      right.score - left.score ||
+      utf8Compare(left.section.path, right.section.path) ||
+      utf8Compare(left.section.heading, right.section.heading)
+    );
+};
+
 /**
  * The sections a question is answered out of, best first. Sections scoring
  * zero are left out rather than padding the selection: a question the corpus
@@ -171,23 +196,11 @@ export const selectSections = (
   question: string,
   options: SelectSectionsOptions = {},
 ): readonly HarnessDocsCorpusSection[] => {
-  const terms = questionTerms(question);
-  if (terms.length === 0) {
-    return [];
-  }
   const maxSections = options.maxSections ?? DEFAULT_SELECTED_SECTIONS;
   const maxChars = options.maxChars ?? MAX_SELECTED_SECTION_CHARS;
-  const scored = sections
-    .map((section) => ({ section, score: scoreSection(section, terms) }))
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) =>
-      right.score - left.score ||
-      utf8Compare(left.section.path, right.section.path) ||
-      utf8Compare(left.section.heading, right.section.heading)
-    );
   const selected: HarnessDocsCorpusSection[] = [];
   let chars = 0;
-  for (const entry of scored) {
+  for (const entry of rankSections(sections, question)) {
     if (selected.length >= maxSections) {
       break;
     }

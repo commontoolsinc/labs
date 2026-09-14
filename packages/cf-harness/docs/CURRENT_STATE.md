@@ -57,30 +57,24 @@ The current package provides:
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
 - one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
-  and `pattern-author` profiles, beside the internal `explore` profile that
-  `query_docs` runs and no delegation may name;
-- documentation a child can look something up in: `query_docs` takes one
-  question, selects the matching sections of the operator-provisioned corpus on
-  the host, and returns a bounded answer with inert path-and-heading citations.
-  A run configures the corpus with a repeatable `--docs-corpus-root`, and a run
-  out of a labs checkout that names none defaults to that checkout's
-  `docs/common`, `docs/development`, and `skills`; the resolved roots and their
-  source are recorded in run state and printed in operator output, and a run
-  that resolves none does not offer the tool. Every admitted section carries a
-  `Resource` integrity endorsement of class
-  `CommonFabricHarnessOperatorProvisionedReference` naming the root it was read
-  under, and only an endorsed section is eligible for an answer, so workspace
-  text cannot reach one. The answer comes from one model call under a profile
-  with no tools, recorded as a model attempt with its tokens in descendant
-  usage, and what was sent is kept on the tool-output artifact and stripped
-  before the caller sees it. That call carries no declaration ceiling and runs
-  no boundary policy evaluation, so it sits outside the posture's caveat policy:
-  the corpus is trusted for confidentiality, which is what makes a sink with no
-  ceiling the right shape for it and also the whole of what holds it — the
-  endorsement is an integrity claim and gates nothing on the way out. Which
-  cheap model answers is resolved from the run's transport, since a transport
-  serves only its own models, and a call that ended with no answer is counted on
-  the run, its children's included, and printed in the operator summary;
+  and `pattern-author` profiles, beside a bounded private `research` loop that
+  no delegation may name;
+- Common Fabric implementation research over the operator-provisioned docs and
+  skills corpus, published pattern metadata and complete multi-file source,
+  dependencies, and safe handle shapes. Private tools support search followed by
+  exact bounded reads with continuation, and cannot execute, write, browse,
+  delegate, or mutate Fabric. The host verifies indexed source identities,
+  admits citations and successfully described handle bindings, and returns a
+  structured complete or incomplete kit with a full invocation or source recipe
+  when one is required. Exact reads and the complete private transcript remain
+  in the tool artifact; the caller receives the derived kit plus explicit
+  incomplete-kit guidance. Partial evidence survives malformed output, provider
+  failure, budget exhaustion, and cancellation, with private usage and failure
+  counts included in the parent record. Kits, confirmed patterns, and bindings
+  persist through delegation, while local authored-source artifacts record the
+  research ids that shaped them. `query_docs` is accepted only as a legacy CLI
+  or persisted-policy alias and is normalized without rewriting old transcript
+  or run-state evidence;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;

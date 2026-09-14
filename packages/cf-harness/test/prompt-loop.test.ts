@@ -5,6 +5,8 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import { decodeBase64 } from "@std/encoding/base64";
 import { parentToolIdsForBacking } from "../src/contracts/tool-descriptor.ts";
 import { join } from "@std/path";
@@ -32,8 +34,15 @@ import {
   type OpenAIChatCompletionRequest,
   OpenAICompatibleGatewayClient,
 } from "../src/gateway/openai-client.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+} from "../src/handle-table.ts";
 import { createHarnessImageAttachment } from "../src/image-attachments.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
+import type {
+  HarnessModelClient,
+  HarnessModelTurnRequest,
+} from "../src/model/client.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
@@ -1258,7 +1267,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "write_file",
       "delegate_task",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
   const lastSentMessage = chatViewOfRequest(secondRequest).messages.at(-1);
@@ -1268,6 +1277,373 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     outputId: createToolOutputId("run-loop", "read_file", 1),
     path: "/workspace/notes/todo.txt",
     content: "hello from file",
+  });
+});
+
+describe("CfHarnessPromptLoop research handoff", () => {
+  it("preserves handles and keeps private evidence in artifacts", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-research-handoff-",
+    });
+    const runId = "run-research-handoff";
+    const docsRoot = join(root, "docs");
+    const artifactRoot = join(root, "artifacts");
+    await Deno.mkdir(docsRoot);
+    await Deno.writeTextFile(
+      join(docsRoot, "api.md"),
+      "# Input contracts\n\nDescribe every opaque handle before binding it.\n",
+    );
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId,
+      });
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-test",
+        artifactStore,
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record",
+          source: "configured",
+          roots: [docsRoot],
+        },
+      });
+      const ref = `/of:fid1:${"R".repeat(43)}`;
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+        {
+          schema: {
+            type: "object",
+            properties: { messages: { type: "array" } },
+          },
+        },
+      );
+      await engine.recordHandleTable(minted.table);
+      const privateRequests: HarnessModelTurnRequest[] = [];
+      let outerTurns = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.runId.includes(":research:")) {
+            privateRequests.push(request);
+            const exactRead = request.transcript.findLast((message) =>
+              message.role === "tool" &&
+              message.toolName === "open_doc_section"
+            );
+            if (exactRead === undefined) {
+              return Promise.resolve({
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "describe-input",
+                    type: "function" as const,
+                    function: {
+                      name: "describe_handle",
+                      arguments: JSON.stringify({ token: minted.token }),
+                    },
+                  }, {
+                    id: "open-contract",
+                    type: "function" as const,
+                    function: {
+                      name: "open_doc_section",
+                      arguments: JSON.stringify({ sectionId: "section-0" }),
+                    },
+                  }],
+                },
+                usage: { totalTokens: 17 },
+              });
+            }
+            const sourceId = (JSON.parse(exactRead.content) as {
+              sourceId: string;
+            }).sourceId;
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: JSON.stringify({
+                  status: "incomplete",
+                  summary:
+                    "The handle contract is known, but semantics remain.",
+                  recommendation: {
+                    kind: "author",
+                    rationale: "Author against the described input shape.",
+                  },
+                  inputs: [{
+                    name: "mail",
+                    token: minted.token,
+                    purpose: "Read message metadata",
+                  }],
+                  selectedPatternIds: [],
+                  steps: ["Bind the opaque handle without materializing it."],
+                  example: {
+                    kind: "pattern-source",
+                    content: "export default ({ mail }) => mail;",
+                    sourceIds: [sourceId],
+                  },
+                  rules: [{
+                    rule: "Describe a handle before binding it.",
+                    sourceIds: [sourceId],
+                  }],
+                  verification: ["Type-check the authored pattern."],
+                  sourceIds: [sourceId],
+                  missing: [
+                    "The task's filtering semantics remain unresolved.",
+                  ],
+                }),
+              },
+              usage: { totalTokens: 20 },
+            });
+          }
+          outerTurns += 1;
+          return Promise.resolve(
+            outerTurns === 1
+              ? {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "research-task",
+                    type: "function" as const,
+                    function: {
+                      name: "research",
+                      arguments: JSON.stringify({
+                        task: `Build a reader around ${minted.token}`,
+                      }),
+                    },
+                  }],
+                },
+              }
+              : {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "Reported the unresolved filtering semantics.",
+                },
+              },
+          );
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine,
+        modelClient,
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: `Research a reader for ${minted.token}.`,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(privateRequests).toHaveLength(2);
+      const privateUser = privateRequests[0].transcript.find((message) =>
+        message.role === "user"
+      );
+      expect(privateUser?.content).toContain(minted.token);
+      expect(privateUser?.content).not.toContain(ref);
+      expect(privateUser?.content).toContain(
+        "Authoritative general handle inventory",
+      );
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool" && message.toolName === "research"
+      );
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected research tool message");
+      }
+      const modelOutput = JSON.parse(toolMessage.content) as {
+        kit: { status: string; inputs: Array<{ token: string }> };
+        guidance: string;
+        researchRecord?: unknown;
+      };
+      expect(modelOutput.kit.status).toBe("incomplete");
+      expect(modelOutput.kit.inputs[0]?.token).toBe(minted.token);
+      expect(modelOutput.guidance).toContain("Do not present or implement");
+      expect(modelOutput.researchRecord).toBeUndefined();
+      expect(result.runState.researchRuns).toHaveLength(1);
+      expect(
+        result.runState.researchRuns?.[0]?.kit.inputs[0]?.token,
+      ).toBe(minted.token);
+      expect(result.totalUsage?.totalTokens).toBe(37);
+
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.toolId === "research"
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted research output");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as {
+        researchRecord?: {
+          task: string;
+          sourceReads: unknown[];
+          describedHandles: Array<{ token: string }>;
+        };
+      };
+      expect(artifactOutput.researchRecord?.task).toContain(minted.token);
+      expect(artifactOutput.researchRecord?.sourceReads).toHaveLength(1);
+      expect(
+        artifactOutput.researchRecord?.describedHandles[0]?.token,
+      ).toBe(minted.token);
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      const researchOmission = omissions.results.find((entry) =>
+        entry.outputId === outputRef.outputId
+      );
+      expect(researchOmission?.rules).toEqual([{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/researchRecord",
+        }],
+      }]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("persists partial evidence when synthesis fails", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-research-failure-",
+    });
+    const runId = "run-research-failure";
+    const docsRoot = join(root, "docs");
+    await Deno.mkdir(docsRoot);
+    await Deno.writeTextFile(
+      join(docsRoot, "contract.md"),
+      "# Contract\n\nThis exact evidence must survive a failed synthesis.\n",
+    );
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      let outerTurns = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.runId.includes(":research:")) {
+            const hasRead = request.transcript.some((message) =>
+              message.role === "tool" &&
+              message.toolName === "open_doc_section"
+            );
+            return Promise.resolve(
+              hasRead
+                ? {
+                  assistant: {
+                    role: "assistant" as const,
+                    content: "not valid research JSON",
+                  },
+                }
+                : {
+                  assistant: {
+                    role: "assistant" as const,
+                    content: "",
+                    toolCalls: [{
+                      id: "read-before-failure",
+                      type: "function" as const,
+                      function: {
+                        name: "open_doc_section",
+                        arguments: JSON.stringify({ sectionId: "section-0" }),
+                      },
+                    }],
+                  },
+                },
+            );
+          }
+          outerTurns += 1;
+          return Promise.resolve(
+            outerTurns === 1
+              ? {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "research-failing-task",
+                    type: "function" as const,
+                    function: {
+                      name: "research",
+                      arguments: JSON.stringify({ task: "Read the contract." }),
+                    },
+                  }],
+                },
+              }
+              : {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "Research failed; no kit was claimed.",
+                },
+              },
+          );
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-test",
+          artifactStore,
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: [docsRoot],
+          },
+        }),
+        modelClient,
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Research the contract.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(result.runState.researchFailures).toBe(1);
+      expect(result.runState.researchRuns).toBeUndefined();
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool" && message.toolName === "research"
+      );
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected research tool message");
+      }
+      const modelOutput = JSON.parse(toolMessage.content) as {
+        status: string;
+        message: string;
+        researchRecord?: unknown;
+      };
+      expect(modelOutput.status).toBe("error");
+      expect(modelOutput.message).toContain("not valid JSON");
+      expect(modelOutput.researchRecord).toBeUndefined();
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.toolId === "research"
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted failed research output");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as {
+        status: string;
+        researchRecord?: {
+          sourceReads: Array<{ location: string }>;
+          messages: unknown[];
+        };
+      };
+      expect(artifactOutput.status).toBe("error");
+      expect(
+        artifactOutput.researchRecord?.sourceReads[0]?.location ?? "",
+      ).toContain("contract.md");
+      expect(
+        (artifactOutput.researchRecord?.messages.length ?? 0) >= 4,
+      ).toBe(true);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
   });
 });
 
@@ -2124,7 +2500,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "run_pattern",
       "assign_slug",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
 });
@@ -2295,7 +2671,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "describe_handle",
       "search_patterns",
       "record_feedback",
-      "query_docs",
+      "research",
     ],
   );
 });
@@ -2451,7 +2827,7 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
     "read_skill_resource",
     "describe_handle",
     "run_pattern",
-    "query_docs",
+    "research",
   ]);
 });
 
@@ -2750,7 +3126,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "write_file",
       "delegate_task",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
   assertEquals(
@@ -3634,7 +4010,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       "write_file",
       "delegate_task",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
   assertEquals(denied.detail, "browser is not allowed in this run");
