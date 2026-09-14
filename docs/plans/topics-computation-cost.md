@@ -49,9 +49,9 @@ buckets returning links do not establish smaller network demand.
 
 Keep titles, bodies, authors, comments, links, attachments, names, and piece
 identities intact. Keep the board's original topic links for card rendering and
-its compact `mentionableIndex` and narrow headless `index` projections. Preserve
-the persistent short-name allocator and its never-reuse contract. Sorting cards
-is still a global operation; this plan introduces no incremental sort or top-K.
+its compact `mentionable` and narrow headless `index` projections. Preserve the
+persistent short-name allocator and its never-reuse contract. Sorting cards is a
+global operation; this plan introduces no incremental sort or top-K.
 
 Backlinks must retain canonical identity semantics, including aliases and scope.
 Self-mentions are excluded. Repeated mentions from one source occurrence yield
@@ -70,10 +70,11 @@ generations. Preserve linked record identity for editing handlers.
 ## Execution tracker
 
 Check off a stage only with linked implementation, tests, and measurement
-evidence. Record a rejected prototype's results as a dated report under
-`docs/history/`; update this live plan with the resulting pending scope. A
-conditional stage may close with an evidence-backed decision not to adopt it. A
-dependency on T0 gates a stage's acceptance, as
+evidence. Record a rejected prototype's results as a report in `docs/history/`,
+with the metadata header and index entry [its README](../history/README.md)
+requires; update this live plan with the resulting pending scope. A conditional
+stage may close with an evidence-backed decision not to adopt it. A dependency
+on T0 gates a stage's acceptance, as
 [measurement and acceptance](#measurement-and-acceptance) requires;
 implementation and prototypes can begin earlier.
 
@@ -98,17 +99,24 @@ implementation and prototypes can begin earlier.
       cross-reference rows by topic identity once at the board level. Compare
       direct lookup with each topic scanning the table. Prove two boundaries,
       each without a cast or a duplicated producer. First, the rows reach one
-      index producer as the explicit array Cell or Writable receiver
-      [collection indexes](../features/collection-indexes.md) require, under a
-      schema that carries `topic` as a Cell so the index keys by canonical Cell
-      identity. `crossrefTable` is a `lift`, whose result type exposes no index
-      operator, and `TopicCrossrefRow.topic` is `unknown` so that reading the
-      table expands no topic. Second, the resulting handle crosses the
-      board/topic schema boundary without broadening demand. Retain existing
-      public results through a compatibility bridge where needed; do not assume
-      adding a required field is rollout-safe. Exit: reduced lookup-stage
-      scaling, bounded maintenance cost, and a written old/new board-topic
-      compatibility matrix. Depends on T0.
+      index producer through a subpattern with an explicit Cell input, the shape
+      [reactive collections](../common/concepts/reactive-collections.md#choose-aggregate-semantics-deliberately)
+      gives for a computed list, under a schema that carries `topic` as a Cell
+      so the index keys by canonical Cell identity. `crossrefTable` is a `lift`,
+      whose result type exposes no index operator, and `TopicCrossrefRow.topic`
+      is `unknown` so that reading the table expands no topic. Second, the
+      resulting handle reaches topics without broadening demand. Existing topics
+      hold `boardCrossrefs` as a link to the board's cross-reference table, so
+      decide between carrying the handle through that link, which changes the
+      board's published `crossrefs` result, and a new topic input, which needs
+      the one-time link-bind onto every existing topic that the `mentionable`
+      and `boardNames` inputs describe. Classify the choice under step 1 of the
+      [stored-state procedure](#stored-state-and-deployment-procedure), and list
+      a link-bind in the step 7 manifest. Retain existing public results through
+      a compatibility bridge where needed; do not assume adding a required field
+      is rollout-safe. Exit: reduced lookup-stage scaling, bounded maintenance
+      cost, and a written old/new board-topic compatibility matrix. Depends on
+      T0.
 - [ ] **T3 — Maintain the mention relation.** Prototype stable per-source edge
       production, per-source-occurrence mention deduplication, and shared
       grouping by destination. The derived edges reach `groupBy` through the
@@ -125,12 +133,14 @@ implementation and prototypes can begin earlier.
       candidates with justified end-to-end tradeoffs. Depends on T0 and T1.
 - [ ] **T5 — Harden accepted changes and prepare release artifacts.** Add
       regression read budgets, run all relevant authored/package/integration
-      tests, preserve compatibility baselines, and update maintained docs.
-      Produce matched before/after demos and reports. Each implementation PR
-      needs an antagonistic review and a clean Cubic review on its final head
-      before merge. Exit: all accepted T1–T4 changes are merged, remaining
-      proposals are explicitly deferred, and exact deployable source packages
-      are recorded.
+      tests, preserve compatibility baselines, pass the
+      [pattern update gates](../specs/pattern-update-testing.md), and update
+      maintained docs. Produce matched before/after demos and reports. Each
+      implementation PR needs a review through the
+      [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
+      review on its final head before merge. Exit: all accepted T1–T4 changes
+      are merged, remaining proposals are explicitly deferred, and exact
+      deployable source packages are recorded.
 - [ ] **T6 — Rehearse real stored generations.** Inventory and copy the intended
       board space, verify linked-space coverage, run the two-pass upgrade
       procedure below, and write a concrete rollout/rollback manifest. Exit: two
@@ -150,9 +160,11 @@ implementation and prototypes can begin earlier.
 
 ## Measurement and acceptance
 
-Measure in two tiers. The headless tier runs the board and topic patterns
-without a browser and measures pivot production, per-topic lookup, and topic
-aggregates on synthetic boards at 32, 128, and 512 topics, with low-degree and
+Measure in two tiers. The headless tier exercises the pivot, lookup, and
+aggregate candidates directly over synthetic Cell arrays rather than seeded
+boards, as the
+[index maintenance count probe](../development/BENCHMARKS.md#index-maintenance-count-probe)
+does for indexes. It runs at 32, 128, and 512 topics, with low-degree and
 high-degree mention graphs; vary E independently of N. Exercise a single large
 inbound bucket as well as distributed links. Test threads at 10, 100, and 1,000
 comments, varying L separately. T0 builds this tier's fixture; if a size cannot
@@ -160,13 +172,13 @@ be built, T0 records the measured limit and the tier runs at the largest size it
 builds.
 
 The browser tier measures the whole system, rendering included, through the
-scale and navigation benchmarks at the board sizes their seed builds. The
+scale and navigation benchmarks at the board sizes their seed builds. Seeding a
+whole board bounds those sizes in any tier: the
 [benchmark guide](../development/BENCHMARKS.md#the-board-scaling-benchmark)
-records the seeding time and memory that bound those sizes, and citations raise
-that cost further (see `DEFAULT_CITING_TOPICS` in
-[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)), so
-the independent N and E experiment belongs to the headless tier. Both tiers
-include a small everyday board to expose startup and maintenance overhead that
+records its time, memory, and cause, and citations raise the cost further (see
+`DEFAULT_CITING_TOPICS` in
+[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)). Each
+tier includes a small case to expose startup and maintenance overhead that
 scaling tests can hide.
 
 Demand three distinct workloads: the board alone, the board with one topic open,
@@ -211,14 +223,14 @@ board's package does not upgrade those existing children.
    its current repository source. Record whether each improvement changes only
    derived computation, a public result, or persisted state.
 2. Confirm the target runtime/compiler supports the operators. A change to
-   derived computation alone needs no upgrade step. A change to a topic's
-   persisted state is a new step under
+   derived computation alone needs no upgrade step. A change the topic pattern
+   makes to its own persisted state is a new step under
    [Topic state upgrades](../../packages/patterns/topics/state-upgrades.md),
    which defines the step contract, the mutations allowed while a step is
-   pending, the required tests, and the rollout and rollback limits. Updating a
-   topic to current source also runs every listed step its stored version has
-   not completed, so rehearsal and rollout exercise those steps along with this
-   plan's changes. The board has no stored-state version; if its persisted
+   pending, the required tests, and the rollout and rollback limits. That
+   document also describes when a topic's pending steps run and what stops them;
+   rehearsal and rollout exercise any steps pending on the targets along with
+   this plan's changes. The board has no stored-state version; if its persisted
    inputs must change, specify version handling, idempotency, legacy writers,
    and rollback limits explicitly rather than forcing a schema override.
 3. Acquire a consistent snapshot through the owner/operator and follow the
@@ -241,9 +253,10 @@ board's package does not upgrade those existing children.
 6. Verify authored content independently of `space verify --expect-migration`:
    that command detects removal, not in-place clobbering. Check board
    membership, ordering, names, backlinks, titles/bodies, attribution,
-   comment/link records, handlers, and settled background churn. Stop the clone
-   server, reset, restart, and repeat from the pristine snapshot for a second
-   clean pass.
+   comment/link records, handlers, and settled background churn. Check that each
+   topic's stored `topicStateVersion` reaches `TOPIC_STATE_VERSION`, or record
+   the step still pending and why. Stop the clone server, reset, restart, and
+   repeat from the pristine snapshot for a second clean pass.
 7. Before live execution, record target order, exact package hashes, retained
    source revisions, expected schema/data changes, acceptance commands, snapshot
    location, and rollback actions. Coordinate legacy writers and client refresh
