@@ -218,6 +218,11 @@ topic, and following a crossref to a sibling. Its `topic board` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
 
+The `load` segment ends after the shell publishes its ready application and
+selects the requested board route. Shell readiness is an explicit notification
+from bootstrap; selecting the route does not require its topic data to have
+rendered. This keeps the segment boundary independent of DOM mutation timing.
+
 Each segment reaches its starting point with the timer stopped — `Deno.bench`'s
 `b.start()` and `b.end()` bracket only the segment itself — so every iteration
 measures one segment of a fresh navigation, and no benchmark depends on another
