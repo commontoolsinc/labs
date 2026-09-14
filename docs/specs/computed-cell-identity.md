@@ -322,7 +322,7 @@ non-replayable, including the documented set `fetchBinary`, `fetchText`,
 `navigateTo`, `wish`, and `sqliteQuery` (a server round-trip, even though
 its name suggests a query). The registry is deliberately NOT derived from
 the scheduler's `isEffect`, which carries scheduler semantics — a standing
-demand root, which of these only `navigateTo` and `llmDialog` are — and says
+demand root, which of these only `navigateTo` is — and says
 nothing about replay; do not repurpose it. A reciprocal comment at `registerBuiltins`
 (`builtins/index.ts`) keeps the registry in sync when builtins are added.
 

@@ -150,13 +150,12 @@ Status legend:
 
 **N2 (eager effects split).** The `isEffect` bit means one thing to the
 scheduler: a standing demand root, a node that runs whether or not anything
-reads it. Three kinds of node carry it: `navigateTo` (`isEffect: true` in
-`builtins/navigate-to.ts`), whose whole purpose is the side effect;
-render/UI sinks; and `llmDialog`, which writes its turns into the caller's
-`messages` cell and re-mints the element documents of its `flattenedTools`
-write on every run — a write the idempotency recheck would flag, so the bit
-stays on it until that write is made stable, at which point it is a
-computation with a materializer envelope over `messages` like any other.
+reads it. Two kinds of node carry it: `navigateTo` (`isEffect: true` in
+`builtins/navigate-to.ts`), whose whole purpose is the side effect; and
+render/UI sinks. `llmDialog` is a computation: it writes its turns into the
+caller's `messages` cell and declares that write as a materializer envelope,
+which is what keeps it scheduled for a piece that renders the transcript
+without reading what the dialog returns.
 The network built-ins (`llm`, `generateText`, `generateObject`,
 `sqliteQuery`, the `fetch` family, `streamData` — `registerBuiltins` in
 `builtins/index.ts`) are computations: a node nobody reads is a no-op, and

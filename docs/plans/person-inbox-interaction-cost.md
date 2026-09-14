@@ -409,9 +409,11 @@ computations whose work is a no-op when nothing reads it. `generateText`,
 `generateObject`, `llm` and `sqliteQuery` were registered as effects to keep
 the pull's promise; they are computations now, the `fetch` family and
 `streamData` were always computations, and `navigateTo` stays an effect
-because the navigation is the point. `llmDialog` keeps the bit for now: its
-`flattenedTools` write re-mints element documents on every run, which the
-idempotency recheck flags the moment the bit comes off. With no eager set to serve, both
+because the navigation is the point. `llmDialog` is a computation as well: its
+`flattenedTools` write carries only what a reader displays, which is what lets
+it hold still over inputs that did not change, and it declares its `messages`
+write as a materializer envelope so a piece that renders the transcript keeps
+it scheduled. With no eager set to serve, both
 start pulls are removed, and a child instantiated from a lift walks nothing at
 start: its result is read by whoever reads it.
 
