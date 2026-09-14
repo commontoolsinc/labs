@@ -117,6 +117,11 @@ export type EnsurePieceVerdict = {
    * assuming. Present whenever a start ran. */
   graphIsInstalled?: () => boolean;
 
+  /** The owning result doc's id (the chain terminus) where the chain
+   * resolved — present for `started`, `no-pattern-meta`, and
+   * `pattern-unloadable`. */
+  rootId?: string;
+
   /** Every doc id the traversal read (the demanded root plus chain
    * links): the demand cycle's commit-triggered re-arm watches these. */
   observedDocIds: string[];
@@ -197,6 +202,7 @@ export async function ensurePieceRunningVerdict(
         return {
           started: false,
           reason: "no-pattern-meta",
+          rootId,
           observedDocIds,
         };
       }
@@ -221,6 +227,7 @@ export async function ensurePieceRunningVerdict(
         return {
           started: false,
           reason: "pattern-unloadable",
+          rootId,
           observedDocIds,
         };
       }
@@ -246,6 +253,7 @@ export async function ensurePieceRunningVerdict(
         started: true,
         graphIsInstalled: () =>
           runtime.runner.pieceGraphIsInstalled(resultCell),
+        rootId,
         observedDocIds,
       };
     } catch (error) {
