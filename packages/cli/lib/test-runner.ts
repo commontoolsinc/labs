@@ -1597,11 +1597,12 @@ export async function runTestPattern(
     const settleFully = async (stepIndex: number): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
-        () =>
-          unlessStalled(
+        async () => {
+          await unlessStalled(
             `Settle step at index ${stepIndex} stalled: no runtime progress for ${TIMEOUT}ms`,
             () => runtime.settled(),
-          ),
+          );
+        },
       ).catch((error) => {
         settlementFailed = true;
         throw error;
