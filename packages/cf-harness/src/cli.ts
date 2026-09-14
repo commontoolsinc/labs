@@ -493,7 +493,8 @@ Options:
                                 search_skills and acquire_skill require --skills-registry-url,
                                 query_docs requires a resolved documentation corpus,
                                 and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
-  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
+  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path,
+                                where skill is a registry name or an acquired pin owner/repo/slug@<commit sha>)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen

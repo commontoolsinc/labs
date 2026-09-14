@@ -340,7 +340,8 @@ The current CLI flags are:
 ```text
 --skills-root <path>      Skill root containing <name>/SKILL.md
 --skill <name>            Preload a skill for this run (repeatable)
---allow-skill-script <s>  Allow exact script execution (skill:scripts/path)
+--allow-skill-script <s>  Allow exact script execution (skill:scripts/path,
+                          where skill is a registry name or an acquired pin)
 --no-skill-catalog        Disable automatic skill catalog disclosure
 ```
 
@@ -508,7 +509,10 @@ Policy rules:
 - A skill cannot downgrade CFC enforcement.
 - A skill cannot authorize reading protected substrate observations.
 - A skill script can run only through `run_skill_script`, and only when both the
-  tool and exact `skill:scripts/path` entry are allowlisted by the operator.
+  tool and exact `skill:scripts/path` entry are allowlisted by the operator. An
+  acquired skill's script runs under that same allowlist, with the pin its bytes
+  were read at — `owner/repo/slug@<commit sha>` — in the `skill` field, since an
+  acquired skill has no registry name to key an entry on.
 - `allowed-tools` can narrow or advise, but v1 should not let it expand the
   allowed tool surface.
 - Prompt-injection-like content in a skill should produce a diagnostic event. It
@@ -679,6 +683,7 @@ This avoids ambiguity between host paths and sandbox paths.
 | Explicit skill root, discovery, preload, registry, activation, and resume artifacts | implemented                                                |
 | Indexed supporting-resource reads                                                   | implemented                                                |
 | Exact allowlisted sandbox Deno/Bash skill scripts                                   | implemented                                                |
+| Acquired skills' scripts, run under that same allowlist and keyed by pin            | implemented                                                |
 | Profile-scoped host skill scripts for the leased browser child                      | implemented                                                |
 | Pattern Factory phase-specific skills                                               | implemented                                                |
 | Explicit child-profile skill policy and summary-only parent return                  | implemented                                                |
