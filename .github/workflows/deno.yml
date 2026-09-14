@@ -536,7 +536,7 @@ jobs:
             --allow-env \
             --allow-read \
             --allow-write=/tmp,/var/folders,$CF_TEST_RECORDS_DIR \
-            --allow-run=git,deno \
+            --allow-run=git,deno,$(deno eval "console.log(Deno.execPath())") \
             $TEST_FILES
 
       - name: 🧾 Write coverage report

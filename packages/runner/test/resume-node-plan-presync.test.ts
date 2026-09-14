@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
@@ -403,11 +404,16 @@ describe("resume node plan pre-sync", () => {
     resumed.key("bump").send({});
     await rt2.idle();
     await rt2.storageManager.synced();
-    await rt1.storageManager.synced();
+    // The handler's write reaches replica A by fan-out, on the server's
+    // refresh cadence, so the wait is on the counter's committed change.
     const counter1 = rt1.getCellFromLink<{ n: number }>(
       counter.getAsNormalizedFullLink(),
     );
-    await counter1.pull();
+    await waitForCellValue<{ n: number }>(
+      rt1,
+      counter1,
+      (value) => value?.n === 2,
+    );
     expect(counter1.get().n).toBe(2);
   });
 
@@ -435,11 +441,16 @@ describe("resume node plan pre-sync", () => {
     resumed.key("bump").send({});
     await rt2.idle();
     await rt2.storageManager.synced();
-    await rt1.storageManager.synced();
+    // The handler's write reaches replica A by fan-out, on the server's
+    // refresh cadence, so the wait is on the counter's committed change.
     const counter1 = rt1.getCellFromLink<{ n: number }>(
       counter.getAsNormalizedFullLink(),
     );
-    await counter1.pull();
+    await waitForCellValue<{ n: number }>(
+      rt1,
+      counter1,
+      (value) => value?.n === 2,
+    );
     expect(counter1.get().n).toBe(2);
   });
 
@@ -484,11 +495,16 @@ describe("resume node plan pre-sync", () => {
     resumed.key("bump").send({});
     await rt2.idle();
     await rt2.storageManager.synced();
-    await rt1.storageManager.synced();
+    // The handler's write reaches replica A by fan-out, on the server's
+    // refresh cadence, so the wait is on the counter's committed change.
     const counter1 = rt1.getCellFromLink<{ n: number }>(
       counter.getAsNormalizedFullLink(),
     );
-    await counter1.pull();
+    await waitForCellValue<{ n: number }>(
+      rt1,
+      counter1,
+      (value) => value?.n === 2,
+    );
     expect(counter1.get().n).toBe(2);
   });
 

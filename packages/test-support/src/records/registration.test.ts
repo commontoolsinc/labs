@@ -96,6 +96,15 @@ describe("registration", () => {
       ).toBe(true);
     });
 
+    it("names the runner's silent-backstop guard as machinery for ingestion", () => {
+      // The guard wraps `Deno.test` between the runner's clock preload and
+      // each test file, and Deno names a describe's first step after it.
+      const guard =
+        "file:///repo/packages/runner/test/support/silent-backstop-guard.ts";
+      expect(MACHINERY_MODULE_SUFFIXES.some((tail) => guard.endsWith(tail)))
+        .toBe(true);
+    });
+
     it("returns undefined when no frame names a file", () => {
       expect(registeringModule("")).toBeUndefined();
       expect(registeringModule("Error\n    at <anonymous>")).toBeUndefined();

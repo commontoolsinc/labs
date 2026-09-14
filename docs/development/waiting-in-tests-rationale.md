@@ -209,6 +209,65 @@ A test that legitimately advances through many windows should say so with
 `clock.tick(ms)` rather than lean on the pump. One whose work logical time
 cannot pace at all belongs in `realClockFiles`.
 
+## The pump waits for the loop to go idle
+
+[The runner
+clock](waiting-in-tests.md#the-runner-suite-advancing-the-runtimes-own-timers)
+fires a production timer only once every zero-delay turn that was armed has
+run. What that ordering protects is any wait that races an event against a
+deadline where the event arrives across several turns and the deadline is one
+`src/` timer.
+
+The conflict read-repair wait in `packages/runner/src/storage/v2.ts` is that
+shape. A commit the server refuses for a stale basis carries a retry gate, the
+caught-up frame the server stages for the session, and the storage layer holds
+the rejection until that frame has landed — or until a 30 s backstop lets it
+through with the replica still behind, logging one warn its module logger sits
+above. The frame crosses the loopback transport a turn at a time, and the
+memory server's refresh takes turns of its own, so at the moment the rejection
+arms the backstop the frame is still several turns away.
+
+A pump that fired the earliest production timer on the next turn of the real
+event loop, whatever zero-delay turns were still queued, fired that backstop
+between those turns. Instrumenting the race across the runner suite found 371
+such waits: 33 of them the backstop arm won, each with exactly 30 s of logical
+time elapsed and the frame landing at that same instant, queued behind the
+jump, and 12 more the caught-up arm won only because a sibling wait's jump had
+already moved the clock. Every one of those tests passed. One, the refused
+`fetchProgram` takeover, passed only because the jumps had aged a claim that
+the test's own `clock.tick` was written to age; with the turns run first, the
+same test hung on an event its fixture never produced — which is the failure
+its design had always described, and the test now ages the claim before the
+run that reads it.
+
+So the pump yields. When a zero-delay turn is armed, or a kick is queued to
+run one, it re-queues itself behind the kick and looks again, and it jumps
+only when no turn is left. A turn chain that never ends starves the pump
+rather than hanging the test: past `AUTO_ADVANCE_STARVATION_LIMIT` consecutive
+yields it throws, naming the condition, as `settle()` does for zero-delay work
+that regenerates. `packages/runner/test/clock-preload-auto-advance.test.ts`
+pins the ordering, and the SES-lockdown classification pin waits on the
+`src/` sleep it arms rather than on one turn, because one turn no longer
+carries a jump.
+
+Two convergence tests drained in fixed rounds of round trips — `pull()`,
+`idle()`, `synced()` — and read the value at the end. Such a loop never lets
+the loop go idle, so under the idle rule the memory server's refresh never
+fired inside it and the value never arrived; on the real clock the refresh
+fires on wall time, in the middle of whichever round is running, which is the
+dependence the fixed rounds had been riding. Both now wait on the value they
+converge to, through `waitForCellValue`, which idles the loop between
+committed changes and so fires the timers the convergence rides on. The pump
+also fires every production timer armed for the instant the clock stands at:
+two armed together for one instant both fire, where the second had been passed
+over as already past, and the same pin file holds that.
+
+The ordering makes the read-repair wait resolve on the frame, at one refresh
+cadence of logical time. It does not make the backstop's firing visible when
+the frame genuinely never comes; that is the silent-backstop guard's job,
+described in [the main
+document](waiting-in-tests.md#a-production-backstop-cannot-carry-a-test).
+
 ## Why the runtime-client suite stays on the real clock
 
 `packages/runtime-client` keeps its unit tests on the real clock, and the
