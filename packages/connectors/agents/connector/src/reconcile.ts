@@ -61,6 +61,11 @@ export async function collectSource(
   const errors: CollectedSource["errors"] = [];
   const seenCursors = new Set<string>();
   const seenSessions = new Set<string>();
+  const repeatedSessions = new Set<string>();
+  // Listings, repeats included: the safety limit bounds what the provider
+  // sends, so an inventory repeating one session under fresh cursors still
+  // ends.
+  let listed = 0;
   let cursor: string | undefined;
   let enumerationComplete = false;
   try {
@@ -72,19 +77,24 @@ export async function collectSource(
       signal?.throwIfAborted();
       const page = await driver.listSessions(cursor);
       signal?.throwIfAborted();
-      if (page.sessions.length > MAX_SESSION_SUMMARIES - summaries.length) {
+      if (page.sessions.length > MAX_SESSION_SUMMARIES - listed) {
         throw new Error("session enumeration exceeded safety limit");
       }
+      listed += page.sessions.length;
       // One outcome per session: a page that repeats an ID an earlier page
       // listed is an inventory the provider did not keep consistent across
-      // its cursors, recorded as an error; the first listing stands.
+      // its cursors, recorded as an error once per session; the first
+      // listing stands.
       for (const summary of page.sessions) {
         if (seenSessions.has(summary.nativeSessionId)) {
-          errors.push({
-            nativeSessionId: summary.nativeSessionId,
-            message:
-              `duplicate session in inventory: ${summary.nativeSessionId}`,
-          });
+          if (!repeatedSessions.has(summary.nativeSessionId)) {
+            repeatedSessions.add(summary.nativeSessionId);
+            errors.push({
+              nativeSessionId: summary.nativeSessionId,
+              message:
+                `duplicate session in inventory: ${summary.nativeSessionId}`,
+            });
+          }
           continue;
         }
         seenSessions.add(summary.nativeSessionId);

@@ -115,9 +115,9 @@ refresh finishes.
 
 `collectSource(driver, { signal, retain })` consumes `listSessions()` until
 `nextCursor` is absent. It records an inventory error for a repeated cursor, and
-one for a session a later page lists again, which it keeps once. It also records
-an error before keeping a page that would raise the inventory above 100,000
-summaries. It then calls `readSession()` once for every listed summary the
+one per session a later page lists again, which it keeps once. It also records
+an error before keeping a page that would raise the listings, repeats included,
+above 100,000. It then calls `readSession()` once for every listed summary the
 `retain` predicate does not accept. The optional signal is checked before and
 after every provider call. A host still stops the driver to interrupt a provider
 call that does not return on its own.

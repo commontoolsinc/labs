@@ -139,6 +139,40 @@ Deno.test("collectSource keeps a session a later page repeats once and records t
   );
 });
 
+Deno.test("collectSource ends an inventory that repeats one session under fresh cursors", async () => {
+  // Every page is a new cursor listing the same session many times over:
+  // the deduplicated inventory never grows, so the safety limit counts the
+  // listings the provider sends, and the repeat is recorded once.
+  const base = fakeDriver();
+  const one = (await base.listSessions()).sessions[0];
+  const reads: string[] = [];
+  let pages = 0;
+  const driver: AgentDriver = {
+    ...base,
+    listSessions: (): Promise<SessionPage> => {
+      pages++;
+      return Promise.resolve({
+        sessions: Array.from({ length: 60_000 }, () => one),
+        nextCursor: `cursor-${pages}`,
+      });
+    },
+    readSession: (id: string) => {
+      reads.push(id);
+      return base.readSession(id);
+    },
+  };
+
+  const collected = await collectSource(driver);
+
+  assertEquals(pages, 2);
+  assertEquals(reads, ["one"]);
+  assertEquals(collected.errors, [
+    { nativeSessionId: "one", message: "duplicate session in inventory: one" },
+    { message: "Error: session enumeration exceeded safety limit" },
+  ]);
+  assertEquals(collected.complete, false);
+});
+
 Deno.test("collectSource retains lifecycle state reported only by inventory", async () => {
   const inventorySummary = {
     nativeSessionId: "one",
