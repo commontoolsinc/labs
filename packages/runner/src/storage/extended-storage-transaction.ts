@@ -2861,6 +2861,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return getTransactionWriteAttempts(this.tx) ?? [];
   }
 
+  retainPendingWriteElision(address: IMemorySpaceAddress): void {
+    this.tx.retainPendingWriteElision?.(address);
+  }
+
   getWriteDetails(
     space: MemorySpace,
   ): Iterable<TransactionWriteDetail> {
@@ -4019,6 +4023,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getWriteAttemptLog(): readonly IWriteAttempt[] {
     return this.#wrapped.getWriteAttemptLog?.() ??
       getTransactionWriteAttempts(this.#wrapped.tx) ?? [];
+  }
+
+  retainPendingWriteElision(address: IMemorySpaceAddress): void {
+    this.#wrapped.retainPendingWriteElision?.(address);
   }
 
   getWriteDetails(

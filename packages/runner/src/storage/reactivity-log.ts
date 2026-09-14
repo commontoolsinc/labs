@@ -72,6 +72,16 @@ export const internalVerifierRead: Metadata = {
 };
 
 /**
+ * A pending output reused by a write still needs its publication accepted.
+ * The shared identity selects this commit-only read for wave acceptance and
+ * foreign-space handoff without classifying ordinary verifier probes as writes.
+ */
+export const pendingWriteElisionRead: Metadata = {
+  ...ignoreReadForScheduling,
+  ...internalVerifierRead,
+};
+
+/**
  * Marks the "is there a link here?" probe reads issued by link resolution.
  * They stay in the journal (reactivity must re-resolve when a link appears
  * or changes), and flow-label derivation classifies them as `followRef`

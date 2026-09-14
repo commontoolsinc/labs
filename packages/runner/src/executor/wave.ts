@@ -58,7 +58,10 @@ import type {
 import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
-import { getTransactionReadActivities } from "../storage/transaction-inspection.ts";
+import {
+  getTransactionReadActivities,
+  hasPendingWriteElision,
+} from "../storage/transaction-inspection.ts";
 
 const logger = getLogger("wave-accumulator", {
   enabled: true,
@@ -342,9 +345,17 @@ export function waveRunContextOf(
 // caller whose side effects must wait for durability (the pattern swap's
 // teardown + reinstantiation, §3e) awaits this instead. Attached by the
 // accumulator at seal, same side-table mechanism as the run context.
+type WaveSettlement = Result<
+  Unit,
+  StorageTransactionRejected & {
+    /** This run read a contribution whose optimistic state was withdrawn. */
+    readDependencyWithdrawn?: true;
+  }
+>;
+
 const waveSettlements = new WeakMap<
   IExtendedStorageTransaction,
-  Promise<Result<Unit, StorageTransactionRejected>>
+  Promise<WaveSettlement>
 >();
 
 const requiresWaveAcceptance = new WeakSet<IStorageTransaction>();
@@ -355,12 +366,13 @@ export function requireWaveAcceptance(tx: IExtendedStorageTransaction): void {
 }
 
 /** The sealed tx's wave settlement: resolves ok when every sealed space
- * promoted or its opted-in local state change was accepted, error when any
+ * promoted or its write-free publication was accepted, error when any
  * withdrew (conflict drop, requeue, abort, abandon). Undefined for a tx
- * outside a wave or with neither sealed writes nor opted-in local state. */
+ * outside a wave or with neither sealed writes, opted-in local state, nor a
+ * derivation's pending-output elision obligation. */
 export function waveSettlementOf(
   tx: IExtendedStorageTransaction,
-): Promise<Result<Unit, StorageTransactionRejected>> | undefined {
+): Promise<WaveSettlement> | undefined {
   return waveSettlements.get(tx);
 }
 
@@ -567,6 +579,8 @@ export interface WaveLease {
 
 /** One sealed action run held by the accumulator. */
 interface WaveContribution {
+  /** Set only by the closure that invalidates reads of withdrawn state. */
+  readDependencyWithdrawn?: true;
   index: number;
   context: WaveRunContext;
 
@@ -584,7 +598,7 @@ interface WaveContribution {
    * derived from withdrawn state is not (§3d). */
   readOnlyReadKeys: Set<string>;
 
-  /** Verdict for an opted-in local state change with no replica writes. */
+  /** Verdict for a publication obligation with no replica writes. */
   emptySettlement?: {
     promise: Promise<Result<Unit, StorageTransactionRejected>>;
     resolve: (result: Result<Unit, StorageTransactionRejected>) => void;
@@ -1203,10 +1217,11 @@ export class WaveAccumulator
       // result write have run.
       discoveredScope,
     };
-    const localAcceptance = requiresWaveAcceptance.has(inner);
+    const localAcceptance = requiresWaveAcceptance.has(inner) ||
+      (context?.kind === "derivation" && hasPendingWriteElision(tx));
     try {
-      // Closing releases the transaction's activity; local-only consequences
-      // need its read identities after the storage no-op has closed.
+      // Closing releases the transaction's activity; write-free publication
+      // obligations need its read identities after the storage no-op has closed.
       const localReads = localAcceptance
         ? [...getTransactionReadActivities(tx)].map(({ space, id, scope }) => ({
           space,
@@ -1227,12 +1242,13 @@ export class WaveAccumulator
         return result;
       }
       // A transaction with nothing to seal (read-only, or all-no-op),
-      // no staged appends, and no opted-in local state contributes nothing,
-      // like commit's empty-transaction fast path, and needs no run context:
-      // the §3d
-      // refusal below guards consequences entering the wave (writes,
-      // staged appends, and local state), and a serving runtime's read probes
-      // (piece structure loads, pattern-identity reads) commit nothing.
+      // no staged appends, and no publication obligation contributes nothing,
+      // like commit's empty-transaction fast path, and needs no run context.
+      // A derivation reusing a pending output carries an acceptance obligation
+      // even when the equal-value write produces no storage operation. The §3d
+      // refusal below guards consequences entering the wave: writes, staged
+      // appends, and write-free publication. A serving runtime's ordinary read
+      // probes (piece structure loads, pattern-identity reads) commit nothing.
       // A tx that sealed NOTHING but STAGED APPENDS — the Phase-3
       // pure-forwarding handler, whose only consequence is a
       // cross-space emit — MINTS a zero-write contribution below (the
@@ -1278,14 +1294,14 @@ export class WaveAccumulator
         ? Promise.withResolvers<Result<Unit, StorageTransactionRejected>>()
         : undefined;
       if (emptySettlement !== undefined) {
-        // A storage no-op has no sealSpaceReads handoff. Its local state
-        // change still depends on the same reads as a written contribution.
+        // A storage no-op has no sealSpaceReads handoff. Its publication
+        // obligation still depends on the same reads as a written contribution.
         for (const read of localReads) {
           this.sealSpaceReads(read.space, [read]);
         }
       }
       this.#sealedTxs.add(tx);
-      this.#contributions.push({
+      const contribution: WaveContribution = {
         index: this.#contributions.length,
         context,
         spaces: assembly.spaces,
@@ -1295,13 +1311,18 @@ export class WaveAccumulator
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
         discoveredScope: assembly.discoveredScope,
-      });
+      };
+      this.#contributions.push(contribution);
       waveSettlements.set(
         tx,
-        emptySettlement?.promise ?? Promise.all(
+        (emptySettlement?.promise ?? Promise.all(
           assembly.spaces.map((space) => space.sealed.settled),
-        ).then((settled) =>
+        ).then((settled): Result<Unit, StorageTransactionRejected> =>
           settled.find((outcome) => outcome.error !== undefined) ?? { ok: {} }
+        )).then((outcome): WaveSettlement =>
+          outcome.error !== undefined && contribution.readDependencyWithdrawn
+            ? { error: { ...outcome.error, readDependencyWithdrawn: true } }
+            : outcome
         ),
       );
       return result;
@@ -2077,6 +2098,9 @@ export class WaveAccumulator
               requeued.add(idx);
             }
           } else {
+            if (readWithdrawn && contribution.context.kind === "derivation") {
+              contribution.readDependencyWithdrawn = true;
+            }
             droppedWhole.add(idx);
             outcome.dependencyDroppedWrites += this.#homeOpCount(
               contribution,
@@ -3145,9 +3169,12 @@ export class WaveAccumulator
             "emitter write this wave withdrew, so no entry exists behind " +
             "this run and nothing re-emits it (events.md §4 — one " +
             "durable entry, one completed run; stage C build W3, (α3))"
-          : "pure derivation dropped: derived from a withdrawn " +
-            "contribution; its own reads re-run it when fresh state " +
-            "lands (serving-loop.md §3d)";
+          : contribution.readDependencyWithdrawn
+          ? "pure derivation dropped: a read depended on a withdrawn " +
+            "contribution; the current scheduled instance re-arms after " +
+            "rollback (serving-loop.md §3d)"
+          : "contribution dropped from the wave commit " +
+            "(serving-loop.md §3d)";
         this.#warnDropped(contribution, message);
         this.#withdraw(contribution, message, "contribution-dropped");
         continue;

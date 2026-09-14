@@ -97,6 +97,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
   isUiInputBlindWriteTx,
+  pendingWriteElisionRead,
   registerCommitRejectionListener,
   takeCoverageWaits,
 } from "./reactivity-log.ts";
@@ -1130,6 +1131,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     return new this(manager);
   }
 
+  retainPendingWriteElision(target: IMemorySpaceAddress): void {
+    const { space, ...address } = target;
+    this.#retainPendingWriteElision(this.#branch(space), space, address);
+  }
+
   isContentAddressedDocPersisted(space: MemorySpace, hash: string): boolean {
     return this.#storage.isContentAddressedDocPersisted?.(space, hash) ?? false;
   }
@@ -2077,10 +2083,12 @@ export class V2StorageTransaction implements IStorageTransaction {
           !this.#authoritativeWrites &&
           !this.#mustDeliverSchemaDoc(space, address.id))
       ) {
+        this.#retainPendingWriteElision(branch, space, address);
         return { ok: current };
       }
     }
     if (previous.kind === "notFound" && isDelete) {
+      this.#retainPendingWriteElision(branch, space, address);
       return { ok: current };
     }
 
@@ -2143,6 +2151,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         (!this.#authoritativeWrites &&
           !this.#mustDeliverSchemaDoc(space, address.id)))
     ) {
+      this.#retainPendingWriteElision(branch, space, address);
       return { ok: current };
     }
 
@@ -2175,6 +2184,32 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
 
     return { ok: collapsedNext };
+  }
+
+  /** Elision over a pending document retains its commit basis. */
+  #retainPendingWriteElision(
+    branch: SpaceBranch,
+    space: MemorySpace,
+    address: IMemoryAddress,
+  ): void {
+    if (
+      isUiInputBlindWriteTx(this) ||
+      !branch.replica.hasPendingWrite(
+        address.id,
+        address.scope,
+        this.#scopeKeyIdentity,
+      )
+    ) return;
+    // Keep the commit dependency without subscribing the writer to itself or
+    // consuming the output's CFC label. Validation still checks the original
+    // document; the transaction's own unsealed writes are never a pending layer.
+    // This document-wide check conservatively retains the older layer even
+    // when a preceding write in this transaction supplied the elided value.
+    const read = this.read({ ...address, space }, {
+      trackReadWithoutLoad: true,
+      meta: pendingWriteElisionRead,
+    });
+    if (read.error) throw read.error;
   }
 
   #writeBatchRun(
@@ -2250,6 +2285,7 @@ export class V2StorageTransaction implements IStorageTransaction {
             !this.#authoritativeWrites &&
             !this.#mustDeliverSchemaDoc(space, address.id))
       ) {
+        this.#retainPendingWriteElision(branch, space, address);
         continue;
       }
       const activityPath = findMaterializedParentPath(
@@ -2303,6 +2339,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           (!this.#authoritativeWrites &&
             !this.#mustDeliverSchemaDoc(space, address.id)))
       ) {
+        this.#retainPendingWriteElision(branch, space, address);
         continue;
       }
       changed = true;
@@ -2885,7 +2922,14 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Both read classes: a shallow (nonRecursive) read of withdrawn
       // state makes a derived write exactly as blind as a deep one, and
       // the withdrawal closure folds by DOC identity anyway.
-      for (const read of [...log.reads, ...log.shallowReads]) {
+      const pendingElisions = this.#readActivities.filter((read) =>
+        read.meta === pendingWriteElisionRead
+      ).map(({ space, id, scope, path }) => ({ space, id, scope, path }));
+      // These internal reads are absent from the scheduling log, but the
+      // publication they reuse must survive even when it is in another space.
+      for (
+        const read of [...log.reads, ...log.shallowReads, ...pendingElisions]
+      ) {
         if (writtenSpaces.has(read.space)) continue;
         let reads = readOnlyReads.get(read.space);
         if (reads === undefined) {

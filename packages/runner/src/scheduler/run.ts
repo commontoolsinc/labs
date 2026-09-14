@@ -7,6 +7,7 @@ import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { waveSettlementOf } from "../executor/wave.ts";
 import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
@@ -61,6 +62,7 @@ import {
   pruneFanOutInstances,
 } from "./fan-out.ts";
 import {
+  addInvalidCause,
   type MarkInvalidOptions,
   restoreInvalidCauses,
   takeInvalidCauses,
@@ -676,6 +678,7 @@ export async function runSchedulerAction(
         finalizeSchedulerAction(state, {
           action,
           actionId,
+          registrationToken,
           tx,
           actionStartTime,
           actionEndTime,
@@ -910,6 +913,7 @@ function finalizeSchedulerAction(
   args: {
     readonly action: Action;
     readonly actionId: string;
+    readonly registrationToken: object | undefined;
     readonly tx: IExtendedStorageTransaction;
     readonly actionStartTime: number;
     readonly actionEndTime: number;
@@ -1107,6 +1111,7 @@ function finalizeReactiveActionCommit(
   args: {
     readonly action: Action;
     readonly actionId: string;
+    readonly registrationToken: object | undefined;
     readonly registrationIsCurrent: () => boolean;
     readonly tx: IExtendedStorageTransaction;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
@@ -1187,7 +1192,7 @@ function finalizeReactiveActionCommit(
     args.error,
   );
   const fanOutRun = args.fanOutRun;
-  const handled = watchReactiveActionCommit({
+  const commitState: Parameters<typeof watchReactiveActionCommit>[0] = {
     action: args.action,
     tx: args.tx,
     log: committedLog,
@@ -1230,7 +1235,8 @@ function finalizeReactiveActionCommit(
     },
     handleUnavailable: () => parkUnavailableRun(state, args),
     reportTerminalRejection: (error) => state.handleError(error, args.action),
-  });
+  };
+  const handled = watchReactiveActionCommit(commitState);
   // The barrier entry commit() registered settles with the commit promise,
   // but the disposition above — a conflict's catch-up-then-requeue in
   // particular — runs afterwards. Register the handled chain too, so
@@ -1260,6 +1266,65 @@ function finalizeReactiveActionCommit(
       logger.timeEnd("scheduler", "run", "resubscribe");
     }
   }
+  const node = state.nodes.get(args.action);
+  const instanceRecord = fanOutRun === undefined
+    ? undefined
+    : fanOutRun.state.instances.get(
+      keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+        fanOutRun.instance.key,
+    );
+  const owner = fanOutRun === undefined ? node : instanceRecord;
+  const registrationToken = args.registrationToken;
+  // Sealing is not durable acceptance. A withdrawn contribution can have read
+  // an unchanged field through another contribution's pending document; rolling
+  // that document back produces no value change at the field to wake its reader.
+  // Observe the rollback separately from the pending-commit barrier: the serving
+  // loop must finish that barrier before it can commit the wave being observed.
+  void commitPromise.then(async ({ error }) => {
+    if (
+      error !== undefined || owner === undefined || node === undefined ||
+      node.registrationToken !== registrationToken
+    ) return;
+    const settlement = waveSettlementOf(args.tx);
+    if (settlement === undefined) return;
+    // A run with no contribution has no new publication. Only another sealed
+    // contribution can supersede this run's recovery obligation, even if a
+    // no-op refreshed reads.
+    const token = {};
+    owner.pendingWaveRun = token;
+    const outcome = await settlement;
+    if (owner.pendingWaveRun !== token) return;
+    delete owner.pendingWaveRun;
+    if (
+      node.registrationToken !== registrationToken ||
+      outcome.error?.readDependencyWithdrawn !== true ||
+      (outcome.error as { waveWithdrawalCause?: string } | undefined)
+          ?.waveWithdrawalCause !== "contribution-dropped" ||
+      (!state.nodes.isEffect(args.action) &&
+        !state.nodes.isComputation(args.action))
+    ) return;
+    const record = state.nodes.get(args.action);
+    const current = fanOutRun === undefined
+      ? record === node
+      : record?.fanOut === fanOutRun.state &&
+        fanOutRun.state.instances.get(
+            keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+              fanOutRun.instance.key,
+          ) === instanceRecord;
+    if (!current || record === undefined) return;
+    for (const cause of args.invalidCauses ?? []) {
+      addInvalidCause(record, cause);
+    }
+    commitState.markInvalid(args.action, { retry: true });
+    state.pending.add(args.action);
+    state.queueExecution();
+  }).catch((error) => {
+    logger.error(
+      "wave-withdrawal-rearm-failed",
+      "Could not re-arm a withdrawn reactive run",
+      error,
+    );
+  });
   args.resolve(args.result);
 }
 

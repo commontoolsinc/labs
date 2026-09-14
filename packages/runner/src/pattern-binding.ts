@@ -32,6 +32,7 @@ import {
 } from "./cfc.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { toMemorySpaceAddress } from "./link-types.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -428,6 +429,8 @@ function sendValueToBindingInner<T>(
         });
         if (!valueEqual(current, newValue)) {
           tx.writeValueOrThrow(bindingLink, newValue);
+        } else {
+          tx.retainPendingWriteElision?.(toMemorySpaceAddress(bindingLink));
         }
         return;
       }
@@ -504,8 +507,8 @@ function sendValueToBindingInner<T>(
  * to kilobytes against a cause otherwise measured in hundreds of bytes.
  *
  * The reduction is to the address, not away from the schema specifically, so
- * anything else riding a link is left out too -- cfc's `cfcLabelView` being
- * the one that exists today. See `sigilLinkAddressOnly()`.
+ * anything else riding a link is left out too, including `cfcLabelView` and
+ * the `scopeInitialization` declaration. See `sigilLinkAddressOnly()`.
  *
  * So the reduction happens here rather than in the binding itself, and the two
  * trees part company at this call: what the node reads through keeps its

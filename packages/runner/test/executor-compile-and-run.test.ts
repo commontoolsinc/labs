@@ -1073,4 +1073,123 @@ export default pattern<{ count: number }, { answer: number; nested: { doubled: n
       piece.cancelDemand();
     }
   });
+
+  /** Delivers one child write and observes its committed output. */
+  async function bumpChild(
+    result: Cell<{ compiled: CompiledView }>,
+    reader: Runtime,
+    answer: number,
+  ) {
+    const delivered = Promise.withResolvers<string>();
+    result.key("compiled").key("result").key("bump").send({}, (tx) => {
+      delivered.resolve(tx.status().status);
+    });
+    expect(await delivered.promise).not.toBe("error");
+    await childValue(result, answer, reader);
+    await covered();
+  }
+
+  for (const compiled of [false, true]) {
+    for (const initialCount of [undefined, 0]) {
+      it(`initializes later users' ${initialCount === undefined ? "missing" : "seeded"} session inputs in ${compiled ? "compiled" : "static"} children after reload`, async () => {
+        const code = handlerChildProgram(1);
+        const parentSource = (compiled ? PER_USER_PARENT : STATIC_CHILD_PARENT)
+          .replaceAll("PerUser", "PerSession");
+        const piece = await createParent(
+          code,
+          parentSource,
+          true,
+          initialCount,
+        );
+        const later: Awaited<ReturnType<typeof joinParent>>[] = [];
+        try {
+          await childValue(piece.result, 0);
+          await bumpChild(piece.result, client, 1);
+          const runtimeCount = servingRuntimes.length;
+          await host.spaceServer(space)!.park("test-session-input-recovery");
+          const bob = await joinParent(piece, bobSigner, code);
+          later.push(bob);
+          await childValue(bob.result, 0, bob.runtime);
+          expect(servingRuntimes).toHaveLength(runtimeCount + 1);
+          const bobOther = await joinParent(piece, bobSigner, code);
+          later.push(bobOther);
+          await childValue(bobOther.result, 0, bobOther.runtime);
+          for (const session of later) {
+            expect(
+              session.argument.key("count").resolveAsCell()
+                .getAsNormalizedFullLink().scope,
+            )
+              .toBe("session");
+          }
+          await bumpChild(bob.result, bob.runtime, 1);
+          await Promise.all([client.idle(), bobOther.runtime.idle()]);
+          expect(bobOther.result.key("compiled").get()?.result?.answer).toBe(0);
+          expect(piece.result.key("compiled").get()?.result?.answer).toBe(1);
+          await bumpChild(bobOther.result, bobOther.runtime, 1);
+          await bumpChild(bobOther.result, bobOther.runtime, 2);
+          await bob.runtime.idle();
+          expect(bob.result.key("compiled").get()?.result?.answer).toBe(1);
+          expect(host.stats().unstampedSealRefusals).toBe(0);
+          expect(servingErrors).toEqual([]);
+        } finally {
+          for (const session of later) await session.dispose();
+          piece.cancelDemand();
+        }
+      });
+    }
+
+    it(`preserves a same-address explicit user input in ${compiled ? "compiled" : "static"} children after reload`, async () => {
+      const code = handlerChildProgram(1);
+      const parentSource = (compiled ? PER_USER_PARENT : STATIC_CHILD_PARENT)
+        .replaceAll("PerUser", "PerSession");
+      const piece = await createParent(code, parentSource, true);
+      const later: Awaited<ReturnType<typeof joinParent>>[] = [];
+      try {
+        await childValue(piece.result, 0);
+        await bumpChild(piece.result, client, 1);
+        const explicit = client.getCell(
+          space,
+          "compile-arg",
+          undefined,
+          undefined,
+          "user",
+        ).key("count");
+        const rebind = client.edit();
+        piece.argument.asSchema(undefined).withTx(rebind).key("count").set(
+          explicit,
+        );
+        expect((await rebind.commit()).error).toBeUndefined();
+        await covered();
+        const runtimeCount = servingRuntimes.length;
+        await host.spaceServer(space)!.park(
+          "test-explicit-session-input-recovery",
+        );
+        const bob = await joinParent(piece, bobSigner, code);
+        later.push(bob);
+        await childValue(bob.result, 0, bob.runtime);
+        expect(servingRuntimes).toHaveLength(runtimeCount + 1);
+        const bobOther = await joinParent(piece, bobSigner, code);
+        later.push(bobOther);
+        await childValue(bobOther.result, 0, bobOther.runtime);
+        for (const session of later) {
+          expect(
+            session.argument.key("count").resolveAsCell()
+              .getAsNormalizedFullLink().scope,
+          )
+            .toBe("user");
+        }
+        await bumpChild(bob.result, bob.runtime, 1);
+        await childValue(bobOther.result, 1, bobOther.runtime);
+        await bumpChild(bobOther.result, bobOther.runtime, 2);
+        await childValue(bob.result, 2, bob.runtime);
+        await client.idle();
+        expect(piece.result.key("compiled").get()?.result?.answer).toBe(1);
+        expect(host.stats().unstampedSealRefusals).toBe(0);
+        expect(servingErrors).toEqual([]);
+      } finally {
+        for (const session of later) await session.dispose();
+        piece.cancelDemand();
+      }
+    });
+  }
 });

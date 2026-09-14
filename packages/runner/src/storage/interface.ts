@@ -1406,6 +1406,15 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
+   * Retains the exact-instance commit basis of an elided write when its target
+   * has pending state. The dependency adds neither a scheduling subscription
+   * nor CFC value taint. Transactions without optimistic pending layers may
+   * omit this operation. Callers supply the resolved target that compared equal,
+   * not an outer binding that may point into another document or scope.
+   */
+  retainPendingWriteElision?(address: IMemorySpaceAddress): void;
+
+  /**
    * The manager's `isContentAddressedDocPersisted`, reachable from the
    * transaction (the staging scan runs inside one). Optional the same
    * way; absent means never elide.
@@ -2364,6 +2373,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * through a higher-level diff path such as `markReadAsAttemptedWrite`.
    * Runner-owned system metadata writes may also use this directly when they
    * are intentionally out of phase-1 value-surface CFC scope.
+   * Outside UI blind-write mode, elision over pending state retains an internal
+   * commit dependency; this does not add attempted-target coverage.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
@@ -2817,6 +2828,13 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /** Whether this exact document instance has an unpromoted local write. */
+  hasPendingWrite(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   /** Claims renderer ownership and retires the previous owner's local graphs. */
   acquireViewInterests?(onReplaced: Cancel): ViewInterestLease;
