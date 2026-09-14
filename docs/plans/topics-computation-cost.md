@@ -72,38 +72,52 @@ generations. Preserve linked record identity for editing handlers.
 Check off a stage only with linked implementation, tests, and measurement
 evidence. Record a rejected prototype's results as a dated report under
 `docs/history/`; update this live plan with the resulting pending scope. A
-conditional stage may close with an evidence-backed decision not to adopt it.
+conditional stage may close with an evidence-backed decision not to adopt it. A
+dependency on T0 gates a stage's acceptance, as
+[measurement and acceptance](#measurement-and-acceptance) requires;
+implementation and prototypes can begin earlier.
 
 - [ ] **T0 — Establish the baseline and demonstration.** Extend the existing
       [scale](../../packages/patterns/integration/topic-board-scale.bench.ts)
       and
       [navigation](../../packages/patterns/integration/topic-board-navigation.bench.ts)
-      workloads. Separate pivot production, per-topic lookup, activity, and
+      workloads for the browser tier, and build the headless tier's fixture;
+      [measurement and acceptance](#measurement-and-acceptance) defines both
+      tiers. Separate pivot production, per-topic lookup, activity, and
       rendering costs. Capture a reproducible baseline and a browser demo with
-      board, topic, backlink, and comment actions. Exit: the measurement matrix
-      below runs with explicit demand and recorded environment/source versions.
+      board, topic, backlink, and comment actions. Exit: both tiers run at the
+      sizes they build, with explicit demand and recorded environment/source
+      versions, and the acceptance limits are recorded.
 - [ ] **T1 — Share individual-topic derivations.** Reuse `commentCount` for
       `hasComments`; evaluate sharing the active-link view with `hasLinks` and
       link resolution. Preserve narrow compatibility schemas and stable links.
       Exit: behavior tests pass, repeated work falls, and sharing does not
-      unintentionally broaden board demand. Can proceed independently of T2.
+      unintentionally broaden board demand. Can proceed independently of T2;
+      acceptance depends on T0.
 - [ ] **T2 — Prototype one shared backlink-row index.** Index the existing
       cross-reference rows by topic identity once at the board level. Compare
-      direct lookup with each topic scanning the table. First prove how an index
-      handle can cross the board/topic schema boundary without duplicating its
-      producer. Retain existing public results through a compatibility bridge
-      where needed; do not assume adding a required field is rollout-safe. Exit:
-      reduced lookup-stage scaling, bounded maintenance cost, and a written
-      old/new board-topic compatibility matrix. Depends on T0.
+      direct lookup with each topic scanning the table. Prove two boundaries,
+      each without a cast or a duplicated producer. First, the rows reach one
+      index producer as the explicit array Cell or Writable receiver
+      [collection indexes](../features/collection-indexes.md) require, under a
+      schema that carries `topic` as a Cell so the index keys by canonical Cell
+      identity. `crossrefTable` is a `lift`, whose result type exposes no index
+      operator, and `TopicCrossrefRow.topic` is `unknown` so that reading the
+      table expands no topic. Second, the resulting handle crosses the
+      board/topic schema boundary without broadening demand. Retain existing
+      public results through a compatibility bridge where needed; do not assume
+      adding a required field is rollout-safe. Exit: reduced lookup-stage
+      scaling, bounded maintenance cost, and a written old/new board-topic
+      compatibility matrix. Depends on T0.
 - [ ] **T3 — Maintain the mention relation.** Prototype stable per-source edge
       production, per-source-occurrence mention deduplication, and shared
-      grouping by destination. Preserve backlink order and original source
-      links. Measure edge production separately from bucket lookup. Compare
-      against the T2 candidate, not only the original implementation. Exit:
-      same-count retargets update only the required relation work where
+      grouping by destination. The derived edges reach `groupBy` through the
+      same producer boundary T2 proves. Preserve backlink order and original
+      source links. Measure edge production separately from bucket lookup.
+      Compare against the T2 candidate, not only the original implementation.
+      Exit: same-count retargets update only the required relation work where
       supported, complete-workload costs justify adoption, or a report explains
-      deferral. Depends on T0 and the T2 schema-boundary decision; T1 need not
-      block it.
+      deferral. Depends on T0 and T2's boundary decisions; T1 need not block it.
 - [ ] **T4 — Evaluate large-thread aggregates.** Compare a maintained active
       comment count and activity maxima with the T1 implementation. Use explicit
       Cell receivers and measure score/predicate production; do not rely on
@@ -136,11 +150,24 @@ conditional stage may close with an evidence-backed decision not to adopt it.
 
 ## Measurement and acceptance
 
-Use synthetic boards at 32, 128, and 512 topics initially, with low-degree and
+Measure in two tiers. The headless tier runs the board and topic patterns
+without a browser and measures pivot production, per-topic lookup, and topic
+aggregates on synthetic boards at 32, 128, and 512 topics, with low-degree and
 high-degree mention graphs; vary E independently of N. Exercise a single large
 inbound bucket as well as distributed links. Test threads at 10, 100, and 1,000
-comments, varying L separately. Keep a small everyday board in the matrix to
-expose startup and maintenance overhead that scaling tests can hide.
+comments, varying L separately. T0 builds this tier's fixture; if a size cannot
+be built, T0 records the measured limit and the tier runs at the largest size it
+builds.
+
+The browser tier measures the whole system, rendering included, through the
+scale and navigation benchmarks at the board sizes their seed builds. The
+[benchmark guide](../development/BENCHMARKS.md#the-board-scaling-benchmark)
+records the seeding time and memory that bound those sizes, and citations raise
+that cost further (see `DEFAULT_CITING_TOPICS` in
+[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)), so
+the independent N and E experiment belongs to the headless tier. Both tiers
+include a small everyday board to expose startup and maintenance overhead that
+scaling tests can hide.
 
 Demand three distinct workloads: the board alone, the board with one topic open,
 and all backlink outputs for a scaling probe. Do not describe the last workload
@@ -179,19 +206,21 @@ its existing topic children are separate targets. Updating imported source in a
 board's package does not upgrade those existing children.
 
 1. Inventory target piece IDs, source revisions, stored input/result contracts,
-   linked spaces, and active generations. Inspect the deployed parent's stored
-   demand, not just its current repository source. Record whether each
-   improvement changes only derived computation, a public result, or persisted
-   state.
-2. Confirm the target runtime/compiler supports the operators. Reconcile with
-   the Topics pattern's stored-state upgrade mechanism before a stored-state
-   change. During T6, document the deployed version contract and migration steps
-   in the [Topics documentation](../../packages/patterns/topics/README.md), or
-   establish that mechanism and its repository documentation before relying on
-   it. Pure derivation changes need not require a stored-state migration. If
-   persisted state must change, specify version handling, idempotency, legacy
-   writers, and rollback limits explicitly rather than forcing a schema
-   override.
+   linked spaces, active generations, and each topic's stored
+   `topicStateVersion`. Inspect the deployed parent's stored demand, not just
+   its current repository source. Record whether each improvement changes only
+   derived computation, a public result, or persisted state.
+2. Confirm the target runtime/compiler supports the operators. A change to
+   derived computation alone needs no upgrade step. A change to a topic's
+   persisted state is a new step under
+   [Topic state upgrades](../../packages/patterns/topics/state-upgrades.md),
+   which defines the step contract, the mutations allowed while a step is
+   pending, the required tests, and the rollout and rollback limits. Updating a
+   topic to current source also runs every listed step its stored version has
+   not completed, so rehearsal and rollout exercise those steps along with this
+   plan's changes. The board has no stored-state version; if its persisted
+   inputs must change, specify version handling, idempotency, legacy writers,
+   and rollback limits explicitly rather than forcing a schema override.
 3. Acquire a consistent snapshot through the owner/operator and follow the
    [space-clone rehearsal procedure](../development/space-clone-rehearsal.md).
    Identify absent cross-space inputs and obtain appropriate rehearsal coverage;
@@ -239,6 +268,6 @@ question only if evidence suggests changing visible ordering, duplicate
 behavior, or another preserved contract; keep the existing semantics while it is
 pending.
 
-Do not include handler laziness, replication changes, a new naming allocator, or
-unrelated author migrations solely to enlarge this performance release. Their
-independent plans can proceed without blocking the compatible improvements here.
+Do not include handler laziness, replication changes, or a new naming allocator
+solely to enlarge this performance release. Their independent plans can proceed
+without blocking the compatible improvements here.
