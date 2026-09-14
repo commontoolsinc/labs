@@ -110,9 +110,12 @@ export default pattern(() => {
   const index = new Writable<SessionIndexView & StartableSourcesView>({
     schema: "commonfabric.agent-connector.session-index",
     ownerDid: "did:key:owner",
-    // Codex is configured but its driver cannot start a session; Claude can.
+    // Codex is configured but its driver cannot start a session; an ACP
+    // source and Claude can, and Claude is listed first however the
+    // connector orders them.
     sources: [
       { id: "codex", driver: "codex-app-server", capabilities: {} },
+      { id: "acp-lab", driver: "acp", capabilities: { startSession: true } },
       {
         id: "claude",
         driver: "claude-agent-sdk",
@@ -194,13 +197,15 @@ export default pattern(() => {
     wb.relatedSessions[0]?.nativeSessionId === "aaa"
   );
 
-  // Only a source whose driver can start is offered as a harness, and a
-  // stored link that is not http(s) renders as text with no anchor.
+  // Only a source whose driver can start is offered as a harness, Claude
+  // first, and a stored link that is not http(s) renders as text with no
+  // anchor.
   const assert_harnesses_and_links = assert(() =>
     JSON.stringify(
         propValue(findNodeByProp(wb[UI], "data-harness", ""), "items"),
       ) === JSON.stringify([
         { label: "claude  (claude-agent-sdk)", value: "claude" },
+        { label: "acp-lab  (acp)", value: "acp-lab" },
       ]) &&
     findNode(
         wb[UI],
