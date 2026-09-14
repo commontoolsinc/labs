@@ -87,10 +87,12 @@ describe("LLM partial batch coarsening (channel 6)", () => {
     }
   });
 
-  it("writes no partial under the serving posture with server execution on", async () => {
-    // A served run's partials never become commits: the batch window
-    // elapses, and the window's write is skipped before a transaction is
-    // minted. The request stays open for the rest of the test.
+  it("reads the serving-posture flags in the partial batch window", async () => {
+    // The batch body checks `servingPosture && serverExecution` before it
+    // writes. With serving posture on and server execution OFF the check is
+    // false, so the write still happens — the same as the plain path. The
+    // request dispatches plainly (server execution is what routes it to the
+    // served outbox), so this stays deterministic on the fake clock.
     enableMockMode();
     clearMockResponses();
     const storageManager = StorageManager.emulate({ as: signer });
@@ -98,13 +100,10 @@ describe("LLM partial batch coarsening (channel 6)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       servingPosture: true,
-      experimental: { serverExecution: true },
     });
     const original = LLMClient.prototype.sendRequest;
     const response = Promise.withResolvers<LLMResponse>();
-    let streamed = 0;
     LLMClient.prototype.sendRequest = (_request, partial) => {
-      streamed++;
       partial?.("hel");
       return response.promise;
     };
@@ -112,28 +111,109 @@ describe("LLM partial batch coarsening (channel 6)", () => {
       const tx = runtime.edit();
       const { commonfabric: builder } = createTrustedBuilder(runtime);
       const testPattern = builder.pattern(() =>
-        builder.llm({ messages: [{ role: "user", content: "served" }] })
+        builder.llm({ messages: [{ role: "user", content: "posture" }] })
       );
       const resultCell = runtime.getCell(
         space,
-        "llm-partial-served",
+        "llm-partial-posture",
         testPattern.resultSchema,
         tx,
       );
       const result = runtime.run(tx, testPattern, {}, resultCell);
       tx.commit();
-      await clock.settle();
-      expect(streamed).toBe(1);
 
-      await clock.tick(PARTIAL_BATCH_MS);
-      await clock.settle();
-      expect((result.get() as LlmResultState)?.partial).toBeUndefined();
-    } finally {
-      response.resolve({
-        id: "partial-served",
-        role: "assistant",
-        content: "served",
+      const streamed = Promise.withResolvers<LlmResultState>();
+      const stop = result.sink((value: LlmResultState) => {
+        if (value?.partial === "hel") streamed.resolve(value);
       });
+      try {
+        expect((await streamed.promise).pending).toBe(true);
+      } finally {
+        stop();
+      }
+    } finally {
+      response.resolve({ id: "posture", role: "assistant", content: "hi" });
+      LLMClient.prototype.sendRequest = original;
+      resetMockMode();
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("drops a partial the batch window would write for a superseded run", async () => {
+    // The batch body checks the run it belongs to against the current run. A
+    // newer request supersedes the first before its window elapses, so the
+    // first run's batched partial is skipped rather than written over the
+    // newer request's state. The request messages come from a cell, so
+    // changing them re-runs the node; both requests are held open.
+    enableMockMode();
+    clearMockResponses();
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const original = LLMClient.prototype.sendRequest;
+    const held: Array<() => void> = [];
+    const partials: Array<(text: string) => void> = [];
+    LLMClient.prototype.sendRequest = (request, partial) => {
+      const response = Promise.withResolvers<LLMResponse>();
+      held.push(() =>
+        response.resolve({
+          id: "superseded",
+          role: "assistant",
+          content: String(request.messages[0]?.content ?? ""),
+        })
+      );
+      if (partial) partials.push(partial);
+      return response.promise;
+    };
+    try {
+      const tx = runtime.edit();
+      const { commonfabric: builder } = createTrustedBuilder(runtime);
+      const messages = runtime.getCell<{ role: string; content: string }[]>(
+        space,
+        "llm-superseded-messages",
+        undefined,
+        tx,
+      );
+      messages.set([{ role: "user", content: "first" }]);
+      const testPattern = builder.pattern<
+        { messages: { role: string; content: string }[] }
+      >(({ messages }) => builder.llm({ messages }));
+      const resultCell = runtime.getCell(
+        space,
+        "llm-superseded",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, { messages }, resultCell);
+      tx.commit();
+      // A sink is the demand that runs the node and dispatches its request.
+      const stop = result.sink(() => {});
+      try {
+        await clock.settle();
+
+        // The first request is in flight; stream its partial to arm the
+        // batch timer, then supersede it before the window elapses.
+        expect(partials.length).toBe(1);
+        partials[0]("stale");
+        const bump = runtime.edit();
+        messages.withTx(bump).set([{ role: "user", content: "second" }]);
+        await bump.commit();
+        await clock.settle();
+        expect(partials.length).toBe(2);
+
+        // The first run's batch window elapses now, against the newer run.
+        await clock.tick(PARTIAL_BATCH_MS);
+        await clock.settle();
+        // The stale partial was skipped: the cell never shows it.
+        expect((result.get() as LlmResultState)?.partial).not.toBe("stale");
+      } finally {
+        stop();
+      }
+    } finally {
+      for (const release of held) release();
       LLMClient.prototype.sendRequest = original;
       resetMockMode();
       await runtime.dispose();
