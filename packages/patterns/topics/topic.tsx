@@ -1036,15 +1036,23 @@ interface TopicUpgradeState {
 /** Object schemas whose properties extend generated mutation contracts. */
 type TopicObjectSchema = Exclude<JSONSchema, boolean>;
 
-/** Generated creator contract, including definitions shared by author reads. */
+/** Generated reader contract for partially populated structured creators. */
 const TOPIC_CREATOR_SCHEMA = toSchema<
   Writable<Partial<TopicAuthor> | undefined>
->() as TopicObjectSchema;
+>();
 
-/** Reader contract that materializes strings while retaining opaque legacy data. */
+/** Generated reader contract for partially populated comment authors. */
+const TOPIC_COMMENT_AUTHOR_SCHEMA = toSchema<
+  Partial<TopicAuthor>
+>();
+
+/**
+ * Reader contract that materializes strings while retaining opaque legacy data.
+ * Both structured-author projections must stay inline: this contract is also
+ * embedded inside handler schemas, whose roots resolve local references.
+ */
 const TOPIC_UPGRADE_SCHEMA = {
   type: "object",
-  $defs: TOPIC_CREATOR_SCHEMA.$defs,
   properties: {
     topicStateVersion: toSchema<Writable<number>>(),
     createdBy: TOPIC_CREATOR_SCHEMA,
@@ -1060,7 +1068,7 @@ const TOPIC_UPGRADE_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          author: toSchema<Partial<TopicAuthor>>(),
+          author: TOPIC_COMMENT_AUTHOR_SCHEMA,
           authorName: { type: ["string", "unknown"] },
         },
       },
@@ -1181,12 +1189,13 @@ const runTopicUpgrade = (
  * one, leaves such state untouched so the running Topic can still render it.
  */
 const upgradeTopicState = (state: TopicUpgradeState, verb?: string): void => {
+  const fromHandler = verb !== undefined;
   const version = state.topicStateVersion.get();
   if (
     !Number.isSafeInteger(version) || version < 0 ||
     version > TOPIC_STATE_VERSION
   ) {
-    if (verb) {
+    if (fromHandler) {
       rejectMutation(verb, `unsupported topic state version ${version}`);
     }
     return;
@@ -1195,7 +1204,7 @@ const upgradeTopicState = (state: TopicUpgradeState, verb?: string): void => {
     const step = TOPIC_STATE_UPGRADES[index];
     // Author fields are additive: content handlers can still edit version
     // zero while its migration waits for complete reads.
-    if (!runTopicUpgrade(step, state, verb !== undefined)) return;
+    if (!runTopicUpgrade(step, state, fromHandler)) return;
     state.topicStateVersion.set(index + 1);
   }
 };

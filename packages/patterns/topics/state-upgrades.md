@@ -32,10 +32,11 @@ durable mutation, with the verb name in the error.
 Running a Topic runs the upgrade lift. No consumer has to read the result or
 open the author UI for the lift to write. Each headless content verb and browser
 handler also calls the shared runner after validating the request and before its
-first durable write. Complete reads let the handler upgrade state even when it
-runs before the lift. Incomplete reads leave the version unchanged; the author
-upgrade is additive, so content mutations can still operate on version-zero
-state when their own inputs are available.
+first durable write. A handler can complete an upgrade when its reads satisfy
+that step's readiness guard. For the author step, legacy records with no
+structured author object defer to the lift. Incomplete reads leave the version
+unchanged; the author upgrade is additive, so content mutations can still
+operate on version-zero state when their own inputs are available.
 
 The guarded entry points include comment creation, editing and retraction; link
 creation and retraction; title and body saves; and adding or removing mentions.
@@ -62,8 +63,12 @@ array leaves the whole step incomplete, without author writes. For a blank
 structured name, the author object, its name and kind, and the legacy name must
 all be defined before a handler can complete the step. A nonblank structured
 name already supplies attribution and does not require a legacy name. The lift
-can complete genuinely absent fields; a standalone handler needs unambiguous
-inputs to complete the step itself.
+can complete genuinely absent fields. A version-zero record with only
+`createdByName` or `authorName`, and no corresponding structured author object,
+therefore requires the lift. A handler can complete this step when each author
+already has a nonblank structured name or has the defined fields required by the
+guard; partially populated structured authors with a blank name can meet that
+condition.
 
 A step returns `true` only after completing its writes, or `false` for
 incomplete reads. Only `true` lets the runner write the next version in the same
@@ -108,10 +113,13 @@ The public input fields retain their broad legacy domains. The upgrade reader
 uses the explicit schema type union `["string", "unknown"]`: strings are read as
 values, while non-string legacy data stays opaque. TypeScript's
 `string | unknown` alone collapses to opaque `unknown` and cannot express that
-reader. Both the lift and mutation bindings use the same explicit schema.
-Generated structured-author definitions are also attached at the composed schema
-root: local `$ref` references resolve against that root, including references
-nested beneath the creator and comment projections.
+reader. Both the lift and mutation bindings use the same explicit schema. The
+creator and comment-author projections use `Partial<TopicAuthor>`, which the
+schema generator inlines. Both must remain inline: the upgrade contract is
+embedded in lift and handler schemas, and local `$ref` references resolve
+against the enclosing schema document's root. A projection that emits references
+requires its definitions at every containing document root. The Topics suites
+exercise these bindings and fail when a reference cannot resolve.
 
 Mutations carry a cell containing the upgrade handles. The cell keeps the nested
 read-only source handle intact through handler state typing; reading the binding
