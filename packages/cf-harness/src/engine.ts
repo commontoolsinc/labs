@@ -297,6 +297,13 @@ export interface CreateHarnessEngineOptions
   extends ResolveHarnessConfigOptions {
   runId?: string;
   runState?: HarnessRunState;
+  /**
+   * The acquired skills this run may execute scripts of, handed to a child by
+   * its delegating parent. A child receives the one its `skillHandle` names
+   * and no other: a run holds the scripts of the skill it was given.
+   */
+  acquiredSkills?: HarnessAcquiredSkills;
+
   lineage?: HarnessSubagentLineage;
   subagentResumeContext?: HarnessSubagentResumeContext;
   workspaceHostPath?: string;
@@ -999,6 +1006,9 @@ export class CfHarnessEngine {
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
         skillsRoot: this.config.skillsRootRecord,
+        ...(options.acquiredSkills !== undefined
+          ? { acquiredSkills: options.acquiredSkills }
+          : {}),
         lineage: options.lineage,
         now: this.#now(),
       });

@@ -55,6 +55,7 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
+import { HARNESS_ACQUIRED_SKILLS_TYPE } from "./contracts/skill.ts";
 import type {
   HarnessSkillAcquisition,
   HarnessSkillActivation,
@@ -4546,11 +4547,48 @@ export class CfHarnessPromptLoop {
       parentToolCallId: options.toolCall.id,
       depth: (parentRunState.lineage?.depth ?? 0) + 1,
     };
+    // The acquired skill this child may run scripts of: the one its
+    // `skillHandle` names, found by the pin its acquisition records, and no
+    // other. A child holds the scripts of the skill it was given.
+    const childAcquiredSkill = options.resolvedSkill?.acquisition === undefined
+      ? undefined
+      : (this.engine.getRunState().acquiredSkills?.skills ?? []).find(
+        (skill) =>
+          skill.registryId === options.resolvedSkill!.acquisition!.registryId &&
+          skill.commitSha === options.resolvedSkill!.acquisition!.commitSha,
+      );
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
       sandboxRuntime: this.engine.sandbox,
-      sandbox: this.engine.config.sandbox,
+      // The acquired skill's directory is mounted READ-ONLY and into this
+      // child's sandbox alone — never the parent's, which is why it sits
+      // outside the parent's mounts to begin with. The parent that planned
+      // the acquisition still cannot read the bytes it acquired, which is the
+      // property the hostile-skill receipt rests on.
+      sandbox: childAcquiredSkill === undefined ? this.engine.config.sandbox : {
+        ...this.engine.config.sandbox!,
+        additionalMounts: [
+          ...(this.engine.config.sandbox?.additionalMounts ?? []),
+          {
+            kind: "host-bind" as const,
+            name: "acquired-skill",
+            hostPath: childAcquiredSkill.hostRoot,
+            sandboxPath: childAcquiredSkill.sandboxRoot,
+            readOnly: true,
+          },
+        ],
+      },
+      ...(childAcquiredSkill !== undefined
+        ? {
+          acquiredSkills: {
+            type: HARNESS_ACQUIRED_SKILLS_TYPE,
+            version: 1 as const,
+            generatedAt: new Date().toISOString(),
+            skills: [childAcquiredSkill],
+          },
+        }
+        : {}),
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
