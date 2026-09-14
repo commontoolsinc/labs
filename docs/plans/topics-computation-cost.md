@@ -67,12 +67,16 @@ and removal timestamps. Removing them from the aggregate could move activity
 backward. Preserve optional-field defaults and compatibility with stored topic
 generations. Preserve linked record identity for editing handlers.
 
-A reactive `.map()` lowers to a nested pattern whose name depends on its
-position in the source, and stored state records that name. New reactive
-`.map()` calls in the Topics sources therefore go after the existing ones. The
-[pattern update gates](../specs/pattern-update-testing.md) do not establish that
-an inserted map is safe, so a candidate unable to keep that order has T6 check
-the map-rendered rows on the clone.
+Reactive callback operators (`.map()`, `.filter()`, `.flatMap()`, `.count()`,
+`.minBy()`, `.maxBy()`, `.groupBy()`, and `.keyBy()`)
+[lower to nested patterns](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#94-array-method-strategy)
+[numbered by position in their file](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#113-hoist-placement-and-tdz-ordering),
+and stored state records those names. In each Topics source file, new operators
+go after the existing ones, including operators inside a new subpattern declared
+above existing ones. Removing or reordering one has the same effect as inserting
+one. The [pattern update gates](../specs/pattern-update-testing.md) do not
+establish that such a change is safe, so a candidate unable to keep that order
+has T6 check the rows those operators produce on the clone.
 
 ## Execution tracker
 
@@ -86,10 +90,8 @@ on T0 gates a stage's acceptance, as
 implementation and prototypes can begin earlier.
 
 - [ ] **T0 — Establish the baseline and demonstration.** Build the two tiers
-      [measurement and acceptance](#measurement-and-acceptance) defines, and
-      separate pivot production, per-topic lookup, activity, and rendering
-      costs. Exit: every deliverable below is checked off and the acceptance
-      limits are set.
+      [measurement and acceptance](#measurement-and-acceptance) defines. Exit:
+      every deliverable below is checked off and the acceptance limits are set.
   - [ ] The headless tier's fixture.
   - [ ] The probe script and its baseline.
   - [ ] The CI read-budget test with its negative controls.
@@ -100,8 +102,9 @@ implementation and prototypes can begin earlier.
         [navigation](../../packages/patterns/integration/topic-board-navigation.bench.ts)
         benchmarks.
   - [ ] A browser demo with board, topic, backlink, and comment actions.
-  - [ ] The baseline report, with environment and source versions, in
-        `docs/history/`.
+  - [ ] The baseline report in `docs/history/`, separating pivot production,
+        per-topic lookup, activity, and rendering costs, and recording the
+        probe's baseline and the environment and source versions.
 - [ ] **T1 — Share individual-topic derivations.** Reuse `commentCount` for
       `hasComments`; evaluate sharing the active-link view with `hasLinks` and
       link resolution. Preserve narrow compatibility schemas and stable links.
@@ -118,13 +121,14 @@ implementation and prototypes can begin earlier.
       so the index keys by canonical Cell identity. `crossrefTable` is a `lift`,
       whose result type exposes no index operator, and `TopicCrossrefRow.topic`
       is `unknown` so that reading the table expands no topic. Second, the
-      resulting handle reaches topics without broadening demand. Topics the
-      board itself creates hold `boardCrossrefs` as a link to the board's
-      cross-reference table, so decide between carrying the handle through that
-      link, which changes the board's published `crossrefs` result, and a new
-      topic input, which needs the one-time link-bind onto every existing topic
-      that the `mentionable` and `boardNames` inputs describe. Classify the
-      choice under step 1 of the
+      resulting handle reaches topics without broadening demand. Topics that
+      `addTopic` and the board's composer create hold `boardCrossrefs` as a link
+      to the board's cross-reference table; older topics may not, which step 1's
+      inventory records. Decide between carrying the handle through that link,
+      which changes the board's published `crossrefs` result, and a new topic
+      input, which needs the one-time link-bind onto every existing topic that
+      the `mentionable` and `boardNames` inputs describe. Classify the choice
+      under step 1 of the
       [stored-state procedure](#stored-state-and-deployment-procedure), and list
       a link-bind in the step 7 manifest. Retain existing public results through
       a compatibility bridge where needed; do not assume adding a required field
@@ -181,28 +185,31 @@ boards, as the
 does for indexes. It measures the Topics sources unmodified, the baseline's and
 each candidate's alike, and reaches their non-exported derivations without
 adding exports for measurement; a compiled module
-[registers](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#114-__cfreg-content-addressed-registration)
-its non-exported top-level builder artifacts under its content identity. It runs
-at 32, 128, and 512 topics, with low-degree and high-degree mention graphs, and
-varies E independently of N. Exercise a single large inbound bucket as well as
+[registers by name](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#114-__cfreg-content-addressed-registration)
+its non-exported top-level builder artifacts under its content identity. A
+derivation inside a pattern body registers under a position-numbered name that
+can differ between the baseline and a candidate, so the tier measures it through
+the pattern that holds it rather than by registered name. It runs at 32, 128,
+and 512 topics, with low-degree and high-degree mention graphs, and varies E
+independently of N. Exercise a single large inbound bucket as well as
 distributed links. Test threads at 10, 100, and 1,000 comments, varying L
-separately. The headless read-budget test runs in CI at sizes up to 128 topics;
-512 topics runs only from this tier's probe script. T0 builds this tier's
-fixture; if a size cannot be built, T0 records the measured limit and the tier
-runs at the largest size it builds.
+separately. The headless read-budget test runs in CI at sizes up to 128 topics
+and threads up to 100 comments; 512 topics and 1,000 comments run only from this
+tier's probe script. T0 builds this tier's fixture; if a size cannot be built,
+T0 records the measured limit and the tier runs at the largest size it builds.
 
 The browser tier measures the whole system, rendering included, through the
 scale and navigation benchmarks at the board sizes their seed builds. Its new
 cases run in the scheduled
 [Benchmarks workflow](../development/BENCHMARKS.md#the-pipeline). Seeding a
-whole board bounds those sizes in any tier: the
+whole board bounds the sizes of any tier that seeds one: the
 [benchmark guide](../development/BENCHMARKS.md#the-board-scaling-benchmark)
 records its time, memory, and cause. Citations raise the cost further, and
+seeding cost keeps the browser tier to a few citing topics (see
 `DEFAULT_CITING_TOPICS` in
-[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)
-records the heap that citing from every topic exhausts, so only the headless
-tier varies E independently of N. Each tier includes a small case to expose
-startup and maintenance overhead that scaling tests can hide.
+[the fixture](../../packages/patterns/integration/topic-board-fixture.ts)), so
+only the headless tier varies E independently of N. Each tier includes a small
+case to expose startup and maintenance overhead that scaling tests can hide.
 
 Three demand workloads are distinct: the board alone, the board with one topic
 open, and all backlink outputs. The headless tier runs all three, labeling the
@@ -276,8 +283,9 @@ board's package does not upgrade those existing children.
    topology or shell behavior needs qualification.
 4. Run every authored test and retain the exact complete source package. Run
    `setsrc --check` against the clone, then apply with every test root and data
-   attachment included. Rehearse any link-bind the step 7 manifest lists on the
-   clone along with the check and apply, using
+   attachment included. Along with the check and apply, rehearse on the clone
+   every link-bind the change requires (T2 decides them, and the step 7 manifest
+   records them), using
    [`cf piece link`](../../packages/cli/README.md#linking-piece-inputs). Tests
    attached to deployment are packaged/type-checked, not executed there.
    Classify refusals, including missing linked data; a clean compatibility check
@@ -286,7 +294,7 @@ board's package does not upgrade those existing children.
    Usually children precede the board, but an old board unable to read a new
    child needs a bridge or parent-first sequence. Check old/old, old/new,
    new/old, and new/new combinations that can occur during rollout or rollback.
-   Where the manifest lists a link-bind, the matrix also covers topics with and
+   Where the change requires a link-bind, the matrix also covers topics with and
    without the bind, and the bind run before and after the board's source
    update. Keep each transition serial and inspect its result before the next.
 6. Verify authored content independently of `space verify --expect-migration`:
