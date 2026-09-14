@@ -15,6 +15,7 @@ import type {
 } from "../sandbox/types.ts";
 import type {
   HarnessAcquiredSkill,
+  HarnessAllowedSkillScript,
   HarnessSkillAcquisition,
 } from "../contracts/skill.ts";
 
@@ -122,5 +123,37 @@ export const childSandboxOptions = (
         },
       ],
     },
+  };
+};
+
+/**
+ * What a child given an acquired skill may do with the scripts mounted for it:
+ * run the ones the operator allowlisted at that skill's pin, and no others.
+ *
+ * Two facts have to meet here and belong to different things. The operator's
+ * allowlist is a property of the RUN — it is what `--allow-skill-script`
+ * writes, and the operator decides before any acquisition happens — while a
+ * child's tool surface is a property of its PROFILE. Neither reaches the other
+ * on its own, so a child would hold a mounted skill with no tool to run a
+ * script and no entry naming one.
+ *
+ * Narrowed to the pin: the operator decided about that skill's scripts and no
+ * others, and a delegation carries one `skillHandle`, so one pin is the whole
+ * of what this child was given. A run whose allowlist names none of its scripts
+ * grants nothing, and the child's surface is its profile's, unchanged.
+ */
+export const acquiredSkillScriptSurface = (
+  runAllowlist: readonly HarnessAllowedSkillScript[] | undefined,
+  acquired: HarnessAcquiredSkill | undefined,
+): {
+  allowedSkillScripts: readonly HarnessAllowedSkillScript[];
+  toolIds: readonly "run_skill_script"[];
+} => {
+  const allowedSkillScripts = acquired === undefined
+    ? []
+    : (runAllowlist ?? []).filter((script) => script.skill === acquired.pin);
+  return {
+    allowedSkillScripts,
+    toolIds: allowedSkillScripts.length > 0 ? ["run_skill_script"] : [],
   };
 };

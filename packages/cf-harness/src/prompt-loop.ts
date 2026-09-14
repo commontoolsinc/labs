@@ -146,6 +146,7 @@ import { collapseSupersededRunPatternSources } from "./run-pattern-source-collap
 import { isTerminalHarnessRunStatus } from "./run-state.ts";
 import {
   acquiredSkillForHandle,
+  acquiredSkillScriptSurface,
   childSandboxOptions,
 } from "./skills/acquired-skill-mount.ts";
 import {
@@ -4557,6 +4558,23 @@ export class CfHarnessPromptLoop {
       parentAcquiredSkills?.skills,
       options.resolvedSkill?.acquisition,
     );
+    // The operator's allowlist is the run's and the tool surface is the
+    // profile's, so a child given an acquired skill needs both brought to it or
+    // it holds a mounted skill it cannot run a script of.
+    const acquiredScripts = acquiredSkillScriptSurface(
+      this.engine.config.allowedSkillScripts,
+      childAcquiredSkill,
+    );
+    const childAllowedSkillScripts = [
+      ...(profileConfig.allowedSkillScripts ?? []),
+      ...acquiredScripts.allowedSkillScripts,
+    ];
+    const childAllowedToolIds = [
+      ...profileConfig.allowedToolIds,
+      ...acquiredScripts.toolIds.filter((toolId) =>
+        !profileConfig.allowedToolIds.includes(toolId)
+      ),
+    ];
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
@@ -4625,8 +4643,8 @@ export class CfHarnessPromptLoop {
       ...(this.engine.docsCorpus !== undefined
         ? { docsCorpus: this.engine.docsCorpus }
         : {}),
-      ...(profileConfig.allowedSkillScripts !== undefined
-        ? { allowedSkillScripts: profileConfig.allowedSkillScripts }
+      ...(childAllowedSkillScripts.length > 0
+        ? { allowedSkillScripts: childAllowedSkillScripts }
         : {}),
       ...(profileConfig.skillScriptExecutionTarget !== undefined
         ? {
@@ -4730,14 +4748,14 @@ export class CfHarnessPromptLoop {
         : {}),
       model: childModel.model,
       modelSource: childModel.source,
-      allowedToolIds: [...profileConfig.allowedToolIds],
+      allowedToolIds: childAllowedToolIds,
       hostToolIds: [...profileConfig.hostToolIds],
       ...(profileConfig.skillNames !== undefined
         ? { skillNames: [...profileConfig.skillNames] }
         : {}),
-      ...(profileConfig.allowedSkillScripts !== undefined
+      ...(childAllowedSkillScripts.length > 0
         ? {
-          allowedSkillScripts: profileConfig.allowedSkillScripts.map((
+          allowedSkillScripts: childAllowedSkillScripts.map((
             script,
           ) => ({ ...script })),
         }
@@ -4788,7 +4806,7 @@ export class CfHarnessPromptLoop {
         ? { reasoningEffort: this.#reasoningEffort }
         : {}),
       maxModelTurns,
-      allowedToolIds: profileConfig.allowedToolIds,
+      allowedToolIds: childAllowedToolIds,
       allowedSubagentProfiles: [],
       nativeModelToolIds: profileConfig.nativeModelToolIds,
     });

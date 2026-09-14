@@ -8,6 +8,7 @@ import type {
 import type { DockerRunscSandboxConfig } from "../../src/sandbox/types.ts";
 import {
   acquiredSkillForHandle,
+  acquiredSkillScriptSurface,
   childSandboxOptions,
 } from "../../src/skills/acquired-skill-mount.ts";
 
@@ -81,6 +82,61 @@ describe("the acquired-skill mount a delegation gives its child", () => {
       // external source behind it, and mounts nothing.
       expect(acquiredSkillForHandle([acquiredAt(COMMIT_SHA)], undefined))
         .toBeUndefined();
+    });
+  });
+
+  describe("acquiredSkillScriptSurface()", () => {
+    const entryAt = (skill: string) => ({
+      skill,
+      path: "scripts/category-budgets.sh",
+    });
+
+    it("gives the child the operator's entries for its own pin, and the tool", () => {
+      // The allowlist is the run's and the tool surface is the profile's.
+      // Without both brought to the child it holds a mounted skill it cannot
+      // run a script of.
+      expect(
+        acquiredSkillScriptSurface(
+          [entryAt(`${REGISTRY_ID}@${COMMIT_SHA}`)],
+          acquiredAt(COMMIT_SHA),
+        ),
+      ).toEqual({
+        allowedSkillScripts: [entryAt(`${REGISTRY_ID}@${COMMIT_SHA}`)],
+        toolIds: ["run_skill_script"],
+      });
+    });
+
+    it("withholds an entry naming another skill's pin", () => {
+      // The operator decided about the scripts of the skill this child was
+      // given, and about no others.
+      expect(
+        acquiredSkillScriptSurface(
+          [entryAt(`${REGISTRY_ID}@${OTHER_COMMIT_SHA}`), {
+            skill: "agent-browser",
+            path: "scripts/run.ts",
+          }],
+          acquiredAt(COMMIT_SHA),
+        ),
+      ).toEqual({ allowedSkillScripts: [], toolIds: [] });
+    });
+
+    it("grants no tool when the operator allowlisted nothing at the pin", () => {
+      // An acquisition is not an authorization: mounting the bytes and being
+      // allowed to run one are separate decisions, and the second is the
+      // operator's.
+      expect(acquiredSkillScriptSurface([], acquiredAt(COMMIT_SHA)))
+        .toEqual({ allowedSkillScripts: [], toolIds: [] });
+      expect(acquiredSkillScriptSurface(undefined, acquiredAt(COMMIT_SHA)))
+        .toEqual({ allowedSkillScripts: [], toolIds: [] });
+    });
+
+    it("grants nothing to a child given no acquired skill", () => {
+      expect(
+        acquiredSkillScriptSurface(
+          [entryAt(`${REGISTRY_ID}@${COMMIT_SHA}`)],
+          undefined,
+        ),
+      ).toEqual({ allowedSkillScripts: [], toolIds: [] });
     });
   });
 
