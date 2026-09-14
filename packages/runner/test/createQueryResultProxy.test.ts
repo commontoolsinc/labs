@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 
-import { createQueryResultProxy } from "../../src/query-result-proxy.ts";
-import { Runtime } from "../../src/runtime.ts";
-import { StorageManager } from "../../src/storage/cache.deno.ts";
+import { createQueryResultProxy } from "../src/query-result-proxy.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("query-result-array-iteration");
 

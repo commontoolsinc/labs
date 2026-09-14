@@ -5,9 +5,8 @@
  * column labels a db declares ride onto the row documents rather than onto the
  * container: every entry the container carries is `origin: "link"` with a
  * `LinkReference` atom and no confidentiality of its own. So what a reader
- * derives turns on whether it opened a row, and these two arms are that split
- * — one computation reads a field off every row, the other reads the row
- * count and nothing else.
+ * derives turns on whether it opened a row. The cases distinguish field reads,
+ * including iteration, from reading the row count alone.
  *
  * The db is declared and seeded through the same path a connector store
  * reaches a pattern by: per-column `ifc` on the table contract, rows written
