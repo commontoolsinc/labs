@@ -1053,13 +1053,14 @@ leaves the tree consistent.
 
 ### Aliases
 
+The named-space prefix `/@name/` is refused; callers use `//name/`.
+
 A form a reader accepts and no writer writes, each for one reason and with its
 exit (R12):
 
 | Form                                                    | Read because                                                             | Confined to                                                            | Retires when                                                                                                                                                                                                       |
 | ------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/@did:key:…/` space prefix                             | the writers rendered it into harness refs, stored messages, and markdown | a segment beginning `@did:`, which no scope word or qualifier name can | a migration rewrites the stored strings — harness `ref`s re-render from the fields beside them; messages and markdown are people's content, which is the real decision — or the owner rules the residue acceptable |
-| `/@<name>/` space prefix                                | `cf --url` renders one from a page URL today                             | the same segment, holding a name                                       | step 2, when that writer moves; no stored string holds it                                                                                                                                                          |
 | the CLI's bare form, `pieceId[@scope]` and a slug alone | a typing convenience the README already calls an alias                   | slots where no path competes: `--cell`, link endpoints                 | a CLI decision — the [open question](#open-questions) on retiring it in favor of `/slug`                                                                                                                           |
 
 ## Relationship to existing decisions

@@ -64,10 +64,9 @@ export interface HarnessHandleEntry {
   kind: HarnessHandleKind;
 
   /**
-   * Canonical LLM-friendly link string of the referent — the
-   * `/[@did/]<id>[@scope][/path]` form serialized by the runner's
-   * `createLLMFriendlyLink()`, so two spellings of one address share one
-   * `ref`.
+   * Canonical reference serialized by the runner's `renderCellReference()`.
+   * Complete addresses include their space and scope; unresolved references
+   * omit the unknown space and use an implicit base scope.
    */
   ref: string;
 

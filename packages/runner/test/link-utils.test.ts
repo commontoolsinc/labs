@@ -1664,17 +1664,27 @@ describe("link-utils", () => {
   describe("createLLMFriendlyLink", () => {
     const longId = "of:bafyabc12345678901234567890";
 
+    it("round-trips trailing whitespace as part of the final path key", () => {
+      const link = {
+        id: longId,
+        space,
+        scope: "space" as const,
+        path: ["..", "a#argument "],
+      } as const;
+      expect(parseLLMFriendlyLink(createLLMFriendlyLink(link), space)).toEqual(
+        link,
+      );
+    });
+
     it("should create LLM friendly link from normalized link", () => {
       const link: NormalizedLink = {
         id: longId,
         path: ["path", "to", "cell"],
         space: space,
       };
-      // We need to cast to NormalizedFullLink because createLLMFriendlyLink expects it,
-      // but it only uses id and path.
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}/path/to/cell`);
+      expect(result).toBe(`//${space}/${longId}@space/path/to/cell`);
     });
 
     it("should create LLM friendly links with non-space scope suffixes", () => {
@@ -1686,17 +1696,17 @@ describe("link-utils", () => {
       };
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}@user/path`);
+      expect(result).toBe(`//${space}/${longId}@user/path`);
     });
 
-    it("should omit explicit space scope when creating LLM friendly links", () => {
+    it("omits the base scope when a context space is supplied", () => {
       const link: NormalizedLink = {
         id: longId,
         path: ["path"],
         space: space,
         scope: "space",
       };
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link as any, space);
 
       expect(result).toBe(`/${longId}/path`);
     });
@@ -1709,7 +1719,7 @@ describe("link-utils", () => {
       };
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}`);
+      expect(result).toBe(`//${space}/${longId}@space`);
     });
 
     it("should encode special characters in path", () => {
@@ -1720,7 +1730,9 @@ describe("link-utils", () => {
       };
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}/path~1with~1slash/path~0with~0tilde`);
+      expect(result).toBe(
+        `//${space}/${longId}@space/path~1with~1slash/path~0with~0tilde`,
+      );
     });
   });
 });

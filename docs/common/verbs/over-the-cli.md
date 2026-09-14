@@ -285,7 +285,7 @@ cf exec /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
 A tool prints its result on stdout as it always did, with the result cell's
 address on stderr. The line spells out the whole command that reads it back,
 and the address is one token that carries all three parts — space, id, and
-scope — as the `/@space/piece` reference a target position takes whole.
+scope — as the `//space/piece@scope` reference a target position takes whole.
 Naming the space inside the token is what makes the command portable: `cf exec`
 gets its space from the mount it ran through, while the suggested read falls
 back to whichever space the caller has configured, so an address that named

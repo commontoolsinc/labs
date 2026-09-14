@@ -211,7 +211,9 @@ describe("handle-table", () => {
         createHarnessHandleTable("run-1"),
         ref,
       );
-      expect(resolveHandleToken(table, token)?.ref).toBe(ref);
+      expect(resolveHandleToken(table, token)?.ref).toBe(
+        `//${SPACE_DID}${LINK_A}@space/items/0`,
+      );
     });
 
     it("re-derives a fixed-width suffix on collision, keeping both tokens five characters and distinct", async () => {
@@ -335,7 +337,7 @@ describe("handle-table", () => {
         text,
       );
       expect(value).toBe(table.entries[0].token);
-      expect(table.entries[0].ref).toBe(text);
+      expect(table.entries[0].ref).toBe(`//${SPACE_DID}${LINK_A}@space/items`);
     });
 
     it("consumes complete references and named qualifiers without minting a shorter address", async () => {
@@ -345,7 +347,7 @@ describe("handle-table", () => {
         text,
       );
       expect(value).toBe(table.entries[0].token);
-      expect(table.entries[0].ref).toBe(`/@${SPACE_DID}${LINK_A}@user/items/`);
+      expect(table.entries[0].ref).toBe(`//${SPACE_DID}${LINK_A}@user/items/`);
       for (
         const invalid of [
           `//unresolved${LINK_A}`,

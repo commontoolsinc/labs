@@ -92,14 +92,13 @@ describe("cell-reference", () => {
       });
     });
 
-    it("reads DID and named-space migration aliases", () => {
+    it("preserves the DID alias and refuses retired named-space prefixes", () => {
       const space = "did:key:z6MkBakery";
       expect(parseCellReference(`/@${space}/glaze-tracker`)).toEqual(
         parseCellReference(`//${space}/glaze-tracker`),
       );
-      expect(parseCellReference("/@bakery/glaze-tracker")).toEqual(
-        parseCellReference("//bakery/glaze-tracker"),
-      );
+      expect(() => parseCellReference("/@bakery/glaze-tracker"))
+        .toThrow(/retired; use `\/\/bakery\//);
     });
 
     it("reads scopes and pins in either qualifier order", () => {
