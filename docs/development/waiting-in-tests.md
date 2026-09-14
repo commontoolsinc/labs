@@ -807,7 +807,9 @@ so the test waits for that suspension (`SpaceServer.suspendedOnInput`) and
 reads its wave bound there. The memory server's fan-out and the serving
 runtime settle INSIDE that predicate, between two readings of the
 suspension, so a frame still held or a run still owed un-suspends the loop
-before the second rather than landing after the wait returns. Hold
+before the second rather than landing after the wait returns — the fan-out
+on both sides of the runtime settle, since that settle can itself run work
+that commits. Hold
 `#hasWork()` true and that wait fails by name while the three-second interval
 it replaced passes — the storm's cadence is the flush deadline, which on that
 host is longer than any interval a test can afford. The control is the same
