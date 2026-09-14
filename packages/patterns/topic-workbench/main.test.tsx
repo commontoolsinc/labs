@@ -338,6 +338,30 @@ export default pattern(() => {
     )
   );
 
+  // A confirmed start stays attached when the connector later marks the
+  // session deleted: the row shows from its own record, as a manually
+  // attached session does, and does not fall back to starting.
+  const action_delete_started = action(() => {
+    const started = firstCommand(commands.get())?.nativeSessionId ?? "";
+    const current = index.get();
+    index.set({
+      ...current,
+      sessions: current.sessions.map((s) =>
+        s && s.nativeSessionId === started
+          ? { ...s, syncStatus: "deleted" as const }
+          : s
+      ),
+    });
+  });
+  const assert_deleted_still_attached = assert(() =>
+    wb.pendingStarts.length === 0 &&
+    wb.attachedSessions.length === 2 &&
+    wb.attachedSessions.some((row) =>
+      row.nativeSessionId === firstCommand(commands.get())?.nativeSessionId &&
+      row.gitBranch === ""
+    )
+  );
+
   // With no queue bound, a start records nothing as attached: it stays
   // pending, and Dismiss clears it.
   const action_start_without_queue = action(() => {
@@ -429,6 +453,8 @@ export default pattern(() => {
       { assertion: assert_start_pending },
       { action: action_confirm_start },
       { assertion: assert_start_attached },
+      { action: action_delete_started },
+      { assertion: assert_deleted_still_attached },
       { action: action_start_without_queue },
       { assertion: assert_start_without_queue_pending },
       { render: noQueue[UI] },
