@@ -7402,9 +7402,6 @@ export const prepareBoundaryCommit = (
           !cfcReferenceBindingMatches(input.reference, {
             ...input.source,
             scope: normalizeCellScope(input.source.scope),
-            ...(input.reference.binding.overwrite !== undefined && {
-              overwrite: input.reference.binding.overwrite,
-            }),
           })
         ) {
           reasons.push(verdictReason("reference acquisition is unresolved"));

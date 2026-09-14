@@ -14,6 +14,7 @@ import type {
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
 import type {
+  CfcReferenceBinding,
   CfcReferenceObservation,
   CfcReferenceProvenance,
 } from "./reference-provenance.ts";
@@ -552,7 +553,7 @@ export type WritePolicyInput =
   | {
     readonly kind: "link-write";
     readonly target: CfcAddress;
-    readonly source: CfcAddress;
+    readonly source: CfcReferenceBinding;
     readonly linkSchema?: JSONSchema;
     readonly cfcLabelView?: CfcLabelView;
     readonly reference?: CfcReferenceProvenance;

@@ -12,6 +12,7 @@ import { applyCommit } from "@commonfabric/memory/v2/engine";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
+import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { authorizationRead } from "../src/storage/reactivity-log.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { SpaceReplica } from "../src/storage/v2.ts";
@@ -33,7 +34,8 @@ describe("commit-read-validation", () => {
       storageManager: storage,
     });
     try {
-      const tx = runtime.edit();
+      const underlying = runtime.edit();
+      const tx = createNonReactiveTransaction(underlying);
       tx.dispatchedEventId = "original";
       tx.dispatchedEventId = "original";
       for (const replacement of [undefined, "replacement"]) {
@@ -42,6 +44,7 @@ describe("commit-read-validation", () => {
         })
           .toThrow("cannot be cleared or rebound");
         expect(tx.dispatchedEventId).toBe("original");
+        expect(underlying.dispatchedEventId).toBe("original");
       }
       tx.abort();
     } finally {
@@ -55,6 +58,7 @@ describe("commit-read-validation", () => {
       "sink",
       "effect",
       "event",
+      "wrapped-event",
       "stream",
       "ordinary",
     ] as const
@@ -130,6 +134,9 @@ describe("commit-read-validation", () => {
           });
         }
         if (kind === "event") tx.dispatchedEventId = "durable-event";
+        if (kind === "wrapped-event") {
+          createNonReactiveTransaction(tx).dispatchedEventId = "durable-event";
+        }
         if (kind === "stream") {
           using queued = stub(runtime.scheduler, "queueEvent");
           stream.withTx(tx).send("observed");

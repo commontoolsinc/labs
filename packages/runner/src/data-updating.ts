@@ -54,6 +54,7 @@ import {
 } from "./cfc/types.ts";
 import {
   carryCfcReferenceProvenance,
+  cfcReferenceBinding,
   cfcReferenceBindingMatches,
   type CfcReferenceProvenance,
   getCfcReferenceProvenance,
@@ -275,19 +276,20 @@ const recordLinkWritePolicyInput = (
       !hasPendingSchemaPolicyInput(tx, target)
     ) return;
   }
-  const acquisition = reference !== undefined &&
-      cfcReferenceBindingMatches(reference, source)
-    ? reference
-    : undefined;
+  if (
+    reference !== undefined && !cfcReferenceBindingMatches(reference, source)
+  ) {
+    throw new Error("Reference acquisition does not match its binding");
+  }
   if (tx.getCfcState().flowLabelsMode === "persist") {
-    assertSerializableReferenceScope(source.schema, acquisition?.scopeCaps);
+    assertSerializableReferenceScope(source.schema, reference?.scopeCaps);
   }
   tx.markCfcRelevant(`link-write:${target.id}`);
   tx.recordCfcWritePolicyInput({
     kind: "link-write",
     target: cfcAddressFromLink(target),
-    source: cfcAddressFromLink(source),
-    ...(acquisition !== undefined && { reference: acquisition }),
+    source: cfcReferenceBinding(source),
+    ...(reference !== undefined && { reference }),
     ...(source.schema !== undefined && { linkSchema: source.schema }),
     ...(carriedCfcLabelView !== undefined && {
       cfcLabelView: carriedCfcLabelView,
@@ -302,9 +304,13 @@ export function recordTrustedLinkValueWrite(
   value: unknown,
 ): void {
   const reference = getCfcReferenceProvenance(value);
-  if (reference === undefined) return;
   const source = parseLink(value, target);
-  if (source === undefined) return;
+  if (source === undefined) {
+    if (reference !== undefined) {
+      throw new Error("Reference acquisition does not name a link");
+    }
+    return;
+  }
   recordLinkWritePolicyInput(
     tx,
     target,

@@ -3986,6 +3986,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.#wrapped.tx;
   }
 
+  /** The durable event whose outcome depends on the wrapped transaction. */
+  get dispatchedEventId(): string | undefined {
+    return this.#wrapped.dispatchedEventId;
+  }
+
+  set dispatchedEventId(value: string | undefined) {
+    this.#wrapped.dispatchedEventId = value;
+  }
+
   /**
    * Forwards to the wrapped transaction, as `isAuthoritativeWrites()` below
    * does. `markEffectCompletion()` marks whatever tx shape it is handed, and

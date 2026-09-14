@@ -79,6 +79,9 @@ Owner: Hixie, with the PR author supplying the evidence.
       and writers. It binds the payload to the selected stream and carries the
       sending flow even for primitive events. Older Runtime context readers
       reject it. Memory's opaque string transport needs no CFC policy change.
+      Require Memory's `eventContext` capability as well: clients refuse declared
+      event appends and Retry requests without it, including after reconnect. This handshake proves
+      transport support; it does not establish Runtime context-version support.
 - [ ] Define an enforceable stale-writer barrier: minimum supported host build at
       admission, or an isolated deployment with controlled writers. Reconnecting
       old clients must not author unproven slots into a precise cohort. Reader

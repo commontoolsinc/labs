@@ -1147,8 +1147,19 @@ the per-epic implementation notes).
   WebSocket frames, then delete the config trio and advertise the capability
   unconditionally.
 
-> Two neighbors in the same handshake are related but are not
+> Neighbors in the same handshake are related but are not
 > runtime-toggleable experimental flags:
+>
+> - **`readValidation`** is a build-inherent capability, hardwired to `true`.
+>   Clients require it for commits with required or unclassified reads, including
+>   replay after reconnect. Its absence refuses those commits before send.
+> - **`eventContext`** is a build-inherent capability, hardwired to `true`.
+>   It advertises preservation of opaque Runtime context on durable event
+>   entries and retries. Clients require it for every declared event append and Retry request,
+>   checking again after reconnect. Memory does not interpret the context;
+>   Runtime compatibility is a separate deployment requirement. Both
+>   capabilities are permanent and defined in
+>   [`04-protocol.md`](../specs/memory-v2/04-protocol.md).
 >
 > - **`sqliteCommitRowLabelEval`** is a build-inherent capability, hardwired to
 >   `true`, advertising that this build's engine evaluates row-label rules at

@@ -24,6 +24,7 @@ function validationTransport(
   server: Server,
   capable: boolean | ((connection: number) => boolean),
   dropFirst: boolean,
+  capability: "readValidation" | "eventContext" = "readValidation",
 ): {
   transport: Transport;
   sent: () => number;
@@ -47,7 +48,7 @@ function validationTransport(
                 ...message,
                 flags: {
                   ...message.flags,
-                  readValidation: typeof capable === "function"
+                  [capability]: typeof capable === "function"
                     ? capable(connectionCount)
                     : capable && connectionCount === 1,
                 },
@@ -58,7 +59,10 @@ function validationTransport(
       }
       const message = decodeMemoryBoundary(payload) as { type: string };
       if (message.type === "hello") hellos++;
-      if (message.type === "transact") {
+      if (
+        message.type === "transact" ||
+        message.type === "event.attention.resolve"
+      ) {
         commits++;
         if (dropFirst && commits === 1) {
           connection.close();
@@ -119,6 +123,88 @@ function writeCommit(validation?: "required" | "elidable"): ClientCommit {
 }
 
 describe("v2-read-validation-client", () => {
+  it("requires a positive event context capability and preserves it on the wire", () => {
+    const flags = getMemoryProtocolFlags();
+    expect(flags.eventContext).toBe(true);
+    expect(
+      parseMemoryProtocolFlags(wireMemoryProtocolFlags(flags))?.eventContext,
+    ).toBe(true);
+    const { eventContext: _capability, ...absent } = flags;
+    expect(parseMemoryProtocolFlags(absent)?.eventContext).toBe(false);
+    expect(parseMemoryProtocolFlags({ ...flags, eventContext: "true" }))
+      .toBeNull();
+  });
+
+  for (const timing of ["initial", "readiness", "replay"] as const) {
+    it(`refuses event appends when ${timing} negotiation lacks context support`, async () => {
+      const server = new Server(testSessionOpenServerOptions);
+      const scripted = validationTransport(
+        server,
+        timing !== "initial",
+        timing === "replay",
+        "eventContext",
+      );
+      const client = await connect({ transport: scripted.transport });
+      try {
+        const session = await client.mount(
+          "did:key:event-context",
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const commit: ClientCommit = {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [],
+          eventAppends: [{ id: "of:stream-events:context", eventId: "event" }],
+        };
+        const pending = session.transact(commit);
+        if (timing === "readiness") scripted.disconnect();
+        await expect(pending).rejects.toThrow(
+          "memory server does not support opaque event context",
+        );
+        expect(scripted.sent()).toBe(timing === "replay" ? 1 : 0);
+        expect(scripted.hellos()).toBe(timing === "initial" ? 1 : 2);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+  }
+
+  for (const timing of ["initial", "readiness"] as const) {
+    it(`refuses event retry when ${timing} negotiation lacks context support`, async () => {
+      const server = new Server(testSessionOpenServerOptions);
+      const scripted = validationTransport(
+        server,
+        timing !== "initial",
+        false,
+        "eventContext",
+      );
+      const client = await connect({ transport: scripted.transport });
+      try {
+        const session = await client.mount(
+          "did:key:event-context",
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const pending = session.resolveEventAttention(
+          "event",
+          1,
+          "of:stream-events:context",
+          "retry",
+        );
+        if (timing === "readiness") scripted.disconnect();
+        await expect(pending).rejects.toThrow(
+          "memory server does not support opaque event context",
+        );
+        expect(scripted.sent()).toBe(0);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+  }
+
   it("requires positive capability advertisement and preserves it on the wire", () => {
     const flags = getMemoryProtocolFlags();
     expect(flags.readValidation).toBe(true);

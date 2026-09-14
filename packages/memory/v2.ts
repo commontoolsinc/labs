@@ -1111,6 +1111,9 @@ export type MemoryProtocolFlags = {
    */
   readValidation: boolean;
 
+  /** The server preserves opaque runtime context on durable event entries. */
+  eventContext: boolean;
+
   /** The server integrates durable collaborative operation streams. */
   applyOp: boolean;
 
@@ -1206,6 +1209,7 @@ export type WireMemoryProtocolFlags = {
   messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   readValidation?: boolean;
+  eventContext?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
@@ -1994,6 +1998,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   stableExpressionResultIds: true,
   commitPreconditions: getCommitPreconditionsConfig(),
   readValidation: true,
+  eventContext: true,
   applyOp: true,
   operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
   messageCompressionV1: getMessageCompressionConfig(),
@@ -2059,6 +2064,11 @@ export const parseMemoryProtocolFlags = (
 
   const readValidation = value.readValidation;
   if (readValidation !== undefined && typeof readValidation !== "boolean") {
+    return null;
+  }
+
+  const eventContext = value.eventContext;
+  if (eventContext !== undefined && typeof eventContext !== "boolean") {
     return null;
   }
 
@@ -2163,6 +2173,7 @@ export const parseMemoryProtocolFlags = (
     stableExpressionResultIds: stableExpressionResultIds === true,
     commitPreconditions: commitPreconditions === true,
     readValidation: readValidation === true,
+    eventContext: eventContext === true,
     applyOp: applyOp === true,
     ...(operationCodecs === undefined
       ? {}
@@ -2199,6 +2210,7 @@ export const wireMemoryProtocolFlags = (
   stableExpressionResultIds: flags.stableExpressionResultIds,
   commitPreconditions: flags.commitPreconditions,
   readValidation: flags.readValidation,
+  eventContext: flags.eventContext,
   applyOp: flags.applyOp,
   ...(flags.operationCodecs === undefined
     ? {}

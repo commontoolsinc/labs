@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy } from "@std/testing/mock";
 
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { type FabricValue, hashStringOf } from "@commonfabric/data-model";
@@ -7,10 +8,20 @@ import { Identity } from "@commonfabric/identity";
 
 import { normalizeClause } from "../src/cfc/clause.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
-import { createSigilLinkFromParsedLink } from "../src/link-utils.ts";
+import { createSigilLinkFromParsedLink, parseLink } from "../src/link-utils.ts";
 import { deriveFlowJoin } from "../src/cfc/prepare.ts";
-import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
+import {
+  type CfcMetadata,
+  type LabelMapEntry,
+  runtimeWritePolicyAuthorization,
+} from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { recordTrustedLinkValueWrite } from "../src/data-updating.ts";
+import {
+  carryCfcReferenceProvenance,
+  cfcReferenceBinding,
+  getCfcReferenceProvenance,
+} from "../src/cfc/reference-provenance.ts";
 import {
   findAllWriteRedirectCells,
   sendValueToBinding,
@@ -432,6 +443,136 @@ describe("CFC reference confidentiality", () => {
       "reference acquisition is unresolved",
     );
   });
+
+  it("refuses a raw builtin output whose reference history is missing", async () => {
+    const target = await seed("raw-builtin-target", "public");
+    const tx = runtime.edit();
+    const output = runtime.getCell(space, "raw-builtin-output", undefined, tx);
+    const raw = createSigilLinkFromParsedLink(target.getAsNormalizedFullLink());
+    sendValueToBinding(
+      tx,
+      output,
+      undefined,
+      output.getAsWriteRedirectLink(),
+      raw,
+    );
+    expect(tx.getCfcState().writePolicyInputs).toContainEqual(
+      expect.objectContaining({ kind: "link-write" }),
+    );
+    tx.prepareCfc();
+    expect((await tx.commit()).error?.message).toContain(
+      "reference acquisition is unresolved",
+    );
+  });
+
+  it("refuses a changed binding before discarding its acquired scope restrictions", async () => {
+    const target = await seed("changed-binding-target", "public");
+    const acquire = runtime.edit();
+    const held = runtime.getCellFromLink(
+      {
+        ...target.getAsNormalizedFullLink(),
+        schema: { type: "string", scope: "space" },
+        scopeCaps: [{ depth: 0, scope: "space" }],
+      },
+      undefined,
+      acquire,
+    );
+    const reference = held.getAsLink();
+    expect(getCfcReferenceProvenance(reference)?.scopeCaps).toEqual([
+      { depth: 0, scope: "space" },
+    ]);
+    const changed = carryCfcReferenceProvenance(
+      reference,
+      createSigilLinkFromParsedLink({
+        ...held.getAsNormalizedFullLink(),
+        path: ["different"],
+      }),
+    );
+    acquire.abort();
+    const tx = runtime.edit();
+    const output = runtime.getCell(
+      space,
+      "changed-binding-output",
+      undefined,
+      tx,
+    );
+    expect(() =>
+      recordTrustedLinkValueWrite(tx, output.getAsNormalizedFullLink(), changed)
+    )
+      .toThrow("Reference acquisition does not match its binding");
+    tx.abort();
+  });
+
+  for (const acquiredRedirect of [false, true]) {
+    for (const writtenRedirect of [false, true]) {
+      it(`${acquiredRedirect === writtenRedirect ? "accepts" : "refuses"} a ${writtenRedirect ? "redirect" : "plain"} output acquired as a ${acquiredRedirect ? "redirect" : "plain"} reference`, async () => {
+        const target = await seed("binding-mode-target", "public");
+        const acquired = acquiredRedirect
+          ? target.getAsWriteRedirectLink()
+          : target.getAsLink();
+        const written = writtenRedirect
+          ? target.getAsWriteRedirectLink()
+          : target.getAsLink();
+        const tx = runtime.edit();
+        const output = runtime.getCell(
+          space,
+          "binding-mode-output",
+          undefined,
+          tx,
+        );
+        const destination = output.getAsNormalizedFullLink();
+        recordTrustedLinkValueWrite(tx, destination, written);
+        expect(tx.getCfcState().writePolicyInputs).toContainEqual(
+          expect.objectContaining({
+            kind: "link-write",
+            source: cfcReferenceBinding(parseLink(written, destination)!),
+          }),
+        );
+        tx.recordCfcWritePolicyInput({
+          kind: "link-write",
+          target: destination,
+          source: cfcReferenceBinding(parseLink(written, destination)!),
+          reference: getCfcReferenceProvenance(acquired),
+        }, runtimeWritePolicyAuthorization);
+        tx.writeValueOrThrow(destination, written);
+        tx.prepareCfc();
+        const result = await tx.commit();
+        if (acquiredRedirect === writtenRedirect) {
+          expect(result.error).toBeUndefined();
+        } else {
+          expect(result.error?.message).toContain(
+            "reference acquisition is unresolved",
+          );
+        }
+      });
+    }
+  }
+
+  for (const method of ["get", "sample", "pull"] as const) {
+    it(`consumes a held private reference when read with ${method}`, async () => {
+      const target = await seed("read-entry-target", "public");
+      const selected = await seed("read-entry-selection", target.getAsLink(), [{
+        path: [],
+        origin: "link",
+        observes: "followRef",
+        label: { confidentiality: [secret] },
+      }]);
+      const acquire = runtime.edit();
+      const held = selected.withTx(acquire).resolveAsCell().asSchema({
+        type: "string",
+      }).withTx();
+      acquire.abort();
+      using reads = spy(runtime, "readTx");
+      expect(await held[method]()).toBe("public");
+      const observations = reads.calls.flatMap((call) =>
+        call.returned?.getCfcState().referenceObservations ?? []
+      );
+      expect(observations).toContainEqual(expect.objectContaining({
+        purpose: "dereference",
+        confidentiality: [secret],
+      }));
+    });
+  }
 
   it("marks unresolved references admitted by diagnostics as unavailable evidence", async () => {
     await runtime.dispose();

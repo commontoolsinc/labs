@@ -215,6 +215,12 @@ refusal. Without a context, ordinary precise reference-acquisition checks still
 apply, so decoded reference bytes cannot become public acquisitions. A primitive
 event's dispatch can still require context for the stream-selection history.
 
+Memory advertises opaque context preservation through the `eventContext`
+capability. Clients require it for declared event appends and Retry requests and recheck it before
+sending after reconnect. This transport guarantee is independent of the
+deployment requirement that every participating Runtime support context
+version 2; an older Runtime must not author or dispatch events in that cohort.
+
 Explicit host acquisition APIs, including `GetCell(cause)`,
 `RuntimeClient.acquireCell(address)`, `Runtime.acquireExternalInput(space, data)`,
 and piece/home/slug loaders, remain
