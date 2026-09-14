@@ -1344,6 +1344,7 @@ export function normalizeAndDiff(
       if (cfcLabelViewHasValues(carriedCfcLabelView)) {
         recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
       }
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
       return [];
     } else {
       diffLogger.debug(
@@ -1477,6 +1478,7 @@ export function normalizeAndDiff(
       if (cfcLabelViewHasValues(carriedCfcLabelView)) {
         recordLinkWritePolicyInput(tx, link, parsedLink, carriedCfcLabelView);
       }
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
       return [];
     } else {
       // Scope-isolation guard (spec: docs/specs/scoped-cell-instances.md,
@@ -1815,6 +1817,8 @@ export function normalizeAndDiff(
         location: link,
         value: cloneIfNecessary(newValue as FabricValue, { deep: false }),
       });
+    } else if (changes.length === 0) {
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
     }
 
     return changes;
@@ -2059,6 +2063,8 @@ export function normalizeAndDiff(
         location: link,
         value: cloneIfNecessary(newValue as FabricValue, { deep: false }),
       });
+    } else if (changes.length === 0) {
+      tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
     }
 
     return changes;
@@ -2117,6 +2123,8 @@ export function normalizeAndDiff(
     tx.isAuthoritativeWrites?.() === true
   ) {
     changes.push({ location: link, value: newValue as FabricValue });
+  } else {
+    tx.retainPendingWriteElision?.(toMemorySpaceAddress(link));
   }
 
   return changes;

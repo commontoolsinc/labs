@@ -1102,8 +1102,11 @@ inert. A run with no new contribution preserves the outstanding publication's
 recovery obligation and keeps its refreshed subscriptions. This settlement
 observer is outside the pending-commit barrier that the serving loop drains before committing its wave.
 
-An ordinary raw write elided against pending state retains internal commit
-provenance for that dependency. A later run that elides one pending output and
+An ordinary write elided against pending state retains internal commit
+provenance for that dependency. This applies to raw storage writes, normalized
+result values, and preserved output links. Normalization records the actual
+compared target, including descendants reached through scoped links and write
+redirects. A later run that elides one pending output and
 writes another must withdraw if the elided value is discarded. Read-only foreign
 spaces carry the same internal dependency into the wave. A derivation that only
 elides pending outputs automatically contributes a write-free acceptance

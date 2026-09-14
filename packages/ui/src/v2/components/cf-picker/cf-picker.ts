@@ -1,5 +1,5 @@
-import { numberSchema } from "@commonfabric/runner/schemas";
-import { type CellHandle } from "@commonfabric/runtime-client";
+import { numberSchema, pieceListSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { css, html, PropertyValues } from "lit";
 
 import { BaseElement } from "../../core/base-element.ts";
@@ -266,7 +266,11 @@ export class CFPicker extends BaseElement {
 
   override firstUpdated() {
     this._indexCellController.bind(this.selectedIndex, numberSchema);
-    this._itemsCellController.bind(this.items as any);
+    this._itemsCellController.bind(
+      isCellHandle(this.items)
+        ? this.items.asSchema(pieceListSchema)
+        : this.items,
+    );
     this._updateAriaAttributes();
     this._updateMinHeight();
   }
@@ -277,7 +281,11 @@ export class CFPicker extends BaseElement {
       this._indexCellController.bind(this.selectedIndex, numberSchema);
     }
     if (changedProperties.has("items")) {
-      this._itemsCellController.bind(this.items as any);
+      this._itemsCellController.bind(
+        isCellHandle(this.items)
+          ? this.items.asSchema(pieceListSchema)
+          : this.items,
+      );
     }
   }
 

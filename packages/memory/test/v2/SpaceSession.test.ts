@@ -1,10 +1,6 @@
-/**
- * Checks watch removal ordering through the memory server, with response gates
- * that hold a preceding acquisition open while cleanup is queued.
- */
-
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy } from "@std/testing/mock";
 
 import { defer } from "@commonfabric/utils/defer";
 
@@ -131,6 +127,30 @@ describe("SpaceSession", () => {
   });
 
   describe("instance members", () => {
+    describe("ack()", () => {
+      it("deduplicates acknowledged sequences without suppressing later progress", async () => {
+        const first = await server.writeDocument(space, "of:ack", { n: 1 });
+        expect(first.seq).toBeGreaterThan(0);
+        using acknowledgments = spy(server, "ackSession");
+
+        await watcher.ack(first.seq);
+        await watcher.ack(first.seq);
+        await watcher.ack(first.seq - 1);
+        await watcher.ack(first.seq);
+
+        const next = await server.writeDocument(space, "of:ack", { n: 2 });
+        expect(next.seq).toBeGreaterThan(first.seq);
+        await watcher.ack(next.seq);
+        expect(acknowledgments.calls.map(({ args: [message] }) => ({
+          sessionId: message.sessionId,
+          seenSeq: message.seenSeq,
+        }))).toEqual([
+          { sessionId: watcher.sessionId, seenSeq: first.seq },
+          { sessionId: watcher.sessionId, seenSeq: next.seq },
+        ]);
+      });
+    });
+
     describe("watchRemoveSync()", () => {
       for (const concurrent of [false, true]) {
         describe(`with concurrent refresh ${concurrent ? "enabled" : "disabled"}`, () => {

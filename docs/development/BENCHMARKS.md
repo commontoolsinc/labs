@@ -97,6 +97,18 @@ Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a
 single file.
 
+`packages/runner/test/view-replication.bench.ts` measures view selection through
+chains of 100, 300, and 1,000 computations, each mixed with an equally large
+unrelated chain. Fixture construction stays outside timing; index construction
+and selection are measured together. The selected action count and exclusion of
+the unrelated chain are checked outside the timed interval.
+
+`packages/runner/test/view-producer-proof.bench.ts` measures a client's currency
+proof over 10, 14, 18, and 36 producers, where each producer reads the preceding
+two outputs. This shared ancestry exercises repeated paths to the same upstream
+value. Replica setup and plan indexing stay outside timing; the timed interval
+covers one proof against unchanged values.
+
 ## Constraints on bench files
 
 **Stdout must stay pure JSON.** The workflow redirects all of stdout to
@@ -222,9 +234,12 @@ Three things follow from it being an end-to-end measurement:
   uncaught exception or a navigation never completes. The report still lists
   every other benchmark, the workflow still uploads it, and the dashboard reads
   it: the run is red in the Actions tab and drops only the series it could not
-  measure. Each segment waits on the event it is waiting for, with no deadline
-  of its own, so it fails when something is genuinely broken rather than when
-  the runner is busy.
+  measure. A failed attempt also writes its phase, elapsed time, error, and
+  main-thread IPC diagnostics to stderr, without requesting another reply from
+  a possibly stalled worker. Successful latency samples and failed attempts
+  remain separate. Each segment waits on the event it is waiting for, with no
+  deadline of its own, so it fails when something is genuinely broken rather
+  than when the runner is busy.
 - **The `sign in` segment reads coarser than the others.** It calls the shared
   `login` helper from `@commonfabric/integration/shell-utils`, which polls the
   page on a 50ms interval, and a wall-clock measurement taken around a poll is
@@ -306,10 +321,21 @@ It is the only benchmark in the repository with a second writer. Every other
 bench file drives one runtime against storage it alone holds, so a write
 conflict cannot arise in one, and the cost of a contended write — the rejected
 commit, the rolled-back optimistic write, the re-run — is invisible to all of
-them. This one runs ten runtimes, each in its own Deno worker, against one
-in-process storage server, which is the arrangement
-`packages/patterns/integration/multi-runtime-harness.ts` exists for. No toolshed
-and no browser.
+them. This one runs ten runtimes, each in its own Deno worker, through
+`packages/patterns/integration/multi-runtime-harness.ts`. With server execution
+disabled, the harness hosts an in-process storage server. With
+`EXPERIMENTAL_SERVER_EXECUTION=true`, it uses the serving toolshed at `API_URL`;
+start that toolshed with the same setting. Both modes use ordinary worker
+clients, without a browser or renderer mounts. The view-scoped web-client flag
+therefore does not activate selective replication in this benchmark. Use the
+browser Topics benchmarks to measure that mode, and hold server execution
+constant when comparing replication flags.
+
+Each burst waits for every writer's event consequences to arrive before the
+replica barriers. The harness's budgeted `settle()` alone can return with pending
+consequences, so it cannot define a successful measurement. Outside the timed
+interval, every replica must contain the expected vote count and color
+distribution for every option; a mismatch fails the run.
 
 Four things follow from that shape:
 

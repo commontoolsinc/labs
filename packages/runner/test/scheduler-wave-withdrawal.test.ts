@@ -8,8 +8,11 @@ import {
   ExecutionLeaseCycle,
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
+import { diffAndUpdate } from "../src/data-updating.ts";
 import { toMemorySpaceAddress } from "../src/link-types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { sendValueToBinding } from "../src/pattern-binding.ts";
+import { createSigilLinkFromParsedLink } from "../src/link-utils.ts";
 import { syncCellForIdentity } from "../src/cell.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type {
@@ -19,9 +22,18 @@ import type {
 import {
   ignoreReadForScheduling,
   internalVerifierRead,
+  isInternalVerifierRead,
+  isReadIgnoredForScheduling,
+  isReadMarkedAsAttemptedWrite,
+  markUiInputBlindWriteTx,
+  pendingWriteElisionRead,
+  unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
-import { hasPendingWriteElision } from "../src/storage/transaction-inspection.ts";
+import {
+  getTransactionReadActivities,
+  hasPendingWriteElision,
+} from "../src/storage/transaction-inspection.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import {
   requireWaveAcceptance,
@@ -133,6 +145,10 @@ describe("reactive wave withdrawal", () => {
         "recovers a pending output claimed by a replacement registration",
       ],
       [
+        "replacement-binding",
+        "recovers a seeded pending result reused through a replacement output binding",
+      ],
+      [
         "replacement-probe",
         "keeps a replacement read probe outside wave acceptance",
       ],
@@ -144,6 +160,8 @@ describe("reactive wave withdrawal", () => {
     ] as const
   ) {
     it(description, async () => {
+      const bindingOutput = boundary === "replacement-binding";
+      const replacesOutput = boundary === "replacement-output" || bindingOutput;
       const input = runtime.getCell<{ draft: string; note?: string }>(
         space,
         "input",
@@ -154,6 +172,7 @@ describe("reactive wave withdrawal", () => {
       let writesExtra = false;
       const seed = runtime.edit();
       input.withTx(seed).set({ draft: "a0" });
+      if (bindingOutput) output.withTx(seed).set("before");
       expect((await seed.commit()).error).toBeUndefined();
       let wave = newWave();
       const authored = runtime.edit();
@@ -168,7 +187,7 @@ describe("reactive wave withdrawal", () => {
       const bodyHeld = Promise.withResolvers<void>();
       const releaseBody = Promise.withResolvers<void>();
       const heldSeal = boundary === "reregistered" ||
-        boundary === "replacement-output" || boundary === "replacement-probe";
+        replacesOutput || boundary === "replacement-probe";
       const reregistered = heldSeal || boundary === "body-reregistered";
       let seals = 0;
       runtime.installSealDestination({
@@ -200,9 +219,24 @@ describe("reactive wave withdrawal", () => {
         runs += 1;
         if (boundary === "settled" && runs === 2) recoveryStarted.resolve();
         if (retiredRegistration) {
-          if (boundary === "replacement-output") {
+          if (replacesOutput) {
             const wrapped = new TransactionWrapper(tx);
-            wrapped.writeValueOrThrow(output.getAsNormalizedFullLink(), "b0");
+            if (bindingOutput) {
+              sendValueToBinding(
+                wrapped,
+                output.withTx(wrapped),
+                input.getAsNormalizedFullLink(),
+                createSigilLinkFromParsedLink(
+                  output.getAsNormalizedFullLink(),
+                  {
+                    overwrite: "redirect",
+                  },
+                ),
+                "b0",
+              );
+            } else {
+              wrapped.writeValueOrThrow(output.getAsNormalizedFullLink(), "b0");
+            }
             expect(hasPendingWriteElision(wrapped)).toBe(runs === 2);
           } else if (boundary === "replacement-probe") {
             tx.readOrThrow(
@@ -286,7 +320,7 @@ describe("reactive wave withdrawal", () => {
           boundary === "accepted"
             ? [{ kind: "committed" }, { kind: "committed" }]
             : boundary === "partial" || boundary === "local-acceptance" ||
-                boundary === "repeated" || boundary === "replacement-output"
+                boundary === "repeated" || replacesOutput
             ? [{ kind: "dropped" }, { kind: "dropped" }, { kind: "dropped" }]
             : boundary === "newer"
             ? [{ kind: "dropped" }, { kind: "dropped" }, { kind: "committed" }]
@@ -311,7 +345,7 @@ describe("reactive wave withdrawal", () => {
       if (
         boundary === "withdrawn" || boundary === "repeated" ||
         boundary === "partial" || boundary === "local-acceptance" ||
-        boundary === "settled" || boundary === "replacement-output"
+        boundary === "settled" || replacesOutput
       ) {
         expect(runs).toBe(
           boundary === "withdrawn" || boundary === "settled" ? 2 : 3,
@@ -333,7 +367,7 @@ describe("reactive wave withdrawal", () => {
         boundary === "withdrawn" || boundary === "accepted" ||
           boundary === "repeated" || boundary === "partial" ||
           boundary === "local-acceptance" || boundary === "settled" ||
-          boundary === "replacement-output"
+          replacesOutput
           ? { value: "b0" }
           : boundary === "newer"
           ? { value: "newer" }
@@ -346,35 +380,199 @@ describe("reactive wave withdrawal", () => {
       runtime.scheduler.unsubscribe(derive);
     });
   }
-  for (const kind of ["event-handler", "bookkeeping"] as const) {
-    it(`keeps ${kind} no-ops outside automatic wave acceptance`, async () => {
-      const output = runtime.getCell<string>(
+  for (
+    const mode of [
+      "primitive",
+      "object",
+      "array",
+      "empty object",
+      "empty array",
+      "link",
+      "write redirect",
+      "preserved link",
+      "scoped link target",
+      "alias target",
+      "confirmed value",
+      "successful overwrite",
+      "UI blind value",
+    ] as const
+  ) {
+    it(`tracks normalized publication provenance for ${mode}`, async () => {
+      const scoped = mode === "scoped link target";
+      const indirect = scoped || mode === "alias target";
+      const output = runtime.getCell<unknown>(
         space,
-        "non-reactive-output",
+        "normalized-output",
         undefined,
       );
+      const target = runtime.getCell<unknown>(
+        space,
+        "normalized-target",
+        undefined,
+        undefined,
+        scoped ? "user" : "space",
+      );
+      const targetLink = {
+        ...target.getAsNormalizedFullLink(),
+        path: ["selected"],
+      };
+      const outputLink = output.getAsNormalizedFullLink();
+      const storageLink = indirect ? targetLink : outputLink;
+      const storageAddress = toMemorySpaceAddress(storageLink);
+      const referent = runtime.getCell(space, "normalized-referent", undefined);
+      const reference = createSigilLinkFromParsedLink(
+        referent.getAsNormalizedFullLink(),
+        mode === "write redirect" ? { overwrite: "redirect" } : undefined,
+      );
+      const value = mode === "object"
+        ? { selected: "pending" }
+        : mode === "array"
+        ? ["pending"]
+        : mode === "empty object"
+        ? {}
+        : mode === "empty array"
+        ? []
+        : mode === "link" || mode === "write redirect" ||
+            mode === "preserved link"
+        ? reference
+        : "pending";
+      const confirmed = mode === "confirmed value";
+      const overwrite = mode === "successful overwrite";
+      const blind = mode === "UI blind value";
       const seed = runtime.edit();
-      output.withTx(seed).set("confirmed");
+      seed.writeValueOrThrow(storageLink, confirmed ? value : "before");
+      if (indirect) {
+        seed.writeValueOrThrow(
+          outputLink,
+          createSigilLinkFromParsedLink(
+            targetLink,
+            mode === "alias target" ? { overwrite: "redirect" } : undefined,
+          ),
+        );
+      }
       expect((await seed.commit()).error).toBeUndefined();
       const wave = newWave();
       runtime.installSealDestination(wave);
-      const pending = runtime.edit();
-      stampWaveRunContext(pending, {
-        actionId: "pending-output",
+      if (!confirmed) {
+        const producer = runtime.edit();
+        stampWaveRunContext(producer, {
+          actionId: "normalize-producer",
+          kind: "derivation",
+        });
+        producer.writeValueOrThrow(storageLink, value);
+        expect((await producer.commit()).error).toBeUndefined();
+      }
+      const consumer = runtime.edit();
+      stampWaveRunContext(consumer, {
+        actionId: "normalize-consumer",
         kind: "derivation",
       });
-      output.withTx(pending).set("pending");
-      expect((await pending.commit()).error).toBeUndefined();
-      const noop = runtime.edit();
-      stampWaveRunContext(noop, { actionId: "non-reactive-output", kind });
-      noop.writeValueOrThrow(output.getAsNormalizedFullLink(), "pending");
-      expect(hasPendingWriteElision(noop)).toBe(true);
-      expect((await noop.commit()).error).toBeUndefined();
-      expect(waveSettlementOf(noop)).toBeUndefined();
+      const wrapped = new TransactionWrapper(consumer);
+      if (blind) markUiInputBlindWriteTx(wrapped);
+      try {
+        if (mode === "preserved link") {
+          sendValueToBinding(
+            wrapped,
+            output.withTx(wrapped),
+            outputLink,
+            createSigilLinkFromParsedLink(outputLink, {
+              overwrite: "redirect",
+            }),
+            value,
+            { preserveLinkOutput: true },
+          );
+        } else {
+          expect(
+            diffAndUpdate(
+              runtime,
+              wrapped,
+              outputLink,
+              overwrite ? "replacement" : value,
+              undefined,
+              {
+                meta: ignoreReadForScheduling,
+                schemaRole: "output",
+              },
+            ),
+          ).toBe(overwrite);
+        }
+        const retained = !confirmed && !overwrite && !blind;
+        expect(hasPendingWriteElision(wrapped)).toBe(retained);
+        const basis = [...getTransactionReadActivities(wrapped)].filter(
+          (read) => read.meta === pendingWriteElisionRead,
+        );
+        if (retained) {
+          expect(basis.length).toBeGreaterThan(0);
+          for (const read of basis) {
+            expect(read.space).toBe(storageLink.space);
+            expect(read.id).toBe(storageLink.id);
+            expect(read.scope).toBe(storageLink.scope);
+            expect(read.path.slice(0, storageAddress.path.length)).toEqual(
+              storageAddress.path,
+            );
+            expect(isReadIgnoredForScheduling(read.meta)).toBe(true);
+            expect(isInternalVerifierRead(read.meta)).toBe(true);
+            expect(isReadMarkedAsAttemptedWrite(read.meta)).toBe(false);
+          }
+        } else expect(basis).toEqual([]);
+        expect((await consumer.commit()).error).toBeUndefined();
+        expect(waveSettlementOf(consumer) !== undefined).toBe(
+          retained || overwrite,
+        );
+      } finally {
+        if (blind) unmarkUiInputBlindWriteTx(wrapped);
+      }
       wave.abandon("test cleanup");
       await wave.settled();
-      expect(output.get()).toBe("confirmed");
+      const read = runtime.edit();
+      expect(read.readValueOrThrow(storageLink)).toEqual(
+        confirmed ? value : "before",
+      );
+      read.abort("test cleanup");
     });
+  }
+
+  for (const kind of ["event-handler", "bookkeeping"] as const) {
+    for (const plumbing of ["raw", "binding"] as const) {
+      it(`keeps ${kind} ${plumbing} no-ops outside automatic wave acceptance`, async () => {
+        const output = runtime.getCell<string>(
+          space,
+          "non-reactive-output",
+          undefined,
+        );
+        const seed = runtime.edit();
+        output.withTx(seed).set("confirmed");
+        expect((await seed.commit()).error).toBeUndefined();
+        const wave = newWave();
+        runtime.installSealDestination(wave);
+        const pending = runtime.edit();
+        stampWaveRunContext(pending, {
+          actionId: "pending-output",
+          kind: "derivation",
+        });
+        output.withTx(pending).set("pending");
+        expect((await pending.commit()).error).toBeUndefined();
+        const noop = runtime.edit();
+        stampWaveRunContext(noop, { actionId: "non-reactive-output", kind });
+        if (plumbing === "raw") {
+          noop.writeValueOrThrow(output.getAsNormalizedFullLink(), "pending");
+        } else {sendValueToBinding(
+            noop,
+            output.withTx(noop),
+            output.getAsNormalizedFullLink(),
+            createSigilLinkFromParsedLink(output.getAsNormalizedFullLink(), {
+              overwrite: "redirect",
+            }),
+            "pending",
+          );}
+        expect(hasPendingWriteElision(noop)).toBe(true);
+        expect((await noop.commit()).error).toBeUndefined();
+        expect(waveSettlementOf(noop)).toBeUndefined();
+        wave.abandon("test cleanup");
+        await wave.settled();
+        expect(output.get()).toBe("confirmed");
+      });
+    }
   }
 
   for (

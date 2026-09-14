@@ -1166,6 +1166,9 @@ export type MemoryProtocolFlags = {
    * (`SpaceSession.restore`).
    */
   sessionHoldings: boolean;
+
+  /** Server-selected view delivery with independent execution demand. */
+  viewScopedReplicationV1?: boolean;
 };
 
 /**
@@ -1189,6 +1192,7 @@ export type WireMemoryProtocolFlags = {
   entityIdPagination?: boolean;
   entityIdLookup?: boolean;
   sessionHoldings?: boolean;
+  viewScopedReplicationV1?: boolean;
 };
 
 export type HelloMessage = {
@@ -1444,6 +1448,49 @@ export type SessionSync = {
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
   operationFields?: OperationFieldDelivery[];
+
+  /** Complete view eligibility, applied atomically after this frame's documents. */
+  viewPlans?: ViewPlan[];
+};
+
+/** Local execution eligibility for one current renderer interest. */
+export type ViewPlan = {
+  id: string;
+  revision: number;
+  generation: number;
+  eligibleActions: string[];
+  pieces: { id: string; scope: CellScope; patternIdentity?: string }[];
+  /** Settled execution failures upstream of this rendered view. */
+  errors?: ViewExecutionError[];
+  /** Complete documents admitted as inputs, independently of other watches. */
+  inputs?: { id: string; scope: CellScope }[];
+  /** Observed writers and the settled bases of their transitive inputs. */
+  producers?: {
+    id: string;
+    writes: { id: string; scope: CellScope; path: string[] }[];
+    basis?: {
+      reads: ViewValueBasis[];
+      outputs: ViewValueBasis[];
+    };
+  }[];
+};
+
+/** A serving failure selected under the viewing session's identity. */
+export type ViewExecutionError = {
+  nodeId: string;
+  pieceId: string;
+  message: string;
+  stack?: string;
+  patternId?: string;
+  spellId?: string;
+};
+
+/** An observed path value, including absence and path reachability. */
+export type ViewValueBasis = {
+  id: string;
+  scope: CellScope;
+  path: string[];
+  fingerprint: string;
 };
 
 export type WatchSetResult = {
@@ -1671,12 +1718,51 @@ export type SqliteRegisterDiskSourceResult = {
   registered: true;
 };
 
+/** Live render roots interpreted under the subscribing session's identity. */
+export type ViewQuery = Pick<GraphQuery, "roots" | "branch">;
+
+/** Desired view owned independently from a session's explicit watches. */
+export type ViewInterest = {
+  /** Renderer mount identity, unique within a session. */
+  id: string;
+  /** Monotonic revision of this mount's roots and contracts. */
+  revision: number;
+  /** Visible roots, which also hold execution demand. */
+  query: ViewQuery;
+  /** Whether the server should select data for local interaction previews. */
+  mode: "render" | "speculate";
+  /** Shared component read contract version supplied by this client build. */
+  componentContractVersion: string;
+};
+
+/** Server-owned handle that expires with a session or view revision. */
+export type SessionViewHandle = {
+  sessionId: string;
+  sessionEpoch: string;
+  viewEpoch: string;
+  viewId: string;
+  revision: number;
+};
+
+/** Authenticated view interest exposed to the co-hosted execution planner. */
+export type SessionViewInterest = {
+  handle: SessionViewHandle;
+  principal?: string;
+  /** Whether a connection currently owns the retained session. */
+  attached: boolean;
+  view: ViewInterest;
+  selectionGeneration?: number;
+};
+
 export type WatchSetRequest = {
   type: "session.watch.set";
   requestId: string;
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
+
+  /** Replaces view interests; omitted preserves them and an empty array clears. */
+  views?: ViewInterest[];
 
   /**
    * The client's declared holdings (see {@link SessionHolding}): when
@@ -1994,6 +2080,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // Build-inherent: this build's server takes a client's declared holdings
   // as the delivery diff base wherever they are sent.
   sessionHoldings: true,
+  viewScopedReplicationV1: getServerExecutionConfig(),
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -2121,6 +2208,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const viewScopedReplicationV1 = value.viewScopedReplicationV1;
+  if (
+    viewScopedReplicationV1 !== undefined &&
+    typeof viewScopedReplicationV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const sessionHoldings = value.sessionHoldings;
   if (
     sessionHoldings !== undefined &&
@@ -2156,6 +2251,7 @@ export const parseMemoryProtocolFlags = (
     // declares nothing and reconnects on the declaration-less paths; a
     // provider-bearing one terminates at restore (see the flag's doc).
     sessionHoldings: sessionHoldings === true,
+    viewScopedReplicationV1: viewScopedReplicationV1 === true,
   };
 };
 
@@ -2181,6 +2277,7 @@ export const wireMemoryProtocolFlags = (
   entityIdPagination: flags.entityIdPagination,
   entityIdLookup: flags.entityIdLookup,
   sessionHoldings: flags.sessionHoldings,
+  viewScopedReplicationV1: flags.viewScopedReplicationV1,
 });
 
 /**
