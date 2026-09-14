@@ -292,7 +292,15 @@ const displayPath = (path: string): string =>
 const encodedTreePath = (path: string): string =>
   path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 
-const valueDigestOf = (bytes: Uint8Array): string =>
+/**
+ * The digest an acquisition records over the bytes a pinned commit served.
+ *
+ * Exported because `run_skill_script` re-checks an acquired script's file
+ * against this digest before executing it, and a comparison of two digests is
+ * only a comparison when one function produced both — the encoding is part of
+ * the value, not a presentation of it.
+ */
+export const skillsShValueDigest = (bytes: Uint8Array): string =>
   `sha256:${toUnpaddedBase64url(sha256(bytes))}`;
 
 const readCappedBytes = async (
@@ -521,7 +529,7 @@ export const acquireSkillsShPinnedSkill = async (
       path: relativePath,
       sourceUrl: scriptUrl,
       text: scriptText,
-      valueDigest: valueDigestOf(scriptBytes),
+      valueDigest: skillsShValueDigest(scriptBytes),
     });
   }
 
@@ -530,7 +538,7 @@ export const acquireSkillsShPinnedSkill = async (
     skillRoot: root === "" ? "." : displayPath(root),
     sourceUrl,
     text,
-    valueDigest: valueDigestOf(bytes),
+    valueDigest: skillsShValueDigest(bytes),
     scripts,
     loadedPaths: ["SKILL.md", ...scripts.map((script) => script.path)],
   };

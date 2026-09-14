@@ -84,16 +84,33 @@ export const normalizeAllowedSkillScript = (
 };
 
 /**
+ * A pin and the colon that ends it, for a spec whose skill field is one.
+ *
+ * The commit SHA is what bounds the pin: it is the last thing in the skill
+ * field, and its alphabet holds no colon, so the colon after it is the
+ * separator however many the discovery id held.
+ */
+const ACQUIRED_SPEC_PATTERN = /^(.*@[0-9a-f]{40}):(.+)$/;
+
+/**
  * The `skill:scripts/path` form an operator writes, where `skill` is a
  * registry name or an acquired pin.
  *
- * Split on the FIRST colon, which neither a registry name, a discovery id nor
- * a commit SHA may contain — so widening the skill field did not move where
- * this separator is.
+ * A registry name holds no colon, so its spec splits at the first. A
+ * discovery slug may hold one, so an acquired spec splits after the pin
+ * instead — splitting at the first colon would cut such a spec inside its own
+ * skill field and leave the operator unable to name the script at all.
  */
 export const parseAllowedSkillScriptSpec = (
   spec: string,
 ): HarnessAllowedSkillScript => {
+  const acquired = ACQUIRED_SPEC_PATTERN.exec(spec);
+  if (acquired !== null && parseAcquiredSkillPin(acquired[1]!) !== undefined) {
+    return normalizeAllowedSkillScript({
+      skill: acquired[1]!,
+      path: acquired[2]!,
+    });
+  }
   const separator = spec.indexOf(":");
   if (separator <= 0 || separator === spec.length - 1) {
     throw new Error(

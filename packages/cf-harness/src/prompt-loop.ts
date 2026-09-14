@@ -146,7 +146,7 @@ import { collapseSupersededRunPatternSources } from "./run-pattern-source-collap
 import { isTerminalHarnessRunStatus } from "./run-state.ts";
 import {
   acquiredSkillForHandle,
-  sandboxConfigWithAcquiredSkill,
+  childSandboxOptions,
 } from "./skills/acquired-skill-mount.ts";
 import {
   loadHarnessSkillContext,
@@ -4560,11 +4560,14 @@ export class CfHarnessPromptLoop {
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
-      sandboxRuntime: this.engine.sandbox,
-      sandbox: sandboxConfigWithAcquiredSkill(
-        this.engine.config.sandbox,
-        childAcquiredSkill,
-      ),
+      // A child that mounts an acquired skill gets a sandbox of its own, built
+      // from this run's configuration plus that one mount; every other child
+      // shares this run's runtime.
+      ...childSandboxOptions({
+        sandbox: this.engine.sandbox,
+        ownedSandboxConfig: this.engine.ownedSandboxConfig,
+        configuredSandbox: this.engine.config.sandbox,
+      }, childAcquiredSkill),
       // The parent's own record, narrowed to the one skill. Narrowed rather
       // than rebuilt so the child's record keeps the time the acquisition was
       // written, which is what it is a record of.

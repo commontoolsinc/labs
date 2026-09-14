@@ -2,7 +2,9 @@ import { join, normalize } from "@std/path";
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { createFileSystemHarnessArtifactStore } from "../../src/artifacts.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
+import { AcquiredSkillDirectoryReadableError } from "../../src/skills/acquired-skill-mount.ts";
 import type {
   DockerRunscSandboxConfig,
   SandboxCommandRequest,
@@ -50,11 +52,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
-describe("acquiring a skill's scripts into a run-root sibling", () => {
+describe("acquiring a skill's scripts outside every run root", () => {
   //
   // `acquire_skill` runs in the PARENT, so a script written where the parent's
-  // sandbox can reach it is a script the planner can read. The directory is a
-  // sibling of the run root for that reason, and the check below is what makes
+  // sandbox can reach it is a script the planner can read. The directory sits
+  // outside every run root for that reason, and the check below is what makes
   // the choice mean something rather than merely look tidy.
   //
 
@@ -109,7 +111,13 @@ describe("acquiring a skill's scripts into a run-root sibling", () => {
 
     expect(acquired.pin).toBe(`${REGISTRY_ID}@${COMMIT_SHA}`);
     expect(acquired.hostRoot).toBe(
-      join(artifactRoot, `run-1.acquired-skills`, COMMIT_SHA, "finance-budget"),
+      join(
+        artifactRoot,
+        ".acquired-skills",
+        "run-1",
+        COMMIT_SHA,
+        "finance-budget",
+      ),
     );
     const script = acquired.scripts[0]!;
     expect(script.valueDigest).toBe("sha256:acquired");
@@ -136,12 +144,34 @@ describe("acquiring a skill's scripts into a run-root sibling", () => {
     }]);
 
     await expect(engine.materializeAcquiredSkill(oneScript)).rejects.toThrow(
+      AcquiredSkillDirectoryReadableError,
+    );
+    await expect(engine.materializeAcquiredSkill(oneScript)).rejects.toThrow(
       "artifacts",
     );
     expect(engine.getRunState().acquiredSkills).toBeUndefined();
     await expect(
-      Deno.stat(join(artifactRoot, "run-1.acquired-skills")),
+      Deno.stat(join(artifactRoot, ".acquired-skills")),
     ).rejects.toThrow(Deno.errors.NotFound);
+  });
+
+  it("keeps another run's acquired scripts out of this run's artifacts", async () => {
+    // Run ids admit dots, so a `<runId>.acquired-skills` sibling would be the
+    // run root of a run named that. One directory that no run may be named
+    // holds them all instead.
+    const engine = engineWith([]);
+    const acquired = await engine.materializeAcquiredSkill(oneScript);
+
+    expect(
+      acquired.hostRoot.startsWith(join(artifactRoot, ".acquired-skills/")),
+    )
+      .toBe(true);
+    expect(() =>
+      createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId: ".acquired-skills",
+      })
+    ).toThrow(".acquired-skills");
   });
 
   it("refuses when the workspace itself covers the artifact tree", async () => {

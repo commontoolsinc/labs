@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { createHarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
+import { skillsShValueDigest } from "../../src/skills-sh/acquisition.ts";
 import type {
   HarnessAcquiredSkill,
   HarnessSkillAcquisition,
@@ -28,22 +29,12 @@ const SCRIPT_PATH = "scripts/report.sh";
 const SCRIPT_TEXT = "#!/usr/bin/env bash\necho acquired\n";
 const SANDBOX_ROOT = "/acquired-skill";
 
-const digestText = async (text: string): Promise<string> => {
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength,
-    ) as ArrayBuffer,
-  );
-  return `sha256:${
-    [...new Uint8Array(digest)].map((byte) =>
-      byte.toString(16).padStart(2, "0")
-    )
-      .join("")
-  }`;
-};
+// The digest as the ACQUISITION computes it, which is the only thing the
+// execution's re-check may be compared against: the two sources encode a
+// SHA-256 differently, and an encoding is part of a digest rather than a
+// presentation of it.
+const acquisitionDigest = (text: string): string =>
+  skillsShValueDigest(new TextEncoder().encode(text));
 
 class RecordingSandboxRuntime implements SandboxRuntime {
   readonly calls: SandboxCommandRequest[] = [];
@@ -115,6 +106,7 @@ const activationsHoldingTheAcquiredSkill = (): HarnessSkillActivations => ({
 
 interface ContextOptions {
   sandbox: SandboxRuntime;
+  skillScriptExecutionTarget?: "sandbox" | "host";
   executions: HarnessSkillScriptExecution[];
   acquiredSkills?: readonly HarnessAcquiredSkill[];
   skillActivations?: HarnessSkillActivations;
@@ -130,7 +122,7 @@ const createContext = (options: ContextOptions): HarnessToolContext => {
     skillActivations: options.skillActivations,
     allowedSkillScripts: options.allowedSkillScripts,
     acquiredSkills: options.acquiredSkills,
-    skillScriptExecutionTarget: "sandbox",
+    skillScriptExecutionTarget: options.skillScriptExecutionTarget ?? "sandbox",
     currentDir: "/workspace",
     sandbox: options.sandbox,
     hostProcessRunner: unusedProcessRunner,
@@ -199,7 +191,7 @@ describe("run_skill_script on an acquired skill's script", () => {
     hostRoot = await Deno.makeTempDir({ prefix: "cf-harness-acquired-" });
     await Deno.mkdir(join(hostRoot, "scripts"), { recursive: true });
     await Deno.writeTextFile(join(hostRoot, SCRIPT_PATH), SCRIPT_TEXT);
-    scriptDigest = await digestText(SCRIPT_TEXT);
+    scriptDigest = acquisitionDigest(SCRIPT_TEXT);
     executions = [];
     sandbox = new RecordingSandboxRuntime();
   });
@@ -357,6 +349,51 @@ describe("run_skill_script on an acquired skill's script", () => {
     } finally {
       await Deno.remove(outside, { recursive: true });
     }
+  });
+
+  it("refuses to run an acquired script on the host, outside the sandbox", async () => {
+    // The sandbox is the whole of what bounds fetched code. The host target
+    // exists for the browser profile's own bundled scripts.
+    const output = await runSkillScriptTool.invoke(
+      createContext({
+        sandbox,
+        executions,
+        skillScriptExecutionTarget: "host",
+        acquiredSkills: [acquiredSkill()],
+        skillActivations: activationsHoldingTheAcquiredSkill(),
+        allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+      }),
+      { skill: PIN, path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("error");
+    expect(output.error?.code).toBe("permission_denied");
+    expect(output.error?.message).toContain("runs in the sandbox");
+    expect(output.acquisition).toEqual(acquisition());
+    expect(sandbox.calls.length).toBe(0);
+  });
+
+  it("checks the file against the acquisition's own digest encoding", async () => {
+    // The acquisition records `sha256:<unpadded base64url>` and the registry
+    // snapshot records `sha256:<hex>`. Recomputing in the wrong one refuses
+    // every unmodified script there is, so the encoding under test is the
+    // acquisition's rather than whichever the registry path happens to use.
+    expect(scriptDigest).toMatch(/^sha256:[A-Za-z0-9_-]+$/);
+    expect(scriptDigest).not.toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    const output = await runSkillScriptTool.invoke(
+      createContext({
+        sandbox,
+        executions,
+        acquiredSkills: [acquiredSkill()],
+        skillActivations: activationsHoldingTheAcquiredSkill(),
+        allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+      }),
+      { skill: PIN, path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("executed");
+    expect(output.observedDigest).toBe(scriptDigest);
   });
 
   it("records the acquisition and no registry provenance", async () => {

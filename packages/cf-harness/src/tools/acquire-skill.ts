@@ -21,6 +21,7 @@ import {
   SkillsShPinResolutionError,
 } from "../skills-sh/pin.ts";
 import { sanitizeRegistryString } from "../skills-sh/search-client.ts";
+import { AcquiredSkillDirectoryReadableError } from "../skills/acquired-skill-mount.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface AcquireSkillToolInput {
@@ -277,6 +278,20 @@ export const acquireSkillTool: HarnessToolDefinition<
             })),
           });
         } catch (error) {
+          // A mount covering the directory is a policy answer about who could
+          // read the bytes, not a failure to write them, so it comes back as a
+          // refusal naming the mount rather than as an error.
+          if (error instanceof AcquiredSkillDirectoryReadableError) {
+            return {
+              outputId,
+              status: "refused",
+              reason: {
+                code: AcquiredSkillDirectoryReadableError.code,
+                message: safeErrorMessage(error),
+              },
+              pin: resolvedPin,
+            };
+          }
           return errorOutput(
             `acquire_skill could not hold this skill's scripts: ${
               safeErrorMessage(error)

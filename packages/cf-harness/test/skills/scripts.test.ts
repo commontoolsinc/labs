@@ -84,6 +84,22 @@ describe("scripts.ts", () => {
       expect(parseAllowedSkillScriptSpec("agent-browser:scripts/run.ts"))
         .toEqual({ skill: "agent-browser", path: "scripts/run.ts" });
     });
+
+    it("splits after the pin for a discovery slug that holds a colon", () => {
+      // A slug admits a colon, so the FIRST colon can fall inside the skill
+      // field. What bounds the pin is the commit SHA, whose alphabet holds
+      // none; splitting at the first would leave such a script unnameable.
+      const colonPin = `owner/repo/ns:budget@${SHA}`;
+      expect(parseAllowedSkillScriptSpec(`${colonPin}:scripts/report.sh`))
+        .toEqual({ skill: colonPin, path: "scripts/report.sh" });
+    });
+
+    it("splits at the first colon when what precedes it is no pin", () => {
+      // `a:b@<not a sha>` is a registry-shaped spec whose path happens to
+      // carry an `@`, and it must not be read as an acquired one.
+      expect(parseAllowedSkillScriptSpec("agent-browser:scripts/run@v2.ts"))
+        .toEqual({ skill: "agent-browser", path: "scripts/run@v2.ts" });
+    });
   });
 
   describe("isSkillScriptAllowlisted()", () => {

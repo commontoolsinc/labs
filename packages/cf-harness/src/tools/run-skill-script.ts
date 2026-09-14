@@ -20,6 +20,7 @@ import type {
   HarnessSkillScriptRuntime,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { skillsShValueDigest } from "../skills-sh/acquisition.ts";
 import { harnessSkillScriptMetadata } from "../skills/registry.ts";
 import {
   isSkillScriptAllowlisted,
@@ -71,6 +72,10 @@ export interface RunSkillScriptToolOutput {
    * acquired script runs through the same machinery, so what says which it
    * was is this rather than the registry fields above — which name a
    * run-start snapshot an acquired script was never in.
+   *
+   * Present from the point the run resolves which acquisition the pin names;
+   * a refusal that could not get that far has the pin in `skill` and no
+   * acquisition.
    */
   acquisition?: HarnessSkillAcquisition;
 
@@ -698,6 +703,17 @@ interface ResolvedSkillScript {
   /** Directories the script's real path must still resolve inside. */
   containmentRoots: readonly string[];
 
+  /**
+   * The digest of the file as it stands, taken the way the pin in
+   * {@link ResolvedSkillScript.resource} was taken.
+   *
+   * Two digests compare only when one function produced both, and the two
+   * sources disagree on encoding: a registry snapshot records hexadecimal, an
+   * acquisition records unpadded base64url. The encoding is part of the value,
+   * so the comparison carries its function rather than assuming one.
+   */
+  observedDigestOf(content: Uint8Array): Promise<string>;
+
   /** Where an acquired script came from; absent for a registry skill's. */
   acquisition?: HarnessSkillAcquisition;
 }
@@ -803,6 +819,7 @@ const resolveRegistrySkillScript = (
       sandboxSkillDir: skill.sandboxSkillDir,
       resource,
       containmentRoots: [skill.skillDir, context.skillRegistry.skillsRoot],
+      observedDigestOf: sha256Digest,
     },
   };
 };
@@ -912,6 +929,8 @@ const resolveAcquiredSkillScript = (
         diagnostics: [],
       },
       containmentRoots: [acquired.hostRoot],
+      observedDigestOf: (content) =>
+        Promise.resolve(skillsShValueDigest(content)),
       acquisition: activation.acquisition,
     },
   };
@@ -1125,6 +1144,34 @@ export const runSkillScriptTool: HarnessToolDefinition<
     const { acquisition, skillName } = resolution.resolved;
     let resource = resolution.resolved.resource;
 
+    if (acquisition !== undefined && executionTarget === "host") {
+      // The sandbox is the whole of what bounds an acquired script: bytes a
+      // publisher wrote, admitted because the operator allowlisted a pin. The
+      // host target exists for the browser profile's own bundled scripts,
+      // which need a host CLI, and running fetched code there would put it
+      // outside every boundary this path rests on.
+      const output = errorOutput({
+        outputId,
+        skill: skillName,
+        path: normalizedPath,
+        executionTarget,
+        code: "permission_denied",
+        message:
+          "an acquired skill's script runs in the sandbox; this run executes skill scripts on the host",
+        resource,
+        acquisition,
+      });
+      await context.recordSkillScriptExecution(
+        buildExecutionRecord({
+          output,
+          runId: context.runId,
+          executedAt,
+          resourcePath: resource.resourcePath,
+        }),
+      );
+      return output;
+    }
+
     let resolvedContainmentRoots: string[];
     let resolvedResourcePath: string;
     try {
@@ -1234,7 +1281,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
       return output;
     }
 
-    const observedDigest = await sha256Digest(content);
+    const observedDigest = await resolution.resolved.observedDigestOf(content);
     const observedSizeBytes = content.byteLength;
     if (
       observedDigest !== resource.digest ||

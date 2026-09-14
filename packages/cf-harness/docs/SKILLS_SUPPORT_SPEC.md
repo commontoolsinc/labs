@@ -509,10 +509,17 @@ Policy rules:
 - A skill cannot downgrade CFC enforcement.
 - A skill cannot authorize reading protected substrate observations.
 - A skill script can run only through `run_skill_script`, and only when both the
-  tool and exact `skill:scripts/path` entry are allowlisted by the operator. An
-  acquired skill's script runs under that same allowlist, with the pin its bytes
-  were read at — `owner/repo/slug@<commit sha>` — in the `skill` field, since an
-  acquired skill has no registry name to key an entry on.
+  tool and exact `skill:scripts/path` entry are allowlisted by the operator.
+- A registry skill's script must additionally belong to a skill activated by
+  name in this run, and match that script's entry in the run-start registry
+  snapshot by digest and size.
+- An acquired skill's script goes through the same allowlist, with the pin its
+  bytes were read at — `owner/repo/slug@<commit sha>` — in the `skill` field,
+  since an acquired skill has no registry name to key an entry on. It has no
+  registry and no run-start snapshot either, so the two conditions above are met
+  differently: the run must hold an activation whose acquisition names that pin,
+  and the file must match the digest taken at acquisition. It runs in the
+  sandbox; a run whose skill-script execution target is the host refuses it.
 - `allowed-tools` can narrow or advise, but v1 should not let it expand the
   allowed tool surface.
 - Prompt-injection-like content in a skill should produce a diagnostic event. It

@@ -35,10 +35,24 @@ const sanitizeArtifactName = (input: string): string =>
 
 const RUN_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
+/**
+ * The one directory under an artifact root that is not a run's.
+ *
+ * Acquired scripts sit under it, one subdirectory per run, so that they are
+ * inside no run root at all — the property `acquiredSkillsDir` rests on. A run
+ * may not be named this, or its own artifacts would be that directory.
+ */
+const ACQUIRED_SKILLS_SEGMENT = ".acquired-skills";
+
 const assertValidRunId = (runId: string): string => {
   if (!RUN_ID_PATTERN.test(runId) || runId === "." || runId === "..") {
     throw new Error(
       "runId must be a simple path segment containing only letters, numbers, dots, underscores, or hyphens",
+    );
+  }
+  if (runId === ACQUIRED_SKILLS_SEGMENT) {
+    throw new Error(
+      `runId must not be ${ACQUIRED_SKILLS_SEGMENT}, which names the artifact root's acquired-scripts directory`,
     );
   }
   return runId;
@@ -96,8 +110,8 @@ export interface HarnessArtifactStore {
   readonly imageAttachmentSnapshotDir?: string;
 
   /**
-   * Host directory holding the scripts this run acquired, a sibling of the
-   * run root rather than a directory inside it.
+   * Host directory holding the scripts this run acquired, under the artifact
+   * root's one non-run directory rather than inside any run root.
    *
    * Held apart from the run root BECAUSE of CT-2117, not despite it: the
    * artifact tree is not a confidentiality boundary — `bash` does not reserve
@@ -106,10 +120,10 @@ export interface HarnessArtifactStore {
    * read wherever that tree is reachable. That is the one property the
    * hostile-skill receipt rests on.
    *
-   * Being a sibling buys the lifecycle and not the boundary: it is created
-   * with the run and removed with it, and what keeps the parent out is that
-   * no mount of the parent's sandbox covers it. The acquisition checks that
-   * rather than assuming it, and refuses where it does not hold.
+   * Sitting outside the run roots buys the lifecycle and not the boundary: it
+   * is created with the run and removed with it, and what keeps the parent out
+   * is that no mount of the parent's sandbox covers it. The acquisition checks
+   * that rather than assuming it, and refuses where it does not hold.
    */
   readonly acquiredSkillsDir?: string;
 
@@ -195,11 +209,14 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     const runId = assertValidRunId(options.runId);
     this.runRoot = join(this.artifactRoot, runId);
     this.imageAttachmentSnapshotDir = join(this.runRoot, "image-attachments");
-    // A sibling rather than a child: same lifecycle, and one directory the
-    // run's own artifacts do not contain.
+    // Under the artifact root's one non-run directory rather than under the
+    // run root: same lifecycle, and inside no run's artifacts — not this
+    // run's, and not another run's, which a `<runId>.acquired-skills` sibling
+    // would be for a run named `<runId>.acquired-skills`.
     this.acquiredSkillsDir = join(
       this.artifactRoot,
-      `${runId}.acquired-skills`,
+      ACQUIRED_SKILLS_SEGMENT,
+      runId,
     );
   }
 

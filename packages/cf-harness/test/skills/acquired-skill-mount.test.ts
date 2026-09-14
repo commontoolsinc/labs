@@ -8,7 +8,7 @@ import type {
 import type { DockerRunscSandboxConfig } from "../../src/sandbox/types.ts";
 import {
   acquiredSkillForHandle,
-  sandboxConfigWithAcquiredSkill,
+  childSandboxOptions,
 } from "../../src/skills/acquired-skill-mount.ts";
 
 const REGISTRY_ID = "zubair-trabzada/ai-finance-claude/finance-budget";
@@ -84,14 +84,24 @@ describe("the acquired-skill mount a delegation gives its child", () => {
     });
   });
 
-  describe("sandboxConfigWithAcquiredSkill()", () => {
-    it("adds one read-only mount of the acquired skill's host root", () => {
-      const child = sandboxConfigWithAcquiredSkill(
-        parentSandbox,
-        acquiredAt(COMMIT_SHA),
-      );
+  describe("childSandboxOptions()", () => {
+    const fakeRuntime = {
+      kind: "the parent's runtime",
+    } as unknown as Parameters<typeof childSandboxOptions>[0]["sandbox"];
 
-      expect(child?.additionalMounts).toEqual([
+    it("gives a child with an acquired skill a configuration and no runtime", () => {
+      // A mount is a property of the container, so a runtime already built
+      // against the parent's mounts would ignore anything handed beside it:
+      // the child has to build its own, which it can only do from a
+      // configuration.
+      const options = childSandboxOptions({
+        sandbox: fakeRuntime,
+        ownedSandboxConfig: parentSandbox,
+        configuredSandbox: parentSandbox,
+      }, acquiredAt(COMMIT_SHA));
+
+      expect(options.sandboxRuntime).toBeUndefined();
+      expect(options.sandbox?.additionalMounts).toEqual([
         ...parentSandbox.additionalMounts,
         {
           kind: "host-bind",
@@ -103,16 +113,41 @@ describe("the acquired-skill mount a delegation gives its child", () => {
       ]);
     });
 
-    it("leaves a child given no acquired skill with the parent's mounts", () => {
-      // Which is also the parent's own case: nothing mounts an acquisition
-      // into the run that made it.
-      expect(sandboxConfigWithAcquiredSkill(parentSandbox, undefined))
-        .toEqual(parentSandbox);
+    it("leaves every other mount of the parent's in place", () => {
+      const options = childSandboxOptions({
+        sandbox: fakeRuntime,
+        ownedSandboxConfig: parentSandbox,
+      }, acquiredAt(COMMIT_SHA));
+
+      expect(options.sandbox?.workspaceHostPath).toBe(
+        parentSandbox.workspaceHostPath,
+      );
+      expect(options.sandbox?.additionalMounts.length).toBe(
+        parentSandbox.additionalMounts.length + 1,
+      );
     });
 
-    it("mounts nothing when the run has no sandbox configuration to extend", () => {
-      expect(sandboxConfigWithAcquiredSkill(undefined, acquiredAt(COMMIT_SHA)))
-        .toBeUndefined();
+    it("shares the parent's runtime with a child given no acquired skill", () => {
+      const options = childSandboxOptions({
+        sandbox: fakeRuntime,
+        ownedSandboxConfig: parentSandbox,
+        configuredSandbox: parentSandbox,
+      }, undefined);
+
+      expect(options.sandboxRuntime).toBe(fakeRuntime);
+      expect(options.sandbox).toBe(parentSandbox);
+    });
+
+    it("shares the parent's runtime when that runtime was handed in", () => {
+      // An injected runtime is the thing that executes; a configuration beside
+      // it describes something else, so there is nothing to extend.
+      const options = childSandboxOptions({
+        sandbox: fakeRuntime,
+        configuredSandbox: parentSandbox,
+      }, acquiredAt(COMMIT_SHA));
+
+      expect(options.sandboxRuntime).toBe(fakeRuntime);
+      expect(options.sandbox).toBe(parentSandbox);
     });
   });
 });

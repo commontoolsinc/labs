@@ -157,7 +157,13 @@ export interface HarnessSkillScriptExecution {
    * script is, so the record has to say which it was: the registry fields
    * above name a run-start snapshot this script was never in, and a reader
    * that found them set would take an acquisition for a skill the operator
-   * had installed. Set exactly when `skillName` is a pin.
+   * had installed. Never set beside them.
+   *
+   * Present once the run has resolved which acquisition the pin names, which
+   * every executed script and every refusal after that point carries. A
+   * refusal that could not get that far — a pin this run acquired nothing at,
+   * or one it holds no handle to — has the pin in `skillName` and no
+   * acquisition, because there is none to name.
    */
   acquisition?: HarnessSkillAcquisition;
 

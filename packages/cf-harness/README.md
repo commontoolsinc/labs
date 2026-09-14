@@ -1154,6 +1154,14 @@ non-empty UTF-8, and write the instructions to a cell. The scripts stay
 host-side: nothing is written into the skills root, and whether one may run is
 the operator allowlist's decision rather than the acquisition's.
 
+The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
+provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,
+and the harness-computed SHA-256 of the fetched bytes. It has no channel or
+audience claim, grants no permission, and declassifies nothing. A registry hash
+is not a pin and never enters provenance. The tool returns the handle and this
+inert acquisition metadata; loading the handle remains a separate
+`delegate_task` decision.
+
 ##### Running an acquired skill's script
 
 The scripts land in a directory named for the run and the commit, a sibling of
@@ -1186,14 +1194,6 @@ The invocation is labeled with confidentiality alone. The acquisition's
 instead — the tool output and the persisted execution record carry the
 acquisition as its own field, and the registry digest, size and match fields are
 absent, because they name a run-start snapshot an acquired script was never in.
-
-The successful write carries the weaker `kind: "fetch"` `ExternalIngest`
-provenance variant. It records the exact pinned raw URL, commit SHA, fetch time,
-and the harness-computed SHA-256 of the fetched bytes. It has no channel or
-audience claim, grants no permission, and declassifies nothing. A registry hash
-is not a pin and never enters provenance. The tool returns the handle and this
-inert acquisition metadata; loading the handle remains a separate
-`delegate_task` decision.
 
 `delegate_task` takes an optional `skillHandle`: a handle the parent holds,
 naming a cell whose string value is skill text for the child. The text is

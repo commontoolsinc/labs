@@ -174,7 +174,10 @@ import type {
   DockerRunscSandboxConfig,
   SandboxRuntime,
 } from "./sandbox/types.ts";
-import { ACQUIRED_SKILL_MOUNT_PATH } from "./skills/acquired-skill-mount.ts";
+import {
+  ACQUIRED_SKILL_MOUNT_PATH,
+  AcquiredSkillDirectoryReadableError,
+} from "./skills/acquired-skill-mount.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import type {
   AcquireSkillToolInput,
@@ -1042,6 +1045,20 @@ export class CfHarnessEngine {
   }
 
   /**
+   * The sandbox configuration this engine built its own runtime from, absent
+   * when the runtime was handed in.
+   *
+   * A caller that wants a sandbox differing from this run's — a child that
+   * mounts something its parent does not — needs the configuration rather than
+   * the runtime, and needs to know it may build one at all: where the runtime
+   * was injected, that object is the thing that executes and a configuration
+   * beside it describes something else.
+   */
+  get ownedSandboxConfig(): DockerRunscSandboxConfig | undefined {
+    return this.#ownedRunscConfig;
+  }
+
+  /**
    * The connector handles this run's console was launched against. A
    * delegating parent hands them to the child engine, so a child's grants
    * resolve from the configuration the parent's resolved from rather than
@@ -1656,8 +1673,9 @@ export class CfHarnessEngine {
    * the pinned commit served, and it is what an execution re-checks the file
    * against — the pin a registry script gets from the run-start snapshot.
    *
-   * @throws Error when the run can write nowhere, or when a mount of this
-   * run's sandbox covers the directory.
+   * @throws AcquiredSkillDirectoryReadableError when a mount of this run's
+   * sandbox covers the directory.
+   * @throws Error when the run can write nowhere, or the write fails.
    */
   async materializeAcquiredSkill(
     options: {
@@ -1681,7 +1699,7 @@ export class CfHarnessEngine {
     }
     const covering = this.#hostMountCovering(store.acquiredSkillsDir);
     if (covering !== undefined) {
-      throw new Error(
+      throw new AcquiredSkillDirectoryReadableError(
         `the acquired-skills directory is inside this run's ${
           covering.name ?? covering.kind
         } mount (${covering.hostPath} at ${covering.sandboxPath}), so a script written there would be readable by the run that acquires it`,

@@ -9,7 +9,10 @@
  * read-only.
  */
 
-import type { DockerRunscSandboxConfig } from "../sandbox/types.ts";
+import type {
+  DockerRunscSandboxConfig,
+  SandboxRuntime,
+} from "../sandbox/types.ts";
 import type {
   HarnessAcquiredSkill,
   HarnessSkillAcquisition,
@@ -27,6 +30,24 @@ export const ACQUIRED_SKILL_MOUNT_NAME = "acquired-skill";
  * against — before any child exists to be told where its mount landed.
  */
 export const ACQUIRED_SKILL_MOUNT_PATH = "/acquired-skill";
+
+/**
+ * The refusal a run meets when a mount of its own sandbox covers the directory
+ * its acquired scripts would be written into.
+ *
+ * A class rather than a message, because the caller has to tell this apart
+ * from a failure to write: this one is a policy answer about who could read
+ * the bytes, and the tool reports it as a refusal naming the mount, while a
+ * disk that would not take the file is an error.
+ */
+export class AcquiredSkillDirectoryReadableError extends Error {
+  static readonly code = "acquired_scripts_readable_by_acquiring_run";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "AcquiredSkillDirectoryReadableError";
+  }
+}
 
 /**
  * The acquired skill a delegation hands its child: the one the acquisition
@@ -49,40 +70,57 @@ export const acquiredSkillForHandle = (
     );
 
 /**
- * A child's sandbox configuration, with the one acquired skill it was given
- * mounted read-only.
+ * The sandbox options a child engine is built with, given the acquired skill
+ * it was handed.
  *
- * The mount goes into this child's sandbox and never the parent's, which is
- * why the directory sits outside every mount the parent holds to begin with:
- * the parent that planned the acquisition still cannot read the bytes it
- * acquired, and that is the property the hostile-skill receipt rests on.
+ * A child normally shares its parent's sandbox runtime — the same container
+ * configuration, and the object that executes in it. A child that mounts an
+ * acquired skill cannot: the mount is a property of the container, so a
+ * runtime already built against the parent's mounts would ignore any
+ * configuration handed alongside it and the skill's directory would never
+ * appear. Such a child is given a configuration and no runtime, and builds its
+ * own from it — which also keeps the CFC transport floor, since an engine
+ * checks that only for a sandbox it built.
  *
- * Read-only because a script the child could rewrite is a script whose
- * acquisition digest says nothing about what ran.
- *
- * Returns the configuration unchanged when the child was given no acquired
- * skill, and `undefined` when the parent has no sandbox configuration to
- * extend — a run whose sandbox runtime came from elsewhere mounts nothing
- * through this path.
+ * The parent's own configuration is what is extended, so the child differs
+ * from it in exactly one mount: the acquired skill's host root, read-only,
+ * because a script the child could rewrite is a script whose acquisition
+ * digest says nothing about what ran. Where the parent's runtime was handed in
+ * rather than built, there is no configuration to extend and the child shares,
+ * acquired skill or not.
  */
-export const sandboxConfigWithAcquiredSkill = (
-  sandbox: DockerRunscSandboxConfig | undefined,
+export const childSandboxOptions = (
+  parent: {
+    sandbox: SandboxRuntime;
+    ownedSandboxConfig?: DockerRunscSandboxConfig;
+    configuredSandbox?: DockerRunscSandboxConfig;
+  },
   acquired: HarnessAcquiredSkill | undefined,
-): DockerRunscSandboxConfig | undefined => {
-  if (sandbox === undefined || acquired === undefined) {
-    return sandbox;
+): {
+  sandboxRuntime?: SandboxRuntime;
+  sandbox?: DockerRunscSandboxConfig;
+} => {
+  if (acquired === undefined || parent.ownedSandboxConfig === undefined) {
+    return {
+      sandboxRuntime: parent.sandbox,
+      ...(parent.configuredSandbox !== undefined
+        ? { sandbox: parent.configuredSandbox }
+        : {}),
+    };
   }
   return {
-    ...sandbox,
-    additionalMounts: [
-      ...sandbox.additionalMounts,
-      {
-        kind: "host-bind",
-        name: ACQUIRED_SKILL_MOUNT_NAME,
-        hostPath: acquired.hostRoot,
-        sandboxPath: acquired.sandboxRoot,
-        readOnly: true,
-      },
-    ],
+    sandbox: {
+      ...parent.ownedSandboxConfig,
+      additionalMounts: [
+        ...parent.ownedSandboxConfig.additionalMounts,
+        {
+          kind: "host-bind",
+          name: ACQUIRED_SKILL_MOUNT_NAME,
+          hostPath: acquired.hostRoot,
+          sandboxPath: acquired.sandboxRoot,
+          readOnly: true,
+        },
+      ],
+    },
   };
 };
