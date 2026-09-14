@@ -25,11 +25,65 @@ $ git log -1 --format='%H %ad %s' --date=iso
 cbdf66c3cfe4bfdc661cacfdba7704ba40ede838 2026-09-07 10:34:34 -0700 fix(llm): a system instruction is not a message (#7048)
 ```
 
-No block below shows how the rigs built their store. By the author's account,
-every store was an in-process emulated memory server and no deployed space was
-contacted, read-only calls included. The rigs were never committed; code
-excerpts below are copied from them, and excerpts of `packages/memory` are from
-the tree at the commit.
+The rigs were never committed. Code excerpts below are copied from them, and
+excerpts of `packages/memory` are from the tree at the commit. The next two
+blocks were printed on 2026-09-14, when this record was written up. The first
+gives each rig file's last modification time:
+
+```
+$ stat -f '%Sm  %N' -t '%Y-%m-%d %H:%M' packages/patterns/collection-naming/board-b.tsx packages/patterns/collection-naming/board-c.tsx packages/patterns/collection-naming/item-b.tsx packages/patterns/collection-naming/item-c.tsx packages/patterns/collection-naming/diagnose-board-demand.ts packages/patterns/collection-naming/measure-board-demand.ts packages/patterns/collection-naming/probe-crossing.ts packages/patterns/collection-naming/probe-mechanism.ts packages/patterns/collection-naming/probe-roots.ts
+2026-09-07 11:01  packages/patterns/collection-naming/board-b.tsx
+2026-09-07 11:01  packages/patterns/collection-naming/board-c.tsx
+2026-09-07 11:01  packages/patterns/collection-naming/item-b.tsx
+2026-09-07 11:01  packages/patterns/collection-naming/item-c.tsx
+2026-09-07 11:19  packages/patterns/collection-naming/diagnose-board-demand.ts
+2026-09-07 11:34  packages/patterns/collection-naming/measure-board-demand.ts
+2026-09-07 11:34  packages/patterns/collection-naming/probe-crossing.ts
+2026-09-07 11:31  packages/patterns/collection-naming/probe-mechanism.ts
+2026-09-07 11:28  packages/patterns/collection-naming/probe-roots.ts
+```
+
+Every rig builds its store with `StorageManager.emulate`, passes
+`experimentalOptionsFromEnv` to its runtime, runs a board file, reaches the
+store's server through `MemoryV2Client.loopback`, and disposes the runtime:
+
+```
+$ grep -nE 'StorageManager\.emulate|experimentalOptionsFromEnv\(|main: |loopback\(|runtime\.dispose' packages/patterns/collection-naming/*.ts
+packages/patterns/collection-naming/diagnose-board-demand.ts:33:const storageManager = StorageManager.emulate({ as: signer });
+packages/patterns/collection-naming/diagnose-board-demand.ts:37:  experimental: experimentalOptionsFromEnv(Deno.env.get),
+packages/patterns/collection-naming/diagnose-board-demand.ts:42:  { main: `${HERE}${boardFile}` },
+packages/patterns/collection-naming/diagnose-board-demand.ts:105:  transport: MemoryV2Client.loopback(candidate.server!()),
+packages/patterns/collection-naming/diagnose-board-demand.ts:199:await runtime.dispose();
+packages/patterns/collection-naming/measure-board-demand.ts:89:  const storageManager = StorageManager.emulate({ as: signer });
+packages/patterns/collection-naming/measure-board-demand.ts:94:    experimental: experimentalOptionsFromEnv(Deno.env.get),
+packages/patterns/collection-naming/measure-board-demand.ts:102:    { main: `${HERE}${arm.board}` },
+packages/patterns/collection-naming/measure-board-demand.ts:216:    transport: MemoryV2Client.loopback(candidate.server()),
+packages/patterns/collection-naming/measure-board-demand.ts:271:  await runtime.dispose();
+packages/patterns/collection-naming/probe-crossing.ts:49:  const storageManager = StorageManager.emulate({ as: signer });
+packages/patterns/collection-naming/probe-crossing.ts:53:    experimental: experimentalOptionsFromEnv(Deno.env.get),
+packages/patterns/collection-naming/probe-crossing.ts:58:    { main: `${HERE}board.tsx` },
+packages/patterns/collection-naming/probe-crossing.ts:124:    transport: MemoryV2Client.loopback(candidate.server!()),
+packages/patterns/collection-naming/probe-crossing.ts:217:  await runtime.dispose();
+packages/patterns/collection-naming/probe-mechanism.ts:32:const storageManager = StorageManager.emulate({ as: signer });
+packages/patterns/collection-naming/probe-mechanism.ts:36:  experimental: experimentalOptionsFromEnv(Deno.env.get),
+packages/patterns/collection-naming/probe-mechanism.ts:41:  { main: `${HERE}board.tsx` },
+packages/patterns/collection-naming/probe-mechanism.ts:95:  transport: MemoryV2Client.loopback(candidate.server!()),
+packages/patterns/collection-naming/probe-mechanism.ts:136:await runtime.dispose();
+packages/patterns/collection-naming/probe-roots.ts:35:const storageManager = StorageManager.emulate({ as: signer });
+packages/patterns/collection-naming/probe-roots.ts:39:  experimental: experimentalOptionsFromEnv(Deno.env.get),
+packages/patterns/collection-naming/probe-roots.ts:44:  { main: `${HERE}${boardFile}` },
+packages/patterns/collection-naming/probe-roots.ts:100:  transport: MemoryV2Client.loopback(candidate.server!()),
+packages/patterns/collection-naming/probe-roots.ts:213:await runtime.dispose();
+```
+
+A block shows what a command printed or what a file contains. It cannot show
+when something was done, or that something was not done, so statements of those
+two kinds rest on the author's account. Among them: the date of the runs; that
+no deployed space was contacted, read-only calls included; that the `/tmp`
+output files were not kept; when `git status` was taken; that the name
+assertion was added after the ladder ran, and was run once; how the first rig's
+output was first read, and when its rows were printed; and every statement that
+something was not compared, recorded or tried.
 
 Every fenced block of output is quoted as it was printed in the terminal. Three
 kinds of trim are used, each named where it is used: terminal color codes
@@ -321,10 +375,10 @@ $ deno run -A packages/patterns/collection-naming/measure-board-demand.ts 3 2>/d
 
 ## The instrument
 
-The memory server's `graph.query`, the walk a `session.watch.add` runs. No block
-below shows the session or store the query went through. For the member at
-position 0 of `items`, the root is that member's argument document and the
-selector schema is the schema recorded on the member's argument link, unaltered:
+The memory server's `graph.query`, the walk a `session.watch.add` runs. For the
+member at position 0 of `items`, the root is that member's argument document and
+the selector schema is the schema recorded on the member's argument link,
+unaltered:
 
 ```ts
   const memberCell = items.key(0).resolveAsCell();
@@ -442,8 +496,20 @@ $ grep -E '^\{"arm"' /tmp/probe_ladder.txt 2>/dev/null
 ```
 
 That output was first read as the `asCell` markers on the item's inputs
-stopping the walk at the input links, and the rig's header comment still says
-so. A second form of the rig kept `"value"` as the first segment of every path
+stopping the walk at the input links. The ladder rig's header comment still says
+so:
+
+```ts
+ * Instrument: the memory-v2 server's own `graph.query` — the same
+ * `GraphQueryWalk` a `session.watch.add` runs. Two measurements per arm:
+ *
+ *   argument-walk  one root at the member's ARGUMENT document under the
+ *                  schema the member's pattern declares over it. Every input
+ *                  is `asCell`, so this walk stops at the links and never
+ *                  reaches what they point at. Reported to show that.
+```
+
+A second form of the rig kept `"value"` as the first segment of every path
 and added one query rooted at all of the item's inputs at once, with the
 markers removed:
 
@@ -549,8 +615,8 @@ blocks above: arm C's sibling documents are twice arm B's at every N, and arm C
 returns N more documents than arm B at every N.
 
 **Varying the schema moves the count.** The probe of § The instrument bug hit
-first, run again on a new arm C board of 3 members with `"value"` removed from
-every path. The case list, as run:
+first, run again with the same arguments and with `"value"` removed from every
+path. The case list, as run:
 
 ```ts
 const rowSchema = {
@@ -684,11 +750,51 @@ board of 20 members; root = the names table
 
 The ladder's arms A and B differ in more than where the walk starts; § Stated
 limitations lists what else differs. This probe runs both wirings on the same
-board with the same schemas. At each size it takes both element schemas from
-the schema recorded on the argument link of an arm A member, with the top-level
-cell marker removed:
+board with the same schemas. For each size it runs `board.tsx`, arm A's board,
+into `resultCell`, and takes the first member of that board's `items`. Both
+element schemas come from the schema recorded on that member's argument link,
+with the top-level cell marker removed; both table links are read from that
+member's stored argument; and `boardId` is the id of `resultCell`'s document.
+Elided lines are marked `…`:
 
 ```ts
+async function run(size: number) {
+  …
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    { main: `${HERE}board.tsx` },
+  );
+  const factory = await runtime.patternManager.compilePattern(program, {
+    space,
+  });
+
+  const tx = runtime.edit();
+  const resultCell = runtime.getCell<Json>(
+    space,
+    { probeCrossing: size },
+    factory.resultSchema,
+    tx,
+  );
+  const result = runtime.run(tx, factory, {}, resultCell);
+  …
+  const items = result.key("items");
+  await items.pull();
+  const listed = items.get() ?? [];
+  const memberIds = new Set<string>();
+  for (let index = 0; index < listed.length; index++) {
+    memberIds.add(
+      items.key(index).resolveAsCell().getAsNormalizedFullLink().id,
+    );
+  }
+
+  const memberCell = items.key(0).resolveAsCell();
+  const argumentLink = getMetaLink(memberCell, "argument")!;
+  const argumentCell = runtime.getCellFromLink(argumentLink);
+  await argumentCell.sync();
+  const stored = argumentCell.getRawUntyped() as Record<string, Json>;
+  const argumentSchema = deref(argumentLink.schema);
+
+  // The two element demands, exactly as the exemplar's item declares them.
   const namesSchema = withoutAsCell(
     deref(argumentSchema.properties.boardNames),
   );
@@ -698,6 +804,14 @@ cell marker removed:
   const namesLink = parseLink(stored.boardNames, argumentLink)!;
   const mentionableLink = parseLink(stored.mentionable, argumentLink)!;
   const boardId = resultCell.getAsNormalizedFullLink().id;
+  …
+const sizes = (Deno.args.length > 0 ? Deno.args : ["2", "10", "40"]).map(
+  Number,
+);
+const rows = [];
+for (const size of sizes) {
+  const row = await run(size);
+  …
 ```
 
 It then queries with the two schemas from two sets of roots. The first is one
@@ -843,14 +957,12 @@ documents were not compared.
   board-given name was added after the ladder ran, and ran once, at N = 3. No
   exit status was captured for any `cf check` run or for that run.
 - **Separate runs.** The ladder, the two mutation probes and the crossing probe
-  ran as separate script invocations, as their quoted commands show. No block
-  shows which boards or spaces each used, and this record does not compare
-  figures across them.
+  ran as separate script invocations, as their quoted commands show, and this
+  record does not compare figures across them.
 - **Experimental options were not recorded.** Each rig passed
-  `experimentalOptionsFromEnv(Deno.env.get)` and did not print the options it
-  read.
+  `experimentalOptionsFromEnv(Deno.env.get)`, as the setup lines quoted at the
+  top show, and no quoted output shows the options it read.
 - **The rigs are not committed**, and one of their comments is out of date. The
-  header comment of `measure-board-demand.ts` still states that the argument
-  walk stops at the input links, which the sibling columns of § The ladder
-  contradict. The document ids in the quoted output belong to in-process stores
-  that no longer exist.
+  header comment of `measure-board-demand.ts` quoted in § The instrument bug hit
+  first states that the argument walk stops at the input links, which the
+  sibling columns of § The ladder contradict.
