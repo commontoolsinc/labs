@@ -1164,17 +1164,17 @@ inert acquisition metadata; loading the handle remains a separate
 
 ##### Running an acquired skill's script
 
-The scripts land in a directory named for the run and the commit, a sibling of
-the run root rather than a child of it. `acquire_skill` runs in the parent, and
-the artifact tree is not a confidentiality boundary — `bash` does not reserve it
-the way the file tools do — so a script written under the parent's run root is a
-script the planner could read wherever that tree is reachable. Being a sibling
-buys the lifecycle and not the boundary: the acquisition asks whether any mount
-of this run's sandbox covers the directory, the workspace and every
-`--host-mount` alike, and refuses naming the mount rather than writing bytes the
-acquiring run could read. The refusal comes before the handle is minted, so a
-covering mount leaves no handle to a skill whose scripts its own planner could
-have read.
+The scripts land at `<artifactRoot>/.acquired-skills/<runId>/<commitSha>/<slug>`
+— under the artifact root's one non-run directory, inside no run root.
+`acquire_skill` runs in the parent, and the artifact tree is not a
+confidentiality boundary — `bash` does not reserve it the way the file tools do
+— so a script written under the parent's run root is a script the planner could
+read wherever that tree is reachable. Sitting outside the run roots buys the
+lifecycle and not the boundary: the acquisition asks whether any mount of this
+run's sandbox covers the directory, the workspace and every `--host-mount`
+alike, and refuses naming the mount rather than writing bytes the acquiring run
+could read. The refusal comes before the handle is minted, so a covering mount
+leaves no handle to a skill whose scripts its own planner could have read.
 
 The child a `delegate_task` hands that handle to mounts the directory read-only
 at `/acquired-skill`, and mounts the one skill its handle names and no other.
@@ -1198,6 +1198,17 @@ least one script at that exact pin, so a child holding the handle and the mount
 and nothing else has no tool to invoke. A run that holds an acquired skill
 without mounting it is not backed at all: that is the acquiring parent, which
 deliberately mounts nothing, and a child that shares a handed-in runtime.
+
+Absence of the mount is not by itself absence of the tool, so the refusal says
+so rather than the tool merely not being there. A skills root backs
+`run_skill_script` on its own, so a parent that has one is offered the tool
+after it acquires a skill; what stops it calling the tool on what it acquired is
+that it never loaded that skill — no activation names the pin, and the call
+refuses `skill_not_activated`. A run that is activated for the pin and still
+lacks the mount refuses `script_not_mounted`, naming the sandbox root the script
+would have been addressed at: the path an acquired script is named by is the one
+its mount puts it at, so without the mount there is nothing to run.
+
 `read_skill_resource` is registry-backed throughout, an acquired skill carrying
 no resource index.
 

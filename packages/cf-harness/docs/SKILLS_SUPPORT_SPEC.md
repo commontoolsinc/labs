@@ -531,8 +531,14 @@ Policy rules:
   whose sandbox carries that mount, and `--allow-skill-script` takes an acquired
   pin without a skills root. A run holding an acquired skill it does not mount —
   the acquiring parent, or a child sharing a handed-in sandbox runtime — is not
-  backed and is not offered the tool. `read_skill_resource` stays
-  registry-backed, an acquired skill having no resource index.
+  backed by the mount. That is not the same as having no tool: a skills root
+  backs `run_skill_script` on its own, so such a run is offered the tool
+  whenever it has one, and what stops it is a refusal rather than an absence.
+  The acquiring parent never loaded what it acquired, so no activation names the
+  pin and the call refuses `skill_not_activated`; a run that is activated for
+  the pin and still lacks the mount refuses `script_not_mounted`.
+  `read_skill_resource` stays registry-backed, an acquired skill having no
+  resource index.
 - `allowed-tools` can narrow or advise, but v1 should not let it expand the
   allowed tool surface.
 - Prompt-injection-like content in a skill should produce a diagnostic event. It
