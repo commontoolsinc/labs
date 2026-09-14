@@ -4093,18 +4093,18 @@ export const applyWaveCommit = (
 // during commit-time closure validation, held as the interned schema, so a
 // writer re-referencing the same closure pays map lookups, not re-hashes.
 // Bounded; wholesale eviction on overflow.
-const COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES = 4096;
-const commitSchemaRefCaches = new WeakMap<
+const SCHEMA_DOC_CACHE_MAX_ENTRIES = 4096;
+const schemaDocCaches = new WeakMap<
   Engine,
   Map<string, { seq: number; schema: JSONSchema }>
 >();
-const commitVerifiedSchemaDocRefs = (
+const schemaDocCache = (
   engine: Engine,
 ): Map<string, { seq: number; schema: JSONSchema }> => {
-  let cache = commitSchemaRefCaches.get(engine);
+  let cache = schemaDocCaches.get(engine);
   if (cache === undefined) {
     cache = new Map();
-    commitSchemaRefCaches.set(engine, cache);
+    schemaDocCaches.set(engine, cache);
   }
   return cache;
 };
@@ -5519,7 +5519,7 @@ const applyCommitTransaction = (
   // above, out-of-band tampering, or a store that predates this
   // validation.
   if (requiredSchemaRefs.size > 0) {
-    const verified = commitVerifiedSchemaDocRefs(engine);
+    const cache = schemaDocCache(engine);
     // The hashes this commit's own sets backed, for the refusal's wording,
     // and the seq each stored document was read at, for the cache.
     const included = new Set<string>();
@@ -5542,7 +5542,7 @@ const applyCommitTransaction = (
             : { kind: "stored", value: installed };
         }
         const state = readState(engine, { id, branch });
-        const cached = verified.get(id);
+        const cached = cache.get(id);
         if (cached !== undefined && cached.seq === state?.seq) {
           return { kind: "verified", schema: cached.schema };
         }
@@ -5557,10 +5557,10 @@ const applyCommitTransaction = (
       onVerified: (hash, schema) => {
         const seq = storedSeqs.get(hash);
         if (seq === undefined) return;
-        if (verified.size >= COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES) {
-          verified.clear();
+        if (cache.size >= SCHEMA_DOC_CACHE_MAX_ENTRIES) {
+          cache.clear();
         }
-        verified.set(`cid:${hash}`, { seq, schema });
+        cache.set(`cid:${hash}`, { seq, schema });
       },
       onMissing: (hash, miss) => {
         const id = `cid:${hash}`;
