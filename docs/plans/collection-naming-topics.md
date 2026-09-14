@@ -54,7 +54,7 @@ someone; none is in progress.
    can be pre-flighted; and an optional `unknown` member demand no longer
    refuses. What still needs an accepted break is the typed `shortName` demand
    and the compact mention index's removal of `result.mentionable[].body` —
-   see [issue #6969's investigation](../history/development/issue-6969-upgrade-gates-2026-09-09.md).
+   see the [issue 6969 gates record](../history/development/issue-6969-upgrade-gates-2026-09-09.md).
 
 4. **The `naming` declaration has no reader** (#6986, #6994). Every collection
    publishes `NamingPolicy`; nothing consumes it. Member resolution applies no
