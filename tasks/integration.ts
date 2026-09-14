@@ -345,6 +345,8 @@ async function runPatternTests(
             [
               ...cfCmd,
               "test",
+              // A stall bound, not a ceiling: a step fails once the runtime
+              // reports no progress for this long, however long it has run.
               "--timeout",
               "180000",
               "--root",

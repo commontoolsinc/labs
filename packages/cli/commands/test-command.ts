@@ -30,7 +30,7 @@ export function createTestCommand(
     )
     .example(
       cliText("cf test ./counter.test.tsx --timeout 10000"),
-      "Run with custom timeout (10 seconds).",
+      "Run with a custom stall bound (10 seconds).",
     )
     .example(
       cliText(
@@ -40,7 +40,7 @@ export function createTestCommand(
     )
     .option(
       "--timeout <ms:number>",
-      "Timeout per test action in milliseconds.",
+      "Longest a step may wait without runtime progress, in milliseconds.",
       { default: 5000 },
     )
     .option(

@@ -192,7 +192,8 @@ The `cf test` runner processes the `[TESTS]` array **in order**:
    - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
      its `ok` is true, any other value passes when it equals `true`
 2. Report pass/fail for each assertion
-3. Handle timeouts (5s default) for stuck tests
+3. Fail a step as stalled once the runtime has reported no progress for the
+   `--timeout` bound (5s default), so a stuck test ends rather than hangs
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -241,7 +242,7 @@ cf test ./expense-tracker.test.tsx
 # Run all test patterns in a directory
 cf test ./patterns/
 
-# Run with timeout override
+# Run with a wider stall bound
 cf test ./slow-test.test.tsx --timeout 10000
 ```
 
@@ -249,7 +250,7 @@ cf test ./slow-test.test.tsx --timeout 10000
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--timeout <ms>` | Timeout per test in milliseconds | 5000 |
+| `--timeout <ms>` | Longest a step may wait without runtime progress, in milliseconds | 5000 |
 | `--verbose` | Show detailed execution logs | false |
 
 ### Output
@@ -281,8 +282,6 @@ edit, so keep it short enough to be worth having.
 ```typescript
 // Shown for illustration only.
 async function runTestPattern(testPath: string, options: TestOptions): Promise<TestResults> {
-  const TIMEOUT = options.timeout ?? 5000;
-
   // 1. Create emulated runtime (same as piece step)
   const identity = await Identity.fromPassphrase("test-runner");
   const storageManager = StorageManager.emulate({ as: identity });
@@ -361,11 +360,7 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       // `trustedUi` step wraps it in the DOM provenance a renderer would
       // attach, so a write guarded by a UI contract sees a trusted gesture.
       actionStream.send(buildActionEvent(stepValue.event, stepValue.trustedUi));
-
-      await Promise.race([
-        runtime.idle(),
-        timeout(TIMEOUT, `Action at index ${i} timed out after ${TIMEOUT}ms`)
-      ]);
+      await runtime.idle();
 
     } else if (isAssertion) {
       // It's an assertion - read the value via .key() access. An assert(...)

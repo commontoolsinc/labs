@@ -84,6 +84,7 @@ import {
   TIMING_MEASURE_PREFIX,
 } from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
+import { StallWatchdog } from "./stall-watchdog.ts";
 
 import { assertionOutcome } from "./assert-record.ts";
 import { ActionReadReport } from "./action-read-report.ts";
@@ -348,6 +349,14 @@ export interface TestRunResult {
 }
 
 export interface TestRunnerOptions {
+  /**
+   * The longest a step's settle may go, in milliseconds, without the runtime
+   * reporting progress — a scheduler run, a read, a commit — before the step
+   * fails as stalled. It bounds the gap between two reports of progress
+   * rather than the whole wait, so a step that keeps the scheduler busy for
+   * longer than this still passes. Teardown gets the same value as a flat
+   * bound.
+   */
   timeout?: number;
   verbose?: boolean;
   /** Disables diagnostic replay for timing measurements. */
@@ -1056,6 +1065,10 @@ export async function runTestPattern(
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
+  // Fed by every telemetry marker the runtime emits, below; a settle races
+  // against it rather than against a flat bound, so a slow settle fails only
+  // when the runtime has gone quiet for the whole of `TIMEOUT`.
+  const stallWatchdog = new StallWatchdog(TIMEOUT);
   // The effective import root: an explicit `root` wins; otherwise the nearest
   // package root above the test file, so imports that span the package (shared
   // helpers, sibling patterns) resolve without a flag. When neither exists the
@@ -1206,6 +1219,7 @@ export async function runTestPattern(
       if (readBudgets !== undefined) budgetMeasurement.record(event.marker);
     }
   };
+  const onProgress = () => stallWatchdog.progress();
   const printReadCost = (label: string, started: number) => {
     if (
       readCost === undefined ||
@@ -1219,6 +1233,7 @@ export async function runTestPattern(
     runtime.scheduler.setReadStatsEnabled(true);
   }
   runtime.telemetry.addEventListener("telemetry", onReadCost);
+  runtime.telemetry.addEventListener("telemetry", onProgress);
   // Channel 1: capture pattern-code console.error / console.warn calls that
   // flow through the scheduler's harness console event.  The handler must
   // return args unchanged so the call still appears in the host console.
@@ -1503,6 +1518,20 @@ export async function runTestPattern(
     }
 
     let settlementFailed = false;
+    // Races `work` against the stall watchdog, which rejects with `message`
+    // once the runtime has reported no progress for `TIMEOUT`. The watch is
+    // disarmed however the race ends, so no timer outlives the step.
+    const unlessStalled = async <T>(
+      message: string,
+      work: () => Promise<T>,
+    ): Promise<T> => {
+      const watch = stallWatchdog.watch(message);
+      try {
+        return await Promise.race([work(), watch.promise]);
+      } finally {
+        watch.stop();
+      }
+    };
     const settleRuntime = async (
       stepIndex: number,
       stepLabel: string,
@@ -1511,8 +1540,9 @@ export async function runTestPattern(
       await withPhase(
         ["runTestPattern", "step", stepLabel, "settle"],
         () =>
-          Promise.race([
-            (async () => {
+          unlessStalled(
+            `Action at index ${stepIndex} stalled: no runtime progress for ${TIMEOUT}ms`,
+            async () => {
               for (let settle = 0; settle < maxSettle; settle++) {
                 const iterStart = performance.now();
                 await withPhase(
@@ -1551,12 +1581,8 @@ export async function runTestPattern(
                 ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
                 () => runtime.idle(),
               );
-            })(),
-            timeout(
-              TIMEOUT,
-              `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
-            ),
-          ]),
+            },
+          ),
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -1572,13 +1598,10 @@ export async function runTestPattern(
       await withPhase(
         ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
         () =>
-          Promise.race([
-            runtime.settled(),
-            timeout(
-              TIMEOUT,
-              `Settle step at index ${stepIndex} timed out after ${TIMEOUT}ms`,
-            ),
-          ]),
+          unlessStalled(
+            `Settle step at index ${stepIndex} stalled: no runtime progress for ${TIMEOUT}ms`,
+            () => runtime.settled(),
+          ),
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -2176,6 +2199,7 @@ export async function runTestPattern(
     };
   } finally {
     runtime.telemetry.removeEventListener("telemetry", onReadCost);
+    runtime.telemetry.removeEventListener("telemetry", onProgress);
     if (
       patternCoverage && options.patternCoverageDir &&
       writeLocalPatternCoverage
@@ -2213,14 +2237,14 @@ export async function runTestPattern(
     // make the snapshot a race rather than a record. `closeStorage` keeps that
     // store the CALLER's to close.
     //
-    // Bounded the same way every other await in this function is (the step
-    // settles at `settleRuntime`), and for the same reason: a pattern under
-    // test is untrusted code that may never quiesce, and `scheduler.idle()` —
+    // Bounded for the same reason a step's settle is: a pattern under test
+    // is untrusted code that may never quiesce, and `scheduler.idle()` —
     // which `dispose()` awaits — never resolves for a system that genuinely
     // never settles. Unbounded, one such pattern turns "this file reports a
     // timeout" into "`cf test` hangs with no output", since `runTests` has no
-    // per-file guard. Firing early is safe here in a way it is not elsewhere:
-    // it only skips the rest of a teardown in a process that is moving on.
+    // per-file guard. The bound here is flat where a step's is a stall bound,
+    // because firing early is safe here in a way it is not there: it only
+    // skips the rest of a teardown in a process that is moving on.
     //
     // A teardown that does not complete is RAISED, on both paths. It says the
     // runtime never quiesced, which is a fact about the pattern under test —
