@@ -10,9 +10,9 @@ import type { CollectedSource } from "../src/reconcile.ts";
 
 describe("AgentFabricTarget", () => {
   describe("publish()", () => {
-    for (const abortDuringOpen of [true, false]) {
+    for (const abortBeforeCommit of [true, false]) {
       it(
-        abortDuringOpen
+        abortBeforeCommit
           ? "cancels before its first graph commit and releases graph storage"
           : "finishes its publication when canceled after the first commit starts",
         async () => {
@@ -37,7 +37,7 @@ describe("AgentFabricTarget", () => {
               connection,
               undefined,
               () => {
-                if (abortDuringOpen) controller.abort(reason);
+                if (abortBeforeCommit) controller.abort(reason);
                 return Promise.resolve({
                   connection,
                   release: () => {
@@ -87,11 +87,11 @@ describe("AgentFabricTarget", () => {
               signal: controller.signal,
               onCommit: () => {
                 commitsStarted++;
-                if (!abortDuringOpen) controller.abort(reason);
+                if (!abortBeforeCommit) controller.abort(reason);
               },
             });
 
-            if (abortDuringOpen) {
+            if (abortBeforeCommit) {
               await expect(publication).rejects.toBe(reason);
               expect(commitsStarted).toBe(0);
               expect(

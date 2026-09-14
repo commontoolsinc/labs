@@ -6,6 +6,8 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
+import { expect } from "@std/expect";
+
 import {
   isLinkRef,
   linkRefFrom,
@@ -867,6 +869,7 @@ Deno.test("Fabric target releases graph storage after every session", async () =
   });
   let releases = 0;
   let releaseFails = false;
+  let wrongOwner = false;
   const connection = {
     runtime: mainRuntime,
     spaceDid: session.space,
@@ -883,7 +886,7 @@ Deno.test("Fabric target releases graph storage after every session", async () =
       undefined,
       () =>
         Promise.resolve({
-          connection: releaseFails
+          connection: wrongOwner
             ? { ...graphConnection, ownerDid: "did:key:other-owner" }
             : graphConnection,
           release: async () => {
@@ -946,6 +949,17 @@ Deno.test("Fabric target releases graph storage after every session", async () =
     );
 
     releaseFails = true;
+    await expect(target.publish([{
+      source,
+      sessions: [snapshot("session-3")],
+      errors: [],
+      complete: true,
+    }])).rejects.toThrow("graph release failed");
+    expect(releases).toBe(3);
+    expect(await readStableCellGraphValue(connection, target.cells.allIndex))
+      .toEqual(index);
+
+    wrongOwner = true;
     const error = await assertRejects(
       () =>
         target.publish([{
@@ -964,7 +978,7 @@ Deno.test("Fabric target releases graph storage after every session", async () =
         "graph release failed",
       ],
     );
-    assertEquals(releases, 3);
+    expect(releases).toBe(4);
   } finally {
     await graphRuntime.dispose();
     await mainRuntime.dispose();
