@@ -90,12 +90,27 @@ A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions
 and removals.
 
+Dialogs share Up / Down, Page Up / Page Down, and Home / End for navigation.
+Ctrl-F / Ctrl-B also page down / up. Pages follow the dialog's visible height,
+with one row of overlap. While browsing, `j` / `k` and `J` / `K` move down / up,
+Space and `b` / `B` page down / up, and `g` / `G` jump to the top / bottom.
+Ctrl-N / Ctrl-P move down / up, and Ctrl-D / Ctrl-U move half a page.
+Confirmation prompts use navigation keys to move button focus; Space activates
+the focused button. Printable keys enter text while a filter is active.
+
 Press `i` in a diff to open its file and commit list. The list starts in browse
-mode. Press `/` to filter it by file name, commit hash, or commit subject. The
-usual `f`, `F`, `E`, `T`, and `M` file-visibility keys remain active while the
-list is in browse mode, and Space pages through the entries. Its summary reports
-added and removed lines for the complete diff and for the files that are
-currently shown.
+mode. Press `/` to filter it by file name, commit hash, or commit subject. In
+browse mode, Space pages through the entries, and `g` and `G` select the first
+and last entry. The `f`, `F`, `E`, `T`, and `M` file-visibility keys remain
+active. On a commit row, `f` hides all of that commit's files. Pressing it again
+shows them. Each commit row reports its total added and removed lines under the
+selected count policy. The list's summary reports added and removed lines for
+the complete diff and for the files that are currently shown.
+
+Use `<` and `>` to move to the preceding or following commit header in the main
+view or the index list. From within a commit, `<` returns to that commit's
+header. These keys follow the order of commits in the input, including separate
+commits piped from `git show` or `git log -p`.
 
 Press `D` in that list to cycle its line-count policy. Normal counts include
 every added and removed line. The second policy removes pairs within one file
