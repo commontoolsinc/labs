@@ -29,7 +29,7 @@
  * never be added here): `fetchBinary`, `fetchText`, `fetchJson`,
  * `fetchJsonUnchecked`, `fetchProgram`, `streamData`, `llm`, `llmDialog`,
  * `compileAndRun`, `generateObject`, `generateText`, `navigateTo`, `wish`,
- * `sqliteQuery` (server round-trip; an effect like `llm`),
+ * `sqliteQuery` (server round-trip, like `llm`),
  * `inspectConfLabel` (reads stored label metadata — ambient CFC state that
  * changes independently of the node's inputs), `cellFromUrl` (resolves a
  * space name against the runtime's cache, which is ambient in the same sense,
