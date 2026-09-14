@@ -2,10 +2,11 @@
 // the type system -- no runtime value carries any of them -- so the generator
 // must not surface one as a schema property or requirement.
 //
-// `FabricPrimitive` carries the brand that tells it from a `FabricInstance`;
-// `FabricInstance` carries its own, plus the one that types a
-// `FabricInstancePlus`, at `never`. A structural schema of either skips every
-// such key.
+// `FabricPrimitive` carries the string-keyed brand that tells it from a
+// `FabricInstance`; `FabricInstance` carries its own, keyed by an interned
+// symbol, plus the string-keyed one that types a `FabricInstancePlus`, at
+// `never`. A structural schema of either skips every such key: the string
+// keys by name, the symbol key as every symbol-keyed member is.
 //
 // A concrete `FabricPrimitive` class (`FabricBytes`) emits its
 // `FabricPrimitive` schema type (`{ type: "FabricBytes" }`, matched by
@@ -16,8 +17,10 @@ interface FabricPrimitive {
   readonly "@commonfabric/FabricPrimitive": true;
 }
 
+const FABRIC_INSTANCE_BRAND = Symbol.for("@commonfabric/FabricInstance");
+
 interface FabricInstance {
-  readonly "@commonfabric/FabricInstance": true;
+  readonly [FABRIC_INSTANCE_BRAND]: true;
   readonly "@commonfabric/FabricInstancePlus"?: never;
   deepClone(frozen: boolean): FabricInstance;
 }

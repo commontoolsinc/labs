@@ -1,5 +1,4 @@
 import {
-  FABRIC_INSTANCE_BRAND,
   FABRIC_INSTANCE_PLUS_BRAND,
   FABRIC_PRIMITIVE_BRAND,
   type MutableJSONSchema,
@@ -198,12 +197,13 @@ function shouldSkipInternalProperty(
     return true;
   }
 
-  // The `FabricPrimitive`, `FabricInstance`, and `FabricInstancePlus` nominal
-  // brands exist only in the type system -- no runtime value carries any of
-  // the keys, so none may appear in a schema's `properties` or `required`.
+  // The `FabricPrimitive` and `FabricInstancePlus` nominal brands are
+  // string-keyed and exist only in the type system -- no runtime value carries
+  // either key, so neither may appear in a schema's `properties` or
+  // `required`. The `FabricInstance` brand is symbol-keyed, which the test
+  // above already skips.
   if (
     (propName === FABRIC_PRIMITIVE_BRAND) ||
-    (propName === FABRIC_INSTANCE_BRAND) ||
     (propName === FABRIC_INSTANCE_PLUS_BRAND)
   ) {
     return true;

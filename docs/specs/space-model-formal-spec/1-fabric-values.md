@@ -901,22 +901,24 @@ single `instanceof`, narrowing to the union. The root is not a type a caller
 names, and the data model defines no other subclass of it; an instance of one
 defined elsewhere is not a `FabricValue`.
 
-Each class is **nominal**, not structural: each declares a brand member,
-`@commonfabric/FabricPrimitive` or `@commonfabric/FabricInstance`, that exists
-only in the type system (`declare` emits no runtime member, and nothing reads
-the key). This matters for what `FabricValue` means as a static claim.
-TypeScript is structurally typed, so were `FabricPrimitive` empty, every object
-would satisfy it — and therefore satisfy `FabricValue`, since the union includes
-it — and were `FabricInstance` only its two clone methods, so would every object
-carrying two methods by those names. The brands are what make the annotation
-carry information.
+Each class is **nominal**, not structural: each declares a brand member that
+exists only in the type system (`declare` emits no runtime member, and nothing
+reads the key) -- `FabricPrimitive` under the string key
+`@commonfabric/FabricPrimitive`, and `FabricInstance` under
+`FABRIC_INSTANCE_BRAND`, an interned symbol. This matters for what `FabricValue`
+means as a static claim. TypeScript is structurally typed, so were
+`FabricPrimitive` empty, every object would satisfy it — and therefore satisfy
+`FabricValue`, since the union includes it — and were `FabricInstance` only its
+two clone methods, so would every object carrying two methods by those names.
+The brands are what make the annotation carry information.
 
-Each brand is a well-known string key rather than a `unique symbol` because
-`interface.ts` imports no symbol value, and a `unique symbol` would have to be
-imported as one. `packages/data-model/src/api.ts` declares the identical
-members; the two must agree exactly, since a value branded by one would
-otherwise not satisfy the other, and `api-agreement.ts` stops compiling when
-they stop agreeing.
+The `FabricInstance` brand is a symbol so that it can never be mistaken for
+data: a symbol-keyed member has no place in a schema, where a string-keyed one
+has to be skipped by name. It is interned so that every realm and every copy of
+the module agree on its value. `packages/data-model/src/api.ts` declares the
+identical members; the two must agree exactly, since a value branded by one
+would otherwise not satisfy the other, and `api-agreement.ts` stops compiling
+when they stop agreeing.
 
 ```typescript
 // Shown at module scope.
@@ -1730,6 +1732,8 @@ class-side `[CODEC]` (Section 2.4).
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
+const FABRIC_INSTANCE_BRAND = Symbol.for("@commonfabric/FabricInstance");
+
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
  * protocol as non-primitives. An instance may hold and expose arbitrary
@@ -1763,12 +1767,11 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
    * The nominal brand that tells a `FabricInstance` from any other object with
    * the two clone methods, in the type system; the runtime root carries no
    * brand, so this member is what makes the class nominal. `declare` emits no
-   * runtime member, and nothing ever reads the key; it is a well-known string
-   * key rather than a `unique symbol` so that this file imports no symbol
-   * value. `api.ts` declares the identical member, and `api-agreement.ts`
-   * stops compiling if the two stop agreeing.
+   * runtime member, and nothing ever reads the key. `api.ts` declares the
+   * identical member, and `api-agreement.ts` stops compiling if the two stop
+   * agreeing.
    */
-  declare readonly "@commonfabric/FabricInstance": true;
+  declare readonly [FABRIC_INSTANCE_BRAND]: true;
 
   /**
    * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at

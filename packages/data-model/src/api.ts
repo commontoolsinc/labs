@@ -2,8 +2,8 @@
  * Pattern-visible declarations for the fabric value type system, and for the
  * options of the debug renderers over it, in the form that `@commonfabric/api`
  * re-exports to patterns. Everything here is an interface, a type, or a
- * `declare const`, except for the four brand-key constants, so the module's
- * only runtime footprint is those constants.
+ * `declare const`, except for the brand constants, so the module's only
+ * runtime footprint is those constants.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -169,11 +169,12 @@ export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 export const FABRIC_PRIMITIVE_BRAND = "@commonfabric/FabricPrimitive";
 
 /**
- * The nominal brand key declared on `FabricInstance`. As with
- * `FABRIC_PRIMITIVE_BRAND`, a runtime instance never carries the key, so a
- * schema derived from the type leaves it out.
+ * The nominal brand of `FabricInstance`: an interned symbol, so that every
+ * realm and every copy of this module agree on its value, and so that the
+ * member it keys can never be mistaken for data -- a symbol-keyed member has
+ * no place in a schema. A runtime instance never carries the key.
  */
-export const FABRIC_INSTANCE_BRAND = "@commonfabric/FabricInstance";
+export const FABRIC_INSTANCE_BRAND = Symbol.for("@commonfabric/FabricInstance");
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
@@ -211,10 +212,9 @@ export interface FabricInstance {
   /**
    * The nominal brand that tells a `FabricInstance` from any other object with
    * the two clone methods, in the type system. It exists only in the type
-   * system: a runtime instance never carries the key. `FABRIC_INSTANCE_BRAND`
-   * is the key.
+   * system: a runtime instance never carries the key.
    */
-  readonly "@commonfabric/FabricInstance": true;
+  readonly [FABRIC_INSTANCE_BRAND]: true;
 
   /**
    * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`. It
@@ -314,10 +314,10 @@ export interface FabricPlainObjectPlus<PlusType>
  */
 export interface FabricInstancePlus<PlusType> {
   /**
-   * The nominal brand of a `FabricInstance`; the same-named member there says
+   * The nominal brand of a `FabricInstance`; the same-keyed member there says
    * how.
    */
-  readonly "@commonfabric/FabricInstance": true;
+  readonly [FABRIC_INSTANCE_BRAND]: true;
 
   /**
    * The nominal brand that carries `PlusType`. It exists only in the type

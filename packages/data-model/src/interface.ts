@@ -2,10 +2,10 @@
  * The two special-object classes, `FabricInstance` and `FabricPrimitive`, and
  * the conversion-layer types of the fabric data model, together with the
  * pattern-visible value types that `api.ts` declares, re-exported here so that
- * this module carries the whole `FabricValue` vocabulary. Its one runtime
- * import is the leaf module holding the classes' common root, which imports
- * nothing, so any module can import this one without creating a circular
- * dependency.
+ * this module carries the whole `FabricValue` vocabulary. Its runtime imports
+ * are two leaves that import nothing, `api.ts` for the `FabricInstance` brand
+ * symbol and the module holding the classes' common root, so any module can
+ * import this one without creating a circular dependency.
  *
  * The classes here and the declarations in `api.ts` describe the same shapes,
  * and `api-agreement.ts` stops compiling when they drift. The concrete classes
@@ -19,6 +19,7 @@ import type {
   FabricValue,
   FabricValuePlus,
 } from "./api.ts";
+import { FABRIC_INSTANCE_BRAND } from "./api.ts";
 import { BaseFabricSpecialObject } from "./fabric-bases/BaseFabricSpecialObject.ts";
 
 // We re-`export` all the _types_ from `./api.ts`, so that they're consistently
@@ -154,12 +155,11 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
    * The nominal brand that tells a `FabricInstance` from any other object with
    * the two clone methods, in the type system; the runtime root carries no
    * brand, so this member is what makes the class nominal. `declare` emits no
-   * runtime member, and nothing ever reads the key; it is a well-known string
-   * key rather than a `unique symbol` so that this file imports no symbol
-   * value. `api.ts` declares the identical member, and `api-agreement.ts`
-   * stops compiling if the two stop agreeing.
+   * runtime member, and nothing ever reads the key. `api.ts` declares the
+   * identical member, and `api-agreement.ts` stops compiling if the two stop
+   * agreeing.
    */
-  declare readonly "@commonfabric/FabricInstance": true;
+  declare readonly [FABRIC_INSTANCE_BRAND]: true;
 
   /**
    * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
