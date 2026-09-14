@@ -653,8 +653,9 @@ function isPatternRef(
 }
 
 /**
- * The pattern an in-place update replaced, from the `displacedPattern` meta the
- * pattern updater writes. Its timestamp is optional.
+ * The pattern an in-place update replaced, from the `displacedPattern` meta
+ * that `applyPieceSourceTransition` and the default-root roll-forward heal
+ * write. Its timestamp is optional.
  */
 function readDisplacedPattern(
   value: unknown,

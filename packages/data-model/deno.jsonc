@@ -1,6 +1,7 @@
 {
   "name": "@commonfabric/data-model",
   "compilerOptions": {
+    "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true
   },
   "imports": {

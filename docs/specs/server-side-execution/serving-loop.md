@@ -5,7 +5,7 @@ Normative spec for Phase 1 of
 [README.md](README.md) first; this document assumes its vocabulary.
 MUST/NEVER language is binding on implementers.
 
-## Anchors (verified on main, 2026-08-02; §3d/§2b file:line refs refreshed 2026-08-04 — re-verify before coding)
+## Anchors
 
 - Scheduler: `packages/runner/src/scheduler/` (`execution.ts`,
   `dependency-graph.ts`, `events.ts`, `event-identity.ts`). The scheduler
@@ -14,16 +14,16 @@ MUST/NEVER language is binding on implementers.
 - Runtime construction: `packages/runner/src/runtime.ts` (`new Runtime`),
   builtin registration `packages/runner/src/builtins/index.ts`
   (`registerBuiltins(runtime)`).
-- Store: engine-v3 sqlite per space DID
-  (`packages/toolshed/cache/memory/engine-v3/`), tables `commit`,
-  `revision`, `head`, `branch` — and, since Phase 1 stage B
-  (2026-08-04), `execution_lease` in the reduced §2 shape
-  (`packages/memory/v2/engine.ts` schema;
+- Store: engine-v3 sqlite per space DID (the on-disk layout is
+  composed by `resolveMemoryEngineStoreRootUrl` and
+  `resolveSpaceStoreUrl` in `packages/memory/v2/storage-path.ts`),
+  tables `commit`, `revision`, `head`, `branch`, and `execution_lease`
+  in the reduced §2 shape (`packages/memory/v2/engine.ts` schema;
   `packages/memory/v2/execution-lease.ts` holder side). The v1
-  branch's richer shape was prior art, not substrate (branch
-  `engine.ts:497-507`: branch PK, `lease_generation`, `host_id`,
-  `on_behalf_of`, state `active|draining|revoked`, `expires_at`) and
-  none of it carried over.
+  branch's richer shape was prior art, not substrate (its `engine.ts`:
+  branch PK, `lease_generation`, `host_id`, `on_behalf_of`, state
+  `active|draining|revoked`, `expires_at`) and none of it carried
+  over.
 - Memory server + protocol: `packages/memory/v2.ts`, mounted in toolshed
   at `/api/storage/memory`
   (`packages/toolshed/routes/storage/memory/memory.routes.ts`).
@@ -52,7 +52,10 @@ wave, and once the wave has committed re-announces the documents the
 verb staged to itself as a warm-marked notice — the same carrier as the
 provisioning path's — so the next cycle loads and derives the staged
 piece; the request settles at the verb's own wave commit —
-[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).)*
+[docs/features/server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md).
+AMENDED 2026-09-11: a verb's transaction stamped `directCommit` commits
+to the store on its own instead of sealing, ahead of the wave; the source
+update's setup transaction is one, per §3e.)*
 
 What activation LOADS (RULED 2026-08-02): there is NO piece-start
 policy in v2. The space is ONE lazy reactive graph, and activation
@@ -120,10 +123,10 @@ server analog (runtime-mapping.md N22/N31).
 Activation mechanics: the memory server notifies the ExecutorHost on
 any AUTHORED admission into a space with no live lease — an
 admission-side hook, not a poll (prior art: the no-handler auto-load
-path, `scheduler/events.ts:331-345`). Host boot discovery is a
-per-space check: stream head past `eventWatermark` means undelivered
-events, so activate. A park racing an incoming commit self-heals: the
-hook re-fires on the next admission.
+path in `queueSchedulerEvent`, `scheduler/events.ts`). Host boot
+discovery is a per-space check: stream head past `eventWatermark`
+means undelivered events, so activate. A park racing an incoming
+commit self-heals: the hook re-fires on the next admission.
 
 The EXPLICIT WARM REQUEST *(RULED 2026-08-21 — the owner adopted the
 recommendation set for the home-profile setup-after-park residual;
@@ -261,9 +264,8 @@ construction against *clients* (no code path). Against *other server
 processes* (deploy overlap, partition) it holds via the lease:
 
 - One row per space in `execution_lease`: `(space, holder, expiresAt)`.
-  The table was CREATED in Phase 1 stage B (2026-08-04), reducing the
-  v1 branch's richer shape (see Anchors) to exactly these three
-  fields — prior art, not substrate.
+  The table reduces the v1 branch's richer shape (see Anchors) to
+  exactly these three fields — prior art, not substrate.
 - **`holder` is a PER-PROCESS identity (DR1, RULED 2026-08-03):**
   the SpaceServer's service identity plus a process-instance
   component minted at PROCESS START — stable across every renew and
@@ -384,13 +386,15 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
   // where rapid-fire coalescing comes from: superseded intermediates
   // are skipped by laziness, not by an explicit drain phase.
   run scheduler to QUIESCENCE — scheduler.idle()
-  (packages/runner/src/scheduler/facade.ts:1191-1301) resolves; it
+  (Scheduler.idle() in packages/runner/src/scheduler/facade.ts)
+  resolves; it
   awaits queued AND parked events, running actions, and demanded pull
   work — the eager/idle-scheduled actions and their cascades included.
   It does NOT await undemanded dirty computeds (pull-based laziness,
   §3b), commit durability, or post-commit async builtin work
-  (run.ts:563-572 rides runtime.settled(), which maps to the outbox
-  here). There is no separate commit for idle-time work.
+  (finalizeReactiveActionCommit in scheduler/run.ts rides
+  runtime.settled(), which maps to the outbox here). There is no
+  separate commit for idle-time work.
   commit one derived-class transaction containing:
     - all derived cell changes of this wave (final values only)
     - consequenceOf: every eventId drained this wave
@@ -666,7 +670,7 @@ CREATE TABLE scheduler_basis (
                             --   M2 re-keying; scope_key vocabulary
                             --   is the shared `resolveScopeKey` in
                             --   the wire-shape module —
-                            --   packages/memory/v2.ts:120 — per
+                            --   packages/memory/v2.ts — per
                             --   LD3, key-vocabulary.md §3)
   entity_space     TEXT,    -- the input doc's space: foreign reads
                             --   are logged reads too (cross-space
@@ -722,9 +726,8 @@ Rules the shape carries, binding:
   history.
 - **Interim retention is UNBOUNDED, and that is accepted** (S8).
   Rows at `space` and `user:<p>` keys are touched by no session
-  retirement; main's 32-per-action execution-context cap
-  (`packages/memory/v2/engine.ts:55`) dies with the dropped tables
-  and `scheduler_basis` specifies no replacement bound. The
+  retirement, and no execution-context bound exists —
+  `scheduler_basis` specifies none. The
   narrowing rule above removes the one case that would grow without
   a run to overwrite it; everything else is bounded in practice by
   overwrite-in-place per (action, instance). A real bound is the
@@ -762,18 +765,15 @@ stage-C criterion is the backstop: after this migration the basis
 index is the ONLY persisted scheduler state besides W and
 `eventWatermark`.
 
-**WARNING — the drop list is SEVEN tables; main's own constant
-enumerates SIX** (D6). `CORE_SCHEDULER_TABLES`
-(`packages/memory/v2/engine.ts:1275-1282`) lists
-`scheduler_observation`, `scheduler_action_snapshot`,
-`scheduler_observation_replay`, `scheduler_read_index`,
-`scheduler_write_index`, `scheduler_action_state` — and does NOT
-include `scheduler_context_floor`, which is created and dropped
-through separate statements (`engine.ts:2233-2245`). An
-implementation that mechanically drives the migration off that
-constant WILL leave the floor table behind and fail the plan's
-stage-C criterion for a reason that reads like a mystery. Drive the
-drop from the seven-table list above, not from the constant.
+**WARNING — the drop list is SEVEN tables, and an enumeration of the
+observation tables yields SIX** (D6). `scheduler_context_floor` is
+the one such an enumeration misses: it hangs off no observation
+spine. A migration driven off the six-table enumeration leaves the
+floor table behind and fails the plan's stage-C criterion for a
+reason that reads like a mystery.
+`migrateSchedulerObservationTablesToBasis` in
+`packages/memory/v2/engine.ts` drives the drop from the seven-table
+list above; anything that re-derives that list must too.
 
 **NO BACKFILL** (D10). `scheduler_read_index` and
 `scheduler_action_state` rows are NOT migrated into
@@ -786,14 +786,11 @@ migration that reads old rows would have to reinterpret
 `process_generation` history as overwrite-in-place state, which is
 the reshaping this section already rejected.
 
-**Old client / new server compat is already answered** (D11): the
-capability is negotiated at hello, and a client whose server did not
-advertise `persistentSchedulerState` treats the state as absent and
-runs fresh (`packages/runner/src/storage/v2.ts:2142` — the
-`serverFlags?.persistentSchedulerState !== true` degrade path). A
-server that has migrated advertises nothing to negotiate, so an old
-client takes the same fresh path it already takes today. No version
-handshake is added for this.
+**Old client / new server compat is already answered** (D11): a
+migrated server advertises no `persistentSchedulerState` capability
+at hello, and a client from before the migration reads that as absent
+state and runs fresh — the same path it takes against any server that
+does not advertise it. No version handshake is needed.
 
 **Protocol-layer deletions ride the same migration** (D7). With the
 persisted form gone the flag gates nothing, so the following delete
@@ -811,14 +808,14 @@ here so no one re-derives it mid-PR:
 Dev tooling and live docs read these tables directly and break
 silently, since no product test exercises them:
 
-- `packages/state-inspector/scheduler.ts:15-19` (the five-table
-  requirements map) and its readers at `246-281` — the inspector
-  queries every dropped table by name;
+- `packages/state-inspector` — `hasSchedulerBasisTable` in `db.ts`
+  and the basis-row count in `queries.ts` name the table directly, so
+  the inspector follows any change to it by hand;
 - the `cf inspect` CLI surface that renders that output;
-- `packages/memory/v2/sqlite/guard.ts:16-33` — the `CORE_TABLE_NAMES`
-  blocklist that a pattern statement may never reference: the
-  dropped names come OUT and `scheduler_basis` goes IN, or pattern
-  SQL gains a reachable engine table;
+- `packages/memory/v2/sqlite/guard.ts` — the `CORE_TABLE_NAMES`
+  blocklist that a pattern statement may never reference lists
+  `scheduler_basis` and none of the dropped names; a table added to
+  the engine goes IN, or pattern SQL gains a reachable engine table;
 - the specs that described the persisted form — archived by stage C.3:
   `docs/history/specs/persistent-scheduler-state.md`,
   `docs/history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md`
@@ -833,12 +830,9 @@ hand edit: ~110 fixture files under
 `packages/ts-transformers/test/fixtures/` embed the emitted marker,
 so the GOLDEN-REGENERATION procedure is a required step of the
 change, not a follow-up. Plan Phase 1 stage C sizes the full
-surface. (C.1's unconditional consumer deletion is safe for the
-OFF-arm adoption path runtime-mapping.md N62 keeps: the one
-certificate consumer in `facade.ts` —
-`observationMinimumContextRank`, `facade.ts:213` — already
-degrades to the most-restrictive rank on an ABSENT summary, and
-`adoptRemoteObservations` never reads it; verified 2026-08-03.)
+surface. (The OFF-arm observation-adoption path, the one certificate
+consumer outside the transformer, is gone with the observation
+machinery — runtime-mapping.md N62.)
 
 ## 3c. CFC: the enforcement boundary is the action run
 
@@ -1112,13 +1106,14 @@ which is the failure `eventWatermark` advancement exists to prevent.
 **Multi-space seals** (`.inSpace(...)` provisioning): one tx writes one
 space by DEFAULT; a tx crosses only via the explicit opt-in chain —
 `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4698`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:690`). Opted-in writes are
+(`builder/pattern.ts`) → `Runner.enableCrossSpaceChildCommit()`
+(`runner.ts`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts`). Opted-in writes are
 sequenced at the commit step — foreign authored commits first, home
 derived commit after success — per protocol.md §2b (today's
-`commitMultiSpace`/`runSplitCommits`, `v2-transaction.ts:1971/2048`:
-sequential, stop at first failure). The wave does not close until the
+`V2StorageTransaction.#commitMultiSpace()`/`#runSplitCommits()` in
+`v2-transaction.ts`: sequential, stop at first failure). The wave does
+not close until the
 split completes or fails as a unit (same-host store sequencing, not a
 network await).
 
@@ -1193,7 +1188,18 @@ commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the writing principal. Root creation and explicit wish-sidecar opens
+under the writing principal. A served source update (the `setsrc`
+lifecycle verb, [server-pattern-lifecycle.md](../../features/server-pattern-lifecycle.md))
+moves the pointer in a setup transaction that COMMITS DIRECTLY to the
+store rather than sealing — the serving loop's own derived-class commit,
+serialized with the wave's seals, its own read set validated by the
+store as a client commit's — because module-loading.md lets update
+authority publish only from a transaction that commits to storage
+itself. A wave open at that commit takes a contribution sealed AFTER it,
+whose reads of the docs it wrote saw the commit, as having observed them
+(§3d's conflict set exempts them for that contribution, and the sink
+holds the store to that exact head), so the swap's first derivation
+under the new pattern lands in the same cycle. Root creation and explicit wish-sidecar opens
 fetch system source through the serving runtime's API URL. Those fetches remain
 within verification-coverage.md OW55's source-trust obligation; root ensuring
 adds no source-following probe for an existing root.

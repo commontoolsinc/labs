@@ -3,7 +3,7 @@
 Normative spec for Phase 3 (D-v2-1). Assumes
 [README.md](README.md) §3.6 and [serving-loop.md](serving-loop.md).
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors
 
 - Event machinery: `packages/runner/src/scheduler/events.ts`
   (`queueSchedulerEvent`, `addSchedulerEventHandler`,
@@ -198,9 +198,9 @@ handler fires
   UNCHANGED from today's client: handlers run eagerly, but only after
   preflight makes any dirty state inputs current (D-v2-2) — the
   scheduler recomputes a dirty computed input on demand before the
-  handler that reads it runs
-  (`event-preflight-dependencies.ts:246-248` — preflight recomputes an
-  input that is invalid OR has never run, so the lazy-computed case is
+  handler that reads it runs (`isInvalidNode` in
+  `event-preflight-dependencies.ts` — preflight recomputes an input
+  that is invalid OR has never run, so the lazy-computed case is
   literally in the code; CT-1795's staleness park is an extra gate on
   top) — the common case being not rapid-fire but a lazy computed
   nothing has pulled yet, which the handler must and does see fresh.
@@ -214,7 +214,7 @@ handler fires
 - Server enqueue goes through the scheduler facade (`facade.queueEvent`
   — the wake-shaping entry point), never raw `queueSchedulerEvent`, so
   server-enqueued events get the same shaping as client ones.
-- The inherited backlog collapse (`events.ts:266-321`) would
+- The inherited backlog collapse (`queueSchedulerEvent` in `events.ts`) would
   last-wins-coalesce DURABLE intents; under the flag, collapse is
   DISABLED for durable-id stream events — backpressure is shaped at the
   binding layer instead (README §3.8). (Ledger L8: the owner may yet
@@ -259,8 +259,9 @@ ambient-state one.
   notice. Retry or Dismiss records its resolution; only a resolved entry
   may compact under the ordinary watermark rule.
 - Cascade sends minted inside a handler attempt get fresh ids per
-  attempt (`event-identity.ts:5-9`); harmless under exactly-once,
-  because only the committing attempt's cascades escape the wave.
+  attempt (`mintEventId`'s per-transaction origin state in
+  `event-identity.ts`); harmless under exactly-once, because only the
+  committing attempt's cascades escape the wave.
 - Today's receipt-cell exactly-once (`commitPreconditions`, on by
   default) is SUBSUMED by `eventWatermark` under the flag; the two
   mechanisms MUST NOT be active for the same event

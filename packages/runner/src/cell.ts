@@ -15,10 +15,10 @@ import {
   fabricFromNativeValue,
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
   hashStringOf,
+  isFabricSpecialObject,
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
@@ -2885,8 +2885,7 @@ export class CellImpl<T extends FabricValue>
       return true;
     }
 
-    return ref instanceof FabricSpecialObject &&
-      element instanceof FabricSpecialObject &&
+    return isFabricSpecialObject(ref) && isFabricSpecialObject(element) &&
       valueEqual(element, ref);
   }
 
@@ -4345,7 +4344,7 @@ function containsCycle(value: unknown): boolean {
   const walk = (node: unknown): boolean => {
     if (
       node === null || typeof node !== "object" || isCell(node) ||
-      isCellLink(node) || node instanceof FabricSpecialObject
+      isCellLink(node) || isFabricSpecialObject(node)
     ) {
       return false;
     }

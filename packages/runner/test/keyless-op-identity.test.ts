@@ -9,31 +9,25 @@ import {
 import type { RuntimeProgram } from "./engine-test-support.ts";
 
 /**
- * Regression for CT-1812: a KEYLESS op (no content-addressed entry ref —
- * here, evaluated through the bare, non-registering
- * `Engine.compileAndEvaluateModules`) whose mapped sub-pattern nests a
- * GRANDCHILD exposing a derived-internal computed output.
+ * A KEYLESS op (no content-addressed entry ref — here, evaluated through the
+ * bare, non-registering `Engine.compileAndEvaluateModules`) whose mapped
+ * sub-pattern nests a GRANDCHILD exposing a derived-internal computed output.
  *
- * Before the keyless-op mint, such an op fell back to its embedded pattern
- * graph, whose nested output-alias `defer` levels the immutable-cell JSON
- * round-trip decrements one step too far — the grandchild derived-internal
- * output then resolved one instantiation level too early (throw under strict
- * binding, mis-wire under lenient). This is the CT-1811 corruption on its
- * ref-less remnant path: PR #4454 sealed the harness load path by
- * registration; this test pins the remnant.
- *
- * Now `Runner.#substituteOpPatternRefs` mints the op's `keyless:` content-hash
+ * `Runner.#substituteOpPatternRefs` mints the op's `keyless:` content-hash
  * session identity (the same pointer a keyless ROOT pattern gets via
  * `entryRefForPattern`), so the op rides a `$patternRef` to its pristine
- * artifact and the embedded round-trip never happens.
+ * artifact. Without the mint, such an op would fall back to its embedded
+ * pattern graph, whose nested output-alias `defer` levels the immutable-cell
+ * JSON round-trip decrements one step too far — the grandchild
+ * derived-internal output would then resolve one instantiation level too
+ * early (a throw under strict binding, a mis-wire under lenient).
  *
- * The program is the CT-1811 regression pattern (gideon-tests/
- * ct-1811-mapped-subpattern-derived-output.test.tsx), with the traversal
- * result exposed as a readable `rendered` output and the Wrapper exported so
- * the mint itself is observable.
+ * The program is a mapped sub-pattern with a derived output, with the
+ * traversal result exposed as a readable `rendered` output and the Wrapper
+ * exported so the mint itself is observable.
  */
 
-const CT_1812_PROGRAM_SOURCE = `
+const PROGRAM_SOURCE = `
 import {
   computed,
   NAME,
@@ -141,10 +135,10 @@ export default pattern(() => {
 
 const program: RuntimeProgram = {
   main: "/main.tsx",
-  files: [{ name: "/main.tsx", contents: CT_1812_PROGRAM_SOURCE }],
+  files: [{ name: "/main.tsx", contents: PROGRAM_SOURCE }],
 };
 
-describe("keyless op identity (CT-1812)", () => {
+describe("keyless op identity", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -188,10 +182,10 @@ describe("keyless op identity (CT-1812)", () => {
     const cancel = result.sink(() => {});
     await runtime.idle();
 
-    // The CT-1811/CT-1812 shape works ref-lessly: every grandchild
-    // derived-internal output materialized (2, 4, 6 all present). Before the
-    // mint this threw "Unknown derived internal cell with partial cause"
-    // (strict) or mis-wired (lenient).
+    // The shape works ref-lessly: every grandchild derived-internal output
+    // materialized (2, 4, 6 all present), where the embedded-graph fallback
+    // would throw "Unknown derived internal cell with partial cause" (strict)
+    // or mis-wire (lenient).
     expect(result.key("rendered").get()).toBe(true);
 
     // And it worked BY IDENTITY: instantiation minted the keyless pointer for

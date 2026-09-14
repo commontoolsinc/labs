@@ -156,9 +156,8 @@ Tests to port or extend:
 
 ### WP1.1 — Define the dependency-light factory protocol
 
-- [ ] Add the `FabricFactory` callable arm to
-  `packages/data-model/src/interface.ts` and mirror it in
-  `packages/api/index.ts`.
+- [ ] Add the `FabricFactory` callable arm to the `FabricValue` union in
+  `packages/data-model/src/api.ts`, which `packages/api/index.ts` re-exports.
 - [ ] Define the `FactoryStateV1` discriminated union with exactly the fields in
   the specification: shared `ref`; pattern schemas/params/scope/space selector;
   module schemas/scope; and handler context/event schemas.
@@ -179,7 +178,7 @@ Tests to port or extend:
 
 Expected implementation files:
 
-- `packages/data-model/src/interface.ts`
+- `packages/data-model/src/api.ts`
 - a new dependency-light module such as
   `packages/data-model/src/fabric-factory.ts`
 - `packages/data-model/deno.jsonc` export map

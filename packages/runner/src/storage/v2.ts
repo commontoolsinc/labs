@@ -92,7 +92,6 @@ import {
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { entityKey } from "../scheduler/keys.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
@@ -380,6 +379,69 @@ const toExplicitDocument = (value: FabricValue): EntityDocument => {
   }
   return value as EntityDocument;
 };
+
+/**
+ * The document operations of a native commit, with every root an explicit
+ * document: the shape the replica applies as pending state.
+ */
+const documentOperationsOf = (
+  transaction: NativeStorageCommit,
+): NativeCommitOperation[] =>
+  transaction.operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) =>
+      operation.op === "delete"
+        ? {
+          op: "delete" as const,
+          id: operation.id,
+          scope: operation.scope,
+        }
+        : operation.op === "patch"
+        ? {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+          value: toExplicitDocument(operation.value),
+        }
+        : {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: toExplicitDocument(operation.value),
+        }
+    );
+
+/**
+ * The operations a commit hands the store: cell operations first, a patch
+ * carrying its patches alone, and folded SQLite operations last.
+ */
+const storeOperationsOf = (
+  operations: readonly NativeCommitOperation[],
+  sqliteOps: readonly SqliteOperation[],
+): ClientCommit["operations"] => [
+  ...operations.map((operation) => {
+    switch (operation.op) {
+      case "delete":
+        return operation;
+      case "patch":
+        return {
+          op: "patch" as const,
+          id: operation.id,
+          scope: operation.scope,
+          patches: operation.patches,
+        };
+      case "set":
+        return {
+          op: "set" as const,
+          id: operation.id,
+          scope: operation.scope,
+          value: operation.value,
+        };
+    }
+  }),
+  ...sqliteOps,
+];
 
 type CachedTransactionValue =
   | FabricValue
@@ -818,10 +880,55 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
 const localSeqKey = (localSeq: number | number[]): string =>
   Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
 
+/**
+ * Orders paths segment by segment, a shorter path ahead of one it prefixes.
+ * That puts an ancestor directly ahead of every path below it, which is what
+ * lets `compactRecursiveReads()` drop the descendants in one pass.
+ */
+const compareSegments = (
+  left: readonly string[],
+  right: readonly string[],
+): number => {
+  const limit = Math.min(left.length, right.length);
+  for (let index = 0; index < limit; index++) {
+    if (left[index] !== right[index]) {
+      return left[index] < right[index] ? -1 : 1;
+    }
+  }
+  return left.length - right.length;
+};
+
+const isPathPrefix = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * Helper for `compactCommitReads()`, which keeps the reads of one dependency
+ * group that no other read of the group covers. A recursive read at a path
+ * covers every path below it, so a read under another is dropped. Sorts
+ * `reads` in place and returns the survivors in that order.
+ */
+const compactRecursiveReads = <Read extends { path: readonly string[] }>(
+  reads: Read[],
+): Read[] => {
+  if (reads.length < 2) return reads;
+  reads.sort((left, right) => compareSegments(left.path, right.path));
+  const kept: Read[] = [];
+  let covering: readonly string[] | undefined;
+  for (const read of reads) {
+    if (covering !== undefined && isPathPrefix(covering, read.path)) continue;
+    kept.push(read);
+    covering = read.path;
+  }
+  return kept;
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
-  space: MemorySpace,
   reads: Read[],
 ): Read[] => {
   const dependencyKeys = new Map<number | number[], string>();
@@ -833,41 +940,16 @@ const compactCommitReads = <
     }
     return key;
   };
-  const sorted = [...reads].sort((left, right) => {
-    const leftScope = normalizeCellScope(left.scope);
-    const rightScope = normalizeCellScope(right.scope);
-    if (leftScope !== rightScope) {
-      return leftScope < rightScope ? -1 : 1;
-    }
 
-    if (left.id !== right.id) {
-      return left.id < right.id ? -1 : 1;
-    }
-
-    if ("seq" in left && "seq" in right && left.seq !== right.seq) {
-      return left.seq - right.seq;
-    }
-
-    if ("localSeq" in left && "localSeq" in right) {
-      const leftKey = dependencyKeyFor(left.localSeq);
-      const rightKey = dependencyKeyFor(right.localSeq);
-      if (leftKey !== rightKey) {
-        return leftKey < rightKey ? -1 : 1;
-      }
-    }
-
-    if (left.nonRecursive !== right.nonRecursive) {
-      return left.nonRecursive === true ? 1 : -1;
-    }
-
-    return comparePath(left.path, right.path);
-  });
-
+  // Grouping reads the input in whatever order it arrives: a recursive read
+  // displaces a shallow one at its path whichever comes first, and two reads
+  // equal in every grouped field are interchangeable, so the order the groups
+  // settle in decides nothing. The sort at the end is the one that orders.
   const grouped = new Map<string, {
     recursiveByPath: Map<string, Read>;
     nonRecursiveByPath: Map<string, Read>;
   }>();
-  for (const candidate of sorted) {
+  for (const candidate of reads) {
     // The dependency key carries every admission-relevant field — seq for
     // confirmed reads, the layer set AND basisSeq for pending reads — so
     // reads with divergent bases never merge: ancestor-path compaction
@@ -902,22 +984,10 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const compactedRecursive = sortAndCompactPaths(
-      [...group.recursiveByPath.values()].map((read) => ({
-        space,
-        id: read.id,
-        scope: read.scope,
-        type: DOCUMENT_MIME,
-        path: read.path,
-      })),
+    compacted.push(
+      ...compactRecursiveReads([...group.recursiveByPath.values()]),
+      ...group.nonRecursiveByPath.values(),
     );
-    for (const address of compactedRecursive) {
-      const read = group.recursiveByPath.get(address.path.join("\0"));
-      if (read) {
-        compacted.push(read);
-      }
-    }
-    compacted.push(...group.nonRecursiveByPath.values());
   }
 
   return compacted.toSorted((left, right) => {
@@ -5052,31 +5122,7 @@ export class SpaceReplica
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => documentOperationsOf(transaction),
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
@@ -5124,41 +5170,51 @@ export class SpaceReplica
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
-    options?: { readonly speculative?: boolean },
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
+    },
   ): SealedNativeCommit {
-    const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = transaction.operations
-      .filter((operation) => operation.type === DOCUMENT_MIME)
-      .map((operation) =>
-        operation.op === "delete"
-          ? {
-            op: "delete" as const,
-            id: operation.id,
-            scope: operation.scope,
-          }
-          : operation.op === "patch"
-          ? {
-            op: "patch" as const,
-            id: operation.id,
-            scope: operation.scope,
-            patches: operation.patches,
-            value: toExplicitDocument(operation.value),
-          }
-          : {
-            op: "set" as const,
-            id: operation.id,
-            scope: operation.scope,
-            value: toExplicitDocument(operation.value),
-          }
-      );
     return this.#sealOperations(
-      operations,
+      documentOperationsOf(transaction),
       source,
-      preconditions,
+      activeCommitPreconditions(transaction.preconditions),
       transaction.sqliteOps ?? [],
       verdict,
       options,
     );
+  }
+
+  /**
+   * The operations, preconditions, and read set `transaction` hands the
+   * store, as {@link sealNative} builds them into a sealed commit, without
+   * applying anything here: for a committer that commits to the store
+   * ahead of sealing the same transaction into this replica, which needs
+   * the store's shape before the replica has seen the writes. The reads
+   * are `source`'s, against this replica's records for `identity`'s
+   * instances as they stand, so a pending read names the durable basis
+   * beneath the layers it saw; handed back to {@link sealNative} as its
+   * `reads`, they are the one snapshot both the store and the seal rest
+   * on.
+   */
+  storeCommitOf(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
+  ): {
+    operations: ClientCommit["operations"];
+    preconditions: readonly CommitPrecondition[];
+    reads: ClientCommit["reads"];
+  } {
+    return {
+      operations: storeOperationsOf(
+        documentOperationsOf(transaction),
+        transaction.sqliteOps ?? [],
+      ),
+      preconditions: activeCommitPreconditions(transaction.preconditions),
+      reads: this.#buildReads(source, this.#nextLocalSeq, identity),
+    };
   }
 
   #sealOperations(
@@ -5170,6 +5226,7 @@ export class SpaceReplica
     options?: {
       readonly speculative?: boolean;
       readonly identity?: ScopeKeyIdentity;
+      readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
@@ -5185,33 +5242,11 @@ export class SpaceReplica
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.#buildReads(source, localSeq, identity),
+      reads: options?.reads ?? this.#buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
-      operations: [
-        ...operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
-        ...sqliteOps,
-      ],
+      operations: storeOperationsOf(operations, sqliteOps),
       ...(preconditions.length > 0
         ? { preconditions: [...preconditions] }
         : {}),
@@ -5840,29 +5875,7 @@ export class SpaceReplica
         reads: this.#buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
+        operations: storeOperationsOf(operations, sqliteOps),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
@@ -6960,8 +6973,8 @@ export class SpaceReplica
     // conflict granularity to nonRecursive reads (patchOverlapsNonRecursiveRead),
     // matching how the scheduler reader-dirty index already treats them.
     return {
-      confirmed: compactCommitReads(this.#space, confirmed),
-      pending: compactCommitReads(this.#space, pending),
+      confirmed: compactCommitReads(confirmed),
+      pending: compactCommitReads(pending),
     };
   }
 

@@ -1,8 +1,6 @@
 /**
- * Test for CT-1173: Array persistence bug with Default<> wrapped fields
- *
- * This test specifically checks whether objects with many Default<>-like
- * fields maintain their values correctly when pushed to arrays.
+ * Objects with many `Default<>`-like fields keep their values when pushed to
+ * arrays.
  */
 
 import { expect } from "@std/expect";
@@ -34,7 +32,7 @@ interface Person {
   createdAt: number;
 }
 
-describe("CT-1173: array push with complex objects", () => {
+describe("array push with complex objects", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

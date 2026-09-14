@@ -1,7 +1,7 @@
 /**
  * `Cell.push` anchors an element that carries no explicit identity, so it is
  * stored as its own entity document and the array holds a link to it rather
- * than inline data (CT-1173).
+ * than inline data.
  */
 
 import { expect } from "@std/expect";
@@ -18,7 +18,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("CT-1173: array push anchors its elements", () => {
+describe("array push anchors its elements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -92,14 +92,14 @@ describe("CT-1173: array push anchors its elements", () => {
       const item = result[i];
       console.log(`Item ${i}:`, item, "isLink:", isPrimitiveCellLink(item));
 
-      // If the fix is working, items should be cell links
-      // If the bug exists, items would be inline objects like { name: "Alice" }
+      // Each item is a cell link, never an inline object like
+      // `{ name: "Alice" }`.
       expect(isPrimitiveCellLink(item)).toBe(true);
     }
   });
 
   it("should persist all fields correctly for second+ items", () => {
-    // This specifically tests the persistence issue from the bug report
+    // Every field of every pushed item, not only the first, survives the push.
     const arrayCell = runtime.getCell<
       { name: string; priority: number; createdAt: number }[]
     >(

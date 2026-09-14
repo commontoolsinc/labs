@@ -1,3 +1,4 @@
+import { resolve } from "@std/path";
 import * as defaultSdk from "@anthropic-ai/claude-agent-sdk";
 import type {
   AgentDriver,
@@ -9,6 +10,7 @@ import type {
   SessionPage,
   SessionSummary,
   SourceDescriptor,
+  StartInput,
 } from "../types.ts";
 import { AsyncSerialQueue } from "../serial-queue.ts";
 import { normalizeSourceId } from "../session-contract.ts";
@@ -56,7 +58,7 @@ interface PendingClaudePrompt {
 
 export interface ClaudeSdkAdapter {
   listSessions(
-    options?: { limit?: number; offset?: number },
+    options?: { limit?: number; offset?: number; dir?: string },
   ): Promise<ClaudeSessionInfo[]>;
   getSessionInfo(sessionId: string): Promise<ClaudeSessionInfo | undefined>;
   getSessionMessages(
@@ -73,6 +75,10 @@ export interface ClaudeSdkAdapter {
 const PAGE_SIZE = 100;
 const PREVIEW_LIMIT = 500;
 const claudeSourceEnvironment = new AsyncSerialQueue();
+
+// The SDK accepts a caller-chosen id for a new session only in this form.
+const CLAUDE_SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isoFromMillis(value: unknown): string | null {
   return typeof value === "number" && Number.isFinite(value)
@@ -126,6 +132,17 @@ function unsupported(message: string): CommandExecutionResult {
   return {
     status: "unsupported",
     error: { code: "unsupported", message, retryable: false },
+  };
+}
+
+function sessionLookupFailure(error: unknown): CommandExecutionResult {
+  return {
+    status: "failed",
+    error: {
+      code: "claude-session-lookup-failed",
+      message: String(error),
+      retryable: true,
+    },
   };
 }
 
@@ -213,6 +230,7 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
         inventory: true,
         read: true,
         prompt: true,
+        startSession: true,
         cancel: true,
         rename: true,
         setMode: true,
@@ -257,8 +275,16 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
       throw new Error("invalid Claude cursor");
     }
     const activeSessionIds = new Set(this.#activeQueries.keys());
+    // A source with a directory lists that project directory's sessions and,
+    // when it is inside a Git repository, its worktrees' — never its
+    // subdirectories', which the SDK keys as projects of their own. Without
+    // one it lists every project on the machine.
     const sessions = await this.#withSourceEnvironment(() =>
-      this.#sdk.listSessions({ limit: PAGE_SIZE, offset })
+      this.#sdk.listSessions({
+        limit: PAGE_SIZE,
+        offset,
+        ...(this.#config.cwd ? { dir: this.#config.cwd } : {}),
+      })
     );
     for (const info of sessions) this.#rememberSessionCwd(info);
     return {
@@ -317,6 +343,171 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
     input: PromptInput,
     options: CommandExecutionOptions = {},
   ): Promise<CommandExecutionResult> {
+    const refusal = this.#refuseQuery(nativeSessionId);
+    if (refusal) return refusal;
+    const pending: PendingClaudePrompt = { cancellation: null };
+    this.#pendingPrompts.set(nativeSessionId, pending);
+    try {
+      options.onCancellationReady?.();
+      let sessionCwd: string | null | undefined;
+      try {
+        sessionCwd = this.#sessionCwds.has(nativeSessionId)
+          ? this.#sessionCwds.get(nativeSessionId)
+          : await this.#lookupSessionCwd(nativeSessionId);
+      } catch (error) {
+        if (pending.cancellation) {
+          return pendingPromptCancellation(pending.cancellation);
+        }
+        return sessionLookupFailure(error);
+      }
+      if (pending.cancellation) {
+        return pendingPromptCancellation(pending.cancellation);
+      }
+      if (sessionCwd === undefined) {
+        return {
+          status: "failed",
+          error: {
+            code: "claude-session-not-found",
+            message: `Claude session not found: ${nativeSessionId}`,
+            retryable: false,
+          },
+        };
+      }
+      const promptCwd = sessionCwd || this.#config.cwd;
+      return await this.#runQuery(nativeSessionId, pending, input.text, {
+        resume: nativeSessionId,
+        ...(promptCwd ? { cwd: promptCwd } : {}),
+      }, options);
+    } finally {
+      if (this.#pendingPrompts.get(nativeSessionId) === pending) {
+        this.#pendingPrompts.delete(nativeSessionId);
+      }
+    }
+  }
+
+  async startSession(
+    nativeSessionId: string,
+    input: StartInput,
+    options: CommandExecutionOptions = {},
+  ): Promise<CommandExecutionResult> {
+    const refusal = this.#refuseQuery(nativeSessionId);
+    if (refusal) return refusal;
+    if (!CLAUDE_SESSION_ID_PATTERN.test(nativeSessionId)) {
+      return {
+        status: "failed",
+        error: {
+          code: "claude-session-id-invalid",
+          message: "a new Claude session id must be a UUID",
+          retryable: false,
+        },
+      };
+    }
+    const modes: string[] = this.source.capabilities.modes ?? [];
+    if (input.mode !== undefined && !modes.includes(input.mode)) {
+      return unsupported(`unsupported Claude mode: ${input.mode}`);
+    }
+    // A start runs where its source lists: in the source's own directory when
+    // it has one (the SDK lists that project directory, not its
+    // subdirectories), otherwise in the directory the start names.
+    const sourceCwd = this.#config.cwd;
+    const requested = input.cwd === undefined ? undefined : resolve(input.cwd);
+    const cwd = sourceCwd ?? requested;
+    if (cwd === undefined) {
+      return {
+        status: "failed",
+        error: {
+          code: "claude-start-cwd-required",
+          message:
+            "a new Claude session needs a working directory, and the source configures none",
+          retryable: false,
+        },
+      };
+    }
+    if (
+      sourceCwd !== undefined && requested !== undefined &&
+      requested !== resolve(sourceCwd)
+    ) {
+      return {
+        status: "failed",
+        error: {
+          code: "claude-start-cwd-not-source",
+          message:
+            `${input.cwd} is not the source directory ${sourceCwd}, which is where a start runs`,
+          retryable: false,
+        },
+      };
+    }
+    const pending: PendingClaudePrompt = { cancellation: null };
+    this.#pendingPrompts.set(nativeSessionId, pending);
+    try {
+      options.onCancellationReady?.();
+      let existing: ClaudeSessionInfo | undefined;
+      try {
+        existing = await this.#withSourceEnvironment(() =>
+          this.#sdk.getSessionInfo(nativeSessionId)
+        );
+      } catch (error) {
+        if (pending.cancellation) {
+          return pendingPromptCancellation(pending.cancellation);
+        }
+        return sessionLookupFailure(error);
+      }
+      if (pending.cancellation) {
+        return pendingPromptCancellation(pending.cancellation);
+      }
+      if (existing) {
+        return {
+          status: "failed",
+          error: {
+            code: "claude-session-exists",
+            message: `Claude session already exists: ${nativeSessionId}`,
+            retryable: false,
+          },
+        };
+      }
+      const priorMode = this.#sessionModes.get(nativeSessionId);
+      if (input.mode !== undefined) {
+        this.#sessionModes.set(nativeSessionId, input.mode);
+      }
+      const outcome = await this.#runQuery(
+        nativeSessionId,
+        pending,
+        input.text,
+        {
+          sessionId: nativeSessionId,
+          cwd,
+          // The SDK titles a new session from its first message.
+          ...(input.title !== undefined ? { title: input.title } : {}),
+        },
+        options,
+        // The session is on disk once the SDK has emitted a message for it;
+        // a refresh before that finds nothing to read.
+        { activateAfterFirstMessage: true },
+      );
+      if (outcome.status !== "succeeded") {
+        // A start that did not happen leaves no mode behind for a retry.
+        if (input.mode !== undefined) {
+          if (priorMode === undefined) {
+            this.#sessionModes.delete(nativeSessionId);
+          } else {
+            this.#sessionModes.set(nativeSessionId, priorMode);
+          }
+        }
+        return outcome;
+      }
+      this.#sessionCwds.set(nativeSessionId, cwd);
+      return {
+        status: "succeeded",
+        result: { nativeSessionId, cwd, title: input.title ?? null },
+      };
+    } finally {
+      if (this.#pendingPrompts.get(nativeSessionId) === pending) {
+        this.#pendingPrompts.delete(nativeSessionId);
+      }
+    }
+  }
+
+  #refuseQuery(nativeSessionId: string): CommandExecutionResult | undefined {
     if (this.#stopped) {
       return {
         status: "failed",
@@ -340,51 +531,38 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
         },
       };
     }
-    const pending: PendingClaudePrompt = { cancellation: null };
-    this.#pendingPrompts.set(nativeSessionId, pending);
-    try {
-      options.onCancellationReady?.();
-      let sessionCwd: string | null | undefined;
-      try {
-        sessionCwd = this.#sessionCwds.has(nativeSessionId)
-          ? this.#sessionCwds.get(nativeSessionId)
-          : await this.#lookupSessionCwd(nativeSessionId);
-      } catch (error) {
-        if (pending.cancellation) {
-          return pendingPromptCancellation(pending.cancellation);
-        }
-        return {
-          status: "failed",
-          error: {
-            code: "claude-session-lookup-failed",
-            message: String(error),
-            retryable: true,
-          },
-        };
-      }
-      if (pending.cancellation) {
-        return pendingPromptCancellation(pending.cancellation);
-      }
-      if (sessionCwd === undefined) {
-        return {
-          status: "failed",
-          error: {
-            code: "claude-session-not-found",
-            message: `Claude session not found: ${nativeSessionId}`,
-            retryable: false,
-          },
-        };
-      }
-      const promptCwd = sessionCwd || this.#config.cwd;
+    return undefined;
+  }
 
-      // query() accepts an explicit environment. Do not use
-      // #withSourceEnvironment here: its module-global queue is only for short
-      // SDK methods that lack an env option, and holding it across a full turn
-      // would block every Claude source behind one in-flight prompt.
-      const query = this.#sdk.query({
-        prompt: input.text,
+  /**
+   * Runs one SDK query for `nativeSessionId`, tracking it so `cancel()` can
+   * interrupt it, and returns its terminal outcome. `sessionOptions` says
+   * whether the query resumes a session or starts one.
+   */
+  async #runQuery(
+    nativeSessionId: string,
+    pending: PendingClaudePrompt,
+    prompt: string,
+    sessionOptions: Record<string, unknown>,
+    options: CommandExecutionOptions,
+    { activateAfterFirstMessage = false } = {},
+  ): Promise<CommandExecutionResult> {
+    // query() accepts an explicit environment. Do not use
+    // #withSourceEnvironment here: its module-global queue is only for short
+    // SDK methods that lack an env option, and holding it across a full turn
+    // would block every Claude source behind one in-flight prompt.
+    //
+    // The query is constructed inside the failure path: an SDK that throws
+    // while constructing one has failed the query as surely as one that
+    // throws while running it, and the caller sees one outcome for both.
+    let query: ReturnType<ClaudeSdkAdapter["query"]> | undefined;
+    let lastMessage: unknown;
+    let activated = false;
+    try {
+      query = this.#sdk.query({
+        prompt,
         options: {
-          resume: nativeSessionId,
+          ...sessionOptions,
           ...(this.#sessionModes.has(nativeSessionId)
             ? { permissionMode: this.#sessionModes.get(nativeSessionId) }
             : {}),
@@ -394,7 +572,6 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
           ...(this.#sessionModes.get(nativeSessionId) === "bypassPermissions"
             ? { allowDangerouslySkipPermissions: true }
             : {}),
-          ...(promptCwd ? { cwd: promptCwd } : {}),
           env: {
             ...this.#queryBaseEnvironment,
             ...this.#config.env,
@@ -408,27 +585,34 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
       if (this.#pendingPrompts.get(nativeSessionId) === pending) {
         this.#pendingPrompts.delete(nativeSessionId);
       }
-      let lastMessage: unknown;
-      try {
+      if (!activateAfterFirstMessage) {
+        activated = true;
         await options.onSessionActive?.();
-        for await (const message of query) lastMessage = message;
-        return claudeTerminalResult(lastMessage);
-      } catch (error) {
-        return {
-          status: "failed",
-          error: {
-            code: "claude-query-failed",
-            message: String(error),
-            retryable: false,
-          },
-        };
-      } finally {
+      }
+      for await (const message of query) {
+        lastMessage = message;
+        if (!activated) {
+          activated = true;
+          await options.onSessionActive?.();
+        }
+      }
+      return claudeTerminalResult(lastMessage);
+    } catch (error) {
+      return {
+        status: "failed",
+        error: {
+          code: "claude-query-failed",
+          message: String(error),
+          retryable: false,
+        },
+      };
+    } finally {
+      if (query !== undefined) {
         if (this.#activeQueries.get(nativeSessionId) === query) {
           this.#activeQueries.delete(nativeSessionId);
         }
         query.close();
       }
-    } finally {
       if (this.#pendingPrompts.get(nativeSessionId) === pending) {
         this.#pendingPrompts.delete(nativeSessionId);
       }

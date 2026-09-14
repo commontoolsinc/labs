@@ -50,6 +50,34 @@ function elementNamed(root: unknown, name: string): unknown | undefined {
     (node as { name?: unknown }).name === name);
 }
 
+/** Picks the command type in the composer's select. */
+function setCommandType(root: unknown, next: string): void {
+  const form = elementNamed(root, "cf-form");
+  const field = findNode(
+    form,
+    (node) => readValue(propsOf(node)?.label) === "Command",
+  );
+  const value = propsOf(elementNamed(field, "cf-select"))?.["$value"];
+  if (typeof value === "object" && value !== null && "set" in value) {
+    (value as { set: (next: string) => void }).set(next);
+  }
+}
+
+/** Ticks or clears the composer's force checkbox. */
+function setForce(root: unknown, next: boolean): void {
+  const form = elementNamed(root, "cf-form");
+  const checkbox = findNode(
+    form,
+    (node) =>
+      propsOf(node)?.["$checked"] !== undefined &&
+      textContent(node).includes("forced"),
+  );
+  const checked = propsOf(checkbox)?.["$checked"];
+  if (typeof checked === "object" && checked !== null && "set" in checked) {
+    (checked as { set: (next: boolean) => void }).set(next);
+  }
+}
+
 function countCellLinks(
   root: unknown,
   label: string,
@@ -566,6 +594,22 @@ export default pattern(() => {
       review.includes('"type": "prompt"') &&
       review.includes('"text": "Continue from the debug view"');
   });
+  // A start drafts like a prompt and carries the force flag when asked.
+  const action_prepare_forced_start = action(() => {
+    setCommandType(view[UI], "start");
+    setForce(view[UI], true);
+  });
+  const assert_forced_start_review = assert(() => {
+    const modal = elementNamed(view[UI], "cf-modal");
+    const review = textContent(modal);
+    return review.includes('"type": "start"') &&
+      review.includes('"text": "Continue from the debug view"') &&
+      review.includes('"force": true');
+  });
+  const action_restore_prompt = action(() => {
+    setCommandType(view[UI], "prompt");
+    setForce(view[UI], false);
+  });
   const action_send_command = action(() => {
     const button = findElementByText(
       view[UI],
@@ -652,6 +696,12 @@ export default pattern(() => {
       { assertion: assert_empty_prompt_rejected },
       { action: action_enter_prompt },
       { assertion: assert_command_prepared },
+      { action: action_review_command },
+      { assertion: assert_command_review },
+      { action: action_prepare_forced_start },
+      { action: action_review_command },
+      { assertion: assert_forced_start_review },
+      { action: action_restore_prompt },
       { action: action_review_command },
       { assertion: assert_command_review },
       { action: action_stop_command_admission },
