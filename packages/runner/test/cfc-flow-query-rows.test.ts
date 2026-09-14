@@ -182,6 +182,51 @@ describe("CFC flow labels: the rows of a query result", () => {
     });
   };
 
+  it("iterates the labeled SQLite rows whose container reports a nonzero length", async () => {
+    startRuntime();
+    const { summary } = await summaryConfidentiality(
+      "query-rows-for-of",
+      (query) => {
+        const rows = query?.result ?? [];
+        const subjects: string[] = [];
+        for (const row of rows) subjects.push(row.subject);
+        return {
+          count: rows.length,
+          first: rows[0]?.subject,
+          subjects,
+          from: Array.from(rows, (row) => row.subject),
+          mapped: rows.map((row) => row.subject),
+        };
+      },
+    );
+
+    expect(summary).toEqual({
+      count: 2,
+      first: "Recovered, a service is not active",
+      subjects: ["Recovered, a service is not active", "Your weekly digest"],
+      from: ["Recovered, a service is not active", "Your weekly digest"],
+      mapped: ["Recovered, a service is not active", "Your weekly digest"],
+    });
+  });
+
+  it("carries the class of fields read only through a SQLite row iterator", async () => {
+    startRuntime();
+    const { confidentiality, summary } = await summaryConfidentiality(
+      "query-rows-iterator-class",
+      (query) => {
+        const subjects: string[] = [];
+        for (const row of query?.result ?? []) subjects.push(row.subject);
+        return subjects;
+      },
+    );
+
+    expect(summary).toEqual([
+      "Recovered, a service is not active",
+      "Your weekly digest",
+    ]);
+    expect(confidentiality).toContain(ROW_CLASS);
+  });
+
   it("carries the rows' class into a value a predicate over their fields decided", async () => {
     // Arm A. Every row's labeled field is read and none survives the
     // predicate, which is what a bill classifier that matched nothing does.
