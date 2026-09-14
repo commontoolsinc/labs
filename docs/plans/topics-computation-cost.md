@@ -67,16 +67,22 @@ and removal timestamps. Removing them from the aggregate could move activity
 backward. Preserve optional-field defaults and compatibility with stored topic
 generations. Preserve linked record identity for editing handlers.
 
-Reactive callback operators (`.map()`, `.filter()`, `.flatMap()`, `.count()`,
-`.minBy()`, `.maxBy()`, `.groupBy()`, and `.keyBy()`)
-[lower to nested patterns](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#94-array-method-strategy)
-[numbered by position in their file](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#113-hoist-placement-and-tdz-ordering),
-and stored state records those names. In each Topics source file, new operators
-go after the existing ones, including operators inside a new subpattern declared
-above existing ones. Removing or reordering one has the same effect as inserting
-one. The [pattern update gates](../specs/pattern-update-testing.md) do not
-establish that such a change is safe, so a candidate unable to keep that order
-has T6 check the rows those operators produce on the clone.
+Reactive callback operators (`.map()`, `.filter()`, `.flatMap()`, `.count()`
+with a predicate, `.minBy()`, `.maxBy()`, `.groupBy()`, and `.keyBy()`) lower to
+nested patterns numbered by position in their file, as sections
+[9.4](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#94-array-method-strategy),
+[7.2](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#72-emitter-behaviors),
+and
+[11.3](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#113-hoist-placement-and-tdz-ordering)
+of the transformer spec describe, and stored state records those names. In each
+Topics source file, new operators go after the existing ones, and removing or
+reordering one has the same effect as inserting one. A new subpattern that uses
+such an operator counts where it is declared: declare it after the existing
+operator sites, or, where it cannot be, as for a subpattern the default export
+calls, put it in its own module, whose operators are numbered separately. The
+[pattern update gates](../specs/pattern-update-testing.md) do not establish that
+such a change is safe, so a candidate unable to keep that order has T6 check the
+rows those operators produce on the clone.
 
 ## Execution tracker
 
