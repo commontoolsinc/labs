@@ -18,6 +18,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { PiecesController } from "@commonfabric/piece/ops";
 
+import { CellImpl } from "../../runner/src/cell.ts";
 import { type PieceConfig, sinkCellValue } from "../lib/piece.ts";
 
 const SPACE = "did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk";
@@ -62,13 +63,33 @@ interface Driven {
 /**
  * Helper for the cases below, which is a controller standing in for the
  * connection, and the handles a case drives it by.
+ *
+ * With `handle`, the slot holds a `Cell` rather than a plain value — the
+ * handle an `asCell` projection stores — whose members record what is asked
+ * of it.
  */
-function driving(): { pieces: PiecesController; driven: Driven } {
+function driving(
+  options: { handle?: boolean } = {},
+): { pieces: PiecesController; driven: Driven } {
   const calls: string[] = [];
   let fire: (() => void) | undefined;
   let subscribed = 0;
   let settling: PromiseWithResolvers<void> | undefined;
-  let held: unknown = "before";
+  // A `Cell` by the runtime's own test (`isCell`), which is the question the
+  // read-through asks; its members are this helper's.
+  const handle = Object.assign(Object.create(CellImpl.prototype), {
+    get: () => "behind",
+    getRaw: () => "behind",
+    pull: () => {
+      calls.push("pull handle");
+      return Promise.resolve("behind");
+    },
+    sink: () => {
+      calls.push("sink handle");
+      return () => {};
+    },
+  });
+  let held: unknown = options.handle ? handle : "before";
   const cell = {
     key: (...path: (string | number)[]) => {
       calls.push(`key ${path.join("/")}`);
@@ -326,6 +347,30 @@ describe("sinkCellValue()", () => {
       ...RESOLVES,
     });
     expect(driven.calls.filter((call) => call === "pull").length).toBe(1);
+  });
+
+  it("subscribes behind the handle a slot holds, pulling it first", async () => {
+    // A path crossing an `asCell` field selects a cell whose value is a
+    // handle, and a read of that path serves the value behind it. So the
+    // subscription is taken on the cell the handle names, pulled first as the
+    // slot was, rather than on the slot, which fires only when the handle it
+    // stores is replaced.
+    //
+    // Kills: subscribing to the slot rather than to the handle it holds, which
+    // takes the sink on the outer cell.
+
+    const { pieces, driven } = driving({ handle: true });
+    await sinkCellValue(config, ["topics", 3], () => {}, {}, {
+      loadPieces: () => Promise.resolve(pieces),
+      ...RESOLVES,
+    });
+    expect(driven.calls).toEqual([
+      `get ${config.piece} false -`,
+      "result topics/3",
+      "pull",
+      "pull handle",
+      "sink handle",
+    ]);
   });
 
   it("starts nothing, the start being the caller's own act", async () => {

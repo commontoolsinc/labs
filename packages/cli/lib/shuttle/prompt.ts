@@ -411,12 +411,16 @@ export async function runPrompt(
     // is closed first because that costs no terminal. Nothing is drawn on the
     // way past: the prompt this ended at is the last thing a run has to say.
     lens?.close();
-    // A line still in flight is stopped too. Its read cannot be called off, but
-    // the line can stop being live, and a line that is not live adopts nothing
-    // its read brings back (`guarded`, `vocabulary.ts`): a `watch` still taking
-    // the lens's subscription cancels it when it arrives, rather than handing
-    // the lens to an outcome nothing is left to read.
+    // A line still in flight is stopped, and gives up every lens it opened,
+    // including one it settled with that this loop never took. Both are
+    // needed. Stopping is what keeps the line from opening a lens after this:
+    // a subscription it is still taking comes back as an interruption rather
+    // than being adopted (`guarded`, `vocabulary.ts`). Releasing is what closes
+    // a lens it opened already, whose subscription a stop comes too late for,
+    // and it does so whichever of the line's outcome and the key stream this
+    // loop's last wait took.
     running?.stop();
+    running?.release?.();
     // Each on its own rather than both under one `try`: giving the screen back
     // and ending the line are two things a run owes a terminal, and sharing
     // one would make the first the gate on the second — a terminal that
@@ -474,6 +478,12 @@ interface Running {
 
   /** Cancels it, which settles it with what a cancelled one says. */
   stop(): void;
+
+  /**
+   * Closes every lens the work opened, including one it settled with that the
+   * prompt has not taken, and is absent where the work opens none.
+   */
+  release?(): void;
 }
 
 /**
@@ -494,14 +504,44 @@ function nextKey(keys: AsyncIterator<Key>): Promise<Arrival> {
  * The signal rides the deps bag the verbs already read their collaborators
  * through, so a verb honors it wherever it has a phase to stop between and
  * nothing else has to be threaded to reach one.
+ *
+ * Every lens the line opens is the line's from the moment it is opened
+ * (`adoptLens`), and the line hands over at most one: the lens its outcome
+ * carries. The rest are closed as it settles, which is what catches a lens
+ * whose outcome lost its race to a cancel; the one handed over is closed by
+ * {@link Running.release} where the prompt never took it.
  */
 function start(line: string, shuttle: Shuttle, deps: VerbDeps): Running {
   const stopper = new AbortController();
+  const opened: ValueLens[] = [];
+  const reported = report(line, shuttle, {
+    ...deps,
+    signal: stopper.signal,
+    adoptLens: (lens) => {
+      opened.push(lens);
+    },
+  });
   return {
     kind: "line",
     stop: () => stopper.abort(),
-    settled: report(line, shuttle, { ...deps, signal: stopper.signal }),
+    release: () => closeLenses(opened),
+    settled: reported.then((arrival) => {
+      closeLenses(opened, arrival.kind === "lens" ? arrival.lens : undefined);
+      return arrival;
+    }),
   };
+}
+
+/**
+ * Helper for {@link start}, which closes every lens in `lenses` but `kept`.
+ *
+ * A lens closed twice is closed once (`ValueLens.close`), so one closed as its
+ * line settled and again on the way out needs no test in front of it.
+ */
+function closeLenses(lenses: readonly ValueLens[], kept?: ValueLens): void {
+  for (const lens of lenses) {
+    if (lens !== kept) lens.close();
+  }
 }
 
 /**

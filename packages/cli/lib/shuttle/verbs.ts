@@ -1113,6 +1113,9 @@ async function watch(
   if (watching.kind !== "ran") return watching;
   armed.holding(watching.answer);
   const lens = new ValueLens(armed.label);
+  // Handed over as it is made, so the lens has an owner before it holds a
+  // subscription, whatever becomes of the outcome it is returned in.
+  deps.adoptLens?.(lens);
   // From here the watch holds a subscription and the session does not hold the
   // watch, so every way out of this stretch but the lens disarms it — a line
   // the person cancelled, and a subscription that failed. Left armed, it is a

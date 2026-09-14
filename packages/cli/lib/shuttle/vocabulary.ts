@@ -281,6 +281,17 @@ export interface VerbDeps {
    * checks are what stop it taking effect on the way back.
    */
   readonly signal?: AbortSignal;
+
+  /**
+   * Takes charge of a lens the line has opened, from the moment it is opened.
+   *
+   * What runs the line closes, as the line settles, every lens it opened that
+   * its outcome does not carry, and on the way out every lens it opened at all.
+   * A lens holds a subscription from the moment it adopts one, so it needs an
+   * owner before there is an outcome to find it in: an outcome can lose its
+   * race to a cancel, or arrive after nothing is left to take it (`prompt.ts`).
+   */
+  readonly adoptLens?: (lens: ValueLens) => void;
 }
 
 /**

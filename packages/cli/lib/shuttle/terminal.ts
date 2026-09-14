@@ -250,28 +250,24 @@ class StandardTerminal implements PromptTerminal {
   /**
    * @inheritDoc
    *
-   * Nothing is drawn while a frame has the screen, and nothing is recorded as
-   * drawn either. What was drawn describes the screen the frame gives back,
-   * which the frame leaves as it found it, so a line edited under a frame is
-   * not the line the next drawing is measured against.
+   * What was drawn is recorded only where it was sent. A line edited while a
+   * frame holds the screen reaches no screen, and the screen the frame gives
+   * back still carries the line drawn before it, which is the line the next
+   * drawing is measured against.
    */
   edit(text: string, column: number): void {
-    if (this.#framed) return;
     const line = { text, column, columns: this.#columns() };
-    this.#send(repaint(this.#painted, line));
-    this.#painted = line;
+    if (this.#send(repaint(this.#painted, line))) this.#painted = line;
   }
 
   /**
    * @inheritDoc
    *
-   * Ending a line while a frame has the screen does nothing, for the reason
+   * An ending is recorded only where it was sent, for the reason
    * {@link StandardTerminal.edit} gives.
    */
   finish(): void {
-    if (this.#framed) return;
-    this.#send(finish(this.#painted));
-    this.#painted = NOTHING_PAINTED;
+    if (this.#send(finish(this.#painted))) this.#painted = NOTHING_PAINTED;
   }
 
   /**
@@ -389,17 +385,21 @@ class StandardTerminal implements PromptTerminal {
 
   /**
    * Helper for the three writes that draw the line being edited, which sends
-   * `text` where a frame is not holding the screen.
+   * `text` where a frame is not holding the screen, and is whether it did.
    *
    * It is the one check rather than one per write, so those three cannot
-   * drift from each other about what a frame means. What a frame does with a
-   * line written above the prompt is {@link StandardTerminal.announce}'s
-   * decision and a different one: it is kept, where a drawing of a line that
-   * is not on screen has nothing to be kept for.
+   * drift from each other about what a frame means. The answer is what keeps a
+   * write's record of what was drawn in step with what was sent: a drawing a
+   * frame held back changed nothing on the screen the frame gives back. What a
+   * frame does with a line written above the prompt is
+   * {@link StandardTerminal.announce}'s decision and a different one: it is
+   * kept, where a drawing of a line that is not on screen has nothing to be
+   * kept for.
    */
-  #send(text: string): void {
-    if (this.#framed) return;
+  #send(text: string): boolean {
+    if (this.#framed) return false;
     this.#write(text);
+    return true;
   }
 
   /**

@@ -1173,10 +1173,12 @@ describe("prompt", () => {
 
     it("cancels a lens subscription that arrives after the run threw", async () => {
       // The run can end while a `watch` is still taking the lens's
-      // subscription, which is a read nothing can call off. The line has to be
-      // stopped on the way out, so that when the subscription arrives the line
-      // is no longer live: its cancel runs then. A line left running adopts it
-      // instead, and hands the lens to an outcome nothing is left to read.
+      // subscription, which is a read nothing can call off. Two things on the
+      // way out each see to it: the line is stopped, so the subscription comes
+      // back as an interruption and is cancelled; and the lens the line has
+      // already opened is closed, so a subscription it adopts anyway is
+      // cancelled as it is taken. Either is enough here, and the two cases
+      // after this one pin each alone.
       //
       // The run's own way out tears the session down after the prompt returns
       // (`run.ts`), which is done here by hand. The watch's own subscription is
@@ -1184,8 +1186,8 @@ describe("prompt", () => {
       // torn-down session refusing to hold it — so that cancel is the event
       // both reach, and the case waits on it rather than on a clock.
       //
-      // Kills: ending the run without stopping the line in flight, which
-      // leaves the lens's cancel unrun.
+      // Kills: ending the run with the line neither stopped nor what it opened
+      // closed, which leaves the lens's cancel unrun.
 
       const shuttle = atPiece();
       const lensAsked = Promise.withResolvers<void>();
@@ -1217,6 +1219,97 @@ describe("prompt", () => {
       lensArrives.resolve(() => lensCancels++);
       await watchCancelled.promise;
       expect(lensCancels).toBe(1);
+    });
+
+    it("closes a lens the line produced where the run ended before taking it", async () => {
+      // The line can settle with its lens after the prompt has stopped taking
+      // what lines settle with: a key stream that fails as a `watch` hands its
+      // lens over is seen by the loop first, several awaits lying between a
+      // verb's return and its line's outcome reaching the loop. Nothing the
+      // loop holds is that lens, and stopping the line comes too late for a
+      // subscription it has already adopted. What closes it is the line
+      // closing, on the way out, every lens it opened.
+      //
+      // The key stream fails from inside the session's adoption of the watch,
+      // which is the last thing a `watch` does before it returns its lens.
+      //
+      // Kills: ending the run without closing what the line in flight opened,
+      // which leaves the lens's cancel unrun.
+
+      const shuttle = atPiece();
+      const failing = Promise.withResolvers<IteratorResult<Key>>();
+      const script = [...typed("watch title"), ENTER];
+      const arm = shuttle.session.arm.bind(shuttle.session);
+      shuttle.session.arm = (watch) => {
+        arm(watch);
+        failing.reject(new Error("The keyboard went."));
+      };
+      let asked = 0;
+      let lensCancels = 0;
+      const run = driving(
+        () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: (): Promise<IteratorResult<Key>> =>
+              script.length > 0
+                ? Promise.resolve({ done: false, value: script.shift()! })
+                : failing.promise,
+          }),
+        }),
+        () => {
+          asked++;
+          return Promise.resolve(asked === 1 ? () => {} : () => lensCancels++);
+        },
+        false,
+        false,
+        shuttle,
+      );
+      await expect(run.writes).rejects.toThrow("The keyboard went.");
+      expect(lensCancels).toBe(1);
+    });
+
+    it("takes no further subscription for a line the run ended under", async () => {
+      // The line in flight is stopped on the way out, so a `watch` still
+      // taking its first subscription goes no further once that one arrives,
+      // and asks nothing more of a connection the run is closing. It is also
+      // what makes closing the line's lenses on the way out enough: a lens the
+      // line had not opened yet is one it now never opens.
+      //
+      // The watch's own cancel is the event the case waits on. Stopped, the
+      // line cancels the subscription it was taking; left running, it goes on
+      // to arm the watch, and the torn-down session disarms it.
+      //
+      // Kills: ending the run without stopping the line in flight, which lets
+      // the watch go on to ask for the lens's subscription.
+
+      const shuttle = atPiece();
+      const watchAsked = Promise.withResolvers<void>();
+      const watchArrives = Promise.withResolvers<() => void>();
+      const watchCancelled = Promise.withResolvers<void>();
+      let asked = 0;
+      const run = driving(
+        async function* () {
+          yield* typed("watch title");
+          yield ENTER;
+          await watchAsked.promise;
+          throw new Error("The keyboard went.");
+        },
+        () => {
+          asked++;
+          if (asked === 1) {
+            watchAsked.resolve();
+            return watchArrives.promise;
+          }
+          return Promise.resolve(() => {});
+        },
+        false,
+        false,
+        shuttle,
+      );
+      await expect(run.writes).rejects.toThrow("The keyboard went.");
+      shuttle.session.disarmAll();
+      watchArrives.resolve(() => watchCancelled.resolve());
+      await watchCancelled.promise;
+      expect(asked).toBe(1);
     });
 
     it("cancels the lens's subscription where announcing the line threw", async () => {
