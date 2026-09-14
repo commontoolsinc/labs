@@ -422,6 +422,29 @@ const extractShebang = (
   return text.split(/\r?\n/, 1)[0]?.trimEnd();
 };
 
+/**
+ * The script metadata a resource carries, derived from its bytes and its name.
+ *
+ * Shared with the acquired-skill path, which has a file and no registry scan:
+ * what decides a script's runtime is its shebang and its extension, and that
+ * decision has to be the same one wherever the file came from.
+ */
+export const harnessSkillScriptMetadata = (
+  options: {
+    path: string;
+    executable: boolean;
+    content: Uint8Array;
+    contentKind: HarnessSkillResourceContentKind;
+  },
+): HarnessSkillScriptMetadata => {
+  const shebang = extractShebang(options.content, options.contentKind);
+  return {
+    executable: options.executable,
+    ...(shebang !== undefined ? { shebang } : {}),
+    runtime: scriptRuntimeFromPath(options.path, shebang),
+  };
+};
+
 const scriptMetadataForResource = (
   options: {
     path: string;
