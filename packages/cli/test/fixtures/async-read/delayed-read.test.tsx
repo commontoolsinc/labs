@@ -1,8 +1,10 @@
-// Pattern-test for the CT-1768 fetch-mock `delayMs` (Robin/ubik2's suggestion):
-// a mock can return after a fixed real-time delay, so a fetchJson isn't resolved
-// instantly. The assertion's read is what starts the fetch, and the harness
-// waits for the delayed response before it reads again, so the result is
-// observed deterministically once it lands.
+/**
+ * Fixture for an assertion whose own read starts an async built-in. Nothing
+ * reads the fetch before the assertion does, so its first read is what issues
+ * the request; the mock answers after a delay, and the runner waits for it
+ * before reading again.
+ */
+
 import { assert, computed, fetchJson, pattern, TESTS } from "commonfabric";
 
 export const fetchMocks = [
@@ -22,6 +24,5 @@ export default pattern(() => {
     [TESTS]: [
       { assertion: result_is_7 },
     ],
-    fetched,
   };
 });
