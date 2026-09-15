@@ -351,6 +351,32 @@ describe("stored-claim reconciliation across spellings", () => {
     expect((merged as any).properties.displayName).toEqual({ type: "string" });
   });
 
+  it("keeps the stored stamp on two different stamps under non-corresponding spellings", () => {
+    // The same authored tree served under `/api/patterns` and supplied from
+    // a checkout under `/packages/patterns` spells the module two ways that
+    // no single-segment strip relates. Both claims are stamped, so the
+    // binding each means is its stamp and path; the stored one wins, as it
+    // does when the spellings correspond, and the successor's writes are
+    // for `piece setsrc` delegation to authorize.
+    const merged = mergeCfcSchemaEnvelopes(
+      envelope({
+        moduleIdentity: "profile-home-module-identity-v1",
+        file: PIECE_SPELLING,
+        path: ["setBio"],
+      }),
+      envelope({
+        moduleIdentity: "profile-home-module-identity-v2",
+        file: "/packages/patterns/system/profile-home.tsx",
+        path: ["setBio"],
+      }),
+    );
+    expect(claimOf(merged)).toEqual({
+      moduleIdentity: "profile-home-module-identity-v1",
+      file: PIECE_SPELLING,
+      path: ["setBio"],
+    });
+  });
+
   it("still conflicts on different binding paths", () => {
     expect(() =>
       mergeCfcSchemaEnvelopes(
