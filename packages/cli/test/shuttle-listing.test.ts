@@ -600,9 +600,9 @@ describe("listing", () => {
         rows: [{
           name: "..",
           kind: "value",
-          operand: "/@space/of:fid1:x@space/..",
+          operand: "./..",
         }],
-      })).toEqual(["%1 /@space/of:fid1:x@space/.."]);
+      })).toEqual(["%1 ./.."]);
     });
 
     it("returns a marker in place of a name for a row with no operand", () => {
@@ -655,6 +655,7 @@ describe("listing", () => {
         callable: true,
         piece: false,
         slug: false,
+        watch: false,
       };
       for (const [kind, marked] of Object.entries(annotated)) {
         expect(lines({ rows: [row("a", kind as RowKind)] })[0])

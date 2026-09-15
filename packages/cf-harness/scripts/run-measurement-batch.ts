@@ -2065,7 +2065,7 @@ export const main = async (
       console: DEFAULT_CONSOLE_URL,
       "fabric-api-url": Deno.env.get("CF_HARNESS_FABRIC_API_URL") ??
         DEFAULT_FABRIC_API_URL,
-      base: "main",
+      base: "origin/main",
     },
   });
   const suitePath = flags._.map(String)[0];

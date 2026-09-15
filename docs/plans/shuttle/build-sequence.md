@@ -122,13 +122,14 @@ Landed:
 - **B1a — the place value and its owner module**
   (`packages/cli/lib/shuttle/place.ts`). The whole pair, position *and* scope,
   because scope is half of what a place is (decision 20): `cd` over relative
-  segments, `..`, `-`, `/`, `.` and the `.@scope` qualifier, and rooted and
-  complete
+  references read by the shared reader — a `.` or `..` head with its member
+  and qualifier, and a literal path — `-`, `/`, and rooted and complete
   references; the `slugs/` and `pieces/` facets a space root reserves, and
   nothing else there; the rendering `pwd` prints of both halves, the position
   line carrying the scope so that it denotes one cell wherever it is read; and
-  the refusals — a reference carrying `#argument`, a `#` buried in a bare
-  piece id, a part no rendering would name back, and a move into a space other
+  the refusals — a move selecting the `#argument` member, a member that is
+  not one on a piece segment, a part no rendering would name back, and a move
+  into a space other
   than the connected one, which is the gate a home-anchored entry point meets
   once resolution hands it a space. Two operands come back for the connection
   rather than moving: a `#name` wish target, which B1b resolves, and a
@@ -190,22 +191,20 @@ Landed:
 
   The slice settles the two questions held for it, both of them recorded in
   [`grammar.md`](grammar.md). A quote reaches no reading, so a name whose own
-  characters are readings prints as the reference that names it rather than
-  as a quoted spelling of itself — which is what makes every name a listing
+  characters are readings prints as the operand that reaches it — behind the
+  `.` head, or with its separator escaped — rather than as a quoted spelling
+  of itself — which is what makes every name a listing
   prints one `cd` takes back to that row, and leaves the split returning plain
   strings. And every door holds a piece to the slug and handle vocabularies,
   `validatePieceSegment` being called rather than copied, so a walk, a resolved
   target and a settled move hold a piece to what a reference holds one to, and
   give its reason. What the first ruling costs is one shape: a key whose first
-  character is `#` has no direct spelling — neither the name on its own nor a
-  reference names it — and a listing prints no name for it. Some multi-segment
-  operand does reach it, `#` being data in a segment that names a data key,
-  but a route is not a name; [`grammar.md`](grammar.md) carries the ruling and
-  characterizes the routes no further. Which keys are spelled through one door
-  and
-  not the other is pinned case by case in
-  `packages/cli/test/shuttle-place.test.ts`, so the record moves when the behavior
-  does and not otherwise.
+  character is `#` is not reached by its name on its own, which is a wish
+  target, so a listing prints it behind the `.` head, `./#tag`;
+  [`grammar.md`](grammar.md) carries the ruling. Which keys are spelled through
+  which door is pinned case by case in
+  `packages/cli/test/shuttle-place.test.ts`, so the record moves when the
+  behavior does and not otherwise.
 
 - **B1b (slice 4) — the verbs** (`packages/cli/lib/shuttle/verbs.ts`). A line
   splits, its first token names a verb, and the tokens after it are that
@@ -229,8 +228,8 @@ Landed:
   whether it names this one, and the recorded name answers that — the
   comparison being exact is not an approximation of the key derivation but its
   own answer, since a named space's key hangs off the name's bytes and the
-  reference reading has already read back the `~1` a name holding the
-  separator is written with. A session opened by a DID recorded no name and is
+  reference reader reads the space slot as written, the grammar admitting no
+  separator in a space name. A session opened by a DID recorded no name and is
   refused, which is the honest arm rather than an error path: whether a name
   denotes that space is exactly what it cannot say, and the refusal names
   starting against that name as what would. What `cd` asks a wish through is
@@ -238,19 +237,19 @@ Landed:
   every seam here is.
 
   `get`'s operand goes through the door `cd`'s goes through *plus the
-  `#argument` suffix that door turns down*, read from where shuttle stands
+  `#argument` member that door turns down*, read from where shuttle stands
   rather than from a standing built for the occasion, which is what makes the
   two agree about `..`. `CurrentPlace.aim` is that door and
   `CurrentPlace.resolveNamedSpace` the settling twin beside it. A place is
   result-rooted and cannot stand in an arguments cell, which is why `cd`
-  refuses the suffix in every spelling; reading one is a different act, and
-  `get topics/3#argument` is how an operand asks for it.
+  refuses the member in every spelling; reading one is a different act, and
+  `get .#argument/title` is how an operand asks for it.
 
   The one spelling `get` does not take is a `#name` target: `cf cell get`
   takes none and `cf wish` does, and a data verb here means what it means
   there. The two `#` readings pull opposite ways for a reason that is not
-  arbitrary — the suffix says which of a piece's two cells to read and its
-  place is reachable either way, so refusing it would put a cell out of reach,
+  arbitrary — the member says which of a piece's two cells to read and its
+  piece is reachable either way, so refusing it would put a cell out of reach,
   while a `#name` is a whole target with a verb of its own that answers a
   second way as well as a second time, so taking it would put a second answer
   in reach.
@@ -332,8 +331,8 @@ Landed:
 
   What the rule costs is one shape, recorded in [`grammar.md`](grammar.md)
   beside the readings it joins: a key whose name opens with `-` is not reached
-  by that name standing alone, so a listing prints the reference that names it,
-  exactly as it does for a key called `..`. The typed spelling stays open —
+  by that name standing alone, so a listing prints it behind the `.` head,
+  `./-x`, as it does for a key called `..`. The typed spelling stays open —
   `cd -- -x` reaches such a key — and what a listing owes is the name rather
   than the route. `operandForChild` asks the option grammar rather than making
   the move, that reading being one layer above a place.
@@ -569,12 +568,95 @@ schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
 lands here, since `set` is what makes stale computed state visible.
 
 **B3 — watch and views** (after A4). `Cell.sink` with the guard-plus-`idle()`
-settling discipline; the value, list, and structured piece-overview views on
-the `cf view` pager substrate; session watches (`watch`, `watches`, `unwatch`)
-with prompt event lines. Governed by [`views.md`](views.md); it opens with the
-two experiments and the raw-document-subscription proving test from issue
-[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
-the capped deep sink if the seam disappoints.
+settling discipline; the value, list, and structured piece-overview views;
+session watches (`watch`, `watches`, `unwatch`) with prompt event lines.
+Governed by [`views.md`](views.md). Landing in slices.
+
+Landed:
+
+- **B3a — the settle discipline, the value view, and watches as session
+  objects.** `sinkCellValue` (`packages/cli/lib/piece.ts`) is the subscription
+  seam: it resolves the target the way a read does, sinks the cell, and reports
+  once per quiet runtime through a reentrancy guard plus `runtime.idle()` —
+  `renderVDomToHtml`'s form, and no timer anywhere under it. Starting the piece
+  stays the caller's own act, so a caller watching several cells of one piece
+  starts it once.
+
+  A watch (`lib/shuttle/watch.ts`) is a session object beside the handle table
+  and the warm set: `watch <ref>` arms one and numbers what is armed, `watches`
+  lists them, `unwatch %n` disarms the one a row was minted for, and `where`
+  names them. Each settled change writes one line above the prompt — the cell
+  and which of the piece's two cells it is — through the out-of-band door a
+  connection's own writing already goes through, so scrollback stays
+  append-only. A change is what is reported: the first settle is the baseline,
+  and a settle that landed on the value already held writes nothing. Deciding
+  that needs fabric-aware equality at the root, `deepEqual` reading two
+  distinct `FabricBytes` as equal, so a cell whose bytes changed would otherwise
+  report nothing.
+
+  The line says *that* the cell changed, which root equality is enough to
+  decide. Reporting which leaves moved and what each moved to needs a per-leaf
+  diff over arbitrary fabric values, and that is deferred with the transition
+  row it feeds ([#7444](https://github.com/commontoolsinc/labs/issues/7444)) —
+  the feature rather than the decision behind it. Reading the value out is
+  `get`'s, and watching it move is what the lens is for.
+
+  The value view (`lib/shuttle/lens.ts`) opens as one lens onto that watch,
+  drawn on the alternate screen so that nothing already written scrolls while
+  it is up, and given back on every way out of a run — a signal among them,
+  which ends the process without unwinding. It is pure logic plus a frame the
+  prompt draws: the prompt owns the keyboard, so a lens is a state of its loop
+  rather than a program beside it, which is the shape every view here takes
+  and the reason `pager.ts` is not the substrate ([`views.md`](views.md)).
+  The terminal keeps what was announced while a frame held the screen. The two
+  lifetimes are separate, which is what the slice is for: `q` cancels the
+  lens's own subscription and leaves the watch armed.
+
+  Two things the frame does not draw are worth naming. The connection marker,
+  the relay that would report connection state being B1's and unbuilt
+  ([`runtime-integration.md`](runtime-integration.md)). And the transition row,
+  which is deferred with the diff it is built on
+  ([#7444](https://github.com/commontoolsinc/labs/issues/7444)) rather than
+  declined: the project owner ruled that such a row **stands until another
+  change replaces it rather than expiring**, which is
+  [`views.md`](views.md)'s "never a timer" applied to its own sentence, and
+  that ruling is what it returns under.
+
+Still to land:
+
+- **A watch on a piece's arguments cell.** `sinkCellValue` takes the cell a
+  read takes, and for an arguments path the two are not the same cell: the
+  read resolves the link stored at the member and a subscription does not, so
+  it reports the link marker and a write through that link settles nothing it
+  can see. What closes it is a resolved cell for an arguments path —
+  `PiecePropIo.get` builds one for the read and `getCell()` hands back the
+  unresolved root, so the seam is `packages/piece`'s to offer rather than
+  shuttle's to assemble. Until then `watch` refuses the `#argument` member, and
+  the refusal names what does work: `get .#argument/<path>`, which reads that
+  cell, and `watch <ref>`, which watches the result the pattern computes from
+  it.
+  The two cells are already named and keyed apart everywhere a watch is shown,
+  so what the seam costs is the refusal and nothing under it.
+- **The rest of a view's keys.** The value view answers to the motions and the
+  two ways out — `q` and `ctrl-c`, `j`/`k` and the arrows, `g` and `G`. What
+  the table in [`views.md`](views.md) has beyond them is this slice: `enter`
+  drill and `backspace` up, `/` filter within the view with `n`/`N` for the
+  next match, `e` to edit the selection in `$EDITOR`, and `:` to open a
+  command line. The last is the
+  reason this is a slice rather than a handful of key arms — `:` runs any
+  shuttle line with the view's `%n` handles bound to its rows, which reaches
+  the verb machinery from inside a lens and repaints the frame on what came
+  back. `e` reaches the editor trip the prompt already takes, and `enter` and
+  `backspace` want somewhere to drill *to*, so both of those read more
+  naturally beside the view that has rows.
+- **The list view.** It rests on `SpaceReplica.sinkDocument`, which is on
+  neither `IStorageProvider` nor `ISpaceReplica`, so the seam question is
+  `packages/runner`'s to settle before shuttle reaches it. It opens with the
+  two experiments and the raw-document-subscription proving test from issue
+  [#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
+  the capped deep sink if the seam disappoints.
+- **The structured piece overview** (decision 26): one refreshable frame
+  carrying arguments, a result summary, callables and pattern identity.
 
 **B4 — externals and escapes.** `>` and `<` to and from `file:` externals
 under the scheme-absolute rule; the external working location
@@ -587,9 +669,9 @@ reaches its v1 surface: every dimension printed, the light ones settable
 One question B4 settles rather than inherits: what a rendering carries when
 it is not going to a terminal. Only part of the treatment of a control
 character is at stake, and [`grammar.md`](grammar.md) is where the division
-is. An empty segment, one ending in whitespace, and one holding a newline
-are refused for what a rendering of them reads back as, which is a fact
-about addresses: it holds in a file and a pipe as readily as on a screen,
+is. A segment holding a newline is refused for what a rendering of it reads
+back as, which is a fact about addresses: it holds in a file and a pipe as
+readily as on a screen,
 and B4 changes nothing about it. The rest of the class is refused because a
 terminal acts on it, the round trip there being exact, and a message is
 glyphed for that same reason — those two are what a second destination puts

@@ -13,7 +13,7 @@
 
 export * from "./interface.ts";
 export { BaseValueVisitor } from "./BaseValueVisitor.ts";
-export { ContainerIteratingValueVisitor } from "./ContainerIteratingValueVisitor.ts";
+export { RecursiveValueVisitor } from "./RecursiveValueVisitor.ts";
 export { NopValueVisitor } from "./NopValueVisitor.ts";
 
 export {

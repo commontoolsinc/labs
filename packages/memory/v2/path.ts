@@ -25,12 +25,13 @@ export const parsePointer = (path: string): string[] => {
  * Map-key form within this codebase.
  */
 export const encodePointer = (path: readonly string[]): string => {
-  return path.length === 0
-    ? ""
-    : `/${
-      path.map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
-        .join("/")
-    }`;
+  let pointer = "";
+  for (let segment of path) {
+    if (segment.includes("~")) segment = segment.replaceAll("~", "~0");
+    if (segment.includes("/")) segment = segment.replaceAll("/", "~1");
+    pointer += "/" + segment;
+  }
+  return pointer;
 };
 
 export const isPrefixPath = (

@@ -55,6 +55,7 @@ import { ASSUMED_ROWS } from "../lib/shuttle/page.ts";
 import { renderValue } from "../lib/shuttle/value.ts";
 import { moved } from "./shuttle-place-helpers.ts";
 import { runLine } from "../lib/shuttle/verbs.ts";
+import type { ValueLens } from "../lib/shuttle/lens.ts";
 import type { Outcome, Shuttle, VerbDeps } from "../lib/shuttle/vocabulary.ts";
 import type { WishReadConfig } from "../lib/wish.ts";
 
@@ -168,6 +169,9 @@ const READS_NOTHING: VerbDeps = {
   callFromCommand: () => {
     throw new Error("A call was dispatched.");
   },
+  sinkCellValue: () => {
+    throw new Error("A cell was subscribed to.");
+  },
 };
 
 /**
@@ -236,6 +240,7 @@ function answering(over: VerbDeps = {}): VerbDeps {
     describePiece: () =>
       Promise.resolve({ pattern: null, verbs: [callable("a-verb")] }),
     callFromCommand: () => Promise.resolve(),
+    sinkCellValue: () => Promise.resolve(() => {}),
     editText: (text) =>
       Promise.resolve({
         kind: "edited" as const,
@@ -482,7 +487,10 @@ const VERB_ARITY: readonly (readonly [
   ["more", "none"],
   ["pwd", "none"],
   ["set", "pair"],
+  ["unwatch", "required"],
   ["verbs", "optional"],
+  ["watch", "optional"],
+  ["watches", "none"],
   ["where", "none"],
   ["wish", "required"],
 ];
@@ -534,6 +542,10 @@ const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
     "`set` takes the path to write and the value to write there, as in " +
     `\`set title '"a"'\`.`,
   ],
+  [
+    "unwatch",
+    "`unwatch` takes the watch to disarm, as in `unwatch %1`.",
+  ],
   ["wish", "`wish` takes the target to resolve, as in `wish #favorites`."],
 ]);
 
@@ -548,7 +560,8 @@ const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
  * until it is.
  */
 const THE_VERBS = "The verbs are `call`, `cd`, `describe`, `edit`, `get`, " +
-  "`help`, `link`, `ls`, `more`, `pwd`, `set`, `verbs`, `where`, and `wish`.";
+  "`help`, `link`, `ls`, `more`, `pwd`, `set`, `unwatch`, `verbs`, `watch`, " +
+  "`watches`, `where`, and `wish`.";
 
 /** Helper for the cases below, which is every verb, in that same order. */
 const VERB_WORDS = VERB_ARITY.map(([word]) => word);
@@ -574,7 +587,10 @@ const LINE_PER_VERB: ReadonlyMap<string, string> = new Map([
   ["more", "more"],
   ["pwd", "pwd"],
   ["set", 'set a "b"'],
+  ["unwatch", "unwatch %1"],
   ["verbs", "verbs"],
+  ["watch", "watch"],
+  ["watches", "watches"],
   ["where", "where"],
   ["wish", "wish #favorites"],
 ]);
@@ -904,7 +920,7 @@ describe("verbs", () => {
     });
 
     it("refuses an operand ending in `#argument`, a place being result-rooted", async () => {
-      // The asymmetry `get`'s own door turns on: `cd` refuses the suffix in
+      // The asymmetry `get`'s own door turns on: `cd` refuses the member in
       // every spelling that takes one, and `get` reads it.
       const shuttle = shuttleIn();
       moved(shuttle.place, "slugs");
@@ -912,12 +928,65 @@ describe("verbs", () => {
         reasonOf(await runLine("cd board#argument", shuttle, READS_NOTHING)),
       )
         .toBe(
-          "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
-            "place rooted at the arguments cell would leave every later " +
+          "A place is result-rooted, so `cd` selects no `#argument` member. " +
+            "A place rooted at the arguments cell would leave every later " +
             "relative read ambiguous about which side of the piece it " +
             "addressed. Reach arguments per operand instead, as in " +
-            "`get topics/3#argument`.",
+            "`get .#argument/title` or `get /slugs/board#argument/title`.",
         );
+    });
+
+    it("says a trailing separator named the empty key where the cell holds none", async () => {
+      // Inside a piece the separator ending an operand names the key `""`,
+      // which a person typing a path the way a directory is typed does not
+      // mean, so the refusal says what named it and what to type instead.
+      // Kills a refusal that quotes the empty key as backticks around nothing.
+
+      expect(
+        reasonOf(
+          await runLine("cd title/", atPiece(), settling({ title: { a: 1 } })),
+        ),
+      ).toBe(
+        "`title/` reaches no cell: the trailing `/` names the empty key, " +
+          "which is no key of the cell above it, whose keys are `a`. " +
+          "`title` names the cell above it.",
+      );
+    });
+
+    it("names the empty key in words where a separator inside the operand wrote it", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "cd title//a",
+            atPiece(),
+            settling({ title: { a: 1 } }),
+          ),
+        ),
+      ).toBe(
+        "`title//a` reaches no cell: the empty key is no key of the cell " +
+          "above it, whose keys are `a`.",
+      );
+    });
+
+    it("names the empty key in words where it is missing inside an operand that ends in the separator", async () => {
+      // The missing key is the first empty one, under `title`, and not the
+      // final one the trailing `/` wrote, so the trailing-separator sentence
+      // and its remedy do not apply: `title//a` fails as well. Kills a refusal
+      // that decides the key was the trailing one from the operand's last
+      // character alone.
+
+      expect(
+        reasonOf(
+          await runLine(
+            "cd title//a/",
+            atPiece(),
+            settling({ title: { a: 1 } }),
+          ),
+        ),
+      ).toBe(
+        "`title//a/` reaches no cell: the empty key is no key of the cell " +
+          "above it, whose keys are `a`.",
+      );
     });
 
     describe("the read that settles a move", () => {
@@ -1646,14 +1715,14 @@ describe("verbs", () => {
         await runLine("cd board", shuttle, settling(null, { board: BOARD }));
         expect(shuttle.place.label()).toBe("board @space");
         expect(textOf(await runLine("pwd", shuttle, READS_NOTHING))).toBe(
-          `position  /@${SPACE}/${BOARD}@space\nscope     @space`,
+          `position  //${SPACE}/${BOARD}@space\nscope     @space`,
         );
       });
 
       it("settles a space written as a name before it settles the piece", async () => {
         const shuttle = shuttleIn();
         await runLine(
-          `cd /@${SPACE_NAME}/board/title`,
+          `cd //${SPACE_NAME}/board/title`,
           shuttle,
           settling({ title: 1 }, { board: BOARD }),
         );
@@ -1766,18 +1835,59 @@ describe("verbs", () => {
         );
       });
 
-      it("refuses a target whose address carries the `#argument` suffix", async () => {
+      it("refuses a target whose address carries a pin", async () => {
+        // Kills a target reading that drops the pin the reader carries, which
+        // would land a place on a piece at a version it does not hold.
+
+        const pin = "A".repeat(43);
         const outcome = await runLine(
           "cd #favorites",
           shuttleIn(),
-          addressed(`/${HANDLE}/title#argument`),
+          addressed(`/${HANDLE}@pin=${pin}/title`),
+        );
+        expect(reasonOf(outcome)).toBe(
+          "`#favorites` resolved to an address carrying a `@pin=` qualifier, " +
+            "which a place reached through a target does not keep: a place " +
+            "holds no pin, and shuttle reads a piece as it runs rather than " +
+            "at a pinned version. Reach that cell by its own reference, " +
+            "written without the qualifier.",
+        );
+      });
+
+      it("refuses a target whose address carries the `#argument` member", async () => {
+        // The member on the address's piece segment: an arguments cell, which
+        // a place reached through a target does not stand in.
+
+        const outcome = await runLine(
+          "cd #favorites",
+          shuttleIn(),
+          addressed(`/${HANDLE}#argument/title`),
         );
         expect(reasonOf(outcome)).toBe(
           "`#favorites` resolved to an address carrying the `#argument` " +
-            "suffix, which a place reached through a target does not keep: a " +
+            "member, which a place reached through a target does not keep: a " +
             "place holds one scope and roots at a result. Reach that cell by " +
-            `its own reference, \`/${HANDLE}/title#argument\`.`,
+            `its own reference, \`/${HANDLE}#argument/title\`.`,
         );
+      });
+
+      it("moves to the result key an address names where `#argument` follows its path", async () => {
+        // `#` in a path is data, so this address selects no member. Kills a
+        // target reading that still takes a trailing `#argument` off.
+
+        const shuttle = shuttleIn();
+        const outcome = await runLine(
+          "cd #favorites",
+          shuttle,
+          addressed(`/${HANDLE}/title#argument`),
+        );
+        expect(outcome.kind).toBe("moved");
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: HANDLE,
+          path: ["title#argument"],
+        });
       });
 
       it("refuses an address naming its space by a name rather than a DID", async () => {
@@ -1788,7 +1898,7 @@ describe("verbs", () => {
         const outcome = await runLine(
           "cd #favorites",
           shuttleIn(),
-          addressed(`/@estuary/${HANDLE}`),
+          addressed(`//estuary/${HANDLE}`),
         );
         expect(reasonOf(outcome)).toBe(
           "`#favorites` resolved to an address naming space `estuary`, " +
@@ -1847,7 +1957,7 @@ describe("verbs", () => {
       it("lands where the reference names once the name is this shuttle's own", async () => {
         const shuttle = shuttleIn();
         const outcome = await runLine(
-          `cd /@${SPACE_NAME}/${HANDLE}/title`,
+          `cd //${SPACE_NAME}/${HANDLE}/title`,
           shuttle,
           settling({ title: "t" }),
         );
@@ -1863,7 +1973,7 @@ describe("verbs", () => {
       it("refuses a name that is not the one this shuttle was opened under", async () => {
         const shuttle = shuttleIn();
         const outcome = await runLine(
-          `cd /@estuary/${HANDLE}`,
+          `cd //estuary/${HANDLE}`,
           shuttle,
           READS_NOTHING,
         );
@@ -1880,7 +1990,7 @@ describe("verbs", () => {
         // this space is a question the connection cannot answer and the
         // refusal is the honest arm rather than an error path.
         const outcome = await runLine(
-          `cd /@${SPACE_NAME}/${HANDLE}`,
+          `cd //${SPACE_NAME}/${HANDLE}`,
           shuttleIn(controller(undefined)),
           READS_NOTHING,
         );
@@ -1897,7 +2007,7 @@ describe("verbs", () => {
         expect(
           reasonOf(
             await runLine(
-              `cd /@${SPACE_NAME}/${HANDLE}`,
+              `cd //${SPACE_NAME}/${HANDLE}`,
               shuttle,
               READS_NOTHING,
             ),
@@ -1911,16 +2021,20 @@ describe("verbs", () => {
       });
 
       it("compares a name whose separator the reference wrote as `~1` against the one it stands for", async () => {
-        // The reference reading unescapes before this comparison sees the
-        // name, so a name holding the separator arrives in the form the
-        // connection recorded rather than in the form it was written.
+        // The reader reads the space slot with no escape undone, the grammar
+        // admitting no separator in a space name, so `east~1west` is compared
+        // in those characters and is not the name `east/west`.
         const shuttle = shuttleIn(controller("east/west"));
         const outcome = await runLine(
-          `cd /@east~1west/${HANDLE}`,
+          `cd //east~1west/${HANDLE}`,
           shuttle,
           settling(null),
         );
-        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+        expect(reasonOf(outcome)).toBe(
+          "`east~1west` is not the space this shuttle is connected to, which " +
+            "is `east/west`. One connection serves one space, so reaching " +
+            "that cell means a shuttle started against `east~1west`.",
+        );
       });
 
       it("refuses a name differing from this shuttle's only in case", async () => {
@@ -1929,7 +2043,7 @@ describe("verbs", () => {
         const shuttle = shuttleIn(controller("Board"));
         expect(
           reasonOf(
-            await runLine(`cd /@board/${HANDLE}`, shuttle, READS_NOTHING),
+            await runLine(`cd //board/${HANDLE}`, shuttle, READS_NOTHING),
           ),
         ).toBe(
           "`board` is not the space this shuttle is connected to, which is " +
@@ -1949,7 +2063,7 @@ describe("verbs", () => {
         expect(
           reasonOf(
             await runLine(
-              `cd /@${SPACE_NAME}/${HANDLE}`,
+              `cd //${SPACE_NAME}/${HANDLE}`,
               shuttle,
               READS_NOTHING,
             ),
@@ -2063,7 +2177,7 @@ describe("verbs", () => {
       expect(shuttle.place.place).toBe(before);
     });
 
-    it("refuses the `#argument` suffix, and lists nothing", async () => {
+    it("refuses the `#argument` member, and lists nothing", async () => {
       // The one spelling `get` takes that this cannot. A place carries no
       // selection between a piece's two cells, and a row is reached from the
       // place it was listed at, so an arguments listing would hand out
@@ -2072,6 +2186,23 @@ describe("verbs", () => {
 
       expect(
         reasonOf(await runLine("ls .#argument", atPiece(), READS_NOTHING)),
+      ).toBe(
+        "`#argument` selects one of a piece's two cells, and a listing's " +
+          "rows are reached from the place they were listed at, which " +
+          "carries no such selection. `get` reads that cell.",
+      );
+    });
+
+    it("refuses the `#argument` member a handle's head selects, and lists nothing", async () => {
+      // The member on a `%n` head is read against the row, and a listing of
+      // what it selects would number rows that walk the result all the same.
+      // Kills a reading door that drops the selection a handle carries back,
+      // which would list the row's result instead.
+
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, answering());
+      expect(
+        reasonOf(await runLine("ls %1#argument", shuttle, READS_NOTHING)),
       ).toBe(
         "`#argument` selects one of a piece's two cells, and a listing's " +
           "rows are reached from the place they were listed at, which " +
@@ -2377,7 +2508,7 @@ describe("verbs", () => {
     it("returns both halves of the place, the scope written even at the base", async () => {
       expect(await runLine("pwd", atPiece("title"), READS_NOTHING)).toEqual({
         kind: "text",
-        text: `position  /@${SPACE}/${HANDLE}@space/title\nscope     @space`,
+        text: `position  //${SPACE}/${HANDLE}@space/title\nscope     @space`,
       });
     });
   });
@@ -2389,21 +2520,22 @@ describe("verbs", () => {
         text: `api       ${CONFIG.apiUrl}\n` +
           `identity  ${CONFIG.identity}\n` +
           `space     ${SPACE}\n` +
-          `position  /@${SPACE}/${HANDLE}@space/title\n` +
-          "scope     @space",
+          `position  //${SPACE}/${HANDLE}@space/title\n` +
+          "scope     @space\n" +
+          "watches   none",
       });
     });
 
     it("returns the place's dimensions written exactly as `pwd` writes them", async () => {
       // What makes the two one format rather than two that agree today: the
-      // dimensions `pwd` prints are the end of what `where` prints, character
-      // for character.
+      // dimensions `pwd` prints stand inside what `where` prints, whole and
+      // character for character.
 
       const shuttle = atPiece("title");
       const whole = await runLine("where", shuttle, READS_NOTHING);
       const place = await runLine("pwd", shuttle, READS_NOTHING);
       expect(whole.kind === "text" && place.kind === "text").toBe(true);
-      expect(textOf(whole).endsWith(`\n${textOf(place)}`)).toBe(true);
+      expect(textOf(whole).includes(`\n${textOf(place)}\n`)).toBe(true);
     });
 
     it("returns the record over a connection that will not open", async () => {
@@ -2428,7 +2560,8 @@ describe("verbs", () => {
             `identity  ${CONFIG.identity}\n` +
             `space     ${SPACE}\n` +
             `position  @${SPACE}/\n` +
-            "scope     @space",
+            "scope     @space\n" +
+            "watches   none",
         );
     });
 
@@ -2618,7 +2751,7 @@ describe("verbs", () => {
     it("settles a space written as a name, and reads where it names", async () => {
       let config: PieceConfig | undefined;
       const outcome = await runLine(
-        `get /@${SPACE_NAME}/${HANDLE}/title`,
+        `get //${SPACE_NAME}/${HANDLE}/title`,
         shuttleIn(),
         {
           ...READS_NOTHING,
@@ -2635,15 +2768,15 @@ describe("verbs", () => {
     it("moves nowhere settling a space written as a name", async () => {
       const shuttle = shuttleIn();
       const before = shuttle.place.place;
-      await runLine(`get /@${SPACE_NAME}/${HANDLE}`, shuttle, cellValue(null));
+      await runLine(`get //${SPACE_NAME}/${HANDLE}`, shuttle, cellValue(null));
       expect(shuttle.place.place).toBe(before);
     });
 
-    describe("the `#argument` suffix", () => {
+    describe("the `#argument` member", () => {
       // Standing in an arguments cell is what a result-rooted place cannot do,
       // and reading one is a different act — `cf cell get` performs it, and
-      // `grammar.md` spells it `get topics/3#argument`. So `get`'s door is
-      // `cd`'s plus this suffix, and each case names which of the two cells
+      // `grammar.md` spells it `get .#argument/title`. So `get`'s door is
+      // `cd`'s plus this member, and each case names which of the two cells
       // the read was aimed at.
 
       /** Helper for the cases below, which is what `line` read, and where. */
@@ -2670,16 +2803,31 @@ describe("verbs", () => {
         return seen;
       }
 
-      it("reads the result cell for an operand carrying no suffix", async () => {
+      it("reads the result cell for an operand carrying no member", async () => {
         expect((await reads(atPiece(), "get title")).input).toBe(false);
       });
 
-      it("reads the arguments cell for an operand ending in the suffix", async () => {
-        expect((await reads(atPiece(), "get title#argument")).input).toBe(true);
+      it("reads the arguments cell for an operand whose head selects the member", async () => {
+        // The member on the `.` head, which is where a relative operand
+        // selects it.
+
+        expect((await reads(atPiece(), "get .#argument/title")).input).toBe(
+          true,
+        );
+      });
+
+      it("reads the result key an operand ending in `#argument` names", async () => {
+        // Kills a door that still takes a trailing `#argument` off.
+
+        const seen = await reads(atPiece(), "get title#argument");
+        expect(seen.path).toEqual(["title#argument"]);
+        expect(seen.input).toBe(false);
       });
 
       it("reads the arguments cell at the path the operand names", async () => {
-        const seen = await reads(atPiece("topics"), "get 3#argument");
+        // From the arguments cell's root, whatever path shuttle stands at.
+
+        const seen = await reads(atPiece("topics"), "get .#argument/topics/3");
         expect(seen.path).toEqual(["topics", 3]);
         expect(seen.input).toBe(true);
       });
@@ -2694,29 +2842,80 @@ describe("verbs", () => {
       });
 
       it("reads the arguments cell a rooted reference selects", async () => {
-        const seen = await reads(shuttleIn(), `get /${HANDLE}/title#argument`);
+        const seen = await reads(shuttleIn(), `get /${HANDLE}#argument/title`);
         expect(seen.config?.piece).toBe(HANDLE);
         expect(seen.path).toEqual(["title"]);
         expect(seen.input).toBe(true);
+      });
+
+      it("reads the arguments cell a rooted walk's piece segment selects, and the result key one names after its path", async () => {
+        // The table's two rows. Kills a rooted walk that reads the member off
+        // the path rather than the piece segment, which swaps the two.
+
+        const argument = await reads(
+          atPiece(),
+          "get /slugs/first#argument/label",
+        );
+        expect(argument).toMatchObject({
+          config: { piece: "first" },
+          path: ["label"],
+          input: true,
+        });
+        const result = await reads(
+          atPiece(),
+          "get /slugs/first/label#argument",
+        );
+        expect(result).toMatchObject({
+          config: { piece: "first" },
+          path: ["label#argument"],
+          input: false,
+        });
+      });
+
+      it("reads the arguments cell a handle's head selects, against the row it names", async () => {
+        // Kills a reading door that drops the selection `resolveHandle`
+        // carries back.
+
+        const shuttle = atPiece();
+        await runLine("ls", shuttle, answering());
+        const seen = await reads(shuttle, "get %1#argument/a");
+        expect(seen).toMatchObject({ path: ["a"], input: true });
+      });
+
+      it("reads the arguments cell a piece segment after a facet row selects", async () => {
+        // Kills a handle walk that drops the selection it finds entering a
+        // piece from a facet row.
+
+        const shuttle = shuttleIn();
+        await runLine("ls", shuttle, answering());
+        const seen = await reads(shuttle, "get %1/board#argument/title");
+        expect(seen).toMatchObject({
+          config: { piece: "board" },
+          path: ["title"],
+          input: true,
+        });
       });
 
       it("reads a `#` inside a piece as a character of a key", async () => {
         expect((await reads(atPiece(), "get a#b")).path).toEqual(["a#b"]);
       });
 
-      it("refuses the suffix written with nothing in front of it", async () => {
+      it("refuses the member written as a whole operand, teaching the spellings that take it", async () => {
+        // What it teaches is the two spellings that take the member.
+
         expect(
           reasonOf(await runLine("get #argument", atPiece(), READS_NOTHING)),
         ).toBe(
-          "`#argument` selects a piece's arguments cell, so it follows the " +
-            "target it selects, as in `get topics#argument`.",
+          "`#argument` on its own names no piece to select the arguments cell " +
+            "of. The member goes on a head or a piece segment, as in " +
+            "`get .#argument/title` or `get /slugs/board#argument/title`.",
         );
       });
     });
 
     it("refuses a space written as a name that is not this shuttle's own", async () => {
       const outcome = await runLine(
-        `get /@estuary/${HANDLE}`,
+        `get //estuary/${HANDLE}`,
         shuttleIn(),
         READS_NOTHING,
       );
@@ -3140,10 +3339,10 @@ describe("verbs", () => {
         );
     });
 
-    it("selects the arguments cell where the operand wrote the suffix", async () => {
+    it("selects the arguments cell where the operand wrote the member", async () => {
       let options: { input?: boolean } | undefined;
       await runLine(
-        'set title#argument "a"',
+        'set .#argument/title "a"',
         atPiece(),
         answering({
           setCellValue: (_config, path, _value, given) => {
@@ -3155,23 +3354,23 @@ describe("verbs", () => {
       expect(options?.input).toBe(true);
     });
 
-    it("refuses a suffix with a walk after it, in the name of the verb that wrote it", async () => {
-      // The name reaches the place's reading through this verb's own aim, so
-      // a line that never says `get` is not answered in `get`'s name.
+    it("writes the arguments cell a piece segment's member selects, with a walk after it", async () => {
+      // The member rides the piece segment, and the path after it is inside
+      // the arguments cell. Kills a write door that refuses a member with a
+      // walk after it.
 
-      expect(
-        reasonOf(
-          await runLine(
-            `set slugs/board#argument/title '"x"'`,
-            shuttleIn(),
-            answering(),
-          ),
-        ),
-      ).toBe(
-        "`set` takes `#argument` at the end of an operand and nowhere else: " +
-          "it selects a piece's arguments cell, and a path inside that cell " +
-          "is written in front of it, as in `topics/3/title#argument`.",
+      let written: { path?: (string | number)[]; input?: boolean } = {};
+      await runLine(
+        `set slugs/board#argument/title '"x"'`,
+        shuttleIn(),
+        answering({
+          setCellValue: (_config, path, _value, given) => {
+            written = { path: [...path], input: given?.input };
+            return Promise.resolve({ piece: BOARD, path: [...path] });
+          },
+        }),
       );
+      expect(written).toEqual({ path: ["title"], input: true });
     });
 
     it("refuses a write onto a whole piece before the seam is asked", async () => {
@@ -3258,7 +3457,7 @@ describe("verbs", () => {
       expect(
         textOf(
           await runLine(
-            'set title#argument "a"',
+            'set .#argument/title "a"',
             atPiece(),
             answering({
               setCellValue: () =>
@@ -3413,32 +3612,32 @@ describe("verbs", () => {
         .toBe("Wrote a reference at `latest` naming `title`.");
     });
 
-    it("refuses the arguments suffix on the endpoint pointed at", async () => {
+    it("refuses the arguments member on the endpoint pointed at", async () => {
       expect(
         reasonOf(
-          await runLine("link title#argument latest", atPiece(), answering()),
+          await runLine("link .#argument/title latest", atPiece(), answering()),
         ),
       ).toBe(
-        "`title#argument` selects a piece's arguments cell, and a link " +
+        "`.#argument/title` selects a piece's arguments cell, and a link " +
           "endpoint is a cell of a piece's result. Write the endpoint " +
-          "without the `#argument` suffix.",
+          "without the `#argument` member.",
       );
     });
 
     it("refuses it on the endpoint written at, which is the other half", async () => {
       expect(
         reasonOf(
-          await runLine("link title latest#argument", atPiece(), answering()),
+          await runLine("link title .#argument/latest", atPiece(), answering()),
         ),
       ).toBe(
-        "`latest#argument` selects a piece's arguments cell, and a link " +
+        "`.#argument/latest` selects a piece's arguments cell, and a link " +
           "endpoint is a cell of a piece's result. Write the endpoint " +
-          "without the `#argument` suffix.",
+          "without the `#argument` member.",
       );
     });
 
     it("refuses a container as an endpoint, which holds no cell to point at", async () => {
-      // The endpoint door is `writable`'s plus the suffix rule, so a place
+      // The endpoint door is `writable`'s plus the member rule, so a place
       // that is no cell is refused before either endpoint is read.
 
       expect(
@@ -4138,7 +4337,7 @@ describe("verbs", () => {
     });
 
     it("takes a walk written after a handle to the cell it reaches", async () => {
-      // The suffix every other verb takes on a handle. `call` reads the
+      // The path every other verb takes after a handle. `call` reads the
       // receiver through the same grammar, so a handle carrying one is a
       // reference to a cell and the verb name follows it as usual.
 
@@ -4235,14 +4434,14 @@ describe("verbs", () => {
         );
     });
 
-    it("refuses the arguments suffix, a verb belonging to neither cell", async () => {
+    it("refuses the arguments member, a verb belonging to neither cell", async () => {
       expect(
         reasonOf(await runLine("call .#argument a", atPiece(), answering())),
       )
         .toBe(
           "`#argument` selects one of a piece's two cells, and a verb " +
             "belongs to the piece rather than to either of them. Write the " +
-            "piece without the suffix.",
+            "piece without the member.",
         );
     });
 
@@ -4577,6 +4776,453 @@ describe("verbs", () => {
       expect(order).toEqual(["warm", "describe"]);
     });
   });
+  describe("watch, watches and unwatch", () => {
+    // The three read one session object, so what the cases turn on is the pair
+    // of lifetimes: a lens cancels its own subscription on the way out and the
+    // watch's goes on firing, and only `unwatch` stops that one.
+    //
+    // Every subscription is stood in for, so a case drives a settle by calling
+    // what the seam was handed rather than by waiting for a runtime.
+
+    /** What driving the subscriptions produced. */
+    interface Watching {
+      /** Every settle callback the line took, in the order it took them. */
+      readonly settles: ((value: unknown) => void)[];
+
+      /** How many of those subscriptions have been cancelled. */
+      readonly cancelled: boolean[];
+
+      /** Every line the run wrote above the prompt, in order. */
+      readonly announced: string[];
+    }
+
+    /**
+     * Helper for the cases below, which is a deps bag whose subscription is
+     * this case's to drive, recording each one.
+     */
+    function watching(): { deps: VerbDeps; watched: Watching } {
+      const watched: Watching = {
+        settles: [],
+        cancelled: [],
+        announced: [],
+      };
+      return {
+        watched,
+        deps: answering({
+          sinkCellValue: (_config, _path, onSettled) => {
+            const at = watched.settles.length;
+            watched.settles.push(onSettled);
+            watched.cancelled.push(false);
+            return Promise.resolve(() => {
+              watched.cancelled[at] = true;
+            });
+          },
+          announce: (text) => {
+            watched.announced.push(text);
+          },
+          columns: () => 200,
+        }),
+      };
+    }
+
+    /** Helper for the cases below, which is the lens a `watch` line opened. */
+    function lensOf(outcome: Outcome): ValueLens {
+      if (outcome.kind !== "watching") {
+        throw new Error(`The line opened no lens: ${outcome.kind}.`);
+      }
+      return outcome.lens;
+    }
+
+    /** Helper for the cases below, which is what a `watch` line listed. */
+    function armedOf(outcome: Outcome): string {
+      return outcome.kind === "watching"
+        ? outcome.armed
+        : `not watching: ${outcome.kind}`;
+    }
+
+    it("arms a watch on the cell the operand names", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.label))
+        .toEqual([`${HANDLE}/title @space`]);
+    });
+
+    it("arms a watch on a result key named like the member, `#` being data in a path", async () => {
+      // Kills a watch door that still reads a trailing `#argument` as the
+      // arguments cell, which would refuse this line instead of arming it.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title#argument", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.key))
+        .toEqual([`/${HANDLE}@space/title#argument`]);
+    });
+
+    it("arms a watch on where shuttle stands where the line names nothing", async () => {
+      const shuttle = atPiece("title");
+      const { deps } = watching();
+      await runLine("watch", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.key))
+        .toEqual([`/${HANDLE}@space/title`]);
+    });
+
+    it("refuses a piece's arguments cell, naming the verb that reads one", async () => {
+      // A subscription there reports the link stored at the member rather than
+      // the value behind it, and a write through that link settles nothing it
+      // can see — so a watch armed on one would draw a link marker and then
+      // say nothing ever again. A refusal is what a person can act on, where a
+      // silent watch reads as a cell nobody is changing.
+
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      expect(
+        reasonOf(await runLine("watch .#argument/title", shuttle, deps)),
+      )
+        .toBe(
+          "`watch` does not serve a piece's arguments cell, so the " +
+            "`#argument` member is refused here. `get .#argument/title` or " +
+            "`get /slugs/board#argument/title` reads one, and `watch <ref>` " +
+            "watches the result the pattern computes from it.",
+        );
+      expect({
+        armed: shuttle.session.watches.length,
+        subscriptions: watched.settles.length,
+      }).toEqual({ armed: 0, subscriptions: 0 });
+    });
+
+    it("hands back an operand's own refusal, having armed nothing", async () => {
+      // The refusal is the place's, in the words of the thing that was wrong
+      // with the operand, and it arrives before anything is armed and before
+      // anything is subscribed to: a line that named nowhere leaves the
+      // session exactly as it found it.
+
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      const outcome = await runLine("watch #argument", shuttle, deps);
+      expect({
+        reason: reasonOf(outcome),
+        armed: shuttle.session.watches.length,
+        subscriptions: watched.settles.length,
+      }).toEqual({
+        reason: "`#argument` on its own names no piece to select the " +
+          "arguments cell of. The member goes on a head or a piece segment, " +
+          "as in `get .#argument/title` or `get /slugs/board#argument/title`.",
+        armed: 0,
+        subscriptions: 0,
+      });
+    });
+
+    it("opens a lens onto the cell it armed the watch on", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      const outcome = await runLine("watch title", shuttle, deps);
+      expect(lensOf(outcome).label).toBe(`${HANDLE}/title @space`);
+    });
+
+    it("takes a subscription for the watch and one for the lens", async () => {
+      // Two lifetimes, so two subscriptions: a lens cancels its own on the way
+      // out and the watch's goes on firing, which one subscription could not
+      // express.
+
+      const { deps, watched } = watching();
+      await runLine("watch title", atPiece(), deps);
+      expect(watched.settles.length).toBe(2);
+    });
+
+    it("draws in the lens what the lens's own subscription settled at", async () => {
+      // The second subscription is the lens's, and what it does with a settle
+      // is the other half of the pair: the watch writes a line above the
+      // prompt, and the lens redraws the value it is holding the screen for.
+
+      const { deps, watched } = watching();
+      const outcome = await runLine("watch title", atPiece(), deps);
+      watched.settles[1]!("a title");
+      expect(lensOf(outcome).frame(6, 40).join("\n")).toContain('"a title"');
+    });
+
+    it("leaves the watch armed when the lens closes, and cancels the lens's own", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      const outcome = await runLine("watch title", shuttle, deps);
+      lensOf(outcome).close();
+      expect({
+        cancelled: watched.cancelled,
+        armed: shuttle.session.watches.length,
+      }).toEqual({ cancelled: [false, true], armed: 1 });
+    });
+
+    it("writes an event line above the prompt for a settled change", async () => {
+      const { deps, watched } = watching();
+      await runLine("watch title", atPiece(), deps);
+      const settle = watched.settles[0]!;
+      settle(14);
+      settle(15);
+      expect(watched.announced)
+        .toEqual([`watch ${HANDLE}/title @space: changed`]);
+    });
+
+    it("writes no event line once the watch is disarmed", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      const settle = watched.settles[0]!;
+      settle(14);
+      await runLine("unwatch %1", shuttle, deps);
+      settle(15);
+      expect(watched.announced).toEqual([]);
+    });
+
+    it("numbers what is armed as it arms one, so `unwatch %n` needs no listing first", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      const outcome = await runLine("watch title", shuttle, deps);
+      expect(armedOf(outcome)).toBe(`%1 ${HANDLE}/title @space`);
+      expect(textOf(await runLine("unwatch %1", shuttle, deps)))
+        .toBe(`Disarmed the watch on \`${HANDLE}/title @space\`.`);
+    });
+
+    it("refuses a cell it is already watching, naming what is armed", async () => {
+      // Two watches on one cell write two of every line, and the second says
+      // nothing the first did not.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(reasonOf(await runLine("watch title", shuttle, deps))).toBe(
+        `\`${HANDLE}/title @space\` is watched already. \`watches\` numbers ` +
+          "what is armed, and `unwatch %n` disarms one.",
+      );
+    });
+
+    it("refuses a second spelling of a cell it is already watching", async () => {
+      // The question is asked of the cell rather than of the operand, so the
+      // two spellings that reach one cell are one watch.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(
+        reasonOf(await runLine(`watch /${HANDLE}/title`, shuttle, deps))
+          .endsWith(
+            "disarms one.",
+          ),
+      ).toBe(true);
+    });
+
+    it("takes no subscription for a cell it is already watching", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch title", shuttle, deps);
+      expect(watched.settles.length).toBe(2);
+    });
+
+    it("refuses a container, which holds no value to watch", async () => {
+      expect(reasonOf(await runLine("watch", shuttleIn(), READS_NOTHING)))
+        .toBe(
+          "A space root is a list of what stands inside it rather than a " +
+            "cell, so there is nothing to watch. `ls` lists it.",
+        );
+    });
+
+    it("starts the piece before it subscribes", async () => {
+      // What a sink reports is what a running pattern holds, or what was last
+      // committed if nothing is running it.
+
+      const order: string[] = [];
+      const shuttle = atPiece();
+      await runLine(
+        "watch title",
+        shuttle,
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          sinkCellValue: () => {
+            order.push("subscribe");
+            return Promise.resolve(() => {});
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "subscribe", "subscribe"]);
+    });
+
+    it("disarms the watch it armed where the lens's subscription was cancelled", async () => {
+      // An interrupted line leaves the session as it found it, and a
+      // subscription nothing holds a cancel for is one nothing could stop.
+
+      const stopper = new AbortController();
+      const shuttle = atPiece();
+      const cancelled: boolean[] = [];
+      const outcome = await runLine(
+        "watch title",
+        shuttle,
+        answering({
+          sinkCellValue: () => {
+            const at = cancelled.length;
+            cancelled.push(false);
+            if (at === 1) stopper.abort();
+            return Promise.resolve(() => {
+              cancelled[at] = true;
+            });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({
+        kind: outcome.kind,
+        cancelled,
+        armed: shuttle.session.watches.length,
+      }).toEqual({ kind: "interrupted", cancelled: [true, true], armed: 0 });
+    });
+
+    it("disarms the watch it armed where the lens's subscription failed", async () => {
+      // The other way out of that stretch. A read that failed raises rather
+      // than coming back as an outcome, and a watch left armed behind it is a
+      // sink nothing can reach: the session never took it, so `watches` does
+      // not list it and the run's own disarm passes it by.
+
+      const shuttle = atPiece();
+      const cancelled: boolean[] = [];
+      await expect(runLine(
+        "watch title",
+        shuttle,
+        answering({
+          sinkCellValue: () => {
+            const at = cancelled.length;
+            if (at === 1) return Promise.reject(new Error("The server went."));
+            cancelled.push(false);
+            return Promise.resolve(() => {
+              cancelled[at] = true;
+            });
+          },
+        }),
+      )).rejects.toThrow("The server went.");
+      expect({ cancelled, armed: shuttle.session.watches.length })
+        .toEqual({ cancelled: [true], armed: 0 });
+    });
+
+    it("takes no subscription and arms nothing where handing over its lens throws", async () => {
+      // The lens is made and handed over before anything is held, so a
+      // handover that throws leaves nothing to undo: no subscription taken,
+      // and no watch armed. Handed over any later, the throw would leave the
+      // watch's own subscription running with nothing holding its cancel.
+      //
+      // Kills: handing the lens over after the watch's first subscription,
+      // which leaves that subscription taken and uncancelled.
+
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await expect(runLine("watch title", shuttle, {
+        ...deps,
+        adoptLens: () => {
+          throw new Error("The lens had nowhere to go.");
+        },
+      })).rejects.toThrow("The lens had nowhere to go.");
+      expect({
+        taken: watched.settles.length,
+        armed: shuttle.session.watches.length,
+      }).toEqual({ taken: 0, armed: 0 });
+    });
+
+    it("lists what is armed, numbering each", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch body", shuttle, deps);
+      expect(textOf(await runLine("watches", shuttle, deps)))
+        .toBe(
+          `%1 ${HANDLE}/title @space\n%2 ${HANDLE}/body @space`,
+        );
+    });
+
+    it("says so where nothing is armed", async () => {
+      expect(textOf(await runLine("watches", shuttleIn(), READS_NOTHING)))
+        .toBe("<no watches are armed>");
+    });
+
+    it("disarms the watch a row numbered and cancels its subscription", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("unwatch %1", shuttle, deps);
+      expect({
+        armed: shuttle.session.watches.length,
+        cancelled: watched.cancelled,
+      }).toEqual({ armed: 0, cancelled: [true, false] });
+    });
+
+    it("disarms the watch the row was minted for, not whichever is second now", async () => {
+      // What a bound reference buys: the row carries the cell its watch is
+      // armed on, so a listing read against a session that has changed since
+      // still names the watch it showed.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch body", shuttle, deps);
+      await runLine("watches", shuttle, deps);
+      await runLine("unwatch %1", shuttle, deps);
+      await runLine("unwatch %2", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.label)).toEqual([]);
+    });
+
+    it("refuses a token that names no handle at all", async () => {
+      // The handle's own refusal, handed back as it stands: what is wrong with
+      // `title` is that it is not a handle, and `unwatch` has nothing to add
+      // to a reading that already says so.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(reasonOf(await runLine("unwatch title", shuttle, deps))).toBe(
+        "`title` names no handle. A handle is `%` and the number a listing " +
+          "printed beside a row, as in `%3`.",
+      );
+    });
+
+    it("refuses a handle naming a row of some other listing", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("ls", shuttle, deps);
+      expect(reasonOf(await runLine("unwatch %1", shuttle, deps))).toBe(
+        "`%1` names a row of a listing rather than a watch. `watches` lists " +
+          "what is armed and numbers each of them.",
+      );
+    });
+
+    it("refuses a handle naming a watch that is no longer armed", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("unwatch %1", shuttle, deps);
+      expect(reasonOf(await runLine("unwatch %1", shuttle, deps))).toBe(
+        "`%1` names a watch that is no longer armed. `watches` lists what is.",
+      );
+    });
+
+    it("refuses a `cd` onto a watch row, naming the verb that disarms one", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(reasonOf(await runLine("cd %1", shuttle, deps))).toBe(
+        "`%1` names a row no place stands at, it being a watch. `unwatch` " +
+          "is what disarms one.",
+      );
+    });
+
+    it("names what is armed in the ambient record", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(textOf(await runLine("where", shuttle, deps)).split("\n").at(-1))
+        .toBe(`watches   ${HANDLE}/title @space`);
+    });
+  });
+
   describe("a numbered handle", () => {
     // The other half of a handle: `%n` is printed by a listing and read here.
     // What every case turns on is that the row and the place it was listed at
@@ -5193,6 +5839,7 @@ describe("verbs", () => {
       "listPieceCallables",
       "describePiece",
       "callFromCommand",
+      "sinkCellValue",
     ] as const;
 
     /** One of {@link READS}. */
@@ -5309,6 +5956,10 @@ describe("verbs", () => {
           note("callFromCommand");
           return Promise.resolve();
         },
+        sinkCellValue: () => {
+          note("sinkCellValue");
+          return Promise.resolve(() => {});
+        },
         editText: (text) =>
           Promise.resolve({
             kind: "edited" as const,
@@ -5387,6 +6038,9 @@ describe("verbs", () => {
       ["verbs", onPiece, "listPieceCallables"],
       ["describe", onPiece, "suspend"],
       ["describe", onPiece, "describePiece"],
+      ["watch title", onPiece, "suspend"],
+      ["watch title", onPiece, "warmPiece"],
+      ["watch title", onPiece, "sinkCellValue"],
     ];
 
     it("issues no read after the cancel, on any line and from any read", async () => {
@@ -5409,7 +6063,14 @@ describe("verbs", () => {
      * with every read standing in as a throw, so a verb listed here that
      * reaches one fails instead of being excused by this list.
      */
-    const READS_NOTHING_AT_ALL = ["help", "more", "pwd", "where"];
+    const READS_NOTHING_AT_ALL = [
+      "help",
+      "more",
+      "pwd",
+      "unwatch",
+      "watches",
+      "where",
+    ];
 
     it("cancels a line of every verb, or says why the verb has no read", async () => {
       // What closes the set of verbs, which is the gap the rows above had:

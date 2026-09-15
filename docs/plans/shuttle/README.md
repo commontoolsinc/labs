@@ -22,7 +22,7 @@ shuttle estuary/board> watch topics/3
 │ replies  14                          │
 └── q: back (watch stays armed) ───────┘
 shuttle estuary/board> call topics/3 add-reply --body "hi"
-watch topics/3: replies 14 → 15
+watch topics/3 @space: changed
 shuttle estuary/board>
 ```
 
@@ -49,12 +49,12 @@ The moving half of context has no home. `CF_API_URL`, `CF_IDENTITY`, and
 parameter that is required everywhere and identical across a working
 session is one a caller should state once" — caps out exactly there,
 because piece, path, and scope are not identical across a session: they
-change with every step, because they are the work. The fabric's reference
-grammar is right-anchored —
-`/[@did:key:…/]of:fid1:<id>[@scope][/path…]`, documented at the top of
-`packages/cli/lib/llm-friendly-ref.ts`, which adds the `#argument` suffix
-at the CLI's intake seams — with omitted levels
-supplied by context, and shuttle makes that context a position you
+change with every step, because they are the work. The fabric's cell
+reference grammar — `//<space>/<piece>[#member][@qualifier…][/path…]` and its
+space- and piece-relative forms, decided in
+[`cell-reference-grammar.md`](../../specs/cell-reference-grammar.md) and read
+by `packages/runner/src/cell-reference.ts` — takes the levels a reference
+omits from a context, and shuttle makes that context a position you
 navigate: **a place is the context that fills in the omitted levels of a
 reference**, moved by `cd`, relative references, and handles instead of by
 copying printed addresses between commands (the composition axis of
@@ -149,8 +149,8 @@ invisible, the prompt renders the whole ambient record — place and scope
     would name another cell entirely. Inside a piece nothing is reserved.
 
     **The reservation diverges from the canonical grammar, for two slug
-    values.** The rooted spelling is not shuttle's — `/[@space/]<piece>…`
-    is the canonical cell reference, the runner's `parseReferenceParts`,
+    values.** The rooted spelling is not shuttle's — `[//space]/<piece>…`
+    is the canonical cell reference, the runner's `parseCellReference`,
     the same structure in patterns and at every `cf` intake seam, and this
     CLI resolves the piece segment by slug as well as by handle
     (`packages/cli/lib/llm-friendly-ref.ts`). The facets are the
@@ -246,14 +246,12 @@ invisible, the prompt renders the whole ambient record — place and scope
     everywhere else, so `cd @session` reaches a key of that name and a
     refusal that finds none offers `.@session` instead.
 
-    This tracks
-    [#6814](https://github.com/commontoolsinc/labs/issues/6814), which is
-    proposed rather than merged. Shuttle ships conforming to it because
-    the alternative is migrating the spelling later, and a shell's
-    navigation words are what a person's fingers learn first. A qualifier names the
-    base scope or the reading identity's own
-    overlays, never another identity's; standing in another identity's
-    overlay is a canonical-grammar extension, out of v1.
+    The spelling is the cell reference grammar's
+    ([`cell-reference-grammar.md`](../../specs/cell-reference-grammar.md)),
+    and shuttle reads it through that grammar's own reader. A qualifier names
+    the base scope or the reading identity's own overlays, never another
+    identity's; standing in another identity's overlay is a canonical-grammar
+    extension, out of v1.
 21. **The native tool set v0 is ruled and deferred** with decision 16's
     contract: the list, and `cat`'s deliberate absence, are preserved in
     [`futures.md`](futures.md).
@@ -368,8 +366,10 @@ The ambient context is one record:
   inside it) and scope.
 - **External working location**, **invocation session**.
 
-`cd` accepts relative path segments, `..`, `-`, `/`, rooted and complete
-canonical references, slugs, wish targets, and scope qualifiers. A space
+`cd` accepts relative references — a head, `.` or a run of `..` that climbs
+back through the route shuttle walked, and a literal path after it — `-`,
+`/`, rooted and complete canonical references, slugs, numbered handles, wish
+targets, and scope qualifiers. A space
 named by name inside a reference is accepted and settled in two steps,
 since deriving a DID from a name needs a session: the move comes back
 carrying the name, and landing it means handing it over again with the
@@ -397,11 +397,12 @@ where an operand points is the operand's own fact, and a read of a cell
 that is not there fails on its own account. Every
 reference a command takes resolves against the cwd, and how much of the
 cwd it needs varies: a rooted `/of:…` fixes the piece and path but draws
-its space and its scope from the place, a complete `/@did:key:…/of:…`
+its space and its scope from the place, a complete `//did:key:…/of:…`
 carries the space and still draws the scope, and only a fully qualified
-`/@did:key:…/of:…@scope` names its cell from anywhere
+`//did:key:…/of:…@scope` names its cell from anywhere
 ([`grammar.md`](grammar.md)). The place is result-rooted — `cd` refuses a
-reference carrying `#argument`, and arguments are reached per operand. The
+reference selecting the `#argument` member, and arguments are reached per
+operand, as in `get .#argument/title`. The
 prompt renders position and scope compactly (an elided alias is checked
 against the target's declared name, never guessed).
 
@@ -413,7 +414,7 @@ several) stay reachable later.
 
 | Component | Where | What it gives shuttle |
 | --- | --- | --- |
-| Canonical + alias reference grammar | `packages/cli/lib/llm-friendly-ref.ts` (doc comment), runner's `parseLLMFriendlyLink` | The address syntax; shuttle consumes it and must not fork it |
+| Cell reference grammar | [`cell-reference-grammar.md`](../../specs/cell-reference-grammar.md); `packages/runner/src/cell-reference.ts` — `parseCellReference`, `parseRelativeReference`, `parsePieceSegment`, `renderCellReference` — and `packages/cli/lib/llm-friendly-ref.ts` at the CLI's intake | The address syntax; shuttle consumes it and must not fork it |
 | Target option surface | `targetOptions` in `packages/cli/commands/piece.ts` | The enumeration of exactly what a place must supply |
 | Live-state listing and completion | `keysOf` in `packages/cli/lib/cell-listing.ts` — exported, beside the `listCellKeys` that reads a cell through it, which path completion in `packages/cli/lib/completion/providers.ts` uses | The `ls` primitive and tab completion; shuttle reads the cell over the connection it holds and names its rows through `keysOf`, and a failed read raises rather than listing empty. Shuttle's own tab completion reads that listing rather than a second read, and swallows the failure at its own call site, as the providers do at theirs |
 | Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module doing raw-mode full-screen TTY handling; `mod.ts` and `loadinput.ts` touch stdio for the one-shot path (capability probes, plain-output writes, piped input); `keys.ts`, `ansi.ts`, `render.ts`, `session.ts` hold state and decoding as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |

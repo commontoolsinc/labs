@@ -1009,10 +1009,9 @@ leaves the tree consistent.
    piece-relative form against it; `cf`'s positional path is one already, and
    gains the `.` and `..` heads; every reader of the piece-relative form — an
    interactive reader with a position among them — takes them from the shared
-   reader rather than reading them on its own. A trailing empty segment is the
-   key `""` and is no longer dropped: `parseReferenceParts` and the interactive
-   reader's `moveBySegments` (`packages/cli/lib/shuttle/place.ts`) both pop it
-   today. `#argument` selects a member only on the piece segment or relative
+   reader rather than reading them on its own. A trailing empty segment inside
+   a piece names the key `""`; shared readers and shuttle preserve it.
+   `#argument` selects a member only on the piece segment or relative
    head. In a path it is literal data, including a final key named
    `a#argument`. Readers must preserve these keys so every cell remains
    addressable; they cannot distinguish a literal key from an intended

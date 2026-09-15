@@ -7,8 +7,9 @@
  * are catching up with the code or falling behind it. A median rather than the
  * distance between the ends of the window: the series has steps in it, because
  * a change to what the metric counts moves the whole level in a single day, and
- * one such day cannot carry a median. The chart shows every day of the longer
- * window, with the days the median rests on picked out.
+ * one such day cannot carry a median. The chart spans the longer window and
+ * highlights the days used for the median. Those days' values set the vertical
+ * scale.
  *
  * Amber means that median is a rise. Half the days in the window have to have
  * risen for it to be one, so a day that added debt says nothing on its own. The
@@ -177,11 +178,7 @@ export function coverageDebtView(
     extra: sparkline(
       samples.map((sample) => sample.uncoveredLines),
       CHART_LINE,
-      // Brighten the days the median rests on, and keep the whole window in
-      // view (scaleAll): a change in what the metric counts leaves a step
-      // behind, and scaling to the recent days alone would push everything
-      // before that step off the chart.
-      { count: trend.length, color: CHART_HIGHLIGHT, scaleAll: true },
+      { count: trend.length, color: CHART_HIGHLIGHT },
       true,
       dayPositions(samples),
     ),

@@ -22,6 +22,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   render and not the transaction. It carries what was disproved with what
   landed, and the one item still open — a session that settles at ~800 ms after
   roughly twenty clicks, which is waiting rather than compute.
+- [Topics computation cost and live upgrade](topics-computation-cost.md)
+  sequences shared backlink lookup, incremental mention maintenance, topic
+  summaries, measurement gates, and rehearsed upgrades of populated boards.
 - [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
   repairs, migration of authored patterns and their tests, and enforcement
   through lint and new-source admission.

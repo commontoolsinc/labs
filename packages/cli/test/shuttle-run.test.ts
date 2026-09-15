@@ -23,10 +23,13 @@ import { ConsoleMethod } from "@commonfabric/runner";
 import type { ConnectionOutput, SpaceConfig } from "../lib/piece.ts";
 import type { PromptTerminal } from "../lib/shuttle/prompt.ts";
 import { runShuttle, type ShuttleDeps } from "../lib/shuttle/run.ts";
+import { runLine } from "../lib/shuttle/verbs.ts";
 import type { VerbDeps } from "../lib/shuttle/vocabulary.ts";
 import type { Key } from "../lib/view/keys.ts";
+import { moved } from "./shuttle-place-helpers.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
+const HANDLE = "of:fid1:abcdefghijklmnop";
 
 const CONFIG: SpaceConfig = {
   apiUrl: "https://toolshed.example",
@@ -80,6 +83,8 @@ async function running(
     announce: (text) => {
       produced.push(text);
     },
+    frame: () => {},
+    unframe: () => {},
     suspend: (body) => body(),
   };
   await runShuttle(CONFIG, {
@@ -141,6 +146,8 @@ describe("runShuttle()", () => {
           announce: (text) => {
             announced.push(text);
           },
+          frame: () => {},
+          unframe: () => {},
           suspend: (body) => body(),
         }),
     });
@@ -209,10 +216,57 @@ describe("runShuttle()", () => {
           },
           finish: () => {},
           announce: () => {},
+          frame: () => {},
+          unframe: () => {},
           suspend: (body) => body(),
         }),
     })).rejects.toThrow("No screen.");
     expect(closed).toBe(1);
+  });
+
+  it("disarms every watch before the connection closes", async () => {
+    // A watch outlives the view that armed it and nothing else, so what it
+    // must not outlive is the runtime it subscribed to: a sink still armed
+    // over a disposed connection is a callback into a torn-down runtime.
+
+    const order: string[] = [];
+    let taken = 0;
+    const pieces = {
+      dispose: () => {
+        order.push("closed");
+        return Promise.resolve();
+      },
+      getSpace: () => SPACE,
+      getSpaceName: () => "board",
+    } as unknown as PiecesController;
+    await runShuttle(CONFIG, {
+      open: () => Promise.resolve(pieces),
+      terminal: (body) =>
+        body({
+          keys: ReadableStream.from([]),
+          edit: () => {},
+          finish: () => {},
+          announce: () => {},
+          frame: () => {},
+          unframe: () => {},
+          suspend: (inner) => inner(),
+        }),
+      prompt: async (shuttle) => {
+        moved(shuttle.place, `/${HANDLE}`);
+        const outcome = await runLine("watch title", shuttle, {
+          warmPiece: (config) => Promise.resolve({ piece: config.piece }),
+          sinkCellValue: () => {
+            const at = ++taken;
+            return Promise.resolve(() => order.push(`cancel ${at}`));
+          },
+        });
+        // The lens the line opened is the prompt loop's to close, and this
+        // case stands in for that loop. What is left armed after it is the
+        // watch alone, which is what the run has to disarm.
+        if (outcome.kind === "watching") outcome.lens.close();
+      },
+    });
+    expect(order).toEqual(["cancel 2", "cancel 1", "closed"]);
   });
 
   it("opens no connection at all where the terminal would not open", async () => {
@@ -251,6 +305,8 @@ describe("runShuttle()", () => {
           edit: () => {},
           finish: () => {},
           announce: () => {},
+          frame: () => {},
+          unframe: () => {},
           suspend: (body) => body(),
         });
       },
@@ -282,6 +338,8 @@ describe("runShuttle()", () => {
             edit: () => {},
             finish: () => {},
             announce: () => {},
+            frame: () => {},
+            unframe: () => {},
             suspend: async (inner) => {
               order.push("suspended");
               const answer = await inner();

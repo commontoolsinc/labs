@@ -218,6 +218,11 @@ topic, and following a crossref to a sibling. Its `topic board` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
 
+The `load` segment ends after the shell publishes its ready application and
+selects the requested board route. Shell readiness is an explicit notification
+from bootstrap; selecting the route does not require its topic data to have
+rendered. This keeps the segment boundary independent of DOM mutation timing.
+
 Each segment reaches its starting point with the timer stopped — `Deno.bench`'s
 `b.start()` and `b.end()` bracket only the segment itself — so every iteration
 measures one segment of a fresh navigation, and no benchmark depends on another
@@ -500,6 +505,9 @@ deno bench --no-lock -A --json packages/runner/test/cfc-consumed-source-dedup.be
 
 The [local measurement report](../history/development/performance/2026-09-14-cfc-consumed-source-dedup.md)
 records an alternating source-count sweep and the limits of that measurement.
+The [metadata-width measurement](../history/development/performance/2026-09-14-cfc-consumed-label-index.md)
+uses the same fixture to compare per-document validation and indexed path
+lookup. Index construction remains inside the collector timer.
 
 ## Scoped snapshot memo reuse
 
@@ -547,3 +555,23 @@ are part of their respective measurements.
 
 The [phase measurement report](../history/development/performance/2026-09-11-index-maintenance-phases.md)
 records the validated local count matrix and its limits.
+
+## JSON Pointer encoding
+
+`packages/memory/test/v2-path.bench.ts` measures encoding 256 distinct paths and
+looking each result up in a prebuilt Map. The lookup consumes the encoded
+string, including hashing or flattening deferred by string construction. Fixture
+construction and checksum validation are outside the timed interval.
+
+The plain-path cases sweep depths 1, 4, and 12. Separate depth-4 cases use long
+segments or both JSON Pointer escape characters in every segment. These
+synthetic controls distinguish segment traversal from character scanning and
+escaping; their proportions do not estimate a deployed workload. Run with:
+
+```sh
+deno bench --no-lock --json packages/memory/test/v2-path.bench.ts
+```
+
+The
+[local encoding measurement](../history/development/performance/2026-09-14-encode-pointer.md)
+records interleaved comparisons and their limits.
