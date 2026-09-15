@@ -199,17 +199,37 @@ export function nextNameAmong(names: Iterable<string>): string {
 }
 
 /**
- * Allocates the next name over `names` and records `member` under it, and
- * returns the name. Called from the body of an `action()` or `handler()`, so
- * the read of the map's keys and the write of the new key land in one
+ * Allocates the next name over `names`, calls `create` with it, records what
+ * `create` returns under that name, and returns the name and the member.
+ * Called from the body of an `action()` or `handler()`, so the read of the
+ * map's keys, the create, and the write of the new key land in one
  * transaction. That is what makes the name safe: a concurrent create that
- * read the same keys conflicts on commit, re-runs against this write, and
- * takes the name after it.
+ * read the same keys conflicts on commit and re-runs against this write, and
+ * the re-run calls `create` again with the name after it, so a member built
+ * holding its name holds the one the map records for it.
+ *
+ * `create` runs once per run of the verb, between the read of the keys and
+ * the write. Nothing here constrains what it does with the name; a member
+ * that stores it holds a copy, which stays the map's name for it only because
+ * a name is permanent and never reused.
+ */
+export function createNamed<M>(
+  names: NamesMapCell,
+  create: (name: string) => M,
+): { name: string; member: M } {
+  const name = nextNameAmong(Object.keys(names.get() ?? {}));
+  const member = create(name);
+  names.key(name).set(member);
+  return { name, member };
+}
+
+/**
+ * Like `createNamed()`, except for a member that already exists: allocates
+ * the next name over `names`, records `member` under it, and returns the
+ * name, in one transaction for the reason `createNamed()` states.
  */
 export function assignName(names: NamesMapCell, member: unknown): string {
-  const name = nextNameAmong(Object.keys(names.get() ?? {}));
-  names.key(name).set(member);
-  return name;
+  return createNamed(names, () => member).name;
 }
 
 /**
