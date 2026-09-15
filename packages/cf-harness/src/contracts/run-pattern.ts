@@ -44,7 +44,7 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
     description: {
       type: "string",
       description:
-        'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote is queued for the pattern index when it runs; publication is not confirmed by the tool result. Fill this in for later evaluation and discovery. A run without one publishes nothing.',
+        'One line saying what the pattern you are running does, e.g. "Totals an invoice\'s line items and applies a discount". When pattern-index publication is enabled, source you wrote and ran successfully with a non-empty description is queued for the index; the tool result does not confirm publication. Fill this in for later evaluation and discovery. No contribution is queued when no index is configured, publication is disabled, or the description is empty.',
     },
     hashtags: {
       type: "array",
