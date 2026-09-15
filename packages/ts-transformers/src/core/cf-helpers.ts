@@ -189,7 +189,7 @@ export function injectCfHelpers(source: string, fileName?: string): string {
     source,
     ts.ScriptTarget.ES2023,
   );
-  checkReservedHelperVar(sourceFile, CF_HELPERS_IDENTIFIER);
+  checkCFHelperVar(sourceFile);
   const usedStmt = declaresTopLevelBinding(sourceFile, JSX_FACTORY_SHIM_NAME)
     ? HELPERS_USED_STMT_BARE
     : fileName !== undefined && JS_FILE_RE.test(fileName)
@@ -253,8 +253,13 @@ export function isLegacyInjectedEnvelope(source: string): boolean {
   return false;
 }
 
-// Throws if `identifier` (the reserved `__cfHelpers`) was found as an
-// Identifier anywhere in the parsed source.
+// The authoring guard: throws if the reserved `__cfHelpers` identifier appears
+// anywhere in the parsed source (see `isLegacyInjectedEnvelope` for the one
+// tolerated, storage-fed exception).
+function checkCFHelperVar(sourceFile: ts.SourceFile) {
+  checkReservedHelperVar(sourceFile, CF_HELPERS_IDENTIFIER);
+}
+
 function checkReservedHelperVar(sourceFile: ts.SourceFile, identifier: string) {
   const visitor = (node: ts.Node): ts.Node => {
     if (ts.isIdentifier(node) && node.text === identifier) {
@@ -267,12 +272,14 @@ function checkReservedHelperVar(sourceFile: ts.SourceFile, identifier: string) {
   ts.visitNode(sourceFile, visitor);
 }
 
-// Whether a top-level statement of `sourceFile` declares a value binding named
-// `name`: a function, class, enum, or namespace declaration, a variable
-// declaration (destructuring included), or an import binding. Type-only
-// declarations (`interface`, `type`) do not count: they occupy no value
-// declaration space, so the function shim coexists with them. Bindings nested
-// in any inner scope do not count either; they merely shadow the shim.
+// Whether the module scope of `sourceFile` declares a value binding named
+// `name`: a top-level function, class, enum, or namespace declaration, a
+// top-level variable declaration (destructuring included), an import binding,
+// or a `var` hoisted out of a nested block or loop. Type-only declarations
+// (`interface`, `type`) do not count: they occupy no value declaration space,
+// so the function shim coexists with them. Block-scoped bindings in nested
+// statements and anything inside a function or class body do not count
+// either; they merely shadow the shim.
 function declaresTopLevelBinding(
   sourceFile: ts.SourceFile,
   name: string,
@@ -288,6 +295,31 @@ function declaresTopLevelBinding(
     }
     return false;
   };
+  // `var` declarations hoist through blocks, loops, `try`, `switch`, and
+  // labels up to the nearest function or module scope. Walk exactly those
+  // containers; stop at everything else (expressions, functions, classes).
+  const hoistsVar = (node: ts.Node): boolean => {
+    if (ts.isVariableDeclarationList(node)) {
+      if ((node.flags & ts.NodeFlags.BlockScoped) !== 0) return false;
+      for (const declaration of node.declarations) {
+        if (bindsName(declaration.name)) return true;
+      }
+      return false;
+    }
+    if (ts.isVariableStatement(node)) return hoistsVar(node.declarationList);
+    if (
+      ts.isBlock(node) || ts.isIfStatement(node) || ts.isForStatement(node) ||
+      ts.isForInStatement(node) || ts.isForOfStatement(node) ||
+      ts.isWhileStatement(node) || ts.isDoStatement(node) ||
+      ts.isTryStatement(node) || ts.isCatchClause(node) ||
+      ts.isSwitchStatement(node) || ts.isCaseBlock(node) ||
+      ts.isCaseClause(node) || ts.isDefaultClause(node) ||
+      ts.isLabeledStatement(node) || ts.isWithStatement(node)
+    ) {
+      return ts.forEachChild(node, hoistsVar) === true;
+    }
+    return false;
+  };
   for (const stmt of sourceFile.statements) {
     if (
       ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt) ||
@@ -299,6 +331,8 @@ function declaresTopLevelBinding(
       for (const declaration of stmt.declarationList.declarations) {
         if (bindsName(declaration.name)) return true;
       }
+    } else if (hoistsVar(stmt)) {
+      return true;
     } else if (ts.isImportDeclaration(stmt) && stmt.importClause) {
       const { name, namedBindings } = stmt.importClause;
       if (isName(name)) return true;
