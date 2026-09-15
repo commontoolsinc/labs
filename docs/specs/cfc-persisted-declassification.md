@@ -167,13 +167,14 @@ rewrite event:
    writes, under the `enforce` policy-evaluation dial — never the render
    ceiling or observe-dial diagnostics, where a grant would be spent by
    looking at it) and only while its consumption receipt is absent. The
-   receipt is `cfc-grant:` + a digest of `{grantConsumed: {grantId}}` — the
-   §6.5.1 `consumedCellId` shape on the item-2 address idiom, so the
-   S18-class reserved-namespace write gate covers forging AND the
-   re-arming delete. The releasing transaction stages the receipt write +
-   create-only mark inside `prepareBoundaryCommit`, so consumption commits
-   atomically with the release (no-consume-on-failure, §6.5.2) and a
-   racing second release dies as a permanent `receipt-exists` rejection.
+   receipt is `cfc-grant:` + a digest of `{cfcGrantConsumed: {version,
+   grantConsumed: {grantId}}}` — the §6.5.1 `consumedCellId` shape on the
+   item-2 address idiom, so the S18-class reserved-namespace write gate covers
+   forging AND the re-arming delete. The releasing transaction stages the
+   receipt write + create-only mark inside `prepareBoundaryCommit`, so
+   consumption commits atomically with the release (no-consume-on-failure,
+   §6.5.2) and a racing second release dies as a permanent `receipt-exists`
+   rejection.
    **Requires `experimental.commitPreconditions`** (the storage commit
    emits entity-absent preconditions only under it): with the flag off —
    the default — single-use grants are unsatisfiable everywhere, fail
@@ -196,11 +197,11 @@ _Implementation note (2026-07-09): items 1–3 shipped in #4627. The
 `policyState` guard resolves through `ExchangeEvalContext.grantResolver`
 (evaluator stays pure; variables bind from grant fields; unresolvable or
 throwing resolution fails closed). `CfcGrant` records live in the **owner's
-identity space** at `cfc-grant:` + a digest of the release scope
-`{version, space, kind, owner, resource}` — identity is the scope only, so
-the audience and lifecycle live in the value and revocation keeps the
-address (a full-record hash would give revocations a fresh address while
-the stale one kept resolving). Writes go through
+identity space** at `cfc-grant:` + a digest of the release scope under a
+versioned wrapper, `{cfcGrant: {version, space, kind, owner, resource}}` —
+identity is the scope only, so the audience and lifecycle live in the value
+and revocation keeps the address (a full-record hash would give revocations
+a fresh address while the stale one kept resolving). Writes go through
 `IExtendedStorageTransaction.writeCfcGrant()` and require a trusted
 **builtin** implementation identity (pattern/handler code cannot author
 durable release state); audience entries pass the §3.1.8 principal-like
