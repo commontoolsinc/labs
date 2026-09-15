@@ -43,12 +43,12 @@ honors those policies does not compile. What it adds up to is a
 distributed, trusted runtime for networked software in the AI era.
 
 Concretely. A program that imports your mail gets a token that could
-read all of it. In the fabric that token carries four lines: never
+read all of it. In Common Fabric that token carries four lines: never
 logged, never leaves the verified runtime, only ever sent to the one
 place that issued it, and only in the one field that place expects. That
 is the whole list. Any program can hold that token now, including one a
 model wrote thirty seconds ago, because the rules ride with the data
-instead of with the program's good intentions. In the fabric, how your
+instead of with the program's good intentions. In Common Fabric, how your
 data may be used is structurally aligned with your interests — not
 promised to be, or audited to be. Structurally.
 
