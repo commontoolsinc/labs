@@ -5,11 +5,14 @@ different. The session reads the piece's cells, schema and data through
 handles, reads or edits its source deliberately, and the piece updates in
 place: data intact, a revision that is visible and reversible.
 
-This plan is the design for the cf-harness surface that does that, for a
-ruling before any of it is built. Seven questions, each with a
-recommendation, the alternative it was chosen over, and what that choice
-costs. It is a plan, not a spec: the design of record for the lifecycle it
-sits on is [`../specs/piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md),
+This plan is the design for the cf-harness surface that does that. Seven
+questions, each with a recommendation, the alternative it was chosen over,
+and what that choice costs. Question 2 — whether program text enters a
+model context — is ruled: the child that performs the revision may read
+the source, the parent may not. The rest await a ruling, and the three that
+are still open are listed at the end. It is a plan, not a spec: the design
+of record for the lifecycle it sits on is
+[`../specs/piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md),
 and the vocabulary below is that document's.
 
 ## What already exists
@@ -61,9 +64,20 @@ loom #5722) — so a handle over the piece's root cell reaches the session
 today, under an operator-chosen name, and `describe_handle` answers shape,
 labels and fill over it.
 
-What is missing is narrow: nothing tells the session that a handle names a
-**piece** rather than a cell, nothing lets a session read a piece's source
-under a label, and no tool applies a revision.
+The half of question 2 that keeps source away from the parent is built too,
+and built deliberately. The `pattern-author` subagent profile has its own
+tool surface, its own return contract, and authority over that contract, so
+a delegation cannot widen it
+([`subagent.ts:86-113`](../../packages/cf-harness/src/contracts/subagent.ts#L86-L113),
+[`subagent.ts:251-306`](../../packages/cf-harness/src/contracts/subagent.ts#L251-L306),
+[`subagent.ts:509`](../../packages/cf-harness/src/contracts/subagent.ts#L509)).
+That contract already states the rule this design needs, in its own words:
+it has "no field for source, in any encoding, because a parent has no use
+for source it should not be compiling".
+
+What is missing is narrow: nothing tells a context that a handle names a
+**piece** rather than a cell, no tool reads a piece's source under a label,
+no profile is shaped to hold one, and no tool applies a revision.
 
 ## 1. The reference: how a piece reaches a session
 
@@ -94,10 +108,11 @@ the pattern identity, not the repository locator, not an origin URL's path.
 `readPieceSourceState` returns all of those
 ([`piece-origin.ts:66`](../../packages/piece/src/ops/piece-origin.ts#L66));
 the piece handle's disclosure is a strict subset of it, and question 2 is
-where the rest goes. The revision list is ids, times and an eight-value
+where the rest goes — to the revising child, through a tool of its own, and
+never to the parent. The revision list is ids, times and an eight-value
 operation enum — a channel with no author-chosen text in it at all, which
-is what lets undo be discussed in a session that never reads a line of the
-program.
+is what lets undo be discussed in a context that never reads a line of the
+program, which is the parent's whole position here.
 
 **Alternative: a new `pieceRefs` channel on the task, parallel to
 `patternRefs`.** Rejected. `patternRefs` names content-addressed entries in
@@ -134,104 +149,170 @@ reading their data.
 
 ## 2. Reading the source
 
-This is the load-bearing question, and it is a choice between two costs
-that fall on different people.
+**Recommendation (Ben's ruling, 2026-09-15): the child that performs the
+revision may read the piece's source into its own context, through a
+deliberate labeled read. The parent may not, ever.**
 
-**Recommendation: the harness holds the source; the session edits it
-blind, against diagnostics. Program text does not enter model context.**
+This is the same line `run_pattern`'s answer rule already draws, applied to
+program text: a context that has to work with a thing holds it, and what
+crosses back to the parent is a reference, a diagnostic and a receipt.
 
-The mechanism is CT-2299's. At the point the session takes a piece handle
-into a revision, the harness reads the piece's current authored files with
-`readPieceSourceState` and **retains** them host-side, exactly as
-`#persistRunPatternSource` already retains the source of a `run_pattern`
-call beside its output
-([`prompt-loop.ts:3381`](../../packages/cf-harness/src/prompt-loop.ts#L3381)).
-The session then expresses its change as edits against that retained text —
-search/replace or hunks — which the harness applies host-side and compiles.
-Compile diagnostics quote lines by number against the retained text and
-come back model-facing, as `run_pattern`'s authored-source diagnostics do
-today. Source never returns.
+### The two halves
 
-Two things make this the recommendation rather than a tie.
+**The child half — a labeled read.** A `read_piece_source` tool, on the
+revising child's surface and on no other, takes a piece handle and returns
+the authored files of the piece's current revision. It is not a file read
+and does not go through `read_file`: the piece is addressed by handle, the
+read goes through `readPieceSourceState`
+([`piece-origin.ts:577`](../../packages/piece/src/ops/piece-origin.ts#L577)),
+and the reply carries
 
-The retention justification does not survive the change of author. The
-sidecar's own reason for keeping source without a label is that "the source
-is the model's own writing, so nothing crosses a boundary by being kept"
-([`prompt-loop.ts:3374-3379`](../../packages/cf-harness/src/prompt-loop.ts#L3374-L3379)).
-An existing piece's source was written by someone else, possibly in another
-session under other labels. Reading it into the model is the first time
-this system would move program text **across an authorship boundary into a
-model context**, and CT-2199's ruling names exactly that as the trigger for
-picking the labeling work up. A design that never does it does not need
-CT-2199 built first.
+- the piece's live CFC labels, the same view `describe_handle` reports over
+  the same referent — so the child's context ceiling rises to include them
+  and every later boundary measures the child against that ceiling rather
+  than against the ceiling it had before it read;
+- an **authored-source integrity** statement: whether this revision's
+  source was operator-provisioned, authored by this principal, or authored
+  by another — which is the fact that decides how much the child should
+  trust what it is reading, and is not derivable from the bytes;
+- the current `sourceRevisionId`, so the read and the later write name the
+  same revision.
 
-And the harness already has this shape and it is the one it trusts. The
-indexed-source arm of `run_pattern` compiles source the model did not
-author and withholds the diagnostic, in those words —
-"the diagnostic is retained in the run artifact and withheld here, since it
-quotes source you did not author"
-([`run-pattern.ts:1207`](../../packages/cf-harness/src/tools/run-pattern.ts#L1207)).
-The recommendation is that same posture, one notch less severe: the
-diagnostic comes back, because a diagnostic against text the harness holds
-can quote line numbers without quoting the line.
+The read is recorded in the run artifact as its own event, because
+"deliberate" has to be legible afterwards: a reader of the run can see that
+this child read this piece's source at this revision, which is the property
+CT-2332 asks for in the words "deliberate and recorded".
+
+**The parent half — the invariant, which is mostly already enforced.** The
+`pattern-author` profile is already built to this shape and its reasoning is
+already written down. Its tool surface has no `write_file` and no
+`edit_file` because "its deliverable is a result reference, not a file"
+([`subagent.ts:86-113`](../../packages/cf-harness/src/contracts/subagent.ts#L86-L113)).
+Its return contract is a discriminated union with, in the contract's own
+words, "no field for source, in any encoding, because a parent has no use
+for source it should not be compiling"
+([`subagent.ts:251-306`](../../packages/cf-harness/src/contracts/subagent.ts#L251-L306)).
+And it holds authority over that contract — `returnContractAuthority:
+"profile"`
+([`subagent.ts:509`](../../packages/cf-harness/src/contracts/subagent.ts#L509))
+— so a caller cannot widen the channel with a `returnSchema` of its own
+([`subagent.ts:560-566`](../../packages/cf-harness/src/contracts/subagent.ts#L560-L566)),
+which is the loophole a narrow channel otherwise has.
+
+The part that makes the invariant hold rather than merely being intended is
+smaller than it looks and is worth naming precisely. When a structured
+return schema is in force and the child's return validates, the child's
+free-form prose **does not reach the parent at all**: the summary the parent
+sees is replaced by the fixed sentence "Subagent returned structured data
+matching the requested schema."
+([`prompt-loop.ts:1682-1687`](../../packages/cf-harness/src/prompt-loop.ts#L1682-L1687)).
+Unconstrained strings inside the validated value are sealed as opaque links
+rather than passed
+([`structured-result.ts:60-75`](../../packages/runner/src/cfc/structured-result.ts#L60-L75)).
+So the whole of the parent-facing channel is `ok`, a failure code from a
+fixed vocabulary, a minted result token, and the revision receipt.
+
+So the design's addition to the parent half is a revising profile that
+inherits all of that, plus the one thing the profile machinery does not yet
+give: `read_piece_source` on that surface and absent from the parent's.
+
+### The invariant, stated so it can fail
+
+*No program text, and no string derived from program text, reaches the
+parent context of a revision.*
+
+Three tests, each able to fail:
+
+1. **Surface.** `read_piece_source` is absent from the parent's tool list
+   and from every profile but the revising one. A test asserts the tool id
+   sets, the way the existing profile surfaces are asserted.
+2. **Channel.** A revising child that puts source in its return is
+   refused by its own contract: the return schema has no string field a
+   program could ride in, and the profile owns the schema so a delegation
+   cannot add one. A test plants source in each branch and asserts the
+   parent value holds none of it.
+3. **The seam.** When validation *fails*, the parent's summary is
+   `Subagent return validation failed: <validationError>`
+   ([`prompt-loop.ts:1637-1639`](../../packages/cf-harness/src/prompt-loop.ts#L1637-L1639)),
+   and that message comes from the schema validator
+   ([`schema-sanitization.ts:1675`](../../packages/runner/src/cfc/schema-sanitization.ts#L1675)).
+   Whether a validation message can quote the offending value is the one
+   thing in this chain the design does not get for free, and it is the
+   difference between an invariant and an intention. A test plants source
+   in an invalid return and asserts the parent's summary quotes none of it;
+   if it does, the fix is a fixed message with the detail in the artifact,
+   which is the treatment `run_pattern` already gives thrown text.
+
+### What each half costs
+
+**The child gains what it needs and pays a ceiling.** It can see the code it
+is changing, so "make the matching stricter" is ordinary work rather than a
+schema-and-diagnostics guess. It pays by taking the piece's labels into its
+context: a child that has read a piece holding `email` and `finance` data
+is measured against those atoms at every later boundary, so a release it
+would previously have made may now be withheld. That is correct rather than
+unfortunate — it is the same treatment reading the *data* already gets, and
+CT-2189 run 7 shows the withheld-release path working exactly this way. It
+is also why the read belongs on the revising child and not the author
+child by default: a child that never needs source should not carry the
+ceiling that reading it mints.
+
+**The parent loses nothing it had.** It never held source in this design.
+What it holds is the handle, the revision id, the diagnostics, and the
+receipt — which is what it needs to tell the person what changed.
+
+**The system pays one thing, and it should be said plainly.** Program text
+in a model context is still an unlabeled side channel in the sense CT-2199
+describes: labeling the *read* raises the child's ceiling, but the program
+text the child then writes into `revise_piece` carries no label of its own,
+and the diagnostics quoting it are model-facing. This design narrows that
+exposure to one context which is already at the data's ceiling and whose
+outbound channel is a typed union — which is a far better position than the
+parent holding it — but it does not close CT-2199, and it should not be
+described as closing it. CT-2199's trigger for being picked up is a run
+that shows program text carrying a labeled value across a boundary in a way
+that matters to a reader; this design puts a recorded read in front of that
+boundary, so if it happens, the record names it.
+
+**Alternative: source never enters any model context** — the harness
+retains it and the child edits blind against diagnostics. The
+parent-facing half is identical; what differs is whether the child can see
+what it is changing. Rejected on the ruling, and the honest statement of
+what it would have bought is that the exposure above would not exist at
+all, and the honest statement of what it costs is the "make the matching
+stricter" class of request, which is most of what a person actually asks
+for when iterating on a piece they already have. The retained-source
+mechanism it needs is built anyway — question 5 — so this alternative
+remains available per-profile if a later ceiling makes it necessary.
 
 ### What the author loses, measured
 
-An agent that cannot read the source must locate its edit from
-`describe_handle`'s schema, the person's words, and compile diagnostics
-alone. On a search/replace edit form, a failed anchor is one more attempt.
-The relevant number is the series' attempt-to-success ratio on the bills
-task, where the agent **wrote** the source and still could not land it:
+The measurement changes shape under the ruling: the question is no longer
+"parent with source vs parent blind" but **"revising child with source vs
+revising child blind"**, which is a comparison between the recommendation
+and its alternative rather than between two postures for the parent.
+
+The baseline is the series' attempt-to-success ratio on the bills task,
+where the child **wrote** the source and could see all of it:
 
 | | run 3 | run 4 | run 5 | run 6 | run 7 |
 | --- | --- | --- | --- | --- | --- |
 | `run_pattern` attempts | 4 | 5 | 4 | 8 | 5 |
 | reaching `ok` | 1 | 2 | 1 | 1 | 1 |
 
-(CT-2189 runs 3–7.) One in four to one in eight, with the whole program in
-context. The honest reading is that reading the program is evidently not
-what makes an attempt succeed here: every one of run 7's four failures was
-a compile error against source the model had just written and could see in
-full. What blind editing adds on top of that is anchor misses, and those
-are cheap in a way compile errors are not — an anchor that does not match
-is a host-side answer with no compile, no wave and no tokens beyond the
-diagnostic. What it adds that is *not* cheap is the case where the person's
-request needs a judgment about code the agent cannot see ("make the
-matching stricter"), which becomes a schema-and-diagnostics guess.
+(CT-2189 runs 3–7.) One in four to one in eight, with the whole program
+visible. Every one of run 7's four failures was a compile error against
+source the child had just written, so seeing the program is evidently not
+sufficient for an attempt to succeed. What the ruling buys is not a better
+ratio on that loop; it is the class of request that cannot be expressed at
+all without reading — a revision described in terms of the code's behavior
+rather than its schema.
 
-**The falsifier, and it should be run before this is built out.** Take the
-bills piece on Ben's instance and one real revision request. Run it twice:
-once with the source read into context, once blind against the retained
-text. Compare attempts to first `ok`. If blind editing costs more than
-roughly one extra attempt, that is the number this ruling should be made
-on, and it is cut 1 below.
-
-**Alternative: a `read_piece_source` tool whose output is a labeled
-value.** Source comes back to the model, carrying the piece's labels and
-an integrity mark recording whether it was operator-provisioned or
-model-authored, and the run records the read. What the author gains is
-real: they can see the code they are changing, which is what every human
-editing workflow assumes, and the "make the matching stricter" class of
-request becomes ordinary work.
-
-What it costs is that CT-2199 stops being recorded-and-parked and becomes a
-prerequisite. Labeling the source is not the hard part — the hard part is
-that once labeled source is in model context, every downstream boundary
-that does not consult that label becomes a leak that this feature created:
-the transcript, the collapse summaries, child returns, the Console
-timeline, index publication. CT-2199's memo maps all of them and Ben's
-ruling on it is posture C staged as B — redact diagnostics now, label and
-gate later — which is a sequencing this feature would invert. It also
-re-opens a question the piece-handle disclosure closes by construction: a
-piece the person can select is not necessarily a piece whose source they
-authored.
-
-**If Ben rules for the alternative**, the smallest honest version is:
-`read_piece_source` returns source only for a piece whose current revision
-the *same principal* authored, refuses otherwise with a named code, and
-records the read in the run artifact. That confines the new exposure to
-"your own code, read back to you", which is the demo's case, and leaves
-the cross-author case for CT-2199 to open.
+Cut 1 measures that directly, and it is worth keeping even though the
+ruling has settled the posture, because the number is what tells us whether
+the blind form is worth keeping as a per-profile option: same piece, same
+request, revising child with and without `read_piece_source`, attempts to
+first `ok` and whether the blind arm can express the change at all.
 
 ## 3. The revision tool
 
@@ -244,16 +325,27 @@ and `edit` is the operation the runner records
 `update_pattern`: a pattern is not what is being updated, and the word is
 already taken by `origin-update`, a different row of that same table.
 
+**Whose surface it is on.** The revising child's, beside
+`read_piece_source`, and not the parent's. The parent delegates a revision
+the way it delegates authoring today and receives the receipt; it does not
+hold a tool that writes a piece's source, for the same reason it does not
+hold one that reads it. This is the profile machinery from question 2 doing
+the work in both directions.
+
 **Inputs.**
 
 - `piece` — a handle token, from question 1.
-- `edits` — edits against the retained source (question 2), or `sourceText`
-  for a whole-program replacement. Exactly one, the way `run_pattern`
-  already takes exactly one of `sourceText` and `patternId`
+- `sourceText` — the revised program, or `edits` against the retained
+  source once question 5's primitive lands. Exactly one, the way
+  `run_pattern` already takes exactly one of `sourceText` and `patternId`
   ([`run-pattern.ts:987`](../../packages/cf-harness/src/tools/run-pattern.ts#L987)).
+  A child that has read the source can write either; the edit form is the
+  cheaper one and is what makes attempt N+1 cost in proportion to its
+  change.
 - `description` — what this revision changes, in the person's terms.
 - `expectedRevisionId` — the revision this change was written against,
-  from `describe_handle`. Optional for the first cut, required later.
+  from `read_piece_source` or `describe_handle`. Optional for the first
+  cut, required later.
 
 **What it validates.** Nothing new: `checkPattern` first, then
 `setPattern`, and the second revalidates independently of the first
@@ -428,11 +520,14 @@ diagnostic renderer. What differs is where the retained text came from:
 | resolution | the run's own sidecar ([`prompt-loop.ts:3381`](../../packages/cf-harness/src/prompt-loop.ts#L3381)) | `readPieceSourceState` ([`piece-origin.ts:577`](../../packages/piece/src/ops/piece-origin.ts#L577)) |
 | what applying it does | compile and run, producing a new piece | compile and `setPattern`, revising an existing one |
 | author | this run's model | whoever authored that revision |
+| what reading it mints | nothing — the child wrote it | the piece's labels, on the reading child's ceiling |
 
-The last row is the whole of why question 2 is decided the way it is, and
-it is a property of the *resolution*, not of the primitive. That is the
-test this design should be held to: if the edit applier ever needs to know
-which fork it is serving, the fork has been drawn in the wrong place.
+The last two rows are where question 2 lives, and both are properties of
+the *resolution*, not of the primitive: the retained text is the same kind
+of thing either way, and only the act of resolving it carries a label.
+That is the test this design should be held to — if the edit applier ever
+needs to know which fork it is serving, the fork has been drawn in the
+wrong place.
 
 Two consequences worth stating, because they are what "not a third way of
 writing source" means concretely. The edit format is chosen once, and
@@ -473,53 +568,86 @@ it would not help a piece nobody revised.
 
 ## 7. Sequence of cuts
 
-Each is small, each ends at something provable from the pill against the
-bills piece on Ben's instance, and cut 1 is a measurement rather than a
-feature because question 2's ruling should rest on a number.
+Each is small, and each ends at something provable from the pill against
+the bills piece on Ben's instance. The ruling on question 2 has settled the
+posture, so the order now opens with the invariant that posture rests on:
+the parent-never-sees-source property is worth having a failing test for
+before there is a tool that could break it.
 
-**Cut 1 — measure the cost of blind editing.** No harness change. Take the
-bills piece and one real revision request; run it twice, once with the
-source in context and once blind against retained text, and count attempts
-to first `ok`. *Proves:* what question 2's recommendation costs the author,
-against the run 3–7 baseline above. *Ends at:* a number in a comment on
-CT-2332, and Ben's ruling on question 2.
+**Cut 1 — the revising profile and its invariant.** A `revise` subagent
+profile, built the way `pattern-author` is: its own tool surface, its own
+return schema with no string field a program could ride in, and
+`returnContractAuthority: "profile"` so a delegation cannot widen it
+([`subagent.ts:509`](../../packages/cf-harness/src/contracts/subagent.ts#L509)).
+No new tool on it yet. *Proves:* the three tests of question 2's invariant
+— surface, channel, and the validation-failure seam — with source planted
+in each and the parent's view asserted to hold none of it. *Ends at:* three
+tests that fail on the current code if the profile is removed, and a
+recorded answer on whether a validation message can quote the value.
 
 **Cut 2 — the piece handle.** `describe_handle` says `piece: true`, the
 piece's name, `sourceRevisionId`, the revision list and the origin kind,
 when the referent is a piece root. Loom names the handle after the piece
-rather than `pattern_N`. No writing. *Proves, from the pill:* "what is in
-my bills piece and when did it last change" is answered by a session that
-holds only a handle. *Ends at:* the demo run showing the session naming the
-piece and its revision id without reading a line of source.
+rather than `pattern_N`. No writing, and nothing reads source. *Proves,
+from the pill:* "what is in my bills piece and when did it last change" is
+answered by a parent that holds only a handle. *Ends at:* the demo run
+showing the session naming the piece and its revision id without any
+context in the run having read a line of source.
 
-**Cut 3 — `revise_piece`, whole-source form.** The tool, taking
-`sourceText`, with `checkPattern` then `setPattern`, the rehearsal-trigger
-refusal, the receipt, and the `piece-revision` sidecar.
-`expectedRevisionId` optional. *Proves, from the pill:* the bills piece's
-classifier rules change, the piece's data survives, the receipt names a new
-revision, and the Weaver's piece menu offers the previous one as **Use this
-version** — which is the whole of CT-2332's proof line, undo included.
-*Ends at:* the demo run, plus the sidecar read back from the Console.
+**Cut 3 — `read_piece_source` on the revising child.** The labeled read:
+authored files, the piece's live labels, the authored-source integrity
+statement, the revision id, recorded in the artifact as its own event.
+Still no writing. *Proves:* a child that has read a labeled piece's source
+is measured against that piece's atoms at its next boundary, and the parent
+that delegated to it holds nothing but the handle — the same shape CT-2189
+run 7's withheld release already shows for data. *Ends at:* the run
+artifact showing the read event, the child's raised ceiling, and the
+parent's transcript containing no source.
 
-**Cut 4 — the retained-source edit form.** CT-2299's primitive, with both
+**Cut 4 — `revise_piece`, whole-source form.** The tool on the revising
+child's surface, taking `sourceText`, with `checkPattern` then
+`setPattern`, the rehearsal-trigger refusal, the receipt, and the
+`piece-revision` sidecar. `expectedRevisionId` optional. *Proves, from the
+pill:* the bills piece's classifier rules change, the piece's data
+survives, the receipt names a new revision, and the Weaver's piece menu
+offers the previous one as **Use this version** — the whole of CT-2332's
+proof line, undo included. *Ends at:* the demo run, plus the sidecar read
+back from the Console.
+
+**Cut 5 — the retained-source edit form.** CT-2299's primitive, with both
 resolution paths from question 5 at once. `revise_piece` takes `edits`;
 `run_pattern` takes them against the run's own sidecar. *Proves:* attempt
 N+1 costs in proportion to its change rather than to the program — the
 falsifier CT-2299 already names — measured on both a fresh authoring run
 and a revision run. *Ends at:* the two token-per-attempt curves.
 
-**Cut 5 — `expectedRevisionId` required.** Once the demo has shown the
-session reliably carries it. *Proves:* two sessions revising one piece,
-where the second is refused by name rather than writing over the first.
+**Cut 6 — `expectedRevisionId` required.** Once the demo has shown the
+child reliably carries it. *Proves:* two sessions revising one piece, where
+the second is refused by name rather than writing over the first.
 
-Cuts 3 and 4 are independent of each other once cut 2 lands, and cut 4 is
+**The measurement, which is no longer a cut.** Question 2's "with source
+versus blind" comparison is now a question about whether to keep the blind
+form as a per-profile option, not about which posture to ship. It runs
+against cut 4 — same piece, same request, revising child with and without
+`read_piece_source`, attempts to first `ok`, and whether the blind arm can
+express the change at all — and its result is an option, not a gate.
+
+Cuts 4 and 5 are independent of each other once cut 3 lands, and cut 5 is
 CT-2299's issue rather than this one's — which is the point of question 5.
 
 ## Open for the ruling
 
-1. Question 2, on the measured cost from cut 1: blind editing, or
-   `read_piece_source` with CT-2199 as a prerequisite.
-2. Question 1's last paragraph: does the piece's own name cross into the
-   session, or only its handle name.
-3. Question 4's alternative: is recording the skill pins in the harness
+Question 2 is ruled (Ben, 2026-09-15): the revising child reads, the parent
+never does. What remains:
+
+1. Question 1's last paragraph: does the piece's own name cross into the
+   parent, or only its handle name. The child reading the source will see
+   far more than the name, so this is a question about the parent's view
+   alone.
+2. Question 4's alternative: is recording the skill pins in the harness
    artifact enough for now, or does the revision need a mark in the space.
+3. Whether the revising child is a profile of its own or the existing
+   `pattern-author` profile extended. A separate profile keeps a child that
+   only authors from carrying the ceiling that reading a piece mints, which
+   is why cut 1 assumes one; reusing `pattern-author` is less machinery and
+   one fewer contract to keep in agreement.
