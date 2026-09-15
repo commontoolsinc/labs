@@ -28,7 +28,8 @@
 
 import { ValidationError } from "@cliffy/command";
 import type { CellScope } from "@commonfabric/api";
-import { createSession, isDID, type Session } from "@commonfabric/identity";
+import { createSession, type Session } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import {
   isPieceHandle,
   linkPathSegmentToCellPathSegment,

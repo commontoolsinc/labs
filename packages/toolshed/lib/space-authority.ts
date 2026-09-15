@@ -40,12 +40,13 @@ import { ACLManager, type Runtime } from "@commonfabric/runner";
 import { spaceReaderRole } from "@commonfabric/runner/cfc";
 
 /**
- * A space DID, pinned tightly. The pre-existing `space.startsWith("did:")` check
- * (provision-ingest-channel.ts) admits newlines, whitespace and case variants —
- * and this one string then feeds FOUR consumers that must agree: the hosted-space
- * lookup, the ACL document key, the `\n`-joined channel-id derivation, and the
- * on-disk `<space>.sqlite` filename. On a case-insensitive filesystem two
- * case-variant DIDs open the SAME engine while deriving DIFFERENT channel ids.
+ * A space DID, pinned tightly. `isDID` (`@commonfabric/identity/did`) answers
+ * only "is this a DID", so it admits newlines, whitespace and case variants
+ * after the prefix — and this one string then feeds FOUR consumers that must
+ * agree: the hosted-space lookup, the ACL document key, the `\n`-joined
+ * channel-id derivation, and the on-disk `<space>.sqlite` filename. On a
+ * case-insensitive filesystem two case-variant DIDs open the SAME engine while
+ * deriving DIFFERENT channel ids. This is the narrower question, asked here.
  */
 const SPACE_DID_RE = /^did:key:z[1-9A-HJ-NP-Za-km-z]{20,120}$/;
 

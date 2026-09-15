@@ -6,8 +6,8 @@ import { BaseElement } from "../../core/base-element.ts";
 
 import "../cf-chip/index.ts";
 
-import type { DID } from "@commonfabric/identity";
-import { navigate, openInNewTab } from "@commonfabric/navigation";
+import type { DID } from "@commonfabric/identity/did";
+import { navigate, openInNewTab, spaceViewRef } from "@commonfabric/navigation";
 import {
   type CellHandle,
   CellRef,
@@ -390,12 +390,10 @@ export class CFCellLink extends BaseElement {
       }
 
       // TODO(runtime-worker-refactor):
-      const view = this.spaceName
-        ? { spaceName: this.spaceName, pieceId: this._resolvedCell.id() }
-        : {
-          spaceDid: this._resolvedCell.space(),
-          pieceId: this._resolvedCell.id(),
-        };
+      const view = {
+        ...spaceViewRef(this.spaceName, this._resolvedCell.space()),
+        pieceId: this._resolvedCell.id(),
+      };
 
       // Cmd (Mac) or Ctrl (Windows/Linux) opens in new tab
       if (e.metaKey || e.ctrlKey) {
