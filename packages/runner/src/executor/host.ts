@@ -121,6 +121,31 @@ export type ExecutorHostOptions = {
 
   /** Forwarded internal deterministic-verification seam. */
   decorateWaveCommitSink?: SpaceServerOptions["decorateWaveCommitSink"];
+
+  /** DIAGNOSTIC (tests): forwarded to every SpaceServer this host
+   * builds, with the space it serves — see `SpaceServerOptions`. */
+  onWaveCycle?: (space: MemorySpace) => void;
+
+  /** DIAGNOSTIC (tests): forwarded the same way — the end of a drain
+   * pass, with the space it ran in and the number of events it
+   * queued. */
+  onEventDrainPass?: (space: MemorySpace, queued: number) => void;
+
+  /** DIAGNOSTIC (tests): forwarded the same way — a served dispatch
+   * that deferred, with the space it deferred in. */
+  onEventDeferred?: (space: MemorySpace) => void;
+
+  /** DIAGNOSTIC (tests): forwarded the same way — the event whose
+   * re-drain the in-flight guard turned away, with the space that
+   * turned it away. */
+  onDrainInFlightSkip?: (space: MemorySpace, eventId: string) => void;
+
+  /** DIAGNOSTIC (tests): called as each activation attempt ends —
+   * serving, refused by the tenure, or thrown. Activation is driven
+   * from the admission feed and from session opens and finishes on
+   * neither of their edges. See
+   * `docs/development/waiting-in-tests.md`. */
+  onActivationSettled?: (space: MemorySpace) => void;
 };
 
 export class ExecutorHost {
@@ -605,6 +630,26 @@ export class ExecutorHost {
           // keeps the ambient flag on until close — a parked runtime's
           // dispose releases only its own claim.
         },
+        ...(this.#options.onWaveCycle !== undefined
+          ? { onWaveCycle: () => this.#options.onWaveCycle!(space) }
+          : {}),
+        ...(this.#options.onEventDrainPass !== undefined
+          ? {
+            onEventDrainPass: (queued: number) =>
+              this.#options.onEventDrainPass!(space, queued),
+          }
+          : {}),
+        ...(this.#options.onEventDeferred !== undefined
+          ? {
+            onEventDeferred: () => this.#options.onEventDeferred!(space),
+          }
+          : {}),
+        ...(this.#options.onDrainInFlightSkip !== undefined
+          ? {
+            onDrainInFlightSkip: (eventId: string) =>
+              this.#options.onDrainInFlightSkip!(space, eventId),
+          }
+          : {}),
         onWaveCommitted: () => {
           // Real served progress clears the failure streak — the
           // signal a crash-looping tenure never produces (its first
@@ -629,8 +674,10 @@ export class ExecutorHost {
       if (!activated) {
         this.#spaces.delete(space);
         this.#rebufferConsumedWarm(space, consumedWarm);
+        this.#options.onActivationSettled?.(space);
         return lostInitializationLease ? server : undefined;
       }
+      this.#options.onActivationSettled?.(space);
       if (this.#closed) {
         // close() ran while this activation was in flight (it awaits us,
         // but park() on a not-yet-active server is a no-op — so the
@@ -642,6 +689,7 @@ export class ExecutorHost {
       this.#spaces.delete(space);
       this.#rebufferConsumedWarm(space, consumedWarm);
       logger.error("activate-failed", `activation of ${space} failed`, error);
+      this.#options.onActivationSettled?.(space);
     }
   }
 

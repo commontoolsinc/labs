@@ -266,7 +266,7 @@ describe("prepareBoundaryCommit()", () => {
     const [name, cfc, message] of [
       [
         "unknown-version",
-        { version: 2, payload: { labels: [] } },
+        { version: 999, payload: { labels: [] } },
         "not one this build interprets",
       ],
       [
