@@ -335,7 +335,7 @@ describe("topic-board-pivot-contract", () => {
   // this case cannot tell the pivot's identity check from a position check —
   // swap `!equals(other, topic)` for `from !== to` in `crossrefTable` and it
   // still passes. Only a board listing one topic at two indices separates
-  // them, and that is `assert_twin_earns_no_edge` in
+  // them, and that is `assert_self_mention_inert_through_a_twin` in
   // `packages/patterns/topics/topics.test.tsx`, which stays where it is. It
   // cannot move here: a duplicate cannot be written into a board's list from
   // outside it, by `push`, by seeding the array, or through the controller's

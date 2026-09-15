@@ -30,6 +30,7 @@ import {
   type NamesTableRow,
 } from "../collection-naming/naming.ts";
 import Topics, {
+  distinctByIdentity,
   mentionedBy,
   mentionListsOf,
   submitProfileTopic,
@@ -613,6 +614,37 @@ export default pattern(() => {
       return inbound.length === 1 && equals(inbound[0], twinA);
     },
   );
+
+  // The pivot's row list, handed a board naming `identityTarget` twice: once
+  // directly and once as the slot of a list holding a link to it. The slot is
+  // a different link that resolves to the same document, so only a comparison
+  // that resolves both sides, as `mentionedBy`'s does, counts it as the same
+  // topic. A mid-sync entry is left out, and `identityOther`, listed again
+  // last, keeps the place of its first entry.
+  const identityTarget = new Writable({ title: "Identity target" });
+  const identityOther = new Writable({ title: "Identity other" });
+  const identityHolder = new Writable<{ title: string }[] | Default<[]>>([]);
+  const action_alias_identity_target = action(() => {
+    identityHolder.push(identityTarget);
+  });
+  const assert_distinct_by_identity_keeps_each_first_occurrence = assert(() => {
+    // Taken here rather than captured: a captured cell whose value is a link
+    // arrives already pointing at that link's target, so it would hand over
+    // the target's own link.
+    const identityAlias = identityHolder.key(0);
+    const distinct = distinctByIdentity([
+      identityOther,
+      undefined,
+      identityTarget,
+      identityAlias,
+      identityOther,
+    ]);
+    return !Writable.equalLinks(identityAlias, identityTarget) &&
+      equals(identityAlias, identityTarget) &&
+      distinct.length === 2 &&
+      Writable.equalLinks(distinct[0], identityOther) &&
+      Writable.equalLinks(distinct[1], identityTarget);
+  });
 
   // A source mid-sync reads back as undefined, and taking `.mentions` of that
   // throws — which killed the pivot and, with it, the append that produced the
@@ -1229,6 +1261,8 @@ export default pattern(() => {
         assertion:
           assert_repeated_mentions_contribute_one_edge_per_source_entry,
       },
+      { action: action_alias_identity_target },
+      { assertion: assert_distinct_by_identity_keeps_each_first_occurrence },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
       { action: action_mention_subject_gets_a_link },
       { assertion: assert_plain_link_is_no_mention },
