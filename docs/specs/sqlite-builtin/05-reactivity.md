@@ -22,6 +22,14 @@ long way without a query-dependency analyzer.
   invalidation pass a narrower cell (e.g. a per-table or per-topic cell they bump
   themselves from the same handler that writes), trading precision for manual
   bookkeeping. v1 does not parse SQL to compute fine-grained read sets.
+- **A row keeps its document across re-runs.** The write-back stores each
+  result row as an entity document of its own, keyed on the row's content
+  under the query's result cell. A row the next run returns unchanged links
+  to the document it already has and writes nothing to it; a row whose
+  content changed gets a document of its own; two rows of equal content
+  share one. What a re-run writes is the result cell (its `pending` flag,
+  request hash, and the array of row links) plus one document per row the
+  previous run did not hold — not one document per row per run.
 
 This is deliberately the same shape the runtime uses elsewhere: reactivity is
 driven by observing cells, and the handle cell's changing `rev` stands in for

@@ -1410,30 +1410,44 @@ export function sqliteQuery(
                 return;
               }
               const base = result.getAsNormalizedFullLink();
+              // Every row is an entity document of its own, keyed on the
+              // row's content under the result cell: a row the query returns
+              // again links to the document it already has, and the diff
+              // finds nothing to write there. Leaving the rows as plain
+              // objects for `set()` to anchor would draw each document's id
+              // from the result cell's frame counter, which never repeats,
+              // so every run would mint a fresh document per row and orphan
+              // the last run's. Two rows of equal content share a document,
+              // which is what equal content means here.
+              //
+              // The row's schema, per-column labels and row label included,
+              // goes on the write and not on the stored link. A link that
+              // carries a schema installs it as a content-addressed document
+              // of its own, and two scoped instances of one result settling
+              // in separate waves would then both write that document, which
+              // the second wave refuses. The labels reach the row document
+              // through the write's policy input either way.
               const storedRows = resultRows.map((row, i) => {
-                if (
-                  !Array.isArray(row) ||
-                  (labelSchema === undefined && perRow[i] === undefined)
-                ) {
-                  return row;
-                }
-                const rowLink = {
-                  ...base,
-                  id: toURI(createRef({ id: i }, {
-                    parent: { id: base.id, space: base.space },
-                    path: [...base.path, "result"],
-                    context: "sqlite-entry-row",
-                  })),
-                  path: [],
-                  schema: {
+                const rowCell = createCell(
+                  runtime,
+                  {
+                    ...base,
+                    id: toURI(createRef({ row }, {
+                      parent: { id: base.id, space: base.space },
+                      path: [...base.path, "result"],
+                      context: "sqlite-result-row",
+                    })),
+                    path: [],
+                    schema: undefined,
+                  },
+                  wtx,
+                ).withTx(wtx);
+                rowCell.asSchema(
+                  {
                     ...rowSchemas[i],
                     ...(perRow[i] !== undefined && { ifc: perRow[i] }),
-                  },
-                };
-                const rowCell = createCell(runtime, rowLink, wtx).asSchema(
-                  rowLink.schema as Parameters<Cell<unknown>["asSchema"]>[0],
-                ).withTx(wtx);
-                rowCell.set(row);
+                  } as Parameters<Cell<unknown>["asSchema"]>[0],
+                ).set(row);
                 return rowCell;
               });
               const target = writeSchema
@@ -1445,11 +1459,11 @@ export function sqliteQuery(
                 requestHash: hash,
                 ...(withheld !== undefined ? { withheld } : {}),
               });
-              // Per-row label attachment (CFC Phase 3): object rows split into
-              // entity docs. Labeled entry-list rows are anchored explicitly
-              // because arrays otherwise remain inline. Both forms attach the
-              // row label at the entity root and retain the per-column labels
-              // in `rowSchemas`.
+              // Per-row label attachment (CFC Phase 3): the row label goes on
+              // the row's own document, at its root, beside the per-column
+              // labels `rowSchemas` carries. The document is read back through
+              // the stored link rather than taken from `storedRows`, so a row
+              // that was not stored as a document of its own is caught here.
               if (anyPerRow) {
                 for (let i = 0; i < resultRows.length; i++) {
                   const ifc = perRow[i];
