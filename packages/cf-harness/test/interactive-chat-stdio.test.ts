@@ -4,7 +4,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { fromFileUrl, join } from "@std/path";
+import { fromFileUrl, join, toFileUrl } from "@std/path";
 import {
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
@@ -24,6 +24,7 @@ import {
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
 import {
+  type HarnessChatStoreHeldRefusal,
   type HarnessInteractiveChatOutputEnvelope,
   parseHarnessInteractiveChatStdioCliOptions,
   runHarnessInteractiveChatNdjsonTransport,
@@ -32,6 +33,11 @@ import {
   type RunHarnessInteractiveChatStdioOptions,
 } from "../src/interactive-chat-stdio.ts";
 import type { HarnessPromptLoopResult } from "../src/prompt-loop.ts";
+import { HarnessChatStoreHeldError } from "../src/session-store.ts";
+import {
+  openSqliteHarnessChatSessionStore,
+  sqliteHarnessChatSessionStoreHolderPath,
+} from "../src/sqlite-session-store.ts";
 
 const decodeLines = (
   lines: readonly string[],
@@ -1464,16 +1470,90 @@ Deno.test("interactive stdio refuses a session database another live process hol
   const firstStatus = await first.status;
   const firstStderr = await new Response(first.stderr).text();
   await first.stdout.cancel();
+  const resolvedDbPath = await Deno.realPath(dbPath);
   await Deno.remove(dir, { recursive: true });
 
   assertEquals(firstStatus.code, 0, firstStderr);
   const [statusResponse] = decodeLines([firstResponse.split("\n")[0]]);
   assertEquals("ok" in statusResponse && statusResponse.ok, true);
   assertEquals(second?.code, 1);
-  const secondStderr = decoder.decode(second?.stderr);
+  assertEquals(decoder.decode(second?.stdout), "");
+  const [refusalLine, message] = decoder.decode(second?.stderr).split("\n");
+  const refusal = JSON.parse(refusalLine) as HarnessChatStoreHeldRefusal;
+  assertEquals(refusal.kind, "cf-harness.store-held");
+  assertEquals(refusal.version, 1);
+  assertEquals(refusal.store, resolvedDbPath);
+  assertEquals(refusal.holder?.pid, first.pid);
+  assertEquals(typeof refusal.holder?.instanceId, "string");
+  assertEquals(typeof refusal.holder?.heldSince, "string");
   assertStringIncludes(
-    secondStderr,
-    "cf-harness chat session store is held by another live service process: instance ",
+    message,
+    `cf-harness chat session store ${refusal.store} is held by another live process: instance ${refusal.holder?.instanceId}, pid ${first.pid}, since ${refusal.holder?.heldSince}`,
   );
-  assertStringIncludes(secondStderr, `, pid ${first.pid}, since `);
+});
+
+Deno.test("interactive stdio writes one refusal line to its error output for a held session database", async () => {
+  const dir = await Deno.makeTempDir();
+  const dbPath = join(dir, "chat.sqlite");
+  const holder = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(dbPath),
+    holder: {
+      instanceId: "instance-1",
+      pid: Deno.pid,
+      heldSince: "2026-09-15T00:00:00.000Z",
+    },
+  });
+  const stdout = captureOutputLines();
+  const stderr = captureOutputLines();
+  try {
+    await assertRejects(
+      () =>
+        runHarnessInteractiveChatStdio({
+          sessionDbPath: dbPath,
+          input: encodeInputLines([]),
+          output: stdout.output,
+          errorOutput: stderr.output,
+        }),
+      HarnessChatStoreHeldError,
+    );
+    assertEquals(stdout.lines(), []);
+    assertEquals(stderr.lines().map((line) => JSON.parse(line)), [{
+      kind: "cf-harness.store-held",
+      version: 1,
+      store: await Deno.realPath(dbPath),
+      holder: {
+        instanceId: "instance-1",
+        pid: Deno.pid,
+        heldSince: "2026-09-15T00:00:00.000Z",
+      },
+    }]);
+
+    // A record the holder has not finished writing reads as no holder, and
+    // the line says so rather than naming nobody.
+    await Deno.writeTextFile(
+      await sqliteHarnessChatSessionStoreHolderPath(toFileUrl(dbPath)),
+      "{",
+    );
+    const unnamed = captureOutputLines();
+    await assertRejects(
+      () =>
+        runHarnessInteractiveChatStdio({
+          sessionDbPath: dbPath,
+          input: encodeInputLines([]),
+          output: stdout.output,
+          errorOutput: unnamed.output,
+        }),
+      HarnessChatStoreHeldError,
+    );
+    assertEquals(stdout.lines(), []);
+    assertEquals(unnamed.lines().map((line) => JSON.parse(line)), [{
+      kind: "cf-harness.store-held",
+      version: 1,
+      store: await Deno.realPath(dbPath),
+      holder: null,
+    }]);
+  } finally {
+    holder.close();
+    await Deno.remove(dir, { recursive: true });
+  }
 });

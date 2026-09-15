@@ -31,9 +31,9 @@ export interface HarnessChatSessionTurnEventMutation {
   createTurn?: boolean;
 }
 
-/** The service process holding a store. */
+/** The process holding a store. */
 export interface HarnessChatStoreHolder {
-  /** Identifies one service instance; no two processes share one. */
+  /** Identifies one opening of the store; no two processes share one. */
   instanceId: string;
 
   /** Operating-system process id of the holder. */
@@ -43,25 +43,42 @@ export interface HarnessChatStoreHolder {
   heldSince: string;
 }
 
-/** What `HarnessChatSessionStore.hold()` came to. */
-export type HarnessChatStoreHoldOutcome =
-  | { held: true }
-  | {
-    held: false;
+/**
+ * The store is held by another live process. Nothing was opened, read, or
+ * written: the turns that store holds open are that process's work in
+ * progress.
+ */
+export class HarnessChatStoreHeldError extends Error {
+  readonly #store: string;
+  readonly #holder: HarnessChatStoreHolder | undefined;
 
-    /** Who has the store, where its record could be read. */
-    holder: HarnessChatStoreHolder | undefined;
-  };
+  /**
+   * Constructs an instance for the database at `store`, naming `holder`
+   * where its record could be read.
+   */
+  constructor(store: string, holder: HarnessChatStoreHolder | undefined) {
+    super(
+      holder === undefined
+        ? `cf-harness chat session store ${store} is held by another live process`
+        : `cf-harness chat session store ${store} is held by another live process: instance ${holder.instanceId}, pid ${holder.pid}, since ${holder.heldSince}`,
+    );
+    this.name = "HarnessChatStoreHeldError";
+    this.#store = store;
+    this.#holder = holder;
+  }
+
+  /** The database's path, resolved through every link. */
+  get store(): string {
+    return this.#store;
+  }
+
+  /** Who holds the store, where its record could be read at refusal. */
+  get holder(): HarnessChatStoreHolder | undefined {
+    return this.#holder;
+  }
+}
 
 export interface HarnessChatSessionStore {
-  /**
-   * Takes the store for `holder` until it closes, or reports the holder that
-   * has it. A store without this member is held by no one, and every service
-   * that opens it takes it.
-   */
-  hold?(
-    holder: HarnessChatStoreHolder,
-  ): HarnessMaybePromise<HarnessChatStoreHoldOutcome>;
   saveSession(snapshot: HarnessChatSessionSnapshot): HarnessMaybePromise<void>;
   getSession(
     sessionId: string,

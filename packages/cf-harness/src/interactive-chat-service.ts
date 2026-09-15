@@ -57,10 +57,7 @@ import {
   type HarnessTranscriptSubagentContext,
   isResumableHarnessTranscript,
 } from "./contracts/transcript.ts";
-import type {
-  HarnessChatSessionStore,
-  HarnessChatStoreHolder,
-} from "./session-store.ts";
+import type { HarnessChatSessionStore } from "./session-store.ts";
 import { HarnessControlError } from "./control-errors.ts";
 
 export type HarnessInteractivePromptLoop = Pick<
@@ -117,11 +114,6 @@ export interface CreateHarnessInteractiveChatServiceOptions {
 
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   now?: () => string;
-
-  /**
-   * Mints the identifiers the service assigns itself: its own instance id,
-   * and a session or turn id a request leaves unnamed.
-   */
   randomUUID?: () => string;
   onEvent?: HarnessInteractiveChatEventListener;
   onEventDeliveryError?: HarnessInteractiveChatEventDeliveryErrorHandler;
@@ -184,31 +176,6 @@ class DurableTurnExistsError extends Error {
     this.name = "DurableTurnExistsError";
     this.sessionId = sessionId;
     this.turnId = turnId;
-  }
-}
-
-/**
- * The store a service was to initialize from is held by another live service
- * process. The turns that store holds open are that process's work in
- * progress, so nothing was read or recovered.
- */
-export class HarnessChatStoreHeldError extends Error {
-  readonly #holder: HarnessChatStoreHolder | undefined;
-
-  /** Constructs an instance naming `holder`, where its record could be read. */
-  constructor(holder: HarnessChatStoreHolder | undefined) {
-    super(
-      holder === undefined
-        ? "cf-harness chat session store is held by another live service process"
-        : `cf-harness chat session store is held by another live service process: instance ${holder.instanceId}, pid ${holder.pid}, since ${holder.heldSince}`,
-    );
-    this.name = "HarnessChatStoreHeldError";
-    this.#holder = holder;
-  }
-
-  /** Who holds the store, where its record could be read at refusal. */
-  get holder(): HarnessChatStoreHolder | undefined {
-    return this.#holder;
   }
 }
 
@@ -721,7 +688,6 @@ export class HarnessInteractiveChatService {
   readonly #createPromptLoop: HarnessInteractivePromptLoopFactory;
   readonly #now: () => string;
   readonly #randomUUID: () => string;
-  readonly #instanceId: string;
   readonly #onEvent?: HarnessInteractiveChatEventListener;
   readonly #onEventDeliveryError?:
     HarnessInteractiveChatEventDeliveryErrorHandler;
@@ -809,7 +775,6 @@ export class HarnessInteractiveChatService {
       defaultPromptLoopFactory;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#randomUUID = options.randomUUID ?? defaultRandomUUID;
-    this.#instanceId = this.#randomUUID();
     this.#onEvent = options.onEvent;
     this.#onEventDeliveryError = options.onEventDeliveryError;
     this.#sessionStore = options.sessionStore;
@@ -825,24 +790,14 @@ export class HarnessInteractiveChatService {
 
   /**
    * Loads every session, turn, and event the store holds and settles the
-   * turns no process is running. The store is taken first, for as long as it
-   * stays open: one that another live service process holds is refused with a
-   * `HarnessChatStoreHeldError` before anything is read, since the turns it
-   * holds open are that process's work in progress rather than interrupted
-   * work. A store whose holder has exited is taken over and recovered like an
-   * unheld one.
+   * turns no process is running. A durable store reaches this service held
+   * for its own process — a SQLite store another live process holds is
+   * refused at open — so every non-terminal turn it carries was left by a
+   * process that has exited.
    */
   async initializeFromStore(): Promise<void> {
     if (this.#sessionStore === undefined) {
       return;
-    }
-    const hold = await this.#sessionStore.hold?.({
-      instanceId: this.#instanceId,
-      pid: Deno.pid,
-      heldSince: this.#now(),
-    });
-    if (hold !== undefined && !hold.held) {
-      throw new HarnessChatStoreHeldError(hold.holder);
     }
     this.#sessions.clear();
     const turnsBySession = new Map<string, HarnessChatTurnRecord[]>();

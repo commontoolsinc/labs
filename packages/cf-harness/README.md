@@ -1843,12 +1843,14 @@ stdin and writes response/event envelopes as newline-delimited JSON. Pass
 `--chat-session-db` or set `CF_HARNESS_CHAT_SESSION_DB` to persist sessions,
 turn records, and replayable events across process restarts. One process holds a
 session database for as long as it runs: a second process pointed at the same
-database is refused at startup, with an error naming the holder, rather than
-recovering over the turns the first is still running. A database whose holder
-has exited is taken over, and the turns it left unfinished are settled as
-interrupted. Pass `--chat-max-in-memory-events` or set
-`CF_HARNESS_CHAT_MAX_IN_MEMORY_EVENTS` to bound the transport's in-memory event
-cache while keeping durable replay available through SQLite.
+database is refused at startup rather than recovering over the turns the first
+is still running. The refusal is one JSON line on stderr —
+`{"kind":"cf-harness.store-held","version":1,"store":<resolved path>,"holder":{"instanceId","pid","heldSince"}|null}`
+— followed by the error's message, with nothing written to stdout and exit
+status 1. A database whose holder has exited is taken over, and the turns it
+left unfinished are settled as interrupted. Pass `--chat-max-in-memory-events`
+or set `CF_HARNESS_CHAT_MAX_IN_MEMORY_EVENTS` to bound the transport's in-memory
+event cache while keeping durable replay available through SQLite.
 
 Both this entrypoint and the strict Loom host's `interactive` subcommand accept
 `--fabric-api-url`, `--fabric-identity`, and `--fabric-space`, with defaults

@@ -1,18 +1,20 @@
 /**
- * One service process holds a SQLite chat session store for as long as it
- * runs. A second process pointed at the same database is refused rather than
- * recovered over, so the turns the first is still running are never marked
- * interrupted from outside; a store whose holder has exited is taken over and
- * recovered exactly as an unheld one is.
+ * A SQLite chat session store is held by the process that opens it for as
+ * long as that handle stays open. A second process pointed at the same
+ * database is refused at open rather than recovered over, so the turns the
+ * first is still running are never marked interrupted from outside; a
+ * database whose holder has exited is taken over and recovered exactly as an
+ * unheld one is.
  */
 
 import { expect } from "@std/expect";
 import { fromFileUrl, join, toFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
+import { Database } from "@db/sqlite";
+
 import { createHarnessChatSessionStatus } from "../src/contracts/interactive-chat.ts";
 import {
-  HarnessChatStoreHeldError,
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
@@ -20,7 +22,10 @@ import type {
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
-import type { HarnessChatStoreHolder } from "../src/session-store.ts";
+import {
+  HarnessChatStoreHeldError,
+  type HarnessChatStoreHolder,
+} from "../src/session-store.ts";
 import {
   openSqliteHarnessChatSessionStore,
   type SqliteHarnessChatSessionStore,
@@ -89,6 +94,12 @@ const withDatabaseUrl = async (
   }
 };
 
+const holder = (instanceId: string): HarnessChatStoreHolder => ({
+  instanceId,
+  pid: Deno.pid,
+  heldSince: "2026-09-15T00:00:00.000Z",
+});
+
 const readHolderFile = async (url: URL): Promise<unknown> =>
   JSON.parse(
     await Deno.readTextFile(
@@ -96,11 +107,33 @@ const readHolderFile = async (url: URL): Promise<unknown> =>
     ),
   );
 
-const holder = (instanceId: string): HarnessChatStoreHolder => ({
-  instanceId,
-  pid: Deno.pid,
-  heldSince: "2026-09-15T00:00:00.000Z",
-});
+/** The error an opening of `url` rejects with, or `undefined` if it opens. */
+const refusalOf = (url: URL): Promise<unknown> =>
+  openSqliteHarnessChatSessionStore({ url }).then(
+    (store) => {
+      store.close();
+      return undefined;
+    },
+    (error: unknown) => error,
+  );
+
+/**
+ * A connection of the test's own on the database, holding nothing and
+ * writing nothing, for `PRAGMA data_version`: the reading moves once any
+ * other connection commits.
+ */
+const observe = (
+  url: URL,
+): { dataVersion: () => number; close: () => void } => {
+  const database = new Database(fromFileUrl(url), { readonly: true });
+  return {
+    dataVersion: () =>
+      (database.prepare("PRAGMA data_version").get() as {
+        data_version: number;
+      }).data_version,
+    close: () => database.close(),
+  };
+};
 
 /** Records a session in the store with `turnId` still running in it. */
 const saveRunningTurn = (
@@ -133,6 +166,16 @@ const saveRunningTurn = (
   });
 };
 
+/**
+ * Leaves the database at `url` holding a running turn and held by no one,
+ * as a process that exited without closing leaves it.
+ */
+const seedRunningTurn = async (url: URL): Promise<void> => {
+  const store = await openSqliteHarnessChatSessionStore({ url });
+  saveRunningTurn(store, "session-1", "turn-1");
+  store.close();
+};
+
 /** Reads `stream` up to its first newline and returns that line. */
 const readFirstLine = async (
   stream: ReadableStream<Uint8Array>,
@@ -152,7 +195,7 @@ const readFirstLine = async (
 };
 
 /**
- * Starts a process that holds the store at `url` as `instanceId`, and
+ * Starts a process that holds the database at `url` as `instanceId`, and
  * returns once it reports the hold; `kill()` ends it without a chance to
  * close anything.
  */
@@ -189,153 +232,139 @@ const spawnHolder = async (
   };
 };
 
-const withLiveService = async (
-  url: URL,
-  run: (
-    live: HarnessInteractiveChatService,
-    stores: {
-      first: SqliteHarnessChatSessionStore;
-      second: SqliteHarnessChatSessionStore;
-    },
-    loop: ReturnType<typeof suspendedPromptLoop>,
-  ) => Promise<void>,
-): Promise<void> => {
-  const first = await openSqliteHarnessChatSessionStore({ url });
-  const second = await openSqliteHarnessChatSessionStore({ url });
-  const loop = suspendedPromptLoop();
-  const live = new HarnessInteractiveChatService({
-    createPromptLoop: loop.createPromptLoop,
-    now: nextIsoNow(),
-    randomUUID: () => "instance-live",
-    sessionStore: first,
-  });
-  try {
-    await live.initializeFromStore();
-    const session = await live.startSession("req-session", {
-      sessionId: "session-1",
-      workspace: { hostPath: "/workspace" },
-    });
-    expect(session.ok).toBe(true);
-    const turn = await live.startTurn("req-turn", {
-      sessionId: "session-1",
-      turnId: "turn-1",
-      input: { text: "Keep working" },
-    });
-    expect(turn.ok).toBe(true);
-    await loop.entered;
-    expect(second.getTurn("session-1", "turn-1")?.turn.status).toBe(
-      "running",
-    );
-    await run(live, { first, second }, loop);
-  } finally {
-    second.close();
-    first.close();
-  }
-};
-
 describe("chat session store hold", () => {
-  describe("HarnessInteractiveChatService.initializeFromStore()", () => {
-    it("leaves the turn another live service is running as `running` in the store", async () => {
+  describe("openSqliteHarnessChatSessionStore()", () => {
+    it("holds an unheld database and writes the holder beside it", async () => {
       await withDatabaseUrl(async (url) => {
-        await withLiveService(url, async (live, { second }, loop) => {
-          const late = new HarnessInteractiveChatService({
-            createPromptLoop: noPromptLoop,
-            now: nextIsoNow(),
-            sessionStore: second,
-          });
-
-          // Whether the second service is refused is the next case's subject;
-          // here only what its initialization does to the store matters.
-          await late.initializeFromStore().catch(() => undefined);
-
-          expect(second.getTurn("session-1", "turn-1")?.turn.status).toBe(
-            "running",
-          );
-          loop.release("Done.");
-          await live.waitForTurn("session-1", "turn-1");
-          expect(second.getTurn("session-1", "turn-1")?.turn.status).toBe(
-            "completed",
-          );
+        const store = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-1"),
         });
+        try {
+          expect(await readHolderFile(url)).toEqual(holder("instance-1"));
+        } finally {
+          store.close();
+        }
       });
     });
 
-    it("rejects with `HarnessChatStoreHeldError` naming the live holder", async () => {
+    it("names this process in the holder it writes when given none", async () => {
       await withDatabaseUrl(async (url) => {
-        await withLiveService(url, async (_live, { second }) => {
-          const late = new HarnessInteractiveChatService({
-            createPromptLoop: noPromptLoop,
-            now: nextIsoNow(),
-            sessionStore: second,
-          });
-
-          const refusal = await late.initializeFromStore().then(
-            () => undefined,
-            (error: unknown) => error,
-          );
-
-          expect(refusal).toBeInstanceOf(HarnessChatStoreHeldError);
-          const holder: HarnessChatStoreHolder = {
-            instanceId: "instance-live",
+        const store = await openSqliteHarnessChatSessionStore({ url });
+        try {
+          expect(await readHolderFile(url)).toEqual({
+            instanceId: expect.any(String),
             pid: Deno.pid,
-            heldSince: "2026-09-15T00:00:01.000Z",
-          };
-          expect((refusal as HarnessChatStoreHeldError).holder).toEqual(holder);
-          expect((refusal as HarnessChatStoreHeldError).message).toBe(
-            `cf-harness chat session store is held by another live service process: instance instance-live, pid ${Deno.pid}, since 2026-09-15T00:00:01.000Z`,
-          );
-          expect(late.status().sessions).toEqual([]);
-        });
+            heldSince: expect.any(String),
+          });
+        } finally {
+          store.close();
+        }
       });
     });
 
-    it("commits nothing to a held store before refusing", async () => {
+    it("refuses a database another handle holds, naming the holder, without touching it", async () => {
       await withDatabaseUrl(async (url) => {
-        const first = await openSqliteHarnessChatSessionStore({ url });
+        const first = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-1"),
+        });
+        const observer = observe(url);
         try {
           saveRunningTurn(first, "session-1", "turn-1");
-          expect(await first.hold(holder("instance-1"))).toEqual({
-            held: true,
+          const before = observer.dataVersion();
+
+          const refusal = await refusalOf(url);
+
+          expect(refusal).toBeInstanceOf(HarnessChatStoreHeldError);
+          expect((refusal as HarnessChatStoreHeldError).holder).toEqual(
+            holder("instance-1"),
+          );
+          expect((refusal as HarnessChatStoreHeldError).store).toBe(
+            await Deno.realPath(fromFileUrl(url)),
+          );
+          expect((refusal as HarnessChatStoreHeldError).message).toBe(
+            `cf-harness chat session store ${await Deno.realPath(
+              fromFileUrl(url),
+            )} is held by another live process: instance instance-1, pid ${Deno.pid}, since 2026-09-15T00:00:00.000Z`,
+          );
+          expect(observer.dataVersion()).toBe(before);
+          expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "running",
+          );
+          expect(await readHolderFile(url)).toEqual(holder("instance-1"));
+
+          // The holder's own writes go on, and a commit is what the reading
+          // above would have shown.
+          first.saveSession({
+            session: createHarnessChatSessionStatus({
+              sessionId: "session-2",
+              createdAt: "2026-09-15T00:00:00.000Z",
+              workspace: { hostPath: "/workspace" },
+            }),
+            transcript: [],
           });
-          // `PRAGMA data_version` moves on this connection once any other
-          // connection commits, which is what a second opener's pragmas,
-          // schema statements, or recovery would do.
-          const dataVersion = () =>
-            (first.database.prepare("PRAGMA data_version").get() as {
-              data_version: number;
-            }).data_version;
-          const before = dataVersion();
+          expect(observer.dataVersion()).not.toBe(before);
+        } finally {
+          observer.close();
+          first.close();
+        }
+      });
+    });
 
-          const second = await openSqliteHarnessChatSessionStore({ url });
-          try {
-            const late = new HarnessInteractiveChatService({
-              createPromptLoop: noPromptLoop,
-              now: nextIsoNow(),
-              sessionStore: second,
-            });
-            await expect(late.initializeFromStore()).rejects.toThrow(
-              HarnessChatStoreHeldError,
+    it("refuses a database held under another spelling of its path", async () => {
+      // The link is on the database file itself, so a hold file placed beside
+      // each spelling would be two different files.
+      const dir = await Deno.makeTempDir();
+      try {
+        const first = await openSqliteHarnessChatSessionStore({
+          url: toFileUrl(join(dir, "real.sqlite")),
+          holder: holder("instance-1"),
+        });
+        try {
+          await Deno.symlink(
+            join(dir, "real.sqlite"),
+            join(dir, "alias.sqlite"),
+          );
+          const refusal = await refusalOf(toFileUrl(join(dir, "alias.sqlite")));
+          expect(refusal).toBeInstanceOf(HarnessChatStoreHeldError);
+          expect((refusal as HarnessChatStoreHeldError).holder).toEqual(
+            holder("instance-1"),
+          );
+          expect((refusal as HarnessChatStoreHeldError).store).toBe(
+            await Deno.realPath(join(dir, "real.sqlite")),
+          );
+        } finally {
+          first.close();
+        }
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("refuses without naming a holder where the record beside a held database is not one", async () => {
+      // A record cut off mid-write is not JSON; one that parses is still not
+      // a holder unless it has a holder's shape.
+      await withDatabaseUrl(async (url) => {
+        const first = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-1"),
+        });
+        try {
+          for (const record of ["{", "42"]) {
+            await Deno.writeTextFile(
+              await sqliteHarnessChatSessionStoreHolderPath(url),
+              record,
             );
-
-            expect(dataVersion()).toBe(before);
-            expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
-              "running",
+            const refusal = await refusalOf(url);
+            expect(refusal).toBeInstanceOf(HarnessChatStoreHeldError);
+            expect((refusal as HarnessChatStoreHeldError).holder)
+              .toBeUndefined();
+            expect((refusal as HarnessChatStoreHeldError).message).toBe(
+              `cf-harness chat session store ${await Deno.realPath(
+                fromFileUrl(url),
+              )} is held by another live process`,
             );
-            expect(await readHolderFile(url)).toEqual(holder("instance-1"));
-
-            // A commit from that connection is what the check above rules
-            // out; this one shows the check can see one.
-            second.saveSession({
-              session: createHarnessChatSessionStatus({
-                sessionId: "session-2",
-                createdAt: "2026-09-15T00:00:00.000Z",
-                workspace: { hostPath: "/workspace" },
-              }),
-              transcript: [],
-            });
-            expect(dataVersion()).not.toBe(before);
-          } finally {
-            second.close();
           }
         } finally {
           first.close();
@@ -343,23 +372,115 @@ describe("chat session store hold", () => {
       });
     });
 
-    it("takes over a store whose holder has died and settles the turn it left running", async () => {
+    it("holds a database once the handle holding it has closed, and writes to it", async () => {
       await withDatabaseUrl(async (url) => {
-        const store = await openSqliteHarnessChatSessionStore({ url });
+        const first = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-1"),
+        });
+        first.close();
+        const second = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-2"),
+        });
         try {
-          saveRunningTurn(store, "session-1", "turn-1");
-          const holder = await spawnHolder(url, "instance-died");
-          expect(await readHolderFile(url)).toEqual({
-            instanceId: "instance-died",
-            pid: holder.pid,
-            heldSince: expect.any(String),
-          });
-          await holder.kill();
+          expect(await readHolderFile(url)).toEqual(holder("instance-2"));
+          saveRunningTurn(second, "session-1", "turn-1");
+          expect(second.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "running",
+          );
+        } finally {
+          second.close();
+        }
+      });
+    });
 
+    it("releases a database it held but could not open", async () => {
+      await withDatabaseUrl(async (url) => {
+        await Deno.writeTextFile(fromFileUrl(url), "not a database");
+        await expect(openSqliteHarnessChatSessionStore({ url })).rejects
+          .toThrow("not a database");
+        const file = await Deno.open(
+          await sqliteHarnessChatSessionStoreHolderPath(url),
+          { read: true, write: true },
+        );
+        try {
+          expect(await file.tryLock(true)).toBe(true);
+        } finally {
+          file.close();
+        }
+      });
+    });
+
+    it("leaves the turn a live service is running as `running`", async () => {
+      await withDatabaseUrl(async (url) => {
+        const first = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-live"),
+        });
+        const loop = suspendedPromptLoop();
+        const live = new HarnessInteractiveChatService({
+          createPromptLoop: loop.createPromptLoop,
+          now: nextIsoNow(),
+          sessionStore: first,
+        });
+        try {
+          await live.initializeFromStore();
+          const session = await live.startSession("req-session", {
+            sessionId: "session-1",
+            workspace: { hostPath: "/workspace" },
+          });
+          expect(session.ok).toBe(true);
+          const turn = await live.startTurn("req-turn", {
+            sessionId: "session-1",
+            turnId: "turn-1",
+            input: { text: "Keep working" },
+          });
+          expect(turn.ok).toBe(true);
+          await loop.entered;
+          expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "running",
+          );
+
+          expect(await refusalOf(url)).toBeInstanceOf(
+            HarnessChatStoreHeldError,
+          );
+
+          expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "running",
+          );
+          loop.release("Done.");
+          await live.waitForTurn("session-1", "turn-1");
+          expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+            "completed",
+          );
+        } finally {
+          first.close();
+        }
+      });
+    });
+  });
+
+  describe("HarnessInteractiveChatService.initializeFromStore()", () => {
+    it("takes over a database whose holder has died and settles the turn it left running", async () => {
+      await withDatabaseUrl(async (url) => {
+        await seedRunningTurn(url);
+        const died = await spawnHolder(url, "instance-died");
+        expect(await readHolderFile(url)).toEqual({
+          instanceId: "instance-died",
+          pid: died.pid,
+          heldSince: expect.any(String),
+        });
+        await died.kill();
+
+        const store = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-next"),
+        });
+        try {
           const service = new HarnessInteractiveChatService({
             createPromptLoop: noPromptLoop,
             now: nextIsoNow(),
-            randomUUID: () => "instance-next",
             sessionStore: store,
           });
           await service.initializeFromStore();
@@ -370,26 +491,26 @@ describe("chat session store hold", () => {
             terminalReason: "process_interrupted",
             priorStatus: "running",
           });
-          expect(await readHolderFile(url)).toEqual({
-            instanceId: "instance-next",
-            pid: Deno.pid,
-            heldSince: "2026-09-15T00:00:01.000Z",
-          });
+          expect(await readHolderFile(url)).toEqual(holder("instance-next"));
         } finally {
           store.close();
         }
       });
     });
 
-    it("settles the running turn of a store no process holds", async () => {
+    it("settles the running turn of a database no process ever held", async () => {
       await withDatabaseUrl(async (url) => {
-        const store = await openSqliteHarnessChatSessionStore({ url });
+        await seedRunningTurn(url);
+        await Deno.remove(await sqliteHarnessChatSessionStoreHolderPath(url));
+
+        const store = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-next"),
+        });
         try {
-          saveRunningTurn(store, "session-1", "turn-1");
           const service = new HarnessInteractiveChatService({
             createPromptLoop: noPromptLoop,
             now: nextIsoNow(),
-            randomUUID: () => "instance-next",
             sessionStore: store,
           });
           await service.initializeFromStore();
@@ -407,22 +528,18 @@ describe("chat session store hold", () => {
               event,
             ) => event.event.kind),
           ).toEqual(["turn_failed"]);
-          expect(await readHolderFile(url)).toEqual({
-            instanceId: "instance-next",
-            pid: Deno.pid,
-            heldSince: "2026-09-15T00:00:01.000Z",
-          });
+          expect(await readHolderFile(url)).toEqual(holder("instance-next"));
         } finally {
           store.close();
         }
       });
     });
 
-    it("runs its own turns after taking a store, and keeps it across its own reinitialization", async () => {
+    it("runs its own turns after taking a database, and keeps it across its own reinitialization", async () => {
       await withDatabaseUrl(async (url) => {
+        await seedRunningTurn(url);
         const store = await openSqliteHarnessChatSessionStore({ url });
         try {
-          saveRunningTurn(store, "session-1", "turn-1");
           const service = new HarnessInteractiveChatService({
             createPromptLoop: completingPromptLoop,
             now: nextIsoNow(),
@@ -456,113 +573,6 @@ describe("chat session store hold", () => {
           );
         } finally {
           store.close();
-        }
-      });
-    });
-  });
-
-  describe("SqliteHarnessChatSessionStore.hold()", () => {
-    it("takes an unheld store and writes the holder beside the database", async () => {
-      await withDatabaseUrl(async (url) => {
-        const store = await openSqliteHarnessChatSessionStore({ url });
-        try {
-          expect(await store.hold(holder("instance-1"))).toEqual({
-            held: true,
-          });
-          expect(await readHolderFile(url)).toEqual(holder("instance-1"));
-        } finally {
-          store.close();
-        }
-      });
-    });
-
-    it("returns the holder for a store another handle holds", async () => {
-      await withDatabaseUrl(async (url) => {
-        const first = await openSqliteHarnessChatSessionStore({ url });
-        const second = await openSqliteHarnessChatSessionStore({ url });
-        try {
-          expect(await first.hold(holder("instance-1"))).toEqual({
-            held: true,
-          });
-          expect(await second.hold(holder("instance-2"))).toEqual({
-            held: false,
-            holder: holder("instance-1"),
-          });
-          expect(await readHolderFile(url)).toEqual(holder("instance-1"));
-        } finally {
-          second.close();
-          first.close();
-        }
-      });
-    });
-
-    it("returns the holder for a store held under another spelling of its path", async () => {
-      // The link is on the database file itself, so a hold file placed beside
-      // each spelling would be two different files.
-      const dir = await Deno.makeTempDir();
-      try {
-        const first = await openSqliteHarnessChatSessionStore({
-          url: toFileUrl(join(dir, "real.sqlite")),
-        });
-        await Deno.symlink(join(dir, "real.sqlite"), join(dir, "alias.sqlite"));
-        const second = await openSqliteHarnessChatSessionStore({
-          url: toFileUrl(join(dir, "alias.sqlite")),
-        });
-        try {
-          expect(await first.hold(holder("instance-1"))).toEqual({
-            held: true,
-          });
-          expect(await second.hold(holder("instance-2"))).toEqual({
-            held: false,
-            holder: holder("instance-1"),
-          });
-        } finally {
-          second.close();
-          first.close();
-        }
-      } finally {
-        await Deno.remove(dir, { recursive: true });
-      }
-    });
-
-    it("returns no holder where the record beside a held store is not one", async () => {
-      await withDatabaseUrl(async (url) => {
-        const first = await openSqliteHarnessChatSessionStore({ url });
-        const second = await openSqliteHarnessChatSessionStore({ url });
-        try {
-          expect(await first.hold(holder("instance-1"))).toEqual({
-            held: true,
-          });
-          await Deno.writeTextFile(
-            await sqliteHarnessChatSessionStoreHolderPath(url),
-            "{",
-          );
-          expect(await second.hold(holder("instance-2"))).toEqual({
-            held: false,
-            holder: undefined,
-          });
-        } finally {
-          second.close();
-          first.close();
-        }
-      });
-    });
-
-    it("takes a store once the handle holding it has closed", async () => {
-      await withDatabaseUrl(async (url) => {
-        const first = await openSqliteHarnessChatSessionStore({ url });
-        const second = await openSqliteHarnessChatSessionStore({ url });
-        try {
-          expect(await first.hold(holder("instance-1"))).toEqual({
-            held: true,
-          });
-          first.close();
-          expect(await second.hold(holder("instance-2"))).toEqual({
-            held: true,
-          });
-          expect(await readHolderFile(url)).toEqual(holder("instance-2"));
-        } finally {
-          second.close();
         }
       });
     });
