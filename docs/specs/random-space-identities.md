@@ -40,10 +40,16 @@ or resolve a route.
 ## One create action
 
 A caller supplies an authenticated creator, a target application service
-provider, and an opaque idempotency key. Repeating the same create action at
-the same provider returns the same accepted DID and genesis transaction.
-Starting a new create action generates a different space, even when its label
-is unchanged.
+provider, and an opaque idempotency key. The target is identified canonically
+by its normalized public ASP origin and an immutable control-namespace version
+that the ASP advertised before the creator signed the intent. The ASP
+advertises one canonical public origin for each version; an alias is resolved
+to that origin before signing. The idempotency scope is the creator DID,
+normalized target origin, and opaque key; a retry must retain the recorded
+namespace version. A different version at that scope is a conflict, not a new
+create action. Repeating the same create action returns the same accepted DID
+and genesis transaction. Starting a new create action generates a different
+space, even when its label is unchanged.
 
 Creation has one durable record whose state can be resumed by any request
 process. It records the accepted random allocation before the target provider
@@ -56,7 +62,8 @@ Creation completes after all of the following are durable:
 - the accepted random DID and signed genesis transaction;
 - the exact recorded genesis transaction committed as the DID's first history;
   and
-- the DID-keyed entry in the creator's Home space.
+- one Home-space transaction that completes the immutable creation record and
+  adds the DID-keyed space entry and authenticated storage-origin hint.
 
 ## Routing across provider processes
 

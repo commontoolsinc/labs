@@ -146,7 +146,9 @@ labels.
 - Define an idempotency key for one user create action. It must survive client
   resubmission and server-process changes without becoming part of the DID.
 - Define an append-only control-namespace catalog in existing deployment
-  configuration. A creation intent binds its target ASP's current namespace
+  configuration. For each version, advertise exactly one canonical normalized
+  public ASP origin and resolve provider aliases to it before signing. A
+  creation intent binds that origin and its target ASP's current namespace
   version before the creator signs it. New versions may add or replace shards;
   old versions and their shard DIDs remain addressable for idempotent replay.
 - Define the `spaces` field on the ordinary Home space root. Define the stable
@@ -510,7 +512,7 @@ labels.
   - Emit `https://<asp-host>/<space-did>` for a space root and
     `https://<asp-host>/<space-did>/<piece-did>` for a piece.
   - Use `https://<asp-host>/` for the authenticated user's home space when the
-    application intentionally chooses the specified empty-space spelling.
+    application intentionally chooses the empty hostname-based URL.
   - Accept existing piece-slug URLs as user-facing compatibility input and
     replace them with piece-DID URLs after loading.
   - Stop constructing `?host=` and `?spaceHost=` URLs. Keep them as
@@ -544,8 +546,8 @@ labels.
     Do not install a named redirect table, registry row, or conditional
     integration with the registry plan.
   - Preserve legacy host-query URLs through a validated redirect into
-    the Common Fabric hostname form. This compatibility route opens an explicit
-    DID and does not restore name-derived creation.
+    the existing ASP-hosted DID route. This compatibility route opens an
+    explicit DID and does not restore name-derived creation.
   - Retain old deterministic spaces as ordinary DIDs. Do not rotate their
     identity merely to make their origin random.
   - Remove production code, configuration, and secrets that contain the fixed
