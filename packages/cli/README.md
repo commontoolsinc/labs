@@ -619,7 +619,9 @@ reads. A compatible verdict therefore does not prove that every linked value has
 loaded. It also runs the CFC schema-envelope merge the setup transaction
 performs at commit, in dry run, over both documents that take it: the envelope
 stored on the piece's argument document against the candidate's argument schema,
-and the envelope stored on the piece's own document against its result schema. A
+and the envelope stored on the piece's own document against its result schema,
+the latter only where setup would rewrite the result projection, since a
+candidate that leaves the projection as it is takes no result merge at commit. A
 stored claim the candidate cannot reconcile with — an owner-protected field
 whose `writeAuthorizedBy` claim names a different binding, say — is reported by
 the check in the merge's own words rather than discovered as a commit rejection

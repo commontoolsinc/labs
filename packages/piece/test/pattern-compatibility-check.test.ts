@@ -288,6 +288,38 @@ function writerProgram(root: string, writer = "setName"): RuntimeProgram {
   };
 }
 
+/**
+ * A pattern whose result document carries a declared label with no writer
+ * claim: `label` is confidential under `ATOM`. `comment` is source the
+ * projection does not carry, so two revisions differing only in it bind the
+ * same projection to the document; `expression` is what `label` computes,
+ * and changing it re-mints the derived cell the projection links.
+ */
+function labelledResultProgram(
+  comment: string,
+  expression = "seed",
+): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        ...CFC_PRELUDE,
+        comment,
+        "interface Args { seed: Confidential<string, Label>; }",
+        "interface Out { label: Confidential<string, Label>; }",
+        "export default pattern<Args, Out>(",
+        "  ({ seed }) => ({",
+        "    [NAME]: 'Compatibility check',",
+        `    label: ${expression},`,
+        "  }),",
+        ");",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
 describe("setsrc compatibility preflight", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -809,6 +841,91 @@ describe("setsrc compatibility preflight", () => {
       expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(
         report.candidate.identity,
       );
+    });
+  });
+
+  describe("the result projection setup would keep", () => {
+    // Setup writes the result projection only where the candidate's differs
+    // from the stored one, and the schema input the commit merges rides that
+    // write. So a candidate whose projection is unchanged takes no result
+    // merge at commit, whatever the stored envelope holds, and the check has
+    // to ask setup's question before it merges that envelope in dry run — or
+    // an implementation-only update over a partially migrated piece is
+    // refused by the check and committed by the apply.
+    //
+    // The fixture widens the stored result envelope past what the pattern
+    // declares, as the argument fixture above does, and writes the stored
+    // projection back unchanged under the wider schema, so the envelope and
+    // the projection can move independently of each other.
+
+    const pieceWithWidenedResultEnvelope = async () => {
+      const piece = await pieces.create(labelledResultProgram(""), {
+        input: { seed: "hello" },
+      });
+      await runtime.idle();
+      const cell = piece.getCell();
+      const projection = JSON.stringify(cell.getRaw());
+      const { error } = await runtime.editWithRetry((tx) => {
+        cell.withTx(tx).asSchema({
+          type: "object",
+          properties: {
+            label: {
+              type: "string",
+              ifc: { confidentiality: [DECLARED_ATOM, EXTRA_ATOM] },
+            },
+          },
+        } as never).set(cell.getRaw() as never);
+      });
+      expect(
+        error?.message,
+        "the fixture could not widen the stored result envelope, so the " +
+          "cases below have no merge to fail",
+      ).toBeUndefined();
+      await runtime.idle();
+      expect(
+        JSON.stringify(cell.getRaw()),
+        "the fixture changed the stored projection, so setup would rewrite " +
+          "it and the cases below would not reach the elided write",
+      ).toBe(projection);
+      return piece;
+    };
+
+    it("clears a candidate whose projection setup would keep, which the apply commits", async () => {
+      const piece = await pieceWithWidenedResultEnvelope();
+      const candidate = labelledResultProgram(
+        "// a revision the projection does not carry",
+      );
+
+      const report = await piece.checkPattern(candidate);
+      expect(report.issues.cfc).toBe(undefined);
+      expect(report.compatible).toBe(true);
+
+      await piece.setPattern(candidate);
+      await runtime.idle();
+      expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(
+        report.candidate.identity,
+      );
+    });
+
+    it("refuses a candidate whose projection setup would rewrite over an envelope it cannot merge", async () => {
+      // The control: re-minting the derived cell changes the projection, so
+      // setup writes it, the commit merges the result schema, and the widened
+      // envelope refuses the narrower declared label at both ends.
+      const piece = await pieceWithWidenedResultEnvelope();
+      const candidate = labelledResultProgram("", "`seen:${seed}`");
+
+      const report = await piece.checkPattern(candidate);
+      expect(report.compatible).toBe(false);
+      expect(report.issues.cfc).toContain(
+        "confidentiality cannot be weakened at /label",
+      );
+
+      const applied = await piece.setPattern(candidate).then(
+        () => undefined,
+        (error: unknown) => (error as { message?: string })?.message,
+      );
+      expect(applied).toContain("CFC enforcement rejected commit");
+      expect(applied).toContain("confidentiality cannot be weakened at /label");
     });
   });
 

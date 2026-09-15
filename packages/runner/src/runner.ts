@@ -2579,6 +2579,43 @@ export class Runner {
   }
 
   /**
+   * Whether setting `pattern` up on `resultCell` would rewrite the result
+   * projection: `pattern` is not the pattern the document was last set up
+   * with, and the projection it binds to the document differs from the one
+   * stored. Setup writes the projection only then, and records the result
+   * schema as a write-policy input only with that write, so this is also
+   * whether the setup commit merges `pattern`'s result schema into the
+   * document's stored CFC envelope. `cf piece setsrc --check` asks it before
+   * it merges that envelope in dry run, so a source update that leaves the
+   * projection as it is — one changing only what the projection does not
+   * carry — is not refused over an envelope the commit never touches. Reads
+   * only.
+   *
+   * A source update never asks setup to reapply a stored setup, so the same
+   * pattern as the last run is the one case where setup keeps the stored
+   * projection without comparing.
+   */
+  setupRewritesResultProjection(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<unknown>,
+  ): boolean {
+    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx)) ??
+      this.#sessionPatternPointer(resultCell.withTx(tx));
+    const entryRef = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    if (
+      previousIdentityRef !== undefined && entryRef !== undefined &&
+      entryRef.identity === previousIdentityRef.identity &&
+      entryRef.symbol === previousIdentityRef.symbol
+    ) {
+      return false;
+    }
+    return this.#nextResultProjection(tx, pattern, resultCell, {
+      preserveName: false,
+    }).changed;
+  }
+
+  /**
    * Validate a piece's stored argument against a candidate without staging it.
    *
    * Uses setup's value validation and defaults. Unreadable argument documents
@@ -2878,6 +2915,42 @@ export class Runner {
     resultCell: Cell<R>,
     options: { preserveName: boolean },
   ): void {
+    const { result, fabricResult, changed } = this.#nextResultProjection(
+      tx,
+      pattern,
+      resultCell,
+      options,
+    );
+    if (changed) {
+      recordSetupProjectionPolicyInputs(
+        tx,
+        this.#runtime,
+        resultCell,
+        pattern.resultSchema,
+        result,
+      );
+      const writableResultCell = pattern.resultSchema === undefined
+        ? resultCell.withTx(tx)
+        : resultCell.withTx(tx).asSchema(pattern.resultSchema);
+      // The result root marks the whole result document as generated: setup
+      // rewrites the complete projection.
+      writableResultCell.setRawUntyped(fabricResult, false, "output");
+    }
+  }
+
+  /**
+   * The projection setting `pattern` up stores on `resultCell`, beside the
+   * one stored now: `result` is the projection as bound to the document,
+   * which the policy-input recorder walks; `fabricResult` is what a write
+   * stores; and `changed` is whether that differs from what is stored, which
+   * is the one condition under which setup writes it. Reads only.
+   */
+  #nextResultProjection<R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<R>,
+    options: { preserveName: boolean },
+  ): { result: R; fabricResult: FabricValue; changed: boolean } {
     const writableResultCell = pattern.resultSchema === undefined
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
@@ -2918,18 +2991,11 @@ export class Runner {
     const fabricResult = fabricFromConvertibleJsValue(
       flattenBuilderArtifacts(result),
     );
-    if (!valueEqual(fabricResult, previousResult)) {
-      recordSetupProjectionPolicyInputs(
-        tx,
-        this.#runtime,
-        resultCell,
-        pattern.resultSchema,
-        result,
-      );
-      // The result root marks the whole result document as generated: setup
-      // rewrites the complete projection.
-      writableResultCell.setRawUntyped(fabricResult, false, "output");
-    }
+    return {
+      result,
+      fabricResult,
+      changed: !valueEqual(fabricResult, previousResult),
+    };
   }
 
   /**

@@ -20,6 +20,7 @@ import {
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   getValueAtPath,
+  type IExtendedStorageTransaction,
   isCell,
   isCellResultForDereferencing,
   isLink,
@@ -5265,12 +5266,14 @@ async function pieceSourceCompatibilityReview(
  * Two documents take that merge at commit, and both are reviewed here. The
  * argument document merges under the candidate's argument schema. The piece's
  * own document — the result, where a profile's owner-protected fields live —
- * merges under the candidate's result schema. Setup rewrites the result
- * projection in full, so its schema input covers the whole document as
- * generated output and every path of it is exempt from the additive-required
- * rule; the review passes the same exemption, or a candidate that adds a
- * generated result field would be refused here and accepted by the deploy. An
- * argument is an input: nothing generates it, so its merge takes no exemption.
+ * merges under the candidate's result schema, and only when setup rewrites
+ * the result projection at all, which `setupRewritesResultProjection` decides
+ * for the review as it does for setup. Setup rewrites the projection in full,
+ * so its schema input covers the whole document as generated output and every
+ * path of it is exempt from the additive-required rule; the review passes the
+ * same exemption, or a candidate that adds a generated result field would be
+ * refused here and accepted by the deploy. An argument is an input: nothing
+ * generates it, so its merge takes no exemption.
  *
  * Each merge is driven for real, in dry run, through
  * `storedCfcEnvelopeMergeIssue` — the fast paths the commit takes before it
@@ -5283,21 +5286,30 @@ function pieceSourceCfcEnvelopeIssue(
   candidate: Pattern,
   pieces: PiecesController,
 ): string | undefined {
+  // `readTx()` cannot write, so the two dry runs stay dry runs.
+  const tx = pieces.runtime.readTx();
   const issues = [
     pieceDocumentCfcEnvelopeIssue(
       "argument",
       argumentCell,
       candidate.argumentSchema,
       {},
-      pieces,
+      tx,
     ),
-    pieceDocumentCfcEnvelopeIssue(
-      "result",
-      piece,
-      candidate.resultSchema,
-      { generatedOutputPaths: [[]] },
-      pieces,
-    ),
+    // Setup writes the result projection, and with it the schema input the
+    // commit merges, only where the candidate's projection differs from the
+    // stored one. A candidate that changes nothing the projection carries
+    // takes no merge at commit, so the review asks setup's own question
+    // first rather than refusing over an envelope the commit never touches.
+    pieces.runtime.runner.setupRewritesResultProjection(tx, candidate, piece)
+      ? pieceDocumentCfcEnvelopeIssue(
+        "result",
+        piece,
+        candidate.resultSchema,
+        { generatedOutputPaths: [[]] },
+        tx,
+      )
+      : undefined,
   ].filter((issue): issue is string => issue !== undefined);
   return issues.length === 0 ? undefined : issues.join("\n");
 }
@@ -5312,11 +5324,10 @@ function pieceDocumentCfcEnvelopeIssue(
   cell: Cell<unknown>,
   candidateSchema: JSONSchema,
   options: MergeCfcSchemaEnvelopeOptions,
-  pieces: PiecesController,
+  tx: IExtendedStorageTransaction,
 ): string | undefined {
   const link = cell.getAsNormalizedFullLink();
-  // `readTx()` cannot write, so the dry run stays a dry run.
-  const stored = loadStoredCfcEnvelope(pieces.runtime.readTx(), {
+  const stored = loadStoredCfcEnvelope(tx, {
     space: link.space,
     id: link.id,
     scope: link.scope,

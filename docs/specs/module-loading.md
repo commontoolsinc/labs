@@ -647,12 +647,14 @@ store, outside the wave, and registers its authority from that verdict
 repairing the current source's compiled cache. The review includes the CFC
 schema-envelope merge the setup transaction performs at commit, run in dry run
 over the envelopes stored on the piece's argument document and on the piece's
-own document, so a stored `writeAuthorizedBy` claim the candidate's schema
-cannot reconcile with is reported by the check rather than by the commit. It
-issues no storage writes and creates no module update authority. Verified byte
-caches and in-memory compiler state may be reused by later operations. Normal
-storage reads can demand materialization by an active server executor;
-preflight does not freeze the space or suppress other actors' writes.
+own document — the latter only where setup would rewrite the result
+projection, as the commit merges it only then — so a stored `writeAuthorizedBy`
+claim the candidate's schema cannot reconcile with is reported by the check
+rather than by the commit. It issues no storage writes and creates no module
+update authority. Verified byte caches and in-memory compiler state may be
+reused by later operations. Normal storage reads can demand materialization by
+an active server executor; preflight does not freeze the space or suppress
+other actors' writes.
 
 Asynchronous source and compiled closure loads register authority only when the
 transaction carries no uncommitted writes (`tx.hasWrites()` is false). Source
