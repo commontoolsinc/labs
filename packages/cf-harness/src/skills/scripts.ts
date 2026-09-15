@@ -1,11 +1,8 @@
 import { normalize as normalizeResourcePath } from "@std/path/posix";
 import type { HarnessAllowedSkillScript } from "../contracts/skill.ts";
-import { parseSkillsShSkillId } from "../skills-sh/pin.ts";
+import { parseSkillsShSkillId, splitSkillsShPin } from "../skills-sh/pin.ts";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-/** A full lowercase Git commit SHA, which is the whole of an acquired pin. */
-const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
 /**
  * Whether `skill` names an acquired skill rather than a registry one: a
@@ -19,17 +16,14 @@ const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 export const parseAcquiredSkillPin = (
   skill: string,
 ): { readonly id: string; readonly commitSha: string } | undefined => {
-  const at = skill.lastIndexOf("@");
-  if (at <= 0) return undefined;
-  const id = skill.slice(0, at);
-  const commitSha = skill.slice(at + 1);
-  if (!COMMIT_SHA_PATTERN.test(commitSha)) return undefined;
+  const split = splitSkillsShPin(skill);
+  if (split === undefined) return undefined;
   try {
-    parseSkillsShSkillId(id);
+    parseSkillsShSkillId(split.id);
   } catch {
     return undefined;
   }
-  return { id, commitSha };
+  return split;
 };
 
 /**
@@ -156,4 +150,47 @@ export const isSkillScriptAllowlisted = (
   return allowlist.some((allowed) =>
     allowedSkillScriptKey(normalizeAllowedSkillScript(allowed)) === key
   );
+};
+
+/**
+ * What a run is told about the skill scripts its operator allowed, or
+ * `undefined` where none were.
+ *
+ * Which script may run is the operator's decision and the run has no other
+ * way to learn it: the allowlist reaches the tool, not the model, so a run
+ * never told it can only guess at what it is permitted to do.
+ *
+ * An acquired entry additionally carries the commit its bytes were read at,
+ * and that commit exists nowhere else — a run acquiring the skill by name
+ * alone gets whatever the default branch holds when it runs, which is the
+ * allowed bytes only by luck. So the acquired entries are said with the
+ * instruction to acquire by the whole pin.
+ */
+export const allowedSkillScriptsContextMessage = (
+  allowlist: readonly HarnessAllowedSkillScript[] | undefined,
+): string | undefined => {
+  const scripts = allowlist ?? [];
+  if (scripts.length === 0) {
+    return undefined;
+  }
+  const acquired = scripts.filter((script) =>
+    parseAcquiredSkillPin(script.skill) !== undefined
+  );
+  return [
+    "Operator-allowed skill scripts:",
+    ...scripts.map((script) => `- ${script.skill} -> ${script.path}`),
+    "",
+    "These are the only scripts `run_skill_script` will run, and a script " +
+    "absent from this list is refused however it is named.",
+    ...(acquired.length === 0 ? [] : [
+      "",
+      "The entries carrying `@<commit sha>` are acquired skills, pinned to " +
+      "exact bytes. Pass the whole pin as the `acquire_skill` id, so what " +
+      "you acquire is what was allowed; acquiring the same skill by name " +
+      "alone resolves to the repository's current default-branch head, which " +
+      "is these bytes only by coincidence. A child given the resulting " +
+      "handle receives `run_skill_script` for the listed scripts of that pin " +
+      "and for nothing else.",
+    ]),
+  ].join("\n");
 };

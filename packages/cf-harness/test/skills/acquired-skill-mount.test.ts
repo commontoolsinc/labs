@@ -106,9 +106,22 @@ describe("the acquired-skill mount a delegation gives its child", () => {
       });
     });
 
-    it("withholds an entry naming another skill's pin", () => {
+    it("withholds an entry naming another skill", () => {
       // The operator decided about the scripts of the skill this child was
       // given, and about no others.
+      expect(
+        acquiredSkillScriptSurface(
+          [{ skill: "agent-browser", path: "scripts/run.ts" }],
+          acquiredAt(COMMIT_SHA),
+        ),
+      ).toEqual({ allowedSkillScripts: [], toolIds: [] });
+    });
+
+    it("reports the two commits when the entry names this skill at another", () => {
+      // The operator allowed this skill's scripts and the acquisition fetched
+      // other bytes, so granting nothing is a mistake rather than a decision —
+      // and granting nothing is indistinguishable from an operator who allowed
+      // nothing unless the two commits are said.
       expect(
         acquiredSkillScriptSurface(
           [entryAt(`${REGISTRY_ID}@${OTHER_COMMIT_SHA}`), {
@@ -117,7 +130,23 @@ describe("the acquired-skill mount a delegation gives its child", () => {
           }],
           acquiredAt(COMMIT_SHA),
         ),
-      ).toEqual({ allowedSkillScripts: [], toolIds: [] });
+      ).toEqual({
+        allowedSkillScripts: [],
+        toolIds: [],
+        pinMismatch: {
+          acquiredPin: `${REGISTRY_ID}@${COMMIT_SHA}`,
+          allowedPins: [`${REGISTRY_ID}@${OTHER_COMMIT_SHA}`],
+        },
+      });
+    });
+
+    it("reports no mismatch when the allowlist names this skill at its own commit", () => {
+      expect(
+        acquiredSkillScriptSurface(
+          [entryAt(`${REGISTRY_ID}@${COMMIT_SHA}`)],
+          acquiredAt(COMMIT_SHA),
+        ).pinMismatch,
+      ).toBeUndefined();
     });
 
     it("grants no tool when the operator allowlisted nothing at the pin", () => {

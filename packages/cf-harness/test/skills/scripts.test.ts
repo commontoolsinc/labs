@@ -1,10 +1,15 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { splitSkillsShPin } from "../../src/skills-sh/pin.ts";
+
 import {
   allowedSkillScriptKey,
+  allowedSkillScriptsContextMessage,
+  isAllowedSkillScriptSkill,
   isSkillScriptAllowlisted,
   normalizeAllowedSkillScript,
+  parseAcquiredSkillPin,
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "../../src/skills/scripts.ts";
@@ -151,6 +156,94 @@ describe("scripts.ts", () => {
         { skill: PIN, path: "scripts/report.sh" },
         { skill: "agent-browser", path: "scripts/run.ts" },
       ]);
+    });
+  });
+
+  describe("allowedSkillScriptsContextMessage()", () => {
+    it("names the operator's entries and no others", () => {
+      // Exclusivity rather than inclusion: a `toContain` per entry stays green
+      // when a later change leaks a pair the operator never wrote, and a
+      // disclosure that names a script nobody allowed is the failure worth
+      // catching. So the whole bullet list is the assertion.
+      const message = allowedSkillScriptsContextMessage([
+        { skill: PIN, path: "scripts/report.sh" },
+        { skill: "agent-browser", path: "scripts/run.ts" },
+      ]);
+
+      expect(
+        (message ?? "").split("\n").filter((line) => line.startsWith("- ")),
+      ).toEqual([
+        `- ${PIN} -> scripts/report.sh`,
+        "- agent-browser -> scripts/run.ts",
+      ]);
+    });
+
+    it("says to acquire by the whole pin", () => {
+      // The pin is the point: acquiring the same skill by name alone resolves
+      // to the default-branch head, which is the allowed bytes only by luck.
+      expect(
+        allowedSkillScriptsContextMessage([
+          { skill: PIN, path: "scripts/report.sh" },
+        ]),
+      ).toContain("`acquire_skill` id");
+    });
+
+    it("names a registry entry alone, which the run can learn nowhere else", () => {
+      const message = allowedSkillScriptsContextMessage([
+        { skill: "agent-browser", path: "scripts/run.ts" },
+      ]);
+
+      expect(
+        (message ?? "").split("\n").filter((line) => line.startsWith("- ")),
+      ).toEqual(["- agent-browser -> scripts/run.ts"]);
+    });
+
+    it("says nothing about acquiring for a registry-only allowlist", () => {
+      // There is no pin to acquire by, so the instruction would name a
+      // spelling none of the entries has.
+      expect(
+        allowedSkillScriptsContextMessage([
+          { skill: "agent-browser", path: "scripts/run.ts" },
+        ]),
+      ).not.toContain("`acquire_skill` id");
+    });
+
+    it("returns nothing for an empty or absent allowlist", () => {
+      expect(allowedSkillScriptsContextMessage([])).toBeUndefined();
+      expect(allowedSkillScriptsContextMessage(undefined)).toBeUndefined();
+    });
+  });
+
+  describe("parseAcquiredSkillPin()", () => {
+    it("splits a pin exactly as `splitSkillsShPin` does", () => {
+      // Two splitters that agree only by inspection would reopen the failure
+      // the one spelling exists to prevent: an allowlist entry and an
+      // acquisition naming different bytes while both look valid.
+      for (
+        const candidate of [
+          PIN,
+          `${PIN}@${SHA}`,
+          `owner/repo/slug@${SHA}`,
+          `owner/repo/slug@${SHA.toUpperCase()}`,
+          `owner/repo/slug@${SHA.slice(0, 7)}`,
+          "owner/repo/slug@main",
+          "owner/repo/slug",
+          "agent-browser",
+          `@${SHA}`,
+          "",
+        ]
+      ) {
+        const split = splitSkillsShPin(candidate);
+        const parsed = parseAcquiredSkillPin(candidate);
+        if (parsed !== undefined) {
+          expect(parsed).toEqual(split);
+        } else {
+          // Where they part it is the head, which only this one validates.
+          expect(
+            split === undefined || !isAllowedSkillScriptSkill(candidate),
+          ).toBe(true);
+        }
+      }
     });
   });
 });

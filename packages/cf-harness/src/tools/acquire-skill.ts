@@ -11,6 +11,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { stampExternalFetchIngest } from "@commonfabric/runner/cfc";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 
+import type { HarnessAllowedSkillScript } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import {
   SkillsShAcquisitionError,
@@ -19,9 +20,11 @@ import {
 import {
   type SkillsShPinnedAddress,
   SkillsShPinResolutionError,
+  splitSkillsShPin,
 } from "../skills-sh/pin.ts";
 import { sanitizeRegistryString } from "../skills-sh/search-client.ts";
 import { AcquiredSkillDirectoryReadableError } from "../skills/acquired-skill-mount.ts";
+import { parseAcquiredSkillPin } from "../skills/scripts.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface AcquireSkillToolInput {
@@ -92,7 +95,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
   toolId: "acquire_skill",
   title: "Acquire Skill",
   description:
-    "Acquire a discovered skill id from its pinned GitHub commit after checking the complete recursive listing. The parent never receives skill text: a loaded result carries a handle only. A refusal is an expected outcome with its reason and offending paths as inert metadata; do not retry around it. Acquisition grants no permission and loads nothing into the parent. Loading the handle into a child is a separate later delegate_task decision.",
+    "Acquire a discovered skill id from its pinned GitHub commit after checking the complete recursive listing. An id given without a commit resolves to the default-branch head, which moves; naming the commit acquires those exact bytes, which is what an operator's script allowlist is keyed on. The parent never receives skill text: a loaded result carries a handle only. A refusal is an expected outcome with its reason and offending paths as inert metadata; do not retry around it. Acquisition grants no permission and loads nothing into the parent. Loading the handle into a child is a separate later delegate_task decision.",
   effectClass: "write",
   inputSchema: {
     type: "object",
@@ -100,7 +103,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
       id: {
         type: "string",
         description:
-          "Exact discovery id returned by search_skills, in owner/repository/slug form.",
+          "Exact discovery id returned by search_skills, in owner/repository/slug form, optionally followed by @<commit sha> to acquire that exact commit rather than the repository's default-branch head.",
       },
     },
     required: ["id"],
@@ -177,6 +180,17 @@ const safeErrorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error),
   );
 
+/** The pins this run allows the scripts of, deduplicated, in entry order. */
+const acquirablePins = (
+  allowlist: readonly HarnessAllowedSkillScript[] | undefined,
+): readonly string[] => [
+  ...new Set(
+    (allowlist ?? [])
+      .filter((script) => parseAcquiredSkillPin(script.skill) !== undefined)
+      .map((script) => script.skill),
+  ),
+];
+
 const operationalAcquisitionCodes: ReadonlySet<
   SkillsShAcquisitionFailureCode
 > = new Set(["request_failed", "http_error"]);
@@ -205,6 +219,40 @@ export const acquireSkillTool: HarnessToolDefinition<
       return errorOutput(
         "acquire_skill requires the host skill-context handle mint",
       );
+    }
+
+    // An explicit commit is accepted only where the operator's allowlist names
+    // it. GitHub serves a commit object to the whole of a repository's FORK
+    // NETWORK, so a free choice of sha reaches bytes that were never in the
+    // named repository's own history while the acquisition record, its
+    // `ExternalIngest` stamp and its `git-commit-sha` verification all still
+    // read as that repository. Resolving a bare id cannot reach them — it goes
+    // to the repository's own default-branch head — so the constraint costs
+    // nothing a caller had before, and the only reason to name a commit at all
+    // is to hit a pin the operator already allowed.
+    const requestedCommit = splitSkillsShPin(input.id)?.commitSha;
+    if (requestedCommit !== undefined) {
+      const allowedPins = acquirablePins(context.allowedSkillScripts);
+      if (!allowedPins.includes(input.id)) {
+        // A refusal rather than an error: the operator's policy decided this,
+        // it will decide the same way every time, and a caller that read it as
+        // an operational failure would retry something that cannot succeed.
+        return {
+          outputId,
+          status: "refused",
+          reason: {
+            code: "commit_not_allowlisted",
+            message: allowedPins.length === 0
+              ? `the commit-pinned id ${input.id} names a commit this run ` +
+                `allows the scripts of no acquired skill at; acquire by the ` +
+                `skill id alone to read its default-branch head`
+              : `the commit-pinned id ${input.id} names a commit this run ` +
+                `does not allow the scripts of; it allows ` +
+                `${allowedPins.join(", ")}, and acquiring by the skill id ` +
+                `alone reads its default-branch head`,
+          },
+        };
+      }
     }
 
     let pin: SkillsShPinnedAddress | undefined;

@@ -785,8 +785,9 @@ is absent is not offered, rather than offered and failing.
 
 Each turn is its own run, so what that run holds is established per turn and
 announced in the messages it opens with: the skills registry scanned from the
-skills root, the well-known grants of the session's space — which is what lets a
-task explore what the space holds — and the input cells the request attached.
+skills root, the skill scripts the operator allowed, the well-known grants of
+the session's space — which is what lets a task explore what the space holds —
+and the input cells the request attached.
 
 ## Connector grants
 

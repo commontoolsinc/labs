@@ -1127,9 +1127,26 @@ do not offer it.
 takes an exact id returned by `search_skills`, resolves the source repository's
 default branch to a full commit SHA, reads GitHub's recursive tree at that
 commit, and derives the candidate root from exact path-segment equality with the
-discovery slug. No case folding or path normalization participates. Zero or
-multiple candidates refuse, and a tree response marked `truncated` refuses
-because an unread inventory is not evidence of absence.
+discovery slug.
+
+The id may carry the commit itself, `owner/repo/slug@<commit sha>`, and then
+those are the bytes acquired and GitHub is not asked where the default branch
+points; everything after that step is identical, and the pin the run records is
+the same either way. That spelling exists because an operator's script allowlist
+is keyed on a commit while a default branch moves, so a run acquiring by name
+alone holds the allowed bytes only when nothing was pushed in between. The run
+is told which scripts its operator allowed before its first turn, pins and all,
+which is what lets it name one. A run that acquires the same skill at another
+commit — which acquiring by bare id can still do, the default branch having
+moved — is refused at `delegate_task` with both commits named, rather than
+handing a child a mounted skill and no tool to run it with. A delegation that
+wanted the skill's prose rather than its script says so with
+`withoutSkillScript` and proceeds: the child is given the skill's instructions,
+as any handle-carrying delegation is, and is given neither the acquired-skill
+mount nor `run_skill_script` — so the bytes it says it will not run are not
+reachable by other means either. No case folding or path normalization
+participates. Zero or multiple candidates refuse, and a tree response marked
+`truncated` refuses because an unread inventory is not evidence of absence.
 
 The path whitelist is scoped to the selected candidate root's subtree, so
 sibling skills and repository files outside that root do not leak into the

@@ -11,6 +11,7 @@ import { expect } from "@std/expect";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import type { SkillsShSearchHit } from "../../src/skills-sh/search-client.ts";
 import {
+  parseSkillsShAcquisitionRequest,
   resolveSkillsShHitPin,
   resolveSkillsShSkillIdPin,
   SkillsShPinResolutionError,
@@ -84,6 +85,73 @@ describe("skills.sh pin resolution", () => {
       slug: "vercel-react-native-skills",
       commitSha: COMMIT_SHA,
       resolvedAt: "2026-09-01T02:03:04.000Z",
+    });
+  });
+
+  it("returns the named commit for an id that carries one", async () => {
+    const { fetch, urls } = fixtureFetch();
+
+    const pin = await resolveSkillsShSkillIdPin(`${HIT.id}@${COMMIT_SHA}`, {
+      fetch,
+      now: () => "2026-09-01T02:03:04.000Z",
+    });
+
+    expect(urls).toEqual([]);
+    expect(pin).toEqual({
+      id: HIT.id,
+      owner: "vercel-labs",
+      repo: "agent-skills",
+      slug: "vercel-react-native-skills",
+      commitSha: COMMIT_SHA,
+      resolvedAt: "2026-09-01T02:03:04.000Z",
+    });
+  });
+
+  it("returns the same address for a pinned id as for its default-branch head", async () => {
+    const head = await resolveSkillsShSkillIdPin(HIT.id, {
+      fetch: fixtureFetch().fetch,
+      now: () => "2026-09-01T02:03:04.000Z",
+    });
+    const pinned = await resolveSkillsShSkillIdPin(`${HIT.id}@${COMMIT_SHA}`, {
+      fetch: fixtureFetch().fetch,
+      now: () => "2026-09-01T02:03:04.000Z",
+    });
+
+    expect(pinned).toEqual(head);
+  });
+
+  it("refuses a commit that is not a full lowercase SHA, before any request", async () => {
+    const { fetch, urls } = fixtureFetch();
+
+    for (
+      const id of [
+        `${HIT.id}@main`,
+        `${HIT.id}@${COMMIT_SHA.slice(0, 7)}`,
+        `${HIT.id}@${COMMIT_SHA.toUpperCase()}`,
+      ]
+    ) {
+      const refusal = await refusalOf(resolveSkillsShSkillIdPin(id, { fetch }));
+      expect(refusal.code).toBe("invalid_hit");
+    }
+    expect(urls).toEqual([]);
+  });
+
+  it("separates the skill from the commit a request pins it to", () => {
+    expect(parseSkillsShAcquisitionRequest(`${HIT.id}@${COMMIT_SHA}`)).toEqual({
+      id: HIT.id,
+      owner: "vercel-labs",
+      repo: "agent-skills",
+      slug: "vercel-react-native-skills",
+      commitSha: COMMIT_SHA,
+    });
+  });
+
+  it("returns no commit for a request that pins none", () => {
+    expect(parseSkillsShAcquisitionRequest(HIT.id)).toEqual({
+      id: HIT.id,
+      owner: "vercel-labs",
+      repo: "agent-skills",
+      slug: "vercel-react-native-skills",
     });
   });
 

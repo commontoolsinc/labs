@@ -866,6 +866,30 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  if (
+    input.withoutSkillScript !== undefined &&
+    typeof input.withoutSkillScript !== "boolean"
+  ) {
+    return {
+      invalid: {
+        field: "withoutSkillScript",
+        expected:
+          "`true` to state the delegation runs no script of its skill, or omit it",
+      },
+    };
+  }
+  // Inert without a skill to be instructions-only about, and an inert field
+  // the harness accepted would read to its caller as a decision that took
+  // effect.
+  if (input.skillHandle === undefined && input.withoutSkillScript === true) {
+    return {
+      invalid: {
+        field: "withoutSkillScript",
+        expected:
+          "omitted when no `skillHandle` is supplied; it states what a delegation does with the skill it carries",
+      },
+    };
+  }
   // Both together is a call that says two things at once, and the harness
   // would have to pick one. Refusing states which fields disagree instead.
   if (input.skillHandle !== undefined && input.withoutSkillHandle === true) {
@@ -927,6 +951,9 @@ const parseDelegateTaskInput = (
         : {}),
       ...(input.withoutSkillHandle === true
         ? { withoutSkillHandle: true }
+        : {}),
+      ...(input.withoutSkillScript === true
+        ? { withoutSkillScript: true }
         : {}),
     },
   };
@@ -3828,7 +3855,9 @@ export class CfHarnessPromptLoop {
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
-    let resolvedDelegateSkill: { text: string; token: string } | undefined;
+    let resolvedDelegateSkill:
+      | { text: string; token: string; acquisition?: HarnessSkillAcquisition }
+      | undefined;
     if (toolId === "delegate_task") {
       const parsedDelegateInput = parseDelegateTaskInput(input);
       if ("invalid" in parsedDelegateInput) {
@@ -4002,6 +4031,45 @@ export class CfHarnessPromptLoop {
             ? { acquisition: entry!.acquisition }
             : {}),
         };
+        // The operator allowed scripts of this skill at a commit, and the
+        // acquisition fetched another. Left alone the child receives no
+        // `run_skill_script` at all, which reads exactly as an operator who
+        // allowed nothing, so the delegation is refused with both commits
+        // named instead. The model can act on it two ways: `acquire_skill`
+        // takes a pin, so acquiring the allowed one is one answer, and a
+        // delegation that wanted the skill's instructions rather than its
+        // script says so with `withoutSkillScript` and proceeds.
+        const mismatch = delegateInput.withoutSkillScript === true
+          ? undefined
+          : acquiredSkillScriptSurface(
+            this.engine.config.allowedSkillScripts,
+            acquiredSkillForHandle(
+              this.engine.getRunState().acquiredSkills?.skills,
+              resolvedDelegateSkill.acquisition,
+            ),
+          ).pinMismatch;
+        if (mismatch !== undefined) {
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected:
+                `a handle for a skill whose scripts this run allows. This ` +
+                `run allows scripts of ${mismatch.allowedPins.join(", ")}, ` +
+                `and the handle names ${mismatch.acquiredPin}, which is the ` +
+                `same skill at another commit; acquire it by the allowed pin`,
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
       }
     }
     await this.engine.recordPolicyDecision({
@@ -4564,11 +4632,21 @@ export class CfHarnessPromptLoop {
     };
     // The acquired skill this child may run scripts of: the one its
     // `skillHandle` names, and no other.
+    //
+    // A delegation stating `withoutSkillScript` holds none. The mount is what
+    // puts the script bytes at a path, and a `default` child also holds
+    // `bash`, so leaving it in place would hand a child that says it runs no
+    // script of this skill the very bytes it says it will not run. The skill's
+    // TEXT is unaffected: it reaches the child through the handle rather than
+    // through the mount, which is the whole of what an instructions-only
+    // delegation asked for.
     const parentAcquiredSkills = this.engine.getRunState().acquiredSkills;
-    const childAcquiredSkill = acquiredSkillForHandle(
-      parentAcquiredSkills?.skills,
-      options.resolvedSkill?.acquisition,
-    );
+    const childAcquiredSkill = options.input.withoutSkillScript === true
+      ? undefined
+      : acquiredSkillForHandle(
+        parentAcquiredSkills?.skills,
+        options.resolvedSkill?.acquisition,
+      );
     // The operator's allowlist is the run's and the tool surface is the
     // profile's, so a child given an acquired skill needs both brought to it or
     // it holds a mounted skill it cannot run a script of.
@@ -4795,6 +4873,9 @@ export class CfHarnessPromptLoop {
         : {}),
       ...(delegateInput.withoutSkillHandle === true
         ? { withoutSkillHandle: true }
+        : {}),
+      ...(delegateInput.withoutSkillScript === true
+        ? { withoutSkillScript: true }
         : {}),
     });
     const childLoop = new CfHarnessPromptLoop({
@@ -5039,6 +5120,9 @@ export class CfHarnessPromptLoop {
         : {}),
       ...(delegateInput.withoutSkillHandle === true
         ? { withoutSkillHandle: true }
+        : {}),
+      ...(delegateInput.withoutSkillScript === true
+        ? { withoutSkillScript: true }
         : {}),
       runState: subagent.runState,
       ...(structuredReturn !== undefined ? { structuredReturn } : {}),

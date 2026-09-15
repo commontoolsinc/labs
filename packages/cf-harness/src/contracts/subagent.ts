@@ -694,6 +694,14 @@ interface HarnessSubagentRunRefBase {
   skillHandle?: string;
 
   /**
+   * Set when this delegation stated it runs no script of the skill it
+   * carries. Recorded because it is why the child has no script surface and
+   * no acquired-skill mount, which a run report otherwise cannot tell from an
+   * operator who allowlisted nothing.
+   */
+  withoutSkillScript?: boolean;
+
+  /**
    * Set when this delegation stated it deliberately carries no acquired
    * skill. It discharges the run's outstanding custody: the parent has
    * answered the question the refusal asks, once, and later delegations are
@@ -759,6 +767,24 @@ export interface DelegateTaskToolInput {
    * unforgeable table membership instead of by name.
    */
   skillHandle?: string;
+
+  /**
+   * States that this delegation wants its skill's instructions and runs no
+   * script of it.
+   *
+   * Requires {@link skillHandle}, and is meaningful where that handle names a
+   * skill whose scripts the operator allowlisted at a DIFFERENT commit. Such a
+   * delegation is otherwise refused, because the child would receive no
+   * `run_skill_script` and an absent tool reads exactly as an operator who
+   * allowed nothing. Saying so here is how a parent that wanted the prose
+   * rather than the script proceeds.
+   *
+   * It takes the script bytes away rather than only the tool: the child's
+   * sandbox carries no acquired-skill mount, so a profile holding `bash` has
+   * nothing under that path to run. The skill's text is unaffected, reaching
+   * the child through the handle.
+   */
+  withoutSkillScript?: boolean;
 
   /**
    * States that this delegation deliberately carries no acquired skill. It is
