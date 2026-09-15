@@ -63,8 +63,13 @@ const SPREADS = ["low-degree", "high-degree", "single-bucket"] as const;
  */
 const SCALING_MENTIONS_PER_SOURCE = 4;
 
-/** Topic count at which the pivot cases vary mentions per source. */
-const MENTION_SWEEP_TOPIC_COUNT = 128;
+/**
+ * Topic counts at which the pivot cases vary mentions per source. The whole
+ * sweep runs at each: 32 topics is the size the read-budget tests gate in
+ * continuous integration, and 128 is the size the probe reports the effect of
+ * mention degree at.
+ */
+const MENTION_SWEEP_TOPIC_COUNTS = [32, 128];
 
 /**
  * Mentions per source the mention sweep covers. Zero is the `none` graph, in
@@ -214,13 +219,15 @@ export function probeCases(): ProbeCase[] {
       );
     }
   }
-  for (const perSource of MENTION_SWEEP) {
-    if (perSource === 0) {
-      pivot({ shape: "none" }, MENTION_SWEEP_TOPIC_COUNT);
-      continue;
-    }
-    for (const shape of SPREADS) {
-      pivot({ shape, perSource }, MENTION_SWEEP_TOPIC_COUNT);
+  for (const topicCount of MENTION_SWEEP_TOPIC_COUNTS) {
+    for (const perSource of MENTION_SWEEP) {
+      if (perSource === 0) {
+        pivot({ shape: "none" }, topicCount);
+        continue;
+      }
+      for (const shape of SPREADS) {
+        pivot({ shape, perSource }, topicCount);
+      }
     }
   }
   thread(SMALL_THREAD_LENGTH, SMALL_THREAD_LENGTH);
