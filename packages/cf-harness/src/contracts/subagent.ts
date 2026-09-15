@@ -83,6 +83,15 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * the job should compose it rather than write one, and say how the one it ran
  * turned out.
  *
+ * `read_piece_source` and `revise_piece` are how it changes a piece someone
+ * already has rather than building a new one: the read is addressed by handle
+ * and answers that piece's current authored files, and the revision replaces
+ * them through the runtime's own compatibility check. They are on this surface
+ * and on no parent's — see `SUBAGENT_ONLY_TOOL_IDS` — because the return
+ * contract below has no field for source in any encoding, so program text a
+ * third party authored reaches the context that has to edit it and stops
+ * there.
+ *
  * `research` is how an author reaches documentation, indexed source, and
  * implementation guidance it has no path to. A child cannot delegate, so the
  * bounded private research loop is a tool on this surface rather than another

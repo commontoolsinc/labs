@@ -67,7 +67,8 @@ import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 export type PieceSourceProvenance =
   | "deployment-served"
   | "followed-in-fabric"
-  | "authored-in-place";
+  | "authored-in-place"
+  | "unreadable-origin";
 
 export interface ReadPieceSourceToolInput {
   token: string;
@@ -130,6 +131,16 @@ export interface RevisePieceToolSuccessOutput {
 
   /** The origin this update detached, when the piece was following one. */
   detachedOrigin?: string;
+
+  /**
+   * Set when the source update committed but the refresh of the running
+   * piece did not. The revision is durable and `resultRef` names the piece;
+   * what is unestablished is that the piece runs the new source yet. It is
+   * the tool's equivalent of `cf piece setsrc`'s "source changed, running
+   * deploy unverified" — a state a caller has to be able to tell from a
+   * clean apply, since rendering the result is how it would find out.
+   */
+  refreshWarning?: string;
 }
 
 export type RevisePieceToolOutput =
@@ -193,6 +204,7 @@ export const readPieceSourceToolDescriptor: HarnessToolDescriptor = {
           "deployment-served",
           "followed-in-fabric",
           "authored-in-place",
+          "unreadable-origin",
         ],
       },
       labels: { type: "array", items: LABEL_SCHEMA },
@@ -240,6 +252,7 @@ export const revisePieceToolDescriptor: HarnessToolDescriptor = {
       revisionId: { type: "string" },
       resultRef: { type: "string" },
       detachedOrigin: { type: "string" },
+      refreshWarning: { type: "string" },
       message: { type: "string" },
     },
     required: ["outputId", "status"],
@@ -248,9 +261,21 @@ export const revisePieceToolDescriptor: HarnessToolDescriptor = {
   tags: ["fabric", "piece", "source"],
 };
 
-/** Where the piece says its current source came from. */
+/**
+ * Where the piece says its current source came from.
+ *
+ * A piece carrying a recorded origin string no resolver can follow is
+ * neither following nor detached — it holds something a person can read and
+ * repair — so it is reported as its own state rather than folded into
+ * `authored-in-place`, which would assert an authorship the piece never
+ * recorded.
+ */
 const provenanceOf = (state: PieceSourceState): PieceSourceProvenance => {
-  if (state.origin === undefined) return "authored-in-place";
+  if (state.origin === undefined) {
+    return state.unusableOrigin === undefined
+      ? "authored-in-place"
+      : "unreadable-origin";
+  }
   return state.origin.kind === "system"
     ? "deployment-served"
     : "followed-in-fabric";
@@ -552,6 +577,11 @@ export const revisePieceTool: HarnessToolDefinition<
       resultRef,
       ...(receipt.detachedOrigin !== null
         ? { detachedOrigin: receipt.detachedOrigin }
+        : {}),
+      ...(receipt.refresh.status === "failed"
+        ? {
+          refreshWarning: scrubBareFabricIdentifiers(receipt.refresh.warning),
+        }
         : {}),
     };
   },

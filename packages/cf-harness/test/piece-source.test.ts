@@ -11,6 +11,7 @@ import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { validateStructuredResultValue } from "@commonfabric/runner/cfc";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -222,6 +223,31 @@ describe("piece-source", () => {
       const output = result.output as PieceSourceToolErrorOutput;
       expect(output.status).toBe("error");
       expect(output.message).toContain("this run's own space");
+    });
+
+    it("reports an origin nothing can follow as its own state rather than as in-place authorship", async () => {
+      // A piece carrying a recorded origin string no resolver can follow is
+      // neither following nor detached: it holds something a person can read
+      // and repair. Folding it into `authored-in-place` would assert an
+      // authorship the piece never recorded.
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const cell = await pieces.getPieceCell(created.pieceId);
+      await runtime.editWithRetry((tx) => {
+        cell.withTx(tx).setMetaRaw(
+          "patternSource",
+          "not-a-followable-origin",
+          rawMetaWriteAuthorization,
+        );
+      });
+      await runtime.idle();
+
+      const result = await engine.invokeBuiltinTool("read_piece_source", {
+        token: created.resultRef,
+      });
+      const output = result.output as ReadPieceSourceToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.provenance).toBe("unreadable-origin");
     });
 
     it("refuses a token that names a position inside a piece rather than a piece", async () => {
