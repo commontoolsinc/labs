@@ -331,6 +331,31 @@ export function render() {
     );
   });
 
+  it("compileToModulesCollecting times each authored file separately", async () => {
+    // What a batch caller charges each of the programs it unioned. Only
+    // authored files carry a figure: the declaration libs emit nothing and
+    // `skipLibCheck` keeps them out of the diagnostics pass.
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.ts", {
+        "/main.ts": "import { one } from './other.ts';\nexport default one;\n",
+        "/other.ts": "export const one = 1;\n",
+      }),
+    );
+
+    const collected = compiler.compileToModulesCollecting(resolved);
+
+    expect(collected.diagnostics).toEqual([]);
+    expect([...collected.durations.keys()].toSorted())
+      .toEqual(["/main.ts", "/other.ts"]);
+    // The sum rather than each figure. These are wall-clock, and a
+    // one-line module can take less than the clock resolves, so a floor
+    // under one of them would fail on a loaded machine; a compile that
+    // did anything cannot have spent nothing between them.
+    const spent = [...collected.durations.values()].reduce((a, b) => a + b, 0);
+    expect(spent).toBeGreaterThan(0);
+  });
+
   it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {
     // The interleaved driver only changes WHERE the event loop can run
     // (macrotask yields at module boundaries) — never what is emitted. Pin

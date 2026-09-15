@@ -3,6 +3,7 @@ import { parse as parseJsonc } from "@std/jsonc";
 import { describe, it } from "@std/testing/bdd";
 import { DOC_DEMOS } from "../check-verb-session-sync.ts";
 import { TRIPWIRES } from "../check-tripwires.ts";
+import { matchesPatternFilter } from "../pattern-files.ts";
 import {
   type Gate,
   HISTORY_GATES,
@@ -362,45 +363,115 @@ describe("the repository's gate suites", () => {
         test: { k: "typecheck", s: "memory", n: "deno-check" },
       }),
     ).toEqual({ level: "unit", unit: "memory" });
+    const pattern = byId("cfcheck").units[0]!;
     expect(
       byId("cfcheck").locate({
-        test: { k: "typecheck", s: "repo", n: "cfcheck a/b.tsx" },
+        test: { k: "typecheck", s: "repo", n: `cfcheck ${pattern}` },
       }),
-    ).toEqual({ level: "unit", unit: "cfcheck" });
+    ).toEqual({ level: "unit", unit: pattern });
     expect(
       byId("typecheck").locate({
-        test: { k: "typecheck", s: "repo", n: "cfcheck a/b.tsx" },
+        test: { k: "typecheck", s: "repo", n: `cfcheck ${pattern}` },
       }),
     ).toBeUndefined();
   });
 
-  it("restricts the compatibility gate to the patterns it was given", async () => {
-    const compat = byId("pattern-compat");
-    const [invocation] = await compat.command(
-      [{ unit: compat.units[0]!, skip: [] }],
-      context,
-    );
-    expect(invocation!.command).toContain("--only");
+  it("restricts a pattern gate to the patterns it was given", async () => {
+    // One `--only` per pattern: the flag takes a single value, so a run
+    // handed a list after one flag would be rejected by the task for the
+    // second value it found.
+    for (const id of ["cfcheck", "pattern-compat"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        suite.units.slice(0, 2).map((unit) => ({ unit, skip: [] })),
+        context,
+      );
+      const command = invocation!.command;
+      expect(command.filter((word) => word === "--only")).toHaveLength(2);
+      for (const [index, word] of command.entries()) {
+        if (word !== "--only") continue;
+        expect(command[index + 1]).not.toBe("--only");
+      }
+    }
   });
 
-  it("asks the compatibility gate for everything without a filter", async () => {
-    // A filtered run does not ask the whole-tree questions — whether a
-    // retired pattern still has a baseline, whether an accepted break has
-    // gone orphaned — so a run given every pattern passes no filter.
-    const compat = byId("pattern-compat");
-    const [invocation] = await compat.command(
-      compat.units.map((unit) => ({ unit, skip: [] })),
-      context,
-    );
-    expect(invocation!.command).not.toContain("--only");
+  it("asks a pattern gate for everything without a filter", async () => {
+    // A run given every pattern is the task's own unfiltered run, which
+    // is what a gate with a whole-tree question of its own needs: the
+    // compatibility gate asks whether a retired pattern still has a
+    // baseline and whether an accepted break has gone orphaned, and a
+    // filtered run asks neither.
+    for (const id of ["cfcheck", "pattern-compat"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        suite.units.map((unit) => ({ unit, skip: [] })),
+        context,
+      );
+      expect(invocation!.command).not.toContain("--only");
+    }
   });
 
-  it("holds the compatibility gate's own record to the suite", () => {
-    const compat = byId("pattern-compat");
+  it("records a pattern gate's invocation under the suite's name", async () => {
+    // The wrapper is what turns the command's exit code into a record,
+    // so the identity is written on the command line rather than
+    // inferred. `run-recorded <kind> <scope> <name> -- <command>` puts
+    // that name three words along.
+    for (const id of ["cfcheck", "pattern-compat"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        context,
+      );
+      const command = invocation!.command;
+      const wrapper = command.indexOf("run-recorded");
+      expect(wrapper).toBeGreaterThan(0);
+      expect(command[wrapper + 3]).toBe(id);
+      expect(command[wrapper + 4]).toBe("--");
+    }
+  });
+
+  it("holds a pattern gate's own record to the suite", () => {
+    // The wrapper records the whole invocation under the suite's name,
+    // and that duration is the run's rather than any one pattern's.
     expect(
-      compat.locate({ test: { k: "gate", s: "repo", n: "pattern-compat" } }),
-    )
-      .toEqual({ level: "suite" });
+      byId("pattern-compat").locate({
+        test: { k: "gate", s: "repo", n: "pattern-compat" },
+      }),
+    ).toEqual({ level: "suite" });
+    expect(
+      byId("cfcheck").locate({
+        test: { k: "typecheck", s: "repo", n: "cfcheck" },
+      }),
+    ).toEqual({ level: "suite" });
+  });
+
+  it("selects one pattern per `--only` the task is given", () => {
+    // A lane is charged for the units it asked for, so a filter the task
+    // reads more widely than the topology meant would check patterns
+    // nobody paid for. The task matches a filter as a substring, and what
+    // makes that exact here is that a unit is a whole path.
+    const units = byId("cfcheck").units;
+    const widened = units.filter((unit) => {
+      const hit = units.filter((file) => matchesPatternFilter(file, unit));
+      return hit.length !== 1 || hit[0] !== unit;
+    });
+    expect(widened).toEqual([]);
+  });
+
+  it("names the pattern type check's units the way git names a file", async () => {
+    // A unit that is a path needs no `unitsForChange`: the census makes
+    // it mandatory from the diff naming it, so every unit has to be a
+    // path git reports, in git's own spelling.
+    const cfcheck = byId("cfcheck");
+    expect(cfcheck.unitsForChange).toBeUndefined();
+    const listed = await new Deno.Command("git", {
+      args: ["-C", root, "ls-files", "-z", "packages"],
+    }).output();
+    const tracked = new Set(
+      new TextDecoder().decode(listed.stdout).split("\0"),
+    );
+    expect(cfcheck.units.filter((unit) => !tracked.has(unit))).toEqual([]);
+    expect(cfcheck.units.length).toBeGreaterThan(0);
   });
 
   it("gives the vintage replay every record it writes", () => {
@@ -412,20 +483,18 @@ describe("the repository's gate suites", () => {
     ).toEqual({ level: "unit", unit: "pattern-vintage" });
   });
 
-  it("runs the pattern type check and the vintage replay whole", async () => {
-    // Both write a record per item and neither takes a way of running
-    // part of itself, so the suite is one unit and the command is the
-    // task, wrapped so its exit code becomes that unit's record.
-    for (const id of ["cfcheck", "pattern-vintage"]) {
-      const suite = byId(id);
-      const [invocation] = await suite.command(
-        [{ unit: suite.units[0]!, skip: [] }],
-        context,
-      );
-      expect(invocation!.command).toContain("run-recorded");
-      expect(invocation!.command.at(-1)).toBe(suite.units[0]);
-      expect(await suite.command([], context)).toEqual([]);
-    }
+  it("runs the vintage replay whole", async () => {
+    // It writes a record per vintage and takes no way of running part of
+    // itself, so the suite is one unit and the command is the task,
+    // wrapped so its exit code becomes that unit's record.
+    const vintage = byId("pattern-vintage");
+    const [invocation] = await vintage.command(
+      [{ unit: vintage.units[0]!, skip: [] }],
+      context,
+    );
+    expect(invocation!.command).toContain("run-recorded");
+    expect(invocation!.command.at(-1)).toBe(vintage.units[0]);
+    expect(await vintage.command([], context)).toEqual([]);
   });
 
   it("declines a type-check record whose name is another gate's", () => {
