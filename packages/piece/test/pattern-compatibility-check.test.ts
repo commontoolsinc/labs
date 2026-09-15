@@ -231,6 +231,63 @@ function strengthenedProgram(): RuntimeProgram {
   };
 }
 
+/**
+ * A pattern whose result document carries an owner-protected field: `name`
+ * may be written only by the handler `writer` names. `root` is the directory
+ * the authored tree is grounded at, so the same tree compiles as
+ * `/api/patterns/app/main.tsx` and as `/packages/patterns/app/main.tsx`, the
+ * way the shell serves a system pattern and a checkout supplies it.
+ *
+ * `writer` is the name of the handler binding, and so the binding path the
+ * writer claim records. Two programs that differ only in it declare the same
+ * result, with the claim at `/name` naming a different binding.
+ */
+function writerProgram(root: string, writer = "setName"): RuntimeProgram {
+  return {
+    main: `${root}/app/main.tsx`,
+    files: [
+      {
+        name: `${root}/app/main.tsx`,
+        contents: [
+          "/// <cts-enable />",
+          "import {",
+          "  handler,",
+          "  pattern,",
+          "  type Stream,",
+          "  Writable,",
+          "  WriteAuthorizedBy,",
+          "} from 'commonfabric';",
+          "import { revision } from '../shared/revision.ts';",
+          "",
+          `const ${writer} = handler<`,
+          "  { name: string },",
+          "  { name: Writable<string> }",
+          ">((event, state) => {",
+          "  state.name.set(revision + ':' + event.name);",
+          "});",
+          "",
+          "type Output = {",
+          `  name: WriteAuthorizedBy<string, typeof ${writer}>;`,
+          "  setName: Stream<{ name: string }>;",
+          "};",
+          "",
+          "export default pattern<{ seed?: string }, Output>(() => {",
+          "  const name = new Writable<",
+          `    WriteAuthorizedBy<string, typeof ${writer}>`,
+          "  >('initial').for('name');",
+          `  return { name, setName: ${writer}({ name }) };`,
+          "});",
+          "",
+        ].join("\n"),
+      },
+      {
+        name: `${root}/shared/revision.ts`,
+        contents: "export const revision = 'v1';\n",
+      },
+    ],
+  };
+}
+
 describe("setsrc compatibility preflight", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -668,6 +725,93 @@ describe("setsrc compatibility preflight", () => {
       await freshRuntime.dispose();
       await freshStorage.close();
     }
+  });
+
+  describe("the result document's stored writer claims", () => {
+    // The argument cases above merge the envelope stored on the piece's
+    // argument document. The setup transaction merges the envelope stored on
+    // the piece's own document too — the result — and a profile's
+    // owner-protected fields live there. A claim stamped onto that envelope
+    // by the handler that wrote the field meets the candidate's claim at the
+    // same path, and where the two name different bindings the commit is
+    // refused with `writeAuthorizedBy must remain stable`. The verdict has to
+    // come from the check, not from the deploy.
+    //
+    // Every case stamps the stored claim first, by having the bound handler
+    // write the field once: a claim the setup declared but nothing wrote is
+    // unstamped, and an unstamped claim reconciles with anything at its
+    // path, so the merge these cases drive would never run.
+
+    const servedRoot = "/api/patterns";
+    const checkoutRoot = "/packages/patterns";
+
+    const stampedPiece = async (program: RuntimeProgram) => {
+      const piece = await pieces.create(program, { input: {} });
+      await runtime.idle();
+      const result = await piece.result.getCell();
+      result.key("setName").send({ name: "stamped" });
+      await result.pull();
+      expect(
+        await piece.result.get(["name"]),
+        "the bound handler did not write the field, so the stored claim " +
+          "carries no stamp and the cases below have no merge to fail",
+      ).toBe("v1:stamped");
+      return piece;
+    };
+
+    it("reports the stored claim refusing a candidate that binds the field to another handler", async () => {
+      const piece = await stampedPiece(writerProgram(servedRoot));
+      const candidate = writerProgram(servedRoot, "assignName");
+
+      const report = await piece.checkPattern(candidate);
+
+      expect(report.compatible).toBe(false);
+      expect(report.issues.cfc).toBeDefined();
+      // The merge's own words: the same sentence the commit rejection carries.
+      expect(report.issues.cfc).toContain(
+        "writeAuthorizedBy must remain stable at /name",
+      );
+
+      // The override bypasses the contract proof, which objects to the
+      // renamed binding on its own, and reaches the enforcement layer: CFC
+      // refuses the commit over the stored claim, which is what the check
+      // reported.
+      const forced = await piece.setPattern(candidate, {
+        dangerouslyAllowIncompatibleSchema: true,
+      }).then(
+        () => undefined,
+        (error: unknown) => (error as { message?: string })?.message,
+      );
+      expect(forced).toContain("CFC enforcement rejected commit");
+      expect(forced).toContain("writeAuthorizedBy must remain stable at /name");
+    });
+
+    it("returns the verdict the apply reaches for the same tree compiled under another root", async () => {
+      // The production shape: the piece runs the tree the shell served under
+      // `/api/patterns`, and the update supplies it from a checkout under
+      // `/packages/patterns`. The contract proof passes, since it compares
+      // neither the file spelling nor the module hash, so whether the stored
+      // claim and the candidate's reconcile is decided by the merge alone.
+      // The check is held to the apply's verdict rather than to a fixed one:
+      // what the merge makes of two stamps under different spellings is the
+      // merge's rule, and the check's job is to report it.
+      const piece = await stampedPiece(writerProgram(servedRoot));
+      const candidate = writerProgram(checkoutRoot);
+
+      const report = await piece.checkPattern(candidate);
+      const refusal = await piece.setPattern(candidate).then(
+        () => undefined,
+        (error: unknown) => (error as { message?: string })?.message,
+      );
+
+      expect(report.compatible).toBe(refusal === undefined);
+      if (refusal !== undefined) {
+        expect(refusal).toContain("writeAuthorizedBy must remain stable");
+        expect(report.issues.cfc).toContain(
+          "writeAuthorizedBy must remain stable at /name",
+        );
+      }
+    });
   });
 
   it("still lets the dangerous override through", async () => {
