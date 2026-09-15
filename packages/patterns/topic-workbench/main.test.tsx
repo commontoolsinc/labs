@@ -1,15 +1,22 @@
 /**
  * Pattern test for the topic workbench: the topic header reads through the
  * narrow view, sessions come off the connector index newest first with
- * deleted rows dropped, a session naming the topic is offered as related,
- * attach is idempotent and joins the live row, detach removes it, the
- * spawn command composes from the picked checkout and prompt, a start
- * sends the connector a `start` command and records it as pending until the
- * index carries the session it named (a confirmed start stays attached once
- * the index marks its session deleted; a start with no queue stays pending
- * and can be dismissed), the rail's own buttons attach and detach a row and
- * add the topic's words to the prompt, and a verb call without both ids is
- * refused.
+ * deleted rows dropped, a session naming the topic is offered as related
+ * (one naming a longer number is not), attach is idempotent and joins the
+ * live row, detach removes it and clears its record so a later attach starts
+ * fresh, the spawn command composes from the picked checkout and prompt, a
+ * start sends the connector a `start` command and records it until the index
+ * carries the session it named (a confirmed start stays attached once the
+ * index marks its session deleted, attaching it by hand as well records no
+ * second row, and Detach drops it; a second start can be withdrawn, which
+ * takes its command back out of the queue; a start with no queue stays
+ * starting and can be withdrawn), Start is disabled with its reason when the
+ * picked harness cannot start, when no index or no startable harness is
+ * linked, and when the kickoff is empty, an index that is not the complete
+ * bucket is called out, a start carries the configured mode and a shown
+ * harness no source runs is listed but starts nothing, the rail's own
+ * buttons attach and detach a row and add the topic's words to the prompt,
+ * and a verb call without both ids is refused.
  */
 import {
   action,
@@ -22,68 +29,114 @@ import {
   Writable,
 } from "commonfabric";
 import {
-  childNodes,
+  clickButton,
+  clickInRow,
   findNode,
   findNodeByProp,
-  hasExactText,
   hasText,
-  propsOf,
+  isButton,
   propValue,
 } from "../test/vnode-helpers.ts";
-import Workbench, {
-  type Attachment,
-  type CommandValue,
-  type PendingStart,
-  type SessionIndexView,
-  type StartableSourcesView,
-  type TopicView,
-} from "./main.tsx";
+import type {
+  Attachment,
+  CommandValue,
+  IndexBucketView,
+  SessionIndexView,
+  SessionStart,
+  StartableSourcesView,
+} from "../workbench/sessions.ts";
+import Workbench, { type TopicView } from "./main.tsx";
 
-type ClickStream = { send: (event: Record<string, never>) => void };
-
-const isButton = (label: string) => (candidate: unknown): boolean =>
-  propsOf(candidate)?.onClick !== undefined &&
-  hasExactText(candidate, label);
-
-/** The innermost node the predicate accepts: the row itself rather than
- * every container that also carries the row's text. */
-const innermost = (
-  node: unknown,
-  accept: (node: unknown) => boolean,
-): unknown => {
-  for (const child of childNodes(node)) {
-    const hit = innermost(child, accept);
-    if (hit !== undefined) return hit;
-  }
-  return accept(node) ? node : undefined;
-};
-
-const send = (node: unknown): void => {
-  const onClick = propsOf(node)?.onClick;
-  if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-    (onClick as ClickStream).send({});
-  }
-};
-
-/** Click the button labelled `label` in the row whose text carries `rowText`. */
-const clickInRow = (root: unknown, rowText: string, label: string): void => {
-  const row = innermost(
-    root,
-    (candidate) =>
-      hasText(candidate, rowText) &&
-      findNode(candidate, isButton(label)) !== undefined,
-  );
-  send(findNode(row, isButton(label)));
-};
-
-/** Click the one button labelled `label`. */
-const click = (root: unknown, label: string): void =>
-  send(findNode(root, isButton(label)));
+type IndexFixture = SessionIndexView & StartableSourcesView & IndexBucketView;
 
 /** The first queued command, decoded; `null` when the queue is empty. */
 // deno-lint-ignore no-explicit-any
 const firstCommand = (queued: readonly CommandValue[]): any =>
   JSON.parse(queued[0] ?? "null");
+
+/** The last queued command, decoded; `null` when the queue is empty. */
+// deno-lint-ignore no-explicit-any
+const lastCommand = (queued: readonly CommandValue[]): any =>
+  JSON.parse(queued[queued.length - 1] ?? "null");
+
+/** Whether the Start control is disabled, as the rendered tree has it. */
+const startDisabled = (root: unknown): boolean =>
+  propValue(findNode(root, isButton("Start")), "disabled") === true;
+
+// Plain rows stand in for the connector's linked child cells: the pattern
+// reads the same shallow fields either way. Codex is configured but its driver
+// cannot start a session; an ACP source and Claude can, and Claude is listed
+// first however the connector orders them.
+const INDEX: IndexFixture = {
+  schema: "commonfabric.agent-connector.session-index",
+  ownerDid: "did:key:owner",
+  bucket: "all",
+  sources: [
+    { id: "codex", driver: "codex-app-server", capabilities: {} },
+    { id: "acp-lab", driver: "acp", capabilities: { startSession: true } },
+    {
+      id: "claude",
+      driver: "claude-agent-sdk",
+      capabilities: { startSession: true },
+    },
+  ],
+  sessions: [
+    {
+      sourceId: "claude",
+      nativeSessionId: "aaa",
+      title: "topic #7: Workbench topic",
+      cwd: "/w/labs",
+      gitRepo: null,
+      gitBranch: "main",
+      gitWorktreeRoot: null,
+      updatedAt: "2026-09-08T10:00:00.000Z",
+      active: true,
+      archived: false,
+      syncStatus: "complete",
+    },
+    {
+      sourceId: "claude",
+      nativeSessionId: "bbb",
+      title: "something unrelated",
+      cwd: "/w/other",
+      gitRepo: null,
+      gitBranch: "feature",
+      gitWorktreeRoot: null,
+      updatedAt: "2026-09-08T11:00:00.000Z",
+      active: false,
+      archived: false,
+      syncStatus: "complete",
+    },
+    {
+      sourceId: "claude",
+      nativeSessionId: "ccc",
+      title: "deleted upstream",
+      cwd: null,
+      gitRepo: null,
+      gitBranch: null,
+      gitWorktreeRoot: null,
+      updatedAt: "2026-09-08T12:00:00.000Z",
+      active: null,
+      archived: null,
+      syncStatus: "deleted",
+    },
+    {
+      // Names a longer number: `#7` must not claim `#70`.
+      sourceId: "claude",
+      nativeSessionId: "ddd",
+      title: "topic #70: not this one",
+      cwd: "/w/labs",
+      gitRepo: null,
+      gitBranch: "main",
+      gitWorktreeRoot: null,
+      updatedAt: "2026-09-08T09:00:00.000Z",
+      active: false,
+      archived: false,
+      syncStatus: "complete",
+    },
+  ],
+  checkouts: [{ root: "/w/labs", branch: "main" }],
+};
 
 export default pattern(() => {
   const topic = new Writable<TopicView>({
@@ -106,96 +159,79 @@ export default pattern(() => {
       { kind: "pr", url: "javascript:alert(1)", label: "legacy" },
     ],
   });
-  // Plain rows stand in for the connector's linked child cells: the pattern
-  // reads the same shallow fields either way.
-  const index = new Writable<SessionIndexView & StartableSourcesView>({
-    schema: "commonfabric.agent-connector.session-index",
-    ownerDid: "did:key:owner",
-    // Codex is configured but its driver cannot start a session; an ACP
-    // source and Claude can, and Claude is listed first however the
-    // connector orders them.
-    sources: [
-      { id: "codex", driver: "codex-app-server", capabilities: {} },
-      { id: "acp-lab", driver: "acp", capabilities: { startSession: true } },
-      {
-        id: "claude",
-        driver: "claude-agent-sdk",
-        capabilities: { startSession: true },
-      },
-    ],
-    sessions: [
-      {
-        sourceId: "claude",
-        nativeSessionId: "aaa",
-        title: "topic #7: Workbench topic",
-        cwd: "/w/labs",
-        gitRepo: null,
-        gitBranch: "main",
-        gitWorktreeRoot: null,
-        updatedAt: "2026-09-08T10:00:00.000Z",
-        active: true,
-        archived: false,
-        syncStatus: "complete",
-      },
-      {
-        sourceId: "claude",
-        nativeSessionId: "bbb",
-        title: "something unrelated",
-        cwd: "/w/other",
-        gitRepo: null,
-        gitBranch: "feature",
-        gitWorktreeRoot: null,
-        updatedAt: "2026-09-08T11:00:00.000Z",
-        active: false,
-        archived: false,
-        syncStatus: "complete",
-      },
-      {
-        sourceId: "claude",
-        nativeSessionId: "ccc",
-        title: "deleted upstream",
-        cwd: null,
-        gitRepo: null,
-        gitBranch: null,
-        gitWorktreeRoot: null,
-        updatedAt: "2026-09-08T12:00:00.000Z",
-        active: null,
-        archived: null,
-        syncStatus: "deleted",
-      },
-    ],
-    checkouts: [{ root: "/w/labs", branch: "main" }],
-  });
+  const index = new Writable<IndexFixture>(INDEX);
   const attached = new Writable<Attachment[] | Default<[]>>([]);
   const commands = new Writable<CommandValue[] | Default<[]>>([]);
-  const pendingStarts = new Writable<PendingStart[] | Default<[]>>([]);
+  const starts = new Writable<SessionStart[] | Default<[]>>([]);
   const wb = Workbench({
     topic,
     sessions: index,
     attached,
     commands,
-    pendingStarts,
+    starts,
   });
   // A workbench whose host has bound no queue yet: a start reaches nothing.
-  const noQueuePending = new Writable<PendingStart[] | Default<[]>>([]);
+  const noQueueStarts = new Writable<SessionStart[] | Default<[]>>([]);
   const noQueue = Workbench({
     topic,
     sessions: index,
     attached: new Writable<Attachment[] | Default<[]>>([]),
-    pendingStarts: noQueuePending,
+    starts: noQueueStarts,
+  });
+  // No index linked at all.
+  const bare = Workbench({ topic });
+  // An index whose only source cannot start.
+  const codexOnly = Workbench({
+    topic,
+    sessions: new Writable<IndexFixture>({
+      ...INDEX,
+      sources: [{ id: "codex", driver: "codex-app-server", capabilities: {} }],
+    }),
+  });
+  // No topic, so nothing to start from until the person writes a prompt.
+  const blankCommands = new Writable<CommandValue[] | Default<[]>>([]);
+  const blank = Workbench({
+    sessions: index,
+    attached: new Writable<Attachment[] | Default<[]>>([]),
+    commands: blankCommands,
+    starts: new Writable<SessionStart[] | Default<[]>>([]),
+  });
+  // The connector's recent bucket rather than its complete index.
+  const recentBucket = Workbench({
+    topic,
+    sessions: new Writable<IndexFixture>({ ...INDEX, bucket: "recent" }),
+  });
+  // A start mode for the first turn, and a harness shown that no source runs.
+  const shownCommands = new Writable<CommandValue[] | Default<[]>>([]);
+  const shown = Workbench({
+    topic,
+    sessions: index,
+    attached: new Writable<Attachment[] | Default<[]>>([]),
+    commands: shownCommands,
+    starts: new Writable<SessionStart[] | Default<[]>>([]),
+    startMode: "acceptEdits",
+    harnessesShown: [{ id: "gemini", driver: "gemini-cli" }],
   });
 
   const assert_header = assert(() =>
     wb[NAME] === "Workbench: Workbench topic" &&
     wb.attachedSessions.length === 0 &&
     // Newest first, and the deleted row is dropped.
-    wb.recentSessions.length === 2 &&
+    wb.recentSessions.length === 3 &&
     wb.recentSessions[0]?.nativeSessionId === "bbb" &&
     wb.recentSessions[1]?.nativeSessionId === "aaa" &&
     wb.recentSessions[1]?.active === true &&
-    // The session whose title names the topic is offered as related.
+    wb.recentSessions[2]?.nativeSessionId === "ddd" &&
+    // The session whose title names the topic is offered as related; the
+    // one naming #70 is not.
     wb.relatedSessions.length === 1 &&
-    wb.relatedSessions[0]?.nativeSessionId === "aaa"
+    wb.relatedSessions[0]?.nativeSessionId === "aaa" &&
+    // Claude can start from the complete index: nothing blocks Start, and
+    // the index earns no caution.
+    wb.startBlocker === "" &&
+    !startDisabled(wb[UI]) &&
+    hasText(wb[UI], "can be withdrawn until then") &&
+    findNodeByProp(wb[UI], "data-index-note", "") === undefined
   );
 
   // Only a source whose driver can start is offered as a harness, Claude
@@ -215,6 +251,31 @@ export default pattern(() => {
     hasText(wb[UI], "legacy")
   );
 
+  // Start is disabled, and the caption says why, wherever the handler would
+  // send nothing: no index, no startable harness, an empty kickoff, and a
+  // linked index that is not the complete bucket earns a caution.
+  const action_start_blocked = action(() => {
+    bare.startSession.send();
+    codexOnly.startSession.send();
+    blank.startSession.send();
+  });
+  const assert_start_blocked = assert(() =>
+    bare.startBlocker.startsWith("No session index is linked") &&
+    startDisabled(bare[UI]) &&
+    hasText(bare[UI], "No session index is linked") &&
+    codexOnly.startBlocker ===
+      "No harness the connector runs here can start a session." &&
+    startDisabled(codexOnly[UI]) &&
+    blank.startBlocker === "Write a prompt to start from." &&
+    startDisabled(blank[UI]) &&
+    blankCommands.get().length === 0 &&
+    hasText(
+      findNodeByProp(recentBucket[UI], "data-index-note", ""),
+      "the connector's recent bucket",
+    ) &&
+    recentBucket.startBlocker === ""
+  );
+
   const action_attach = action(() => {
     wb.attach.send({ sourceId: "claude", nativeSessionId: "aaa" });
   });
@@ -226,7 +287,7 @@ export default pattern(() => {
     wb.attachedSessions[0]?.gitBranch === "main" &&
     wb.attachedSessions[0]?.attached === true &&
     wb.relatedSessions.length === 0 &&
-    wb.recentSessions.length === 1 &&
+    wb.recentSessions.length === 2 &&
     wb.recentSessions[0]?.nativeSessionId === "bbb"
   );
 
@@ -257,7 +318,28 @@ export default pattern(() => {
   const assert_detached = assert(() =>
     wb.attachedSessions.length === 1 &&
     wb.attachedSessions[0]?.nativeSessionId === "zzz" &&
-    wb.recentSessions.length === 2
+    wb.recentSessions.length === 3
+  );
+
+  // Detach clears the record as well as the membership, so attaching the
+  // same session again writes a fresh record rather than reviving the old.
+  const action_reattach = action(() => {
+    wb.attach.send({
+      sourceId: "claude",
+      nativeSessionId: "aaa",
+      title: "attached again",
+    });
+  });
+  const assert_reattached_fresh = assert(() =>
+    wb.attachedSessions.length === 2 &&
+    attached.get().find((a) => a.nativeSessionId === "aaa")?.title ===
+      "attached again"
+  );
+  const action_detach_again = action(() => {
+    wb.detach.send({ sourceId: "claude", nativeSessionId: "aaa" });
+  });
+  const assert_detached_again = assert(() =>
+    wb.attachedSessions.length === 1 && wb.recentSessions.length === 3
   );
 
   const action_compose_spawn = action(() => {
@@ -276,8 +358,8 @@ export default pattern(() => {
   );
 
   // A start sends one `start` command for the Claude source, named after the
-  // topic and carrying the kickoff, and records the session it minted as
-  // pending: nothing attaches until the index carries the session.
+  // topic and carrying the kickoff, and records the session it minted:
+  // nothing attaches until the index carries the session.
   const action_start = action(() => {
     wb.startSession.send();
   });
@@ -298,12 +380,14 @@ export default pattern(() => {
   );
   const assert_start_pending = assert(() =>
     wb.attachedSessions.length === 1 &&
-    wb.pendingStarts.length === 1 &&
-    wb.pendingStarts[0]?.nativeSessionId ===
+    wb.startingSessions.length === 1 &&
+    wb.startingSessions[0]?.nativeSessionId ===
       firstCommand(commands.get())?.nativeSessionId &&
-    wb.pendingStarts[0]?.commandId === firstCommand(commands.get())?.id &&
-    wb.pendingStarts[0]?.title === "topic #7: Workbench topic" &&
-    hasText(wb[UI], "Starting · 1")
+    wb.startingSessions[0]?.commandId === firstCommand(commands.get())?.id &&
+    wb.startingSessions[0]?.title === "topic #7: Workbench topic" &&
+    starts.get().length === 1 &&
+    hasText(wb[UI], "Starting · 1") &&
+    hasText(wb[UI], "Withdraw takes the command out of the queue")
   );
 
   // The connector publishes the session: the start is confirmed and counts
@@ -332,7 +416,7 @@ export default pattern(() => {
     });
   });
   const assert_start_attached = assert(() =>
-    wb.pendingStarts.length === 0 &&
+    wb.startingSessions.length === 0 &&
     wb.attachedSessions.length === 2 &&
     wb.attachedSessions[1]?.nativeSessionId ===
       firstCommand(commands.get())?.nativeSessionId &&
@@ -360,7 +444,7 @@ export default pattern(() => {
     });
   });
   const assert_deleted_still_attached = assert(() =>
-    wb.pendingStarts.length === 0 &&
+    wb.startingSessions.length === 0 &&
     wb.attachedSessions.length === 2 &&
     wb.attachedSessions.some((row) =>
       row.nativeSessionId === firstCommand(commands.get())?.nativeSessionId &&
@@ -368,32 +452,120 @@ export default pattern(() => {
     )
   );
 
+  // A started session attached by hand as well (a skill inside it attaching
+  // itself, naming no title) shows once and keeps the start's title; Detach
+  // on it drops both records.
+  const action_attach_started = action(() => {
+    wb.attach.send({
+      sourceId: "claude",
+      nativeSessionId: firstCommand(commands.get())?.nativeSessionId ?? "",
+    });
+  });
+  const assert_started_attached_once = assert(() =>
+    wb.attachedSessions.length === 2 &&
+    wb.attachedSessions.some((row) =>
+      row.nativeSessionId === firstCommand(commands.get())?.nativeSessionId &&
+      row.title === "topic #7: Workbench topic"
+    ) &&
+    attached.get().some((a) =>
+      a.nativeSessionId === firstCommand(commands.get())?.nativeSessionId &&
+      a.title === ""
+    )
+  );
+  const action_detach_started = action(() => {
+    clickInRow(wb[UI], "topic #7: Workbench topic", "Detach");
+  });
+  const assert_started_detached = assert(() =>
+    wb.attachedSessions.length === 1 &&
+    wb.attachedSessions[0]?.nativeSessionId === "zzz" &&
+    starts.get().length === 0 &&
+    attached.get().every((a) =>
+      a.nativeSessionId !== firstCommand(commands.get())?.nativeSessionId
+    )
+  );
+
+  // A second start, withdrawn before the connector takes it: the command
+  // leaves the queue, and only that command (a value in the queue that is
+  // not a command is passed over); the record goes with it.
+  const action_start_again = action(() => {
+    commands.set([...commands.get(), "not a command"]);
+    wb.startSession.send();
+  });
+  const assert_second_start_pending = assert(() =>
+    commands.get().length === 3 &&
+    wb.startingSessions.length === 1 &&
+    wb.startingSessions[0]?.commandId === lastCommand(commands.get())?.id &&
+    starts.get().length === 1
+  );
+  const action_withdraw = action(() => {
+    clickInRow(wb[UI], "topic #7: Workbench topic", "Withdraw");
+  });
+  const assert_withdrawn = assert(() =>
+    commands.get().length === 2 &&
+    commands.get()[1] === "not a command" &&
+    wb.startingSessions.length === 0 &&
+    starts.get().length === 0 &&
+    wb.attachedSessions.length === 1
+  );
+
   // With no queue bound, a start records nothing as attached: it stays
-  // pending, and Dismiss clears it.
+  // starting, and Withdraw clears it with nothing to take back.
   const action_start_without_queue = action(() => {
     noQueue.spawnPrompt.set("Start without a queue.");
     noQueue.startSession.send();
   });
   const assert_start_without_queue_pending = assert(() =>
     noQueue.attachedSessions.length === 0 &&
-    noQueue.pendingStarts.length === 1 &&
-    noQueuePending.get().length === 1
+    noQueue.startingSessions.length === 1 &&
+    noQueueStarts.get().length === 1
   );
-  const action_dismiss_start = action(() => {
-    clickInRow(noQueue[UI], "topic #7: Workbench topic", "Dismiss");
+  const action_withdraw_without_queue = action(() => {
+    clickInRow(noQueue[UI], "topic #7: Workbench topic", "Withdraw");
   });
-  const assert_start_dismissed = assert(() =>
-    noQueue.pendingStarts.length === 0 && noQueuePending.get().length === 0
+  const assert_withdrawn_without_queue = assert(() =>
+    noQueue.startingSessions.length === 0 &&
+    noQueueStarts.get().length === 0
   );
 
   // A start through the Codex source sends nothing: its driver cannot start
-  // a session, so the picker never offered it and the handler refuses it.
+  // a session, so the picker never offered it, Start is disabled with the
+  // reason, and the handler refuses it.
   const action_start_codex = action(() => {
     wb.spawnSource.set("codex");
     wb.startSession.send();
   });
   const assert_codex_start_refused = assert(() =>
-    commands.get().length === 1 && wb.attachedSessions.length === 2
+    commands.get().length === 2 &&
+    wb.attachedSessions.length === 1 &&
+    wb.startBlocker ===
+      "codex is not a harness this Mac runs; pick one that is." &&
+    startDisabled(wb[UI]) &&
+    hasText(wb[UI], "codex is not a harness this Mac runs")
+  );
+
+  // A start carries the configured mode, and the caption names it; a harness
+  // shown without a source behind it is listed, and picking it blocks Start
+  // with the reason, so a start through it sends nothing.
+  const action_start_with_mode = action(() => {
+    shown.startSession.send();
+  });
+  const assert_started_with_mode = assert(() =>
+    shownCommands.get().length === 1 &&
+    firstCommand(shownCommands.get())?.payload?.mode === "acceptEdits" &&
+    hasText(shown[UI], 'runs under the "acceptEdits" permission mode')
+  );
+  const action_start_shown = action(() => {
+    shown.spawnSource.set("gemini");
+    shown.startSession.send();
+  });
+  const assert_shown_is_inert = assert(() =>
+    JSON.stringify(
+      propValue(findNodeByProp(shown[UI], "data-harness", ""), "items"),
+    ).includes('"gemini  (gemini-cli, not on this Mac)"') &&
+    shownCommands.get().length === 1 &&
+    shown.startBlocker ===
+      "gemini is not a harness this Mac runs; pick one that is." &&
+    startDisabled(shown[UI])
   );
 
   // The rail's buttons write the same record the verbs do: Attach on a recent
@@ -402,7 +574,7 @@ export default pattern(() => {
     clickInRow(wb[UI], "something unrelated", "Attach");
   });
   const assert_clicked_attached = assert(() =>
-    wb.attachedSessions.length === 3 &&
+    wb.attachedSessions.length === 2 &&
     wb.attachedSessions.some((row) =>
       row.nativeSessionId === "bbb" && row.title === "something unrelated"
     ) &&
@@ -412,14 +584,14 @@ export default pattern(() => {
     clickInRow(wb[UI], "something unrelated", "Detach");
   });
   const assert_clicked_detached = assert(() =>
-    wb.attachedSessions.length === 2 &&
+    wb.attachedSessions.length === 1 &&
     wb.recentSessions.some((row) => row.nativeSessionId === "bbb")
   );
 
   // "Add the topic's words" appends the default sentence to what the person
   // typed rather than replacing it.
   const action_click_topic_words = action(() => {
-    click(wb[UI], "Add the topic's words");
+    clickButton(wb[UI], "Add the topic's words");
   });
   const assert_topic_words_appended = assert(() =>
     wb.kickoff.startsWith(
@@ -431,7 +603,7 @@ export default pattern(() => {
   const action_attach_without_ids = action(() => {
     wb.attach.send({ sourceId: "", nativeSessionId: "" });
   });
-  const assert_attach_refused = assert(() => wb.attachedSessions.length === 2);
+  const assert_attach_refused = assert(() => wb.attachedSessions.length === 1);
 
   return {
     [NAME]: "Topic workbench test",
@@ -443,6 +615,12 @@ export default pattern(() => {
       { assertion: assert_header },
       { assertion: assert_harnesses_and_links },
       { render: wb[UI] },
+      { action: action_start_blocked },
+      { render: bare[UI] },
+      { render: codexOnly[UI] },
+      { render: blank[UI] },
+      { render: recentBucket[UI] },
+      { assertion: assert_start_blocked },
       { action: action_attach },
       { assertion: assert_attached },
       { action: action_attach_again },
@@ -452,22 +630,44 @@ export default pattern(() => {
       { render: wb[UI] },
       { action: action_detach },
       { assertion: assert_detached },
+      { action: action_reattach },
+      { assertion: assert_reattached_fresh },
+      { action: action_detach_again },
+      { assertion: assert_detached_again },
       { action: action_compose_spawn },
       { assertion: assert_spawn_command },
       { action: action_start },
       { assertion: assert_start_command },
+      { render: wb[UI] },
       { assertion: assert_start_pending },
       { action: action_confirm_start },
       { assertion: assert_start_attached },
       { action: action_delete_started },
       { assertion: assert_deleted_still_attached },
+      { action: action_attach_started },
+      { assertion: assert_started_attached_once },
+      { render: wb[UI] },
+      { action: action_detach_started },
+      { assertion: assert_started_detached },
+      { action: action_start_again },
+      { render: wb[UI] },
+      { assertion: assert_second_start_pending },
+      { action: action_withdraw },
+      { assertion: assert_withdrawn },
       { action: action_start_without_queue },
       { assertion: assert_start_without_queue_pending },
       { render: noQueue[UI] },
-      { action: action_dismiss_start },
-      { assertion: assert_start_dismissed },
+      { action: action_withdraw_without_queue },
+      { assertion: assert_withdrawn_without_queue },
       { action: action_start_codex },
+      { render: wb[UI] },
       { assertion: assert_codex_start_refused },
+      { action: action_start_with_mode },
+      { render: shown[UI] },
+      { assertion: assert_started_with_mode },
+      { action: action_start_shown },
+      { render: shown[UI] },
+      { assertion: assert_shown_is_inert },
       { action: action_click_attach },
       { assertion: assert_clicked_attached },
       { action: action_click_detach },
