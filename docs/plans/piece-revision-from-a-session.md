@@ -59,8 +59,14 @@ and the profile holds authority over that contract
 ([`subagent.ts:509`](../../packages/cf-harness/src/contracts/subagent.ts#L509)),
 so a delegation cannot widen it with a `returnSchema` of its own
 ([`subagent.ts:560-566`](../../packages/cf-harness/src/contracts/subagent.ts#L560-L566)).
-One test pins that this holds for a return carrying source; nothing else is
-needed to keep the parent out.
+One test pins that this holds for a return carrying source.
+
+What that establishes is a property of the return contract, not of every
+route out of a child. The run artifact root holds each raw tool output and a
+parent's `bash` can read it — CT-2117, a recorded defect that predates this
+and defeats every withheld-content boundary in the harness the same way. What
+this change adds to it is a new kind of content on that route, program text a
+third party authored, rather than a new route.
 
 ## What is built
 

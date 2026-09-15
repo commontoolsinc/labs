@@ -9,10 +9,18 @@
  * piece controller's own `checkPattern` then `setPattern`, which is the
  * "direct edit" row of `docs/specs/piece-source-lifecycle.md`.
  *
- * They sit on the `pattern-author` surface and on no other. That profile's
+ * They sit on the `pattern-author` surface and on no other, and no parent
+ * surface may offer them — see `SUBAGENT_ONLY_TOOL_IDS`. That profile's
  * return contract has no field for source in any encoding and the profile
  * holds authority over it, so a child that reads a piece's source has no
- * channel to carry it back to its parent.
+ * field to return it in.
+ *
+ * That is a statement about the return contract and not about every route
+ * out of a child. The run artifact root holds each raw tool output and the
+ * parent's `bash` can read it (CT-2117), which defeats this boundary as it
+ * defeats every other withheld-content boundary in the harness. What is new
+ * here is the kind of content that route exposes — program text a third
+ * party authored — rather than the route.
  *
  * Neither tool undoes anything. A revision is reversible from the piece menu
  * `cf-render` gives every host, which lists the recorded revisions and offers
