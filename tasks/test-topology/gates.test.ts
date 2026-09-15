@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { parse as parseJsonc } from "@std/jsonc";
 import { describe, it } from "@std/testing/bdd";
 import { DOC_DEMOS } from "../check-verb-session-sync.ts";
 import { TRIPWIRES } from "../check-tripwires.ts";
@@ -52,6 +53,32 @@ describe("the repository's gate suites", () => {
       "check-test-aliases",
     ]);
     expect(declared.toSorted()).toEqual(reading.toSorted());
+  });
+
+  it("gives a token to the gates whose suite asks the GitHub API", async () => {
+    // Read off what each gate's task is allowed to reach rather than off
+    // a list written here, so a gate that starts asking the service a
+    // question without its suite declaring the capability fails this.
+    // Without the token GitHub allows sixty requests an hour from an
+    // address, which a shared runner reaches on its own.
+    const { tasks } = parseJsonc(
+      await Deno.readTextFile(`${root}/deno.jsonc`),
+    ) as { tasks: Record<string, string> };
+    const asking: string[] = [];
+    const declared: string[] = [];
+    for (const suite of [byId("repo-gates"), byId("repo-history-gates")]) {
+      for (const gate of [...WORKING_TREE_GATES, ...HISTORY_GATES]) {
+        if (!suite.units.includes(gate.name)) continue;
+        const [verb, named] = gate.run;
+        const line = verb === "task" ? tasks[named!] ?? "" : "";
+        if (line.includes("api.github.com")) asking.push(gate.name);
+        if (suite.needs.includes("github-api")) declared.push(gate.name);
+      }
+    }
+    expect(asking).toEqual(["check-action-pins"]);
+    // Every gate of a declaring suite, which is wider than the one that
+    // asks: a suite is the unit a capability's environment reaches.
+    expect(declared).toContain("check-action-pins");
   });
 
   it("reaches the gates a change names, and no others", () => {

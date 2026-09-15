@@ -37,7 +37,11 @@ import {
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
-import { type CapabilityId, openCapabilities } from "./ci-capabilities.ts";
+import {
+  type CapabilityId,
+  openCapabilities,
+  takeGithubToken,
+} from "./ci-capabilities.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import {
   type Invocation,
@@ -919,6 +923,9 @@ export async function runLane(
   options: LaneOptions,
   deps: LaneDeps = {},
 ): Promise<boolean> {
+  // Ahead of everything this lane reads, plans, opens or spawns, so that
+  // no child of it inherits the token except through the capability.
+  const githubToken = takeGithubToken();
   const suites = await (deps.topology ?? loadTopology)(options.root);
   const { seen, fetched } = await read(options, suites, deps, console.log);
   const laid = packing(options, suites, seen);
@@ -979,6 +986,7 @@ export async function runLane(
       root: options.root,
       dryRun: false,
       workDir,
+      ...(githubToken === undefined ? {} : { githubToken }),
     });
   } catch (error) {
     await Deno.remove(workDir, { recursive: true }).catch(() => {});

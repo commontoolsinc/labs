@@ -2226,3 +2226,100 @@ describe("what a lane says about coverage", () => {
     expect(text).toContain("workspace-unit/packages/bakery");
   });
 });
+
+describe("what a lane hands the children it spawns", () => {
+  /**
+   * A suite of one unit, whose command writes what the child saw each
+   * GitHub token variable as into a file named for the suite.
+   */
+  function reporting(id: string, needs: CapabilityId[], at: string): Suite {
+    return suite({
+      id,
+      needs,
+      units: [id],
+      command: () =>
+        Promise.resolve([{
+          command: [
+            Deno.execPath(),
+            "eval",
+            `Deno.writeTextFileSync(${JSON.stringify(`${at}/${id}`)}, ` +
+            `JSON.stringify([Deno.env.get("GITHUB_TOKEN") ?? "", ` +
+            `Deno.env.get("GH_TOKEN") ?? ""]))`,
+          ],
+          cwd: REPOSITORY,
+        }]),
+    });
+  }
+
+  /** What the child of `id` reported seeing, one entry per variable. */
+  async function saw(at: string, id: string): Promise<string[]> {
+    return JSON.parse(await Deno.readTextFile(`${at}/${id}`)) as string[];
+  }
+
+  /** A manifest selecting the one unit of each of those suites. */
+  function selecting(ids: readonly string[]): Manifest {
+    return manifestOf(ids.map((id) => ({
+      test: { k: "unit", s: "bakery", n: `glaze > ${id}` },
+      suite: id,
+      unit: id,
+    })));
+  }
+
+  it("gives the token to a declaring suite's child and to no other", async () => {
+    // Read off the children rather than off what the lane exported to
+    // them: `runInvocation` merges this process's own environment
+    // underneath every command it spawns, so a token the lane was still
+    // holding would reach both of these whatever either declared.
+    const at = await Deno.makeTempDir({ prefix: "lane-token-" });
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+    // Handed under the name the `gh` command line reads, with the other
+    // cleared: the capability exports both, so this covers either name a
+    // lane may be handed one under. Both are named here rather than left
+    // to the ambient environment, since a token a developer exported is
+    // exactly what this reads.
+    const names = ["GITHUB_TOKEN", "GH_TOKEN"] as const;
+    const before = new Map(names.map((name) => [name, Deno.env.get(name)]));
+    Deno.env.delete("GITHUB_TOKEN");
+    Deno.env.set("GH_TOKEN", "a-token");
+    const log = console.log;
+    console.log = () => {};
+    let heldAfter: (string | undefined)[] = [];
+    try {
+      await runLane({
+        lane: 1,
+        of: 1,
+        full: false,
+        dryRun: false,
+        laneCount: false,
+        root: REPOSITORY,
+        at: "2026-09-01T00:00:00Z",
+      }, {
+        manifest: () =>
+          Promise.resolve({
+            manifest: selecting(["repo-gates", "workspace-unit"]),
+            objectName: "manifest-fixture.json.gz",
+          }),
+        topology: () =>
+          Promise.resolve([
+            reporting("repo-gates", ["deno", "github-api"], at),
+            reporting("workspace-unit", ["deno"], at),
+          ]),
+        spool: () => spool,
+      });
+      heldAfter = names.map((name) => Deno.env.get(name));
+    } finally {
+      console.log = log;
+      for (const [name, value] of before) {
+        if (value === undefined) Deno.env.delete(name);
+        else Deno.env.set(name, value);
+      }
+    }
+    expect(await saw(at, "repo-gates")).toEqual(["a-token", "a-token"]);
+    expect(await saw(at, "workspace-unit")).toEqual(["", ""]);
+    // The lane itself holds nothing for a child to inherit, which is
+    // what leaves the declaration as the only way one gets a token.
+    expect(heldAfter).toEqual([undefined, undefined]);
+    await Deno.remove(at, { recursive: true });
+    await Deno.remove(spool, { recursive: true });
+  });
+});
