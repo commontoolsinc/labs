@@ -1,13 +1,15 @@
 /**
  * Pattern tests for the naming library's own rules, driven on plain cells
  * with no board: the sequence over the names in use, the allocator re-run
- * against a stale read — the shape a lost commit race leaves behind — the
- * reverse lookup, and the declaration.
+ * against a stale read — the shape a lost commit race leaves behind — both for
+ * a member that exists and for one `createNamed()` builds holding its name,
+ * the reverse lookup, and the declaration.
  */
 
 import { action, assert, equals, pattern, TESTS, Writable } from "commonfabric";
 import {
   assignName,
+  createNamed,
   nameOf,
   type NamesMap,
   namesTable,
@@ -88,6 +90,43 @@ export default pattern(() => {
     equals(names.get()["3"] as object, loser)
   );
 
+  // The same lost race for a member built holding its name. The re-run calls
+  // `create` again, so the name the member is built with is the next distinct
+  // one, and it is the name the map records the member under. A `create` that
+  // was handed the stale name would leave `built` reading `1,2`.
+  const builtNames = new Writable<NamesMap>({});
+  const builtFirst = new Writable({ title: "built first" });
+  const builtWinner = new Writable({ title: "built winner" });
+  const builtLoser = new Writable({ title: "built loser" });
+  const built = new Writable<string[]>([]);
+  const returned = new Writable<string[]>([]);
+
+  const action_create_first = action(() => {
+    const { name } = createNamed(builtNames, (allocated) => {
+      built.push(allocated);
+      return builtFirst;
+    });
+    returned.push(name);
+  });
+  const action_built_winner_lands = action(() => {
+    builtNames.key("2").set(builtWinner);
+  });
+  const action_built_loser_reruns = action(() => {
+    const { name } = createNamed(builtNames, (allocated) => {
+      built.push(allocated);
+      return builtLoser;
+    });
+    returned.push(name);
+  });
+  const assert_rerun_builds_with_the_next_distinct_name = assert(() =>
+    built.get().join(",") === "1,3" &&
+    returned.get().join(",") === "1,3" &&
+    Object.keys(builtNames.get()).join(",") === "1,2,3" &&
+    equals(builtNames.get()["1"] as object, builtFirst) &&
+    equals(builtNames.get()["2"] as object, builtWinner) &&
+    equals(builtNames.get()["3"] as object, builtLoser)
+  );
+
   // Foreign keys on a real map, as a client over the memory protocol could
   // leave them: they neither block allocation nor count as the largest, so
   // the next name follows the sequence's own largest.
@@ -161,6 +200,10 @@ export default pattern(() => {
       { assertion: assert_stale_name_was_the_winners },
       { action: action_loser_reruns },
       { assertion: assert_rerun_takes_the_next_distinct_name },
+      { action: action_create_first },
+      { action: action_built_winner_lands },
+      { action: action_built_loser_reruns },
+      { assertion: assert_rerun_builds_with_the_next_distinct_name },
       { assertion: assert_names_stay_decimal_past_the_safe_integers },
       { assertion: assert_foreign_keys_are_not_names },
       { action: action_foreign_keys_land },
