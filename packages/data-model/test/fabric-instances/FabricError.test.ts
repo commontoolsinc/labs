@@ -909,10 +909,10 @@ describe("FabricError", () => {
         });
 
         it("round-trips an `Error` whose cause is itself a `FabricError`", () => {
-          // Simulates what `fabricFromNativeValue` produces: a FabricError
-          // wrapping an Error whose cause is itself a FabricError (not a raw
-          // Error). Encoding's recurse on `[CODEC]` `encode()` output must find
-          // a FabricValue, not a raw Error.
+          // Simulates what `fabricFromConvertibleJsValue` produces: a
+          // FabricError wrapping an Error whose cause is itself a FabricError
+          // (not a raw Error). Encoding's recurse on `[CODEC]` `encode()`
+          // output must find a FabricValue, not a raw Error.
 
           const innerSe = FabricError.fromNativeError(new Error("inner"));
           const outerErr = new Error("outer");

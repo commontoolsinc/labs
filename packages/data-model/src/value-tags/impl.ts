@@ -24,11 +24,11 @@ import {
 import { toCompactDebugString } from "@/value-debug.ts";
 
 import {
+  type ConvertibleJsValueTag,
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   type FabricValueTag,
   VALUE_TAGS,
-  type ValueTag,
 } from "./interface.ts";
 
 /**
@@ -141,11 +141,11 @@ export function tagOfFabricValueElseNull(
  *
  * This is asked of a class already read from a prototype, which is a
  * question that arises inside this module: a caller holds values, and asks
- * `tagOfNativeValueElseNull()`.
+ * `tagOfConvertibleJsValueElseNull()`.
  */
 function tagOfNativeBuiltinClassElseNull(
   constructorFn: { prototype: unknown },
-): ValueTag | null {
+): ConvertibleJsValueTag | null {
   // A `switch` on constructor identity, rather than sequential `instanceof`
   // checks.
   switch (constructorFn) {
@@ -208,19 +208,27 @@ function tagOfNativeBuiltinClassElseNull(
 }
 
 /**
- * Maps a JS value to its tag. Returns the tag of a primitive or a function,
- * or that of a recognized convertible native instance, or `null` for any
- * other object.
+ * Maps a presumed `FabricConvertibleJsValue` to its tag, based on a shallow
+ * evaluation of its type. Returns the tag of a primitive, or that of a
+ * recognized convertible native instance, or `null` for a function and for
+ * any other object. To be clear, this function does not go out of its way to
+ * make a validity determination.
  *
  * An array is tagged `Array` before anything else is consulted.
  * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
  */
-export function tagOfNativeValueElseNull(value: unknown): ValueTag | null {
+export function tagOfConvertibleJsValueElseNull(
+  value: unknown,
+): ConvertibleJsValueTag | null {
   const jsType = typeOfIncludingNull(value);
 
-  if (jsType !== "object") {
+  if (jsType === VALUE_TAGS.function) {
+    // A function is no `FabricConvertibleJsValue`, so its tag is not one this
+    // returns.
+    return null;
+  } else if (jsType !== "object") {
     return jsType;
   }
 

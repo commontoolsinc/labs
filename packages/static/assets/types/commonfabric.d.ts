@@ -567,8 +567,8 @@ export interface FromNativeErrorOptions {
   /**
    * Converter applied to the error's `cause` and to each of its custom
    * enumerable properties, whose result is what the instance holds. When
-   * absent, a value that is already a valid `FabricValue` is held as it
-   * stands, and anything else is converted the way `fabricFromNativeValue()`
+   * absent, a value that is already a valid `FabricValue` is held as it stands,
+   * and anything else is converted the way `fabricFromConvertibleJsValue()`
    * converts it, without freezing.
    */
   readonly convert?: (value: unknown) => FabricValue;

@@ -291,7 +291,8 @@ Today, special JSON forms are created early and travel through the system:
 
 - `normalizeAndDiff()` converts Cells to SigilLinks (`{ "/": {...} }`) immediately
 - `convertCellsToLinks()` explicitly replaces Cell references with JSON forms
-- `fabricFromNativeValue()` wraps Errors as `{ "@Error": {...} }` during data updates
+- `fabricFromConvertibleJsValue()` wraps Errors as `{ "@Error": {...} }` during
+  data updates
 - Stream markers (`{ $stream: true }`) are stored and compared as JSON objects
 
 The JSON forms then propagate through transactions, the reactive system, and

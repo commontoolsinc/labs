@@ -1,4 +1,4 @@
-import { fabricFromNativeValue } from "@commonfabric/data-model";
+import { fabricFromConvertibleJsValue } from "@commonfabric/data-model";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
@@ -3444,16 +3444,15 @@ export class Runtime {
    * Makes a read-only cell whose content is `data`, carried entirely in the
    * cell's own `data:` URI id; there is no document in a space to fetch.
    *
-   * **Contract note:** `data` is an arbitrary value, deliberately NOT
-   * limited to `FabricValue`. Callers pass, among other things, `Cell`
-   * objects (wish candidate lists), userland event payloads (whatever
-   * patterns and the DOM hand over, `Date`s and `Error`s included), and
-   * pattern-authored schema defaults. A `Cell` becomes its sigil link on the
-   * way in, by `cellAsLink()`; the conversion itself has no
-   * representation for one. Everything past that converts via
-   * `fabricFromNativeValue()`, the designed intake for exactly this: native
-   * instances become their fabric counterparts, and input that is already a
-   * deep-frozen `FabricValue` passes through by identity.
+   * **Contract note:** `data` is an arbitrary value, deliberately NOT limited
+   * to `FabricValue`. Callers pass, among other things, `Cell` objects (wish
+   * candidate lists), userland event payloads (whatever patterns and the DOM
+   * hand over, `Date`s and `Error`s included), and pattern-authored schema
+   * defaults. A `Cell` becomes its sigil link on the way in, by `cellAsLink()`;
+   * the conversion itself has no representation for one. Everything past that
+   * converts via `fabricFromConvertibleJsValue()`, the designed intake for
+   * exactly this: native instances become their fabric counterparts, and input
+   * that is already a deep-frozen `FabricValue` passes through by identity.
    *
    * @param space The space the cell claims as its own (it is not stored
    *   there; links within relate to it).
@@ -3491,8 +3490,8 @@ export class Runtime {
     // Builder artifacts become their encodable form and cells become sigil
     // links HERE rather than at each caller. Neither has a fabric
     // representation, so both have to go before the value reaches
-    // `fabricFromNativeValue()`. This is the designed intake, and the callers
-    // are many: raw and JavaScript node inputs, wish candidates, schema
+    // `fabricFromConvertibleJsValue()`. This is the designed intake, and the
+    // callers are many: raw and JavaScript node inputs, wish candidates, schema
     // defaults. Covering them one at a time was tried and is whack-a-mole --
     // each site that is missed fails as a rejection at the conversion, or worse
     // as a cleanup error that masks it.
@@ -3507,7 +3506,7 @@ export class Runtime {
     // its closure.
     const asDataURI = dataUriFromValue(
       inlineExternalSchemaRefsInValue(
-        fabricFromNativeValue(
+        fabricFromConvertibleJsValue(
           flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
         ),
       ),

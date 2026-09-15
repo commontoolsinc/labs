@@ -44,19 +44,19 @@ import type {
 } from "@/interface.ts";
 import {
   errorClassFromType,
-  fabricFromNativeValue,
-} from "@/native-conversion.ts";
+  fabricFromConvertibleJsValue,
+} from "@/convertible-js.ts";
 import { isValidFabricValue } from "@/validity-check.ts";
 
 /**
  * Helper for `FabricError.fromNativeError()`, which converts a nested value
  * the way its default does: a valid `FabricValue` is held as it stands, and
- * anything else goes through `fabricFromNativeValue()` without freezing.
+ * anything else goes through `fabricFromConvertibleJsValue()` without freezing.
  */
 function convertNestedNativeValue(value: unknown): FabricValue {
   return isValidFabricValue(value)
     ? value
-    : fabricFromNativeValue(value, false);
+    : fabricFromConvertibleJsValue(value, false);
 }
 
 /**
@@ -418,7 +418,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   /**
    * Builds a fresh native `Error` from this `FabricError`'s state. `cause`
    * and extras are copied through as-is (no recursive unwrap). Callers that
-   * need recursive unwrap should use `nativeFromFabricValue()`.
+   * need recursive unwrap should use `convertibleJsFromFabricValue()`.
    */
   #buildNativeError(frozen: boolean): Error {
     const ErrorClass = errorClassFromType(this.#type);
@@ -525,8 +525,8 @@ export class FabricError extends FabricNativeWrapper<Error>
    * Converts a native `Error` into an instance. The fixed slots are read off
    * the error, and `cause` and every custom enumerable property go through
    * `options.convert`. By default a nested value that is already a valid
-   * `FabricValue` is held as it stands, and anything else is converted the
-   * way `fabricFromNativeValue()` converts it, without freezing, so that the
+   * `FabricValue` is held as it stands, and anything else is converted the way
+   * `fabricFromConvertibleJsValue()` converts it, without freezing, so that the
    * result is a valid `FabricValue` throughout. The instance itself is not
    * frozen.
    *

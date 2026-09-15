@@ -65,7 +65,7 @@ const ju: any = await (async () => {
   }
 })();
 const md: any = await import(`${R}/builder/pattern-metadata.ts`);
-const { fabricFromNativeValue } = await import(
+const { fabricFromConvertibleJsValue } = await import(
   "@commonfabric/data-model"
 );
 const { dataUriFromValue } = await import(
@@ -90,7 +90,7 @@ const patternForm = (pattern: unknown): unknown =>
 const say = (k: string, v: unknown) => console.log(`${k}: ${v}`);
 const encoded = (v: unknown) => {
   try {
-    return dataUriFromValue(fabricFromNativeValue(v));
+    return dataUriFromValue(fabricFromConvertibleJsValue(v));
   } catch (e) {
     return `THREW ${(e as Error).message}`;
   }

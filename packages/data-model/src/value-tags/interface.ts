@@ -126,3 +126,12 @@ export const VALUE_TAGS = Object.freeze(
 
 /** One of the tag strings. */
 export type ValueTag = typeof VALUE_TAGS[keyof typeof VALUE_TAGS];
+
+/**
+ * Tag for any value that could possibly be a valid `FabricConvertibleJsValue`:
+ * every tag but `function`.
+ */
+export type ConvertibleJsValueTag = Exclude<
+  ValueTag,
+  typeof VALUE_TAGS.function
+>;

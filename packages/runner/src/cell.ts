@@ -11,8 +11,8 @@ import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
   deepFreeze,
-  type FabricConvertibleValue,
-  fabricFromNativeValue,
+  type FabricConvertibleJsValue,
+  fabricFromConvertibleJsValue,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
@@ -22,7 +22,7 @@ import {
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromConvertibleJsObjectElseUndefined,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -2624,7 +2624,7 @@ export class CellImpl<T extends FabricValue>
       // non-string-keyed internals.
       const comparable = isCellLink(candidate)
         ? candidate
-        : fabricFromNativeValue(flattenBuilderArtifacts(candidate));
+        : fabricFromConvertibleJsValue(flattenBuilderArtifacts(candidate));
       return existing.some((element) => valueEqual(element, comparable));
     };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
@@ -4490,14 +4490,14 @@ export function frameAnchorIds(
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *
- * `FabricConvertibleValue` is an arm rather than something restated, so
+ * `FabricConvertibleJsValue` is an arm rather than something restated, so
  * this stays true of whatever that comes to admit. The container arms are here
  * as well, and they are not redundant with it: theirs hold only what is already
  * fabric or convertible, where a cell may sit at any depth in what a pattern
  * produced. Replacing a nested one is the whole of what this conversion is for.
  */
 export type CellLinkInput =
-  | FabricConvertibleValue
+  | FabricConvertibleJsValue
   | readonly CellLinkInput[]
   | { readonly [key: string]: CellLinkInput }
   | Cell<any>;
@@ -4690,7 +4690,7 @@ function convertOneToLinks(
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
       // `FabricError`. Anything else comes back `undefined`, which says only
       // that nothing needed minting.
-      const minted = shallowFabricFromNativeObjectElseUndefined(value);
+      const minted = shallowFabricFromConvertibleJsObjectElseUndefined(value);
 
       if (minted === undefined) {
         // Nothing was minted, so the value has to be usable as it stands. This

@@ -25,12 +25,12 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import {
-  isValidFabricConvertibleValue,
-  shallowFabricFromNativeValue,
+  isValidFabricConvertibleJsValue,
+  shallowFabricFromConvertibleJsValue,
 } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { isValidFabricNativeObject } from "@/validity-check.ts";
-import { tagOfNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
+import { isValidFabricConvertibleJsObject } from "@/validity-check.ts";
+import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
@@ -322,9 +322,9 @@ describe("FabricRegExp", () => {
     });
   });
 
-  describe("shallowFabricFromNativeValue()", () => {
+  describe("shallowFabricFromConvertibleJsValue()", () => {
     it("converts a `RegExp` to a `FabricRegExp`", () => {
-      const result = shallowFabricFromNativeValue(/abc/gi);
+      const result = shallowFabricFromConvertibleJsValue(/abc/gi);
       expect(result).toBeInstanceOf(FabricRegExp);
       expect((result as FabricRegExp).source).toBe("abc");
       expect((result as FabricRegExp).flags).toBe("gi");
@@ -333,34 +333,38 @@ describe("FabricRegExp", () => {
     it("throws given a `RegExp` with extra enumerable properties", () => {
       const re = /abc/;
       (re as unknown as Record<string, unknown>).custom = 1;
-      expect(() => shallowFabricFromNativeValue(re)).toThrow(
+      expect(() => shallowFabricFromConvertibleJsValue(re)).toThrow(
         "Not representable as a `FabricValue`: `RegExp` with extra enumerable properties",
       );
     });
   });
 
   describe("tag functions", () => {
-    describe("tagOfNativeValueElseNull()", () => {
+    describe("tagOfConvertibleJsValueElseNull()", () => {
       it("returns the `JsRegExp` tag for `RegExp` instances", () => {
-        expect(tagOfNativeValueElseNull(/abc/)).toBe(VALUE_TAGS.JsRegExp);
+        expect(tagOfConvertibleJsValueElseNull(/abc/)).toBe(
+          VALUE_TAGS.JsRegExp,
+        );
       });
     });
 
-    describe("isValidFabricNativeObject()", () => {
+    describe("isValidFabricConvertibleJsObject()", () => {
       it("returns `true` for `RegExp`", () => {
-        expect(isValidFabricNativeObject(/abc/)).toBe(true);
-        expect(isValidFabricNativeObject(new RegExp("test", "gi"))).toBe(true);
+        expect(isValidFabricConvertibleJsObject(/abc/)).toBe(true);
+        expect(isValidFabricConvertibleJsObject(new RegExp("test", "gi"))).toBe(
+          true,
+        );
       });
     });
   });
 
-  describe("isValidFabricConvertibleValue()", () => {
+  describe("isValidFabricConvertibleJsValue()", () => {
     it("returns `true` for a plain `RegExp`", () => {
-      expect(isValidFabricConvertibleValue(/abc/gi)).toBe(true);
+      expect(isValidFabricConvertibleJsValue(/abc/gi)).toBe(true);
     });
 
     it("returns `true` for a `RegExp` nested in objects", () => {
-      expect(isValidFabricConvertibleValue({ pattern: /abc/gi })).toBe(true);
+      expect(isValidFabricConvertibleJsValue({ pattern: /abc/gi })).toBe(true);
     });
   });
 

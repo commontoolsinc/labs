@@ -380,10 +380,10 @@ function extractDefaultValuesInternal(
       // Mutable top-level copy of the schema default, so injecting top-level
       // property defaults below doesn't mutate the schema's own default object.
       // Only top-level keys are written here, and the result is normalized
-      // downstream by `fabricFromNativeValue` (which rebuilds a fresh tree), so a
-      // shallow copy would suffice for correctness; we deep-freeze the bound
-      // children as inexpensive defense-in-depth against accidental deeper
-      // mutation of the shared default.
+      // downstream by `fabricFromConvertibleJsValue` (which rebuilds a fresh
+      // tree), so a shallow copy would suffice for correctness; we deep-freeze
+      // the bound children as inexpensive defense-in-depth against accidental
+      // deeper mutation of the shared default.
       const obj = shallowMutableClone(
         isWalkableObjectOrArray(canonical.default) ? canonical.default : {},
       ) as Record<string, FabricValue>;

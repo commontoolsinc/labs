@@ -49,7 +49,7 @@ import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { meetCfcObservationCeilings } from "../cfc/observation.ts";
 import {
   cloneIfNecessary,
-  fabricFromNativeValue,
+  fabricFromConvertibleJsValue,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model";
@@ -695,7 +695,7 @@ export function sqliteDatabase(
         // The raw write stores the subtree verbatim; `onlyIfDifferent` keeps
         // an unchanged re-derivation write-free (no hash churn per runtime).
         handle.withTx(tx).setRawUntyped(
-          fabricFromNativeValue({
+          fabricFromConvertibleJsValue({
             id,
             ...(tables !== undefined && { tables }),
             scope,
