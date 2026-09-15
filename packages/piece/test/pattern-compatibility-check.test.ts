@@ -294,10 +294,14 @@ function writerProgram(root: string, writer = "setName"): RuntimeProgram {
  * projection does not carry, so two revisions differing only in it bind the
  * same projection to the document; `expression` is what `label` computes,
  * and changing it re-mints the derived cell the projection links.
+ * `argumentFields` adds optional inputs, which changes the argument schema
+ * the projection's link to `seed` is bound under without changing what the
+ * pattern computes.
  */
 function labelledResultProgram(
   comment: string,
   expression = "seed",
+  argumentFields = "",
 ): RuntimeProgram {
   return {
     main: "/main.tsx",
@@ -306,7 +310,7 @@ function labelledResultProgram(
       contents: [
         ...CFC_PRELUDE,
         comment,
-        "interface Args { seed: Confidential<string, Label>; }",
+        `interface Args { seed: Confidential<string, Label>; ${argumentFields} }`,
         "interface Out { label: Confidential<string, Label>; }",
         "export default pattern<Args, Out>(",
         "  ({ seed }) => ({",
@@ -895,6 +899,28 @@ describe("setsrc compatibility preflight", () => {
       const candidate = labelledResultProgram(
         "// a revision the projection does not carry",
       );
+
+      const report = await piece.checkPattern(candidate);
+      expect(report.issues.cfc).toBe(undefined);
+      expect(report.compatible).toBe(true);
+
+      await piece.setPattern(candidate);
+      await runtime.idle();
+      expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(
+        report.candidate.identity,
+      );
+    });
+
+    it("clears a candidate that only adds an optional input, which the apply commits", async () => {
+      // `label: seed` binds the projection to the argument document, and
+      // setup re-points that link at the candidate's argument schema before
+      // it compares projections. The link carries the result schema at its
+      // own path, not the argument schema, so a candidate adding an optional
+      // input leaves the projection as it was: setup writes nothing, the
+      // commit merges nothing, and the check has to agree even over an
+      // envelope the candidate's result schema could not merge with.
+      const piece = await pieceWithWidenedResultEnvelope();
+      const candidate = labelledResultProgram("", "seed", "extra?: string;");
 
       const report = await piece.checkPattern(candidate);
       expect(report.issues.cfc).toBe(undefined);

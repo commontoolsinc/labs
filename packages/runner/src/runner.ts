@@ -2592,8 +2592,12 @@ export class Runner {
    * only.
    *
    * A source update never asks setup to reapply a stored setup, so the same
-   * pattern as the last run is the one case where setup keeps the stored
-   * projection without comparing.
+   * pattern as the last run — by the pointer setup itself compares, a
+   * keyless pattern's session pointer included — is the one case where
+   * setup keeps the stored projection without comparing. For any other
+   * pattern, setup re-points the argument link at `pattern`'s argument
+   * schema before it compares, so the projection is bound here against the
+   * link setup would have staged, not the one stored.
    */
   setupRewritesResultProjection(
     tx: IExtendedStorageTransaction,
@@ -2602,17 +2606,28 @@ export class Runner {
   ): boolean {
     const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx)) ??
       this.#sessionPatternPointer(resultCell.withTx(tx));
-    const entryRef = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    const entryRef = this.#entryRefForPattern(pattern);
     if (
-      previousIdentityRef !== undefined && entryRef !== undefined &&
+      previousIdentityRef !== undefined &&
       entryRef.identity === previousIdentityRef.identity &&
       entryRef.symbol === previousIdentityRef.symbol
     ) {
       return false;
     }
-    return this.#nextResultProjection(tx, pattern, resultCell, {
-      preserveName: false,
-    }).changed;
+    // The link `#applySetupState` stages for a pattern change: the argument
+    // document it finds, or the one it would create, under the pattern's
+    // argument schema.
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
+    const argumentCell = argumentLink === undefined
+      ? getMetaCell(resultCell, "argument", tx)
+      : this.#runtime.getCellFromLink(argumentLink, undefined, tx);
+    return this.#nextResultProjection(
+      tx,
+      pattern,
+      resultCell,
+      argumentCell.asSchema(pattern.argumentSchema).getAsNormalizedFullLink(),
+      { preserveName: false },
+    ).changed;
   }
 
   /**
@@ -2919,6 +2934,7 @@ export class Runner {
       tx,
       pattern,
       resultCell,
+      getMetaLink(resultCell.withTx(tx), "argument")!,
       options,
     );
     if (changed) {
@@ -2943,18 +2959,20 @@ export class Runner {
    * one stored now: `result` is the projection as bound to the document,
    * which the policy-input recorder walks; `fabricResult` is what a write
    * stores; and `changed` is whether that differs from what is stored, which
-   * is the one condition under which setup writes it. Reads only.
+   * is the one condition under which setup writes it. `argumentCellLink` is
+   * the argument link the projection binds to, which setup has staged under
+   * `pattern`'s argument schema by the time it writes. Reads only.
    */
   #nextResultProjection<R>(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     resultCell: Cell<R>,
+    argumentCellLink: NormalizedFullLink,
     options: { preserveName: boolean },
   ): { result: R; fabricResult: FabricValue; changed: boolean } {
     const writableResultCell = pattern.resultSchema === undefined
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
-    const argumentCellLink = getMetaLink(resultCell.withTx(tx), "argument")!;
     // `Pattern` erases its authored result type to `JSONValue`, so validate
     // that actual execution value here, then restore its association with
     // `Cell<R>`.
