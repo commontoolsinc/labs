@@ -1,5 +1,3 @@
-/** Verifies the dashboard's registered tile sequence and reserved slots. */
-
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
@@ -22,7 +20,7 @@ describe("registry", () => {
       "loom-ci",
       "loom-ci-trust",
       "loom-ci-duration",
-      "loom-metric-placeholder",
+      "key-benchmarks",
       "test-flakes",
       "test-selection",
       "coverage-debt",
@@ -39,20 +37,20 @@ describe("registry", () => {
     ]);
   });
 
-  it("returns the empty metric view for each reserved slot", async () => {
-    const placeholders = TILES.filter((tile) =>
-      tile.id.endsWith("metric-placeholder")
-    );
-    const views = await Promise.all(
-      placeholders.map((tile) => tile.collect(context)),
-    );
-
-    expect(views).toEqual(Array(1).fill({
-      label: "YOUR METRIC HERE",
-      status: "good",
-      value: "–",
-      sub: "no metric selected for this tile",
-    }));
+  it("names both benchmark tiles when credentials are unavailable", async () => {
+    for (const [id, label, href] of [
+      ["benchmark", "all benchmarks", "/bench?view=runtime&repo=labs"],
+      ["key-benchmarks", "key benchmarks", "/bench?view=runtime&repo=labs&key=1"],
+    ]) {
+      const tile = TILES.find((tile) => tile.id === id);
+      expect(await tile?.collect(context)).toMatchObject({
+        label,
+        status: "unknown",
+        value: "—",
+        sub: "set GH_TOKEN",
+        href,
+      });
+    }
   });
 
   it("reports cubic spend as a named metric with no value", async () => {

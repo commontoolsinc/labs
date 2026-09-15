@@ -821,8 +821,6 @@ export function sqliteQuery(
   >();
   let sequence = 0;
 
-  const space = parentCell.space;
-
   const action: Action = (tx: IExtendedStorageTransaction) => {
     const inputs = inputsCell.withTx(tx).get() as {
       db?: unknown;
@@ -858,15 +856,27 @@ export function sqliteQuery(
     const clearanceScope: CellScope | undefined = inputs?.readClearance
       ? "user"
       : undefined;
+    const databaseSpace = inputsCell.withTx(tx).key("db").resolveAsCell().space;
+    const crossSpace = databaseSpace !== parentCell.space;
     const scope = narrowestScope([
       outputBinding?.scope,
       dbScope,
       clearanceScope,
+      crossSpace ? "user" : undefined,
     ]);
 
     const runContext = waveRunContextOf(tx);
     const servedRun = runContext !== undefined;
     const runIdentity = runContext?.scopeKeyIdentity;
+    if (
+      crossSpace && servedRun &&
+      (!runIdentity?.principal ||
+        (scope === "session" && !runIdentity.sessionId))
+    ) {
+      throw new Error(
+        "sqlite: cross-space served queries require a complete scoped reader identity",
+      );
+    }
     const needsPublication = !initialized || resultScope !== scope;
     if (needsPublication) {
       selectedResult = makeResultCell<QueryState>(
@@ -1023,6 +1033,11 @@ export function sqliteQuery(
       ? runIdentity?.sessionId
       : undefined;
     const hash = computeInputHashFromValue({
+      databaseSpace,
+      reader: crossSpace ? (actingReader ?? null) : null,
+      readerSession: crossSpace && scope === "session"
+        ? (runIdentity?.sessionId ?? null)
+        : null,
       db,
       sql: inputs.sql,
       params: params ?? null,
@@ -1211,7 +1226,7 @@ export function sqliteQuery(
                 requestHash: hash,
               });
             });
-          const provider = runtime.storageManager.open(space);
+          const provider = runtime.storageManager.open(databaseSpace);
           try {
             if (!provider.sqliteQuery) {
               throw new Error(
@@ -1219,7 +1234,15 @@ export function sqliteQuery(
                   "(sqliteQuery unavailable)",
               );
             }
-            const res = await provider.sqliteQuery(db, sql, params);
+            if (crossSpace && servedRun && !actingReader) {
+              throw new Error(
+                "sqlite: cross-space served queries require a reader",
+              );
+            }
+            const reader = crossSpace && servedRun && actingReader
+              ? { ...runIdentity, principal: actingReader }
+              : undefined;
+            const res = await provider.sqliteQuery(db, sql, params, reader);
             // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
             // OBJECTS so a typed consumer's asCell schema rehydrates them to live
             // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.

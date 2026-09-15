@@ -17,6 +17,7 @@ import {
   type CellLink,
   type NormalizedFullLink,
   parseLink,
+  schemaForSpaceCrossing,
   type ScopeCapAtDepth,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -808,8 +809,23 @@ export function resolveLinkTracingDereferences(
           schema: crossingSchema,
         });
       }
+      const crossSpace = nextHop.link.space !== link.space;
       const nextLink = nextHop.link;
-      const crossSpace = nextLink.space !== link.space;
+      // Precedence and defaults depend on what a reference declares, in
+      // either space. The traveling schema keeps its reference form until
+      // a space boundary requires a self-contained representation.
+      let declaration = nextLink.schema;
+      if (
+        isObjectOrArray(declaration) && typeof declaration.$ref === "string"
+      ) {
+        declaration = ensureExternalSchemaClosure(
+            tx,
+            nextHop.source.space,
+            declaration,
+          )
+          ? ContextualFlowControl.resolveSchemaRefs(declaration) ?? false
+          : false;
+      }
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
       // under the target. Caps recorded for the consumed prefix have done
       // their job; caps for the REMAINING segments still have to travel, or a
@@ -826,15 +842,15 @@ export function resolveLinkTracingDereferences(
         nextHop.link.path.length - link.path.length,
       );
       if (
-        schemaConstrainsNothing(nextLink.schema) && link.schema !== undefined
+        schemaConstrainsNothing(declaration) && link.schema !== undefined
       ) {
         // `default` still inherits from the last declaration even when the
         // stored schema is otherwise unconstrained — a top-level `default`
         // is trivially true, and narrowing can reduce a stored schema to
         // one. A false carried schema stays false: the reader selected
         // nothing, so no default stands in.
-        const storedDefault = isObjectOrArray(nextLink.schema)
-          ? nextLink.schema.default
+        const storedDefault = isObjectOrArray(declaration)
+          ? declaration.default
           : undefined;
         const carriedSchema = storedDefault !== undefined &&
             !ContextualFlowControl.isFalseSchema(link.schema)
@@ -853,6 +869,12 @@ export function resolveLinkTracingDereferences(
         link = carriedCaps === undefined
           ? nextLink
           : { ...nextLink, scopeCaps: carriedCaps };
+      }
+      if (crossSpace) {
+        link = {
+          ...link,
+          schema: schemaForSpaceCrossing(tx, nextHop.source.space, link.schema),
+        };
       }
       const mgr = runtime.storageManager;
       const reserved = !crossSpace &&

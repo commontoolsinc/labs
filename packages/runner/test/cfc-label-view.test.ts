@@ -15,8 +15,11 @@ import { toCell } from "../src/back-to-cell.ts";
 import { type FactoryInput, UI } from "../src/builder/types.ts";
 import {
   cfcLabelViewForCell,
+  cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellFailClosedWithStatus,
   cfcLabelViewFromMetadata,
-} from "../src/cfc/label-view.ts";
+  cfcLabelViewSymbol,
+} from "../src/cfc/mod.ts";
 import { stripSigilCfcLabelViews } from "../src/cfc/link-label-view.ts";
 import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
@@ -1496,6 +1499,101 @@ describe("CFC label view helpers", () => {
         label: { integrity: ["trusted-source"] },
       }],
     });
+  });
+
+  it("reports a successful fail-closed read through the public status wrapper", () => {
+    let metadataReads = 0;
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:labeled-cell",
+        space: "did:key:test",
+        type: "application/json",
+        path: [],
+      }),
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => {
+            metadataReads++;
+            return {
+              version: 1,
+              schemaHash: "test-schema",
+              labelMap: {
+                version: 1,
+                entries: [{
+                  path: [],
+                  label: {
+                    confidentiality: ["private-source"],
+                    integrity: ["trusted-source"],
+                  },
+                }],
+              },
+            };
+          },
+        }),
+      },
+    };
+    const expectedView = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          confidentiality: ["private-source"],
+          integrity: ["trusted-source"],
+        },
+      }],
+    };
+
+    expect(cfcLabelViewForCellFailClosedWithStatus(cell)).toEqual({
+      view: expectedView,
+      readFailed: false,
+    });
+    expect(metadataReads).toBe(1);
+    expect(cfcLabelViewForCellFailClosed(cell)).toEqual(expectedView);
+    expect(metadataReads).toBe(2);
+  });
+
+  it("reports a failed read while retaining confidentiality in its fail-closed view", () => {
+    let metadataReads = 0;
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        id: "of:labeled-cell",
+        space: "did:key:test",
+        type: "application/json",
+        path: [],
+      }),
+      runtime: {
+        readTx: () => ({
+          readOrThrow: () => {
+            metadataReads++;
+            throw new Error("metadata read failed");
+          },
+        }),
+      },
+      [cfcLabelViewSymbol]: () => ({
+        version: 1 as const,
+        entries: [{
+          path: [],
+          label: { confidentiality: ["private-source"] },
+        }],
+      }),
+    };
+
+    expect(cfcLabelViewForCellFailClosedWithStatus(cell)).toEqual({
+      view: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: [
+              "private-source",
+              "cfc:label-read-failed",
+            ],
+          },
+        }],
+      },
+      readFailed: true,
+    });
+    expect(metadataReads).toBe(1);
   });
 
   it("skips result metadata for result-cell internal paths", () => {

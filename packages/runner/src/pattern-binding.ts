@@ -763,9 +763,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
     } else if (isObjectOrArray(binding)) {
       // Copy lazily, as the array branch does: allocate only once a value
       // actually converts to something else, so the shared path — the common
-      // one, and the majority of nodes — allocates nothing at all. Compare
-      // `overlayUnreadableLinkPlaceholders()` in `stored-argument-validation.ts`
-      // for the same idiom.
+      // one, and the majority of nodes — allocates nothing at all.
       let converted: Record<string, FabricExecValue> | undefined;
       for (const key of Object.keys(binding)) {
         const value = binding[key];

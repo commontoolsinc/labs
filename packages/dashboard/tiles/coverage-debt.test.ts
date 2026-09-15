@@ -24,8 +24,8 @@ import {
   COVERAGE_TREND_DAYS,
   coverageDebt,
   coverageDebtView,
-  makeCoverageDebt,
   dailyChangeLabel,
+  makeCoverageDebt,
   medianDailyChange,
   trendWindow,
 } from "./coverage-debt.ts";
@@ -206,6 +206,30 @@ describe("coverage-debt", () => {
       expect([...(view.extra ?? "").matchAll(/<polyline/g)].length).toBe(2);
       expect(view.extra).toContain("var(--chart-highlight)");
       expect(view.duration).toBe(40 * DAY_MS);
+    });
+
+    it("expands recent debt changes while older extremes extend outside the chart", () => {
+      const recent = Array.from(
+        { length: COVERAGE_TREND_DAYS },
+        (_, day) => 80000 - day * 100,
+      );
+      const view = coverageDebtView(samplesOf([0, 200000, ...recent]), NOW);
+      const chart = view.extra ?? "";
+      const [history, highlight] = [
+        ...chart.matchAll(/<polyline points="([^"]+)"/g),
+      ].map((match) =>
+        match[1].split(" ").map((point) => Number(point.split(",")[1]))
+      );
+      const height = Number(chart.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)?.[1]);
+
+      expect(history).toHaveLength(recent.length + 2);
+      expect(highlight).toHaveLength(recent.length);
+      expect(history[0]).toBeGreaterThan(height);
+      expect(history[1]).toBeLessThan(0);
+      expect(Math.min(...highlight)).toBeGreaterThan(0);
+      expect(Math.max(...highlight)).toBeLessThan(height);
+      expect(Math.max(...highlight) - Math.min(...highlight))
+        .toBeGreaterThan(height / 2);
     });
 
     it("returns no pop-out link", () => {

@@ -9,7 +9,11 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+import {
+  verifySchemaDocument,
+  walkSchemaDocumentClosure,
+} from "@commonfabric/data-model-schema/schema-closure";
+import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import { aclDocId, sameAcl } from "@commonfabric/memory/acl";
 import type { ACL, Entity } from "@commonfabric/memory/interface";
 import {
@@ -54,6 +58,7 @@ import {
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
+  type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
@@ -85,13 +90,12 @@ import {
   classifySchemaMeta,
   collectExternalSchemaRefHashes,
   schemaMetaRefHashes,
-} from "../schema-decompose.ts";
+} from "@commonfabric/data-model-schema/schema-refs";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
-import { isSubschema } from "../schema-walk.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -3302,9 +3306,10 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     return this.#followReplacement((replica) =>
-      replica.sqliteQuery(db, sql, params)
+      replica.sqliteQuery(db, sql, params, reader)
     );
   }
 
@@ -4529,9 +4534,10 @@ export class SpaceReplica
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     const { session } = await this.#activeSessionHandle();
-    return await session.sqliteQuery(db, sql, params);
+    return await session.sqliteQuery(db, sql, params, reader);
   }
 
   async listEntityIds(): Promise<string[] | undefined> {
@@ -4735,6 +4741,17 @@ export class SpaceReplica
     return this.#delivered.has(key) ||
       (record?.confirmed.seq ?? 0) > 0 ||
       record?.pending.some((entry) => entry.op !== "patch") === true;
+  }
+
+  /** ISpaceReplica.confirmedDocumentSeq: the accepted seq this replica's
+   * confirmed base stands at for the instance, pending writes excluded. */
+  confirmedDocumentSeq(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): number {
+    return this.#docs.get(this.#docKeyOf({ id, scope }, identity))
+      ?.confirmed.seq ?? 0;
   }
 
   getDocument(
@@ -7374,14 +7391,9 @@ export class SpaceReplica
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
-        if (
-          isSubschema(value) &&
-          internSchemaAsTaggedHashString(value as JSONSchema) === hash
-        ) {
-          registered.push([
-            id,
-            registerSchemaDocument(hash, value as JSONSchema),
-          ]);
+        const schema = verifySchemaDocument(hash, value);
+        if (schema !== undefined) {
+          registered.push([id, registerSchemaDocument(hash, schema)]);
           // A schema document's own refs are collected below from its
           // registered form; schema keywords such as `default` may carry
           // link-shaped DATA, so it is not link-scanned.
@@ -7498,8 +7510,7 @@ export class SpaceReplica
       this.getDocument(`cid:${hash}` as URI);
     if (!isObjectNotArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
-    return isSubschema(value) &&
-      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+    return verifySchemaDocument(hash, value) !== undefined;
   }
 
   /**
@@ -8794,13 +8805,20 @@ export class SpaceReplica
   ): SessionSyncUpsert[] {
     const frame = [...upserts];
     const inFrame = new Set(frame.map((upsert) => upsert.id));
-    for (let index = 0; index < frame.length; index++) {
-      const upsert = frame[index]!;
-      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) continue;
+    // The hashes a document in the frame obliges it to hold: the
+    // document's `schema` metadata member and, for a schema document, its
+    // own refs, or otherwise its link positions. Verification is the
+    // validator's, not this chase's: a schema-shaped document's refs are
+    // followed whether or not it is the document its id names, as its
+    // arrival will be judged.
+    const obligationsOf = (upsert: SessionSyncUpsert): Set<string> => {
+      const hashes = new Set<string>();
+      if (upsert.deleted === true || !isObjectNotArray(upsert.doc)) {
+        return hashes;
+      }
       const metadata = classifySchemaMeta(upsert.doc);
-      // Leave malformed metadata in the frame for per-document quarantine.
-      if (metadata.kind === "malformed") continue;
-      const hashes = new Set(schemaMetaRefHashes(metadata));
+      if (metadata.kind === "malformed") return hashes;
+      for (const hash of schemaMetaRefHashes(metadata)) hashes.add(hash);
       if (upsert.id.startsWith("cid:")) {
         const value = (upsert.doc as { value?: unknown }).value;
         if (isSubschema(value)) {
@@ -8818,16 +8836,27 @@ export class SpaceReplica
           return schema;
         });
       }
-      for (const hash of hashes) {
+      return hashes;
+    };
+    const roots = new Set<string>();
+    for (const upsert of upserts) {
+      for (const hash of obligationsOf(upsert)) roots.add(hash);
+    }
+    walkSchemaDocumentClosure({
+      roots,
+      load: (hash, walk) => {
         const id = `cid:${hash}` as URI;
         if (inFrame.has(id) || this.isContentAddressedDocPersisted(hash)) {
-          continue;
+          return { kind: "settled" };
         }
         inFrame.add(id);
         const dependency = read({ id, scopeKey: "space" as ScopeKey });
-        if (dependency !== undefined) frame.push(dependency);
-      }
-    }
+        if (dependency === undefined) return undefined;
+        frame.push(dependency);
+        for (const next of obligationsOf(dependency)) walk.follow(next);
+        return { kind: "settled" };
+      },
+    });
     return frame;
   }
 

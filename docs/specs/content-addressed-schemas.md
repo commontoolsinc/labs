@@ -315,6 +315,9 @@ with a grammar of exactly two forms:
 - **Reference**: a single-member `{ "$ref": "cid:<hash>" }` root, the
   `#/$defs/<name>` fragment form included.
 
+An omitted member or `undefined` means no schema metadata. A member holding
+`null` is malformed and is refused at the same write and read boundaries.
+
 ```jsonc
 {
   "value": { "items": [] },
@@ -430,6 +433,26 @@ a mismatched document is rejected and never enters the registry. Because
 external refs are hash-covered content, verifying each document
 individually verifies the whole closure against the root reference.
 
+Every walk over a closure is one implementation:
+`walkSchemaDocumentClosure` in `@commonfabric/data-model-schema`
+(`schema-closure.ts`), whose `verifySchemaDocument` is the identity check
+above. The walk owns the worklist, the dedupe, the verification of a
+stored value, and the following of a verified document's own refs. A
+site supplies where a document comes from and what a miss means, and
+nothing else: the commit boundary resolves a hash against the commit's
+own sets and then the store and refuses the commit on a miss; result
+assembly and selector validation read through the query's manager at
+its seq and fail the query; the traversal reads through the transaction
+so the dependency is recorded, reports an absent document on the
+missing-target channel, and lets the schema select nothing; the replica
+resolves against the arriving frame before its store; the transaction
+and the registry walk the realm registry, staging a document or
+memoizing completeness. A site that already holds a document verified —
+the registry, or a cache keyed by the document's version — hands it over
+as verified and the walk follows it without re-hashing; a site that
+holds a document and everything behind it settles the hash, and the walk
+stops there.
+
 The same identity check is the class test. `cid:` holds more document
 classes than schema documents — blobs among them — and a delivery site
 cannot name the class of a directly pulled document, so a document is a
@@ -498,11 +521,20 @@ external closure is complete.
 
 ### Space boundaries
 
+A link's schema belongs to the space holding the link declaration. When a
+document in space A links to a document in space B, the schema's `cid:`
+references resolve in A, including their transitive closure. Before carrying
+that schema into B, traversal and link resolution recompose it into a
+self-contained schema. Path narrowing, target queries, and derived Cell
+handles therefore do not require B to hold A's schema documents. A schema
+declared by a link inside B resolves in B when that next link is followed.
+
 A schema document's value is space-free: content addressing makes the
 bytes identical wherever they are stored, so the realm-wide registry
 shares one verified object across spaces, and using a shared value can
-never produce a wrong answer. Which space a document EXISTS in matters in
-exactly two guarantees, both about delivery rather than about values:
+never produce a wrong answer. Document residency determines where a missing
+closure is loaded, as described above. Two delivery guarantees keep those
+documents available alongside their declarations:
 
 - **The write-side guarantee.** The client that replaces an inline schema
   with a reference created the obligation, so it discharges it: the
@@ -533,7 +565,7 @@ exactly two guarantees, both about delivery rather than about values:
   results are cached per document version, so in steady state a version
   is scanned once however many sessions or refreshes deliver it.
   Traversal keeps its own gate where a schema enters it — the selector
-  and a link: a schema whose closure the space does not hold selects
+  and a link: a schema whose closure the declaring space does not hold selects
   nothing, since selecting by an uncollectable schema would produce a
   result whose shape the receiving client could never reproduce from
   what arrives.
@@ -621,7 +653,7 @@ delivery and traversal split the work in two layers:
 - **Traversal** loads the closure where a schema enters it — the selector
   and a link — because resolution during the traversal needs the
   documents at hand, and its availability gate (a schema whose closure
-  the space does not hold selects nothing) lives on the same reads.
+  the declaring space does not hold selects nothing) lives on the same reads.
   Traversal does not recurse into `cid:` documents.
 - **Result assembly** owns delivery: it scans every complete document the
   query delivers — link positions and the `schema` metadata member —

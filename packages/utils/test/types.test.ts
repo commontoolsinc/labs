@@ -15,7 +15,9 @@ import {
   isReadonlyObjectOrArray,
   isString,
   isUnsafeObjectKey,
+  type JsTypeTagIncludingNull,
   Mutable,
+  typeOfIncludingNull,
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 
@@ -26,6 +28,26 @@ type ImmutableObj<T> = {
 function mutate<T>(value: T, callback: (v: Mutable<T>) => void) {
   callback(value as Mutable<T>);
 }
+
+/**
+ * Labeled sample values with the tag `typeOfIncludingNull()` returns for
+ * each: at least one of every JS type `typeof` decides, and `null`.
+ */
+const JS_TYPE_SAMPLES: ReadonlyArray<
+  [string, unknown, JsTypeTagIncludingNull]
+> = [
+  ["a bigint", 42n, "bigint"],
+  ["a boolean", true, "boolean"],
+  ["a function", () => {}, "function"],
+  ["a class", class {}, "function"],
+  ["`null`", null, "null"],
+  ["a number", 42, "number"],
+  ["`NaN`", NaN, "number"],
+  ["a string", "", "string"],
+  ["a unique symbol", Symbol("s"), "symbol"],
+  ["an interned symbol", Symbol.for("s"), "symbol"],
+  ["`undefined`", undefined, "undefined"],
+];
 
 describe("types", () => {
   describe("Mutable", () => {
@@ -444,6 +466,39 @@ describe("types", () => {
       expect(isPrimitive(new Date())).toBe(false);
       expect(isPrimitive(() => {})).toBe(false);
       expect(isPrimitive(class {})).toBe(false);
+    });
+  });
+
+  describe("JsTypeTagIncludingNull", () => {
+    it("is the result type of `typeof`, plus `null`", () => {
+      // The `typeof` result type has no name of its own, so it is read off a
+      // function that returns one.
+
+      const typeOf = (value: unknown) => typeof value;
+      type TypeOfTag = ReturnType<typeof typeOf>;
+      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
+        : false;
+
+      const _same: Same<TypeOfTag | "null", JsTypeTagIncludingNull> = true;
+    });
+  });
+
+  describe("typeOfIncludingNull()", () => {
+    for (const [label, value, tag] of JS_TYPE_SAMPLES) {
+      it(`returns \`${tag}\` for ${label}`, () => {
+        expect(typeOfIncludingNull(value)).toBe(tag);
+      });
+    }
+
+    it("returns `object` for an object of any kind", () => {
+      // The value `null` has a tag and every other object has none, whatever
+      // its class or prototype.
+
+      expect(typeOfIncludingNull({})).toBe("object");
+      expect(typeOfIncludingNull(Object.create(null))).toBe("object");
+      expect(typeOfIncludingNull([])).toBe("object");
+      expect(typeOfIncludingNull(new Date())).toBe("object");
+      expect(typeOfIncludingNull(new (class {})())).toBe("object");
     });
   });
 

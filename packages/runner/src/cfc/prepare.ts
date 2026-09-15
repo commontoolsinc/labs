@@ -13,6 +13,12 @@ import {
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
 import {
+  containsExternalSchemaRef,
+  formatExternalSchemaRef,
+  parseExternalSchemaRef,
+  SCHEMA_META_MEMBER,
+} from "@commonfabric/data-model-schema/schema-refs";
+import {
   cloneForMutation,
   type CloneForMutationResult,
   fabricAwareEqual,
@@ -28,6 +34,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { encodePointer } from "../../../memory/v2/path.ts";
@@ -35,13 +42,9 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
 import {
-  containsExternalSchemaRef,
   decomposeSchema,
-  formatExternalSchemaRef,
-  parseExternalSchemaRef,
   recomposeSchema,
   recomposeSchemaRefs,
-  SCHEMA_META_MEMBER,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
 import {
@@ -59,7 +62,6 @@ import {
   parseLink,
 } from "../link-utils.ts";
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -72,6 +74,7 @@ import {
   isLinkResolutionProbe,
   isMachineryRead,
   isSchedulerDependencyRead,
+  stableInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
@@ -85,6 +88,7 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
+import { ConsumedLabelIndex } from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
   type CfcGrantConsumptionContext,
@@ -162,10 +166,7 @@ import {
 } from "./ui-contract.ts";
 import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
-const INTERNAL_VERIFIER_META = {
-  ...ignoreReadForScheduling,
-  ...internalVerifierRead,
-};
+const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 
 // The link-source schema read, which reactivity SEES. Prepare's other reads
 // carry `ignoreReadForScheduling` and are invisible to it. This one decides
@@ -4025,9 +4026,10 @@ const verifyInputRequirements = (
   };
   let clockLessReads = 0;
   const readSources = [
-    ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
-      !isInternalVerifierRead(read.meta)
-    ).map((read) => {
+    ...[
+      ...(tx.getPotentiallyExternalReadActivities?.() ??
+        tx.getReadActivities?.() ?? []),
+    ].filter((read) => !isInternalVerifierRead(read.meta)).map((read) => {
       if (provenance !== undefined && read.journalIndex === undefined) {
         clockLessReads += 1;
       }
@@ -5441,6 +5443,9 @@ export const collectConsumedLabel = (
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
   const sources: ConsumedAtomSource[] = [];
   const sourceBuckets = new Map<string, ConsumedAtomSource[]>();
+  // Collection is synchronous and read-only. Share one validated metadata
+  // snapshot per document here; another collection observes its current view.
+  const labelIndexes = new Map<string, ConsumedLabelIndex | undefined>();
   const noteSource = (
     atom: unknown,
     read: CfcAddress,
@@ -5452,7 +5457,7 @@ export const collectConsumedLabel = (
     // The tuple keeps address fields and pointer boundaries unambiguous,
     // including paths containing separators. Only atoms sharing that identity
     // need structural comparison; `sources` retains global first-seen order.
-    const key = JSON.stringify([
+    const key = stringTupleKey([
       read.id,
       read.space,
       read.scope,
@@ -5484,14 +5489,20 @@ export const collectConsumedLabel = (
     ]
   ) {
     if (isInternalVerifierRead(read.meta)) continue;
-    const metadata = storedMetadataFor(
-      tx,
-      read.space,
-      read.id,
-      normalizeCellScope(read.scope),
-      read.type ?? "application/json",
-    );
-    if (metadata === undefined) continue;
+    const scope = normalizeCellScope(read.scope);
+    const type = read.type ?? "application/json";
+    const metadataKey = stringTupleKey([read.space, read.id, scope, type]);
+    if (!labelIndexes.has(metadataKey)) {
+      const metadata = storedMetadataFor(tx, read.space, read.id, scope, type);
+      labelIndexes.set(
+        metadataKey,
+        metadata === undefined
+          ? undefined
+          : new ConsumedLabelIndex(metadata.labelMap.entries),
+      );
+    }
+    const labels = labelIndexes.get(metadataKey);
+    if (labels === undefined) continue;
     const path = canonicalizeLogicalPath(read.path);
     // A recursive read at `path` observes the value at `path` and everything
     // below it, so its confidentiality is the union of every labelMap entry
@@ -5502,8 +5513,7 @@ export const collectConsumedLabel = (
     // #3993). A nonRecursive read sees ONLY the value at `path`, so it counts
     // ancestor-or-equal entries but NOT descendants — counting those would
     // false-reject valid commits (review round 2 on #3993).
-    for (const entry of metadata.labelMap.entries) {
-      const entryPath = canonicalizeLogicalPath(entry.path);
+    for (const { entry, path: entryPath } of labels.overlapping(path)) {
       // CONCRETE structure entries label only the container node's shape:
       // an ancestor structure entry does not apply to a read strictly
       // below it (same exact-path rule as `labelAtPath`); as a descendant

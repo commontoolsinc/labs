@@ -19,10 +19,10 @@ import {
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
   type FabricValueTag,
-  tagFromFabricValue,
-  tagFromFabricValueElseNull,
+  tagOfFabricValue,
+  tagOfFabricValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags.ts";
+} from "@/value-tags";
 
 import {
   type BaselineVisitResult,
@@ -252,7 +252,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
         }
       }
 
-      const tag = this.#tagFromValueElseNull(value);
+      const tag = this.#tagOfValueElseNull(value);
       let result: DispatchingVisitorResult<DomainExtra, ResultType>;
 
       switch (tag) {
@@ -552,7 +552,7 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
     finalValueTagIfKnown?: FabricValueTag | null,
   ): RecurseOfForm {
     const tag = (finalValueTagIfKnown === undefined)
-      ? this.#tagFromValueElseNull(finalValue)
+      ? this.#tagOfValueElseNull(finalValue)
       : finalValueTagIfKnown;
 
     switch (tag) {
@@ -600,19 +600,19 @@ export class VisitInProgress<DomainExtra = never, ResultType = FabricValue> {
    * type-checking style indicated by the top-level `visit*()` call on this
    * instance.
    */
-  #tagFromValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
+  #tagOfValueElseNull(value: DomainFor<DomainExtra>): FabricValueTag | null {
     if (this.#assumeValid) {
-      return tagFromFabricValueElseNull(value as FabricValue);
+      return tagOfFabricValueElseNull(value as FabricValue);
     } else if (this.#deepTypeCheck) {
       // TODO(danfuzz): If cached, `isValidDeepFrozenFabricValue()` is faster
       // than `isValidFabricValue()`. The latter should actually sniff at the
       // frozen cache.
       const isFabricValue = isValidDeepFrozenFabricValue(value) ||
         isValidFabricValue(value);
-      return isFabricValue ? tagFromFabricValue(value) : null;
+      return isFabricValue ? tagOfFabricValue(value) : null;
     } else {
       return isValidFabricValueLayer(value)
-        ? tagFromFabricValue(value as FabricValue)
+        ? tagOfFabricValue(value as FabricValue)
         : null;
     }
   }

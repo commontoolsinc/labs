@@ -27,7 +27,7 @@ import {
 import { BoardSession } from "./topic-board-session.ts";
 
 const DEMAND = parseTopicBoardDemand(Deno.env.get("CF_TOPIC_BOARD_DEMAND"));
-const GROUP = `topic board scale (${DEMAND} demand)`;
+const GROUP = "topic board scale";
 
 /** Board sizes the curve is sampled at. */
 const SIZES = [100, 1000, 10000];

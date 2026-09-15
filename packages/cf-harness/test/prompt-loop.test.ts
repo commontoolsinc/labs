@@ -5,6 +5,9 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { decodeBase64 } from "@std/encoding/base64";
 import { parentToolIdsForBacking } from "../src/contracts/tool-descriptor.ts";
 import { join } from "@std/path";
@@ -12,6 +15,7 @@ import { normalize } from "@std/path/posix";
 
 import { CFC_ENFORCEMENT_MODES } from "@commonfabric/runner/cfc";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -23,8 +27,16 @@ import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
 } from "../src/contracts/prompt-slot.ts";
+import { CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE } from "../src/contracts/cfc-invocation-context.ts";
+import type {
+  HarnessResearchCfcProjection,
+  HarnessResearchRunSummary,
+} from "../src/contracts/research.ts";
 import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
-import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import {
+  createToolOutputId,
+  createToolResultRef,
+} from "../src/contracts/tool-result.ts";
 import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -32,11 +44,21 @@ import {
   type OpenAIChatCompletionRequest,
   OpenAICompatibleGatewayClient,
 } from "../src/gateway/openai-client.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+} from "../src/handle-table.ts";
 import { createHarnessImageAttachment } from "../src/image-attachments.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
+import type {
+  HarnessModelClient,
+  HarnessModelTurnRequest,
+} from "../src/model/client.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
-import type { HarnessRunState } from "../src/run-state.ts";
+import {
+  createHarnessRunState,
+  type HarnessRunState,
+} from "../src/run-state.ts";
 import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
 import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
 import type {
@@ -661,7 +683,7 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(serialized.includes("rotated-refresh-secret"), false);
 });
 
-Deno.test("Codex profile model overrides fail the child without aborting the parent loop", async () => {
+Deno.test("Codex search provider failure fails the child without aborting the parent loop", async () => {
   let modelTurns = 0;
   const modelClient: HarnessModelClient = {
     providerId: "openai-codex",
@@ -672,6 +694,9 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
     },
     complete: () => {
       modelTurns += 1;
+      if (modelTurns === 2) {
+        throw new Error("Synthetic search provider unavailable");
+      }
       return Promise.resolve({
         assistant: modelTurns === 1
           ? {
@@ -723,13 +748,13 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   };
 
   assertEquals(result.finalAssistantText, "Parent recovered.");
-  assertEquals(modelTurns, 2);
+  assertEquals(modelTurns, 3);
   assertEquals(output.subagent.status, "failed");
   assertEquals(output.subagent.runState.status, "failed");
   assertEquals(output.subagent.runState.failureCount, 1);
   assertStringIncludes(
     output.subagent.summary,
-    "is not available from provider openai-codex",
+    "Synthetic search provider unavailable",
   );
 });
 
@@ -1258,7 +1283,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "write_file",
       "delegate_task",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
   const lastSentMessage = chatViewOfRequest(secondRequest).messages.at(-1);
@@ -1268,6 +1293,1591 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     outputId: createToolOutputId("run-loop", "read_file", 1),
     path: "/workspace/notes/todo.txt",
     content: "hello from file",
+  });
+});
+
+describe("CfHarnessPromptLoop research handoff", () => {
+  it("preserves handles and keeps private evidence in artifacts", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-research-handoff-",
+    });
+    const runId = "run-research-handoff";
+    const docsRoot = join(root, "docs");
+    const artifactRoot = join(root, "artifacts");
+    await Deno.mkdir(docsRoot);
+    await Deno.writeTextFile(
+      join(docsRoot, "api.md"),
+      "# Input contracts\n\nDescribe every opaque handle before binding it.\n",
+    );
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId,
+      });
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-test",
+        artifactStore,
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record",
+          source: "configured",
+          roots: [docsRoot],
+        },
+      });
+      const ref = `/of:fid1:${"R".repeat(43)}`;
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        ref,
+        {
+          schema: {
+            type: "object",
+            properties: {
+              messages: { type: "array" },
+              "did:key:zResearchText": { type: "string" },
+            },
+          },
+        },
+      );
+      await engine.recordHandleTable(minted.table);
+      const privateRequests: HarnessModelTurnRequest[] = [];
+      let outerTurns = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.runId.includes(":research:")) {
+            privateRequests.push(request);
+            const exactRead = request.transcript.findLast((message) =>
+              message.role === "tool" &&
+              message.toolName === "open_doc_section"
+            );
+            if (exactRead === undefined) {
+              return Promise.resolve({
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "describe-input",
+                    type: "function" as const,
+                    function: {
+                      name: "describe_handle",
+                      arguments: JSON.stringify({ token: minted.token }),
+                    },
+                  }, {
+                    id: "open-contract",
+                    type: "function" as const,
+                    function: {
+                      name: "open_doc_section",
+                      arguments: JSON.stringify({ sectionId: "section-0" }),
+                    },
+                  }],
+                },
+                usage: { totalTokens: 17 },
+              });
+            }
+            const sourceId = (JSON.parse(exactRead.content) as {
+              sourceId: string;
+            }).sourceId;
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: JSON.stringify({
+                  status: "incomplete",
+                  summary:
+                    "The handle contract did:key:zResearchText is known, but semantics remain.",
+                  recommendation: {
+                    kind: "author",
+                    rationale: "Author against the described input shape.",
+                  },
+                  inputs: [{
+                    name: "mail",
+                    token: minted.token,
+                    purpose: "Read message metadata",
+                  }],
+                  selectedPatternIds: [],
+                  steps: ["Bind the opaque handle without materializing it."],
+                  example: {
+                    kind: "pattern-source",
+                    content: "export default ({ mail }) => mail;",
+                    sourceIds: [sourceId],
+                  },
+                  rules: [{
+                    rule: "Describe a handle before binding it.",
+                    sourceIds: [sourceId],
+                  }],
+                  verification: ["Type-check the authored pattern."],
+                  sourceIds: [sourceId],
+                  missing: [
+                    "The task's filtering semantics remain unresolved.",
+                  ],
+                }),
+              },
+              usage: { totalTokens: 20 },
+            });
+          }
+          outerTurns += 1;
+          return Promise.resolve(
+            outerTurns === 1
+              ? {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "research-task",
+                    type: "function" as const,
+                    function: {
+                      name: "research",
+                      arguments: JSON.stringify({
+                        task: `Build a reader around ${minted.token}`,
+                      }),
+                    },
+                  }],
+                },
+              }
+              : {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "Reported the unresolved filtering semantics.",
+                },
+              },
+          );
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine,
+        modelClient,
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: `Research a reader for ${minted.token}.`,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(privateRequests).toHaveLength(2);
+      const privateUser = privateRequests[0].transcript.find((message) =>
+        message.role === "user"
+      );
+      expect(privateUser?.content).toContain(minted.token);
+      expect(privateUser?.content).not.toContain(ref);
+      expect(privateUser?.content).toContain(
+        "Authoritative general handle inventory",
+      );
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool" && message.toolName === "research"
+      );
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected research tool message");
+      }
+      const modelOutput = JSON.parse(toolMessage.content) as {
+        kit: {
+          status: string;
+          summary: string;
+          inputs: Array<{ token: string }>;
+        };
+        guidance: string;
+        cfc: HarnessResearchCfcProjection;
+        researchRecord?: unknown;
+      };
+      expect(modelOutput.kit.status).toBe("incomplete");
+      expect(modelOutput.kit.summary).toBe(
+        "The handle contract [fabric-id] is known, but semantics remain.",
+      );
+      expect(result.runState.researchRuns?.[0]?.kit.summary).toContain(
+        "did:key:zResearchText",
+      );
+      expect(modelOutput.kit.inputs[0]?.token).toBe(minted.token);
+      expect(modelOutput.guidance).toContain("Do not present or implement");
+      expect(modelOutput.researchRecord).toBeUndefined();
+      expect(modelOutput.cfc.coverage).toBe("incomplete");
+      expect(modelOutput.cfc.outputLabel.integrity).toBeUndefined();
+      expect(modelOutput.cfc.outputLabel.confidentiality).toHaveLength(1);
+      expect(modelOutput.cfc.sourceLabel.integrity).toHaveLength(1);
+      expect(modelOutput.cfc.missingLabels).toEqual([{
+        source: "handle-description",
+        detail: `handle ${minted.token} metadata returned by describe_handle`,
+      }]);
+      expect(result.runState.researchRuns).toHaveLength(1);
+      expect(
+        result.runState.researchRuns?.[0]?.kit.inputs[0]?.token,
+      ).toBe(minted.token);
+      expect(result.runState.researchRuns?.[0]?.cfc).toEqual(modelOutput.cfc);
+      expect(result.runState.cfcModelContext?.observations).toEqual([
+        expect.objectContaining({
+          toolCallId: "research-task",
+          toolId: "research",
+          outputId: toolMessage.resultRef?.outputId,
+          channels: ["output"],
+          label: modelOutput.cfc.outputLabel,
+        }),
+      ]);
+      expect(result.totalUsage?.totalTokens).toBe(37);
+
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.toolId === "research"
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted research output");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as {
+        cfc?: HarnessResearchCfcProjection;
+        researchRecord?: {
+          task: string;
+          sourceReads: unknown[];
+          describedHandles: Array<{ token: string }>;
+        };
+      };
+      expect(artifactOutput.cfc).toEqual(modelOutput.cfc);
+      expect(artifactOutput.researchRecord?.task).toContain(minted.token);
+      expect(artifactOutput.researchRecord?.sourceReads).toHaveLength(1);
+      expect(
+        artifactOutput.researchRecord?.describedHandles[0]?.token,
+      ).toBe(minted.token);
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      const researchOmission = omissions.results.find((entry) =>
+        entry.outputId === outputRef.outputId
+      );
+      expect(researchOmission?.rules).toEqual([{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/researchRecord",
+        }],
+      }, {
+        rule: "bare-fabric-identifier-scrub",
+        locations: [{
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/kit/summary",
+        }],
+      }]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("persists partial evidence when synthesis fails", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-research-failure-",
+    });
+    const runId = "run-research-failure";
+    const docsRoot = join(root, "docs");
+    await Deno.mkdir(docsRoot);
+    await Deno.writeTextFile(
+      join(docsRoot, "contract.md"),
+      "# Contract\n\nThis exact evidence must survive a failed synthesis.\n",
+    );
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      let outerTurns = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.runId.includes(":research:")) {
+            const hasRead = request.transcript.some((message) =>
+              message.role === "tool" &&
+              message.toolName === "open_doc_section"
+            );
+            return Promise.resolve(
+              hasRead
+                ? {
+                  assistant: {
+                    role: "assistant" as const,
+                    content: "not valid research JSON",
+                  },
+                }
+                : {
+                  assistant: {
+                    role: "assistant" as const,
+                    content: "",
+                    toolCalls: [{
+                      id: "read-before-failure",
+                      type: "function" as const,
+                      function: {
+                        name: "open_doc_section",
+                        arguments: JSON.stringify({ sectionId: "section-0" }),
+                      },
+                    }],
+                  },
+                },
+            );
+          }
+          outerTurns += 1;
+          return Promise.resolve(
+            outerTurns === 1
+              ? {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "research-failing-task",
+                    type: "function" as const,
+                    function: {
+                      name: "research",
+                      arguments: JSON.stringify({ task: "Read the contract." }),
+                    },
+                  }],
+                },
+              }
+              : {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "Research failed; no kit was claimed.",
+                },
+              },
+          );
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-test",
+          artifactStore,
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: [docsRoot],
+          },
+        }),
+        modelClient,
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Research the contract.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(result.runState.researchFailures).toBe(1);
+      expect(result.runState.researchRuns).toBeUndefined();
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool" && message.toolName === "research"
+      );
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected research tool message");
+      }
+      const modelOutput = JSON.parse(toolMessage.content) as {
+        status: string;
+        message: string;
+        rawCauseMessage?: unknown;
+        researchRecord?: unknown;
+      };
+      expect(modelOutput.status).toBe("error");
+      expect(modelOutput.message).toBe(
+        "research failed before returning an implementation kit",
+      );
+      expect(modelOutput.rawCauseMessage).toBeUndefined();
+      expect(modelOutput.researchRecord).toBeUndefined();
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.toolId === "research"
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted failed research output");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as {
+        status: string;
+        rawCauseMessage?: string;
+        researchRecord?: {
+          sourceReads: Array<{ location: string }>;
+          messages: unknown[];
+        };
+      };
+      expect(artifactOutput.status).toBe("error");
+      expect(artifactOutput.rawCauseMessage).toContain("not valid JSON");
+      expect(
+        artifactOutput.researchRecord?.sourceReads[0]?.location ?? "",
+      ).toContain("contract.md");
+      expect(
+        (artifactOutput.researchRecord?.messages.length ?? 0) >= 4,
+      ).toBe(true);
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      const researchOmission = omissions.results.find((entry) =>
+        entry.outputId === outputRef.outputId
+      );
+      expect(researchOmission?.rules).toEqual([{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/researchRecord",
+        }, {
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/rawCauseMessage",
+        }],
+      }]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("withholds private provider failure text from the parent model", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-research-provider-failure-",
+    });
+    const runId = "run-research-provider-failure";
+    const docsRoot = join(root, "docs");
+    const privateSource = "PRIVATE-PROVIDER-SOURCE-SENTINEL";
+    await Deno.mkdir(docsRoot);
+    await Deno.writeTextFile(
+      join(docsRoot, "contract.md"),
+      `# Contract\n\n${privateSource}\n`,
+    );
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      let outerTurns = 0;
+      const parentRequests: HarnessModelTurnRequest[] = [];
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.runId.includes(":research:")) {
+            const hasRead = request.transcript.some((message) =>
+              message.role === "tool" &&
+              message.toolName === "open_doc_section"
+            );
+            if (hasRead) {
+              throw new Error(`provider echoed ${privateSource}`);
+            }
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "read-before-provider-failure",
+                  type: "function" as const,
+                  function: {
+                    name: "open_doc_section",
+                    arguments: JSON.stringify({ sectionId: "section-0" }),
+                  },
+                }],
+              },
+            });
+          }
+          parentRequests.push(request);
+          outerTurns += 1;
+          return Promise.resolve(
+            outerTurns === 1
+              ? {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "",
+                  toolCalls: [{
+                    id: "research-provider-failure",
+                    type: "function" as const,
+                    function: {
+                      name: "research",
+                      arguments: JSON.stringify({ task: "Read the contract." }),
+                    },
+                  }],
+                },
+              }
+              : {
+                assistant: {
+                  role: "assistant" as const,
+                  content: "Research failed without exposing its cause.",
+                },
+              },
+          );
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-test",
+          artifactStore,
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: [docsRoot],
+          },
+        }),
+        modelClient,
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Research the contract.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(parentRequests).toHaveLength(2);
+      expect(JSON.stringify(parentRequests[1].transcript)).not.toContain(
+        privateSource,
+      );
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool" && message.toolName === "research"
+      );
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected research tool message");
+      }
+      const modelOutput = JSON.parse(toolMessage.content) as {
+        message: string;
+        rawCauseMessage?: unknown;
+        researchRecord?: unknown;
+      };
+      expect(modelOutput.message).toBe(
+        "research failed before returning an implementation kit",
+      );
+      expect(modelOutput.rawCauseMessage).toBeUndefined();
+      expect(modelOutput.researchRecord).toBeUndefined();
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.toolId === "research"
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted provider-failure output");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as {
+        rawCauseMessage?: string;
+        researchRecord?: {
+          sourceReads: Array<{ location: string }>;
+        };
+      };
+      expect(artifactOutput.rawCauseMessage).toContain(privateSource);
+      expect(
+        artifactOutput.researchRecord?.sourceReads[0]?.location ?? "",
+      ).toContain("contract.md");
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      const researchOmission = omissions.results.find((entry) =>
+        entry.outputId === outputRef.outputId
+      );
+      expect(researchOmission?.rules).toEqual([{
+        rule: "artifact-only",
+        locations: [{
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/researchRecord",
+        }, {
+          artifactPath: outputRef.artifactPath,
+          jsonPointer: "/rawCauseMessage",
+        }],
+      }]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("CfHarnessPromptLoop opening research", () => {
+  it("recovers an interrupted opening with no output exactly once across resumes", async () => {
+    const runId = "opening-without-output";
+    const task = "Continue the interrupted task.";
+    const requests: HarnessModelTurnRequest[] = [];
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) => {
+        requests.push(request);
+        return Promise.resolve({
+          assistant: { role: "assistant", content: "Continued." },
+        });
+      },
+    };
+    const runState = createHarnessRunState({
+      runId,
+      model: "gpt-test",
+      cfcEnforcementMode: "disabled",
+      currentDir: "/workspace",
+      openingResearch: {
+        type: "cf-harness.opening-research",
+        version: 1,
+        status: "pending",
+        task,
+        toolCallId: "interrupted-opening",
+        toolOutputIndex: 0,
+      },
+    });
+    const events: string[] = [];
+    const first = await new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+      }),
+      modelClient,
+      allowedToolIds: ["research"],
+    }).runTranscript({
+      transcript: [{ role: "user", content: task }],
+      onTranscriptEvent: ({ message }) => {
+        events.push(message.content);
+      },
+    });
+    expect(first.runState.openingResearch?.status).toBe("failed");
+    expect(first.transcript[0].content).toContain(
+      "produced no persisted result",
+    );
+    expect(events[1]).toBe(first.transcript[0].content);
+    const second = await new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: first.runState,
+      }),
+      modelClient,
+      allowedToolIds: ["research"],
+    }).runTranscript({ transcript: first.transcript });
+    expect(requests.map((request) => request.runId)).toEqual([runId, runId]);
+    expect(second.runState.toolOutputs).toEqual([]);
+    expect(
+      second.transcript.filter((message) =>
+        message.content.includes("Host opening research handoff")
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("throws when an interrupted opening has no matching task in the transcript", async () => {
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: createHarnessRunState({
+          runId: "opening-mismatched-task",
+          model: "gpt-test",
+          cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
+          openingResearch: {
+            type: "cf-harness.opening-research",
+            version: 1,
+            status: "pending",
+            task: "The original task",
+            toolCallId: "interrupted-opening",
+            toolOutputIndex: 0,
+          },
+        }),
+      }),
+      modelClient: {
+        providerId: "test-provider",
+        complete: () => {
+          throw new Error("model must not run");
+        },
+      },
+      allowedToolIds: ["research"],
+    });
+    await expect(loop.runTranscript({
+      transcript: [{ role: "user", content: "An unrelated task" }],
+    })).rejects.toThrow("opening research task does not match a user message");
+  });
+
+  it("restores provenance on an existing handoff without trusting an escaped or corrupt artifact", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      for (const artifactKind of ["outside", "corrupt"] as const) {
+        const runId = `opening-${artifactKind}-artifact`;
+        const task = "Continue the task.";
+        const handoffMessage = "Host opening research handoff: retained error";
+        const outputId = createToolOutputId(runId, "research", 1);
+        const artifactStore = createFileSystemHarnessArtifactStore({
+          artifactRoot: root,
+          runId,
+        });
+        await Deno.mkdir(artifactStore.runRoot, { recursive: true });
+        const artifactPath = artifactKind === "outside"
+          ? join(root, "outside.json")
+          : join(artifactStore.runRoot, "corrupt.json");
+        await Deno.writeTextFile(
+          artifactPath,
+          artifactKind === "outside"
+            ? JSON.stringify({ researchRecord: { secret: "OUTSIDE-EVIDENCE" } })
+            : "{",
+        );
+        const runState = createHarnessRunState({
+          runId,
+          model: "gpt-test",
+          cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
+          openingResearch: {
+            type: "cf-harness.opening-research",
+            version: 1,
+            status: "failed",
+            task,
+            toolCallId: "opening-call",
+            toolOutputIndex: 0,
+            outputId,
+            handoffMessage,
+          },
+        });
+        const requests: HarnessModelTurnRequest[] = [];
+        const result = await new CfHarnessPromptLoop({
+          engine: new CfHarnessEngine({
+            sandboxRuntime: new FakeSandboxRuntime(),
+            artifactStore,
+            runState: {
+              ...runState,
+              toolOutputs: [
+                createToolResultRef(outputId, "research", runId, artifactPath),
+              ],
+            },
+          }),
+          modelClient: {
+            providerId: "test-provider",
+            complete: (request) => {
+              requests.push(request);
+              return Promise.resolve({
+                assistant: { role: "assistant", content: "Continued." },
+              });
+            },
+          },
+          allowedToolIds: ["research"],
+        }).runTranscript({
+          transcript: [
+            { role: "user", content: handoffMessage },
+            { role: "user", content: task },
+          ],
+        });
+        expect(requests.map((request) => request.runId)).toEqual([runId]);
+        expect(
+          result.transcript.filter((message) =>
+            message.content === handoffMessage
+          ),
+        ).toHaveLength(1);
+        expect(result.transcript[0]).toMatchObject({
+          role: "user",
+          content: handoffMessage,
+          toolResultProvenance: { outputId, toolCallId: "opening-call" },
+        });
+        const omissions = JSON.parse(
+          await Deno.readTextFile(
+            join(artifactStore.runRoot, "transcript-omissions.json"),
+          ),
+        ) as HarnessTranscriptOmissions;
+        expect(omissions.results).toEqual([{
+          outputId,
+          toolCallId: "opening-call",
+          toolId: "research",
+          transcriptIndex: 0,
+          rules: [],
+        }]);
+        expect(JSON.stringify(result.transcript)).not.toContain(
+          "OUTSIDE-EVIDENCE",
+        );
+      }
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("preserves the artifact failure when opening checkpoint persistence also fails", async () => {
+    const root = await Deno.makeTempDir();
+    const runId = "opening-artifact-failure";
+    const artifactStore = createFileSystemHarnessArtifactStore({
+      artifactRoot: root,
+      runId,
+    });
+    const artifactFailure = new Error("research artifact write failed");
+    const outputStub = stub(
+      artifactStore,
+      "persistToolOutput",
+      () => Promise.reject(artifactFailure),
+    );
+    const persistState = artifactStore.persistRunState.bind(artifactStore);
+    const stateStub = stub(artifactStore, "persistRunState", (state) => {
+      if (state.openingResearch?.status === "failed") {
+        return Promise.reject(new Error("checkpoint write failed"));
+      }
+      return persistState(state);
+    });
+    try {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        artifactStore,
+        runId,
+        model: "gpt-test",
+      });
+      const loop = new CfHarnessPromptLoop({
+        engine,
+        allowedToolIds: ["research"],
+        modelClient: {
+          providerId: "test-provider",
+          complete: () => Promise.reject(new Error("provider unavailable")),
+        },
+      });
+      await expect(loop.runPrompt({
+        prompt: "Research the contract.",
+        openingResearchTask: "Research the contract.",
+        promptSlotBinding: directPromptSlotBinding,
+      })).rejects.toBe(artifactFailure);
+      expect(engine.getRunState().openingResearch?.status).toBe("failed");
+      expect(engine.getRunState().toolOutputs).toEqual([]);
+    } finally {
+      stateStub.restore();
+      outputStub.restore();
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  const incompleteKit = (task: string) => ({
+    status: "incomplete" as const,
+    task,
+    summary: "The task needs more exact evidence.",
+    recommendation: {
+      kind: "focused-api" as const,
+      rationale: "Resolve the remaining contract before implementation.",
+    },
+    inputs: [],
+    patterns: [],
+    steps: [],
+    rules: [],
+    verification: [],
+    sources: [],
+    missing: ["an exact implementation contract"],
+  });
+
+  it("researches a fresh root before its first parent turn with normal accounting", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-opening-research-",
+    });
+    const runId = "run-opening-research";
+    const task = "Build a documented Common Fabric counter.";
+    const requests: HarnessModelTurnRequest[] = [];
+    try {
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: async (request) => {
+          requests.push(request);
+          await request.onAttempt?.({
+            type: "cf-harness.model-attempt",
+            providerId: "test-provider",
+            operation: "test-complete",
+            endpoint: "https://model.example/responses",
+            attempt: 1,
+            maxTransportAttempts: 1,
+            startedAt: "2026-09-14T00:00:00.000Z",
+            endedAt: "2026-09-14T00:00:00.001Z",
+            durationMs: 1,
+            responseCompleteDurationMs: 1,
+            request: {
+              model: request.model,
+              messageCount: request.transcript.length,
+              toolCount: request.tools.length,
+              nativeModelToolCount: request.nativeModelToolIds.length,
+              serializedBytes: 1,
+            },
+            outcome: "http_response",
+            httpStatus: 200,
+          });
+          if (request.runId.includes(":research:")) {
+            return {
+              assistant: {
+                role: "assistant" as const,
+                content: JSON.stringify({
+                  status: "incomplete",
+                  summary:
+                    "The task did:key:zOpeningText needs more exact evidence.",
+                  recommendation: {
+                    kind: "focused-api",
+                    rationale:
+                      "Resolve the remaining contract before implementation.",
+                  },
+                  inputs: [],
+                  selectedPatternIds: [],
+                  steps: [],
+                  rules: [],
+                  verification: [],
+                  sourceIds: [],
+                  missing: ["an exact implementation contract"],
+                }),
+              },
+              usage: { totalTokens: 11 },
+            };
+          }
+          return {
+            assistant: {
+              role: "assistant" as const,
+              content: "I will report the unresolved contract.",
+            },
+            usage: { totalTokens: 7 },
+          };
+        },
+      };
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runId,
+          model: "gpt-test",
+        }),
+        modelClient,
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: task,
+        openingResearchTask: task,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(requests.map((request) => request.runId)).toEqual([
+        createToolOutputId(runId, "research", 1),
+        runId,
+      ]);
+      const parentTranscript = requests[1].transcript;
+      const taskIndex = parentTranscript.findIndex((message) =>
+        message.role === "user" && message.content === task
+      );
+      expect(taskIndex).toBeGreaterThan(0);
+      const handoff = parentTranscript[taskIndex - 1];
+      if (handoff.role !== "user") {
+        throw new Error("expected host opening research context");
+      }
+      expect(handoff.content).toContain(
+        "Host opening research handoff",
+      );
+      expect(handoff.content).not.toContain("did:key:zOpeningText");
+      expect(result.runState.researchRuns?.[0]?.kit.summary).toContain(
+        "did:key:zOpeningText",
+      );
+      expect(handoff.content).toContain(
+        '"status":"incomplete"',
+      );
+      const openingOutputId = createToolOutputId(runId, "research", 1);
+      expect(handoff.toolResultProvenance).toEqual({
+        type: "cf-harness.tool-result-provenance",
+        toolCallId: `opening-research:${runId}`,
+        toolId: "research",
+        outputId: openingOutputId,
+      });
+      expect(JSON.stringify(handoff)).not.toContain("researchRecord");
+      expect(
+        result.transcript.some((message) => message.role === "tool"),
+      ).toBe(false);
+      expect(result.runState.openingResearch?.status).toBe("completed");
+      expect(result.runState.openingResearch?.outputId).toBe(openingOutputId);
+      expect(result.runState.researchRuns).toHaveLength(1);
+      const openingCfc = result.runState.researchRuns?.[0]?.cfc;
+      expect(openingCfc?.coverage).toBe("complete");
+      expect(openingCfc?.missingLabels).toEqual([]);
+      expect(openingCfc?.sourceLabel.integrity).toBeUndefined();
+      expect(openingCfc?.sourceLabel.confidentiality).toHaveLength(1);
+      expect(
+        (openingCfc?.sourceLabel.confidentiality?.[0] as { type?: string })
+          ?.type,
+      ).toBe(CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE);
+      expect(openingCfc?.outputLabel).toEqual(openingCfc?.sourceLabel);
+      expect(result.runState.cfcModelContext?.observations).toEqual([
+        expect.objectContaining({
+          toolCallId: `opening-research:${runId}`,
+          toolId: "research",
+          outputId: openingOutputId,
+          channels: ["output"],
+          label: openingCfc?.outputLabel,
+        }),
+      ]);
+      expect(result.usage?.totalTokens).toBe(7);
+      expect(result.totalUsage?.totalTokens).toBe(18);
+
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.outputId === openingOutputId
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted opening research output");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as { cfc?: HarnessResearchCfcProjection; researchRecord?: unknown };
+      expect(artifactOutput.researchRecord).toBeDefined();
+      expect(artifactOutput.cfc).toEqual(openingCfc);
+      expect(handoff.content).toContain(JSON.stringify(openingCfc));
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      expect(omissions.results).toContainEqual({
+        transcriptIndex: taskIndex - 1,
+        toolCallId: `opening-research:${runId}`,
+        toolId: "research",
+        outputId: openingOutputId,
+        rules: [{
+          rule: "artifact-only",
+          locations: [{
+            artifactPath: outputRef.artifactPath,
+            jsonPointer: "/researchRecord",
+          }],
+        }, {
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{
+            artifactPath: outputRef.artifactPath,
+            jsonPointer: "/kit/summary",
+          }],
+        }],
+      });
+
+      const report = JSON.parse(
+        await Deno.readTextFile(result.runState.runReportPath!),
+      ) as {
+        toolActivity: Array<{ origin?: string; toolId: string }>;
+        policyDecisions: Array<{ origin?: string; toolId: string }>;
+        timeline: Array<{ origin?: string; toolId?: string }>;
+        modelAttempts: Array<{ modelTurn: number }>;
+      };
+      expect(report.toolActivity).toEqual([
+        expect.objectContaining({
+          origin: "opening-research",
+          toolId: "research",
+        }),
+      ]);
+      expect(report.policyDecisions).toEqual([
+        expect.objectContaining({
+          origin: "opening-research",
+          toolId: "research",
+        }),
+      ]);
+      expect(report.timeline).toContainEqual(expect.objectContaining({
+        origin: "opening-research",
+        toolId: "research",
+      }));
+      expect(report.modelAttempts.map((attempt) => attempt.modelTurn)).toEqual([
+        0,
+        1,
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("does not claim private evidence for a source-free opening error", async () => {
+    class FailingDocsCorpusEngine extends CfHarnessEngine {
+      override getDocsCorpus(): ReturnType<
+        CfHarnessEngine["getDocsCorpus"]
+      > {
+        return Promise.reject(new Error("test corpus unavailable"));
+      }
+    }
+
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-opening-research-source-free-",
+    });
+    const runId = "run-opening-research-source-free";
+    const task = "Research a task while its corpus is unavailable.";
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      const requests: HarnessModelTurnRequest[] = [];
+      const loop = new CfHarnessPromptLoop({
+        engine: new FailingDocsCorpusEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runId,
+          model: "gpt-test",
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: ["/operator/docs"],
+          },
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            requests.push(request);
+            if (request.runId.includes(":research:")) {
+              throw new Error(
+                "source-free failure must precede a private call",
+              );
+            }
+            return Promise.resolve({
+              assistant: {
+                role: "assistant",
+                content: "I will report the opening research failure.",
+              },
+            });
+          },
+        },
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runPrompt({
+        prompt: task,
+        openingResearchTask: task,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(requests.map((request) => request.runId)).toEqual([runId]);
+      expect(result.runState.openingResearch?.status).toBe("failed");
+      const outputRef = result.runState.toolOutputs.find((entry) =>
+        entry.toolId === "research"
+      );
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted source-free research error");
+      }
+      const artifactOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as Record<string, unknown> & {
+        cfc?: HarnessResearchCfcProjection;
+        rawCauseMessage?: string;
+      };
+      expect(Object.hasOwn(artifactOutput, "researchRecord")).toBe(false);
+      expect(artifactOutput.rawCauseMessage).toBe("test corpus unavailable");
+      expect(artifactOutput.cfc?.coverage).toBe("complete");
+      expect(artifactOutput.cfc?.missingLabels).toEqual([]);
+      expect(artifactOutput.cfc?.outputLabel.confidentiality).toHaveLength(1);
+      expect(result.runState.cfcModelContext?.observations).toEqual([
+        expect.objectContaining({
+          toolCallId: `opening-research:${runId}`,
+          toolId: "research",
+          outputId: outputRef.outputId,
+          channels: ["output"],
+          label: artifactOutput.cfc?.outputLabel,
+        }),
+      ]);
+
+      const handoff = result.transcript.find((message) =>
+        message.role === "user" &&
+        message.content.includes("Host opening research handoff")
+      );
+      if (handoff?.role !== "user") {
+        throw new Error("expected source-free opening research handoff");
+      }
+      expect(handoff.toolResultProvenance?.outputId).toBe(outputRef.outputId);
+      expect(handoff.content).toContain(JSON.stringify(artifactOutput.cfc));
+      expect(handoff.content).toContain(
+        "research failed before returning an implementation kit",
+      );
+      expect(handoff.content).not.toContain("test corpus unavailable");
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      expect(omissions.results).toContainEqual(expect.objectContaining({
+        toolCallId: `opening-research:${runId}`,
+        toolId: "research",
+        outputId: outputRef.outputId,
+        rules: [{
+          rule: "artifact-only",
+          locations: [{
+            artifactPath: outputRef.artifactPath,
+            jsonPointer: "/rawCauseMessage",
+          }],
+        }],
+      }));
+      expect(JSON.stringify(omissions)).not.toContain("/researchRecord");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("recovers a persisted handoff on resume without repeating research", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-opening-research-resume-",
+    });
+    const runId = "run-opening-research-resume";
+    const task = "Resume the interrupted task.";
+    const outputId = createToolOutputId(runId, "research", 1);
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      const kit = {
+        ...incompleteKit(task),
+        summary: "Recover did:key:zRecoveredText",
+      };
+      const recoverySecret = cfcAtom.resource(
+        "RecoveredResearchSecret",
+        "resume",
+      );
+      const recoveryIntegrity = cfcAtom.resource(
+        "RecoveredResearchIntegrity",
+        "resume",
+      );
+      const cfc: HarnessResearchCfcProjection = {
+        version: 1,
+        sourceLabel: {
+          confidentiality: [recoverySecret],
+          integrity: [recoveryIntegrity],
+        },
+        outputLabel: { confidentiality: [recoverySecret] },
+        coverage: "incomplete",
+        missingLabels: [{
+          source: "pattern-index-source",
+          detail: "pattern recovered source returned by inspect_pattern",
+        }],
+      };
+      const artifactPath = await artifactStore.persistToolOutput(
+        "research",
+        outputId,
+        {
+          outputId,
+          status: "ok",
+          kit,
+          guidance: "Keep the incomplete status.",
+          cfc,
+          researchRecord: { private: "RECOVERY-PRIVATE-SENTINEL" },
+        },
+      );
+      const researchRun: HarnessResearchRunSummary = {
+        type: "cf-harness.research-run",
+        researchRunId: outputId,
+        outputId,
+        kit,
+        confirmedPatterns: [],
+        describedHandles: [],
+        cfc,
+        completedAt: "2026-09-14T00:00:01.000Z",
+      };
+      const runState: HarnessRunState = {
+        ...createHarnessRunState({
+          runId,
+          status: "failed",
+          endedAt: "2026-09-14T00:00:02.000Z",
+          terminalReason: "process_interrupted",
+          cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
+          model: "gpt-test",
+          researchRuns: [researchRun],
+          openingResearch: {
+            type: "cf-harness.opening-research",
+            version: 1,
+            status: "pending",
+            task,
+            toolCallId: `opening-research:${runId}`,
+            toolOutputIndex: 0,
+          },
+        }),
+        toolOutputs: [
+          createToolResultRef(outputId, "research", runId, artifactPath),
+        ],
+      };
+      const requests: HarnessModelTurnRequest[] = [];
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runState,
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            requests.push(request);
+            return Promise.resolve({
+              assistant: { role: "assistant", content: "Resume complete." },
+            });
+          },
+        },
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runTranscript({
+        transcript: [{ role: "user", content: task }],
+      });
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0].runId).toBe(runId);
+      expect(result.runState.toolOutputs).toHaveLength(1);
+      expect(result.runState.researchRuns).toHaveLength(1);
+      expect(result.runState.openingResearch?.status).toBe("completed");
+      const recoveredHandoffs = result.transcript.filter((message) =>
+        message.role === "user" &&
+        message.content.includes("Host opening research handoff")
+      );
+      expect(recoveredHandoffs).toHaveLength(1);
+      const recoveredHandoff = recoveredHandoffs[0];
+      if (recoveredHandoff.role !== "user") {
+        throw new Error("expected recovered opening research context");
+      }
+      expect(recoveredHandoff.toolResultProvenance?.outputId).toBe(outputId);
+      expect(recoveredHandoff.content).toContain(JSON.stringify(cfc));
+      expect(recoveredHandoff.content).not.toContain("did:key:zRecoveredText");
+      expect(result.runState.researchRuns?.[0]?.kit).toEqual(kit);
+      expect(recoveredHandoff.content).not.toContain(
+        "RECOVERY-PRIVATE-SENTINEL",
+      );
+      expect(result.runState.cfcModelContext?.label).toEqual(cfc.outputLabel);
+      expect(result.runState.cfcModelContext?.observations).toEqual([
+        expect.objectContaining({
+          toolCallId: `opening-research:${runId}`,
+          toolId: "research",
+          outputId,
+          channels: ["output"],
+          label: cfc.outputLabel,
+        }),
+      ]);
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      expect(omissions.results).toContainEqual(expect.objectContaining({
+        toolCallId: `opening-research:${runId}`,
+        toolId: "research",
+        outputId,
+        rules: [{
+          rule: "artifact-only",
+          locations: [{
+            artifactPath,
+            jsonPointer: "/researchRecord",
+          }],
+        }, {
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{ artifactPath, jsonPointer: "/kit/summary" }],
+        }],
+      }));
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("recovers an error omission only from its persisted private record", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-opening-research-error-resume-",
+    });
+    const runId = "run-opening-research-error-resume";
+    const task = "Resume after interrupted research failed.";
+    const outputId = createToolOutputId(runId, "research", 1);
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      const errorSecret = cfcAtom.resource(
+        "RecoveredResearchErrorSecret",
+        "resume-error",
+      );
+      const cfc: HarnessResearchCfcProjection = {
+        version: 1,
+        sourceLabel: { confidentiality: [errorSecret] },
+        outputLabel: { confidentiality: [errorSecret] },
+        coverage: "complete",
+        missingLabels: [],
+      };
+      const artifactPath = await artifactStore.persistToolOutput(
+        "research",
+        outputId,
+        {
+          outputId,
+          status: "error",
+          message: "research failed after collecting partial evidence",
+          cfc,
+          rawCauseMessage: "RECOVERED-PRIVATE-CAUSE-SENTINEL",
+          researchRecord: { private: "PARTIAL-ERROR-PRIVATE-SENTINEL" },
+        },
+      );
+      const runState: HarnessRunState = {
+        ...createHarnessRunState({
+          runId,
+          status: "failed",
+          endedAt: "2026-09-14T00:00:02.000Z",
+          terminalReason: "process_interrupted",
+          cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
+          model: "gpt-test",
+          openingResearch: {
+            type: "cf-harness.opening-research",
+            version: 1,
+            status: "pending",
+            task,
+            toolCallId: `opening-research:${runId}`,
+            toolOutputIndex: 0,
+          },
+        }),
+        toolOutputs: [
+          createToolResultRef(outputId, "research", runId, artifactPath),
+        ],
+      };
+      const requests: HarnessModelTurnRequest[] = [];
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          artifactStore,
+          runState,
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            requests.push(request);
+            return Promise.resolve({
+              assistant: { role: "assistant", content: "Resume complete." },
+            });
+          },
+        },
+        allowedToolIds: ["research"],
+      });
+
+      const result = await loop.runTranscript({
+        transcript: [{ role: "user", content: task }],
+      });
+
+      expect(requests).toHaveLength(1);
+      expect(result.runState.openingResearch?.status).toBe("failed");
+      expect(JSON.stringify(requests[0].transcript)).not.toContain(
+        "PARTIAL-ERROR-PRIVATE-SENTINEL",
+      );
+      expect(JSON.stringify(requests[0].transcript)).not.toContain(
+        "RECOVERED-PRIVATE-CAUSE-SENTINEL",
+      );
+      const recoveredHandoffs = result.transcript.filter((message) =>
+        message.role === "user" &&
+        message.content.includes("Host opening research handoff")
+      );
+      expect(recoveredHandoffs).toHaveLength(1);
+      const recoveredHandoff = recoveredHandoffs[0];
+      if (recoveredHandoff.role !== "user") {
+        throw new Error("expected recovered opening research error context");
+      }
+      expect(recoveredHandoff.toolResultProvenance?.outputId).toBe(outputId);
+      expect(recoveredHandoff.content).toContain(JSON.stringify(cfc));
+      expect(recoveredHandoff.content).not.toContain(
+        "RECOVERED-PRIVATE-CAUSE-SENTINEL",
+      );
+      expect(result.runState.cfcModelContext?.label).toEqual(cfc.outputLabel);
+      expect(result.runState.cfcModelContext?.observations).toEqual([
+        expect.objectContaining({
+          toolCallId: `opening-research:${runId}`,
+          toolId: "research",
+          outputId,
+          channels: ["output"],
+          label: cfc.outputLabel,
+        }),
+      ]);
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        ),
+      ) as HarnessTranscriptOmissions;
+      expect(omissions.results).toContainEqual(expect.objectContaining({
+        toolCallId: `opening-research:${runId}`,
+        toolId: "research",
+        outputId,
+        rules: [{
+          rule: "artifact-only",
+          locations: [{
+            artifactPath,
+            jsonPointer: "/researchRecord",
+          }, {
+            artifactPath,
+            jsonPointer: "/rawCauseMessage",
+          }],
+        }],
+      }));
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("does not research a resumed legacy root that has no opening marker", async () => {
+    const runId = "run-opening-research-legacy-resume";
+    const task = "Resume a legacy task without opening research state.";
+    const runState = createHarnessRunState({
+      runId,
+      status: "failed",
+      endedAt: "2026-09-14T00:00:02.000Z",
+      terminalReason: "process_interrupted",
+      cfcEnforcementMode: "disabled",
+      currentDir: "/workspace",
+      model: "gpt-test",
+    });
+    const requests: HarnessModelTurnRequest[] = [];
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+      }),
+      modelClient: {
+        providerId: "test-provider",
+        complete: (request) => {
+          requests.push(request);
+          return Promise.resolve({
+            assistant: {
+              role: "assistant",
+              content: "Legacy resume complete.",
+            },
+          });
+        },
+      },
+      allowedToolIds: ["research"],
+    });
+
+    const result = await loop.runTranscript({
+      transcript: [{ role: "user", content: task }],
+      openingResearchTask: task,
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].runId).toBe(runId);
+    expect(result.runState.openingResearch).toBeUndefined();
+    expect(result.runState.researchRuns).toBeUndefined();
+    expect(
+      result.transcript.some((message) =>
+        message.role === "user" &&
+        message.content.includes("Host opening research handoff")
+      ),
+    ).toBe(false);
+  });
+
+  it("does not start opening research for a child run", async () => {
+    const runId = "root.subagent.1";
+    const task = "Implement the delegated task.";
+    const requests: HarnessModelTurnRequest[] = [];
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-test",
+        lineage: {
+          role: "subagent",
+          rootRunId: "root",
+          parentRunId: "root",
+          parentToolCallId: "delegate-child",
+          depth: 1,
+        },
+      }),
+      modelClient: {
+        providerId: "test-provider",
+        complete: (request) => {
+          requests.push(request);
+          return Promise.resolve({
+            assistant: { role: "assistant", content: "Child complete." },
+          });
+        },
+      },
+      allowedToolIds: ["research"],
+    });
+
+    const result = await loop.runPrompt({
+      prompt: task,
+      openingResearchTask: task,
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].runId).toBe(runId);
+    expect(result.runState.openingResearch).toBeUndefined();
+    expect(result.runState.researchRuns).toBeUndefined();
+    expect(
+      result.transcript.some((message) =>
+        message.role === "user" &&
+        message.content.includes("Host opening research handoff")
+      ),
+    ).toBe(false);
   });
 });
 
@@ -2124,7 +3734,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "run_pattern",
       "assign_slug",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
 });
@@ -2295,7 +3905,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "describe_handle",
       "search_patterns",
       "record_feedback",
-      "query_docs",
+      "research",
     ],
   );
 });
@@ -2451,7 +4061,7 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
     "read_skill_resource",
     "describe_handle",
     "run_pattern",
-    "query_docs",
+    "research",
   ]);
 });
 
@@ -2750,7 +4360,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "write_file",
       "delegate_task",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
   assertEquals(
@@ -3634,7 +5244,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       "write_file",
       "delegate_task",
       "describe_handle",
-      "query_docs",
+      "research",
     ],
   );
   assertEquals(denied.detail, "browser is not allowed in this run");

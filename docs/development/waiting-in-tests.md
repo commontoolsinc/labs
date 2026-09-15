@@ -79,17 +79,20 @@ Waits split into two groups with different primitives.
 
 **Browser integration tests** have a page to attach an in-page waiter to:
 
-- `waitForCondition(page, predicate, { args })` installs a single waiter inside
-  the page. A shared MutationObserver hub watches the document and every shadow
-  root — including shadow roots created after the wait began — and re-evaluates
-  the predicate the instant the DOM reflects new state, then signals the test
-  process over a protocol binding. It takes no caller-supplied timeout: a
+- `waitForCondition(page, predicate, { args, events })` installs a single waiter
+  inside the page. A shared MutationObserver hub watches the document and every
+  shadow root — including shadow roots created after the wait began — and
+  re-evaluates the predicate the instant the DOM reflects new state, then signals
+  the test process over a protocol binding. It takes no caller-supplied timeout: a
   built-in five-minute stuck-condition safety net bounds a condition that never
   holds, and a coarse 500-millisecond in-page backstop covers conditions that
-  flip with no DOM mutation (for example a runtime global being set). The
-  predicate is serialized and runs in the page, so it closes over nothing from
-  the test module — inline any collection it needs, and pass values in through
-  `args`. A predicate that returns a truthy value instead of `true` hands that
+  flip with no DOM mutation (for example a runtime global being set). A nonempty
+  `events` list additionally observes those window events and disables the
+  polling backstop. The waiter checks once immediately, so an event that fired
+  before the wait is also covered. `waitForShellReady(page)` uses `cf-shell-ready`, which the shell dispatches
+  after publishing `globalThis.app` at the end of bootstrap. The predicate is
+  serialized and runs in the page, so it closes over nothing from the test module
+  — inline any collection it needs, and pass values in through `args`. A predicate that returns a truthy value instead of `true` hands that
   value back to the caller in the same binding notification, so it must be a
   `PageConditionValue`: a plain JSON value. Maps, functions, class instances,
   cycles, and other lossy JSON inputs are rejected at the boundary instead of
@@ -422,11 +425,13 @@ current server state. The assertion is therefore read once, at quiescence, with
 no convergence loop around it: a false value is a failure.
 
 Reach for this rather than a settle-and-retry loop whenever the write is
-something the test can name — name the arrival, wait on it, then read. What the
-awaiting side gets in place of the Deno fail-fast above is the orchestrator's
-worker RPC deadline, which is the ambient limit the previous paragraph
-describes: a marker that never arrives is reported against the participant,
-marker, and announcer rather than fast.
+something the test can name — name the arrival, wait on it, then read. Worker
+requests wait for a response without a wall-clock limit. A worker error rejects
+its pending and future requests. If every unfinished participant is waiting for
+an unannounced marker, the orchestrator reports a deadlock. An announced marker
+that never arrives leaves the request pending: the shared server keeps the
+event loop open, so the CI step or job limit, or local cancellation, ends that
+run.
 
 ### Browser-hosted unit tests have a harness backstop
 
@@ -796,6 +801,28 @@ must observe it by the time the barrier lands. `barrierControls` in the CSP suit
 is that check. Moving its barrier earlier leaves every negative case green while
 the controls that can speak to ordering go red, which is the point of having
 them.
+
+A barrier is not the only way out of an interval, and it is not the first
+thing to look for. Where the thing being ruled out is a component failing to
+settle, the settling itself is a positive event, and observing it asserts
+more than any interval could. `packages/runner/test/executor-fan-out.test.ts`'s
+OW29 storm pin is the worked example: the storm it rules out is a serving
+loop whose cycles keep finding work, which never suspends on its input wait,
+so the test waits for that suspension (`SpaceServer.suspendedOnInput`) and
+reads its wave bound there. The memory server's fan-out and the serving
+runtime settle INSIDE that predicate, between two readings of the
+suspension, so a frame still held or a run still owed un-suspends the loop
+before the second rather than landing after the wait returns — the fan-out
+on both sides of the runtime settle, since that settle can itself run work
+that commits. Hold
+`#hasWork()` true and that wait fails by name while the three-second interval
+it replaced passes — the storm's cadence is the flush deadline, which on that
+host is longer than any interval a test can afford. The control is the same
+reading taken while the edits are being covered, which must go false; a
+reading pinned true would satisfy the wait on its first poll. What stays
+out of reach there is a wake from work neither settle covers, and the
+comment says which shape that leaves rather than implying the assertion
+covers everything.
 
 Which controls those are is worth working out rather than assuming, because a
 control can be written so that it cannot fail: only an event that can arrive

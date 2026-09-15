@@ -90,10 +90,12 @@ jobs:
           deno bench --json -A --v8-flags=--expose-gc \
             packages/runner/test/*.bench.ts \
             packages/utils/src/cache.bench.ts \
+            packages/utils/test/string-tuple-key.bench.ts \
             packages/utils/test/deep-equal.bench.ts \
             packages/fuse/entity-projection.bench.ts \
             packages/memory/test/v2-entity-id-list.bench.ts \
             packages/memory/test/v2-cached-patch-replay.bench.ts \
+            packages/memory/test/v2-path.bench.ts \
             packages/data-model/bench/hashing.bench.ts \
             packages/data-model/bench/codec-json.bench.ts \
             packages/dashboard/machine-calibration.bench.ts \

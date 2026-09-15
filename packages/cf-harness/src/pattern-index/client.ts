@@ -6,8 +6,9 @@
  * sees the run's own identity rather than a shared secret.
  *
  * Everything here runs on the trusted host side. A pattern's source reaches
- * this module and the `run_pattern` compile path and stops there: it is never
- * placed in model-facing output.
+ * this module, the `run_pattern` compile path, and the private research loop.
+ * Research retains exact reads in its artifact and exposes only its admitted
+ * implementation kit to the calling model.
  */
 
 import type { JSONSchema } from "@commonfabric/api";

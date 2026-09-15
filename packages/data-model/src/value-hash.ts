@@ -20,7 +20,7 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "./value-tags.ts";
+import { tagOfNativeValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -253,14 +253,14 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 /**
  * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via
- * `tagFromNativeValueElseNull()` / `VALUE_TAGS` for recognized types. The
+ * `tagOfNativeValueElseNull()` / `VALUE_TAGS` for recognized types. The
  * `null` case is handled by the caller (`feedValue()`).
  */
 function feedObjectValue(
   hasher: IncrementalHasher,
   value: object,
 ): void {
-  const nativeTag = tagFromNativeValueElseNull(value);
+  const nativeTag = tagOfNativeValueElseNull(value);
 
   switch (nativeTag) {
     case VALUE_TAGS.FabricEpochNsec: {

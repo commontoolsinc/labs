@@ -214,9 +214,14 @@ settling happens before the timings start.
 `packages/patterns/integration/topic-board-navigation.bench.ts` measures what a
 person waits for rather than what a component costs: a browser loading a topic
 board carrying dozens of topics, signing in, the cards appearing, opening a
-topic, and following a crossref to a sibling. Its `topic board (index demand)` group charts
+topic, and following a crossref to a sibling. Its `topic board` group charts
 each of those as its own series plus a `journey` series for the whole sequence,
 so a regression lands on the segment that caused it.
+
+The `load` segment ends after the shell publishes its ready application and
+selects the requested board route. Shell readiness is an explicit notification
+from bootstrap; selecting the route does not require its topic data to have
+rendered. This keeps the segment boundary independent of DOM mutation timing.
 
 Each segment reaches its starting point with the timer stopped — `Deno.bench`'s
 `b.start()` and `b.end()` bracket only the segment itself — so every iteration
@@ -258,9 +263,8 @@ The seeder holds a subscription to the board's index using its durable result
 schema. This keeps the current list demanded without subscribing to each
 topic's full result. Set `CF_TOPIC_BOARD_DEMAND=full` in either board benchmark,
 or pass `--demand=full` to the seeder, to run the full-result stress workload.
-The fixture records `seedDemand`, diagnostics name it, and benchmark groups
-include `index demand` or `full demand`; compare execution arms with the same
-setting. An unqualified `topic board` series is a separate workload series.
+The fixture records `seedDemand`, and diagnostics name it. Both seeding modes
+use the same benchmark groups; compare execution arms with the same setting.
 These subscriptions do not bound every seeding read: controller writes also
 pull their result to complete, and citation creation addresses the topics.
 
@@ -271,10 +275,10 @@ change that is flat at thirty topics and quadratic at three hundred looks the
 same on the navigation benchmark's `board` series.
 `packages/patterns/integration/topic-board-scale.bench.ts` measures that same
 thing — a signed-in cold load, timed until every card has rendered — across
-board sizes of 100, 1000, and 10000, in a `topic board scale (index demand)` group whose
+board sizes of 100, 1000, and 10000, in a `topic board scale` group whose
 series are named for the sizes. The boards carry no crossrefs, so the numbers
 describe the cost of the list rather than of the join over it.
-`CF_TOPIC_BOARD_DEMAND=full` selects the separately labeled full-demand group.
+`CF_TOPIC_BOARD_DEMAND=full` selects full-result seeding.
 The navigation fixture's citations and the scale fixture's lack of citations
 are distinct workloads, so their timings do not form a size-only comparison.
 
@@ -501,6 +505,9 @@ deno bench --no-lock -A --json packages/runner/test/cfc-consumed-source-dedup.be
 
 The [local measurement report](../history/development/performance/2026-09-14-cfc-consumed-source-dedup.md)
 records an alternating source-count sweep and the limits of that measurement.
+The [metadata-width measurement](../history/development/performance/2026-09-14-cfc-consumed-label-index.md)
+uses the same fixture to compare per-document validation and indexed path
+lookup. Index construction remains inside the collector timer.
 
 ## Scoped snapshot memo reuse
 
@@ -548,3 +555,233 @@ are part of their respective measurements.
 
 The [phase measurement report](../history/development/performance/2026-09-11-index-maintenance-phases.md)
 records the validated local count matrix and its limits.
+
+## Topics computation cost probe
+
+Run `deno run -A --frozen scripts/topics-computation-cost.ts` from the
+repository root to measure the Topics board's mention pivot, each topic's
+backlink lookup, and a topic's comment and link aggregates over the headless
+fixture in `packages/patterns/integration/topics-headless-fixture.ts`. The
+fixture writes synthetic topics straight to emulated storage and runs the
+unmodified Topics lifts — `crossrefTable`, `backlinksOf`,
+`presentCommentCountOf`, and `lastActivityOf` — with no browser and no server.
+Each case runs in a process of its own, started with `--frozen` as well, so no
+process in a run writes `deno.lock`.
+
+The options select what runs:
+
+- `--small` runs only the small cases, which make the smoke run.
+- `--filter=<regexp>` runs the cases whose ID the expression matches.
+- `--repeat=<n>` runs every selected case `n` times, in rounds, so that repeated
+  samples of one case alternate with the others rather than running back to
+  back.
+- `--max-old-space-size=<megabytes>` sets the heap each case's process runs
+  under.
+
+### The heap the 512-topic cases need
+
+V8's default heap can be too small for the `all-backlinks` cases at 512 topics,
+so pass `--max-old-space-size=8192` to any run that includes them. The probe
+starts each case's process with a larger heap only when that option is given. A
+case whose process exhausts its heap is recorded as a `limit` line rather than a
+sample:
+
+```sh
+deno run -A --frozen scripts/topics-computation-cost.ts --max-old-space-size=8192
+```
+
+### The matrix
+
+The pivot cases hold 32, 128, and 512 topics under the `low-degree`,
+`high-degree`, and `single-bucket` mention graphs, at four mentions per source.
+At 128 topics a sweep varies mentions per source over 0, 1, 4, and 16, where 0
+is the `none` graph. The small pivot cases hold 4 topics, with as many mentions
+per source, up to four, as each graph allows. The fixture's documentation of
+`MentionGraph` says how each graph spreads its mentions.
+
+The thread cases hold four topics, each with 10, 100, or 1,000 comments and
+three links, then with 10, 100, or 1,000 links and three comments. The small
+thread case gives each topic one comment and one link.
+
+The pivot cases are recorded under three demand workloads. The first topic is
+the focus topic: the one `topic-open` opens. The mention phases change which
+topics mention it, and the comment and link phases edit it; the unrelated
+sibling edit changes a different topic, the last one.
+
+- `board`: a board loaded before any topic is opened, which demands none of the
+  four lifts. The probe does not measure it: each `board` case writes a sample
+  recording `measured: false` and the reason, and starts no process.
+- `topic-open`: the board with the focus topic open, which demands the pivot,
+  the focus topic's backlinks, and its present comment count, but not its last
+  activity.
+- `all-backlinks`: the pivot and every topic's backlinks. This is a scaling
+  probe, not what a board in use demands.
+
+The `board` and `topic-open` definitions come from one browser measurement of a
+small Topics board, with client execution, lazy materialization on, and card
+values already stored. Loading the board, before any topic was opened, ran none
+of the four lifts, since the cards read their stored values. Opening a topic ran
+the pivot and that topic's backlinks and comment count, but not its last
+activity. Returning to the board afterward ran that topic's last activity once;
+a board returned to after opening a topic is not one of the probe's workloads.
+That is one small sample. Server execution, and lazy materialization off, were
+not measured.
+
+The thread cases are measured under one workload, `aggregates`, which demands
+every topic's present comment count and last activity and nothing else. Those
+are the two lifts that read a topic's comments and links, which the thread cases
+scale, and no pivot workload demands a topic's last activity. The browser ran
+them one topic at a time, the comment count on opening a topic and its last
+activity on returning to the board; `aggregates` runs every topic's, so it is
+not what a board in use demands either.
+
+A case's ID names all of that, as
+`pivot/<graph>/mentions-<count>/topics-<count>/<workload>` or
+`thread/comments-<count>/links-<count>/aggregates`.
+
+### The phases
+
+Initialization runs from the transaction that starts the demanded lifts through
+settlement. Compiling the Topics sources and writing the fixture come before it
+and are not measured. The warm updates then run in turn on the same fixture,
+each measured from the start of its edit through settlement:
+
+- mention removal, in which the first topic that mentions the focus topic drops
+  every entry naming it;
+- mention insertion, in which that topic appends one entry naming the focus
+  topic again;
+- a same-count retarget, in which that topic points its one entry naming the
+  focus topic at a topic it does not yet mention, leaving the focus topic's
+  mentioners and joining that topic's. Where it already mentions every other
+  topic, the entry points at one it mentions, and the phase's `edit` record says
+  the target gained no mentioner;
+- comment append, edit, and retraction on the focus topic;
+- link removal, which stamps the focus topic's first present link as removed;
+- an unrelated sibling edit, which writes the last topic's `title` and nothing
+  else. None of the measured lifts reads a title. A rename through a topic also
+  stamps `titleUpdatedAt`, which `lastActivityOf` reads, so this phase is not a
+  rename.
+
+Where nothing mentions the focus topic, as in the `none` graph, mention removal
+is not measured and insertion starts from the second topic. The warm updates
+write storage directly, so what a live edit costs beyond those writes is not in
+the counts: dispatching its handler, running `mentionsOf`, which derives the
+mention list the pivot reads, and the reads of the edit's own transaction.
+
+The last phase, `reopen`, disposes the runtime without closing its storage,
+opens a fresh runtime over the same storage manager, and starts the demanded
+lifts again over the fixture and the outputs the case has stored. It is measured
+from the transaction that starts the lifts through settlement, as initialization
+is; disposing the old runtime and compiling the sources for the new one come
+before it. Both runtimes share one storage manager, so the phase reopens storage
+the process holds open; it does not measure a new client connecting to that
+storage. Initialization's `other` bucket counts runs that reopen does not
+repeat, so comparing the two phases' totals takes in that difference as well as
+the lifts' own work. After reopen the probe also checks that every lift the
+workload demands completed at least one action.
+
+A phase the fixture cannot give records `measured: false` and a `reason` saying
+why; every other phase record carries `measured: true`. After every phase the
+probe checks that the measurement holds exactly the outputs its workload demands
+and checks each of them, the pivot when demanded included, against values
+computed from the fixture data. It fails the run on a mismatch or on an error
+the runtime reports.
+
+### The output
+
+Standard output carries JSON lines. Standard error carries progress and
+everything a case's process prints.
+
+- The first line has the `kind` `environment`: the git revision and whether the
+  tree is dirty, the Deno, V8, and TypeScript versions, the platform, the
+  processor count, the experimental options the fixture pins, the arguments, the
+  V8 flags each case's process starts with, the `repeat` count, and the selected
+  case IDs.
+- A `sample` line is one case in one `round`: the case, its `family` (`pivot` or
+  `thread`), its series, the `size` its series scales, its `workload`, the
+  fixture's options with its mention count, the `focusTopic` and its
+  `focusMentioners` count, and `demandedActions`, how many actions of each lift
+  the workload starts. A measured sample adds `measured: true`, the heap limit
+  its process ran under, and a record per phase; a `board` sample adds
+  `measured: false` and the `reason` instead.
+- A `limit` line records a case whose process exhausted its heap, which the
+  probe recognizes by V8's out-of-memory message on the process's stderr. It
+  names the case, its series (the ID with the scaled count written as `*`), the
+  `size` that failed, `largestBuilt` (the largest smaller size of the series
+  with a sample, or `null`), the heap limit the process ran under, how long it
+  ran, the signal or exit code that ended it, and the out-of-memory message. No
+  size of the series from `size` up runs again, and `skipped` lists the larger
+  ones; an earlier round may already have sampled them.
+- The last line has the `kind` `complete`, with the number of `samples` the run
+  wrote and the `limitedSeries` that recorded a limit. A case that fails in any
+  other way ends the run with an error and no `complete` line.
+
+A measured phase records:
+
+- `edit`, for a warm update, the topic and entry indices its edit touched, with
+  `removedEntries` for a mention removal and `targetGainsSource` for a retarget;
+- `elapsedMs`, from the start of the phase through settlement;
+- `bodies`, the completed-body reads that
+  [read accounting](../features/read-accounting.md) defines, attributed to a
+  lift by the authored source each run reports and grouped by role: `producer`
+  holds the pivot, `consumer` the backlink lookup, `aggregate` the comment count
+  and last activity, and `other` every remaining run, sinks and builtins
+  included. `total` sums them all. Each entry counts runs, actions, proxy
+  accesses, link resolutions, and per-run sums of distinct documents and
+  registered dependencies, with the most proxy accesses of any one run;
+- `attempts`, the transaction-attempt reads through settlement, of every kind,
+  grouped by the same roles. An attempt counts toward a lift when its action
+  completed a run of that lift in the same phase, and toward `other` when its
+  action completed some other run there or when it names no action, as the
+  initialization attempt does. An attempt whose action completed no run in the
+  phase, such as one aborted because a read was unavailable, is under
+  `unattributed`. `total` sums them all;
+- `graph`, the scheduler's node and edge counts once settled;
+- `memory`, the heap used, heap total, resident set size, and external memory,
+  with `collected` saying whether a full collection ran before they were read.
+
+The complete settled operation is the unit a comparison decides on:
+`bodies.total` and `attempts.total` cover all of it, and the role groups show
+where the work sits. Elapsed times are local wall-clock samples, for comparison
+across `--repeat` rounds; nothing gates on them.
+
+## JSON Pointer encoding
+
+`packages/memory/test/v2-path.bench.ts` measures encoding 256 distinct paths and
+looking each result up in a prebuilt Map. The lookup consumes the encoded
+string, including hashing or flattening deferred by string construction. Fixture
+construction and checksum validation are outside the timed interval.
+
+The plain-path cases sweep depths 1, 4, and 12. Separate depth-4 cases use long
+segments or both JSON Pointer escape characters in every segment. These
+synthetic controls distinguish segment traversal from character scanning and
+escaping; their proportions do not estimate a deployed workload. Run with:
+
+```sh
+deno bench --no-lock --json packages/memory/test/v2-path.bench.ts
+```
+
+The
+[local encoding measurement](../history/development/performance/2026-09-14-encode-pointer.md)
+records interleaved comparisons and their limits.
+
+## String tuple keys
+
+`packages/utils/test/string-tuple-key.bench.ts` measures encoding 256 distinct
+string tuples and looking up their values in a prebuilt Map. The cases cover
+two-field document identities, three-field cache slots, five-field consumed
+sources, and fields containing escape characters or Unicode. Construction and
+checksum checks stay outside the timed interval; the lookup includes string
+hashing and flattening.
+
+`stringTupleKey` is available through `@commonfabric/utils/string-tuple-key`.
+It preserves string and tuple boundaries, including empty strings and embedded
+NULs. Its opaque output is for internal Map and Set identities whose components
+are all strings. A caller with a fixed string prefix and one trailing path can
+spread that path into the tuple. Multiple variable-length arrays need explicit
+boundaries; structured or nullable identities need their own encoding contract.
+Existing persisted and wire key formats keep their protocol-defined encoding.
+
+The collector and scheduler effects are tracked by
+`packages/runner/test/cfc-consumed-source-dedup.bench.ts` and
+`packages/runner/test/scheduler-invalid-causes.bench.ts` respectively.

@@ -449,8 +449,6 @@ async function runPatternTests(
             [
               ...cfCmd,
               "test",
-              "--timeout",
-              "180000",
               "--root",
               path.join(rootDir, patternRoot(testFile)),
               testFile,

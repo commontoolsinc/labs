@@ -20,7 +20,9 @@ import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 
 import { type CellScope, type JSONSchema } from "./builder/types.ts";
 import {
@@ -77,7 +79,6 @@ import {
   allowMutableTransactionRead,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
-import { forEachSubschema } from "./schema-walk.ts";
 import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
@@ -2179,10 +2180,10 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
 export function compactChangeSet(changes: ChangeSet): ChangeSet {
   if (changes.length <= 1) return changes;
 
-  // Group by document using safe separator (JSON.stringify avoids key collisions)
+  // Group by document without conflating boundaries between address fields.
   const byDocument = new Map<string, ChangeSet>();
   for (const change of changes) {
-    const key = JSON.stringify([
+    const key = stringTupleKey([
       change.location.space,
       change.location.id,
     ]);

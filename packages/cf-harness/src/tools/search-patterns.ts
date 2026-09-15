@@ -11,13 +11,14 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
+import { TRUSTED_PATTERN_PROPERTIES } from "../contracts/trusted-pattern-schema.ts";
 import { schemaToTypeString } from "@commonfabric/runner";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
 import type {
   PatternIndexClient,
   PatternIndexPatternKind,
   PatternIndexQuality,
-  PatternIndexSignals,
 } from "../pattern-index/client.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
@@ -36,12 +37,7 @@ export const SEARCH_PATTERNS_MAX_RESULTS = 10;
  */
 export const SEARCH_PATTERNS_MAX_DETAILED_RESULTS = 5;
 
-export interface SearchPatternsToolResult {
-  patternId: string;
-  description: string;
-  hashtags: readonly string[];
-  signals?: PatternIndexSignals;
-
+export interface SearchPatternsToolResult extends TrustedPatternRecord {
   /** Whether its published argument schema classifies it as a part or app. */
   kind: PatternIndexPatternKind;
 
@@ -62,41 +58,9 @@ export interface SearchPatternsToolResult {
    * can be copied into pattern source as it stands.
    */
   importHint: string;
-
-  /** The pattern's argument shape, as a TypeScript type. */
-  argumentType?: string;
-
-  /** The pattern's result shape, as a TypeScript type. */
-  resultType?: string;
 }
 
-/**
- * What a run knows about a published pattern it may name by id. A
- * `search_patterns` hit is one of these, so every field a hit reports is
- * here; a pattern reference the task attached is another, resolved from the
- * index by id, and a by-id read answers no ranking evidence — no match
- * counts, and no tier — because that is what search computes over a query.
- * Whichever it came from, this is metadata and never source.
- */
-export interface TrustedPatternRecord {
-  patternId: string;
-  description: string;
-  hashtags: readonly string[];
-  signals?: PatternIndexSignals;
-  kind?: PatternIndexPatternKind;
-  quality?: PatternIndexQuality;
-  matchedTerms?: number;
-  queryTerms?: number;
-  importHint: string;
-  argumentType?: string;
-  resultType?: string;
-
-  /** The identity that published it, where the index reported it. */
-  ownerDid?: string;
-
-  /** When the index recorded it, where the index reported it. */
-  createdAt?: string;
-}
+export type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
 
 export interface SearchPatternsToolSuccessOutput {
   outputId: string;
@@ -190,37 +154,7 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
           type: "array",
           items: {
             type: "object",
-            properties: {
-              patternId: { type: "string" },
-              description: { type: "string" },
-              hashtags: { type: "array", items: { type: "string" } },
-              signals: {
-                type: "object",
-                properties: {
-                  uses: { type: "number" },
-                  score: { type: "number" },
-                },
-                required: ["uses", "score"],
-                additionalProperties: false,
-              },
-              kind: {
-                type: "string",
-                enum: ["part", "app"],
-                description:
-                  "Whether the published argument schema classifies the pattern as a reusable part or whole app.",
-              },
-              quality: {
-                type: "string",
-                enum: ["penalized", "unproven", "proven"],
-                description:
-                  "Evidence tier from recorded outcomes: penalized is net-negative, unproven has no recorded success, and proven has at least one recorded success or positive rating without a net-negative score.",
-              },
-              matchedTerms: { type: "number" },
-              queryTerms: { type: "number" },
-              importHint: { type: "string" },
-              argumentType: { type: "string" },
-              resultType: { type: "string" },
-            },
+            properties: TRUSTED_PATTERN_PROPERTIES,
             required: [
               "patternId",
               "description",

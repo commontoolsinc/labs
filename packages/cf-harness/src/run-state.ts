@@ -18,6 +18,7 @@ import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import type { HarnessInputCell } from "./contracts/input-cells.ts";
 import type { HarnessPatternRef } from "./contracts/pattern-refs.ts";
+import type { HarnessResearchRunSummary } from "./contracts/research.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
@@ -29,6 +30,7 @@ import type {
 } from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type {
+  HarnessAcquiredSkills,
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceReads,
@@ -56,6 +58,18 @@ export type HarnessRunStatus =
   | "running"
   | "completed"
   | "failed";
+
+/** Durable driver checkpoint for research before a root task's first turn. */
+export interface HarnessOpeningResearch {
+  type: "cf-harness.opening-research";
+  version: 1;
+  status: "pending" | "completed" | "failed";
+  task: string;
+  toolCallId: string;
+  toolOutputIndex: number;
+  outputId?: string;
+  handoffMessage?: string;
+}
 
 /**
  * How a run ended. `assistant_completed` is the one success: the model
@@ -175,6 +189,15 @@ export interface HarnessRunState {
   skillResourceReadsPath?: string;
   skillScriptExecutions?: HarnessSkillScriptExecutions;
   skillScriptExecutionsPath?: string;
+
+  /**
+   * The skills this run acquired scripts for, by pin, with where each script's
+   * bytes sit and the digest taken at acquisition. A run that acquired none
+   * has no record rather than an empty one.
+   */
+  acquiredSkills?: HarnessAcquiredSkills;
+
+  acquiredSkillsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -204,12 +227,22 @@ export interface HarnessRunState {
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
 
+  /** Admitted research kits and host-confirmed records retained by this run. */
+  researchRuns?: HarnessResearchRunSummary[];
+
+  /** Opening-research intent and recoverable model-context handoff. */
+  openingResearch?: HarnessOpeningResearch;
+
   /**
-   * How many `query_docs` calls in this run and its descendants ended with no
-   * answer — the model that answers them was unreachable, or what came back
-   * was not a reply the tool could read. A run whose documentation channel is
-   * down still answers every call, with an error the model reads and the
-   * operator never sees, so the count is kept where a summary can state it.
+   * How many `research` calls in this run and its descendants returned no kit.
+   * An incomplete kit is still a successful answer and does not increment it.
+   */
+  researchFailures?: number;
+
+  /**
+   * Legacy failed documentation-query count retained for resumed runs. New
+   * calls record {@link researchFailures}; this field remains readable so an
+   * older run's operator evidence is not rewritten or dropped.
    */
   docsQueryFailures?: number;
 
@@ -246,6 +279,15 @@ export interface CreateHarnessRunStateOptions {
   skillResourceReadsPath?: string;
   skillScriptExecutions?: HarnessSkillScriptExecutions;
   skillScriptExecutionsPath?: string;
+
+  /**
+   * The skills this run acquired scripts for, by pin, with where each script's
+   * bytes sit and the digest taken at acquisition. A run that acquired none
+   * has no record rather than an empty one.
+   */
+  acquiredSkills?: HarnessAcquiredSkills;
+
+  acquiredSkillsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -265,6 +307,9 @@ export interface CreateHarnessRunStateOptions {
   inputCells?: HarnessInputCell[];
   patternRefs?: HarnessPatternRef[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
+  researchRuns?: HarnessResearchRunSummary[];
+  openingResearch?: HarnessOpeningResearch;
+  researchFailures?: number;
   docsQueryFailures?: number;
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -341,6 +386,12 @@ export const createHarnessRunState = (
     ...(options.skillScriptExecutionsPath !== undefined
       ? { skillScriptExecutionsPath: options.skillScriptExecutionsPath }
       : {}),
+    ...(options.acquiredSkills !== undefined
+      ? { acquiredSkills: structuredClone(options.acquiredSkills) }
+      : {}),
+    ...(options.acquiredSkillsPath !== undefined
+      ? { acquiredSkillsPath: options.acquiredSkillsPath }
+      : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
       : {}),
@@ -401,6 +452,15 @@ export const createHarnessRunState = (
     policyEvents: [],
     ...(options.policyDecisions !== undefined
       ? { policyDecisions: [...options.policyDecisions] }
+      : {}),
+    ...(options.researchRuns !== undefined
+      ? { researchRuns: structuredClone(options.researchRuns) }
+      : {}),
+    ...(options.openingResearch !== undefined
+      ? { openingResearch: structuredClone(options.openingResearch) }
+      : {}),
+    ...(options.researchFailures !== undefined
+      ? { researchFailures: options.researchFailures }
       : {}),
     ...(options.docsQueryFailures !== undefined
       ? { docsQueryFailures: options.docsQueryFailures }
@@ -521,10 +581,9 @@ export const setHarnessSubagentRun = (
 };
 
 /**
- * The run with `count` more failed documentation queries against it. Called
- * once for each explore turn a provider refused, and once more with a child's
- * whole count when a delegation returns, so the number a summary reads covers
- * the family rather than one run of it.
+ * The run with `count` more legacy documentation-query failures against it.
+ * Kept for resumed state and child rollup; new research failures use
+ * {@link addHarnessResearchFailures}.
  */
 export const addHarnessDocsQueryFailures = (
   state: HarnessRunState,
@@ -533,6 +592,36 @@ export const addHarnessDocsQueryFailures = (
 ): HarnessRunState =>
   count <= 0 ? state : patchHarnessRunState(state, {
     docsQueryFailures: (state.docsQueryFailures ?? 0) + count,
+  }, now);
+
+/** Appends one host-admitted research kit and its confirmed records. */
+export const appendHarnessResearchRun = (
+  state: HarnessRunState,
+  run: HarnessResearchRunSummary,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  appendToHarnessRunState(state, "researchRuns", structuredClone(run), now);
+
+/** Replaces the durable opening-research driver checkpoint. */
+export const setHarnessOpeningResearch = (
+  state: HarnessRunState,
+  openingResearch: HarnessOpeningResearch,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  patchHarnessRunState(
+    state,
+    { openingResearch: structuredClone(openingResearch) },
+    now,
+  );
+
+/** Adds failed bounded research calls to the run-family summary. */
+export const addHarnessResearchFailures = (
+  state: HarnessRunState,
+  count: number,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  count <= 0 ? state : patchHarnessRunState(state, {
+    researchFailures: (state.researchFailures ?? 0) + count,
   }, now);
 
 export const appendHarnessFailureRecord = (

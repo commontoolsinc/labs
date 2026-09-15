@@ -83,7 +83,6 @@ import {
   setTimingMeasuresEnabled,
   TIMING_MEASURE_PREFIX,
 } from "@commonfabric/utils/logger";
-import { timeout } from "@commonfabric/utils/sleep";
 
 import { assertionOutcome } from "./assert-record.ts";
 import { ActionReadReport } from "./action-read-report.ts";
@@ -348,8 +347,6 @@ export interface TestRunResult {
 }
 
 export interface TestRunnerOptions {
-  timeout?: number;
-
   /**
    * Compile the file's program and run nothing: no steps, no coverage
    * written, no multi-user participants started. What the run leaves behind
@@ -1062,7 +1059,6 @@ export async function runTestPattern(
   testPath: string,
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
-  const TIMEOUT = options.timeout ?? 60000;
   // The effective import root: an explicit `root` wins; otherwise the nearest
   // package root above the test file, so imports that span the package (shared
   // helpers, sibling patterns) resolve without a flag. When neither exists the
@@ -1531,59 +1527,49 @@ export async function runTestPattern(
 
     let settlementFailed = false;
     const settleRuntime = async (
-      stepIndex: number,
       stepLabel: string,
       maxSettle = 20,
     ): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", stepLabel, "settle"],
-        () =>
-          Promise.race([
-            (async () => {
-              for (let settle = 0; settle < maxSettle; settle++) {
-                const iterStart = performance.now();
-                await withPhase(
-                  [
-                    "runTestPattern",
-                    "step",
-                    stepLabel,
-                    "settle",
-                    `iter-${settle}`,
-                    "idle",
-                  ],
-                  () => runtime.idle(),
-                );
-                await withPhase(
-                  [
-                    "runTestPattern",
-                    "step",
-                    stepLabel,
-                    "settle",
-                    `iter-${settle}`,
-                    "synced",
-                  ],
-                  () => storageManager.synced(),
-                );
-                const totalMs = performance.now() - iterStart;
-                if (options.verbose && totalMs > 1) {
-                  console.log(
-                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
-                  );
-                }
-                // If both resolved nearly instantly, the system is settled.
-                // synced() has ~1ms of overhead even when idle, so use 2ms.
-                if (settle > 0 && totalMs < 2) break;
-              }
-              await withPhase(
-                ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
-                () => runtime.idle(),
-              );
-            })(),
-            timeout(
-              TIMEOUT,
-              `Action at index ${stepIndex} timed out after ${TIMEOUT}ms`,
-            ),
-          ]),
+        async () => {
+          for (let settle = 0; settle < maxSettle; settle++) {
+            const iterStart = performance.now();
+            await withPhase(
+              [
+                "runTestPattern",
+                "step",
+                stepLabel,
+                "settle",
+                `iter-${settle}`,
+                "idle",
+              ],
+              () => runtime.idle(),
+            );
+            await withPhase(
+              [
+                "runTestPattern",
+                "step",
+                stepLabel,
+                "settle",
+                `iter-${settle}`,
+                "synced",
+              ],
+              () => storageManager.synced(),
+            );
+            const totalMs = performance.now() - iterStart;
+            if (options.verbose && totalMs > 1) {
+              console.log(`      settle[${settle}]: ${fmtMs(totalMs)}`);
+            }
+            // If both resolved nearly instantly, the system is settled.
+            // synced() has ~1ms of overhead even when idle, so use 2ms.
+            if (settle > 0 && totalMs < 2) break;
+          }
+          await withPhase(
+            ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
+            () => runtime.idle(),
+          );
+        },
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -1600,14 +1586,7 @@ export async function runTestPattern(
     const settleFully = async (stepIndex: number): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
-        () =>
-          Promise.race([
-            runtime.settled(),
-            timeout(
-              TIMEOUT,
-              `Settle step at index ${stepIndex} timed out after ${TIMEOUT}ms`,
-            ),
-          ]),
+        () => runtime.settled(),
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -1682,8 +1661,8 @@ export async function runTestPattern(
         // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
         // before the next step. A test inserts this before an assertion that reads
         // an async-builtin result so it never observes a half-settled state. The
-        // step is transparent — it produces no result. A settle timeout propagates
-        // to the outer handler and fails the whole run (a stuck settle is fatal).
+        // step is transparent: it produces no result. A settlement error
+        // propagates to the outer handler and fails the whole run.
         if (isSettle) {
           try {
             if (!stepValue.skip) await settleFully(i);
@@ -1704,7 +1683,7 @@ export async function runTestPattern(
             if (!stepValue.skip) {
               await materializeTestVDOM(
                 stepCell.key("render") as Cell<unknown>,
-                () => settleRuntime(i, renderName, 20),
+                () => settleRuntime(renderName, 20),
               );
               if (options.verbose) console.log(`  ◇ ${renderName}`);
             } else if (options.verbose) {
@@ -1801,7 +1780,7 @@ export async function runTestPattern(
           // resolve quickly (< 1ms), indicating quiescence. Max iterations
           // as a safety net against infinite loops.
           try {
-            await settleRuntime(i, actionName, 20);
+            await settleRuntime(actionName, 20);
           } catch (err) {
             results.push({
               name: actionName,
@@ -1995,14 +1974,7 @@ export async function runTestPattern(
             try {
               await withPhase(
                 ["runTestPattern", "step", assertionName, "asyncWork"],
-                () =>
-                  Promise.race([
-                    runtime.settled(),
-                    timeout(
-                      TIMEOUT,
-                      `Waiting for async work read by ${assertionName} timed out after ${TIMEOUT}ms`,
-                    ),
-                  ]),
+                () => runtime.settled(),
               );
               ({ passed, error } = await withPhase(
                 ["runTestPattern", "step", assertionName, "reread", "evaluate"],
@@ -2018,7 +1990,7 @@ export async function runTestPattern(
             try {
               for (let retry = 0; retry < 3 && !passed; retry++) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
-                await settleRuntime(i, assertionName, 6);
+                await settleRuntime(assertionName, 6);
                 ({ passed, error } = await withPhase(
                   [
                     "runTestPattern",
@@ -2265,46 +2237,14 @@ export async function runTestPattern(
     consoleCaptureActive = false;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
-    // Tear the whole runtime down, not just its engine: that is what stops it
-    // WRITING (`Runtime.dispose`'s JSDoc has the mechanism). It matters here
-    // because a caller-supplied store outlives this call and gets READ — the
-    // vintage capture snapshots it — so a runtime still able to commit would
-    // make the snapshot a race rather than a record. `closeStorage` keeps that
-    // store the CALLER's to close.
-    //
-    // Bounded the same way every other await in this function is (the step
-    // settles at `settleRuntime`), and for the same reason: a pattern under
-    // test is untrusted code that may never quiesce, and `scheduler.idle()` —
-    // which `dispose()` awaits — never resolves for a system that genuinely
-    // never settles. Unbounded, one such pattern turns "this file reports a
-    // timeout" into "`cf test` hangs with no output", since `runTests` has no
-    // per-file guard. Firing early is safe here in a way it is not elsewhere:
-    // it only skips the rest of a teardown in a process that is moving on.
-    //
-    // A teardown that does not complete is RAISED, on both paths. It says the
-    // runtime never quiesced, which is a fact about the pattern under test —
-    // reporting it only to stderr would let `cf test` exit 0 on a run whose
-    // writer was still going, and a caller that supplied its own store is worse
-    // off still, since it is about to read what that writer wrote. Raising also
-    // keeps the pre-existing contract: `storageManager.close()` used to sit here
-    // unguarded, so a failing teardown already failed the file.
-    //
-    // Logged BEFORE it is raised because throwing from a `finally` discards the
-    // result this function was about to return, including any step failures.
-    // The exit code is right either way; the log is what keeps the diagnosis.
-    //
-    // Losing the race ABANDONS the dispose rather than cancelling it:
-    // `settled()` takes no abort signal, so the drain runs on in the background
-    // and the steps after it never happen. Acceptable because the only path
-    // that reaches it has already failed, and a capture's temp store and server
-    // are torn down by `captureVintage`'s own `finally`.
+    // Await disposal before returning so the runtime has stopped writing when
+    // a caller reads its store. A caller-supplied store stays open. Log failures
+    // before raising them: a throw from `finally` replaces the pending result,
+    // which may already contain step failures.
     const teardown = withPhase(
       ["runTestPattern", "cleanup", "runtimeDispose"],
       () =>
-        Promise.race([
-          runtime.dispose({ closeStorage: options.storageHost === undefined }),
-          timeout(TIMEOUT, `Runtime teardown timed out after ${TIMEOUT}ms`),
-        ]),
+        runtime.dispose({ closeStorage: options.storageHost === undefined }),
     );
     await teardown.catch((error) => {
       console.error(

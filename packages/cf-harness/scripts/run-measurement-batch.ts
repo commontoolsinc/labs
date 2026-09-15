@@ -1254,7 +1254,7 @@ const readSkillRegistry = async (
   };
 };
 
-/** A root run whose first user message exactly matches one batch task. */
+/** The root run identified by the console's returned turn id. */
 interface RunCandidate {
   runId: string;
 }
@@ -1267,13 +1267,13 @@ interface RunCandidateScan {
 }
 
 /**
- * Finds root runs created during this batch whose first user message matches
- * `taskText`. Ambiguity is left for the caller to refuse rather than settled
- * by directory order.
+ * Finds the console turn's root artifact. The console assigns its turn id to
+ * the harness run, so task text and transcript ordering play no part in this
+ * join. Other turns may carry the same task or unreadable artifacts.
  */
 const runCandidates = async (
   artifactRoot: string,
-  taskText: string,
+  turnId: string,
   batchStartedAt: string,
 ): Promise<RunCandidateScan> => {
   const candidates: RunCandidate[] = [];
@@ -1282,6 +1282,7 @@ const runCandidates = async (
   for await (const entry of Deno.readDir(artifactRoot)) {
     if (!entry.isDirectory) continue;
     directories.push(entry.name);
+    if (entry.name !== turnId) continue;
     const runStatePath = join(artifactRoot, entry.name, "run-state.json");
     let runState: Record<string, unknown>;
     try {
@@ -1313,31 +1314,6 @@ const runCandidates = async (
     ) {
       continue;
     }
-    const transcriptPath = join(
-      artifactRoot,
-      entry.name,
-      "transcript.json",
-    );
-    let transcript: unknown;
-    try {
-      transcript = JSON.parse(await Deno.readTextFile(transcriptPath));
-    } catch (error) {
-      unread.push(
-        `${entry.name}/transcript.json could not be read: ${
-          describeError(error)
-        }`,
-      );
-      continue;
-    }
-    if (!Array.isArray(transcript)) {
-      unread.push(`${entry.name}/transcript.json was not a message list`);
-      continue;
-    }
-    const firstUser = transcript.find((message) =>
-      typeof message === "object" && message !== null &&
-      (message as Record<string, unknown>).role === "user"
-    ) as Record<string, unknown> | undefined;
-    if (firstUser?.content !== taskText) continue;
     candidates.push({ runId: entry.name });
   }
   return {
@@ -1452,7 +1428,7 @@ export const runTask = async (
   try {
     scan = await runCandidates(
       artifactRoot,
-      task.text,
+      started.turnId,
       options.batchStartedAt,
     );
   } catch (error) {
@@ -1464,22 +1440,9 @@ export const runTask = async (
     };
   }
   if (scan.candidates.length !== 1 || scan.unread.length > 0) {
-    const candidates = scan.candidates;
-    let reason: string;
-    if (candidates.length > 1) {
-      reason = `the run lookup is ambiguous: ${
-        candidates.map((candidate) => candidate.runId).join(", ")
-      } all have this task as their first user message`;
-    } else if (scan.unread.length > 0) {
-      reason = candidates.length === 1
-        ? `the run lookup found ${
-          candidates[0].runId
-        } but could not rule out another match: ${scan.unread.join("; ")}`
-        : `the run lookup could not read ${scan.unread.join("; ")}`;
-    } else {
-      reason =
-        `no root run created after ${options.batchStartedAt} has this task as its first user message`;
-    }
+    const reason = scan.unread.length > 0
+      ? `the run lookup could not read ${scan.unread.join("; ")}`
+      : `no root run ${started.turnId} created after ${options.batchStartedAt} exists for this console turn`;
     return {
       ...base,
       configuration: {
@@ -2065,7 +2028,7 @@ export const main = async (
       console: DEFAULT_CONSOLE_URL,
       "fabric-api-url": Deno.env.get("CF_HARNESS_FABRIC_API_URL") ??
         DEFAULT_FABRIC_API_URL,
-      base: "main",
+      base: "origin/main",
     },
   });
   const suitePath = flags._.map(String)[0];

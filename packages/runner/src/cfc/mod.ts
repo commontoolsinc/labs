@@ -29,6 +29,7 @@ export {
 export {
   cfcLabelViewForCell,
   cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellFailClosedWithStatus,
   cfcLabelViewForCellWithStatus,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,

@@ -146,6 +146,25 @@ export type VerifiedExternalIdentity = RequiresIntegrity<
 
 export type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
 
+/**
+ * Where things shared with this profile's owner are delivered: the owner's
+ * share inbox — a dedicated space their daemon minted, holding one inbox piece
+ * whose `receive` stream other daemons call (loom `shares/inbox.py`; the
+ * design is loom's weaver-multiuser-sharing D8 and share-inbox proposal).
+ * Public on purpose and no secret in it: the inbox space's ACL is the gate,
+ * the pointer only says where to knock. Empty strings mean "no inbox yet".
+ */
+export type ProfileInboxPointer = {
+  /** The inbox space's DID. */
+  space: string;
+  /** The memory host the space lives on (an http(s) origin). */
+  host: string;
+};
+export type SetProfileInboxEvent = {
+  space?: string;
+  host?: string;
+};
+
 type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
   VerifiedExternalIdentityCell[],
   Binding
@@ -170,6 +189,15 @@ export type ProfileHomeOutput = {
   // (masked until now only because `addExternalLink` sorts earlier in the
   // required check).
   bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">;
+  // The owner's share inbox pointer (2026-09-15). Owner-protected like bio;
+  // readable by anyone who can read the profile, which is what a sender
+  // needs. OPTIONAL rather than defaulted, unlike bio: the pattern-update
+  // gate refuses an object default beneath a `$ref` constraint ("defaults
+  // changed below a constraint that is not stable under default insertion"),
+  // and a stored profile predating the field simply has no such property.
+  // A running profile always binds it (empty strings mean "no inbox yet");
+  // a reader of a stored doc takes `inbox?.space`.
+  inbox?: OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>;
   // Public web profiles the owner has chosen to associate with this profile.
   // The owner-protected list is distinct from `elements`, whose entries are
   // Common Fabric piece references.
@@ -202,6 +230,7 @@ export type ProfileHomeOutput = {
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   setBio: Stream<SetProfileBioEvent>;
+  setInbox: Stream<SetProfileInboxEvent>;
   addExternalLink: Stream<MutateExternalProfileLinksEvent>;
   removeExternalLink: Stream<MutateExternalProfileLinksEvent>;
   publishVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
@@ -256,6 +285,7 @@ export type BackwardsCompatibleProfile = PartialBy<
   & Omit<ProfileHomeOutput, typeof UI>
   & { [UI]: unknown },
   | "setBio"
+  | "setInbox"
   | "addExternalLink"
   | "removeExternalLink"
   | "publishVerifiedIdentities"
@@ -508,6 +538,53 @@ const setBio = handler<
   },
 );
 
+// A share inbox space is minted by the owner's daemon as a did:key (ed25519,
+// base58btc: `z` then the alphabet without 0, O, I, l), so that is the one
+// grammar the pointer admits — a value that cannot name a space is not
+// published, not stored half-right.
+const INBOX_SPACE_DID = /^did:key:z[1-9A-HJ-NP-Za-km-z]{20,}$/;
+
+/** The memory host as an http(s) ORIGIN and nothing more: parsed, not
+ *  pattern-matched, so credentials, a path, a query, a fragment or an
+ *  unparseable port are refused rather than stored for a sender to read
+ *  back. Returns the origin, or "" when the value is not one. */
+function inboxHostOrigin(value: string): string {
+  const raw = value.trim();
+  if (raw === "") return "";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return "";
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+  if (url.username !== "" || url.password !== "") return "";
+  if (url.search !== "" || url.hash !== "") return "";
+  if (url.pathname !== "/" && url.pathname !== "") return "";
+  if (raw.endsWith("?") || raw.endsWith("#")) return "";
+  return url.origin;
+}
+
+// The single authorized writer for the share inbox pointer. A pointer is
+// both parts shaped or nothing: a did:key for the space, an http(s) origin
+// for the host; both empty clears it (the owner retired their inbox).
+// Anything else is dropped, never half-written — a sender that read a half
+// pointer would knock on nothing.
+const setInbox = handler<
+  SetProfileInboxEvent,
+  { inbox: Writable<ProfileInboxPointer> }
+>((event, state) => {
+  const space = (event.space ?? "").trim();
+  const rawHost = (event.host ?? "").trim();
+  if (space === "" && rawHost === "") {
+    state.inbox.set({ space: "", host: "" });
+    return;
+  }
+  const host = inboxHostOrigin(rawHost);
+  if (!INBOX_SPACE_DID.test(space) || host === "") return;
+  state.inbox.set({ space, host });
+});
+
 // The single authorized writer for externally hosted profile links. Add and
 // remove streams are instances of this handler so the owner-protected list has
 // one stable write identity, like `elements` above.
@@ -653,6 +730,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const bio = new Writable<
       OwnerProtectedProfileWrite<string, typeof setBio>
     >("").for("bio");
+    const inbox = new Writable<
+      OwnerProtectedProfileWrite<ProfileInboxPointer, typeof setInbox>
+    >({ space: "", host: "" }).for("inbox");
     const externalLinks = new Writable<
       OwnerProtectedProfileWrite<
         ExternalProfileLink[],
@@ -740,12 +820,14 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       name,
       avatar,
       bio,
+      inbox,
       externalLinks,
       verifiedIdentities,
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
       setBio: setBio({ bio, draft: bioDraft }),
+      setInbox: setInbox({ inbox }),
       addExternalLink: mutateExternalProfileLinks({
         externalLinks,
         mode: "add",

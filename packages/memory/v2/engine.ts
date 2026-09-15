@@ -1,19 +1,18 @@
 import { Database } from "@db/sqlite";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import {
   hashStringOf,
   taggedHashStringOf,
   valueEqual,
 } from "@commonfabric/data-model";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
-import type { JSONSchema } from "../../runner/src/builder/types.ts";
+import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
+import { isSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import {
   classifySchemaMeta,
   collectExternalSchemaRefHashes,
   SCHEMA_META_MEMBER,
   schemaMetaRefHashes,
-} from "../../runner/src/schema-decompose.ts";
-import { isSubschema } from "../../runner/src/schema-walk.ts";
+} from "@commonfabric/data-model-schema/schema-refs";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   applySqliteCommitWrite,
@@ -3763,6 +3762,47 @@ ORDER BY seq, op_index
 };
 
 /**
+ * Whether a commit after `sinceSeq` wrote this document instance that
+ * `holder`'s own derived commits do not account for — serving-loop.md
+ * §3d's INTRUSION on a document a serving tenure derives into. A client's
+ * authored write is one; so is another holder's derived write, and a
+ * system commit. The tenure's own derived commits are not, which is what
+ * separates a document another writer moved under a run from one the
+ * tenure itself advanced while that run was in flight.
+ *
+ * `holder` absent (a wave driven outside a lease) makes every write an
+ * intrusion: nothing identifies a commit as this tenure's. So does a
+ * derived row carrying no holder, which the class is not supposed to
+ * produce. Both are the exemption failing CLOSED, and the query says so
+ * in SQL rather than leaning on three-valued logic to arrive there: `=`
+ * against a NULL yields UNKNOWN, and a `NOT (...)` over UNKNOWN drops the
+ * row — exempting exactly the writes these two cases must not exempt.
+ */
+export const hasIntrusionSince = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    sinceSeq: number;
+    holder?: string;
+  },
+): boolean =>
+  engine.database.prepare(`
+SELECT 1 FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch AND r.id = :id AND r.scope_key = :scope_key
+  AND r.seq > :since_seq
+  AND NOT (:holder IS NOT NULL AND c.class = 'derived' AND c.holder IS :holder)
+LIMIT 1
+`).get({
+      branch: options.branch ?? DEFAULT_BRANCH,
+      id: options.id,
+      scope_key: options.scopeKey,
+      since_seq: options.sinceSeq,
+      holder: options.holder ?? null,
+    }) !== undefined;
+
+/**
  * One admitted commit as the serving loop's subscription sees it
  * (serving-loop.md §1 plane (d), §3): class + holder for the self-echo
  * skip, and the written doc INSTANCES for dirtiness marking. Assembled
@@ -4090,22 +4130,22 @@ export const applyWaveCommit = (
   ).immediate(engine, options);
 };
 
-// Per-version record of stored schema documents whose content verified and
-// whose refs were collected during commit-time closure validation, so a
+// Per-version record of stored schema documents whose content verified
+// during commit-time closure validation, held as the interned schema, so a
 // writer re-referencing the same closure pays map lookups, not re-hashes.
 // Bounded; wholesale eviction on overflow.
-const COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES = 4096;
-const commitSchemaRefCaches = new WeakMap<
+const SCHEMA_DOC_CACHE_MAX_ENTRIES = 4096;
+const schemaDocCaches = new WeakMap<
   Engine,
-  Map<string, { seq: number; refs: ReadonlySet<string> }>
+  Map<string, { seq: number; schema: JSONSchema }>
 >();
-const commitVerifiedSchemaDocRefs = (
+const schemaDocCache = (
   engine: Engine,
-): Map<string, { seq: number; refs: ReadonlySet<string> }> => {
-  let cache = commitSchemaRefCaches.get(engine);
+): Map<string, { seq: number; schema: JSONSchema }> => {
+  let cache = schemaDocCaches.get(engine);
   if (cache === undefined) {
     cache = new Map();
-    commitSchemaRefCaches.set(engine, cache);
+    schemaDocCaches.set(engine, cache);
   }
   return cache;
 };
@@ -5520,61 +5560,63 @@ const applyCommitTransaction = (
   // above, out-of-band tampering, or a store that predates this
   // validation.
   if (requiredSchemaRefs.size > 0) {
-    const verified = commitVerifiedSchemaDocRefs(engine);
-    const pending = [...requiredSchemaRefs];
-    const walked = new Set<string>();
-    while (pending.length > 0) {
-      const hash = pending.pop()!;
-      if (walked.has(hash)) continue;
-      walked.add(hash);
-      const id = `cid:${hash}`;
-      const included = cidSetsInCommit?.has(id)
-        ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
-        : undefined;
-      if (included !== undefined) {
-        // The set already verified its content against its id; what a
-        // schema reference additionally requires is that the content be a
-        // schema at all — a code document's string, say, is not.
-        if (!isSubschema(included)) {
+    const cache = schemaDocCache(engine);
+    // The hashes this commit's own sets backed, for the refusal's wording,
+    // and the seq each stored document was read at, for the cache.
+    const included = new Set<string>();
+    const storedSeqs = new Map<string, number>();
+    walkSchemaDocumentClosure({
+      roots: requiredSchemaRefs,
+      load: (hash) => {
+        const id = `cid:${hash}`;
+        const installed = cidSetsInCommit?.has(id)
+          ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
+          : undefined;
+        if (installed !== undefined) {
+          included.add(hash);
+          // The set already verified its content against its id; what a
+          // schema reference additionally requires is that the content be
+          // a schema at all — a code document's string, say, is not, and
+          // handing it over as stored content is what refuses it.
+          return isSubschema(installed)
+            ? { kind: "verified", schema: installed }
+            : { kind: "stored", value: installed };
+        }
+        const state = readState(engine, { id, branch });
+        const cached = cache.get(id);
+        if (cached !== undefined && cached.seq === state?.seq) {
+          return { kind: "verified", schema: cached.schema };
+        }
+        const storedInner =
+          state?.document === null || state?.document === undefined
+            ? undefined
+            : (state.document as { value?: unknown }).value;
+        if (storedInner === undefined) return undefined;
+        storedSeqs.set(hash, state!.seq);
+        return { kind: "stored", value: storedInner };
+      },
+      onVerified: (hash, schema) => {
+        const seq = storedSeqs.get(hash);
+        if (seq === undefined) return;
+        if (cache.size >= SCHEMA_DOC_CACHE_MAX_ENTRIES) {
+          cache.clear();
+        }
+        cache.set(`cid:${hash}`, { seq, schema });
+      },
+      onMissing: (hash, miss) => {
+        const id = `cid:${hash}`;
+        if (miss === "absent") {
           throw new ProtocolError(
-            `memory v2 commit references schema document ${id} whose included content does not verify`,
+            `memory v2 commit references schema document ${id} that is neither included in the commit nor stored in the space`,
           );
         }
-        for (const dep of collectExternalSchemaRefHashes(included)) {
-          pending.push(dep);
-        }
-        continue;
-      }
-      const state = readState(engine, { id, branch });
-      const cached = verified.get(id);
-      if (cached !== undefined && cached.seq === state?.seq) {
-        for (const dep of cached.refs) pending.push(dep);
-        continue;
-      }
-      const storedInner =
-        state?.document === null || state?.document === undefined
-          ? undefined
-          : (state.document as { value?: unknown }).value;
-      if (storedInner === undefined) {
         throw new ProtocolError(
-          `memory v2 commit references schema document ${id} that is neither included in the commit nor stored in the space`,
+          included.has(hash)
+            ? `memory v2 commit references schema document ${id} whose included content does not verify`
+            : `memory v2 commit references schema document ${id} whose stored content does not verify`,
         );
-      }
-      if (
-        !isSubschema(storedInner) ||
-        internSchemaAsTaggedHashString(storedInner as JSONSchema) !== hash
-      ) {
-        throw new ProtocolError(
-          `memory v2 commit references schema document ${id} whose stored content does not verify`,
-        );
-      }
-      const refs = collectExternalSchemaRefHashes(storedInner);
-      if (verified.size >= COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES) {
-        verified.clear();
-      }
-      verified.set(id, { seq: state!.seq, refs });
-      for (const dep of refs) pending.push(dep);
-    }
+      },
+    });
   }
 
   // An identity commit leaves every document it writes as the space

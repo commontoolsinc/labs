@@ -4,18 +4,13 @@ import {
   type WishState,
   type WishTag,
 } from "@commonfabric/api";
-import {
-  deepFrozenCloneAndInternSchema,
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model-schema";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   type DebugValueOptions,
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { LRUCache } from "@commonfabric/utils/cache";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -34,7 +29,6 @@ import {
 import { type Cell } from "../cell.ts";
 import {
   createSigilLinkFromParsedLink,
-  getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
 import { systemPatternSource } from "../pattern-source-scheme.ts";
@@ -55,7 +49,8 @@ import {
   recordRuntimeOwnedStore,
 } from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
-import { rawMetaWriteAuthorization } from "../meta-seam.ts";
+import { wishStateSchemaForResult } from "./wish-schema.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -1816,70 +1811,6 @@ function createWishCandidatesCell(
   return runtime.getImmutableCell(space, values, undefined, tx);
 }
 
-// asCell-wrapped schemas keyed by content hash. `hashSchema()` is one
-// unavoidable walk (through the query-result proxy when the input is one) and
-// is the cache key: it is `FabricValue`-aware, so schemas that differ only in
-// non-JSON `FabricValue` content (e.g. a `FabricBytes` default) get distinct
-// keys — a `JSON.stringify()` key would collide them. The clone-and-intern
-// repeats for the same content on every wish send, so cache it.
-const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
-
-function schemaAsCell(schema: unknown): JSONSchema {
-  if (schema && typeof schema === "object") {
-    const key = hashSchema(schema as JSONSchema);
-    let result = schemaAsCellCache.get(key);
-    if (result === undefined) {
-      // `schema` may be a query-result proxy, so deep-frozen-clone rather than
-      // freeze in place; the clone de-proxies and preserves `FabricValue`
-      // leaves that a JSON round-trip would mangle.
-      result = deepFrozenCloneAndInternSchema({
-        ...(schema as Record<string, unknown>),
-        asCell: ["cell"],
-      });
-      schemaAsCellCache.put(key, result);
-    }
-    return result;
-  }
-  return { asCell: ["cell"] };
-}
-
-function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
-  if (schema === undefined) return undefined;
-  // schemaAsCell JSON-round-trips its input, and `schema` is typically a
-  // query-result proxy where every property access during stringify pays the
-  // full cell-read machinery (~7ms for a large search schema in profiles).
-  // Materialize once and share the instance for both slots — internSchema
-  // canonicalizes the wrapper, so the duplicate reference is fine.
-  const resultSchema = schemaAsCell(schema);
-  // Fragment references resolve from the wish-state schema root after the
-  // requested schema is nested under result and candidates.
-  const schemaWithDefinitions = resultSchema as Record<string, unknown> & {
-    $defs?: Record<string, JSONSchema>;
-  };
-  const { $defs, ...nestedSchemaObject } = schemaWithDefinitions;
-  const nestedResultSchema = nestedSchemaObject as JSONSchema;
-  const candidateSchema = nestedResultSchema;
-  return internSchema({
-    ...($defs === undefined ? {} : { $defs }),
-    type: "object",
-    properties: {
-      result: {
-        anyOf: [
-          { type: "undefined" },
-          nestedResultSchema,
-        ],
-      },
-      candidates: {
-        type: "array",
-        items: candidateSchema,
-      },
-      error: true,
-      [UI]: true,
-    },
-    required: ["result", "candidates"],
-  });
-}
-
 function explicitWishSchemaScope(schema: unknown): CellScope | undefined {
   if (
     schema &&
@@ -2166,20 +2097,8 @@ export function wish(
     const scoped = scopedCell(runtime, tx, baseCell, outputScope);
     recordRuntimeOwnedStore(tx, parentCell, scoped);
     enrollRuntimeOwnedStore(tx, parentCell, scoped);
-    if (scoped !== baseCell) {
-      // Copy the meta result link from the base cell into our new scoped cell
-      const resultLink = getMetaLink(baseCell.withTx(tx), "result");
-      if (resultLink !== undefined) {
-        scoped.setMetaRaw(
-          "result",
-          createSigilLinkFromParsedLink(resultLink, {
-            base: scoped,
-            includeSchema: true,
-          }),
-          rawMetaWriteAuthorization,
-        );
-      }
-    }
+    setResultCell(scoped, parentCell.withTx(tx));
+    setPatternCell(scoped, parentCell.withTx(tx).key("pattern"));
     scoped.set(value);
     surfaceWishStateCommitFailure(tx, scoped);
     sendResult(tx, scoped);
@@ -3028,7 +2947,13 @@ export function wish(
               return;
             }
 
-            if (canUseSharedHashtagResult(activeParsed, { headless })) {
+            // Home discovery must run under the demander's transaction. A
+            // shared subscription has no demanding principal of its own.
+            if (
+              !targetMayUseHomeSpace &&
+              wishOutputScope(schema, inputScope, false) === "space" &&
+              canUseSharedHashtagResult(activeParsed, { headless })
+            ) {
               const shared = getCurrentSharedHashtagResolver(ctx, activeParsed);
               usedSharedHashtagResolver = true;
               measureWishPhase(

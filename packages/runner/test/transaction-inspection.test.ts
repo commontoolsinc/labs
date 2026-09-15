@@ -1,4 +1,5 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { FabricValue } from "@commonfabric/data-model";
@@ -13,6 +14,7 @@ import {
 } from "../src/storage/extended-storage-transaction.ts";
 import type {
   IExtendedStorageTransaction,
+  IReadActivity,
   ITransactionJournal,
   ITransactionWriteRequest,
   TransactionReactivityLog,
@@ -291,6 +293,39 @@ describe("transaction inspection", () => {
     } finally {
       await storageManager.close();
     }
+  });
+
+  it("forwards the current candidate journal without copying records or replacing absent capabilities", () => {
+    const records: IReadActivity[] = [{
+      space,
+      id: "test:candidate-journal",
+      path: ["value"],
+      meta: { internalVerifierRead: false },
+    }];
+    const inner = {
+      getPotentiallyExternalReadActivities() {
+        return records;
+      },
+    } as unknown as IExtendedStorageTransaction;
+    const wrapper = new TransactionWrapper(inner);
+    expect(wrapper.getPotentiallyExternalReadActivities()).toBe(records);
+    records[0].meta.internalVerifierRead = true;
+    records.push({
+      space,
+      id: "test:later-candidate",
+      path: ["value", "field"],
+      meta: {},
+    });
+    expect([...wrapper.getPotentiallyExternalReadActivities()!]).toEqual(
+      records,
+    );
+    expect([...wrapper.getPotentiallyExternalReadActivities()!][0]).toBe(
+      records[0],
+    );
+    delete inner.getPotentiallyExternalReadActivities;
+    expect(wrapper.getPotentiallyExternalReadActivities()).toBeUndefined();
+    inner.getPotentiallyExternalReadActivities = () => undefined;
+    expect(wrapper.getPotentiallyExternalReadActivities()).toBeUndefined();
   });
 
   it("does not fan out batch writes when the wrapped transaction already handles them", () => {

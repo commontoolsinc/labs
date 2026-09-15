@@ -39,7 +39,7 @@ import "../shell/src/globals.ts";
  * the shell publishes it as the last step of its bootstrap module, after
  * opening the browser key store. That module body runs on past the document's
  * `load` event, so a navigation that resolves on `load` hands back a page whose
- * shell is still booting, for the couple of milliseconds the key store takes.
+ * shell is still booting. The `cf-shell-ready` event announces publication.
  *
  * A document that is not the shell never publishes the handle, and returns
  * here without a wait. `goto` reports such a document through
@@ -49,7 +49,9 @@ import "../shell/src/globals.ts";
 export async function waitForShellReady(page: Page): Promise<void> {
   if (!await isShellDocument(page)) return;
   try {
-    await waitForCondition(page, () => globalThis.app !== undefined);
+    await waitForCondition(page, () => globalThis.app !== undefined, {
+      events: ["cf-shell-ready"],
+    });
   } catch (cause) {
     throw new Error(await describeShellReadyFailure(page), { cause });
   }

@@ -363,12 +363,18 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         options.names.arg,
         compiled.argumentSchema,
       );
+    // A client's own write of a scoped input races the serving loop
+    // materializing that user's slots, and the loser of that race is told
+    // its read went stale. Every real client retries such a rejection;
+    // these writes do too, so a legitimate race reads as one write landing
+    // after another rather than as a failure.
     const writeDraft = async (runtime: Runtime, value: string) => {
       const arg = typedArg(runtime);
       await arg.sync();
-      const tx = runtime.edit();
-      arg.key("draft").withTx(tx).set(value);
-      expect((await tx.commit()).error).toBeUndefined();
+      const result = await runtime.editWithRetry((tx) => {
+        arg.key("draft").withTx(tx).set(value);
+      });
+      expect(result.error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
     };
@@ -386,9 +392,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         )
         : typedArg(runtime);
       await arg.sync();
-      const tx = runtime.edit();
-      arg.key("note").withTx(tx).set(value);
-      expect((await tx.commit()).error).toBeUndefined();
+      const result = await runtime.editWithRetry((tx) => {
+        arg.key("note").withTx(tx).set(value);
+      });
+      expect(result.error).toBeUndefined();
       await runtime.idle();
       await runtime.storageManager.synced();
     };
@@ -1304,9 +1311,17 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     );
     const wavesBefore = host!.stats().waves;
     const EDITS = 20;
+    // Sampled for the control below: a client write the server has taken
+    // leaves the loop with an input to cover, so it reads busy there.
+    let sawLoopBusy = false;
+    const noteLoopBusy = () => {
+      sawLoopBusy ||= host!.spaceServer(space)?.suspendedOnInput === false;
+    };
     for (let i = 1; i <= EDITS; i++) {
       await setup.writeDraft(alice, `a${i}`);
+      noteLoopBusy();
       await setup.writeDraft(bob, `b${i}`);
+      noteLoopBusy();
     }
     await waitUntil(
       () =>
@@ -1315,12 +1330,53 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       "both instances to converge on the last edit",
       30_000,
     );
-    // Quiescence: no further waves once the inputs stop (the storm was
-    // 4,427 waves / 5 min at the deadline cadence, without inputs).
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // Quiescence, observed rather than waited out (waiting-in-tests.md's
+    // "Proving a negative"): the loop suspends on its input wait and the
+    // serving runtime's scheduler settles. The storm this step pins is a
+    // loop whose cycles keep finding work of their own, and such a loop
+    // never suspends — `#hasWork()` holds at the end of each cycle and
+    // the next begins — so the suspension IS the settling, with no
+    // interval to size. Its companion covers the other producer: a run a
+    // wave re-armed leaves the scheduler unsettled until it has run.
+    //
+    // The interval this replaced was the wrong instrument as well as the
+    // expensive one, and the difference is reproducible: hold
+    // `#hasWork()` true and the wait below fails by name, while three
+    // seconds of interval pass. The 4,427-wave storm ran at the
+    // production flush deadline, tens of milliseconds; this host's is
+    // five seconds, so a storm of exactly that shape commits nothing at
+    // all inside a window a test could afford to wait out.
+    //
+    // The settles run INSIDE the predicate, between two readings of the
+    // suspension: a frame the memory server still held, or a run the
+    // scheduler still owed, un-suspends the loop before the second
+    // reading rather than landing after the wait returns. The fan-out is
+    // drained on both sides of the runtime settle, because that settle
+    // can run work that commits, whose fan-out a drain finishing ahead of
+    // it never carried. What stays out of reach is a wake from work no
+    // settle covers — a structure load completing is the one this
+    // pattern could produce, having no external effects of its own.
+    // Nothing the test can post is ordered after such a wake, so the
+    // claim is the settled state and the bound below, never the absence
+    // of every later wave.
+    const spaceServer = host!.spaceServer(space)!;
+    await waitUntil(
+      async () => {
+        if (!spaceServer.suspendedOnInput) return false;
+        await server.idle();
+        await servingRuntime!.idle();
+        await server.idle();
+        return spaceServer.suspendedOnInput;
+      },
+      "the serving loop to suspend on its input wait with the server's " +
+        "fan-out drained and its runtime settled",
+    );
     const wavesAtQuiescence = host!.stats().waves;
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(host!.stats().waves).toBe(wavesAtQuiescence);
+    // The control for that wait, and the reason it is not vacuous: the
+    // same reading, taken while the edits above were being covered, went
+    // false. A reading pinned true would satisfy the wait on its first
+    // poll and leave every claim resting on it unasserted.
+    expect(sawLoopBusy).toBe(true);
     // Bounded by the inputs plus a small constant (one wave may carry
     // several inputs; a discovery re-arm runs inside its wave).
     expect(wavesAtQuiescence - wavesBefore).toBeLessThanOrEqual(

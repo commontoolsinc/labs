@@ -18,7 +18,7 @@ export type BuiltinToolId =
   | "record_feedback"
   | "search_skills"
   | "acquire_skill"
-  | "query_docs"
+  | "research"
   | "loom_compose"
   | "loom_inspect"
   | "loom_authoring_context";
@@ -52,13 +52,11 @@ const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /**
- * The tool gated on a configured documentation corpus. A run given no corpus
- * root has nothing for an explore child to answer out of, so the tool is
- * absent rather than present and answering every question with the same
- * refusal.
+ * The tool gated on at least one trusted research source. A run with neither
+ * corpus nor pattern index has nothing for its private loop to investigate.
  */
-const DOCS_CORPUS_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["query_docs"] as const,
+const RESEARCH_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["research"] as const,
 );
 
 /** The metadata-only tool gated on configured skills.sh discovery. */
@@ -72,14 +70,29 @@ const SKILLS_SH_ACQUISITION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /**
- * The tools that exist only over a skill registry, gated on the same terms.
- * A run given no skills root scans no registry, so `read_skill_resource`
- * would answer `skill_registry_missing` on every call and `run_skill_script`
- * has nothing to run — absent rather than present-but-failing, so a model
- * does not spend turns discovering a tool it was never backed to use.
+ * The tool that exists only over a skill registry. A run given no skills root
+ * scans no registry, so `read_skill_resource` would answer
+ * `skill_registry_missing` on every call — absent rather than
+ * present-but-failing, so a model does not spend turns discovering a tool it
+ * was never backed to use.
  */
 const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["read_skill_resource", "run_skill_script"] as const,
+  ["read_skill_resource"] as const,
+);
+
+/**
+ * The tool two different backings can supply, and which is absent only when
+ * neither does.
+ *
+ * A registry script needs the skills root that scanned it. An acquired script
+ * needs no registry at all: its bytes came from a pinned commit and sit where
+ * the run that holds the skill's handle mounts them. A child given an acquired
+ * skill in a run with no skills root is backed to run its script, and
+ * withholding the tool from it would hand it a mounted skill it could not
+ * execute.
+ */
+const SKILL_SCRIPT_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["run_skill_script"] as const,
 );
 
 /** Tools backed only by an explicitly configured host Loom transport. */
@@ -96,6 +109,14 @@ export interface HarnessToolBackingAvailability {
   skillsShSearchAvailable: boolean;
   skillsShAcquisitionAvailable: boolean;
   skillRegistryAvailable: boolean;
+
+  /**
+   * Whether this run holds a skill it acquired scripts for. The second backing
+   * `run_skill_script` has, independent of any registry: absent, the tool
+   * rests on the skills root alone.
+   */
+  acquiredSkillsAvailable?: boolean;
+
   docsCorpusAvailable: boolean;
 
   /** Whether the operator configured host Loom authoring for this run. */
@@ -114,7 +135,13 @@ export const withheldToolIds = (
       ? []
       : SKILLS_SH_ACQUISITION_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
-    ...(availability.docsCorpusAvailable ? [] : DOCS_CORPUS_TOOL_IDS),
+    ...(availability.skillRegistryAvailable ||
+        availability.acquiredSkillsAvailable
+      ? []
+      : SKILL_SCRIPT_TOOL_IDS),
+    ...(availability.docsCorpusAvailable || availability.patternIndexAvailable
+      ? []
+      : RESEARCH_TOOL_IDS),
     ...(availability.loomAuthoringAvailable ? [] : LOOM_AUTHORING_TOOL_IDS),
   ]);
 
@@ -140,7 +167,9 @@ export const parentToolIdsForBacking = (
     ...(availability.skillsShAcquisitionAvailable
       ? SKILLS_SH_ACQUISITION_TOOL_IDS
       : []),
-    ...(availability.docsCorpusAvailable ? DOCS_CORPUS_TOOL_IDS : []),
+    ...(availability.docsCorpusAvailable || availability.patternIndexAvailable
+      ? RESEARCH_TOOL_IDS
+      : []),
     ...(availability.loomAuthoringAvailable ? LOOM_AUTHORING_TOOL_IDS : []),
   ].filter((toolId, index, ids) =>
     !withheld.has(toolId) && ids.indexOf(toolId) === index
@@ -149,12 +178,32 @@ export const parentToolIdsForBacking = (
 
 export type HarnessToolEffectClass = "read" | "write" | "side-effect";
 
-export interface HarnessToolDescriptor {
-  toolId: BuiltinToolId;
+/** A function tool descriptor accepted by the harness model transports. */
+export interface HarnessModelToolDescriptor {
+  /** Function name sent to the model. */
+  toolId: string;
+
+  /** Short display name for operator-facing surfaces. */
   title: string;
+
+  /** Instructions that tell the model when and how to call the tool. */
   description: string;
+
+  /** Whether invoking the tool only reads or can change external state. */
   effectClass: HarnessToolEffectClass;
+
+  /** JSON Schema for the function arguments. */
   inputSchema: JSONSchema;
+
+  /** JSON Schema for the function result, when one is declared. */
   outputSchema?: JSONSchema;
+
+  /** Search and presentation labels for the tool. */
   tags?: readonly string[];
+}
+
+/** A registered harness builtin, whose id participates in run policy. */
+export interface HarnessToolDescriptor extends HarnessModelToolDescriptor {
+  /** Stable builtin id used by policy, transcripts, and the registry. */
+  toolId: BuiltinToolId;
 }
