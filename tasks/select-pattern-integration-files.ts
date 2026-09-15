@@ -33,11 +33,13 @@ export const PATTERN_INTEGRATION_INITIAL_SHARD_LOADS = [
 export const PATTERN_INTEGRATION_SHARD_COUNT =
   PATTERN_INTEGRATION_INITIAL_SHARD_LOADS.length;
 
-// Relative weights from the latest successful CI profile. Files absent from
-// the profile receive a unit weight.
+// Each weight is a measured wall time in seconds, and a file this table does
+// not name is weighted one second. The measurement differs between the blocks
+// below, so each says which one it is.
 export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   Record<string, number>
 > = {
+  // From the latest successful CI profile.
   "cf-code-editor.test.ts": 40.7,
   "convergence-storm.test.ts": 30.0,
   "lunch-poll-vote.test.ts": 42.5,
@@ -74,12 +76,14 @@ export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   "chat-note.test.ts": 0.3,
   "chatbot.test.ts": 0.4,
   "fetch-json.test.ts": 0.4,
-  // The Topics read-budget files' wall times in seconds, each measured with
-  // `deno test` on a 10-core arm64 macOS machine while no other test ran.
-  "topics-read-budget-mentions-16.test.ts": 58.3,
-  "topics-read-budget-high-degree.test.ts": 42.1,
-  "topics-read-budget-single-bucket.test.ts": 38.6,
-  "topics-read-budget-small-and-threads.test.ts": 28.2,
+  // The Topics read-budget files, each the larger of two `deno test` runs on a
+  // 10-core arm64 macOS machine while no other test ran. CI runs them several
+  // times slower than that machine, so these weights order the four files
+  // against the CI-profiled ones rather than state what they cost in CI.
+  "topics-read-budget-small-and-threads.test.ts": 35.6,
+  "topics-read-budget-mentions-16.test.ts": 22.0,
+  "topics-read-budget-high-degree.test.ts": 19.5,
+  "topics-read-budget-single-bucket.test.ts": 19.3,
 };
 // Files at or above this measured duration occupy distinct shards.
 export const PATTERN_INTEGRATION_DISTINCT_WEIGHT_MINIMUM = 31;
