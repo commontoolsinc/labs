@@ -910,8 +910,9 @@ defined elsewhere is not a `FabricValue`.
 Each class is **nominal**, not structural: each declares a brand member that
 exists only in the type system (`declare` emits no runtime member, and nothing
 reads the key), keyed by an interned symbol that `api.ts` exports --
-`FABRIC_PRIMITIVE_BRAND` and `FABRIC_INSTANCE_BRAND`. This matters for what `FabricValue`
-means as a static claim. TypeScript is structurally typed, so were
+`FABRIC_PRIMITIVE_BRAND` and `FABRIC_INSTANCE_PLUS_BRAND`, the latter typed as
+the `PlusType` an instance may hold, `never` on `FabricInstance`. This matters
+for what `FabricValue` means as a static claim. TypeScript is structurally typed, so were
 `FabricPrimitive` empty, every object would satisfy it — and therefore satisfy
 `FabricValue`, since the union includes it — and were `FabricInstance` only its
 two clone methods, so would every object carrying two methods by those names.
@@ -960,11 +961,7 @@ that form the `FabricPrimitive` arm of `FabricValue`.
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
-import {
-  FABRIC_INSTANCE_BRAND,
-  FABRIC_INSTANCE_PLUS_BRAND,
-  FABRIC_PRIMITIVE_BRAND,
-} from "./api.ts";
+import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
@@ -1742,11 +1739,7 @@ class-side `[CODEC]` (Section 2.4).
 // Shown for illustration only.
 // file: packages/data-model/src/interface.ts
 
-import {
-  FABRIC_INSTANCE_BRAND,
-  FABRIC_INSTANCE_PLUS_BRAND,
-  FABRIC_PRIMITIVE_BRAND,
-} from "./api.ts";
+import { FABRIC_INSTANCE_PLUS_BRAND, FABRIC_PRIMITIVE_BRAND } from "./api.ts";
 
 /**
  * Abstract base class for the `FabricValue`s that participate in the fabric
@@ -1779,19 +1772,11 @@ import {
 export abstract class FabricInstance extends BaseFabricSpecialObject {
   /**
    * The nominal brand that tells a `FabricInstance` from any other object with
-   * the two clone methods, in the type system; the runtime root carries no
-   * brand, so this member is what makes the class nominal. `declare` emits no
-   * runtime member, and nothing ever reads the key. `api.ts` declares the
-   * identical member, and `api-agreement.ts` stops compiling if the two stop
-   * agreeing.
-   */
-  declare readonly [FABRIC_INSTANCE_BRAND]: true;
-
-  /**
-   * The nominal brand that carries a `FabricInstancePlus`'s `PlusType`, at
-   * `never` here since an instance of this class holds only `FabricValue`s.
-   * Declared the way the brand above is, and for the same reasons; `api.ts`
-   * declares the identical member.
+   * the two clone methods, in the type system, at `never` since an instance of
+   * this class holds only `FabricValue`s; the runtime root carries no brand,
+   * so this member is what makes the class nominal. `declare` emits no runtime
+   * member, and nothing ever reads the key. `api.ts` declares the identical
+   * member, and `api-agreement.ts` stops compiling if the two stop agreeing.
    */
   declare readonly [FABRIC_INSTANCE_PLUS_BRAND]: never;
 
