@@ -9,6 +9,8 @@
 import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 
+import type { Cell } from "@commonfabric/runner";
+
 import {
   buildTopicsFixture,
   type FixtureTopic,
@@ -20,12 +22,11 @@ import {
   reachTopicsDerivations,
   resolveTopicsProgram,
   topicIndicesOf,
-  type TopicOutputs,
   TOPICS_LIFT_NAMES,
   type TopicsFixture,
   type TopicsLiftName,
   type TopicsMeasurement,
-  type TopicsUpdate,
+  type TopicsOperation,
 } from "./topics-headless-fixture.ts";
 
 /** How many inbound mentions each topic has, counting each source once. */
@@ -33,16 +34,18 @@ function inboundCounts(fixture: TopicsFixture): number[] {
   return fixture.topics.map((_, topic) => mentionersOf(fixture, topic).length);
 }
 
-/** The outputs `measurement` holds for `topic`, which it must demand. */
-function outputsOf(
+/** The backlinks `measurement` holds for `topic`, which it must demand. */
+function backlinksOutputOf(
   measurement: TopicsMeasurement,
   topic: number,
-): TopicOutputs {
-  const outputs = measurement.outputs.topics.get(topic);
-  if (outputs === undefined) {
-    throw new Error(`The measurement does not demand topic ${topic}.`);
+): Cell<unknown[]> {
+  const backlinks = measurement.outputs.backlinks.get(topic);
+  if (backlinks === undefined) {
+    throw new Error(
+      `The measurement does not demand topic ${topic}'s backlinks.`,
+    );
   }
-  return outputs;
+  return backlinks;
 }
 
 /** How many of each lift's actions the scheduler holds once settled. */
@@ -342,7 +345,7 @@ describe("topics-headless-fixture", () => {
         .toEqual(expected);
       expect(
         topicIndices.map((topic) =>
-          topicIndicesOf(seeded, outputsOf(measurement, topic).backlinks)
+          topicIndicesOf(seeded, backlinksOutputOf(measurement, topic))
         ),
       ).toEqual(expected);
       expect(expected.every((backlinks) => backlinks.length > 0)).toBe(true);
@@ -352,17 +355,11 @@ describe("topics-headless-fixture", () => {
       const { seeded } = measurement;
       expect(fixture.topics[SELF_MENTIONER].mentions).toContain(SELF_MENTIONER);
       expect(
-        topicIndicesOf(
-          seeded,
-          outputsOf(measurement, SELF_MENTIONER).backlinks,
-        ),
+        topicIndicesOf(seeded, backlinksOutputOf(measurement, SELF_MENTIONER)),
       )
         .toEqual(mentionedByIndex(measurement, fixture, SELF_MENTIONER));
       expect(
-        topicIndicesOf(
-          seeded,
-          outputsOf(measurement, SELF_MENTIONER).backlinks,
-        ),
+        topicIndicesOf(seeded, backlinksOutputOf(measurement, SELF_MENTIONER)),
       )
         .not.toContain(SELF_MENTIONER);
     });
@@ -375,7 +372,7 @@ describe("topics-headless-fixture", () => {
       ).toHaveLength(2);
       const backlinks = topicIndicesOf(
         seeded,
-        outputsOf(measurement, target).backlinks,
+        backlinksOutputOf(measurement, target),
       );
       expect(backlinks).toEqual(mentionedByIndex(measurement, fixture, target));
       expect(backlinks.filter((source) => source === REPEATED_MENTIONER))
@@ -396,8 +393,8 @@ describe("topics-headless-fixture", () => {
     });
 
     it("returns each topic's present comment count as a count of its unretracted comments", () => {
-      const counts = topicIndices.map((topic) =>
-        outputsOf(measurement, topic).commentCount.get()
+      const counts = measurement.outputs.commentCounts.map((cell) =>
+        cell.get()
       );
       expect(counts).toEqual(fixture.topics.map(presentCommentCount));
       expect(
@@ -408,8 +405,8 @@ describe("topics-headless-fixture", () => {
     });
 
     it("returns each topic's last activity as its latest stamp, edits and retractions included", () => {
-      const activity = topicIndices.map((topic) =>
-        outputsOf(measurement, topic).lastActivity.get()
+      const activity = measurement.outputs.lastActivity.map((cell) =>
+        cell.get()
       );
       expect(activity).toEqual(fixture.topics.map(latestStamp));
       expect(
@@ -419,7 +416,7 @@ describe("topics-headless-fixture", () => {
       ).toBe(true);
     });
 
-    it("attributes each lift's runs to that lift by the source the scheduler reports", () => {
+    it("attributes each lift's runs and attempts to that lift by the source the scheduler reports", () => {
       // Each lift has one scheduler action per instance: one pivot, and one of
       // each topic lift per topic. The run telemetry the reads are keyed on,
       // the graph snapshot, and the reach helper's `src` all take an action's
@@ -427,7 +424,8 @@ describe("topics-headless-fixture", () => {
       // independently here. The action IDs are: the reads gather them from
       // run telemetry, and the snapshot lists the actions the scheduler holds,
       // so the two sets agreeing shows each lift's runs are attributed to that
-      // lift's own actions and to no others.
+      // lift's own actions and to no others. Attempts are attributed through
+      // those same action IDs, and each run commits in an attempt of its own.
 
       const { reads, graph, derivations } = measurement;
       const instances = {
@@ -449,8 +447,10 @@ describe("topics-headless-fixture", () => {
         expect([...body.actions].toSorted()).toEqual(graphActions.toSorted());
         expect(body.runs).toBeGreaterThanOrEqual(count);
         expect(body.proxyAccesses).toBeGreaterThan(0);
+        expect({ lift, attempts: reads.attempts[lift].attempts >= count })
+          .toEqual({ lift, attempts: true });
       }
-      expect(reads.attempts.attempts).toBeGreaterThan(0);
+      expect(reads.attempts.other.attempts).toBeGreaterThan(0);
     });
   });
 
@@ -496,7 +496,7 @@ describe("topics-headless-fixture", () => {
       expect(oracle).toEqual(mentionersOf(fixture, DUPLICATED));
       expect(oracle).toEqual([0, 1]);
       expect(
-        topicIndicesOf(seeded, outputsOf(measurement, DUPLICATED).backlinks),
+        topicIndicesOf(seeded, backlinksOutputOf(measurement, DUPLICATED)),
       ).toEqual([
         ...oracle,
         ...oracle,
@@ -526,7 +526,7 @@ describe("topics-headless-fixture", () => {
       ).toEqual(expected);
       expect(
         others.map((topic) =>
-          topicIndicesOf(seeded, outputsOf(measurement, topic).backlinks)
+          topicIndicesOf(seeded, backlinksOutputOf(measurement, topic))
         ),
       ).toEqual(expected);
       const [target] = fixture.topics[DUPLICATED].mentions;
@@ -538,7 +538,7 @@ describe("topics-headless-fixture", () => {
     });
   });
 
-  describe("over a board demanded alone", () => {
+  describe("over a board with no topic open", () => {
     const fixture = buildTopicsFixture({
       topicCount: 6,
       mentions: { shape: "high-degree", perSource: 2 },
@@ -560,28 +560,39 @@ describe("topics-headless-fixture", () => {
       expect(measurement.errors).toEqual([]);
     });
 
-    it("starts the pivot and none of the topic lifts", () => {
+    it("starts the pivot and every topic's comment count and last activity, and no backlinks", () => {
       expect(graphActionCounts(measurement)).toEqual({
         crossrefTable: 1,
         backlinksOf: 0,
-        presentCommentCountOf: 0,
-        lastActivityOf: 0,
+        presentCommentCountOf: fixture.topics.length,
+        lastActivityOf: fixture.topics.length,
       });
-      expect(measurement.outputs.topics.size).toBe(0);
+      expect(measurement.outputs.backlinks.size).toBe(0);
       expect(measurement.reads.bodies.crossrefTable.runs).toBeGreaterThan(0);
     });
 
-    it("returns a pivot entry per board entry, naming the topics that mention it", () => {
+    it("returns a pivot entry per distinct topic on the board, naming the topics that mention it", () => {
       const { seeded, outputs } = measurement;
       expect(
         pivotEntriesOf(seeded, outputs.table).map(({ topic, mentionedBy }) => ({
           topic,
           mentionedBy,
         })),
-      ).toEqual(fixture.board.map((topic) => ({
+      ).toEqual([...new Set(fixture.board)].map((topic) => ({
         topic,
         mentionedBy: mentionersOf(fixture, topic),
       })));
+    });
+
+    it("returns every topic's present comment count and last activity", () => {
+      const { outputs } = measurement;
+      expect({
+        commentCounts: outputs.commentCounts.map((cell) => cell.get()),
+        lastActivity: outputs.lastActivity.map((cell) => cell.get()),
+      }).toEqual({
+        commentCounts: fixture.topics.map(presentCommentCount),
+        lastActivity: fixture.topics.map(latestStamp),
+      });
     });
   });
 
@@ -608,23 +619,23 @@ describe("topics-headless-fixture", () => {
       expect(measurement.errors).toEqual([]);
     });
 
-    it("starts the pivot and the open topic's three lifts, and no other topic's", () => {
+    it("starts the board's lifts and the open topic's backlinks, and no other topic's backlinks", () => {
       expect(graphActionCounts(measurement)).toEqual({
         crossrefTable: 1,
         backlinksOf: 1,
-        presentCommentCountOf: 1,
-        lastActivityOf: 1,
+        presentCommentCountOf: fixture.topics.length,
+        lastActivityOf: fixture.topics.length,
       });
-      expect([...measurement.outputs.topics.keys()]).toEqual([OPEN]);
+      expect([...measurement.outputs.backlinks.keys()]).toEqual([OPEN]);
     });
 
     it("returns the open topic's backlinks, present comment count, and last activity", () => {
-      const outputs = outputsOf(measurement, OPEN);
+      const { seeded, outputs } = measurement;
       expect(mentionersOf(fixture, OPEN)).toHaveLength(5);
       expect({
-        backlinks: topicIndicesOf(measurement.seeded, outputs.backlinks),
-        commentCount: outputs.commentCount.get(),
-        lastActivity: outputs.lastActivity.get(),
+        backlinks: topicIndicesOf(seeded, backlinksOutputOf(measurement, OPEN)),
+        commentCount: outputs.commentCounts[OPEN].get(),
+        lastActivity: outputs.lastActivity[OPEN].get(),
       }).toEqual({
         backlinks: mentionersOf(fixture, OPEN),
         commentCount: presentCommentCount(fixture.topics[OPEN]),
@@ -651,7 +662,7 @@ describe("topics-headless-fixture", () => {
     });
     let measurement: TopicsMeasurement;
     let initialPivotRuns: number;
-    let update: TopicsUpdate;
+    let update: TopicsOperation;
 
     beforeAll(async () => {
       measurement = await measureTopicsFixture(
@@ -679,22 +690,106 @@ describe("topics-headless-fixture", () => {
       expect(
         topicIndicesOf(
           measurement.seeded,
-          outputsOf(measurement, OPEN).backlinks,
+          backlinksOutputOf(measurement, OPEN),
         ),
       ).toEqual([MENTIONER]);
     });
 
-    it("returns the reads of the runs the edit causes, attributed to the pivot and the lookup", () => {
+    it("returns the runs and attempts the edit causes, attributed to the pivot and the lookup", () => {
       const { bodies, attempts } = update.reads;
-      expect(bodies.crossrefTable.runs).toBeGreaterThan(0);
-      expect(bodies.backlinksOf.runs).toBeGreaterThan(0);
-      expect(attempts.attempts).toBeGreaterThan(0);
+      expect({
+        pivotRuns: bodies.crossrefTable.runs > 0,
+        lookupRuns: bodies.backlinksOf.runs > 0,
+        pivotAttempts: attempts.crossrefTable.attempts > 0,
+        lookupAttempts: attempts.backlinksOf.attempts > 0,
+      }).toEqual({
+        pivotRuns: true,
+        lookupRuns: true,
+        pivotAttempts: true,
+        lookupAttempts: true,
+      });
     });
 
     it("leaves the initialization reads as they were", () => {
       expect(measurement.reads.bodies.crossrefTable.runs).toBe(
         initialPivotRuns,
       );
+    });
+  });
+
+  describe("reopen()", () => {
+    const MENTIONER = 2;
+    const OPEN = 0;
+    const fixture = buildTopicsFixture({
+      topicCount: 4,
+      mentions: { shape: "none" },
+    });
+    let measurement: TopicsMeasurement;
+    let measuredRuntime: TopicsMeasurement["runtime"];
+    let reopened: TopicsOperation;
+
+    beforeAll(async () => {
+      measurement = await measureTopicsFixture(
+        fixture,
+        "topics-headless-fixture reopen",
+        { workload: "topic-open", topic: OPEN },
+      );
+      const { seeded } = measurement;
+      await measurement.update((tx) => {
+        seeded.topics[MENTIONER].withTx(tx).key("mentions").set([
+          seeded.topics[OPEN],
+        ]);
+      });
+      measuredRuntime = measurement.runtime;
+      reopened = await measurement.reopen();
+    });
+    afterAll(async () => {
+      await measurement?.[Symbol.asyncDispose]();
+    });
+
+    it("reports no runtime errors", () => {
+      expect(measurement.errors).toEqual([]);
+    });
+
+    it("leaves the measurement holding a runtime other than the one it started", () => {
+      expect(measurement.runtime).not.toBe(measuredRuntime);
+    });
+
+    it("returns outputs holding what the first runtime stored, its update included", () => {
+      const { seeded, outputs } = measurement;
+      expect({
+        backlinks: topicIndicesOf(seeded, backlinksOutputOf(measurement, OPEN)),
+        commentCount: outputs.commentCounts[OPEN].get(),
+        lastActivity: outputs.lastActivity[OPEN].get(),
+      }).toEqual({
+        backlinks: [MENTIONER],
+        commentCount: presentCommentCount(fixture.topics[OPEN]),
+        lastActivity: latestStamp(fixture.topics[OPEN]),
+      });
+    });
+
+    it("returns the reads of starting the demanded lifts again", () => {
+      const { bodies, attempts } = reopened.reads;
+      expect(
+        TOPICS_LIFT_NAMES.map((lift) => ({
+          lift,
+          actions: bodies[lift].actions.size,
+          attempted: attempts[lift].attempts > 0,
+        })),
+      ).toEqual([
+        { lift: "crossrefTable", actions: 1, attempted: true },
+        { lift: "backlinksOf", actions: 1, attempted: true },
+        {
+          lift: "presentCommentCountOf",
+          actions: fixture.topics.length,
+          attempted: true,
+        },
+        {
+          lift: "lastActivityOf",
+          actions: fixture.topics.length,
+          attempted: true,
+        },
+      ]);
     });
   });
 });

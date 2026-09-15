@@ -8,8 +8,9 @@
  *
  * Each case runs in a child process of its own, so a case that exhausts the
  * heap ends that process rather than the run: this process records the limit,
- * skips the larger sizes of that case's series, and carries on. Output is JSON
- * lines on stdout; progress, and everything a child prints, goes to stderr.
+ * skips the larger sizes of that case's series, and carries on. Any other
+ * failure ends the run. Output is JSON lines on stdout; progress, and
+ * everything a child prints, goes to stderr.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -26,6 +27,7 @@ import type {
 } from "@commonfabric/runner";
 
 import {
+  type AttemptReads,
   type BodyReads,
   buildTopicsFixture,
   DEFAULT_COMMENTS_PER_TOPIC,
@@ -97,17 +99,10 @@ const WORKLOADS = ["board", "topic-open", "all-backlinks"] as const;
 
 /**
  * The topic a `topic-open` case opens, and the one every warm update edits or
- * mentions. In the `high-degree` and `single-bucket` graphs every other topic
- * mentions it.
+ * mentions. How many other topics mention it depends on the mention graph, and
+ * each sample records the count.
  */
 const FOCUS_TOPIC = 0;
-
-/**
- * Why no case measures reopening storage it wrote, which every sample says in
- * place of a measurement.
- */
-const REOPEN_NOT_MEASURED =
-  "The fixture's measurement offers no second runtime over the storage it wrote.";
 
 /** A demand workload, by name. */
 type Workload = typeof WORKLOADS[number];
@@ -254,15 +249,24 @@ interface RunOptions {
   readonly maxOldSpaceSize?: number;
 }
 
+/** Matches the line V8 writes to stderr when a process exhausts its heap. */
+const HEAP_EXHAUSTED = /Fatal JavaScript out of memory|heap out of memory/i;
+
 /** What running one case in a child process came to. */
 type CaseOutcome =
   /** The case completed and wrote its sample. */
   | { readonly kind: "sample"; readonly sample: Record<string, unknown> }
-  /** A signal ended the child before the case completed. */
+  /** The case's process exhausted its heap before the case completed. */
   | {
     readonly kind: "limit";
-    readonly signal: Deno.Signal;
+
+    /** The signal that ended the process, when one did. */
+    readonly signal: Deno.Signal | null;
+
+    /** The process's exit code. */
     readonly exitCode: number;
+
+    /** The line of the process's stderr that reports the exhausted heap. */
     readonly message: string;
 
     /** The heap limit the child ran under, when it recorded one. */
@@ -276,8 +280,8 @@ type CaseOutcome =
  * Runs every case `options` selects, in rounds, writing the environment, each
  * sample, each limit, and a completion record as JSON lines.
  *
- * @throws Error when no case is selected, or when a child fails other than by
- * a signal.
+ * @throws Error when no case is selected, or when a case fails other than by
+ * exhausting its process's heap.
  */
 async function runProbe(options: RunOptions): Promise<void> {
   const cases = probeCases().filter((probeCase) =>
@@ -308,10 +312,10 @@ async function runProbe(options: RunOptions): Promise<void> {
     cases: cases.map((probeCase) => probeCase.id),
   });
 
-  // Per series, the smallest size that could not be built, and the largest
-  // size that was.
+  // Per series, the smallest size whose process exhausted its heap, and every
+  // size with a sample.
   const limits = new Map<string, number>();
-  const built = new Map<string, number>();
+  const sampled = new Map<string, Set<number>>();
   let samples = 0;
   for (let round = 1; round <= options.repeat; round++) {
     for (const probeCase of cases) {
@@ -322,17 +326,20 @@ async function runProbe(options: RunOptions): Promise<void> {
       if (outcome.kind === "sample") {
         emit({ kind: "sample", round, ...outcome.sample });
         samples++;
-        built.set(series, Math.max(built.get(series) ?? 0, size));
+        sampled.set(series, (sampled.get(series) ?? new Set()).add(size));
         continue;
       }
       limits.set(series, size);
+      const smaller = [...sampled.get(series) ?? []].filter((built) =>
+        built < size
+      );
       emit({
         kind: "limit",
         round,
         case: id,
         series,
         size,
-        largestBuilt: built.get(series) ?? null,
+        largestBuilt: smaller.length === 0 ? null : Math.max(...smaller),
         heapSizeLimitBytes: outcome.heapSizeLimitBytes,
         elapsedMs: outcome.elapsedMs,
         signal: outcome.signal,
@@ -378,9 +385,9 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 /**
  * Runs `probeCase` in a child process started with `v8Flags`, forwarding
  * everything the child prints to stderr, and returns its sample, or the limit
- * a signal ending the child records.
+ * its process reached by exhausting its heap.
  *
- * @throws Error when the child exits unsuccessfully other than by a signal, or
+ * @throws Error when the child fails other than by exhausting its heap, or
  * exits successfully without writing its sample.
  */
 async function runCase(
@@ -415,7 +422,17 @@ async function runCase(
     ]);
     const elapsedMs = performance.now() - started;
     const written = await Deno.readTextFile(sampleFile);
-    if (status.signal !== null) {
+    if (!status.success) {
+      const exhausted = stderr.split("\n").map((line) => line.trim())
+        .find((line) => HEAP_EXHAUSTED.test(line));
+      if (exhausted === undefined) {
+        const ending = status.signal === null
+          ? `exited with code ${status.code}`
+          : `was ended by \`${status.signal}\``;
+        throw new Error(
+          `Case \`${probeCase.id}\` ${ending} without exhausting its heap.`,
+        );
+      }
       // The file holds the child's first record or a sample cut short, so the
       // limit is read out of its text rather than parsed as a whole.
       const heapLimit = /"heapSizeLimitBytes":(\d+)/.exec(written);
@@ -423,15 +440,10 @@ async function runCase(
         kind: "limit",
         signal: status.signal,
         exitCode: status.code,
-        message: fatalMessageOf(stderr),
+        message: exhausted,
         heapSizeLimitBytes: heapLimit === null ? null : Number(heapLimit[1]),
         elapsedMs,
       };
-    }
-    if (!status.success) {
-      throw new Error(
-        `Case \`${probeCase.id}\` exited with code ${status.code}.`,
-      );
     }
     const sample: Record<string, unknown> = JSON.parse(written);
     if (sample.kind !== "sample") {
@@ -461,16 +473,6 @@ async function forwardToStderr(
   return text + decoder.decode();
 }
 
-/**
- * Helper for {@link runCase}, which returns the line of a child's stderr that
- * says why the process ended, or its last line when none does.
- */
-function fatalMessageOf(stderr: string): string {
-  const lines = stderr.split("\n").map((line) => line.trim()).filter(Boolean);
-  return lines.find((line) => /fatal|out of memory/i.test(line)) ??
-    lines.at(-1) ?? "";
-}
-
 //
 // One case, in a child process
 //
@@ -489,6 +491,9 @@ interface StoredTopic {
   /** The topic's links. */
   links: FixtureLink[];
 }
+
+/** What a warm update's edit touched, by topic and entry index. */
+type EditRecord = Readonly<Record<string, number | boolean>>;
 
 /** What a phase recorded, or why it was not measured. */
 type PhaseRecord =
@@ -525,12 +530,10 @@ async function measureCase(
   );
   const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
   verifyOutputs(measurement, fixture);
-  await measureWarmUpdates(id, measurement, fixture, phases);
-  phases.push({
-    phase: "reopen",
-    measured: false,
-    reason: REOPEN_NOT_MEASURED,
-  });
+  const updated = await measureWarmUpdates(id, measurement, fixture, phases);
+  console.error(`${id}: reopen`);
+  phases.push(phaseRecord("reopen", await measurement.reopen()));
+  verifyOutputs(measurement, updated);
 
   await Deno.writeTextFile(
     sampleFile,
@@ -552,6 +555,7 @@ async function measureCase(
           0,
         ),
         focusTopic: FOCUS_TOPIC,
+        focusMentioners: mentionersOf(fixture, FOCUS_TOPIC).length,
       },
       heapSizeLimitBytes,
       phases,
@@ -574,14 +578,15 @@ function demandOf(workload: Workload): TopicsDemand {
 /**
  * Helper for {@link measureCase}, which measures each warm update in turn on
  * the one evolving fixture, appending a record for each to `phases` and
- * checking every output after each.
+ * checking every output after each, and returns the fixture data as the
+ * updates left it.
  */
 async function measureWarmUpdates(
   id: string,
   measurement: TopicsMeasurement,
   fixture: TopicsFixture,
   phases: PhaseRecord[],
-): Promise<void> {
+): Promise<TopicsFixture> {
   const { seeded } = measurement;
   let model = fixture;
   const others = model.topics.map((_, index) => index)
@@ -591,7 +596,7 @@ async function measureWarmUpdates(
   const focus = () => model.topics[FOCUS_TOPIC];
   const measure = async (
     phase: string,
-    edit: Readonly<Record<string, number>>,
+    edit: EditRecord,
     next: TopicsFixture,
     write: (tx: IExtendedStorageTransaction) => void,
   ) => {
@@ -601,63 +606,76 @@ async function measureWarmUpdates(
     verifyOutputs(measurement, model);
   };
 
-  // A source that does not yet mention the focus topic appends a mention of
-  // it, then drops that entry again. Where every other topic already mentions
-  // the focus topic, the first of them appends a repeat.
-  const source =
-    others.find((index) =>
-      !model.topics[index].mentions.includes(FOCUS_TOPIC)
-    ) ?? others[0];
-  const unmentioned = model.topics[source].mentions;
+  // Removal drops every entry naming the focus topic from a topic that
+  // mentions it, and insertion appends one again, so each moves that topic
+  // out of or into the focus topic's mentioners. Where nothing mentions the
+  // focus topic, removal is not measured and insertion starts from the first
+  // other topic.
+  const mentioner = others.find((index) =>
+    model.topics[index].mentions.includes(FOCUS_TOPIC)
+  );
+  const source = mentioner ?? others[0];
+  if (mentioner === undefined) {
+    phases.push({
+      phase: "mention removal",
+      measured: false,
+      reason: "No topic mentions the focus topic.",
+    });
+  } else {
+    const before = model.topics[source].mentions;
+    const kept = before.filter((index) => index !== FOCUS_TOPIC);
+    await measure(
+      "mention removal",
+      {
+        source,
+        target: FOCUS_TOPIC,
+        removedEntries: before.length - kept.length,
+      },
+      withTopic(model, source, (topic) => ({ ...topic, mentions: kept })),
+      (tx) =>
+        stored(source, tx).key("mentions").set(
+          kept.map((index) => seeded.topics[index]),
+        ),
+    );
+  }
   await measure(
     "mention insertion",
     { source, target: FOCUS_TOPIC },
     withTopic(model, source, (topic) => ({
       ...topic,
-      mentions: [...unmentioned, FOCUS_TOPIC],
+      mentions: [...topic.mentions, FOCUS_TOPIC],
     })),
     (tx) => stored(source, tx).key("mentions").push(seeded.topics[FOCUS_TOPIC]),
   );
+
+  // The same topic, which now names the focus topic in exactly one entry,
+  // points that entry at a topic it does not yet mention, leaving the focus
+  // topic's mentioners and joining that topic's. Where it already mentions
+  // every other topic, it points the entry at one it mentions, and
+  // `targetGainsSource` records that the target's mentioners did not change.
+  const mentions = model.topics[source].mentions;
+  const position = mentions.indexOf(FOCUS_TOPIC);
+  const candidates = others.filter((index) => index !== source);
+  const unmentioned = candidates.filter((index) => !mentions.includes(index));
+  const target = unmentioned[0] ?? candidates[0];
   await measure(
-    "mention removal",
-    { source, target: FOCUS_TOPIC },
-    withTopic(model, source, (topic) => ({ ...topic, mentions: unmentioned })),
+    "same-count retarget",
+    {
+      source,
+      position,
+      from: FOCUS_TOPIC,
+      to: target,
+      targetGainsSource: unmentioned.length > 0,
+    },
+    withTopic(model, source, (topic) => ({
+      ...topic,
+      mentions: mentions.with(position, target),
+    })),
     (tx) =>
-      stored(source, tx).key("mentions").set(
-        unmentioned.map((index) => seeded.topics[index]),
+      stored(source, tx).key("mentions").key(position).set(
+        seeded.topics[target],
       ),
   );
-
-  // A source mentioning the focus topic points that one entry at another
-  // topic, preferring one it does not already mention.
-  const retargeter = others.find((index) =>
-    model.topics[index].mentions.includes(FOCUS_TOPIC)
-  );
-  if (retargeter === undefined) {
-    phases.push({
-      phase: "same-count retarget",
-      measured: false,
-      reason: "No topic mentions the focus topic.",
-    });
-  } else {
-    const mentions = model.topics[retargeter].mentions;
-    const position = mentions.indexOf(FOCUS_TOPIC);
-    const candidates = others.filter((index) => index !== retargeter);
-    const target = candidates.find((index) => !mentions.includes(index)) ??
-      candidates[0];
-    await measure(
-      "same-count retarget",
-      { source: retargeter, position, from: FOCUS_TOPIC, to: target },
-      withTopic(model, retargeter, (topic) => ({
-        ...topic,
-        mentions: mentions.with(position, target),
-      })),
-      (tx) =>
-        stored(retargeter, tx).key("mentions").key(position).set(
-          seeded.topics[target],
-        ),
-    );
-  }
 
   // The focus topic's thread gains a comment, and its first present comment
   // is edited and then retracted. Each stamp is later than any the topic
@@ -725,7 +743,9 @@ async function measureWarmUpdates(
     );
   }
 
-  // Another topic is renamed. None of the reached lifts reads a title.
+  // Another topic's title, and nothing else on it, is written. None of the
+  // reached lifts reads a title, which a rename's `titleUpdatedAt` stamp would
+  // change, so this is not a rename.
   const sibling = others[others.length - 1];
   const title = `${model.topics[sibling].title}, renamed`;
   await measure(
@@ -734,6 +754,7 @@ async function measureWarmUpdates(
     withTopic(model, sibling, (topic) => ({ ...topic, title })),
     (tx) => stored(sibling, tx).key("title").set(title),
   );
+  return model;
 }
 
 /**
@@ -752,8 +773,10 @@ function withTopic(
 }
 
 /**
- * Checks the pivot, and every demanded topic's outputs, against what `model`
- * says they should be.
+ * Checks the pivot, every topic's comment count and last activity, and every
+ * demanded topic's backlinks against what `model` says they should be. The
+ * pivot holds one entry per distinct topic on the board, in the order of each
+ * topic's first entry.
  *
  * @throws Error when one differs, or when the runtime has reported an error.
  */
@@ -768,29 +791,29 @@ function verifyOutputs(
       topic,
       mentionedBy,
     })),
-  ).toEqual(model.board.map((topic) => ({
+  ).toEqual([...new Set(model.board)].map((topic) => ({
     topic,
     mentionedBy: mentionersOf(model, topic),
   })));
-  for (const [topic, cells] of outputs.topics) {
-    expect({
-      topic,
-      backlinks: topicIndicesOf(seeded, cells.backlinks),
-      commentCount: cells.commentCount.get(),
-      lastActivity: cells.lastActivity.get(),
-    }).toEqual({
+  expect({
+    commentCounts: outputs.commentCounts.map((cell) => cell.get()),
+    lastActivity: outputs.lastActivity.map((cell) => cell.get()),
+  }).toEqual({
+    commentCounts: model.topics.map(presentCommentCount),
+    lastActivity: model.topics.map(latestStamp),
+  });
+  for (const [topic, backlinks] of outputs.backlinks) {
+    expect({ topic, backlinks: topicIndicesOf(seeded, backlinks) }).toEqual({
       topic,
       backlinks: mentionersOf(model, topic),
-      commentCount: presentCommentCount(model.topics[topic]),
-      lastActivity: latestStamp(model.topics[topic]),
     });
   }
 }
 
 /**
- * Returns the record of a measured phase: its elapsed time, its body reads by
- * role, its attempt reads, the graph once settled, and the memory in use
- * after a collection.
+ * Returns the record of a measured phase: its elapsed time, its body and
+ * attempt reads by role, the graph once settled, and the memory in use after a
+ * collection.
  */
 function phaseRecord(
   phase: string,
@@ -799,10 +822,10 @@ function phaseRecord(
     readonly graph: SchedulerGraphSnapshot;
     readonly elapsedMs: number;
   },
-  edit?: Readonly<Record<string, number>>,
+  edit?: EditRecord,
 ): PhaseRecord {
   const { reads, graph, elapsedMs } = measured;
-  const { bodies } = reads;
+  const { bodies, attempts } = reads;
   return {
     phase,
     measured: true,
@@ -816,9 +839,18 @@ function phaseRecord(
         lastActivityOf: bodyRecord(bodies.lastActivityOf),
       },
       other: bodyRecord(bodies.other),
-      total: totalOf(Object.values(bodies)),
+      total: bodyTotalOf(Object.values(bodies)),
     },
-    attempts: { ...reads.attempts },
+    attempts: {
+      producer: { crossrefTable: { ...attempts.crossrefTable } },
+      consumer: { backlinksOf: { ...attempts.backlinksOf } },
+      aggregate: {
+        presentCommentCountOf: { ...attempts.presentCommentCountOf },
+        lastActivityOf: { ...attempts.lastActivityOf },
+      },
+      other: { ...attempts.other },
+      total: attemptTotalOf(Object.values(attempts)),
+    },
     graph: { nodes: graph.nodes.length, edges: graph.edges.length },
     memory: memoryRecord(),
   };
@@ -830,7 +862,7 @@ function bodyRecord(body: BodyReads): Record<string, number> {
 }
 
 /** Returns `bodies` summed, with the largest single run's proxy accesses. */
-function totalOf(bodies: readonly BodyReads[]): Record<string, number> {
+function bodyTotalOf(bodies: readonly BodyReads[]): Record<string, number> {
   const sum = (count: (body: BodyReads) => number) =>
     bodies.reduce((total, body) => total + count(body), 0);
   return {
@@ -845,6 +877,15 @@ function totalOf(bodies: readonly BodyReads[]): Record<string, number> {
       ...bodies.map((body) => body.maxRunProxyAccesses),
     ),
   };
+}
+
+/** Returns `buckets` summed. */
+function attemptTotalOf(buckets: readonly AttemptReads[]): AttemptReads {
+  return buckets.reduce((total, bucket) => ({
+    attempts: total.attempts + bucket.attempts,
+    proxyAccesses: total.proxyAccesses + bucket.proxyAccesses,
+    linkResolutions: total.linkResolutions + bucket.linkResolutions,
+  }), { attempts: 0, proxyAccesses: 0, linkResolutions: 0 });
 }
 
 /**

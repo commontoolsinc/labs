@@ -10,7 +10,8 @@
  * authored name through the runtime's artifact index, and each lift's runs are
  * attributed to it by the authored source the scheduler reports for them. A
  * measurement starts the lifts one demand workload names, and records reads
- * over its initialization and over each update written to it afterward.
+ * over its initialization, over each update written to it afterward, and over
+ * reopening its storage in a fresh runtime.
  *
  * Every value is derived from the options, so fixtures built from equal
  * options hold equal data, and counts taken in separate runtimes compare.
@@ -492,7 +493,10 @@ export interface BodyReads extends ActionReadStats {
   maxRunProxyAccesses: number;
 }
 
-/** Transaction-attempt reads, summed over every attempt of every kind. */
+/**
+ * Transaction-attempt reads, summed over the attempts attributed to one
+ * bucket.
+ */
 export interface AttemptReads {
   /** Attempts recorded. */
   attempts: number;
@@ -512,8 +516,14 @@ export interface TopicsReads {
    */
   readonly bodies: Readonly<Record<TopicsLiftName | "other", BodyReads>>;
 
-  /** Attempt reads, initialization included. */
-  readonly attempts: AttemptReads;
+  /**
+   * Attempt reads per reached lift, attributed by the action each attempt
+   * names: an attempt belongs to a lift when its action is one of the actions
+   * that lift's recorded body runs report. Every other attempt, the
+   * initialization attempt included, is under `other`. The attribution is made
+   * when recording stops.
+   */
+  readonly attempts: Readonly<Record<TopicsLiftName | "other", AttemptReads>>;
 }
 
 /** A fixture written to storage. */
@@ -549,80 +559,95 @@ export const TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS = {
   serverExecution: false,
 } as const;
 
-/** Which of the reached lifts a measurement starts and holds demanded. */
+/**
+ * Which of the reached lifts a measurement starts and holds demanded.
+ *
+ * A board with no topic open sorts its cards by each topic's last activity and
+ * shows each topic's comment count, so every workload demands both for every
+ * topic. Every workload also runs the pivot, although only a topic's backlinks
+ * and the board's published `crossrefs` output read it, so a board with no
+ * topic open may not run it at all. This fixture does not settle that; the
+ * per-lift reads keep the pivot's work separable.
+ */
 export type TopicsDemand =
-  /** The board alone: the pivot. */
+  /**
+   * The board with no topic open: the pivot, and every topic's comment count
+   * and last activity.
+   */
   | { readonly workload: "board" }
-  /** The board with one topic open: the pivot, and that topic's three lifts. */
+  /** The board with one topic open: the board's demand, and its backlinks. */
   | { readonly workload: "topic-open"; readonly topic: number }
   /**
-   * The pivot, and every topic's three lifts: a scaling probe, not what a
-   * board in use demands.
+   * The board's demand, and every topic's backlinks: a scaling probe, not what
+   * a board in use demands.
    */
   | { readonly workload: "all-backlinks" };
-
-/** One topic's lift outputs. */
-export interface TopicOutputs {
-  /** The topic's backlinks. */
-  readonly backlinks: Cell<unknown[]>;
-
-  /** The topic's present comment count. */
-  readonly commentCount: Cell<number>;
-
-  /** The topic's last activity. */
-  readonly lastActivity: Cell<number>;
-}
 
 /** The demanded lifts' outputs over a seeded fixture. */
 export interface TopicsOutputs {
   /** The board's pivot over the fixture's board: a link to a row per entry. */
   readonly table: Cell<PivotRow[]>;
 
-  /** Each demanded topic's outputs, by topic index. */
-  readonly topics: ReadonlyMap<number, TopicOutputs>;
+  /** Each topic's present comment count, by topic index. */
+  readonly commentCounts: readonly Cell<number>[];
+
+  /** Each topic's last activity, by topic index. */
+  readonly lastActivity: readonly Cell<number>[];
+
+  /** Each demanded topic's backlinks, by topic index. */
+  readonly backlinks: ReadonlyMap<number, Cell<unknown[]>>;
 }
 
-/** An update to a measurement, once the runtime has settled. */
-export interface TopicsUpdate {
-  /** Reads from the start of the update through settlement. */
+/** An operation on a measurement, recorded through settlement. */
+export interface TopicsOperation {
+  /** Reads from the start of the operation through settlement. */
   readonly reads: TopicsReads;
 
   /** The scheduler's graph once settled. */
   readonly graph: SchedulerGraphSnapshot;
 
   /**
-   * Wall-clock milliseconds from the start of the update through settlement.
+   * Wall-clock milliseconds from the start of the operation through
+   * settlement.
    */
   readonly elapsedMs: number;
 }
 
-/** A settled measurement, holding its runtime open until disposed. */
+/**
+ * A settled measurement, holding a runtime over the fixture's storage open
+ * until disposed. That is the runtime the measurement started, until
+ * `reopen()` replaces it; `runtime`, `derivations`, `seeded`, and `outputs`
+ * always describe the current one.
+ */
 export interface TopicsMeasurement extends AsyncDisposable {
-  /** The runtime the measurement ran in. */
+  /** The runtime running the demanded lifts. */
   readonly runtime: Runtime;
 
-  /** The reached derivations. */
+  /** The derivations `runtime` reached. */
   readonly derivations: TopicsDerivations;
 
-  /** The fixture as written to storage. */
+  /** The fixture as written to storage, addressed through `runtime`. */
   readonly seeded: SeededTopicsFixture;
 
-  /** The lifts the measurement started and holds demanded. */
+  /** The lifts the measurement starts and holds demanded. */
   readonly demand: TopicsDemand;
 
-  /** The outputs, each held demanded until the measurement is disposed. */
+  /** The outputs `runtime` holds demanded until the measurement is disposed. */
   readonly outputs: TopicsOutputs;
 
-  /** Reads from the start of the lifts through settlement. */
+  /** Reads from the start of the lifts through settlement, at initialization. */
   readonly reads: TopicsReads;
 
-  /** Wall-clock milliseconds from the start of the lifts through settlement. */
+  /**
+   * Wall-clock milliseconds from the start of the lifts through settlement, at
+   * initialization.
+   */
   readonly elapsedMs: number;
 
-  /** The scheduler's graph once settled. */
+  /** The scheduler's graph once initialization settled. */
   readonly graph: SchedulerGraphSnapshot;
 
-  /** Errors the runtime reported, in the order it reported them. */
+  /** Errors any of the measurement's runtimes reported, in the order reported. */
   readonly errors: readonly string[];
 
   /**
@@ -630,13 +655,29 @@ export interface TopicsMeasurement extends AsyncDisposable {
    * has settled, with the reads recorded from the start of the edit through
    * settlement. The edit's own transaction is not a read attempt; the reactive
    * runs its commit causes are. Every run completed before settlement is
-   * recorded, whatever caused it, so two updates must not overlap.
+   * recorded, whatever caused it, so operations must not overlap.
    *
    * @throws Error when the commit fails.
    */
   update(
     edit: (tx: IExtendedStorageTransaction) => void,
-  ): Promise<TopicsUpdate>;
+  ): Promise<TopicsOperation>;
+
+  /**
+   * Disposes `runtime` without closing its storage, opens a fresh runtime over
+   * the same storage manager, reaches the Topics lifts again, and starts the
+   * lifts `demand` names over the stored fixture and the outputs already written
+   * for them, returning once the new runtime has settled.
+   *
+   * Reads are recorded from the transaction that starts the lifts through
+   * settlement, as at initialization; disposing the old runtime and compiling
+   * the sources precede it and are not recorded. Both runtimes share one
+   * storage manager, so this reopens storage the process holds open rather than
+   * connecting a new client to it.
+   *
+   * @throws Error when starting the lifts fails to commit.
+   */
+  reopen(): Promise<TopicsOperation>;
 }
 
 /**
@@ -646,7 +687,9 @@ export interface TopicsMeasurement extends AsyncDisposable {
  *
  * Reads are recorded from the transaction that starts the lifts, which is
  * accounted as initialization, through settlement; compiling the sources and
- * writing the fixture precede it and are not recorded.
+ * writing the fixture precede it and are not recorded. The fixture's storage
+ * stays open until the measurement is disposed, which is what lets `reopen()`
+ * start the lifts again over it.
  *
  * @throws RangeError when `demand` opens a topic outside the fixture.
  */
@@ -655,13 +698,131 @@ export async function measureTopicsFixture(
   passphrase: string,
   demand: TopicsDemand = { workload: "all-backlinks" },
 ): Promise<TopicsMeasurement> {
-  const demanded = demandedTopics(demand, fixture.topics.length);
+  const backlinkTopics = backlinkTopicsOf(demand, fixture.topics.length);
   await using stack = new AsyncDisposableStack();
   const identity = await Identity.fromPassphrase(passphrase);
   const space: MemorySpace = identity.did();
   const storage = EmulatedStorageManager.emulate({ as: identity });
   stack.defer(() => storage.close());
   const errors: string[] = [];
+  const open = (seed?: TopicsFixture) =>
+    openTopicsSession(
+      storage,
+      space,
+      errors,
+      { topicCount: fixture.topics.length, backlinkTopics, seed },
+    );
+
+  // Unset only while `reopen()` is between disposing one session and opening
+  // the next, so a measurement whose reopen failed holds no runtime.
+  let session: TopicsSession | undefined = await open(fixture);
+  stack.defer(() => session?.[Symbol.asyncDispose]());
+  const { start } = session;
+  const current = (): TopicsSession => {
+    if (session === undefined) {
+      throw new Error(
+        "The measurement holds no runtime: its `reopen()` did not complete.",
+      );
+    }
+    return session;
+  };
+
+  const update = async (
+    edit: (tx: IExtendedStorageTransaction) => void,
+  ): Promise<TopicsOperation> => {
+    const { runtime, derivations } = current();
+    const recording = recordTopicsReads(runtime, derivations.sources);
+    let elapsedMs: number;
+    let graph: SchedulerGraphSnapshot;
+    try {
+      const started = performance.now();
+      const tx = runtime.edit();
+      edit(tx);
+      const { error } = await tx.commit();
+      if (error !== undefined) {
+        throw new Error(`Committing a Topics update failed: ${error.name}`, {
+          cause: error,
+        });
+      }
+      await runtime.settled(Infinity);
+      elapsedMs = performance.now() - started;
+      graph = runtime.scheduler.getGraphSnapshot();
+    } finally {
+      recording[Symbol.dispose]();
+    }
+    return { reads: recording.reads, graph, elapsedMs };
+  };
+
+  const reopen = async (): Promise<TopicsOperation> => {
+    const previous = current();
+    session = undefined;
+    await previous[Symbol.asyncDispose]();
+    session = await open();
+    return session.start;
+  };
+
+  const cleanup = stack.move();
+  return {
+    get runtime() {
+      return current().runtime;
+    },
+    get derivations() {
+      return current().derivations;
+    },
+    get seeded() {
+      return current().seeded;
+    },
+    demand,
+    get outputs() {
+      return current().outputs;
+    },
+    reads: start.reads,
+    elapsedMs: start.elapsedMs,
+    graph: start.graph,
+    errors,
+    update,
+    reopen,
+    [Symbol.asyncDispose]: () => cleanup.disposeAsync(),
+  };
+}
+
+/** One runtime running the demanded lifts over a fixture's storage. */
+interface TopicsSession extends AsyncDisposable {
+  /** The runtime. */
+  readonly runtime: Runtime;
+
+  /** The derivations the runtime reached. */
+  readonly derivations: TopicsDerivations;
+
+  /** The fixture's documents, addressed through the runtime. */
+  readonly seeded: SeededTopicsFixture;
+
+  /** The outputs, each held demanded until the session is disposed. */
+  readonly outputs: TopicsOutputs;
+
+  /** What starting the lifts recorded, from their start through settlement. */
+  readonly start: TopicsOperation;
+}
+
+/**
+ * Helper for {@link measureTopicsFixture}, which opens a runtime over `storage`,
+ * reaches the Topics lifts, writes `seed` into `space` or, absent one,
+ * addresses the fixture already written there, and starts the pivot, every
+ * topic's comment count and last activity, and the backlinks of each topic in
+ * `backlinkTopics`, recording reads from that start through settlement.
+ * Disposing the session disposes its runtime and leaves `storage` open.
+ */
+async function openTopicsSession(
+  storage: EmulatedStorageManager,
+  space: MemorySpace,
+  errors: string[],
+  { topicCount, backlinkTopics, seed }: {
+    readonly topicCount: number;
+    readonly backlinkTopics: readonly number[];
+    readonly seed?: TopicsFixture;
+  },
+): Promise<TopicsSession> {
+  await using stack = new AsyncDisposableStack();
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -674,7 +835,9 @@ export async function measureTopicsFixture(
     runtime,
     await resolveTopicsProgram(runtime),
   );
-  const seeded = await seedTopicsFixture(runtime, space, fixture);
+  const seeded = seed === undefined
+    ? storedTopicsFixture(runtime, space, topicCount)
+    : await seedTopicsFixture(runtime, space, seed);
   const recorder = recordTopicsReads(runtime, derivations.sources);
   let outputs: TopicsOutputs;
   let elapsedMs: number;
@@ -685,14 +848,17 @@ export async function measureTopicsFixture(
       space,
       derivations,
       seeded,
-      demanded,
+      backlinkTopics,
     );
-    const topicCells = [...outputs.topics.values()].flatMap((topic) => [
-      topic.backlinks,
-      topic.commentCount,
-      topic.lastActivity,
-    ]);
-    for (const cell of [outputs.table, ...topicCells]) {
+    const { table, commentCounts, lastActivity, backlinks } = outputs;
+    for (
+      const cell of [
+        table,
+        ...commentCounts,
+        ...lastActivity,
+        ...backlinks.values(),
+      ]
+    ) {
       stack.defer(cell.sink(() => {}));
     }
     await runtime.settled(Infinity);
@@ -700,32 +866,10 @@ export async function measureTopicsFixture(
   } finally {
     recorder[Symbol.dispose]();
   }
-  const graph = runtime.scheduler.getGraphSnapshot();
-
-  const update = async (
-    edit: (tx: IExtendedStorageTransaction) => void,
-  ): Promise<TopicsUpdate> => {
-    const recording = recordTopicsReads(runtime, derivations.sources);
-    try {
-      const started = performance.now();
-      const tx = runtime.edit();
-      edit(tx);
-      const { error } = await tx.commit();
-      if (error !== undefined) {
-        throw new Error(`Committing a Topics update failed: ${error.name}`, {
-          cause: error,
-        });
-      }
-      await runtime.settled(Infinity);
-      const elapsedMs = performance.now() - started;
-      return {
-        reads: recording.reads,
-        graph: runtime.scheduler.getGraphSnapshot(),
-        elapsedMs,
-      };
-    } finally {
-      recording[Symbol.dispose]();
-    }
+  const start = {
+    reads: recorder.reads,
+    graph: runtime.scheduler.getGraphSnapshot(),
+    elapsedMs,
   };
 
   const cleanup = stack.move();
@@ -733,22 +877,43 @@ export async function measureTopicsFixture(
     runtime,
     derivations,
     seeded,
-    demand,
     outputs,
-    reads: recorder.reads,
-    elapsedMs,
-    graph,
-    errors,
-    update,
+    start,
     [Symbol.asyncDispose]: () => cleanup.disposeAsync(),
+  };
+}
+
+/** The cause of topic `index`'s document. */
+function topicCause(index: number): string {
+  return `topics-fixture-topic-${index}`;
+}
+
+/** The cause of the board's list of topic links. */
+const BOARD_CAUSE = "topics-fixture-board";
+
+/**
+ * Helper for {@link openTopicsSession}, which addresses the first
+ * `topicCount` topic documents and the board already written into `space`.
+ */
+function storedTopicsFixture(
+  runtime: Runtime,
+  space: MemorySpace,
+  topicCount: number,
+): SeededTopicsFixture {
+  return {
+    topics: Array.from(
+      { length: topicCount },
+      (_, index) => runtime.getCell<unknown>(space, topicCause(index)),
+    ),
+    board: runtime.getCell<unknown[]>(space, BOARD_CAUSE),
   };
 }
 
 /**
  * Helper for {@link measureTopicsFixture}, which returns the index of each
- * topic whose lifts `demand` starts, in topic order.
+ * topic whose backlinks `demand` names, in topic order.
  */
-function demandedTopics(demand: TopicsDemand, topicCount: number): number[] {
+function backlinkTopicsOf(demand: TopicsDemand, topicCount: number): number[] {
   switch (demand.workload) {
     case "board":
       return [];
@@ -771,12 +936,7 @@ async function seedTopicsFixture(
 ): Promise<SeededTopicsFixture> {
   const tx = runtime.edit();
   const topics = fixture.topics.map((_, index) =>
-    runtime.getCell<unknown>(
-      space,
-      `topics-fixture-topic-${index}`,
-      undefined,
-      tx,
-    )
+    runtime.getCell<unknown>(space, topicCause(index), undefined, tx)
   );
   fixture.topics.forEach((topic, index) =>
     topics[index].set({
@@ -784,12 +944,7 @@ async function seedTopicsFixture(
       mentions: topic.mentions.map((target) => topics[target]),
     })
   );
-  const board = runtime.getCell<unknown[]>(
-    space,
-    "topics-fixture-board",
-    undefined,
-    tx,
-  );
+  const board = runtime.getCell<unknown[]>(space, BOARD_CAUSE, undefined, tx);
   board.set(fixture.board.map((index) => topics[index]));
   const { error } = await tx.commit();
   if (error !== undefined) {
@@ -801,16 +956,17 @@ async function seedTopicsFixture(
 }
 
 /**
- * Helper for {@link measureTopicsFixture}, which starts the pivot over the
- * seeded board and the three lifts of each topic in `demanded`, in one
- * transaction begun as an initialization attempt.
+ * Helper for {@link openTopicsSession}, which starts the pivot over the seeded
+ * board, every topic's comment count and last activity, and the backlinks of
+ * each topic in `backlinkTopics`, in one transaction begun as an
+ * initialization attempt.
  */
 async function startTopicsLifts(
   runtime: Runtime,
   space: MemorySpace,
   { lifts }: TopicsDerivations,
   seeded: SeededTopicsFixture,
-  demanded: readonly number[],
+  backlinkTopics: readonly number[],
 ): Promise<TopicsOutputs> {
   const tx = runtime.edit();
   runtime.scheduler.beginReadAttempt(tx, "initialization");
@@ -822,36 +978,41 @@ async function startTopicsLifts(
     { sources: seeded.board },
     output<PivotRow[]>("topics-fixture-crossrefs"),
   );
-  const topics = new Map<number, TopicOutputs>();
-  for (const index of demanded) {
-    const topic = seeded.topics[index];
-    topics.set(index, {
-      backlinks: runtime.run(
-        tx,
-        lifts.backlinksOf,
-        { table, self: topic },
-        output<unknown[]>(`topics-fixture-backlinks-${index}`),
-      ),
-      commentCount: runtime.run(
-        tx,
-        lifts.presentCommentCountOf,
-        { comments: topic.key("comments") },
-        output<number>(`topics-fixture-comment-count-${index}`),
-      ),
-      lastActivity: runtime.run(
-        tx,
-        lifts.lastActivityOf,
-        {
-          comments: topic.key("comments"),
-          links: topic.key("links"),
-          createdAt: topic.key("createdAt"),
-          bodyUpdatedAt: topic.key("bodyUpdatedAt"),
-          titleUpdatedAt: topic.key("titleUpdatedAt"),
-        },
-        output<number>(`topics-fixture-last-activity-${index}`),
-      ),
-    });
-  }
+  const withBacklinks = new Set(backlinkTopics);
+  const backlinks = new Map<number, Cell<unknown[]>>();
+  const commentCounts: Cell<number>[] = [];
+  const lastActivity: Cell<number>[] = [];
+  seeded.topics.forEach((topic, index) => {
+    if (withBacklinks.has(index)) {
+      backlinks.set(
+        index,
+        runtime.run(
+          tx,
+          lifts.backlinksOf,
+          { table, self: topic },
+          output<unknown[]>(`topics-fixture-backlinks-${index}`),
+        ),
+      );
+    }
+    commentCounts.push(runtime.run(
+      tx,
+      lifts.presentCommentCountOf,
+      { comments: topic.key("comments") },
+      output<number>(`topics-fixture-comment-count-${index}`),
+    ));
+    lastActivity.push(runtime.run(
+      tx,
+      lifts.lastActivityOf,
+      {
+        comments: topic.key("comments"),
+        links: topic.key("links"),
+        createdAt: topic.key("createdAt"),
+        bodyUpdatedAt: topic.key("bodyUpdatedAt"),
+        titleUpdatedAt: topic.key("titleUpdatedAt"),
+      },
+      output<number>(`topics-fixture-last-activity-${index}`),
+    ));
+  });
   runtime.prepareTxForCommit(tx);
   const { error } = await tx.commit();
   if (error !== undefined) {
@@ -859,13 +1020,13 @@ async function startTopicsLifts(
       cause: error,
     });
   }
-  return { table, topics };
+  return { table, commentCounts, lastActivity, backlinks };
 }
 
 /**
  * Helper for {@link measureTopicsFixture}, which enables body and attempt read
- * accounting on `runtime` and records each completed run under the lift whose
- * authored source it reports, until disposed.
+ * accounting on `runtime` and records each completed run, and each attempt,
+ * under the lift it belongs to, until disposed.
  */
 function recordTopicsReads(
   runtime: Runtime,
@@ -883,6 +1044,11 @@ function recordTopicsReads(
     registeredDependencies: 0,
     maxRunProxyAccesses: 0,
   });
+  const emptyAttempts = (): AttemptReads => ({
+    attempts: 0,
+    proxyAccesses: 0,
+    linkResolutions: 0,
+  });
   const reads = {
     bodies: {
       crossrefTable: emptyBody(),
@@ -891,15 +1057,27 @@ function recordTopicsReads(
       lastActivityOf: emptyBody(),
       other: emptyBody(),
     },
-    attempts: { attempts: 0, proxyAccesses: 0, linkResolutions: 0 },
+    attempts: {
+      crossrefTable: emptyAttempts(),
+      backlinksOf: emptyAttempts(),
+      presentCommentCountOf: emptyAttempts(),
+      lastActivityOf: emptyAttempts(),
+      other: emptyAttempts(),
+    },
   };
+  // An attempt names its action, and an action's lift is known only from the
+  // body runs reported for it, which need not arrive before the attempt. So
+  // attempts are held by action here and attributed when recording stops.
+  const attemptsByAction = new Map<string | undefined, AttemptReads>();
   const listener = (event: Event) => {
     if (!(event instanceof RuntimeTelemetryEvent)) return;
     const { marker } = event;
     if (marker.type === "scheduler.read-attempt") {
-      reads.attempts.attempts++;
-      reads.attempts.proxyAccesses += marker.reads.proxyAccesses;
-      reads.attempts.linkResolutions += marker.reads.linkResolutions;
+      const held = attemptsByAction.get(marker.actionId) ?? emptyAttempts();
+      held.attempts++;
+      held.proxyAccesses += marker.reads.proxyAccesses;
+      held.linkResolutions += marker.reads.linkResolutions;
+      attemptsByAction.set(marker.actionId, held);
     } else if (marker.type === "scheduler.run.complete") {
       const lift = marker.src === undefined
         ? undefined
@@ -925,6 +1103,18 @@ function recordTopicsReads(
     [Symbol.dispose]: () => {
       runtime.scheduler.setReadStatsEnabled(false);
       runtime.telemetry.removeEventListener("telemetry", listener);
+      for (const [actionId, held] of attemptsByAction) {
+        const lift = actionId === undefined
+          ? undefined
+          : TOPICS_LIFT_NAMES.find((name) =>
+            reads.bodies[name].actions.has(actionId)
+          );
+        const bucket = reads.attempts[lift ?? "other"];
+        bucket.attempts += held.attempts;
+        bucket.proxyAccesses += held.proxyAccesses;
+        bucket.linkResolutions += held.linkResolutions;
+      }
+      attemptsByAction.clear();
     },
   };
 }
