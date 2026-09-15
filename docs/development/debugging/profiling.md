@@ -409,7 +409,11 @@ reference from a detached copy.
 
 For labeled built-in results, also test the persisted field labels. Give source
 fields distinct confidentiality and integrity labels, pass their references
-through the actual derivations, and inspect the downstream field views. Record
+through the actual derivations, and inspect the downstream field views. When a
+field path crosses a link, use the resolved view from
+[`cfcLabelViewForResolvedCellWithStatus`](../../../packages/runner/src/cfc/label-view.ts)
+and check `readFailed`: a failed metadata read is not an absent label, and a
+view of only the intermediate link document can miss the target's labels. Record
 the flow-label and enforcement settings with the result. Include a rebuilt
 record as a contrast to expose label propagation caused by copying. A flat
 pass-through test does not prove a wrapper, grouping, or sorting pipeline;
