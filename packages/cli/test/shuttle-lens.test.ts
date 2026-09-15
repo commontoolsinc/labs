@@ -15,16 +15,32 @@ import { describe, it } from "@std/testing/bdd";
 
 import { unicodeWidth } from "@std/cli/unicode-width";
 
-import { ValueLens } from "../lib/shuttle/lens.ts";
+import { type FrameCursor, ValueLens } from "../lib/shuttle/lens.ts";
 import type { Key } from "../lib/view/keys.ts";
 
 /** How tall and wide a frame is where a case is not asking about the size. */
 const ROWS = 8;
 const COLUMNS = 40;
 
+/** The cell a lens the cases below drive is a lens onto. */
+const REFERENCE = "/of:fid1:abcdefghijklmnop/settings/depth";
+
 /** Helper for the cases below, which is the key named `name`. */
 function key(name: string): Key {
   return { name };
+}
+
+/** Helper for the cases below, which types `text` at `lens`, a key each. */
+function types(lens: ValueLens, text: string): void {
+  for (const char of text) lens.reads({ name: char, char });
+}
+
+/**
+ * Helper for the cases below, which is a value long enough that the frame
+ * shows a part of it: twenty entries, which renders as twenty-two lines.
+ */
+function long(): string[] {
+  return ["alpha", "beta", "gamma", ...Array(17).fill("filler")];
 }
 
 /** What driving a lens produced: the lens, its repaints, and its cancels. */
@@ -34,6 +50,9 @@ interface Driven {
 
   /** The frames it drew, in order. */
   readonly drawn: (readonly string[])[];
+
+  /** Where it put the cursor on each of those frames, in the same order. */
+  readonly cursors: (FrameCursor | undefined)[];
 
   /** How many times the subscription it holds has been cancelled. */
   cancels: () => number;
@@ -49,11 +68,15 @@ function driving(
   columns = COLUMNS,
 ): Driven {
   const drawn: (readonly string[])[] = [];
+  const cursors: (FrameCursor | undefined)[] = [];
   let cancelled = 0;
-  const lens = new ValueLens(label);
+  const lens = new ValueLens(label, REFERENCE);
   lens.holding(() => cancelled++);
-  lens.drawnThrough(() => drawn.push(lens.frame(rows, columns)));
-  return { lens, drawn, cancels: () => cancelled };
+  lens.drawnThrough(() => {
+    drawn.push(lens.frame(rows, columns));
+    cursors.push(lens.cursor(rows, columns));
+  });
+  return { lens, drawn, cursors, cancels: () => cancelled };
 }
 
 /** Helper for the cases below, which is the frame a lens last drew. */
@@ -64,6 +87,19 @@ function last(driven: Driven): readonly string[] {
 /** Helper for the cases below, which is the body rows of `frame`. */
 function body(frame: readonly string[]): string[] {
   return frame.slice(1, -1).map((row) => row.slice(2, -2).trimEnd());
+}
+
+/**
+ * Helper for the cases below, which is the modeline of `frame`: the row above
+ * the bottom edge, where a frame that has one draws it.
+ */
+function modeline(frame: readonly string[]): string {
+  return (frame[frame.length - 2] ?? "").slice(2, -2).trimEnd();
+}
+
+/** Helper for the cases below, which is the bottom edge of `frame`. */
+function keys(frame: readonly string[]): string {
+  return frame[frame.length - 1] ?? "";
 }
 
 describe("lens", () => {
@@ -148,9 +184,30 @@ describe("lens", () => {
         });
 
         it("offers every key it takes on the bottom edge", () => {
-          expect(last(driving("c", 4, 60))[3]).toBe(
-            "└ q back (the watch stays armed) · j/k scroll · g/G ends ──┘",
+          // The frame offers what it answers to, so this is the whole of the
+          // key table read off the drawing rather than off the source. A key
+          // added without its phrase, or a phrase left after the key it names
+          // went, is a frame telling a reader something untrue about itself.
+
+          expect(keys(last(driving("c", 4, 100)))).toBe(
+            "└ q back · j/k scroll · g/G ends · / search · : command · " +
+              "e edit · (q leaves the watch armed) ─────┘",
           );
+        });
+
+        it("drops whole phrases from the edge rather than cutting one", () => {
+          // Half a phrase offers nothing, and the separator left hanging after
+          // it promises a phrase that is not there — which reads as a frame
+          // that failed to draw rather than as one too narrow to say more.
+          //
+          // Kills: fitting the joined phrases to the room, which ends this
+          // edge in a dangling separator.
+
+          const edge = keys(last(driving("c", 4, 60)));
+          expect(edge).toBe(
+            "└ q back · j/k scroll · g/G ends · / search · : command ───┘",
+          );
+          expect(edge).not.toContain("· ─");
         });
 
         it("says the cell has not settled before it has", () => {
@@ -172,9 +229,9 @@ describe("lens", () => {
         it("says which rows are on screen where the value does not fit", () => {
           const driven = driving("c", 4, 80);
           driven.lens.showing(["a", "b", "c", "d", "e", "f"]);
-          expect(last(driven)[3]).toBe(
-            "└ q back (the watch stays armed) · j/k scroll · g/G ends " +
-              "──────────── 1-2 of 8 ┘",
+          expect(keys(last(driven))).toBe(
+            "└ q back · j/k scroll · g/G ends · / search · : command · " +
+              "e edit ──── 1-2 of 8 ┘",
           );
         });
 
@@ -185,15 +242,15 @@ describe("lens", () => {
 
           const driven = driving("c", 4, 40);
           driven.lens.showing(["a", "b", "c", "d", "e", "f"]);
-          expect(last(driven)[3])
-            .toBe("└ q back (the watch stays ar  1-2 of 8 ┘");
+          expect(keys(last(driven)))
+            .toBe("└ q back · j/k scroll ─────── 1-2 of 8 ┘");
         });
 
         it("says nothing about rows where the whole value is on screen", () => {
           const driven = driving("c", 8, 60);
           driven.lens.showing(1);
-          expect(last(driven)[7]).toBe(
-            "└ q back (the watch stays armed) · j/k scroll · g/G ends ──┘",
+          expect(keys(last(driven))).toBe(
+            "└ q back · j/k scroll · g/G ends · / search · : command ───┘",
           );
         });
 
@@ -335,11 +392,386 @@ describe("lens", () => {
           driven.lens.reads(key("j"));
           expect(driven.drawn.length).toBe(1);
         });
+
+        it("opens a command line on `:`, offering the two keys that end it", () => {
+          const driven = driving("c", ROWS, 60);
+          driven.lens.reads(key(":"));
+          expect(modeline(last(driven))).toBe(":");
+          expect(keys(last(driven)))
+            .toBe(
+              "└ enter run · ctrl-c cancel ───────────────────────────────┘",
+            );
+        });
+
+        it("takes the command line's row from the value while it is open", () => {
+          // The modeline is not drawn empty, so what it costs is a row of the
+          // value and it costs it only while there is something in it. A frame
+          // that reserved the row would be one row short for the whole of a
+          // session that never typed at it.
+          //
+          // Kills: drawing the modeline into the rows the edges already left,
+          // which returns a frame a row taller than the terminal.
+
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(long());
+          expect(body(last(driven)).length).toBe(ROWS - 2);
+          driven.lens.reads(key(":"));
+          expect(last(driven).length).toBe(ROWS);
+          expect(body(last(driven)).length).toBe(ROWS - 2);
+          expect(modeline(last(driven))).toBe(":");
+        });
+
+        it("draws what is typed at the command line", () => {
+          const driven = driving();
+          driven.lens.reads(key(":"));
+          types(driven.lens, "get depth");
+          expect(modeline(last(driven))).toBe(":get depth");
+        });
+
+        it("binds the line editor's table on the command line", () => {
+          // The same table the prompt binds, which is what makes the line one
+          // a person types the way they type every other line here.
+          //
+          // Kills: a second table beside the prompt's, which would have to
+          // grow a binding each time that one does.
+
+          const driven = driving();
+          driven.lens.reads(key(":"));
+          types(driven.lens, "depth");
+          driven.lens.reads({ name: "ctrl-a", ctrl: true });
+          types(driven.lens, "get ");
+          expect(modeline(last(driven))).toBe(":get depth");
+        });
+
+        it("asks for the line the command line took on `enter`", () => {
+          const driven = driving();
+          driven.lens.reads(key(":"));
+          types(driven.lens, "get depth");
+          driven.lens.reads(key("enter"));
+          expect(driven.lens.asked()).toBe("get depth");
+        });
+
+        it("asks for nothing where the command line was left empty", () => {
+          // `enter` at an empty prompt runs nothing, and this is that line in
+          // the one place it is typed on a frame.
+
+          const driven = driving();
+          driven.lens.reads(key(":"));
+          driven.lens.reads(key("enter"));
+          expect(driven.lens.asked()).toBeUndefined();
+          expect(driven.lens.typing).toBe(false);
+        });
+
+        it("abandons the command line on `ctrl-c` and keeps the frame", () => {
+          // `ctrl-c` means what the prompt means by it: what is being typed
+          // where something is, and the way out where nothing is. A frame that
+          // closed here would take the view away from somebody who meant to
+          // take back a line.
+          //
+          // Kills: reading `ctrl-c` as the way out before asking whether a
+          // line is open, which closes the lens on the first of the two.
+
+          const driven = driving();
+          driven.lens.reads(key(":"));
+          types(driven.lens, "get depth");
+          driven.lens.reads(key("ctrl-c"));
+          expect(driven.lens.open).toBe(true);
+          expect(driven.lens.typing).toBe(false);
+          expect(driven.lens.asked()).toBeUndefined();
+        });
+
+        it("abandons the command line on `escape` as it does on `ctrl-c`", () => {
+          const driven = driving();
+          driven.lens.reads(key(":"));
+          types(driven.lens, "get depth");
+          driven.lens.reads(key("escape"));
+          expect(driven.lens.typing).toBe(false);
+          expect(driven.lens.asked()).toBeUndefined();
+        });
+
+        it("takes no key as a view key while a command line is open", () => {
+          // Every key goes to the line while one is open, `q` among them: a
+          // person typing a line is typing text, and a view that read a
+          // character of it as a motion would scroll under what they typed.
+
+          const driven = driving();
+          driven.lens.showing(long());
+          driven.lens.reads(key(":"));
+          types(driven.lens, "q");
+          expect(driven.lens.open).toBe(true);
+          expect(modeline(last(driven))).toBe(":q");
+        });
+
+        it("asks for `edit` on the cell it is a lens onto on `e`", () => {
+          // The editor trip, the refusals and the write are the `edit` verb's,
+          // reached through the same mechanism `:` reaches a typed line
+          // through. A second copy of any of them here would be a second
+          // answer to a question the verb already answers.
+
+          const driven = driving();
+          driven.lens.reads(key("e"));
+          expect(driven.lens.asked()).toBe(`edit ${REFERENCE}`);
+        });
+
+        it("asks for nothing while a line it asked for is in flight", () => {
+          // One line at a time, which is the loop's own discipline: a second
+          // would be a second cancel to hold and a second answer to place in
+          // one modeline.
+
+          const driven = driving();
+          driven.lens.reads(key("e"));
+          expect(driven.lens.asked()).toBe(`edit ${REFERENCE}`);
+          driven.lens.reads(key("e"));
+          expect(driven.lens.asked()).toBeUndefined();
+          driven.lens.reads(key(":"));
+          expect(driven.lens.typing).toBe(false);
+        });
+
+        it("offers the key that stops the line while one is in flight", () => {
+          const driven = driving("c", ROWS, 60);
+          driven.lens.reads(key("e"));
+          expect(keys(last(driven))).toContain("ctrl-c stop");
+          expect(keys(last(driven))).not.toContain(": command");
+          expect(modeline(last(driven))).toBe(`: edit ${REFERENCE}`);
+        });
+
+        it("moves the view to the first line holding what `/` took", () => {
+          // Kills: taking the match as a row of the screen rather than a line
+          // of the rendering, which lands somewhere else on every width.
+
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(long());
+          driven.lens.reads(key("/"));
+          types(driven.lens, "gamma");
+          driven.lens.reads(key("enter"));
+          expect(body(last(driven))[0]).toBe('  "gamma",');
+          expect(modeline(last(driven))).toBe("/gamma  1 of 1");
+        });
+
+        it("says how many matches there are and which one it is on", () => {
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(long());
+          driven.lens.reads(key("/"));
+          types(driven.lens, "filler");
+          driven.lens.reads(key("enter"));
+          expect(modeline(last(driven))).toBe("/filler  1 of 17");
+          driven.lens.reads(key("n"));
+          expect(modeline(last(driven))).toBe("/filler  2 of 17");
+          driven.lens.reads(key("N"));
+          expect(modeline(last(driven))).toBe("/filler  1 of 17");
+        });
+
+        it("wraps from the last match back to the first on `n`", () => {
+          // A search that stopped at the last match leaves a reader at the
+          // bottom of a value with no way back to the first but a retype.
+
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(["one", "two"]);
+          driven.lens.reads(key("/"));
+          types(driven.lens, "o");
+          driven.lens.reads(key("enter"));
+          expect(modeline(last(driven))).toBe("/o  1 of 2");
+          driven.lens.reads(key("n"));
+          expect(modeline(last(driven))).toBe("/o  2 of 2");
+          driven.lens.reads(key("n"));
+          expect(modeline(last(driven))).toBe("/o  1 of 2");
+        });
+
+        it("says so where a search found nothing", () => {
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(long());
+          driven.lens.reads(key("/"));
+          types(driven.lens, "nowhere");
+          driven.lens.reads(key("enter"));
+          expect(modeline(last(driven))).toBe("/nowhere  no match");
+        });
+
+        it("offers `n` and `N` only once a pattern is set", () => {
+          const driven = driving("c", ROWS, 100);
+          expect(keys(last(driven))).not.toContain("n/N next");
+          driven.lens.showing(long());
+          driven.lens.reads(key("/"));
+          types(driven.lens, "gamma");
+          driven.lens.reads(key("enter"));
+          expect(keys(last(driven))).toContain("n/N next");
+        });
+
+        it("puts a search away on an empty one", () => {
+          // The value is short enough that the rows the modeline would take
+          // are blank, so a modeline that stayed would be the one row of the
+          // frame with anything on it.
+
+          const driven = driving("c", ROWS, 100);
+          driven.lens.showing(["one", "two"]);
+          driven.lens.reads(key("/"));
+          types(driven.lens, "one");
+          driven.lens.reads(key("enter"));
+          expect(modeline(last(driven))).toBe("/one  1 of 1");
+          driven.lens.reads(key("/"));
+          driven.lens.reads(key("enter"));
+          expect(keys(last(driven))).not.toContain("n/N next");
+          expect(modeline(last(driven))).toBe("");
+        });
+
+        it("draws nothing for `n` with no pattern set", () => {
+          const driven = driving();
+          driven.lens.reads(key("n"));
+          driven.lens.reads(key("N"));
+          expect(driven.drawn.length).toBe(1);
+        });
+
+        it("counts a search against what the cell holds now", () => {
+          // A value that changed under a search is the one case where a total
+          // remembered from when the search was made would be a lie on screen.
+          //
+          // Kills: holding the match count beside the pattern, which goes on
+          // saying `1 of 17` after sixteen of them went.
+
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(long());
+          driven.lens.reads(key("/"));
+          types(driven.lens, "filler");
+          driven.lens.reads(key("enter"));
+          expect(modeline(last(driven))).toBe("/filler  1 of 17");
+          driven.lens.showing(["filler", "filler"]);
+          expect(modeline(last(driven))).toBe("/filler  2 matches");
+        });
+
+        it("searches while a line it asked for is in flight", () => {
+          // A search costs a traversal of what is already on screen, so there
+          // is nothing for it to wait on: what one line at a time bounds is
+          // the work the loop runs, not the work this module does.
+
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.showing(long());
+          driven.lens.reads(key("e"));
+          driven.lens.reads(key("/"));
+          types(driven.lens, "gamma");
+          driven.lens.reads(key("enter"));
+          expect(body(last(driven))[0]).toBe('  "gamma",');
+        });
+      });
+
+      describe("asked()", () => {
+        it("hands the line over once", () => {
+          // The caller that takes it is the one that runs it, so a second
+          // caller finds nothing to run twice.
+
+          const driven = driving();
+          driven.lens.reads(key("e"));
+          expect(driven.lens.asked()).toBe(`edit ${REFERENCE}`);
+          expect(driven.lens.asked()).toBeUndefined();
+        });
+      });
+
+      describe("answered()", () => {
+        it("says what came back and offers the keys that start a line again", () => {
+          const driven = driving("c", ROWS, 60);
+          driven.lens.reads(key("e"));
+          driven.lens.answered("Wrote `depth`.");
+          expect(modeline(last(driven))).toBe("Wrote `depth`.");
+          expect(keys(last(driven))).toContain(": command");
+          expect(keys(last(driven))).not.toContain("ctrl-c stop");
+        });
+
+        it("says the first line of what came back and no more of it", () => {
+          // The whole of it reaches the transcript, which the frame is holding
+          // back: what the modeline owes a reader is the acknowledgement, and
+          // a frame that grew with a listing would be a page rather than a
+          // view.
+
+          const driven = driving();
+          driven.lens.reads(key("e"));
+          driven.lens.answered("first\nsecond\nthird");
+          expect(modeline(last(driven))).toBe("first");
+        });
+
+        it("lets the next line be asked for", () => {
+          const driven = driving();
+          driven.lens.reads(key("e"));
+          driven.lens.asked();
+          driven.lens.answered("");
+          driven.lens.reads(key("e"));
+          expect(driven.lens.asked()).toBe(`edit ${REFERENCE}`);
+        });
+
+        it("draws nothing once the lens is closed", () => {
+          const driven = driving();
+          driven.lens.close();
+          driven.lens.answered("something");
+          expect(driven.drawn.length).toBe(1);
+        });
+      });
+
+      describe("cursor()", () => {
+        it("is nothing where nothing is being typed at the frame", () => {
+          // A frame with no line open is read rather than typed at, and a
+          // cursor on one sits wherever the last row's drawing ended and reads
+          // as a place a person could type.
+
+          expect(driving().cursors[0]).toBeUndefined();
+        });
+
+        it("stands on the command line, after what is typed", () => {
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.reads(key(":"));
+          types(driven.lens, "get");
+          // The row above the bottom edge, and four columns in: past the
+          // frame's left edge, the space after it, and `:get`.
+          expect(driven.cursors[driven.cursors.length - 1])
+            .toEqual({ row: ROWS - 1, column: 7 });
+        });
+
+        it("follows the cursor within the line rather than its end", () => {
+          const driven = driving("c", ROWS, COLUMNS);
+          driven.lens.reads(key(":"));
+          types(driven.lens, "get");
+          driven.lens.reads({ name: "ctrl-a", ctrl: true });
+          expect(driven.cursors[driven.cursors.length - 1])
+            .toEqual({ row: ROWS - 1, column: 4 });
+        });
+
+        it("scrolls a line longer than the row under the cursor", () => {
+          // Every other text on a frame is cut at the right edge, and cutting
+          // is wrong here for one reason: a cut line is still readable, and a
+          // line being typed past the cut is one a person is typing where they
+          // cannot see.
+          //
+          // Kills: fitting the typed line as a title is fitted, which leaves
+          // the cursor off the row and the characters last typed invisible.
+
+          const driven = driving("c", ROWS, 20);
+          driven.lens.reads(key(":"));
+          types(driven.lens, "set settings/depth 3");
+          const row = modeline(last(driven));
+          expect(row.endsWith("depth 3")).toBe(true);
+          expect(unicodeWidth(row)).toBeLessThanOrEqual(16);
+          expect(driven.cursors[driven.cursors.length - 1]?.column)
+            .toBe(3 + unicodeWidth(row));
+        });
+
+        it("is nothing on a terminal with no room for a command line", () => {
+          const driven = driving("c", 2, COLUMNS);
+          driven.lens.reads(key(":"));
+          expect(driven.cursors[driven.cursors.length - 1]).toBeUndefined();
+          expect(last(driven).length).toBe(2);
+        });
+      });
+
+      describe("typing", () => {
+        it("is whether a line is being typed at the frame", () => {
+          const driven = driving();
+          expect(driven.lens.typing).toBe(false);
+          driven.lens.reads(key(":"));
+          expect(driven.lens.typing).toBe(true);
+          driven.lens.reads(key("enter"));
+          expect(driven.lens.typing).toBe(false);
+        });
       });
 
       describe("holding()", () => {
         it("cancels at once where the lens closed while it was subscribing", () => {
-          const lens = new ValueLens("c");
+          const lens = new ValueLens("c", REFERENCE);
           let cancelled = 0;
           lens.close();
           lens.holding(() => cancelled++);

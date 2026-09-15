@@ -758,6 +758,11 @@ describe("terminal", () => {
       // The whole of what a run holding a frame sends, the run's own way out
       // included: the screen goes back before this returns, whatever the run
       // did with it.
+      //
+      // Each drawing ends by saying where the cursor goes, hiding it here
+      // because neither of these frames is being typed at. It is sent with
+      // every drawing rather than once, because a drawing positions each row
+      // from the top and leaves the cursor wherever the last of them ended.
 
       const watched = await watching({}, async (terminal) => {
         terminal.frame(["a"]);
@@ -766,10 +771,23 @@ describe("terminal", () => {
       });
       expect(watched.written()).toBe(
         "\x1b[?1049h\x1b[?25l" +
-          "\x1b[?7l\x1b[1;1H\x1b[2Ka\x1b[?7h" +
-          "\x1b[?7l\x1b[1;1H\x1b[2Kb\x1b[?7h" +
+          "\x1b[?7l\x1b[1;1H\x1b[2Ka\x1b[?7h\x1b[?25l" +
+          "\x1b[?7l\x1b[1;1H\x1b[2Kb\x1b[?7h\x1b[?25l" +
           "\x1b[?25h\x1b[?1049l",
       );
+    });
+
+    it("puts the cursor where a frame being typed at says", async () => {
+      // A frame with a command line open on it is typed at, and a line being
+      // typed with no cursor on it is one a person cannot see where they are
+      // in. The move comes before the show, so the cursor never appears at the
+      // place the rows left it on the way to the place it belongs.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"], { row: 2, column: 5 });
+        await Promise.resolve();
+      });
+      expect(watched.written()).toContain("\x1b[2;5H\x1b[?25h");
     });
 
     it("draws no line being edited while it has the screen", async () => {

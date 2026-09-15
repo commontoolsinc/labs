@@ -39,14 +39,11 @@
 import { EditBuffer } from "../view/editbuffer.ts";
 import type { Key } from "../view/keys.ts";
 import { completeLine } from "./completion.ts";
+import { apply, codePoints } from "./editing.ts";
 import { LineHistory, recall } from "./history.ts";
-import type { ValueLens } from "./lens.ts";
+import type { FrameCursor, ValueLens } from "./lens.ts";
 import { ASSUMED_COLUMNS, ASSUMED_ROWS } from "./page.ts";
-import {
-  escapeControlCharacters,
-  holdsControlCharacter,
-  messageOf,
-} from "./place.ts";
+import { escapeControlCharacters, messageOf } from "./place.ts";
 import { renderValue } from "./value.ts";
 import { runLine } from "./verbs.ts";
 import {
@@ -58,6 +55,15 @@ import {
 
 /** What the prompt opens every line with, before the place it carries. */
 const PROMPT_NAME = "shuttle";
+
+/**
+ * What a line typed at a frame is told when it opened a view of its own.
+ *
+ * The line ran and is not taken back — a `watch` typed at a frame leaves a
+ * watch armed, which `watches` lists and `unwatch` disarms. What it did not
+ * get is the screen, one frame being what the prompt draws at a time.
+ */
+const ONE_FRAME = "One frame at a time, so this line's view was not opened.";
 
 /** What a line that was cancelled leaves behind it. */
 const INTERRUPTED = "Interrupted.";
@@ -123,8 +129,14 @@ export interface PromptTerminal {
    * `rows` is the whole frame, already fitted to the terminal by whatever
    * composed it (`lens.ts`), so an implementation places the rows and decides
    * nothing about what is in them.
+   *
+   * `cursor` is where in the frame a person is typing, and is absent where
+   * nobody is: a frame with a command line open on it is typed at, and one
+   * without is read. An implementation shows the cursor there and hides it
+   * otherwise, which is what stops a frame that is only read from carrying a
+   * cursor that reads as a place to type.
    */
-  frame(rows: readonly string[]): void;
+  frame(rows: readonly string[], cursor?: FrameCursor): void;
 
   /**
    * Gives the screen back, and writes whatever {@link PromptTerminal.announce}
@@ -203,6 +215,15 @@ export interface PromptTerminal {
  * this loop rather than a program beside it because the keys are read here:
  * one asked for is one a verb of its own could not have.
  *
+ * A lens may ask for a line of its own — what `:` and `e` type at a frame —
+ * and it runs here, through the same {@link start} a line typed at the prompt
+ * runs through and under the same cancel. So one line is in flight at a time
+ * whichever of the two took it, and what it produced goes to the transcript
+ * the way every line's output does; the frame is told as well, and says so
+ * until something replaces it. A line that opened a view of its own arrives
+ * while one is up, and there its view is closed rather than adopted: one frame
+ * at a time, the line itself standing.
+ *
  * Cancelling is honest about what it can reach. The line is abandoned and the
  * prompt comes back, but a read already sent to the server is not something
  * this can call off: it finishes into nothing, and the checks along the way
@@ -235,6 +256,18 @@ export async function runPrompt(
   let held: Key[] = [];
   /** Whether the keys have run out, which ends the run once nothing is left. */
   let ended = false;
+
+  /**
+   * Draws `opened` at the size the screen has now, cursor and all.
+   *
+   * The size is asked for on every drawing rather than held, so a window
+   * resized under an open lens is redrawn to fit it.
+   */
+  const draw = (opened: ValueLens): void => {
+    const rows = measured(deps.rows?.(), ASSUMED_ROWS);
+    const columns = measured(deps.columns?.(), ASSUMED_COLUMNS);
+    terminal.frame(opened.frame(rows, columns), opened.cursor(rows, columns));
+  };
 
   /**
    * Closes the lens and comes back to the prompt, which is what `q` does and
@@ -315,6 +348,14 @@ export async function runPrompt(
       if (arrival.kind === "ran") {
         running = undefined;
         if (arrival.text !== "") terminal.announce(arrival.text);
+        if (lens !== undefined) {
+          // The line was typed at a frame that still has the screen, so the
+          // prompt under it is not what comes next: the frame acknowledges the
+          // line, and the whole of what it said is in the transcript the frame
+          // is holding back.
+          lens.answered(arrival.text);
+          continue;
+        }
         // After the line, not before it: `cd` is what moves the place, so the
         // prompt a line is typed at is the place it was read against.
         prompt = promptFor(shuttle);
@@ -328,6 +369,19 @@ export async function runPrompt(
         // way out cannot close, and its sink would run for the rest of the
         // process with no frame on screen to say it is there.
         const opened = arrival.lens;
+        if (lens !== undefined) {
+          // One frame at a time. A line typed at a frame can be any line, and
+          // one of them opens a view — so this is the arm where a second
+          // arrives, and what it must not do is leave a subscription running
+          // with no frame to draw it. The line itself ran and said what it
+          // did; only its view is turned down, and the frame that is up says
+          // so.
+          opened.close();
+          if (arrival.text !== "") terminal.announce(arrival.text);
+          terminal.announce(ONE_FRAME);
+          lens.answered(ONE_FRAME);
+          continue;
+        }
         lens = opened;
         // What the line produced is written before the frame takes the screen,
         // which is the order it happened in: the verb armed the watch and said
@@ -336,12 +390,7 @@ export async function runPrompt(
         if (arrival.text !== "") terminal.announce(arrival.text);
         // The frame is composed at the size the screen has each time it is
         // drawn, so a window resized under an open lens is redrawn to fit it.
-        opened.drawnThrough(() =>
-          terminal.frame(opened.frame(
-            measured(deps.rows?.(), ASSUMED_ROWS),
-            measured(deps.columns?.(), ASSUMED_COLUMNS),
-          ))
-        );
+        opened.drawnThrough(() => draw(opened));
         continue;
       }
       if (arrival.kind === "completed") {
@@ -365,10 +414,23 @@ export async function runPrompt(
         // Every key goes to the lens while one is open, which is what makes it
         // full-screen: the line under it is not being typed at, so a key that
         // the lens does not take does nothing rather than editing something
-        // nobody can see. Which keys close a frame is the lens's decision and
-        // not this loop's, so `q` and `ctrl-c` are one rule made where the keys
-        // are read; what is left here is what a `ctrl-c` does to the line under
-        // the frame.
+        // nobody can see. What a key does to the frame is the lens's decision
+        // and not this loop's, which is what keeps every key but one a rule
+        // made where the keys are read.
+        //
+        // `ctrl-c` is the one, because it can mean three things and only two of
+        // them are the frame's: abandoning what is being typed at it, and the
+        // way out where nothing is. The third is stopping the line the frame
+        // asked for, which this loop holds. Innermost first, which is the order
+        // the prompt already takes — so a frame with nothing being typed at it
+        // and a line in flight stops the line, and the frame stays up.
+        if (key.name === "ctrl-c" && !lens.typing && running !== undefined) {
+          running.stop();
+          held = [];
+          buffer.setText("");
+          history.abandon();
+          continue;
+        }
         lens.reads(key);
         if (key.name === "ctrl-c") {
           // What a `ctrl-c` drops is what was typed ahead of it, here as at the
@@ -378,7 +440,15 @@ export async function runPrompt(
           buffer.setText("");
           history.abandon();
         }
-        if (!lens.open) closeLens();
+        if (!lens.open) {
+          closeLens();
+          continue;
+        }
+        // A line the frame asked for runs the way a line typed at the prompt
+        // runs: the same start, the same signal, the same cancel. What differs
+        // is where its answer lands, which is the `ran` arm above.
+        const asked = lens.asked();
+        if (asked !== undefined) running = start(asked, shuttle, deps);
         continue;
       }
       if (running === undefined) {
@@ -603,83 +673,6 @@ function endsLine(key: Key, buffer: EditBuffer): boolean {
 }
 
 /**
- * What a key acts on: the line being typed, and the lines typed before it.
- *
- * The two travel together because the recall keys act on both at once — a
- * line put on the buffer is a position the traversal moved to — and a table
- * of motions over one value is what lets the second table modal editing wants
- * (`docs/plans/shuttle/futures.md`) bind the same acts.
- */
-interface Editing {
-  /** The line being typed. */
-  readonly buffer: EditBuffer;
-
-  /** The lines this run typed, and where the traversal over them stands. */
-  readonly history: LineHistory;
-}
-
-/**
- * The motions a key runs, by the key that runs it. Emacs bindings, because
- * they are what the substrate's own editor binds and what a terminal's other
- * line editors offer.
- *
- * A `Map` rather than an object, which holds what was put in it and answers
- * for nothing else — the shape the verb table takes, for the same reason and
- * against a wider door. What reaches this one is narrower: a key name is a
- * single character, a `ctrl-` or `alt-` compound, or one of the fixed names
- * `decodeKeys` writes, and none of those is a member every object carries.
- *
- * `ctrl-d` deletes forward here and ends the run in {@link runPrompt}, which
- * reads it first: what the two spellings have in common is that each removes
- * what is in front of the cursor, and on an empty line there is only the run.
- *
- * `up` and `down` walk the lines this run typed rather than the rows of the
- * buffer, and nothing is lost by that: the prompt reads one line, `enter`
- * being what ends it rather than what breaks it, so a buffer here has one row
- * and a vertical motion over it has nowhere to go. `ctrl-p` and `ctrl-n` are
- * bound beside them, those being what an Emacs binding spells the same two
- * motions as.
- */
-const BINDINGS: ReadonlyMap<string, (editing: Editing) => void> = new Map([
-  ["left", ({ buffer }) => buffer.moveLeft()],
-  ["ctrl-b", ({ buffer }) => buffer.moveLeft()],
-  ["right", ({ buffer }) => buffer.moveRight()],
-  ["ctrl-f", ({ buffer }) => buffer.moveRight()],
-  ["home", ({ buffer }) => buffer.moveLineStart()],
-  ["ctrl-a", ({ buffer }) => buffer.moveLineStart()],
-  ["end", ({ buffer }) => buffer.moveLineEnd()],
-  ["ctrl-e", ({ buffer }) => buffer.moveLineEnd()],
-  ["alt-b", ({ buffer }) => buffer.moveWordBackward()],
-  ["alt-f", ({ buffer }) => buffer.moveWordForward()],
-  ["backspace", ({ buffer }) => buffer.deleteBackward()],
-  ["delete", ({ buffer }) => buffer.deleteForward()],
-  ["ctrl-d", ({ buffer }) => buffer.deleteForward()],
-  ["ctrl-k", ({ buffer }) => buffer.killLine()],
-  ["ctrl-u", ({ buffer }) => buffer.killWholeLine()],
-  ["ctrl-w", ({ buffer }) => buffer.killWordBackward()],
-  ["alt-backspace", ({ buffer }) => buffer.killWordBackward()],
-  ["alt-d", ({ buffer }) => buffer.killWordForward()],
-  ["ctrl-y", ({ buffer }) => buffer.yank()],
-  ["alt-y", ({ buffer }) => buffer.yankPop()],
-  [
-    "up",
-    ({ buffer, history }) => recall(buffer, history.earlier(buffer.text())),
-  ],
-  [
-    "ctrl-p",
-    ({ buffer, history }) => recall(buffer, history.earlier(buffer.text())),
-  ],
-  [
-    "down",
-    ({ buffer, history }) => recall(buffer, history.later(buffer.text())),
-  ],
-  [
-    "ctrl-n",
-    ({ buffer, history }) => recall(buffer, history.later(buffer.text())),
-  ],
-]);
-
-/**
  * Helper for {@link runPrompt}, which is the prompt `shuttle` currently
  * carries.
  *
@@ -801,41 +794,4 @@ function whenAborted<T>(signal: AbortSignal, answer: T): Promise<T> {
   return new Promise((resolve) => {
     signal.addEventListener("abort", () => resolve(answer), { once: true });
   });
-}
-
-/**
- * Helper for {@link runPrompt}, which lets `key` act on `buffer`: the motion
- * it is bound to, or the character it produced where it is bound to none.
- *
- * A key carrying a modifier produces no character, so a binding and an
- * insertion never both apply, and a key that is neither does nothing.
- *
- * A character a terminal acts on rather than prints is one of those neithers.
- * The decoder gives every byte below `0x20` a name and no character, so none
- * of those reaches here at all; what does is a C1 character, which arrives
- * whole out of a paste — and `U+009B` is a sequence introducer, which drawn
- * into the line would take the rest of it as a command. There is nowhere for
- * such a character to be going: no place admits a part holding one
- * (`place.ts`), so a line carrying one is a line already refused, and drawing
- * it would corrupt the screen on the way to that refusal.
- */
-function apply(editing: Editing, key: Key): void {
-  const motion = BINDINGS.get(key.alt === true ? `alt-${key.name}` : key.name);
-  if (motion !== undefined) {
-    motion(editing);
-    return;
-  }
-  if (key.char !== undefined && !holdsControlCharacter(key.char)) {
-    editing.buffer.insert(key.char);
-  }
-}
-
-/**
- * Helper for {@link runPrompt}, which is the length of `text` in the unit the
- * cursor is measured in. The buffer moves its cursor a code point at a time,
- * and this counts the prompt in front of it the same way, so the sum is an
- * index into the line rather than a place on the screen.
- */
-function codePoints(text: string): number {
-  return [...text].length;
 }

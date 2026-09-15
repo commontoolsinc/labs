@@ -14,9 +14,11 @@
  */
 
 import { decodeKeys, type Key } from "../view/keys.ts";
+import type { FrameCursor } from "./lens.ts";
 import { ASSUMED_COLUMNS, ASSUMED_ROWS } from "./page.ts";
 import {
   above,
+  cursorIn,
   finish,
   givingScreen,
   NOTHING_PAINTED,
@@ -294,12 +296,12 @@ class StandardTerminal implements PromptTerminal {
    * second taking: entering the alternate screen twice would save the
    * transcript's position over itself and leave nothing to go back to.
    */
-  frame(rows: readonly string[]): void {
+  frame(rows: readonly string[], cursor?: FrameCursor): void {
     if (!this.#framed) {
       this.#framed = true;
       this.#write(takingScreen());
     }
-    this.#write(screenOf(rows));
+    this.#write(`${screenOf(rows)}${cursorIn(cursor)}`);
   }
 
   /**

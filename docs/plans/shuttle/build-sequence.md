@@ -622,6 +622,46 @@ Landed:
   [`views.md`](views.md)'s "never a timer" applied to its own sentence, and
   that ruling is what it returns under.
 
+- **B3b — the rest of a value view's keys.** `:` opens a command line on the
+  row above the bottom edge, `/` with `n`/`N` finds text in the rendering, and
+  `e` opens the watched cell in an editor.
+
+  `:` is the reason this is a slice rather than a handful of key arms. Running
+  a line is asynchronous and the prompt loop is what runs one, so the lens
+  leaves the line where the loop collects it and the loop hands back what it
+  produced (`asked` and `answered`, `lib/shuttle/lens.ts`). That keeps the lens
+  synchronous — a case still drives the whole of it with a key and a value —
+  and keeps one line in flight at a time under one cancel, the loop's own. What
+  the line produced reaches the transcript the way every line's output does;
+  the modeline carries its first line, which is the acknowledgement rather than
+  the answer. `e` is that same mechanism with the line composed rather than
+  typed (`edit <reference>`), so the editor trip, the refusals and the write
+  stay the `edit` verb's.
+
+  Three things the loop decides rather than the frame. A `ctrl-c` means the
+  innermost of the three things it can mean — what is being typed, then the
+  line in flight, then the way out — which is the order the prompt already
+  takes. A line that opens a view of its own has that view closed rather than
+  adopted: one frame at a time, and the line itself stands, so a `watch` typed
+  at a frame leaves a watch armed. And a frame is now typed at, so it carries a
+  cursor on the command line's row and hides the cursor otherwise.
+
+  `/` searches rather than filters, which is the one place the value view and
+  the list view read the same key differently: a rendering of JSON with lines
+  dropped out of it is no longer the value's rendering
+  ([`views.md`](views.md)). `enter` drill and `backspace` up are not here; they
+  arrive with the list view, below.
+
+  Two things a reader will look for and not find. `tab` completes nothing on
+  the command line — completion is an errand of its own and the loop runs one
+  at a time — and the lines typed at a frame are recalled by that frame's own
+  `up` and `down` rather than joining the prompt's history, the prompt's being
+  the lines typed at the prompt.
+
+  The line editor is one table both places read (`lib/shuttle/editing.ts`), so
+  a line typed at a frame takes the motions a line typed at the prompt takes,
+  and a binding added to either is added to both.
+
 Still to land:
 
 - **A watch on a piece's arguments cell.** `sinkCellValue` takes the cell a
@@ -637,24 +677,17 @@ Still to land:
   it.
   The two cells are already named and keyed apart everywhere a watch is shown,
   so what the seam costs is the refusal and nothing under it.
-- **The rest of a view's keys.** The value view answers to the motions and the
-  two ways out — `q` and `ctrl-c`, `j`/`k` and the arrows, `g` and `G`. What
-  the table in [`views.md`](views.md) has beyond them is this slice: `enter`
-  drill and `backspace` up, `/` filter within the view with `n`/`N` for the
-  next match, `e` to edit the selection in `$EDITOR`, and `:` to open a
-  command line. The last is the
-  reason this is a slice rather than a handful of key arms — `:` runs any
-  shuttle line with the view's `%n` handles bound to its rows, which reaches
-  the verb machinery from inside a lens and repaints the frame on what came
-  back. `e` reaches the editor trip the prompt already takes, and `enter` and
-  `backspace` want somewhere to drill *to*, so both of those read more
-  naturally beside the view that has rows.
-- **The list view.** It rests on `SpaceReplica.sinkDocument`, which is on
-  neither `IStorageProvider` nor `ISpaceReplica`, so the seam question is
-  `packages/runner`'s to settle before shuttle reaches it. It opens with the
-  two experiments and the raw-document-subscription proving test from issue
+- **The list view,** and with it `enter` drill and `backspace` up. It rests on
+  `SpaceReplica.sinkDocument`, which is on neither `IStorageProvider` nor
+  `ISpaceReplica`, so the seam question is `packages/runner`'s to settle before
+  shuttle reaches it. It opens with the two experiments and the
+  raw-document-subscription proving test from issue
   [#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
-  the capped deep sink if the seam disappoints.
+  the capped deep sink if the seam disappoints. The two drilling keys come with
+  it because both want a row to drill from: a value view has a scroll position
+  and no selection, and its rendering is the one `get` and `wish` write, so a
+  map from a row to a path into the value is a change to a shared renderer
+  rather than a key arm.
 - **The structured piece overview** (decision 26): one refreshable frame
   carrying arguments, a result summary, callables and pattern identity.
 
