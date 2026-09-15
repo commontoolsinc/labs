@@ -9,15 +9,17 @@ calls, the authority it needs, where the verb runs, what comes back, and
 what still happens on the client.
 
 A source update carries module-update authority, which
-[`module-loading.md`](../specs/module-loading.md) requires to be published
-from an owned setup transaction that commits to storage itself. A serving
-wave's acceptance is withdrawable until the wave commits, so the served
-`setsrc` verb does not seal its setup transaction into the wave: the
-transaction commits directly to the store, as one of the serving loop's own
-commits made outside the wave ([Direct commits](#direct-commits) below), and
-the update's authority registers from that verdict. `cf piece setsrc`
-requests the verb; `cf piece setsrc --check` stays in the client's process,
-since it writes nothing.
+[`module-loading.md`](../specs/module-loading.md) requires to be published from
+an owned setup transaction that commits to storage itself. A serving wave's
+acceptance is withdrawable until the wave commits, so the served `setsrc` verb
+does not seal its setup transaction into the wave: the transaction commits
+directly to the store, as one of the serving loop's own commits made outside the
+wave ([Direct commits](#direct-commits) below), and the update's authority
+registers from that verdict. `cf piece setsrc` requests the verb; `cf piece
+setsrc --check` stays in the client's process, since it issues no storage
+writes. Its normal storage reads can still demand materialization by the serving
+runtime, and a check does not freeze the space
+([`module-loading.md`](../specs/module-loading.md)).
 
 The verbs run only when `EXPERIMENTAL_SERVER_EXECUTION` selects the ON arm
 ([`EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)).
