@@ -1,5 +1,5 @@
 import type { Constructor } from "@commonfabric/utils/types";
-import type { FabricValue } from "@/interface.ts";
+import type { FabricValuePlus } from "@/interface.ts";
 import type { FabricCodec, LiveEnvironment } from "./interface.ts";
 
 /**
@@ -11,9 +11,9 @@ import type { FabricCodec, LiveEnvironment } from "./interface.ts";
  * in identity: extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec}
  * rather than this directly. Those two are what tell the codec system whether a
  * state is more work for the walker or the walker's final answer, a difference
- * no signature can carry -- and extending one of them fixes the `Encoded`
- * domain in the same stroke, so the declaration and its consequence cannot
- * drift apart.
+ * no signature can carry -- and extending one of them fixes the `PlusType` and
+ * `Encoded` domains in the same stroke, so the declaration and its consequence
+ * cannot drift apart. Both are as {@link FabricCodec} describes them.
  *
  * `State` is the codec's own state type, a subtype of the format-wide
  * `Encoded`: what `encode()` emits, what `canDecode()` narrows to, and the only
@@ -26,8 +26,11 @@ import type { FabricCodec, LiveEnvironment } from "./interface.ts";
  * every state before dispatching one here, which is what makes the narrower
  * parameter true rather than merely declared.
  */
-export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
-  implements FabricCodec<Encoded> {
+export abstract class BaseFabricCodec<
+  PlusType,
+  Encoded,
+  State extends Encoded = Encoded,
+> implements FabricCodec<PlusType, Encoded> {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
@@ -71,7 +74,7 @@ export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
     typeTag: string,
     state: State,
     env: LiveEnvironment,
-  ): FabricValue;
+  ): FabricValuePlus<PlusType>;
 
   /**
    * @inheritDoc
@@ -79,7 +82,10 @@ export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
    * What this codec emits is what it takes back: `State` is the same type
    * {@link #canDecode} narrows to and {@link #decode} is handed.
    */
-  abstract encode(value: FabricValue, env: LiveEnvironment): State;
+  abstract encode(
+    value: FabricValuePlus<PlusType>,
+    env: LiveEnvironment,
+  ): State;
 
   //
   // Instance members
@@ -96,7 +102,7 @@ export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
   }
 
   /** @inheritDoc */
-  canEncode(value: FabricValue): boolean {
+  canEncode(value: FabricValuePlus<PlusType>): boolean {
     const cls = this.#uniqueHandledClass;
 
     return (cls !== undefined) && (value instanceof cls);
@@ -108,7 +114,7 @@ export abstract class BaseFabricCodec<Encoded, State extends Encoded = Encoded>
    * Returns this codec's {@link #recognizedTypeTag}. A codec with no recognized
    * tag (whose instances carry per-instance tags) must override this.
    */
-  tagForValue(_value: FabricValue): string {
+  tagForValue(_value: FabricValuePlus<PlusType>): string {
     if (this.#recognizedTypeTag === undefined) {
       throw new Error(
         "Shouldn't happen: codec has no recognized tag; `tagForValue()` must " +

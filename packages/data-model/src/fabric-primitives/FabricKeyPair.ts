@@ -242,7 +242,7 @@ export class FabricKeyPair extends BaseFabricPrimitive {
 
   static #jsonCodec = Object.freeze(
     new (class KeyPairCodec
-      extends BaseNonterminalCodec<FabricKeyPairMaterialState> {
+      extends BaseNonterminalCodec<never, FabricKeyPairMaterialState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.KeyPair, FabricKeyPair);
