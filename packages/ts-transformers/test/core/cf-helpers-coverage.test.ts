@@ -253,6 +253,19 @@ Deno.test("injectCfHelpers appends a bare helper use instead of the `h` shim whe
     // A type-only import still occupies the binding (TS2440 against a local
     // declaration), so it counts too.
     "type-only import": 'import type { h } from "./h.ts";',
+    // `var` hoists out of nested blocks and loops to the module scope.
+    "var in a block": "{ var h = 1; }",
+    "var in an if": "if (Math.random()) { var h = 1; } else { const x = 1; }",
+    "var in a classic for": "for (var h = 0; h < 1; h++) {}",
+    "var in a for-of": "for (var h of [1]) {}",
+    "var in a for-in": "for (var h in { a: 1 }) {}",
+    "var in a try": "try { var h = 1; } catch { }",
+    "var in a catch": "try { } catch (e) { var h = e; }",
+    "var in a switch case": "switch (1) { case 1: var h = 1; break; default: }",
+    "var in a labeled block": "outer: { var h = 1; }",
+    "var in a while": "while (false) { var h = 1; }",
+    "var in a do-while": "do { var h = 1; } while (false);",
+    "var destructured in a block": "{ var { h } = { h: 1 }; }",
   };
   const bareTrailer =
     `// @ts-ignore: Internals\nvoid ${CF_HELPERS_IDENTIFIER};\n`;
@@ -288,6 +301,12 @@ Deno.test("injectCfHelpers keeps the `h` shim when `h` is only nested, type-only
     "anonymous default class": "export default class {}",
     "side-effect import": 'import "./side-effect.ts";',
     "named import of something else": 'import { hyperscript } from "./h.ts";',
+    // Block-scoped nested bindings and function-scoped `var` do not hoist.
+    "const in a block": "{ const h = 1; }",
+    "let in a for-of": "for (let h of [1]) {}",
+    "var inside a nested function": "if (true) { function f() { var h = 1; } }",
+    "var inside an arrow body": "export const f = () => { var h = 1; };",
+    "var inside a class method": "class C { m() { var h = 1; } }",
   };
   for (const [label, source] of Object.entries(sources)) {
     const out = injectCfHelpers(source);

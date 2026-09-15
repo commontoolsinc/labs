@@ -40,11 +40,14 @@ Before AST transforms, `transformCfDirective()`:
    after the source a forwarding `h(...)` helper delegating to
    `__cfHelpers.h` — so authors need not import the JSX factory manually, and
    the helper module is not tree-shaken before binding. When the module
-   already declares a top-level value binding named `h` (a function, class,
-   enum, or namespace declaration, a variable declaration including
-   destructuring, or an import binding), the shim would be a duplicate
-   identifier, so a bare `void __cfHelpers;` statement is appended instead;
-   type-only `h` declarations and `h` bindings in inner scopes keep the shim
+   scope already declares a value binding named `h` (a top-level function,
+   class, enum, or namespace declaration, a top-level variable declaration
+   including destructuring, any import binding — type-only imports
+   included, since they still occupy the name — or a `var` hoisted out of a
+   nested block or loop), the shim would be a duplicate identifier, so a
+   bare `void __cfHelpers;` statement is appended instead. `interface h` /
+   `type h` declarations, block-scoped `h` bindings in nested statements,
+   and `h` bindings inside function or class bodies keep the shim
    (`declaresTopLevelBinding`, `src/core/cf-helpers.ts`; pinned by
    `test/core/cf-helpers-coverage.test.ts` and the
    `ast-transform/top-level-h-binding` fixture). Either trailer is two lines.
@@ -3195,10 +3198,10 @@ the default-on pre-transform (§2.1) injects a forwarding
 `function h(…) { return __cfHelpers.h.apply(null, args); }` declaration
 (unless the module binds `h` itself — §2.1 — in which case no shim is
 injected), which shape 1 then hardens: as of this writing the trailing
-`__cfHardenFn(h);` closes 358 of the 360 `*.expected.*` fixture files (the
-exceptions are a `.skip` file, the orphaned, input-less
+`__cfHardenFn(h);` closes 381 of the 383 `*.expected.*` fixture files. The
+two exceptions are the orphaned, input-less
 `closures/map-type-assertion.expected.jsx`, which predates this stage, and
-`ast-transform/top-level-h-binding.expected.jsx`, whose module binds `h`).
+`ast-transform/top-level-h-binding.expected.jsx`, whose module binds `h`.
 Helper names are `createUniqueName`-minted, so they print as bare
 `__cfHardenFn`/`__cfBindVerifiedBinding` unless the printer must
 disambiguate — and a suffixed name would no longer verify (§17.6).
