@@ -27,7 +27,9 @@ const rows = [
   { id: 2, body: "b" },
 ];
 
-const never = () => false;
+const never = () => undefined;
+
+const database = { space: "did:key:zTestSpace", id: "of:notes-db" };
 
 describe("resultRowKeys()", () => {
   it("keys a row carrying no confidentiality on its content", () => {
@@ -36,8 +38,9 @@ describe("resultRowKeys()", () => {
         rows,
         columns: undefined,
         tables: undefined,
+        database,
         columnLabeled: false,
-        rowLabeled: never,
+        rowLabel: never,
       }),
     ).toEqual([{ row: rows[0] }, { row: rows[1] }]);
   });
@@ -48,12 +51,13 @@ describe("resultRowKeys()", () => {
         rows,
         columns: notesColumns,
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
     ).toEqual([
-      { table: "notes", key: { id: 1 }, tables },
-      { table: "notes", key: { id: 2 }, tables },
+      { database, table: "notes", key: { id: 1 }, tables },
+      { database, table: "notes", key: { id: 2 }, tables },
     ]);
   });
 
@@ -63,24 +67,27 @@ describe("resultRowKeys()", () => {
         rows: [[["id", 7], ["body", "x"]]],
         columns: notesColumns,
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
-    ).toEqual([{ table: "notes", key: { id: 7 }, tables }]);
+    ).toEqual([{ database, table: "notes", key: { id: 7 }, tables }]);
   });
 
-  it("keys a row under a row label on its position", () => {
+  it("keys a row under a row label on its position and its label", () => {
+    const label = { confidentiality: ["did:mailto:bob@b.example"] };
     expect(
       resultRowKeys({
         rows,
         columns: notesColumns,
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: (index) => index === 1,
+        rowLabel: (index) => index === 1 ? label : undefined,
       }),
     ).toEqual([
-      { table: "notes", key: { id: 1 }, tables },
-      { index: 1, tables },
+      { database, table: "notes", key: { id: 1 }, tables },
+      { database, index: 1, tables, label },
     ]);
   });
 
@@ -90,10 +97,11 @@ describe("resultRowKeys()", () => {
         rows: [{ body: "a" }],
         columns: [{ output: "body", table: "notes", column: "body" }],
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
-    ).toEqual([{ index: 0, tables }]);
+    ).toEqual([{ database, index: 0, tables }]);
   });
 
   it("keys on position when the key column is labeled", () => {
@@ -112,10 +120,12 @@ describe("resultRowKeys()", () => {
         rows,
         columns: notesColumns,
         tables: labeledKey,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
-    ).toEqual([{ index: 0, tables: labeledKey }, {
+    ).toEqual([{ database, index: 0, tables: labeledKey }, {
+      database,
       index: 1,
       tables: labeledKey,
     }]);
@@ -130,10 +140,11 @@ describe("resultRowKeys()", () => {
           { output: "name", table: "tags", column: "name" },
         ],
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
-    ).toEqual([{ index: 0, tables }]);
+    ).toEqual([{ database, index: 0, tables }]);
   });
 
   it("keys every row on position when two rows share a key", () => {
@@ -145,10 +156,12 @@ describe("resultRowKeys()", () => {
         }],
         columns: notesColumns,
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
-    ).toEqual([{ index: 0, tables }, { index: 1, tables }, {
+    ).toEqual([{ database, index: 0, tables }, { database, index: 1, tables }, {
+      database,
       index: 2,
       tables,
     }]);
@@ -161,12 +174,13 @@ describe("resultRowKeys()", () => {
         rows: [{ id: wide, body: "a" }, { id: wide + 1n, body: "b" }],
         columns: notesColumns,
         tables,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
     ).toEqual([
-      { table: "notes", key: { id: wide }, tables },
-      { table: "notes", key: { id: wide + 1n }, tables },
+      { database, table: "notes", key: { id: wide }, tables },
+      { database, table: "notes", key: { id: wide + 1n }, tables },
     ]);
   });
 
@@ -183,13 +197,36 @@ describe("resultRowKeys()", () => {
         rows: [{ slug: "a", body: "x" }, { slug: null, body: "y" }],
         columns,
         tables: textKey,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
     ).toEqual([
-      { table: "notes", key: { slug: "a" }, tables: textKey },
-      { index: 1, tables: textKey },
+      { database, table: "notes", key: { slug: "a" }, tables: textKey },
+      { database, index: 1, tables: textKey },
     ]);
+  });
+
+  it("keys the same row of another database on a different key", () => {
+    const other = { space: database.space, id: "of:other-db" };
+    const [first] = resultRowKeys({
+      rows: [rows[0]],
+      columns: notesColumns,
+      tables,
+      database,
+      columnLabeled: true,
+      rowLabel: never,
+    });
+    const [second] = resultRowKeys({
+      rows: [rows[0]],
+      columns: notesColumns,
+      tables,
+      database: other,
+      columnLabeled: true,
+      rowLabel: never,
+    });
+    expect(first).toEqual({ database, table: "notes", key: { id: 1 }, tables });
+    expect(second).not.toEqual(first);
   });
 
   it("keys on position when the origin table declares no primary key", () => {
@@ -199,9 +236,10 @@ describe("resultRowKeys()", () => {
         rows: [rows[0]],
         columns: notesColumns,
         tables: keyless,
+        database,
         columnLabeled: true,
-        rowLabeled: never,
+        rowLabel: never,
       }),
-    ).toEqual([{ index: 0, tables: keyless }]);
+    ).toEqual([{ database, index: 0, tables: keyless }]);
   });
 });

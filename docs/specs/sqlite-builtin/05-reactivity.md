@@ -34,8 +34,14 @@ long way without a query-dependency analyzer.
   primary key when the projection carries the whole key from one table, no
   key column is labeled, and no two rows share a key, so the row keeps its
   document wherever it lands in the result and a changed row is rewritten in
-  place. A row under a row label, or one without such a key, is keyed on its
-  position. The keys that are not content also carry the handle's `tables`
+  place. A row without such a key is keyed on its position, and a row under a
+  row label on its position and its label: a document's confidentiality can
+  never weaken, so a document may only ever hold rows of one label, and the
+  label is metadata every document carries in the open, so the id gives away
+  nothing the document does not. The keys that are not content also carry
+  the selected database, its space and id, since a query's `db` input can
+  move to another database whose rows would otherwise land on the same
+  documents, and the handle's `tables`
   declaration, because a commit attaches label metadata only to the documents
   it writes: a stricter re-declaration of a label moves every row to a new
   document that the commit writes and labels, rather than leaving a row with

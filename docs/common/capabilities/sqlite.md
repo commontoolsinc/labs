@@ -110,7 +110,9 @@ are unchanged writes no row documents: a row of an unlabeled database is keyed
 on its content, so equal rows share one document and a row the result held
 before takes its old document back; a row of a labeled database is keyed on
 its origin table's primary key where the projection carries one, and on its
-position otherwise, so a changed row is rewritten in place. A row projecting a
+position otherwise, so a changed row is rewritten in place; a row under a
+row label is keyed on its position and its label, so a row whose label
+changes takes a new document. A row projecting a
 column name a Fabric record reserves (`constructor`, `__proto__`) crosses the
 wire as a list of entries and is stored the same way.
 

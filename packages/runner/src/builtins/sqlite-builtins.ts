@@ -1412,8 +1412,9 @@ export function sqliteQuery(
               rows: resultRows,
               columns: res.columns,
               tables: db.tables,
+              database: { space: databaseSpace, id: db.id },
               columnLabeled: labelSchema !== undefined,
-              rowLabeled: (i) => perRow[i] !== undefined,
+              rowLabel: (i) => perRow[i],
             });
             const wrote = await runtime.editWithRetry((wtx) => {
               markEffectCompletion(wtx, effectKey);
