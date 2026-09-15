@@ -357,13 +357,23 @@ Current v1 behavior:
 - `--skill` requires `--skills-root`.
 - Multiple `--skill` values are allowed and loaded in the provided order after
   deduplication.
-- `--allow-skill-script` is repeatable, deduplicates exact normalized entries,
-  and does not itself expose the execution tool;
-  `--allow-tool
-  run_skill_script` is also required. An entry keyed on a
-  registry name requires `--skills-root`, since that is what gives the script a
-  sandbox path; an entry keyed on an acquired pin does not, its bytes reaching
-  the sandbox through the acquisition's own mount.
+- `--allow-skill-script` is repeatable and deduplicates exact normalized
+  entries. An entry keyed on a registry name requires `--skills-root`, since
+  that is what gives the script a sandbox path; an entry keyed on an acquired
+  pin does not, its bytes reaching the sandbox through the acquisition's own
+  mount.
+- The entry and the tool are decided separately for the run's own surface and
+  together for a child's, and the difference is not a preference. The run's
+  surface is `--allow-tool`, a list of tools rather than a list of scripts, so
+  an operator narrowing it must include `run_skill_script` — an entry alone does
+  not add a tool to a list the operator wrote. A delegated child's surface is
+  its profile's, which the operator never writes, so a child handed an acquired
+  skill receives `run_skill_script` exactly when the run allowlisted at least
+  one script at that skill's pin, and nothing else has to be said. There is no
+  configuration anyone wants in which a script is allowlisted and the tool
+  withheld; where that happens on the run's own surface it is a mistake, and a
+  run narrowed that way offers no tool rather than refusing a call, so nothing
+  names the cause.
 - `--no-skill-catalog` is available for tightly scripted batch runs that only
   want explicit preloaded skills.
 

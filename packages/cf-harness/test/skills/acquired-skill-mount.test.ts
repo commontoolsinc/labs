@@ -183,6 +183,36 @@ describe("the acquired-skill mount a delegation gives its child", () => {
       );
     });
 
+    it("adds no second mount where the parent's configuration already backs the skill", () => {
+      // A configuration that already backs this skill would otherwise gain a
+      // duplicate under the same name at the same sandbox path. Asked through
+      // the predicate the backing decision uses, so "already mounted" means
+      // the same thing here as it does there.
+      const acquired = acquiredAt(COMMIT_SHA);
+      const alreadyMounted = {
+        ...parentSandbox,
+        additionalMounts: [
+          ...parentSandbox.additionalMounts,
+          {
+            kind: "host-bind" as const,
+            name: "acquired-skill",
+            hostPath: acquired.hostRoot,
+            sandboxPath: "/acquired-skill",
+            readOnly: true,
+          },
+        ],
+      };
+
+      const options = childSandboxOptions({
+        sandbox: fakeRuntime,
+        ownedSandboxConfig: alreadyMounted,
+      }, acquired);
+
+      expect(options.sandbox?.additionalMounts).toEqual(
+        alreadyMounted.additionalMounts,
+      );
+    });
+
     it("shares the parent's runtime with a child given no acquired skill", () => {
       const options = childSandboxOptions({
         sandbox: fakeRuntime,

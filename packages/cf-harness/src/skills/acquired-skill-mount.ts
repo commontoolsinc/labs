@@ -110,6 +110,18 @@ export const childSandboxOptions = (
         : {}),
     };
   }
+  // A configuration that already backs this skill needs no second mount of it
+  // — two binds under one name at one sandbox path, where the first already
+  // answers. Asked through the predicate the rest of this decides by, so a
+  // run that is backed is backed by one mount however it got there.
+  if (
+    acquiredSkillMountBacks(
+      parent.ownedSandboxConfig.additionalMounts,
+      acquired,
+    )
+  ) {
+    return { sandbox: parent.ownedSandboxConfig };
+  }
   return {
     sandbox: {
       ...parent.ownedSandboxConfig,
