@@ -135,7 +135,7 @@ describe("topic-board-child-contract", () => {
     await citing.result.set({ topic: cited.getCell() }, ["mention"]);
 
     // The edge exists only if `addTopic` handed this child the board's
-    // `crossrefs` pivot — which is the thing no pattern test can still see.
+    // `crossrefs` pivot.
     const inbound = await cited.result.get(["referencedBy"]) as {
       title: string;
     }[];

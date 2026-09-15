@@ -862,11 +862,9 @@ export default pattern(() => {
   // `removeByValue` matches a cell by its link — so a cell is a faithful stand
   // -in for the piece a real caller would hold, and the rule under test is the
   // same.
-  // `mention` and `unmention` themselves, on a directly held topic. The board's
-  // PIVOT needs a board — that is why its cases live in
-  // `integration/topic-board-child-contract.test.ts` — but these verbs do not:
-  // each one writes the topic's OWN `mentioned` list, and the set semantics
-  // that make them mergeable are the part worth pinning here.
+  // `mention` and `unmention` themselves, on a directly held topic. Each one
+  // writes the topic's OWN `mentioned` list, and the set semantics that make
+  // them mergeable are the part worth pinning here.
   // --- Stamped removals (Stage C item 1) ---
   //
   // A retraction stamps the record and leaves it in place. Driven on a
