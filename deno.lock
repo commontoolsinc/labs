@@ -2910,7 +2910,8 @@
       "packages/patterns": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.9.1",
-          "npm:@xyflow/react@^12.11.5"
+          "npm:@xyflow/react@^12.11.5",
+          "npm:typescript@6.0.3"
         ]
       },
       "packages/piece": {
