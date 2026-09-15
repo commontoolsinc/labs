@@ -51,10 +51,22 @@ ignored. Two of those lines are directives to this driver rather than lines for
 the shell, and neither makes a record of its own:
 
 * `@frame <keys>` waits until the shell has taken the alternate screen for a
-  full-screen view, then types `<keys>` at it with no return. It belongs
-  directly under the line that opens the view, because that line has not
-  settled — the view is what it settles into — and typing at a view before it
-  is drawn would put the keys on the line being typed next instead.
+  full-screen view, then types `<keys>` at it. It belongs directly under the
+  line that opens the view, because that line has not settled — the view is
+  what it settles into — and typing at a view before it is drawn would put the
+  keys on the line being typed next instead. `\r` in `<keys>` is the return
+  that runs a line typed at the view, and `\\` is a backslash; those two are
+  the whole of the reading, every other character being itself. The directive
+  types no return of its own: a view is keys rather than lines, and the one
+  place a return means anything there is a command line the view opened.
+* `@drawn <text>` waits until `<text>` has been drawn anywhere on the screen,
+  searching from the last line typed. It is for what a view draws: a frame is
+  drawn on the alternate screen and carries none of the writes `next_write`
+  takes the drawing apart by, so `@said` cannot look there at all. It is what a
+  line typed at a view is waited on with -- the keys of a `@frame` are typed in
+  one go, so without it the key that closes the view is read before the line
+  the key before it ran has come back, and what that line produced reaches the
+  record after this one.
 * `@said <text>` waits until `<text>` has been drawn, searching from the last
   line typed. It is for what the shell writes on its own account rather than in
   answer to a line: a watch's event line arrives when the runtime settles, which
@@ -114,6 +126,7 @@ ENTER_ALT = "\x1b[?1049h"
 # The script lines that are instructions to this driver rather than to the
 # shell. Each is documented in the module docstring above.
 FRAME_KEYS = "@frame "
+AWAIT_DRAWN = "@drawn "
 AWAIT_SAID = "@said "
 
 # How tall and wide the terminal is. Fixed rather than inherited, so that what
@@ -218,6 +231,30 @@ class Terminal:
                 raise EOFError("the shell ended before it drew %r" % needle)
 
 
+def frame_keys(text):
+    """The keys `@frame` types, reading `\\r` as a return and `\\\\` as a backslash.
+
+    A view answers to keys rather than to lines, so the script writes each key
+    as itself — but a command line a view opened is run by a return, and a
+    script file has no way to hold one. Two escapes and no more: a reading
+    wider than that would make every other character a question.
+    """
+    keys = []
+    at = 0
+    while at < len(text):
+        pair = text[at:at + 2]
+        if pair == "\\r":
+            keys.append("\r")
+            at += 2
+        elif pair == "\\\\":
+            keys.append("\\")
+            at += 2
+        else:
+            keys.append(text[at])
+            at += 1
+    return "".join(keys)
+
+
 def settle(terminal, said):
     """Reads until an empty prompt is drawn, collecting what was written above it."""
     while True:
@@ -248,9 +285,15 @@ def run(script, argv):
         terminal.type_line(line)
         # A view opens instead of the line settling, so the keys that close it
         # are typed before the settle rather than after it.
-        while at < len(script) and script[at].startswith(FRAME_KEYS):
-            terminal.wait_for(ENTER_ALT)
-            terminal.type(script[at][len(FRAME_KEYS):])
+        while at < len(script) and (
+            script[at].startswith(FRAME_KEYS)
+            or script[at].startswith(AWAIT_DRAWN)
+        ):
+            if script[at].startswith(AWAIT_DRAWN):
+                terminal.wait_for(script[at][len(AWAIT_DRAWN):])
+            else:
+                terminal.wait_for(ENTER_ALT)
+                terminal.type(frame_keys(script[at][len(FRAME_KEYS):]))
             at += 1
         prompt = settle(terminal, said)
         records.append({"line": line, "said": "\n".join(said), "prompt": prompt})
