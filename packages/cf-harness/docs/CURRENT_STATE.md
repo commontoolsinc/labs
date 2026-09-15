@@ -61,20 +61,42 @@ The current package provides:
   no delegation may name;
 - Common Fabric implementation research over the operator-provisioned docs and
   skills corpus, published pattern metadata and complete multi-file source,
-  dependencies, and safe handle shapes. Private tools support search followed by
-  exact bounded reads with continuation, and cannot execute, write, browse,
+  dependencies, and safe handle shapes. Fresh CLI root tasks and each
+  interactive turn start with research before the first parent model turn,
+  subject to the ordinary tool policy. A durable checkpoint retains its
+  host-supplied handoff immediately before the task and recovers it without
+  another private call on resume. The handoff carries the research result
+  identity, so the sibling omission record retains a proven `/researchRecord`
+  join to the raw artifact while recording no location for a source-free error;
+  no private record enters parent context. Delegated children consume the
+  inherited kit and start no opening pass. Private tools support search followed
+  by exact bounded reads with continuation, and cannot execute, write, browse,
   delegate, or mutate Fabric. The host verifies indexed source identities,
   admits citations and successfully described handle bindings, and returns a
   structured complete or incomplete kit with a full invocation or source recipe
-  when one is required. Exact reads and the complete private transcript remain
-  in the tool artifact; the caller receives the derived kit plus explicit
-  incomplete-kit guidance. Partial evidence survives malformed output, provider
-  failure, budget exhaustion, and cancellation, with private usage and failure
-  counts included in the parent record. Kits, confirmed patterns, and bindings
-  persist through delegation, while local authored-source artifacts record the
-  research ids that shaped them. `query_docs` is accepted only as a legacy CLI
-  or persisted-policy alias and is normalized without rewriting old transcript
-  or run-state evidence;
+  when one is required. Section selectors and citation ids are distinct; a
+  current-read catalog supports synthesis and at most one tool-free citation
+  repair within the existing model-turn budget. Unread ids remain inadmissible.
+  Complete pattern-source examples receive a host-side syntax-only parser check;
+  exact parser diagnostics keep a claimed-complete kit incomplete while
+  preserving its full source and citations for local correction. Parser success
+  does not establish imports, types, compilation, or runtime behavior. Each
+  result separately carries a CFC projection: its full known source label, a
+  confidentiality-only output label for later model context, and explicit
+  missing-label coverage for unclassified pattern-index metadata/source,
+  unavailable handle-label metadata, or legacy research summaries. Documentation
+  search accounts for unselected leads that influenced ranking. Publication
+  never promotes private indexed source to public, and retained source integrity
+  does not endorse a model rewrite. Opening handoff, resume, and delegated-child
+  paths preserve the confidentiality influence and diagnostic projection. Exact
+  reads and the complete private transcript remain in the tool artifact; the
+  caller receives the derived kit plus explicit incomplete-kit guidance. Partial
+  evidence survives malformed output, provider failure, budget exhaustion, and
+  cancellation, with private usage and failure counts included in the parent
+  record. Kits, confirmed patterns, and bindings persist through delegation,
+  while local authored-source artifacts record the research ids that shaped
+  them. `query_docs` is accepted only as a legacy CLI or persisted-policy alias
+  and is normalized without rewriting old transcript or run-state evidence;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
@@ -400,6 +422,10 @@ mode.
 - End-to-end runner-owned CFC mediation is incomplete in the current product
   integrations; enforcing modes therefore cannot yet replace their `observe`
   bridges.
+- The pattern index exposes no CFC labels for either result metadata or private
+  indexed source. Research records each observation as missing label coverage;
+  downstream enforcement can carry known confidentiality, while the coverage gap
+  remains diagnostic rather than becoming a clean classification.
 - Capability discovery does not prove that Docker, `runsc-cfc`, a browser lease,
   or another external dependency is healthy. Callers must perform dependency
   preflight for workflows that require them.

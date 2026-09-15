@@ -10,6 +10,7 @@ import {
   isObjectNotArray,
   type ReadonlyRecord,
 } from "@commonfabric/utils/types";
+import { isAbsolute, relative } from "@std/path";
 
 import { isHarnessModelProviderId } from "./config.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
@@ -27,7 +28,10 @@ import {
 } from "./contracts/handle-table.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
-import type { HarnessResearchRunSummary } from "./contracts/research.ts";
+import type {
+  HarnessResearchCfcProjection,
+  HarnessResearchRunSummary,
+} from "./contracts/research.ts";
 import type { TrustedPatternRecord } from "./contracts/trusted-pattern.ts";
 import {
   createHarnessInvalidToolCall,
@@ -55,6 +59,7 @@ import {
   type HarnessModelTurnUsage,
   type HarnessRunTimelineEntryInput,
   type HarnessToolActivity,
+  type HarnessToolInvocationOrigin,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
 import type {
@@ -105,6 +110,7 @@ import {
 import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
 import {
   annotateHarnessToolResultOmissions,
+  annotateHarnessUserResultOmissions,
   createHarnessTranscriptOmissionRuleRecord,
   type HarnessTranscriptOmissionRuleRecord,
 } from "./contracts/transcript-omissions.ts";
@@ -114,6 +120,7 @@ import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
   HarnessTranscriptSubagentContext,
+  HarnessUserTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { HarnessControlError } from "./control-errors.ts";
 import {
@@ -145,7 +152,10 @@ import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-ga
 import { sumHarnessModelUsage } from "./model/usage.ts";
 import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnostic-collapse.ts";
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
-import { isTerminalHarnessRunStatus } from "./run-state.ts";
+import {
+  type HarnessOpeningResearch,
+  isTerminalHarnessRunStatus,
+} from "./run-state.ts";
 import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
@@ -167,7 +177,10 @@ import {
 } from "./fabric-identifier-scrub.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import { isSearchPatternsToolSuccessOutput } from "./tools/search-patterns.ts";
-import { isResearchToolSuccessOutput } from "./tools/research.ts";
+import {
+  isResearchToolSuccessOutput,
+  researchKitGuidance,
+} from "./tools/research.ts";
 import type { HarnessPatternRef } from "./contracts/pattern-refs.ts";
 import { isRunPatternToolSuccessOutput } from "./tools/run-pattern.ts";
 import {
@@ -222,6 +235,8 @@ export interface CreateHarnessPromptLoopOptions
 
 export interface RunHarnessPromptOptions {
   prompt: string;
+  /** Trusted driver marker for research before a new root task. */
+  openingResearchTask?: string;
   systemPrompt?: string;
   contextMessages?: readonly string[];
   imageAttachments?: readonly HarnessImageAttachment[];
@@ -236,6 +251,8 @@ export interface RunHarnessPromptOptions {
 
 export interface RunHarnessTranscriptOptions {
   transcript: readonly HarnessTranscriptMessage[];
+  /** Trusted driver marker for research before a new root task. */
+  openingResearchTask?: string;
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
@@ -1861,6 +1878,34 @@ const cfcResultFromOutput = (
     ? output.cfcResult as CfcSandboxResult
     : undefined;
 
+const researchCfcFromOutput = (
+  output: unknown,
+): HarnessResearchCfcProjection | undefined =>
+  isObjectNotArray(output) && isObjectNotArray(output.cfc) &&
+    output.cfc.version === 1 &&
+    (output.cfc.coverage === "complete" ||
+      output.cfc.coverage === "incomplete") &&
+    isObjectNotArray(output.cfc.sourceLabel) &&
+    isObjectNotArray(output.cfc.outputLabel) &&
+    Array.isArray(output.cfc.missingLabels)
+    ? output.cfc as unknown as HarnessResearchCfcProjection
+    : undefined;
+
+const researchModelContextObservation = (
+  output: unknown,
+  resultRef: ToolResultRef,
+  toolCallId: string,
+): HarnessCfcModelContextObservationInput | undefined => {
+  const cfc = researchCfcFromOutput(output);
+  return cfc === undefined ? undefined : {
+    toolCallId,
+    toolId: "research",
+    outputId: resultRef.outputId,
+    channels: ["output"],
+    label: cfc.outputLabel,
+  };
+};
+
 /**
  * The fields a tool result keeps on its artifact and does not put in front of
  * the model: the sandbox's own CFC result, and the complete private transcript
@@ -2937,6 +2982,338 @@ export class CfHarnessPromptLoop {
     );
   }
 
+  #openingResearchHandoffMessage(
+    marker: HarnessOpeningResearch,
+    result: string,
+    outputId?: string,
+  ): string {
+    return [
+      `Host opening research handoff (toolCallId: ${marker.toolCallId}${
+        outputId === undefined ? "" : `, outputId: ${outputId}`
+      }).`,
+      "The root driver ran this through the normal research policy, artifact, provenance, and usage-accounting path before the first parent model turn.",
+      "Treat the JSON below as host-supplied context for the immediately following task. Preserve incomplete status and missing items exactly; this message is not a model-authored tool call.",
+      result,
+    ].join("\n");
+  }
+
+  #openingResearchHandoffUserMessage(
+    marker: HarnessOpeningResearch,
+    content: string,
+    resultRef?: ToolResultRef,
+    omissionRules: readonly HarnessTranscriptOmissionRuleRecord[] = [],
+    inheritFrom?: HarnessTranscriptMessage,
+  ): HarnessUserTranscriptMessage {
+    if (resultRef === undefined) return { role: "user", content };
+    return annotateHarnessUserResultOmissions(
+      {
+        role: "user",
+        content,
+        toolResultProvenance: {
+          type: "cf-harness.tool-result-provenance",
+          toolCallId: marker.toolCallId,
+          toolId: resultRef.toolId,
+          outputId: resultRef.outputId,
+        },
+      },
+      omissionRules,
+      inheritFrom,
+    );
+  }
+
+  async #recoveryResearchArtifactEvidence(
+    resultRef: ToolResultRef,
+    successSummary: HarnessResearchRunSummary | undefined,
+  ): Promise<{
+    omissionRules: readonly HarnessTranscriptOmissionRuleRecord[];
+    cfc?: HarnessResearchCfcProjection;
+  }> {
+    let artifactOnlyPointers = successSummary === undefined
+      ? []
+      : ["/researchRecord"];
+    let cfc = successSummary?.cfc;
+    if (
+      (artifactOnlyPointers.length === 0 || cfc === undefined) &&
+      resultRef.artifactPath !== undefined
+    ) {
+      try {
+        const runRoot = this.engine.artifactStore?.runRoot;
+        if (runRoot === undefined) return { omissionRules: [] };
+        const realRunRoot = await Deno.realPath(runRoot);
+        const realArtifactPath = await Deno.realPath(resultRef.artifactPath);
+        const relativeArtifactPath = relative(realRunRoot, realArtifactPath);
+        if (
+          relativeArtifactPath === ".." ||
+          relativeArtifactPath.startsWith("../") ||
+          relativeArtifactPath.startsWith("..\\") ||
+          isAbsolute(relativeArtifactPath)
+        ) {
+          return { omissionRules: [] };
+        }
+        const persisted: unknown = JSON.parse(
+          await Deno.readTextFile(realArtifactPath),
+        );
+        if (isObjectNotArray(persisted)) {
+          artifactOnlyPointers = presentFieldPointers(persisted, [
+            "researchRecord",
+            "rawCauseMessage",
+          ]);
+        }
+        cfc ??= researchCfcFromOutput(persisted);
+      } catch {
+        // Recovery only claims an omission it can prove from retained state.
+      }
+    }
+    const omission = createHarnessTranscriptOmissionRuleRecord(
+      "artifact-only",
+      resultRef,
+      artifactOnlyPointers,
+    );
+    return {
+      omissionRules: omission === undefined ? [] : [omission],
+      ...(cfc !== undefined ? { cfc } : {}),
+    };
+  }
+
+  async #recoverOpeningResearchHandoff(
+    marker: HarnessOpeningResearch,
+  ): Promise<
+    { marker: HarnessOpeningResearch; message: HarnessUserTranscriptMessage }
+  > {
+    const runState = this.engine.getRunState();
+    const indexedOutputRef = runState.toolOutputs[marker.toolOutputIndex];
+    const outputRef = indexedOutputRef?.toolId === "research" &&
+        (marker.outputId === undefined ||
+          indexedOutputRef.outputId === marker.outputId)
+      ? indexedOutputRef
+      : undefined;
+    const researchRun = outputRef === undefined
+      ? undefined
+      : runState.researchRuns?.find((run) =>
+        run.outputId === outputRef.outputId
+      );
+    const artifactEvidence = outputRef === undefined
+      ? { omissionRules: [] }
+      : await this.#recoveryResearchArtifactEvidence(outputRef, researchRun);
+    const omissionRules = artifactEvidence.omissionRules;
+    if (
+      outputRef !== undefined && artifactEvidence.cfc !== undefined &&
+      !runState.cfcModelContext?.observations.some((observation) =>
+        observation.toolId === "research" &&
+        observation.outputId === outputRef.outputId &&
+        observation.channels.includes("output")
+      )
+    ) {
+      const observation = researchModelContextObservation(
+        { cfc: artifactEvidence.cfc },
+        outputRef,
+        marker.toolCallId,
+      );
+      if (observation !== undefined) {
+        await this.engine.recordCfcModelContextObservations([observation]);
+      }
+    }
+    if (marker.handoffMessage !== undefined) {
+      return {
+        marker,
+        message: this.#openingResearchHandoffUserMessage(
+          marker,
+          marker.handoffMessage,
+          outputRef,
+          omissionRules,
+        ),
+      };
+    }
+    if (outputRef !== undefined) {
+      const result = researchRun === undefined
+        ? JSON.stringify({
+          outputId: outputRef.outputId,
+          status: "error",
+          message:
+            "Opening research persisted no admitted kit before interruption and was not repeated on resume.",
+          ...(artifactEvidence.cfc !== undefined
+            ? { cfc: artifactEvidence.cfc }
+            : {}),
+        })
+        : JSON.stringify({
+          outputId: outputRef.outputId,
+          status: "ok",
+          kit: researchRun.kit,
+          guidance: researchKitGuidance(researchRun.kit),
+          cfc: researchRun.cfc,
+        });
+      const message = this.#openingResearchHandoffMessage(
+        marker,
+        result,
+        outputRef.outputId,
+      );
+      return {
+        marker: {
+          ...marker,
+          status: researchRun === undefined ? "failed" : "completed",
+          outputId: outputRef.outputId,
+          handoffMessage: message,
+        },
+        message: this.#openingResearchHandoffUserMessage(
+          marker,
+          message,
+          outputRef,
+          omissionRules,
+        ),
+      };
+    }
+    const message = this.#openingResearchHandoffMessage(
+      marker,
+      JSON.stringify({
+        status: "error",
+        message:
+          "Opening research produced no persisted result before interruption and was not repeated on resume.",
+      }),
+    );
+    return {
+      marker: { ...marker, status: "failed", handoffMessage: message },
+      message: this.#openingResearchHandoffUserMessage(marker, message),
+    };
+  }
+
+  async #prepareOpeningResearch(options: {
+    task?: string;
+    model: string;
+    promptSlotBinding?: PromptSlotBinding;
+    signal?: AbortSignal;
+    sequence: number;
+    recordActivity: (activity: HarnessToolActivity) => void;
+    recordDescendantUsage: (usage: HarnessModelUsage) => void;
+    onTranscriptEvent?: (
+      event: HarnessTranscriptEvent,
+    ) => void | Promise<void>;
+  }): Promise<
+    {
+      marker: HarnessOpeningResearch;
+      message: HarnessUserTranscriptMessage;
+    } | undefined
+  > {
+    const runState = this.engine.getRunState();
+    if (runState.openingResearch !== undefined) {
+      const recovered = await this.#recoverOpeningResearchHandoff(
+        runState.openingResearch,
+      );
+      if (recovered.marker !== runState.openingResearch) {
+        await this.engine.recordOpeningResearch(recovered.marker);
+      }
+      return recovered;
+    }
+    if (
+      options.task === undefined || this.engine.resumedRun ||
+      runState.lineage !== undefined || !this.#allowedToolIds.has("research")
+    ) {
+      return undefined;
+    }
+    const marker: HarnessOpeningResearch = {
+      type: "cf-harness.opening-research",
+      version: 1,
+      status: "pending",
+      task: options.task,
+      toolCallId: `opening-research:${runState.runId}`,
+      toolOutputIndex: runState.toolOutputs.length,
+    };
+    await this.engine.recordOpeningResearch(marker);
+    try {
+      const invoked = await this.#invokeToolCall(
+        {
+          id: marker.toolCallId,
+          type: "function",
+          function: {
+            name: "research",
+            arguments: JSON.stringify({ task: options.task }),
+          },
+        },
+        options.model,
+        options.promptSlotBinding,
+        options.signal,
+        options.sequence,
+        options.recordActivity,
+        options.recordDescendantUsage,
+        options.onTranscriptEvent,
+        "opening-research",
+      );
+      if (invoked.cfcModelContextObservations !== undefined) {
+        await this.engine.recordCfcModelContextObservations(
+          invoked.cfcModelContextObservations,
+        );
+      }
+      const outputId = invoked.toolMessage.resultRef?.outputId;
+      const message = this.#openingResearchHandoffMessage(
+        marker,
+        invoked.toolMessage.content,
+        outputId,
+      );
+      let returnedKit = false;
+      try {
+        const output = JSON.parse(invoked.toolMessage.content) as {
+          status?: unknown;
+        };
+        returnedKit = output.status === "ok";
+      } catch {
+        // A non-JSON policy result did not return an admitted research kit.
+      }
+      const settled: HarnessOpeningResearch = {
+        ...marker,
+        status: returnedKit ? "completed" : "failed",
+        ...(outputId !== undefined ? { outputId } : {}),
+        handoffMessage: message,
+      };
+      await this.engine.recordOpeningResearch(settled);
+      return {
+        marker: settled,
+        message: this.#openingResearchHandoffUserMessage(
+          settled,
+          message,
+          invoked.toolMessage.resultRef,
+          [],
+          invoked.toolMessage,
+        ),
+      };
+    } catch (error) {
+      try {
+        await this.engine.recordOpeningResearch({
+          ...marker,
+          status: "failed",
+        });
+      } catch {
+        // The tool failure remains the run outcome when its checkpoint fails.
+      }
+      throw error;
+    }
+  }
+
+  #insertOpeningResearchHandoff(
+    transcript: HarnessTranscriptMessage[],
+    handoff: {
+      marker: HarnessOpeningResearch;
+      message: HarnessUserTranscriptMessage;
+    },
+  ): { index: number; inserted: boolean } | undefined {
+    const existingIndex = transcript.findIndex((message) =>
+      message.role === "user" && message.content === handoff.message.content
+    );
+    if (existingIndex >= 0) {
+      if (handoff.message.toolResultProvenance === undefined) return undefined;
+      transcript[existingIndex] = handoff.message;
+      return { index: existingIndex, inserted: false };
+    }
+    const taskIndex = transcript.findLastIndex((message) =>
+      message.role === "user" && message.content === handoff.marker.task
+    );
+    if (taskIndex < 0) {
+      throw new Error(
+        "opening research task does not match a user message in the transcript",
+      );
+    }
+    transcript.splice(taskIndex, 0, handoff.message);
+    return { index: taskIndex, inserted: true };
+  }
+
   async runPrompt(
     options: RunHarnessPromptOptions,
   ): Promise<HarnessPromptLoopResult> {
@@ -2957,6 +3334,7 @@ export class CfHarnessPromptLoop {
             : {}),
         },
       ],
+      openingResearchTask: options.openingResearchTask,
       model: options.model,
       maxModelTurns: options.maxModelTurns,
       promptSlotBinding: options.promptSlotBinding,
@@ -3135,6 +3513,48 @@ export class CfHarnessPromptLoop {
     // one way the loop ends in success.
     let finalAssistantText: string | undefined;
     try {
+      const openingResearch = await this.#prepareOpeningResearch({
+        task: options.openingResearchTask,
+        model,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        ...(options.signal !== undefined ? { signal: options.signal } : {}),
+        sequence: toolActivity.length + 1,
+        recordActivity: (activity) => toolActivity.push(activity),
+        recordDescendantUsage: (usage) => descendantUsage.push(usage),
+        ...(options.onTranscriptEvent !== undefined
+          ? { onTranscriptEvent: options.onTranscriptEvent }
+          : {}),
+      });
+      if (openingResearch !== undefined) {
+        const placement = this.#insertOpeningResearchHandoff(
+          transcript,
+          openingResearch,
+        );
+        if (placement !== undefined) {
+          const { index, inserted } = placement;
+          for (const entry of reportTimeline) {
+            if (
+              inserted && entry.transcriptIndex !== undefined &&
+              entry.transcriptIndex >= index
+            ) {
+              entry.transcriptIndex += 1;
+            }
+          }
+          await this.engine.persistTranscript(transcript);
+          if (inserted) {
+            const handoffMessage = transcript[index];
+            reportTimeline.push(transcriptTimelineEntry(
+              handoffMessage,
+              index,
+              this.engine.getRunState().updatedAt,
+            ));
+            await options.onTranscriptEvent?.({
+              message: handoffMessage,
+              transcript,
+            });
+          }
+        }
+      }
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
         let response;
@@ -3555,6 +3975,7 @@ export class CfHarnessPromptLoop {
     startedAt: string;
     promptSlotBinding?: PromptSlotBinding;
     effectClass?: HarnessToolEffectClass;
+    origin?: HarnessToolInvocationOrigin;
     toolInputSummary?: HarnessToolInputSummary;
     policyEventIndexes?: readonly number[];
     recordActivity: (activity: HarnessToolActivity) => void;
@@ -3577,6 +3998,7 @@ export class CfHarnessPromptLoop {
       endedAt: this.engine.getRunState().updatedAt,
       toolCallId: options.toolCall.id,
       toolId: options.toolCall.function.name,
+      ...(options.origin !== undefined ? { origin: options.origin } : {}),
       ...(options.effectClass !== undefined
         ? { effectClass: options.effectClass }
         : {}),
@@ -3596,6 +4018,7 @@ export class CfHarnessPromptLoop {
       toolActivitySequence: options.sequence,
       toolCallId: options.toolCall.id,
       toolId: options.toolCall.function.name,
+      ...(options.origin !== undefined ? { origin: options.origin } : {}),
       ...(options.effectClass !== undefined
         ? { effectClass: options.effectClass }
         : {}),
@@ -3634,6 +4057,7 @@ export class CfHarnessPromptLoop {
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
     onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>,
+    origin?: HarnessToolInvocationOrigin,
   ): Promise<InvokedToolCallMessages> {
     // The name the model wrote stays out of the complaint: it is model text,
     // and a tool name carries injected instruction as readily as any other
@@ -3648,6 +4072,7 @@ export class CfHarnessPromptLoop {
         },
         sequence,
         startedAt: this.engine.getRunState().updatedAt,
+        ...(origin !== undefined ? { origin } : {}),
         ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         recordActivity,
       });
@@ -3682,6 +4107,7 @@ export class CfHarnessPromptLoop {
       endedAt: activityEndedAt(),
       toolCallId: toolCall.id,
       toolId,
+      ...(origin !== undefined ? { origin } : {}),
       effectClass: tool.descriptor.effectClass,
       cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
       policyDecision,
@@ -3728,6 +4154,7 @@ export class CfHarnessPromptLoop {
         toolCallId: toolCall.id,
         toolId,
         effectClass: tool.descriptor.effectClass,
+        ...(origin !== undefined ? { origin } : {}),
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: "denied",
         reasonCodes: ["tool_not_allowed"],
@@ -3758,6 +4185,7 @@ export class CfHarnessPromptLoop {
         sequence,
         startedAt: activityStartedAt,
         effectClass: tool.descriptor.effectClass,
+        ...(origin !== undefined ? { origin } : {}),
         ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         policyEventIndexes,
         recordActivity,
@@ -3781,6 +4209,7 @@ export class CfHarnessPromptLoop {
         sequence,
         startedAt: activityStartedAt,
         effectClass: tool.descriptor.effectClass,
+        ...(origin !== undefined ? { origin } : {}),
         ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         policyEventIndexes,
         recordActivity,
@@ -3851,6 +4280,7 @@ export class CfHarnessPromptLoop {
         toolCallId: toolCall.id,
         toolId,
         effectClass: tool.descriptor.effectClass,
+        ...(origin !== undefined ? { origin } : {}),
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: "denied",
         reasonCodes: policyDecisionReasonCodes,
@@ -3885,6 +4315,7 @@ export class CfHarnessPromptLoop {
           sequence,
           startedAt: activityStartedAt,
           effectClass: tool.descriptor.effectClass,
+          ...(origin !== undefined ? { origin } : {}),
           ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
           toolInputSummary,
           policyEventIndexes,
@@ -3919,6 +4350,7 @@ export class CfHarnessPromptLoop {
           toolCallId: toolCall.id,
           toolId,
           effectClass: tool.descriptor.effectClass,
+          ...(origin !== undefined ? { origin } : {}),
           cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
           decision: "denied",
           reasonCodes: [
@@ -3971,6 +4403,7 @@ export class CfHarnessPromptLoop {
             sequence,
             startedAt: activityStartedAt,
             effectClass: tool.descriptor.effectClass,
+            ...(origin !== undefined ? { origin } : {}),
             ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
             toolInputSummary,
             policyEventIndexes,
@@ -4001,6 +4434,7 @@ export class CfHarnessPromptLoop {
             sequence,
             startedAt: activityStartedAt,
             effectClass: tool.descriptor.effectClass,
+            ...(origin !== undefined ? { origin } : {}),
             ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
             toolInputSummary,
             policyEventIndexes,
@@ -4021,6 +4455,7 @@ export class CfHarnessPromptLoop {
             sequence,
             startedAt: activityStartedAt,
             effectClass: tool.descriptor.effectClass,
+            ...(origin !== undefined ? { origin } : {}),
             ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
             toolInputSummary,
             policyEventIndexes,
@@ -4052,6 +4487,7 @@ export class CfHarnessPromptLoop {
       toolCallId: toolCall.id,
       toolId,
       effectClass: tool.descriptor.effectClass,
+      ...(origin !== undefined ? { origin } : {}),
       cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
       decision: policyDecision,
       reasonCodes: policyDecisionReasonCodes,
@@ -4132,6 +4568,7 @@ export class CfHarnessPromptLoop {
         toolCallId: toolCall.id,
         toolId,
         effectClass: tool.descriptor.effectClass,
+        ...(origin !== undefined ? { origin } : {}),
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: harnessReleaseDecisionOutcome(releaseDecision.reasonCode),
         reasonCodes: [releaseDecision.reasonCode],
@@ -4406,6 +4843,39 @@ export class CfHarnessPromptLoop {
         ),
       };
     }
+    if (toolId === "research") {
+      let publicOutput: unknown = output;
+      if (isObjectNotArray(output)) {
+        const {
+          rawCauseMessage: _rawCauseMessage,
+          ...visibleOutput
+        } = output;
+        publicOutput = visibleOutput;
+      }
+      const observation = researchModelContextObservation(
+        output,
+        resultRef,
+        toolCallId,
+      );
+      return {
+        output: stripInternalToolFields(publicOutput),
+        ...(observation !== undefined
+          ? { cfcModelContextObservations: [observation] }
+          : {}),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            isObjectNotArray(output)
+              ? presentFieldPointers(output, [
+                "researchRecord",
+                "rawCauseMessage",
+              ])
+              : [],
+          ),
+        ),
+      };
+    }
     if (toolId === "describe_handle") {
       // A disclosed schema's property names are whoever authored the schema's
       // own text, and the shape reduction passes them through deliberately —
@@ -4659,6 +5129,9 @@ export class CfHarnessPromptLoop {
         ? { docsCorpus: this.engine.docsCorpus }
         : {}),
       ...(inheritedResearchRuns.length > 0 ? { inheritedResearchRuns } : {}),
+      ...(parentRunState.cfcModelContext !== undefined
+        ? { inheritedCfcModelContext: parentRunState.cfcModelContext }
+        : {}),
       ...(profileConfig.allowedSkillScripts !== undefined
         ? { allowedSkillScripts: profileConfig.allowedSkillScripts }
         : {}),

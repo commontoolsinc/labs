@@ -16,7 +16,10 @@ import {
   createToolOutputId,
   createToolResultRef,
 } from "../src/contracts/tool-result.ts";
-import type { HarnessToolTranscriptMessage } from "../src/contracts/transcript.ts";
+import type {
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptMessage,
+} from "../src/contracts/transcript.ts";
 
 describe("transcript omissions", () => {
   const runId = "omission-run";
@@ -179,6 +182,55 @@ describe("transcript omissions", () => {
       "artifact-only",
       "model-context-truncation",
     ]);
+  });
+
+  it("retains prior-process rules for a restored user handoff", () => {
+    const researchOutputId = createToolOutputId(runId, "research", 1);
+    const researchRef = createToolResultRef(
+      researchOutputId,
+      "research",
+      runId,
+      artifactPath,
+    );
+    const omission = createHarnessTranscriptOmissionRuleRecord(
+      "artifact-only",
+      researchRef,
+      ["/researchRecord"],
+    )!;
+    const previous = createHarnessTranscriptOmissions([
+      annotateHarnessToolResultOmissions({
+        role: "tool",
+        toolCallId: "opening-research:omission-run",
+        toolName: "research",
+        content: "sanitized kit",
+        resultRef: researchRef,
+      }, [omission]),
+    ]);
+    const restored = JSON.parse(JSON.stringify({
+      role: "user",
+      content: "Host opening research handoff",
+      toolResultProvenance: {
+        type: "cf-harness.tool-result-provenance",
+        toolCallId: "opening-research:omission-run",
+        toolId: "research",
+        outputId: researchOutputId,
+      },
+    })) as HarnessTranscriptMessage;
+
+    expect(createHarnessTranscriptOmissions([restored], previous).results)
+      .toEqual([{
+        transcriptIndex: 0,
+        toolCallId: "opening-research:omission-run",
+        toolId: "research",
+        outputId: researchOutputId,
+        rules: [{
+          rule: "artifact-only",
+          locations: [{
+            artifactPath,
+            jsonPointer: "/researchRecord",
+          }],
+        }],
+      }]);
   });
 
   it("does not overwrite an unsupported prior omission record", async () => {

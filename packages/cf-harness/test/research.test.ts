@@ -1,6 +1,7 @@
 import { encodeHex } from "@std/encoding/hex";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import {
   computeEntryIdentity,
@@ -30,7 +31,10 @@ import {
   MAX_RESEARCH_MODEL_TURNS,
   MAX_RESEARCH_TOTAL_READ_CHARS,
 } from "../src/research/runner.ts";
-import { researchToolDescriptor } from "../src/tools/research.ts";
+import {
+  researchKitGuidance,
+  researchToolDescriptor,
+} from "../src/tools/research.ts";
 
 type ModelStep = (
   request: HarnessModelTurnRequest,
@@ -220,6 +224,11 @@ describe("research", () => {
       expect(reply.kit.status).toBe("complete");
       expect(reply.kit.rules[0].rule).toContain("late-contract");
       expect(reply.kit.example?.content).toBe(tailExample);
+      expect(reply.kit.example?.syntax).toEqual({
+        status: "valid",
+        scope: "syntax-only",
+        diagnostics: [],
+      });
       expect(reply.kit.sources[0].offset).toBe(4_000);
       const tailRead = toolOutputs(
         model.requests[3],
@@ -228,6 +237,19 @@ describe("research", () => {
       expect(tailRead.content).toContain(tailRule);
       expect(tailRead.content).toContain(tailExample);
       expect(tailRead.complete).toBe(true);
+      expect(tailRead.sectionId).toBe("section-0");
+      expect(reply.kit.sources[0].cfcLabel).toEqual({
+        integrity: [operatorProvisionedReferenceAtom("/trusted/docs")],
+      });
+      expect(reply.record.cfc).toEqual({
+        version: 1,
+        sourceLabel: {
+          integrity: [operatorProvisionedReferenceAtom("/trusted/docs")],
+        },
+        outputLabel: {},
+        coverage: "complete",
+        missingLabels: [],
+      });
     });
 
     it("keeps duplicate headings as distinct exact sources", async () => {
@@ -285,6 +307,135 @@ describe("research", () => {
         "docs/repeated.md#Example (section-0)",
         "docs/repeated.md#Example (section-1)",
       ]);
+      const opened = toolOutputs(model.requests[1], "open_doc_section");
+      expect(opened.map((read) => read.sectionId)).toEqual([
+        "section-0",
+        "section-1",
+      ]);
+    });
+
+    it("repairs one misspelled citation on the final available turn", async () => {
+      const corpus = corpusWith([{
+        path: "docs/api.md",
+        heading: "Pattern contract",
+        text: "Use the exact documented pattern contract.",
+      }]);
+      const intermediateTurns: ModelStep[] = Array.from(
+        { length: MAX_RESEARCH_MODEL_TURNS - 3 },
+        (_, index) => () =>
+          assistant("", [{
+            id: `search-${index}`,
+            name: "search_docs",
+            input: { query: "pattern contract" },
+          }]),
+      );
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "read",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }]),
+        ...intermediateTurns,
+        (request) => {
+          const sourceId = String(
+            toolOutputs(request, "open_doc_section")[0].sourceId,
+          );
+          const misspelled = sourceId.slice(0, -1);
+          return finalResult({
+            status: "complete",
+            summary: "The exact contract is available.",
+            recommendation: {
+              kind: "focused-api",
+              rationale: "The opened section establishes the rule.",
+            },
+            rules: [{
+              rule: "Use the documented pattern contract.",
+              sourceIds: [misspelled],
+            }],
+            sourceIds: [misspelled],
+            missing: [],
+          });
+        },
+        (request) => {
+          const sourceId = String(
+            toolOutputs(request, "open_doc_section")[0].sourceId,
+          );
+          expect(request.tools).toEqual([]);
+          expect(request.transcript.at(-1)?.content).toContain(sourceId);
+          expect(request.transcript.at(-1)?.content).toContain("section-0");
+          return finalResult({
+            status: "complete",
+            summary: "The exact contract is available.",
+            recommendation: {
+              kind: "focused-api",
+              rationale: "The opened section establishes the rule.",
+            },
+            rules: [{
+              rule: "Use the documented pattern contract.",
+              sourceIds: [sourceId],
+            }],
+            sourceIds: [sourceId],
+            missing: [],
+          });
+        },
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ corpus }),
+      );
+
+      expect(model.requests).toHaveLength(MAX_RESEARCH_MODEL_TURNS);
+      expect(reply.record.budgets.modelTurns).toBe(MAX_RESEARCH_MODEL_TURNS);
+      expect(reply.record.budgets.toolCalls).toBe(
+        MAX_RESEARCH_MODEL_TURNS - 2,
+      );
+      expect(reply.kit.status).toBe("complete");
+      expect(reply.kit.sources).toHaveLength(1);
+    });
+
+    it("keeps strict admission after the single citation repair", async () => {
+      const corpus = corpusWith([{
+        path: "docs/api.md",
+        heading: "Pattern contract",
+        text: "Use the exact documented pattern contract.",
+      }]);
+      const misspelledResult = (request: HarnessModelTurnRequest) => {
+        const sourceId = String(
+          toolOutputs(request, "open_doc_section")[0].sourceId,
+        );
+        const misspelled = `${sourceId}-wrong`;
+        return finalResult({
+          status: "complete",
+          recommendation: {
+            kind: "focused-api",
+            rationale: "The opened section establishes the rule.",
+          },
+          rules: [{ rule: "Use the contract.", sourceIds: [misspelled] }],
+          sourceIds: [misspelled],
+          missing: [],
+        });
+      };
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "read",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }]),
+        misspelledResult,
+        misspelledResult,
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ corpus }),
+      );
+
+      expect(model.requests).toHaveLength(3);
+      expect(reply.kit.status).toBe("incomplete");
+      expect(reply.kit.sources).toEqual([]);
+      expect(reply.kit.missing.some((item) => item.includes("was not read")))
+        .toBe(true);
     });
   });
 
@@ -396,6 +547,22 @@ describe("research", () => {
       expect(reply.kit.patterns[0].files).toEqual([
         "/main.tsx",
         "/title.ts",
+      ]);
+      expect(reply.record.cfc.coverage).toBe("incomplete");
+      expect(reply.record.cfc.missingLabels).toEqual([
+        {
+          source: "pattern-index-metadata",
+          detail:
+            `pattern ${patternId} metadata returned by search_pattern_index`,
+        },
+        {
+          source: "pattern-index-metadata",
+          detail: `pattern ${patternId} metadata returned by inspect_pattern`,
+        },
+        {
+          source: "pattern-index-source",
+          detail: `pattern ${patternId} source returned by inspect_pattern`,
+        },
       ]);
       const inspection = toolOutputs(
         model.requests[3],
@@ -535,35 +702,173 @@ describe("research", () => {
     });
   });
 
-  describe("host admission", () => {
-    it("drops invented sources and undescribed handles from a claimed complete kit", async () => {
+  describe("CFC metadata", () => {
+    it("separates a complete kit from partial label coverage across all observations", async () => {
+      const docsA = operatorProvisionedReferenceAtom("/trusted/docs-a");
+      const docsB = operatorProvisionedReferenceAtom("/trusted/docs-b");
+      const taskSecret = cfcAtom.resource("ResearchTaskSecret", "task");
+      const handleSecret = cfcAtom.resource("HandleSecret", "handle");
+      const handleIntegrity = cfcAtom.resource("HandleIntegrity", "handle");
+      const corpus = {
+        type: "cf-harness.docs-corpus" as const,
+        roots: [{ name: "docs-a", hostPath: "/trusted/docs-a" }, {
+          name: "docs-b",
+          hostPath: "/trusted/docs-b",
+        }],
+        sections: [{
+          path: "docs-a/api.md",
+          heading: "Dinner API",
+          text: "Use the documented dinner API.",
+          integrity: [docsA],
+        }, {
+          path: "docs-b/unselected.md",
+          heading: "Other material",
+          text: "This unselected section still influenced lexical ranking.",
+          integrity: [docsB],
+        }],
+        files: 2,
+        truncated: false,
+      };
+      const results: PatternIndexSearchResponse["results"] = [
+        "unselected-a",
+        "unselected-b",
+      ].map((patternId) => ({
+        patternId,
+        description: `Published lead ${patternId}`,
+        hashtags: ["dinner"],
+        ownerDid: "did:key:zPublisher",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        dependencies: [],
+        kind: "part" as const,
+        quality: "unproven" as const,
+      }));
+      const index: HarnessResearchPatternIndex = {
+        searchPatterns: () => Promise.resolve({ results }),
+        getPattern: () => Promise.reject(new Error("not inspected")),
+      };
+      const token = "cfh:a:labelled";
       const model = new ScriptedModelClient([
         () =>
-          finalResult({
+          assistant("", [{
+            id: "search-docs",
+            name: "search_docs",
+            input: { query: "dinner API" },
+          }, {
+            id: "open-doc",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }, {
+            id: "search-patterns",
+            name: "search_pattern_index",
+            input: { text: "dinner" },
+          }, {
+            id: "describe",
+            name: "describe_handle",
+            input: { token },
+          }]),
+        (request) => {
+          const read = toolOutputs(request, "open_doc_section")[0];
+          return finalResult({
             status: "complete",
+            summary: "The focused API rule is established.",
             recommendation: {
-              kind: "author",
-              rationale: "Write a new pattern.",
+              kind: "focused-api",
+              rationale: "The exact documentation read states the rule.",
             },
-            inputs: [{
-              name: "mail",
-              token: "cfh:a:fake2",
-              purpose: "Read mail",
+            rules: [{
+              rule: "Use the documented dinner API.",
+              sourceIds: [read.sourceId],
             }],
-            example: {
-              kind: "pattern-source",
-              content: "export default 1;",
-            },
-            sourceIds: ["documentation:invented"],
+            sourceIds: [read.sourceId],
             missing: [],
-          }),
+          });
+        },
       ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({
+          corpus,
+          getPatternIndex: () => Promise.resolve(index),
+          handleTokens: [token],
+          taskCfcLabel: { confidentiality: [taskSecret] },
+          describeHandle: () =>
+            Promise.resolve({
+              output: {
+                outputId: "describe-labelled",
+                token,
+                known: true,
+                hasSchema: false,
+              },
+              cfcLabel: {
+                confidentiality: [handleSecret],
+                integrity: [handleIntegrity],
+              },
+              cfcLabelAvailable: true,
+            }),
+        }),
+      );
+
+      expect(reply.kit.status).toBe("complete");
+      expect(reply.record.cfc.coverage).toBe("incomplete");
+      expect(reply.record.cfc.sourceLabel.confidentiality).toEqual([
+        taskSecret,
+        handleSecret,
+      ]);
+      expect(reply.record.cfc.sourceLabel.integrity).toEqual([
+        docsA,
+        docsB,
+        handleIntegrity,
+      ]);
+      expect(reply.record.cfc.outputLabel).toEqual({
+        confidentiality: [taskSecret, handleSecret],
+      });
+      expect(reply.record.cfc.missingLabels).toEqual([
+        {
+          source: "pattern-index-metadata",
+          detail:
+            "pattern unselected-a metadata returned by search_pattern_index",
+        },
+        {
+          source: "pattern-index-metadata",
+          detail:
+            "pattern unselected-b metadata returned by search_pattern_index",
+        },
+      ]);
+      expect(reply.record.sourceReads[0].cfcLabel).toEqual({
+        integrity: [docsA],
+      });
+    });
+  });
+
+  describe("host admission", () => {
+    it("drops invented sources and undescribed handles from a claimed complete kit", async () => {
+      const claimedResult = () =>
+        finalResult({
+          status: "complete",
+          recommendation: {
+            kind: "author",
+            rationale: "Write a new pattern.",
+          },
+          inputs: [{
+            name: "mail",
+            token: "cfh:a:fake2",
+            purpose: "Read mail",
+          }],
+          example: {
+            kind: "pattern-source",
+            content: "export default 1;",
+          },
+          sourceIds: ["documentation:invented"],
+          missing: [],
+        });
+      const model = new ScriptedModelClient([claimedResult, claimedResult]);
 
       const reply = await createResearchRunner({ modelClient: model })(
         requestFor(),
       );
 
       expect(reply.kit.status).toBe("incomplete");
+      expect(model.requests).toHaveLength(2);
       expect(reply.kit.inputs).toEqual([]);
       expect(reply.kit.sources).toEqual([]);
       expect(reply.kit.missing).toContain(
@@ -622,11 +927,14 @@ describe("research", () => {
           handleTokens: [token],
           describeHandle: () =>
             Promise.resolve({
-              outputId: "describe-error",
-              token,
-              known: true,
-              hasSchema: false,
-              error: "referent is no longer available",
+              output: {
+                outputId: "describe-error",
+                token,
+                known: true,
+                hasSchema: false,
+                error: "referent is no longer available",
+              },
+              cfcLabelAvailable: false,
             }),
         }),
       );
@@ -695,10 +1003,13 @@ describe("research", () => {
           handleTokens: [token],
           describeHandle: () =>
             Promise.resolve({
-              outputId: "describe-mail",
-              token,
-              known: true,
-              hasSchema: false,
+              output: {
+                outputId: "describe-mail",
+                token,
+                known: true,
+                hasSchema: false,
+              },
+              cfcLabelAvailable: false,
             }),
         }),
       );
@@ -756,6 +1067,76 @@ describe("research", () => {
       );
       expect(reply.kit.status).toBe("incomplete");
     });
+
+    it("retains complete source and exact parser diagnostics for invalid syntax", async () => {
+      const corpus = corpusWith([{
+        path: "docs/api.md",
+        heading: "Pattern contract",
+        text: "Import pattern and Writable from commonfabric.",
+      }]);
+      const source = [
+        'import { new Writable, pattern } from "commonfabric";',
+        "export default pattern(() => ({ value: new Writable(0) }));",
+      ].join("\n");
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "read",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }]),
+        (request) => {
+          const read = toolOutputs(request, "open_doc_section")[0];
+          return finalResult({
+            status: "complete",
+            recommendation: {
+              kind: "author",
+              rationale: "The documented contract supports new source.",
+            },
+            example: {
+              kind: "pattern-source",
+              content: source,
+              sourceIds: [read.sourceId],
+            },
+            sourceIds: [read.sourceId],
+            missing: [],
+          });
+        },
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ corpus }),
+      );
+
+      expect(reply.kit.example?.content).toBe(source);
+      expect(reply.kit.example?.sourceIds).toHaveLength(1);
+      expect(reply.kit.example?.syntax).toEqual({
+        status: "invalid",
+        scope: "syntax-only",
+        diagnostics: [{
+          code: 1003,
+          message: "Identifier expected.",
+          line: 1,
+          column: 10,
+        }, {
+          code: 1005,
+          message: "',' expected.",
+          line: 1,
+          column: 14,
+        }],
+      });
+      expect(reply.kit.missing).toEqual(expect.arrayContaining([
+        "pattern-source example has a syntax error: TS1003 at 1:10: Identifier expected.",
+        "pattern-source example has a syntax error: TS1005 at 1:14: ',' expected.",
+      ]));
+      expect(reply.kit.status).toBe("incomplete");
+      expect(researchKitGuidance(reply.kit)).toContain(
+        "Correct those errors locally without repeating research",
+      );
+      expect(researchKitGuidance(reply.kit)).toContain(
+        "Syntax acceptance alone will not establish",
+      );
+    });
   });
 
   describe("bounded execution", () => {
@@ -779,6 +1160,9 @@ describe("research", () => {
       expect(model.requests).toHaveLength(MAX_RESEARCH_MODEL_TURNS);
       expect(model.requests.at(-1)?.tools).toEqual([]);
       expect(model.requests.at(-1)?.transcript.at(-1)?.role).toBe("user");
+      expect(model.requests.at(-1)?.transcript.at(-1)?.content).toContain(
+        "Current citable source catalog",
+      );
       expect(reply.kit.status).toBe("incomplete");
     });
 
@@ -808,6 +1192,11 @@ describe("research", () => {
       }
 
       expect(failure).toBeInstanceOf(HarnessResearchError);
+      if (failure === undefined) {
+        throw new Error("expected malformed JSON to fail research");
+      }
+      expect(failure.name).toBe("HarnessResearchError");
+      expect(Object.keys(failure)).toEqual([]);
       expect(failure?.message).toContain("not valid JSON");
       expect(failure?.record.sourceReads).toHaveLength(1);
       expect(
@@ -872,10 +1261,13 @@ describe("research", () => {
             descriptions += 1;
             abort.abort("stop research");
             return Promise.resolve({
-              outputId: `describe-${descriptions}`,
-              token,
-              known: true,
-              hasSchema: false,
+              output: {
+                outputId: `describe-${descriptions}`,
+                token,
+                known: true,
+                hasSchema: false,
+              },
+              cfcLabelAvailable: false,
             });
           },
         }));
@@ -910,7 +1302,65 @@ describe("research", () => {
       expect(usage).toEqual([17]);
     });
 
+    it("presents attached patterns as trusted leads that still require inspection", async () => {
+      const model = new ScriptedModelClient([
+        (request) => {
+          const user = request.transcript.find((message) =>
+            message.role === "user"
+          );
+          expect(user?.content).toContain(
+            "Authoritative index-resolved pattern attachments",
+          );
+          expect(user?.content).toContain("attached-checklist");
+          const attachments = user?.content.split("\n").find((line) =>
+            line.startsWith('[{"patternId":"attached-checklist"')
+          );
+          expect(JSON.parse(attachments ?? "[]")).toEqual([
+            expect.objectContaining({
+              patternId: "attached-checklist",
+              importHint:
+                'import CheckList from "cf:pattern:attached-checklist"',
+            }),
+          ]);
+          expect(user?.content).toContain("trusted search leads");
+          expect(user?.content).toContain(
+            "Call inspect_pattern before selecting one",
+          );
+          return finalResult();
+        },
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({
+          attachedPatterns: [{
+            patternId: "attached-checklist",
+            description: "A reusable checklist.",
+            hashtags: ["checklist"],
+            importHint: 'import CheckList from "cf:pattern:attached-checklist"',
+            kind: "part",
+            quality: "proven",
+            argumentType: "{ items: CheckItem[] }",
+            resultType: "{ items: CheckItem[]; ui: VNode }",
+          }],
+        }),
+      );
+
+      expect(model.requests).toHaveLength(1);
+      expect(reply.record.cfc).toEqual({
+        version: 1,
+        sourceLabel: {},
+        outputLabel: {},
+        coverage: "incomplete",
+        missingLabels: [{
+          source: "pattern-index-metadata",
+          detail:
+            "pattern attached-checklist metadata supplied as a task attachment",
+        }],
+      });
+    });
+
     it("includes prior kits in a focused follow-up prompt", async () => {
+      const priorSecret = cfcAtom.resource("PriorResearchSecret", "prior");
       const prior = {
         type: "cf-harness.research-run" as const,
         researchRunId: "prior-research",
@@ -933,20 +1383,99 @@ describe("research", () => {
         },
         confirmedPatterns: [],
         describedHandles: [],
+        cfc: {
+          version: 1 as const,
+          sourceLabel: { confidentiality: [priorSecret] },
+          outputLabel: { confidentiality: [priorSecret] },
+          coverage: "incomplete" as const,
+          missingLabels: [{
+            source: "pattern-index-source" as const,
+            detail: "pattern prior source returned by inspect_pattern",
+          }],
+        },
         completedAt: "2026-09-14T00:00:00.000Z",
       } satisfies HarnessResearchRunSummary;
       const model = new ScriptedModelClient([() => finalResult()]);
 
-      await createResearchRunner({ modelClient: model })(requestFor({
-        task: "Follow up after receiving mail.",
-        priorResearchRuns: [prior],
-      }));
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({
+          task: "Follow up after receiving mail.",
+          priorResearchRuns: [prior],
+        }),
+      );
 
       const user = model.requests[0].transcript.find((message) =>
         message.role === "user"
       );
+      const system = model.requests[0].transcript.find((message) =>
+        message.role === "system"
+      );
       expect(user?.content).toContain("prior-research");
       expect(user?.content).toContain("mail grant");
+      expect(user?.content).toContain("not citations for this fresh research");
+      expect(user?.content).toContain("section-N");
+      expect(system?.content).toContain(
+        "outputId returned by describe_handle records binding provenance only",
+      );
+      expect(system?.content).toContain(
+        "Only an exact value returned in a field named sourceId",
+      );
+      expect(reply.record.cfc).toEqual(prior.cfc);
+    });
+
+    it("records missing CFC coverage for a legacy prior kit", async () => {
+      const legacyPrior = {
+        type: "cf-harness.research-run" as const,
+        researchRunId: "legacy-prior-research",
+        outputId: "legacy-prior-output",
+        kit: {
+          status: "incomplete" as const,
+          task: "Initial task",
+          summary: "Use the previously researched checklist rules.",
+          recommendation: {
+            kind: "author" as const,
+            rationale: "A small authored composition remains appropriate.",
+          },
+          inputs: [],
+          patterns: [],
+          steps: [],
+          rules: [{
+            rule: "Preserve the researched checklist behavior.",
+            sourceIds: [],
+          }],
+          verification: [],
+          sources: [],
+          missing: ["exact composition"],
+        },
+        confirmedPatterns: [],
+        describedHandles: [],
+        completedAt: "2026-09-13T00:00:00.000Z",
+      } satisfies HarnessResearchRunSummary;
+      const model = new ScriptedModelClient([() => finalResult()]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ priorResearchRuns: [legacyPrior] }),
+      );
+
+      const user = model.requests[0].transcript.find((message) =>
+        message.role === "user"
+      );
+      expect(user?.content).toContain("legacy-prior-research");
+      expect(user?.content).toContain(
+        "Preserve the researched checklist behavior.",
+      );
+      expect(reply.kit.status).toBe("incomplete");
+      expect(reply.record.cfc).toEqual({
+        version: 1,
+        sourceLabel: {},
+        outputLabel: {},
+        coverage: "incomplete",
+        missingLabels: [{
+          source: "prior-research",
+          detail:
+            "prior research run legacy-prior-research summary did not retain CFC metadata",
+        }],
+      });
     });
   });
 });

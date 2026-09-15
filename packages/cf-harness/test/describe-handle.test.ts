@@ -33,7 +33,10 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
-import { describeHandleTool } from "../src/tools/describe-handle.ts";
+import {
+  describeHandleForResearch,
+  describeHandleTool,
+} from "../src/tools/describe-handle.ts";
 import { runPatternTool } from "../src/tools/run-pattern.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
@@ -828,10 +831,11 @@ describe("describe_handle", () => {
         ref,
       );
 
-      const output = await describeHandleTool.invoke(
+      const researchDescription = await describeHandleForResearch(
         contextWith(minted.table, session),
         { token: minted.token },
       );
+      const output = researchDescription.output;
 
       const label = output.labels?.find((entry) => entry.path === undefined);
       expect(label?.integrity).toEqual([
@@ -854,6 +858,11 @@ describe("describe_handle", () => {
       expect(reply).not.toContain("operator-chosen-class");
       expect(reply).not.toContain("operator-chosen-subject");
       expect(reply).not.toContain("operator-chosen-source");
+      expect(researchDescription.cfcLabelAvailable).toBe(true);
+      const exactLabel = JSON.stringify(researchDescription.cfcLabel);
+      expect(exactLabel).toContain("operator-chosen-class");
+      expect(exactLabel).toContain("operator-chosen-subject");
+      expect(exactLabel).toContain("operator-chosen-source");
     });
 
     it("answers what the space says about a cell's labels, so unlabelled and unread are different answers", async () => {
@@ -876,9 +885,21 @@ describe("describe_handle", () => {
         contextWith(minted.table),
         { token: minted.token },
       );
+      const readForResearch = await describeHandleForResearch(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+      const unreadForResearch = await describeHandleForResearch(
+        contextWith(minted.table),
+        { token: minted.token },
+      );
 
       expect(read.labels).toEqual([]);
       expect(unread.labels).toBeUndefined();
+      expect(readForResearch.cfcLabelAvailable).toBe(true);
+      expect(readForResearch.cfcLabel).toEqual({});
+      expect(unreadForResearch.cfcLabelAvailable).toBe(false);
+      expect(unreadForResearch.cfcLabel).toBeUndefined();
     });
 
     it("reports an address in another space as shapeless even though the runtime could read it", async () => {

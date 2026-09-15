@@ -1,3 +1,9 @@
+/**
+ * Runs bounded private Common Fabric research and admits implementation kits
+ * against exact host observations. The full derivation is returned separately
+ * so callers can keep private evidence out of model context.
+ */
+
 import type { JSONSchema } from "@commonfabric/api";
 import { encodeHex } from "@std/encoding/hex";
 import { sha256 } from "@commonfabric/content-hash";
@@ -5,19 +11,30 @@ import {
   computeEntryIdentity,
   ensureCompilerStack,
 } from "@commonfabric/runner";
+import type { IFCLabel } from "@commonfabric/runner/cfc";
+import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 
 import type {
+  HarnessResearchCfcProjection,
   HarnessResearchExample,
   HarnessResearchHandleRecord,
   HarnessResearchInputBinding,
   HarnessResearchKit,
+  HarnessResearchMissingLabel,
+  HarnessResearchMissingLabelSource,
   HarnessResearchPatternRecord,
   HarnessResearchRecommendationKind,
   HarnessResearchRule,
   HarnessResearchRunSummary,
   HarnessResearchSourceRead,
   HarnessResearchStatus,
+  HarnessResearchSyntaxCheck,
 } from "../contracts/research.ts";
+import {
+  cloneIfcLabel,
+  confidentialityOnlyIfcLabel,
+} from "../contracts/cfc-model-context.ts";
+import type { TrustedPatternRecord } from "../contracts/trusted-pattern.ts";
 import type { HarnessModelToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
@@ -40,7 +57,7 @@ import type {
   PatternIndexSearchResponse,
 } from "../pattern-index/client.ts";
 import { patternIndexDependencies } from "../pattern-index/composition.ts";
-import type { DescribeHandleToolOutput } from "../tools/describe-handle.ts";
+import type { DescribeHandleResearchResult } from "../tools/describe-handle.ts";
 import {
   patternIndexDeclaredType,
   patternIndexImportHint,
@@ -100,10 +117,16 @@ export interface HarnessResearchRequest {
   handleTokens: readonly string[];
 
   /** Safe shape-only description of one general handle. */
-  describeHandle?: (token: string) => Promise<DescribeHandleToolOutput>;
+  describeHandle?: (token: string) => Promise<DescribeHandleResearchResult>;
+
+  /** Existing CFC label on the task and accumulated model context. */
+  taskCfcLabel?: IFCLabel;
 
   /** Prior research retained by this run, newest last. */
   priorResearchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Index-resolved pattern attachments supplied with the root task. */
+  attachedPatterns?: readonly TrustedPatternRecord[];
 
   /** Run-level cancellation signal. */
   signal?: AbortSignal;
@@ -135,6 +158,9 @@ export interface HarnessResearchRecord {
   /** Handles safely described by the host. */
   describedHandles: readonly HarnessResearchHandleRecord[];
 
+  /** Known CFC labels and explicit metadata gaps across all observations. */
+  cfc: HarnessResearchCfcProjection;
+
   /** Resource use at the end of the loop. */
   budgets: {
     /** Model turns spent. */
@@ -159,14 +185,22 @@ export interface HarnessResearchReply {
 
 /** Failure that carries every private observation made before it occurred. */
 export class HarnessResearchError extends Error {
-  override name = "HarnessResearchError";
+  readonly #record: HarnessResearchRecord;
 
-  /** Partial artifact record preserved on the failed builtin output. */
-  readonly record: HarnessResearchRecord;
-
+  /** Constructs an instance carrying the partial research record. */
   constructor(message: string, record: HarnessResearchRecord) {
     super(message);
-    this.record = record;
+    this.#record = record;
+  }
+
+  /** Stable error class name. */
+  override get name(): string {
+    return "HarnessResearchError";
+  }
+
+  /** Partial artifact record preserved on the failed builtin output. */
+  get record(): HarnessResearchRecord {
+    return this.#record;
   }
 }
 
@@ -195,6 +229,8 @@ interface ResearchState {
   searchedPatterns: Map<string, HarnessResearchPatternRecord>;
   programs: Map<string, PatternIndexProgram>;
   describedHandles: Map<string, HarnessResearchHandleRecord>;
+  sourceLabel: IFCLabel;
+  missingLabels: Map<string, HarnessResearchMissingLabel>;
   readChars: number;
   toolCalls: number;
 }
@@ -489,6 +525,84 @@ const sourceId = (
 
 const unique = <T>(values: readonly T[]): T[] => [...new Set(values)];
 
+/** Builds the research CFC projection without inventing missing source labels. */
+export const createHarnessResearchCfcProjection = (
+  labels: readonly (IFCLabel | undefined)[],
+  missingLabels: readonly HarnessResearchMissingLabel[] = [],
+): HarnessResearchCfcProjection => {
+  const sourceLabel = labels.reduce<IFCLabel>(
+    (merged, label) => label === undefined ? merged : mergeLabel(merged, label),
+    {},
+  );
+  return {
+    version: 1,
+    sourceLabel: cloneIfcLabel(sourceLabel),
+    outputLabel: confidentialityOnlyIfcLabel(sourceLabel) ?? {},
+    coverage: missingLabels.length === 0 ? "complete" : "incomplete",
+    missingLabels: missingLabels.map((missing) => ({ ...missing })),
+  };
+};
+
+const addSourceLabel = (
+  state: ResearchState,
+  label: IFCLabel | undefined,
+): void => {
+  if (label !== undefined) {
+    state.sourceLabel = mergeLabel(state.sourceLabel, label);
+  }
+};
+
+const addMissingLabel = (
+  state: ResearchState,
+  source: HarnessResearchMissingLabelSource,
+  detail: string,
+): void => {
+  const key = `${source}\u0000${detail}`;
+  if (!state.missingLabels.has(key)) {
+    state.missingLabels.set(key, { source, detail });
+  }
+};
+
+const researchCfcProjection = (
+  state: ResearchState,
+): HarnessResearchCfcProjection =>
+  createHarnessResearchCfcProjection(
+    [state.sourceLabel],
+    [...state.missingLabels.values()],
+  );
+
+const citedSourceIds = (raw: RawResearchResult): string[] =>
+  unique([
+    ...stringList(raw.sourceIds, 32, 500),
+    ...stringList(objectValue(raw.example).sourceIds, 16, 500),
+    ...(Array.isArray(raw.rules) ? raw.rules : []).flatMap((rule) =>
+      stringList(objectValue(rule).sourceIds, 12, 500)
+    ),
+  ]);
+
+const unreadSourceIds = (
+  raw: RawResearchResult,
+  state: ResearchState,
+): string[] => {
+  const opened = new Set(state.sourceReads.map((read) => read.sourceId));
+  return citedSourceIds(raw).filter((id) => !opened.has(id));
+};
+
+const sourceCatalog = (state: ResearchState): string =>
+  [
+    "Current citable source catalog. Copy only these sourceId field values, exactly as returned:",
+    ...(state.sourceReads.length === 0
+      ? ["No exact source reads are currently citable."]
+      : state.sourceReads.map((read) =>
+        JSON.stringify({
+          sourceId: read.sourceId,
+          kind: read.kind,
+          location: read.location,
+        })
+      )),
+    "A documentation source location includes its section-N reopen argument. Pass that sectionId to open_doc_section; never pass a documentation:* sourceId as sectionId.",
+  ].join("\n");
+
 const researchModel = (providerId: string): string =>
   providerId === "openai-codex" ? RESEARCH_CODEX_MODEL : RESEARCH_MODEL;
 
@@ -501,6 +615,9 @@ const systemPrompt = (): string =>
     "A long section or source file is never represented by its first chunk alone. Follow nextOffset with another exact read whenever the needed answer could continue later.",
     "Inspect every selected pattern. Read the relevant source files and inspect direct dependencies when composition behavior matters.",
     "A handle binding is supported only after you call describe_handle for that exact token and receive a successful description. Never infer a binding from task prose alone.",
+    "Only an exact value returned in a field named sourceId is citable in the final sourceIds arrays. Copy it exactly; never abbreviate, reconstruct, or transpose it.",
+    "The outputId returned by describe_handle records binding provenance only. It is not a sourceId and must never be cited.",
+    "For documentation, sectionId is the section-N selector accepted by open_doc_section, while sourceId is the documentation:* citation returned by that read. Never use one in place of the other.",
     "The final inputs array is only for existing described external handles. Use [] when the task needs no external data; put types, defaults, literals, and new local state in the recipe.",
     "Never invent a pattern id, import, handle, grant, API rule, source id, or missing input. If the tools do not establish one, return incomplete and name it under missing.",
     "Prefer direct-run when one verified published pattern solves the task, composition when verified parts fit, and author only when reuse does not. Use focused-api only for a narrow rules/contracts answer that needs no runnable recipe.",
@@ -515,6 +632,7 @@ const userPrompt = (
   request: HarnessResearchRequest,
 ): string => {
   const prior = request.priorResearchRuns?.slice(-2) ?? [];
+  const attachedPatterns = request.attachedPatterns ?? [];
   return [
     "Task:",
     request.task,
@@ -524,6 +642,14 @@ const userPrompt = (
       ? request.handleTokens.join("\n")
       : "No general handles are available.",
     "Keep these opaque cfh tokens unchanged. Call describe_handle for every token you recommend binding; a failed or skipped description cannot support an input binding.",
+    ...(attachedPatterns.length > 0
+      ? [
+        "",
+        "Authoritative index-resolved pattern attachments for this task:",
+        JSON.stringify(attachedPatterns),
+        "These records are trusted search leads, not source inspection. Call inspect_pattern before selecting one, then open every source file the current answer relies on.",
+      ]
+      : []),
     ...(prior.length > 0
       ? [
         "",
@@ -532,7 +658,7 @@ const userPrompt = (
           researchRunId: run.researchRunId,
           kit: run.kit,
         }))),
-        "Treat these as starting context, then use tools to resolve the follow-up or verify anything the current answer relies on.",
+        "Treat these as starting context and research only unresolved items. Their sourceIds are not citations for this fresh research call: reopen every source the current answer relies on, using a section-N value from a documentation source location as open_doc_section.sectionId, and cite only the newly returned sourceId.",
       ]
       : []),
   ].join("\n");
@@ -624,6 +750,11 @@ const inspectPattern = async (
   patternId: string,
 ): Promise<Record<string, unknown>> => {
   const pattern = await index.getPattern({ patternId, includeSource: true });
+  addMissingLabel(
+    state,
+    "pattern-index-metadata",
+    `pattern ${pattern.patternId} metadata returned by inspect_pattern`,
+  );
   if (pattern.patternId !== patternId) {
     throw new Error(
       `pattern index returned ${pattern.patternId} for ${patternId}`,
@@ -632,6 +763,11 @@ const inspectPattern = async (
   if (pattern.program === undefined) {
     throw new Error(`pattern ${patternId} has no indexed source program`);
   }
+  addMissingLabel(
+    state,
+    "pattern-index-source",
+    `pattern ${patternId} source returned by inspect_pattern`,
+  );
   const program = pattern.program;
   let identityVerified: true | undefined;
   let identityNote: string | undefined;
@@ -752,6 +888,11 @@ const invokeResearchTool = async (
       const eligible = (request.corpus?.sections ?? []).filter((section) =>
         section.integrity.some(isOperatorProvisionedReferenceAtom)
       );
+      for (const section of eligible) {
+        addSourceLabel(state, {
+          integrity: structuredClone([...section.integrity]),
+        });
+      }
       const limit = Math.max(1, Math.min(10, integerValue(input.limit, 8)));
       return {
         corpusSections: eligible.length,
@@ -785,6 +926,10 @@ const invokeResearchTool = async (
         input.maxChars,
       );
       const location = `${section.path}#${section.heading} (${sectionId})`;
+      const cfcLabel: IFCLabel = {
+        integrity: structuredClone([...section.integrity]),
+      };
+      addSourceLabel(state, cfcLabel);
       const read = addRead(state, {
         kind: "documentation",
         location,
@@ -792,9 +937,11 @@ const invokeResearchTool = async (
         end: range.end,
         totalChars: section.text.length,
         integrity: section.integrity.map((atom) => atom.class),
+        cfcLabel,
       }, range.content);
       return {
         sourceId: read.sourceId,
+        sectionId,
         path: section.path,
         heading: section.heading,
         offset: range.offset,
@@ -826,8 +973,20 @@ const invokeResearchTool = async (
       const results = response.results.slice(0, limit).map(
         searchedPatternRecord,
       );
+      if (results.length === 0) {
+        addMissingLabel(
+          state,
+          "pattern-index-metadata",
+          "empty search_pattern_index response",
+        );
+      }
       for (const result of results) {
         state.searchedPatterns.set(result.patternId, result);
+        addMissingLabel(
+          state,
+          "pattern-index-metadata",
+          `pattern ${result.patternId} metadata returned by search_pattern_index`,
+        );
       }
       return { results };
     }
@@ -891,7 +1050,17 @@ const invokeResearchTool = async (
       if (request.describeHandle === undefined) {
         throw new Error("handle description is unavailable");
       }
-      const description = await request.describeHandle(token);
+      const described = await request.describeHandle(token);
+      if (described.cfcLabelAvailable) {
+        addSourceLabel(state, described.cfcLabel ?? {});
+      } else {
+        addMissingLabel(
+          state,
+          "handle-description",
+          `handle ${token} metadata returned by describe_handle`,
+        );
+      }
+      const description = described.output;
       if (!description.known || description.error !== undefined) {
         return description;
       }
@@ -959,11 +1128,71 @@ const parseRules = (
   return rules;
 };
 
-const parseExample = (
+/** Checks TypeScript/TSX grammar without resolving, checking, or executing it. */
+const checkPatternSourceSyntax = async (
+  content: string,
+): Promise<HarnessResearchSyntaxCheck> => {
+  try {
+    const { ts } = await ensureCompilerStack();
+    const result = ts.transpileModule(content, {
+      fileName: "/research-example.tsx",
+      reportDiagnostics: true,
+      compilerOptions: {
+        jsx: ts.JsxEmit.Preserve,
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ESNext,
+      },
+    });
+    const diagnostics = (result.diagnostics ?? [])
+      .filter((diagnostic) =>
+        diagnostic.category === ts.DiagnosticCategory.Error
+      )
+      .map((diagnostic) => {
+        const location = diagnostic.file !== undefined &&
+            diagnostic.start !== undefined
+          ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+          : undefined;
+        return {
+          code: diagnostic.code,
+          message: ts.flattenDiagnosticMessageText(
+            diagnostic.messageText,
+            "\n",
+          ),
+          ...(location !== undefined
+            ? { line: location.line + 1, column: location.character + 1 }
+            : {}),
+        };
+      });
+    return {
+      status: diagnostics.length === 0 ? "valid" : "invalid",
+      scope: "syntax-only",
+      diagnostics,
+    };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      scope: "syntax-only",
+      diagnostics: [],
+      detail: errorMessage(error),
+    };
+  }
+};
+
+const syntaxDiagnosticText = (
+  diagnostic: HarnessResearchSyntaxCheck["diagnostics"][number],
+): string => {
+  const location = diagnostic.line === undefined ||
+      diagnostic.column === undefined
+    ? ""
+    : ` at ${diagnostic.line}:${diagnostic.column}`;
+  return `TS${diagnostic.code}${location}: ${diagnostic.message}`;
+};
+
+const parseExample = async (
   value: unknown,
   sources: ReadonlyMap<string, HarnessResearchSourceRead>,
   missing: string[],
-): HarnessResearchExample | undefined => {
+): Promise<HarnessResearchExample | undefined> => {
   const record = objectValue(value);
   const kind = record.kind;
   const content = typeof record.content === "string" ? record.content : "";
@@ -985,14 +1214,33 @@ const parseExample = (
   if (admitted.length === 0) {
     missing.push("the example has no exact opened source supporting its APIs");
   }
-  return { kind, content, sourceIds: admitted };
+  if (kind === "run-pattern-input") {
+    return { kind, content, sourceIds: admitted };
+  }
+  const syntax = await checkPatternSourceSyntax(content);
+  if (syntax.status === "invalid") {
+    for (const diagnostic of syntax.diagnostics) {
+      missing.push(
+        `pattern-source example has a syntax error: ${
+          syntaxDiagnosticText(diagnostic)
+        }`,
+      );
+    }
+  } else if (syntax.status === "unavailable") {
+    missing.push(
+      `pattern-source syntax check was unavailable: ${
+        syntax.detail ?? "unknown error"
+      }`,
+    );
+  }
+  return { kind, content, sourceIds: admitted, syntax };
 };
 
-const admitResearchKit = (
+const admitResearchKit = async (
   task: string,
   raw: RawResearchResult,
   state: ResearchState,
-): HarnessResearchKit => {
+): Promise<HarnessResearchKit> => {
   const missing = stringList(raw.missing);
   const sourceMap = new Map(
     state.sourceReads.map((read) => [read.sourceId, read]),
@@ -1024,7 +1272,7 @@ const admitResearchKit = (
       : "author";
   const inputs = parseInputs(raw.inputs, state.describedHandles, missing);
   const rules = parseRules(raw.rules, sourceMap, missing);
-  const example = parseExample(raw.example, sourceMap, missing);
+  const example = await parseExample(raw.example, sourceMap, missing);
   if ((kind === "direct-run" || kind === "compose") && patterns.length === 0) {
     missing.push(`${kind} requires an inspected published pattern`);
   }
@@ -1105,9 +1353,33 @@ async (request) => {
     searchedPatterns: new Map(),
     programs: new Map(),
     describedHandles: new Map(),
+    sourceLabel: {},
+    missingLabels: new Map(),
     readChars: 0,
     toolCalls: 0,
   };
+  addSourceLabel(state, request.taskCfcLabel);
+  for (const prior of request.priorResearchRuns ?? []) {
+    if (prior.cfc === undefined) {
+      addMissingLabel(
+        state,
+        "prior-research",
+        `prior research run ${prior.researchRunId} summary did not retain CFC metadata`,
+      );
+      continue;
+    }
+    addSourceLabel(state, prior.cfc.outputLabel);
+    for (const missing of prior.cfc.missingLabels) {
+      addMissingLabel(state, missing.source, missing.detail);
+    }
+  }
+  for (const pattern of request.attachedPatterns ?? []) {
+    addMissingLabel(
+      state,
+      "pattern-index-metadata",
+      `pattern ${pattern.patternId} metadata supplied as a task attachment`,
+    );
+  }
   let finalAssistant: HarnessAssistantTranscriptMessage | undefined;
   let modelTurns = 0;
   const record = (): HarnessResearchRecord => ({
@@ -1123,6 +1395,7 @@ async (request) => {
     describedHandles: [...state.describedHandles.values()].map((record) =>
       structuredClone(record)
     ),
+    cfc: researchCfcProjection(state),
     budgets: {
       modelTurns,
       toolCalls: state.toolCalls,
@@ -1144,6 +1417,7 @@ async (request) => {
           content: [
             "Synthesis turn: private tools are now withheld.",
             `You used ${modelTurns} of ${MAX_RESEARCH_MODEL_TURNS} model turns, ${state.toolCalls} of ${MAX_RESEARCH_TOOL_CALLS} tool calls, and ${state.readChars} of ${MAX_RESEARCH_TOTAL_READ_CHARS} read characters.`,
+            sourceCatalog(state),
             "Return the final schema now. If evidence is missing, return status incomplete and name it rather than calling another tool.",
           ].join("\n"),
         });
@@ -1231,9 +1505,66 @@ async (request) => {
       emptyMessage: "research result was empty",
       invalidMessage: "research result was not valid JSON",
     });
-    const kit = admitResearchKit(
+    let raw = objectValue(parsed) as RawResearchResult;
+    const invalidSourceIds = unreadSourceIds(raw, state);
+    if (
+      raw.status === "complete" && invalidSourceIds.length > 0 &&
+      modelTurns < MAX_RESEARCH_MODEL_TURNS
+    ) {
+      if (runWasAborted(request.signal)) {
+        throw abortError(request.signal);
+      }
+      transcript.push({
+        role: "user",
+        content: [
+          "Citation repair turn: private tools are withheld. Correct sourceIds only and return the entire final JSON schema again.",
+          `These cited ids were not returned by an exact read in this research call: ${
+            JSON.stringify(invalidSourceIds)
+          }`,
+          sourceCatalog(state),
+          "Use no other source ids. Remove a claim whose support is absent or return status incomplete; do not invent, approximate, or reuse an id from a prior research call.",
+          `This is model turn ${
+            modelTurns + 1
+          } of ${MAX_RESEARCH_MODEL_TURNS}; no further repair turn is available.`,
+        ].join("\n"),
+      });
+      const repaired = await options.modelClient.complete({
+        model,
+        transcript: [...transcript],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: request.researchRunId,
+        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+        ...(options.onAttempt !== undefined
+          ? { onAttempt: options.onAttempt }
+          : {}),
+      });
+      modelTurns += 1;
+      if (repaired.usage !== undefined) options.onUsage?.(repaired.usage);
+      transcript.push(repaired.assistant);
+      const repairCalls = repaired.assistant.toolCalls ?? [];
+      for (const call of repairCalls) {
+        transcript.push(toolResultMessage(call.id, call.function.name, {
+          error: "private tools are withheld on the citation repair turn",
+        }));
+      }
+      if (repairCalls.length === 0) {
+        try {
+          raw = objectValue(parseStructuredResultJson(
+            repaired.assistant.content,
+            {
+              emptyMessage: "citation repair result was empty",
+              invalidMessage: "citation repair result was not valid JSON",
+            },
+          )) as RawResearchResult;
+        } catch {
+          // The original candidate remains available for strict admission.
+        }
+      }
+    }
+    const kit = await admitResearchKit(
       request.task,
-      objectValue(parsed) as RawResearchResult,
+      raw,
       state,
     );
     return { kit, record: record() };

@@ -7,12 +7,14 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { type Cell, isCell, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { join, normalize } from "@std/path/posix";
 import { CfHarnessEngine } from "../src/engine.ts";
+import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
@@ -21,6 +23,7 @@ import {
 } from "../src/handle-table.ts";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
 import type { HarnessResearchRunSummary } from "../src/contracts/research.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
 import {
   DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
   PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS,
@@ -543,6 +546,111 @@ describe("prompt-loop cross-agent address handles", () => {
     const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(table.entries[0]!.ref);
     expect(command).not.toContain(token);
+  });
+
+  it("carries research labels and kits into a child without another opening pass", async () => {
+    const root = await Deno.makeTempDir({
+      dir: "/tmp",
+      prefix: "cf-harness-subagent-research-cfc-",
+    });
+    const runId = "run-subagent-research-cfc";
+    const childRunId = `${runId}.subagent.1`;
+    const secret = cfcAtom.resource("InheritedResearchSecret", "parent");
+    const researchRun = {
+      type: "cf-harness.research-run",
+      researchRunId: `${runId}:research:1`,
+      outputId: `${runId}:research:1`,
+      kit: {
+        status: "incomplete",
+        task: "Build from the inherited contract.",
+        summary: "The contract is available to the child.",
+        recommendation: {
+          kind: "author",
+          rationale: "The final wrapper remains local.",
+        },
+        inputs: [],
+        patterns: [],
+        steps: ["Use the inherited contract."],
+        rules: [],
+        verification: ["Run the wrapper."],
+        sources: [],
+        missing: ["Implement the final wrapper."],
+      },
+      confirmedPatterns: [],
+      describedHandles: [],
+      cfc: {
+        version: 1,
+        sourceLabel: { confidentiality: [secret] },
+        outputLabel: { confidentiality: [secret] },
+        coverage: "complete",
+        missingLabels: [],
+      },
+      completedAt: "2026-09-15T00:00:00.000Z",
+    } satisfies HarnessResearchRunSummary;
+    try {
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: join(root, "artifacts"),
+        runId,
+      });
+      const requestBodies: unknown[] = [];
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          artifactStore,
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-5.4",
+          inheritedResearchRuns: [researchRun],
+          inheritedCfcModelContext: {
+            type: "cf-harness.cfc-model-context",
+            version: 1,
+            updatedAt: "2026-09-15T00:00:00.000Z",
+            label: { confidentiality: [secret] },
+            observations: [],
+          },
+        }),
+        fetchFn: scriptedFetch([
+          delegateCallTurn("call-delegate", {
+            goal: "Implement the researched recipe.",
+          }),
+          bashCallTurn("call-child", "printf child-ready"),
+          finalTurn("Child done."),
+          finalTurn("Parent done."),
+        ], requestBodies),
+      });
+
+      await loop.runPrompt({
+        prompt: "Delegate the researched recipe.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      const childState = JSON.parse(
+        await Deno.readTextFile(
+          join(artifactStore.artifactRoot, childRunId, "run-state.json"),
+        ),
+      ) as HarnessRunState;
+      expect(childState.openingResearch).toBeUndefined();
+      expect(childState.researchRuns?.map((run) => run.outputId)).toEqual([
+        researchRun.outputId,
+      ]);
+      expect(
+        childState.toolOutputs.some((output) => output.toolId === "research"),
+      ).toBe(false);
+      expect(childState.cfcModelContext?.label.confidentiality).toContainEqual(
+        secret,
+      );
+      const bashInvocation = childState.cfcInvocationContexts?.find((context) =>
+        context.toolId === "bash"
+      );
+      expect(
+        bashInvocation?.cfcInputLabels?.entries.flatMap((entry) =>
+          entry.label.confidentiality ?? []
+        ),
+      ).toContainEqual(secret);
+      expect(requestBodies).toHaveLength(4);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
   });
 
   it("returns an address the child discovered to the parent as a parent-resolvable token", async () => {

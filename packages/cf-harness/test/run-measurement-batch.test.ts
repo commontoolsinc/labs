@@ -194,7 +194,7 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
       }
       return Response.json({
         sessionId: "session-1",
-        turnId: "turn-1",
+        turnId: options.runId ?? "turn-1",
       });
     }
     if (url.pathname === "/api/events") {
@@ -209,7 +209,16 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
       const stream = options.streams[streamIndex++] ??
         { frames: [], keepOpen: false };
       return new Response(
-        sseBody(stream.frames, stream.keepOpen, stream.fault ?? false),
+        sseBody(
+          stream.frames.map((frame) =>
+            frame.replaceAll(
+              '"turn-1"',
+              JSON.stringify(options.runId ?? "turn-1"),
+            )
+          ),
+          stream.keepOpen,
+          stream.fault ?? false,
+        ),
         {
           headers: { "content-type": "text/event-stream" },
         },
@@ -351,7 +360,7 @@ const gitRun = (
       : { success: ancestor, code: ancestor ? 0 : 1 },
   );
 
-/** Writes the two artifacts the batch uses to identify a root run. */
+/** Writes a root run's identity and transcript artifacts. */
 const writeRunCandidate = async (
   artifactRoot: string,
   runId: string,
@@ -1678,7 +1687,7 @@ describe("run-measurement-batch", () => {
   });
 
   describe("runTask()", () => {
-    it("measures the run family whose first user message matches the task", async () => {
+    it("measures the run family identified by the console turn", async () => {
       const console_ = startFakeConsole({
         streams: [completedStream()],
         runId: "fixture-run",
@@ -1710,6 +1719,7 @@ describe("run-measurement-batch", () => {
     it("prefers the session artifact root to the console-wide fallback", async () => {
       const console_ = startFakeConsole({
         streams: [completedStream()],
+        runId: "fixture-run",
         artifactRoot: FIXTURE_ROOT,
         statusArtifactRoot: "/a/different/console-wide/root",
       });
@@ -1860,63 +1870,29 @@ describe("run-measurement-batch", () => {
       }
     });
 
-    it("records why a session's run could not be measured rather than reporting no calls", async () => {
+    it("records a missing turn artifact without selecting another task", async () => {
       const artifactRoot = await Deno.makeTempDir();
       try {
+        await writeRunCandidate(
+          artifactRoot,
+          "another-turn",
+          "2026-08-28T21:00:01.000Z",
+          "same task",
+        );
         const console_ = startFakeConsole({
           streams: [completedStream()],
           artifactRoot,
         });
         try {
-          const client = await ConsoleClient.open(console_.url);
           const result = await runTask(
-            client,
-            { id: "books", text: "Track the books I am reading." },
+            await ConsoleClient.open(console_.url),
+            { id: "one", text: "same task" },
             () => {},
             { ...RUN_TASK_OPTIONS, artifactRoot },
           );
           expect(result.measurement).toBeUndefined();
-          expect(result.measurementUnread).toBe(
-            "no root run created after 2026-08-28T21:00:00.000Z has this task as its first user message",
-          );
-          expect(result.configuration.skillsUnread).toBe(
-            "no run was selected, so no skill registry could be read",
-          );
-        } finally {
-          await console_.close();
-        }
-      } finally {
-        await Deno.remove(artifactRoot, { recursive: true });
-      }
-    });
-
-    it("does not select a root run whose first user message is for another task", async () => {
-      const artifactRoot = await Deno.makeTempDir();
-      try {
-        await writeRunCandidate(
-          artifactRoot,
-          "another-task",
-          "2026-08-31T05:00:01.000Z",
-          "Create a shopping list.",
-        );
-        const console_ = startFakeConsole({
-          streams: [completedStream()],
-          artifactRoot,
-        });
-        try {
-          const client = await ConsoleClient.open(console_.url);
-          const result = await runTask(
-            client,
-            { id: "books", text: "Track the books I am reading." },
-            () => {},
-            {
-              batchStartedAt: "2026-08-31T05:00:00.000Z",
-              artifactRoot,
-            },
-          );
-          expect(result.runId).toBeUndefined();
           expect(result.measurementUnread).toContain(
-            "no root run created after 2026-08-31T05:00:00.000Z",
+            "no root run turn-1 created after",
           );
         } finally {
           await console_.close();
@@ -1926,94 +1902,26 @@ describe("run-measurement-batch", () => {
       }
     });
 
-    it("ignores a matching run created before the batch started", async () => {
-      const dir = await Deno.makeTempDir();
-      try {
-        await writeRunCandidate(
-          dir,
-          "before-batch",
-          "2026-08-31T04:59:59.000Z",
-          "Track the books I am reading.",
-        );
-        await writeRunCandidate(
-          dir,
-          "during-batch",
-          "2026-08-31T05:00:01.000Z",
-          "Track the books I am reading.",
-        );
-        const console_ = startFakeConsole({
-          streams: [completedStream()],
-          artifactRoot: dir,
-        });
-        try {
-          const client = await ConsoleClient.open(console_.url);
-          const result = await runTask(
-            client,
-            { id: "books", text: "Track the books I am reading." },
-            () => {},
-            {
-              batchStartedAt: "2026-08-31T05:00:00.000Z",
-              artifactRoot: dir,
-            },
-          );
-          expect(result.runId).toBe("during-batch");
-        } finally {
-          await console_.close();
-        }
-      } finally {
-        await Deno.remove(dir, { recursive: true });
-      }
-    });
-
-    it("records every candidate when two runs match the same task", async () => {
-      const dir = await Deno.makeTempDir();
-      try {
-        for (const runId of ["candidate-one", "candidate-two"]) {
-          await writeRunCandidate(
-            dir,
-            runId,
-            "2026-08-31T05:00:01.000Z",
-            "Track the books I am reading.",
-          );
-        }
-        const console_ = startFakeConsole({
-          streams: [completedStream()],
-          artifactRoot: dir,
-        });
-        try {
-          const client = await ConsoleClient.open(console_.url);
-          const result = await runTask(
-            client,
-            { id: "books", text: "Track the books I am reading." },
-            () => {},
-            {
-              batchStartedAt: "2026-08-31T05:00:00.000Z",
-              artifactRoot: dir,
-            },
-          );
-          expect(result.measurement).toBeUndefined();
-          expect(result.measurementUnread).toContain("candidate-one");
-          expect(result.measurementUnread).toContain("candidate-two");
-          expect(result.measurementUnread).toContain("ambiguous");
-        } finally {
-          await console_.close();
-        }
-      } finally {
-        await Deno.remove(dir, { recursive: true });
-      }
-    });
-
-    it("records a malformed current run artifact rather than reporting no matching run", async () => {
+    it("joins the exact turn despite host context, repeated tasks, and unrelated unread artifacts", async () => {
       const artifactRoot = await Deno.makeTempDir();
       try {
-        await writeRunCandidate(
-          artifactRoot,
-          "malformed-run",
-          "2026-08-31T05:00:01.000Z",
-          "Track the books I am reading.",
+        for (const runId of ["turn-1", "another-turn"]) {
+          await writeRunCandidate(
+            artifactRoot,
+            runId,
+            "2026-08-28T21:00:01.000Z",
+            "same task",
+          );
+        }
+        await Deno.writeTextFile(
+          `${artifactRoot}/turn-1/transcript.json`,
+          JSON.stringify([
+            { role: "user", content: "Host opening research: a complete kit" },
+            { role: "user", content: "same task" },
+          ]),
         );
         await Deno.writeTextFile(
-          `${artifactRoot}/malformed-run/transcript.json`,
+          `${artifactRoot}/another-turn/run-state.json`,
           "{",
         );
         const console_ = startFakeConsole({
@@ -2021,106 +1929,114 @@ describe("run-measurement-batch", () => {
           artifactRoot,
         });
         try {
-          const client = await ConsoleClient.open(console_.url);
           const result = await runTask(
-            client,
-            { id: "books", text: "Track the books I am reading." },
+            await ConsoleClient.open(console_.url),
+            { id: "one", text: "same task" },
             () => {},
+            { ...RUN_TASK_OPTIONS, artifactRoot },
+          );
+          expect(result.runId).toBe(result.turnId);
+          expect(result.measurement?.runs.map((run) => run.runId)).toEqual([
+            "turn-1",
+          ]);
+          expect(result.measurement?.runs[0].transcript).toEqual({
+            kind: "read",
+            value: { messages: 2 },
+          });
+        } finally {
+          await console_.close();
+        }
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("refuses stale, mismatched, or child run identities", async () => {
+      const artifactRoot = await Deno.makeTempDir();
+      try {
+        await writeRunCandidate(
+          artifactRoot,
+          "turn-1",
+          "2026-08-28T21:00:01.000Z",
+          "same task",
+        );
+        for (
+          const state of [
+            { runId: "turn-1", createdAt: "2026-08-28T20:59:59.000Z" },
+            { runId: "different-id", createdAt: "2026-08-28T21:00:01.000Z" },
             {
-              batchStartedAt: "2026-08-31T05:00:00.000Z",
-              artifactRoot,
+              runId: "turn-1",
+              createdAt: "2026-08-28T21:00:01.000Z",
+              lineage: { role: "subagent" },
             },
+          ]
+        ) {
+          await Deno.writeTextFile(
+            `${artifactRoot}/turn-1/run-state.json`,
+            JSON.stringify(state),
           );
-          expect(result.measurement).toBeUndefined();
-          expect(result.measurementUnread).toContain("malformed-run");
-          expect(result.measurementUnread).toContain("transcript.json");
-          expect(result.measurementUnread).not.toContain("no root run");
-        } finally {
-          await console_.close();
+          const console_ = startFakeConsole({
+            streams: [completedStream()],
+            artifactRoot,
+          });
+          try {
+            const result = await runTask(
+              await ConsoleClient.open(console_.url),
+              { id: "one", text: "same task" },
+              () => {},
+              { ...RUN_TASK_OPTIONS, artifactRoot },
+            );
+            expect(result.runId).toBeUndefined();
+          } finally {
+            await console_.close();
+          }
         }
       } finally {
         await Deno.remove(artifactRoot, { recursive: true });
       }
     });
 
-    it("records unread and non-object run states rather than treating them as no run", async () => {
-      const artifactRoot = await Deno.makeTempDir();
-      try {
-        await Deno.writeTextFile(`${artifactRoot}/not-a-run.txt`, "note");
-        await Deno.mkdir(`${artifactRoot}/not-an-object`);
-        await Deno.writeTextFile(
-          `${artifactRoot}/not-an-object/run-state.json`,
-          "[]",
-        );
-        await Deno.mkdir(`${artifactRoot}/unread-state/run-state.json`, {
-          recursive: true,
-        });
-        const console_ = startFakeConsole({
-          streams: [completedStream()],
-          artifactRoot,
-        });
-        try {
-          const client = await ConsoleClient.open(console_.url);
-          const result = await runTask(
-            client,
-            { id: "books", text: "Track the books I am reading." },
-            () => {},
-            { ...RUN_TASK_OPTIONS, artifactRoot },
-          );
-          expect(result.measurement).toBeUndefined();
-          expect(result.measurementUnread).toContain(
-            "not-an-object/run-state.json was not an object",
-          );
-          expect(result.measurementUnread).toContain(
-            "unread-state/run-state.json could not be read",
-          );
-        } finally {
-          await console_.close();
-        }
-      } finally {
-        await Deno.remove(artifactRoot, { recursive: true });
-      }
-    });
-
-    it("records unread and non-list transcripts rather than treating them as no run", async () => {
+    it("reports an unread identified run state and keeps an unread transcript attributable", async () => {
       const artifactRoot = await Deno.makeTempDir();
       try {
         await writeRunCandidate(
           artifactRoot,
-          "not-a-list",
-          "2026-08-31T05:00:01.000Z",
-          "Track the books I am reading.",
+          "turn-1",
+          "2026-08-28T21:00:01.000Z",
+          "same task",
         );
-        await Deno.writeTextFile(
-          `${artifactRoot}/not-a-list/transcript.json`,
-          "{}",
-        );
-        await writeRunCandidate(
-          artifactRoot,
-          "unread-transcript",
-          "2026-08-31T05:00:01.000Z",
-          "Track the books I am reading.",
-        );
-        await Deno.remove(`${artifactRoot}/unread-transcript/transcript.json`);
-        await Deno.mkdir(`${artifactRoot}/unread-transcript/transcript.json`);
+        await Deno.writeTextFile(`${artifactRoot}/turn-1/run-state.json`, "[]");
         const console_ = startFakeConsole({
-          streams: [completedStream()],
+          streams: [completedStream(), completedStream()],
           artifactRoot,
         });
         try {
           const client = await ConsoleClient.open(console_.url);
-          const result = await runTask(
+          const task = { id: "one", text: "same task" };
+          const options = { ...RUN_TASK_OPTIONS, artifactRoot };
+          const unreadState = await runTask(client, task, () => {}, options);
+          expect(unreadState.measurementUnread).toContain(
+            "turn-1/run-state.json was not an object",
+          );
+          await writeRunCandidate(
+            artifactRoot,
+            "turn-1",
+            "2026-08-28T21:00:01.000Z",
+            "same task",
+          );
+          await Deno.writeTextFile(
+            `${artifactRoot}/turn-1/transcript.json`,
+            "{",
+          );
+          const unreadTranscript = await runTask(
             client,
-            { id: "books", text: "Track the books I am reading." },
+            task,
             () => {},
-            { ...RUN_TASK_OPTIONS, artifactRoot },
+            options,
           );
-          expect(result.measurement).toBeUndefined();
-          expect(result.measurementUnread).toContain(
-            "not-a-list/transcript.json was not a message list",
-          );
-          expect(result.measurementUnread).toContain(
-            "unread-transcript/transcript.json could not be read",
+          expect(unreadTranscript.runId).toBe("turn-1");
+          expect(unreadTranscript.measurement?.runs[0].transcript.kind).toBe(
+            "unread",
           );
         } finally {
           await console_.close();

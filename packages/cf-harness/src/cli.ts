@@ -3453,6 +3453,7 @@ export const runCfHarnessCli = async (
       });
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
+        openingResearchTask: parsed.prompt!,
         imageAttachments: parsed.imageAttachments,
         systemPrompt: resolveCfHarnessCliSystemPrompt({
           ...parsed,

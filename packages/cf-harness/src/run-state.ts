@@ -58,6 +58,18 @@ export type HarnessRunStatus =
   | "completed"
   | "failed";
 
+/** Durable driver checkpoint for research before a root task's first turn. */
+export interface HarnessOpeningResearch {
+  type: "cf-harness.opening-research";
+  version: 1;
+  status: "pending" | "completed" | "failed";
+  task: string;
+  toolCallId: string;
+  toolOutputIndex: number;
+  outputId?: string;
+  handoffMessage?: string;
+}
+
 /**
  * How a run ended. `assistant_completed` is the one success: the model
  * answered without calling a tool. `setup_error` is a run that died before
@@ -208,6 +220,9 @@ export interface HarnessRunState {
   /** Admitted research kits and host-confirmed records retained by this run. */
   researchRuns?: HarnessResearchRunSummary[];
 
+  /** Opening-research intent and recoverable model-context handoff. */
+  openingResearch?: HarnessOpeningResearch;
+
   /**
    * How many `research` calls in this run and its descendants returned no kit.
    * An incomplete kit is still a successful answer and does not increment it.
@@ -274,6 +289,7 @@ export interface CreateHarnessRunStateOptions {
   patternRefs?: HarnessPatternRef[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   researchRuns?: HarnessResearchRunSummary[];
+  openingResearch?: HarnessOpeningResearch;
   researchFailures?: number;
   docsQueryFailures?: number;
   lineage?: HarnessSubagentLineage;
@@ -414,6 +430,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.researchRuns !== undefined
       ? { researchRuns: structuredClone(options.researchRuns) }
+      : {}),
+    ...(options.openingResearch !== undefined
+      ? { openingResearch: structuredClone(options.openingResearch) }
       : {}),
     ...(options.researchFailures !== undefined
       ? { researchFailures: options.researchFailures }
@@ -557,6 +576,18 @@ export const appendHarnessResearchRun = (
   now = new Date().toISOString(),
 ): HarnessRunState =>
   appendToHarnessRunState(state, "researchRuns", structuredClone(run), now);
+
+/** Replaces the durable opening-research driver checkpoint. */
+export const setHarnessOpeningResearch = (
+  state: HarnessRunState,
+  openingResearch: HarnessOpeningResearch,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  patchHarnessRunState(
+    state,
+    { openingResearch: structuredClone(openingResearch) },
+    now,
+  );
 
 /** Adds failed bounded research calls to the run-family summary. */
 export const addHarnessResearchFailures = (

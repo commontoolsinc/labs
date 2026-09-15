@@ -1230,6 +1230,31 @@ corpus or pattern index. This is a private tool loop, not web research and not a
 delegable child profile. The gateway transport uses `gemini-3.5-flash`; the
 owner-authenticated Codex transport uses `gpt-5.6-luna`.
 
+The CLI and each interactive `start_turn` mark the current user task for an
+opening research call. A fresh root run executes that call through the ordinary
+tool-policy, artifact, provenance, cancellation, and usage-accounting path
+before its first parent model turn. Its admitted kit, including an incomplete
+kit and its missing items, becomes a host-supplied user-context message directly
+before the task rather than a fabricated assistant/tool exchange. Attached
+pattern references enter the private loop as trusted index leads, but the loop
+still has to inspect their exact published source before selecting them.
+
+Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
+The driver records pending intent before invocation, then records whether a kit
+was returned together with the sanitized handoff and tool-output identity. After
+interruption it reconstructs a missing handoff from the exact persisted research
+result, or supplies an explicit source-free failure when no result was
+persisted; neither case repeats the call. A resumed legacy run with no
+checkpoint does not gain a new opening pass, and delegated child runs do not
+start one. The host-context message carries only the research call, tool, and
+output identity. When the raw result contains a private record,
+`transcript-omissions.json` uses that identity to retain its `/researchRecord`
+join to the raw tool artifact across persistence and recovery; a source-free
+error records no such location. The private record remains absent from the
+parent transcript and provider context. Opening activity and policy records
+carry `origin: "opening-research"`; its private model usage is descendant usage
+included in the root's total rather than in the parent's direct usage.
+
 The private model can search the operator-provisioned docs and skills corpus,
 open exact section windows, search the published pattern index, inspect a
 pattern with its complete multi-file program and dependencies, open bounded
@@ -1258,6 +1283,15 @@ the narrowly identified compiler case unsupported by the light identity path is
 recorded as deferred rather than misreported as verified. An identity mismatch
 is always refused.
 
+Documentation reads return both the exact `section-N` selector used to reopen a
+section and the distinct `documentation:*` source id used to cite that read.
+Before tool-free synthesis the private loop receives a concise catalog of the
+exact source ids read in the current call. If a draft claiming completeness
+still cites an unread id and one of the eight model turns remains, the loop
+allows one tool-free citation-only repair against that same catalog. It never
+fuzzily accepts, completes, or reopens an invented id, and the repair adds no
+research-tool calls to the 24-call bound.
+
 The returned kit distinguishes `complete` from `incomplete`, recommends direct
 run, composition, authoring, or a focused API answer, and carries admitted
 patterns, described external-handle bindings, ordered steps, rules,
@@ -1270,6 +1304,33 @@ belong in the recipe, and `[]` is correct when no external data is required.
 Every API shown by an example, comments included, must cite an exact opened
 read. Routine reversible choices are stated as assumptions; only real blockers
 belong in `missing`.
+
+A complete `pattern-source` example also receives a host-side TypeScript parser
+check. The kit retains the complete source, citations, and exact diagnostic
+codes and locations when parsing fails, but admission marks the kit incomplete
+so the parent or pattern author can correct those diagnostics locally without
+repeating research. A `valid` result establishes syntax only: it does not
+resolve imports, type-check, compile, or execute the example. An unavailable
+parser is reported explicitly rather than treated as acceptance.
+
+Every research result carries a `cfc` projection alongside kit completeness.
+`sourceLabel` joins the existing labels known for the task, every documentation
+section observed while ranking a search (including unselected leads), exact
+handle descriptions, and inherited research output. `outputLabel` carries only
+that join's confidentiality into later model context; retained integrity is
+source provenance, not an assertion that the model-authored kit has
+operator-authored authority. Opening handoffs and ordinary research results add
+the output label to model context, delegated children inherit it with the kit,
+and resume reconstructs it from the durable result or summary.
+
+`cfc.coverage` describes metadata availability, independently of whether the kit
+is complete. Every influencing surface that exposes no label is retained in
+`missingLabels`; this includes each pattern-index metadata or source
+observation, a handle whose exact label metadata was unavailable, and a legacy
+prior-research summary with no CFC projection. The current pattern-index API
+exposes neither metadata labels nor source labels, and publication does not make
+its private indexed source public, so pattern-index research correctly reports
+incomplete CFC coverage. No missing label is replaced with a clean label.
 
 The model-facing tool result contains the admitted kit and explicit guidance not
 to treat an incomplete kit as complete. The full private transcript, exact read

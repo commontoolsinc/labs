@@ -10,7 +10,8 @@ import type { ToolOutputId } from "./tool-result.ts";
 export type HarnessCfcModelContextChannel =
   | "stdout"
   | "stderr"
-  | "exitCode";
+  | "exitCode"
+  | "output";
 
 export interface HarnessCfcModelContextObservation {
   type: "cf-harness.cfc-model-context-observation";

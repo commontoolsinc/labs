@@ -1,6 +1,7 @@
 import type {
   CfcEnforcementMode,
   CfcLabelView,
+  IFCLabel,
 } from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcInvocationContext,
@@ -19,6 +20,7 @@ import type {
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import type { HarnessResearchRunSummary } from "../contracts/research.ts";
+import type { HarnessPatternRef } from "../contracts/pattern-refs.ts";
 import type { HarnessResearchRunner } from "../research/runner.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
@@ -104,6 +106,12 @@ export interface HarnessToolContext {
 
   /** Prior admitted kits retained by this run for follow-up and delegation. */
   researchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Existing CFC label on a research task and its accumulated model context. */
+  researchTaskCfcLabel?: IFCLabel;
+
+  /** Pattern attachments resolved by the host before the first model turn. */
+  patternRefs?: readonly HarnessPatternRef[];
 
   /** Adds one admitted kit and its trusted records to durable run state. */
   recordResearchRun?(run: HarnessResearchRunSummary): void | Promise<void>;

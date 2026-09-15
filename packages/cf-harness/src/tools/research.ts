@@ -8,15 +8,17 @@ import type { JSONSchema } from "@commonfabric/api";
 
 import {
   HARNESS_RESEARCH_RUN_TYPE,
+  type HarnessResearchCfcProjection,
   type HarnessResearchKit,
   type HarnessResearchRunSummary,
 } from "../contracts/research.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import {
+  createHarnessResearchCfcProjection,
   HarnessResearchError,
   type HarnessResearchRecord,
 } from "../research/runner.ts";
-import { describeHandleTool } from "./describe-handle.ts";
+import { describeHandleForResearch } from "./describe-handle.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 /** Whole task or focused follow-up the private loop investigates. */
@@ -39,6 +41,9 @@ export interface ResearchToolSuccessOutput {
   /** How the caller must treat the kit's admission status. */
   guidance: string;
 
+  /** Known source labels and explicit CFC metadata gaps for this result. */
+  cfc: HarnessResearchCfcProjection;
+
   /**
    * Full private transcript and exact read contents. The prompt loop strips
    * this field before the outer model sees the tool result.
@@ -57,6 +62,12 @@ export interface ResearchToolErrorOutput {
   /** Stable, source-free explanation of what prevented a kit. */
   message: string;
 
+  /** Known source labels and explicit CFC metadata gaps before failure. */
+  cfc: HarnessResearchCfcProjection;
+
+  /** Exact failure text retained only in the persisted tool artifact. */
+  rawCauseMessage?: string;
+
   /** Partial private trace retained on failures that reached the loop. */
   researchRecord?: HarnessResearchRecord;
 }
@@ -65,6 +76,58 @@ export interface ResearchToolErrorOutput {
 export type ResearchToolOutput =
   | ResearchToolSuccessOutput
   | ResearchToolErrorOutput;
+
+const researchCfcSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    version: { type: "integer", enum: [1] },
+    sourceLabel: {
+      type: "object",
+      properties: {
+        confidentiality: { type: "array", items: {} },
+        integrity: { type: "array", items: {} },
+      },
+      additionalProperties: false,
+    },
+    outputLabel: {
+      type: "object",
+      properties: {
+        confidentiality: { type: "array", items: {} },
+        integrity: { type: "array", items: {} },
+      },
+      additionalProperties: false,
+    },
+    coverage: { type: "string", enum: ["complete", "incomplete"] },
+    missingLabels: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          source: {
+            type: "string",
+            enum: [
+              "pattern-index-metadata",
+              "pattern-index-source",
+              "handle-description",
+              "prior-research",
+            ],
+          },
+          detail: { type: "string" },
+        },
+        required: ["source", "detail"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    "version",
+    "sourceLabel",
+    "outputLabel",
+    "coverage",
+    "missingLabels",
+  ],
+  additionalProperties: false,
+};
 
 /** Public model contract of the Common Fabric research capability. */
 export const researchToolDescriptor: HarnessToolDescriptor = {
@@ -131,6 +194,33 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
                   type: "array",
                   items: { type: "string" },
                 },
+                syntax: {
+                  type: "object",
+                  properties: {
+                    status: {
+                      type: "string",
+                      enum: ["valid", "invalid", "unavailable"],
+                    },
+                    scope: { type: "string", enum: ["syntax-only"] },
+                    diagnostics: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          code: { type: "number" },
+                          message: { type: "string" },
+                          line: { type: "number" },
+                          column: { type: "number" },
+                        },
+                        required: ["code", "message"],
+                        additionalProperties: false,
+                      },
+                    },
+                    detail: { type: "string" },
+                  },
+                  required: ["status", "scope", "diagnostics"],
+                  additionalProperties: false,
+                },
               },
               required: ["kind", "content", "sourceIds"],
               additionalProperties: false,
@@ -157,8 +247,16 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         },
         researchRecord: { type: "object" },
         guidance: { type: "string" },
+        cfc: researchCfcSchema,
       },
-      required: ["outputId", "status", "kit", "guidance", "researchRecord"],
+      required: [
+        "outputId",
+        "status",
+        "kit",
+        "guidance",
+        "cfc",
+        "researchRecord",
+      ],
       additionalProperties: false,
     }, {
       type: "object",
@@ -166,9 +264,11 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         status: { type: "string", enum: ["error"] },
         message: { type: "string" },
+        cfc: researchCfcSchema,
+        rawCauseMessage: { type: "string" },
         researchRecord: { type: "object" },
       },
-      required: ["outputId", "status", "message"],
+      required: ["outputId", "status", "message", "cfc"],
       additionalProperties: false,
     }],
   } satisfies JSONSchema,
@@ -177,6 +277,19 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** Stable model-facing explanation for an internal research failure. */
+const RESEARCH_FAILURE_MESSAGE =
+  "research failed before returning an implementation kit";
+
+/** Caller guidance derived from the host-admitted kit status. */
+export const researchKitGuidance = (kit: HarnessResearchKit): string =>
+  kit.status === "complete"
+    ? "This kit passed host admission. Preserve its cited contracts and still run the listed verification."
+    : kit.example?.kind === "pattern-source" &&
+        kit.example.syntax?.status === "invalid"
+    ? "This kit retains its cited evidence and complete source, but the source has the exact TypeScript syntax errors listed under kit.example.syntax.diagnostics. Correct those errors locally without repeating research, then resolve any other item under kit.missing before presenting or implementing the kit as complete. Syntax acceptance alone will not establish its imports, types, compilation, or runtime behavior."
+    : "This kit is incomplete. Do not present or implement it as complete; resolve every item under kit.missing with focused research or report the unresolved limitation.";
 
 /** Narrows a raw tool result to a successful research response. */
 export const isResearchToolSuccessOutput = (
@@ -189,6 +302,7 @@ export const isResearchToolSuccessOutput = (
   return record.status === "ok" && typeof record.outputId === "string" &&
     typeof record.kit === "object" && record.kit !== null &&
     typeof record.guidance === "string" &&
+    typeof record.cfc === "object" && record.cfc !== null &&
     typeof record.researchRecord === "object" &&
     record.researchRecord !== null;
 };
@@ -201,10 +315,14 @@ export const researchTool: HarnessToolDefinition<
   descriptor: researchToolDescriptor,
   async invoke(context, input) {
     const outputId = context.nextOutputId("research");
+    const initialCfc = createHarnessResearchCfcProjection([
+      context.researchTaskCfcLabel,
+    ]);
     const errorOutput = (message: string): ResearchToolErrorOutput => ({
       outputId,
       status: "error",
       message,
+      cfc: initialCfc,
     });
     if (context.runResearch === undefined) {
       return errorOutput("research requires the host research runner");
@@ -225,8 +343,12 @@ export const researchTool: HarnessToolDefinition<
           : {}),
         handleTokens: generalTokens,
         describeHandle: async (token) =>
-          await describeHandleTool.invoke(context, { token }),
+          await describeHandleForResearch(context, { token }),
+        ...(context.researchTaskCfcLabel !== undefined
+          ? { taskCfcLabel: context.researchTaskCfcLabel }
+          : {}),
         priorResearchRuns: context.researchRuns ?? [],
+        attachedPatterns: (context.patternRefs ?? []).map((ref) => ref.record),
         ...(context.signal !== undefined ? { signal: context.signal } : {}),
       });
       const summary: HarnessResearchRunSummary = {
@@ -240,6 +362,7 @@ export const researchTool: HarnessToolDefinition<
         describedHandles: reply.record.describedHandles.map((record) =>
           structuredClone(record)
         ),
+        cfc: structuredClone(reply.record.cfc),
         completedAt: context.now(),
       };
       await context.recordResearchRun?.(summary);
@@ -247,17 +370,17 @@ export const researchTool: HarnessToolDefinition<
         outputId,
         status: "ok",
         kit: reply.kit,
-        guidance: reply.kit.status === "complete"
-          ? "This kit passed host admission. Preserve its cited contracts and still run the listed verification."
-          : "This kit is incomplete. Do not present or implement it as complete; resolve every item under kit.missing with focused research or report the unresolved limitation.",
+        guidance: researchKitGuidance(reply.kit),
+        cfc: reply.record.cfc,
         researchRecord: reply.record,
       };
     } catch (error) {
       await context.recordResearchFailure?.();
       return {
-        ...errorOutput(`research failed: ${errorMessage(error)}`),
+        ...errorOutput(RESEARCH_FAILURE_MESSAGE),
+        rawCauseMessage: errorMessage(error),
         ...(error instanceof HarnessResearchError
-          ? { researchRecord: error.record }
+          ? { cfc: error.record.cfc, researchRecord: error.record }
           : {}),
       };
     }

@@ -15,8 +15,11 @@ import {
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
+  type IFCLabel,
   inheritedCfcPostureReport,
+  mergeCfcLabelViews,
 } from "@commonfabric/runner/cfc";
+import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -42,12 +45,17 @@ import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import type { HarnessResearchRunSummary } from "./contracts/research.ts";
 import {
   createHarnessCfcInvocationContext,
+  createHarnessPromptSlotInfluenceLabels,
   type HarnessCfcInvocationContext,
   type HarnessCfcInvocationInputLabelPath,
   type HarnessCfcInvocationOperation,
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
-import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
+import {
+  createHarnessCfcModelContextInputLabels,
+  type HarnessCfcModelContext,
+  type HarnessCfcModelContextObservationInput,
+} from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import {
@@ -152,10 +160,12 @@ import {
   appendHarnessResearchRun,
   appendToHarnessRunState,
   createHarnessRunState,
+  type HarnessOpeningResearch,
   type HarnessRunState,
   type HarnessRunTerminalReason,
   isTerminalHarnessRunStatus,
   patchHarnessRunState,
+  setHarnessOpeningResearch,
   setHarnessRunStatus,
   setHarnessSubagentRun,
 } from "./run-state.ts";
@@ -335,6 +345,9 @@ export interface CreateHarnessEngineOptions
    * admitted kits and host-confirmed records, not the private read transcript.
    */
   inheritedResearchRuns?: readonly HarnessResearchRunSummary[];
+
+  /** Parent model-context labels retained by a newly delegated child. */
+  inheritedCfcModelContext?: HarnessCfcModelContext;
 
   /**
    * Injection seam for the render gate's probe runtime, mirroring
@@ -996,6 +1009,9 @@ export class CfHarnessEngine {
         ...(options.inheritedResearchRuns !== undefined
           ? { researchRuns: [...options.inheritedResearchRuns] }
           : {}),
+        ...(options.inheritedCfcModelContext !== undefined
+          ? { cfcModelContext: options.inheritedCfcModelContext }
+          : {}),
         skillsRoot: this.config.skillsRootRecord,
         lineage: options.lineage,
         now: this.#now(),
@@ -1162,6 +1178,24 @@ export class CfHarnessEngine {
    */
   setResearchRunner(runner: HarnessResearchRunner): void {
     this.#researchRunner = runner;
+  }
+
+  /** Whether this engine was restored from an existing run-state artifact. */
+  get resumedRun(): boolean {
+    return this.#resumedRun;
+  }
+
+  /** Persists the root driver's opening-research checkpoint. */
+  async recordOpeningResearch(
+    openingResearch: HarnessOpeningResearch,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessOpeningResearch(
+      this.#runState,
+      openingResearch,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
   }
 
   /** Whether this run can acquire a pinned external skill. */
@@ -2281,7 +2315,33 @@ export class CfHarnessEngine {
     return invocation;
   }
 
+  #researchTaskCfcLabel(): IFCLabel | undefined {
+    const paths: readonly HarnessCfcInvocationInputLabelPath[] = [[
+      "args",
+      "task",
+    ]];
+    const view = mergeCfcLabelViews([
+      createHarnessPromptSlotInfluenceLabels({
+        promptSlot: this.#runState.promptSlotBinding,
+        runManifest: summarizeCfcInvocationRunManifest(
+          this.#runState.runManifest,
+          this.#runState.runManifestPath,
+        ),
+        paths,
+      }),
+      createHarnessCfcModelContextInputLabels({
+        modelContext: this.#runState.cfcModelContext,
+        paths,
+      }),
+    ]);
+    return view?.entries.reduce<IFCLabel | undefined>(
+      (label, entry) => mergeLabel(label, entry.label),
+      undefined,
+    );
+  }
+
   #createToolContext(signal?: AbortSignal) {
+    const researchTaskCfcLabel = this.#researchTaskCfcLabel();
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
@@ -2324,6 +2384,8 @@ export class CfHarnessEngine {
         ? { runResearch: this.#researchRunner }
         : {}),
       researchRuns: this.#runState.researchRuns ?? [],
+      ...(researchTaskCfcLabel !== undefined ? { researchTaskCfcLabel } : {}),
+      patternRefs: this.#runState.patternRefs ?? [],
       recordResearchRun: (run: HarnessResearchRunSummary) => {
         this.recordResearchRun(run);
       },

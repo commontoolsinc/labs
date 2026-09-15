@@ -1,8 +1,14 @@
 # cf-harness task research and composition
 
-Status: the callable research service is implemented and locally verified.
-Corrected live verification is pending; automatic startup and index
-contributions follow that checkpoint.
+Status: the callable service, bounded citation repair, automatic root startup,
+syntax-only example admission, and existing CFC propagation are implemented. The
+[six-trial comparison](../history/packages/cf-harness/research-guard-comparison-2026-09-15.md)
+records successful indexed composition, browser persistence, and lower
+whole-task cost on the synthetic dinner-page task. The next experiments target
+opening cost, focused follow-ups, and component contracts. The inbox capstone
+requires working email grants and tested indexed email components; synthetic
+composition does not establish inbox correctness. Recipe compilation and
+behavior still require author/compiler and browser verification.
 
 Goal: every new cf-harness task starts with research that equips its parent and
 pattern author to use the available grants, compose indexed patterns, and follow
@@ -202,6 +208,48 @@ Repeat the bare task with the improved index. Keep this measurement separate
 from the fixed-index comparison so library improvements and research
 improvements can be evaluated individually. Apply the same process to
 Gmail/Plaid bill reconciliation after the inbox checkpoint.
+
+## Next experiments: opening cost and component contracts
+
+Use the
+[completed comparison](../history/packages/cf-harness/research-guard-comparison-2026-09-15.md)
+as a whole-workflow baseline. Preserve its frozen sources and artifacts. An
+experiment against a rebased or otherwise changed harness needs a new matched
+control; it must not attribute unrelated source changes to its treatment.
+
+Evaluate a small opening orientation with targeted follow-ups for unresolved
+contracts. A short orientation can make canonical `pattern-dev` references
+explicit, route capability searches to the index and API questions to docs, and
+supply a complete composition example. Resolve any preloaded sections through
+the configured corpus, read budget, and citation provenance. Keep the skill's
+authoring, deployment, and test workflow with the author. Measure access to a
+skill separately from reading it. A callable-only condition can isolate
+automatic startup; a separate guard ablation can isolate syntax admission.
+
+Keep models, task, runtime, source corpus, frozen index responses and rankings,
+publication policy, and budgets constant within each comparison. Use fresh
+sessions and spaces and serialize trials. Verify connectivity before model
+calls. Record provider caching, exact source identity, private helper work,
+descendants, compiler corrections, and browser outcome. Separate fixed task
+acceptance from the choice of components or visual design. Preserve failed
+trials and their costs; an infrastructure repair is not a model improvement.
+
+For the dinner-page regression, add and complete a preparation item, add costs
+of $4.50 and $2.75, verify a $7.25 increase, and verify persistence after
+reload. Check currency units and native checkbox state separately from host
+accessibility attributes. Read full submitted-source artifacts to establish
+actual component invocation. A successful compiler result is not a browser
+acceptance result.
+
+Improve indexed contracts in a separate library experiment: explicit amount
+units, writable input requirements, returned fields, and tested minimal
+compositions. Keep publication changes out of research-context comparisons.
+Upstream index labels remain a classification dependency; successful source
+authorization does not supply a public label.
+
+Expand next to a direct-reuse task and the inbox task once its grants are known
+to work. Keep new index contributions out of the initial comparison, then
+measure their effect in the separate component-library checkpoint.
 
 ## Correctness dependencies and measurement
 

@@ -1,4 +1,10 @@
+/**
+ * Defines the serializable implementation-kit, provenance, syntax, and CFC
+ * contracts carried by bounded Common Fabric research.
+ */
+
 import type { JSONSchema } from "@commonfabric/api";
+import type { IFCLabel } from "@commonfabric/runner/cfc";
 
 import type { TrustedPatternRecord } from "./trusted-pattern.ts";
 
@@ -40,6 +46,46 @@ export interface HarnessResearchSourceRead {
 
   /** Integrity classes carried by a documentation section. */
   integrity?: readonly string[];
+
+  /** Exact existing CFC label carried by this source, when one is available. */
+  cfcLabel?: IFCLabel;
+}
+
+/** Existing source surface whose CFC label metadata was unavailable. */
+export type HarnessResearchMissingLabelSource =
+  | "pattern-index-metadata"
+  | "pattern-index-source"
+  | "handle-description"
+  | "prior-research";
+
+/** One precise gap in the CFC metadata available to a research run. */
+export interface HarnessResearchMissingLabel {
+  /** Source surface that supplied bytes or metadata without a CFC label. */
+  source: HarnessResearchMissingLabelSource;
+
+  /** Stable description of the exact observation whose label was unavailable. */
+  detail: string;
+}
+
+/**
+ * CFC metadata carried through a research result. Coverage describes label
+ * availability only and is independent of whether the implementation kit is
+ * complete.
+ */
+export interface HarnessResearchCfcProjection {
+  version: 1;
+
+  /** Join of every known label on inputs and sources that influenced the run. */
+  sourceLabel: IFCLabel;
+
+  /** Confidentiality that the derived kit carries into later model context. */
+  outputLabel: IFCLabel;
+
+  /** Whether every influencing source exposed existing CFC metadata. */
+  coverage: "complete" | "incomplete";
+
+  /** Exact observations whose existing CFC metadata was unavailable. */
+  missingLabels: readonly HarnessResearchMissingLabel[];
 }
 
 /** Host-confirmed metadata for a pattern inspected during research. */
@@ -120,6 +166,39 @@ export interface HarnessResearchRule {
   sourceIds: readonly string[];
 }
 
+/** One TypeScript parser diagnostic from a pattern-source example. */
+export interface HarnessResearchSyntaxDiagnostic {
+  /** TypeScript diagnostic code. */
+  code: number;
+
+  /** Diagnostic text with nested messages flattened. */
+  message: string;
+
+  /** One-based source line, when TypeScript located the error. */
+  line?: number;
+
+  /** One-based source column, when TypeScript located the error. */
+  column?: number;
+}
+
+/**
+ * Cheap parser check over a complete pattern-source example. This establishes
+ * syntax only; it does not resolve imports, type-check, compile, or execute.
+ */
+export interface HarnessResearchSyntaxCheck {
+  /** Whether TypeScript reported a parser error. */
+  status: "valid" | "invalid" | "unavailable";
+
+  /** Fixed bound on what this check establishes. */
+  scope: "syntax-only";
+
+  /** Exact parser diagnostics, in TypeScript's reported order. */
+  diagnostics: readonly HarnessResearchSyntaxDiagnostic[];
+
+  /** Why the host could not run the check. */
+  detail?: string;
+}
+
 /** Practical invocation or complete source example for the recommendation. */
 export interface HarnessResearchExample {
   /** Whether the content is tool input JSON or authored pattern source. */
@@ -130,6 +209,9 @@ export interface HarnessResearchExample {
 
   /** Exact opened reads supporting every API used, comments included. */
   sourceIds: readonly string[];
+
+  /** Host parser result, present for a pattern-source example. */
+  syntax?: HarnessResearchSyntaxCheck;
 }
 
 /** Structured implementation guidance returned by the `research` tool. */
@@ -196,6 +278,12 @@ export interface HarnessResearchRunSummary {
 
   /** Every safe handle description inspected during the run. */
   describedHandles: readonly HarnessResearchHandleRecord[];
+
+  /**
+   * Known CFC labels and explicit metadata gaps carried by the derived kit.
+   * Absent only on a summary restored from before this projection existed.
+   */
+  cfc?: HarnessResearchCfcProjection;
 
   /** Time the host completed the research run. */
   completedAt: string;

@@ -12,13 +12,18 @@ import {
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
 import { type Cell, readResultSchemaMeta } from "@commonfabric/runner";
-import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
+import {
+  type CfcLabelView,
+  cfcLabelViewForCellFailClosed,
+  type IFCLabel,
+} from "@commonfabric/runner/cfc";
+import { mergeLabel } from "@commonfabric/runner/cfc/label-view-core";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import { resolveHandleToken } from "../handle-table.ts";
 import { schemaShapeOnly } from "../schema-shape.ts";
-import type { HarnessToolDefinition } from "./types.ts";
+import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
 export interface DescribeHandleToolInput {
   token: string;
@@ -407,12 +412,21 @@ const labelAtomTypes = (
     .filter((type): type is string => type !== undefined),
 });
 
-/** The labels the referent carries, read live through the session. */
-const describedLabels = (cell: Cell<unknown>): DescribeHandleLabel[] =>
-  (cfcLabelViewForCellFailClosed(cell)?.entries ?? []).map((entry) => ({
+/** The labels the referent carries, projected for the public shape reply. */
+const describedLabels = (
+  view: CfcLabelView | undefined,
+): DescribeHandleLabel[] =>
+  (view?.entries ?? []).map((entry) => ({
     ...(entry.path.length > 0 ? { path: [...entry.path] } : {}),
     ...labelAtomTypes(entry.label),
   }));
+
+/** Full existing CFC metadata across every path of one referent. */
+const referentLabel = (view: CfcLabelView | undefined): IFCLabel =>
+  (view?.entries ?? []).reduce<IFCLabel>(
+    (label, entry) => mergeLabel(label, entry.label),
+    {},
+  );
 
 /** The properties `schema` declares, empty when it declares none. */
 const schemaProperties = (
@@ -702,6 +716,8 @@ interface DescribedReferent {
   schema?: JSONSchema;
   labels?: DescribeHandleLabel[];
   database?: DescribeHandleDatabase;
+  cfcLabel?: IFCLabel;
+  cfcLabelAvailable?: true;
 }
 
 /**
@@ -746,7 +762,9 @@ const describeInFabric = async (
     // shape already needed.
     const referent =
       (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
-    const labels = describedLabels(referent);
+    const labelView = cfcLabelViewForCellFailClosed(referent);
+    const labels = describedLabels(labelView);
+    const cfcLabel = referentLabel(labelView);
     const documentSchema = readResultSchemaMeta(root);
     const declared = await declaredSchema(
       root,
@@ -755,13 +773,18 @@ const describeInFabric = async (
       documentSchema,
     );
     if (declared !== undefined) {
-      return { labels, schema: declared };
+      return {
+        labels,
+        schema: declared,
+        cfcLabel,
+        cfcLabelAvailable: true,
+      };
     }
     // Nothing was declared, so the referent's own value is the only place a
     // contract can still be stated, and a database handle states one there.
     const { database, ref: db } = databaseOf(referent);
     if (database === undefined || db === undefined) {
-      return { labels };
+      return { labels, cfcLabel, cfcLabelAvailable: true };
     }
     // The counts are read after the contract rather than with it, so a
     // database that discloses its tables still discloses them when nothing
@@ -774,69 +797,86 @@ const describeInFabric = async (
     return {
       labels,
       database: fill === undefined ? database : { ...database, fill },
+      cfcLabel,
+      cfcLabelAvailable: true,
     };
   } catch {
     return {};
   }
 };
 
-export const describeHandleTool: HarnessToolDefinition<
-  DescribeHandleToolInput,
-  DescribeHandleToolOutput
-> = {
-  descriptor: describeHandleToolDescriptor,
-  async invoke(context, input) {
-    const outputId = context.nextOutputId("describe_handle");
-    const token = typeof input.token === "string" ? input.token.trim() : "";
-    const entry = context.handleTable === undefined
-      ? undefined
-      : resolveHandleToken(context.handleTable, token);
-    if (entry === undefined) {
-      // An unknown token is an ordinary answer, not a failure: a token from
-      // another run, or one the model invented, simply names nothing here.
-      return {
+/** Private sidecar used to carry exact existing labels into research. */
+export interface DescribeHandleResearchResult {
+  /** Ordinary safe shape-only result shown to the research model. */
+  output: DescribeHandleToolOutput;
+
+  /** Full existing referent label, including integrity, when readable. */
+  cfcLabel?: IFCLabel;
+
+  /** Distinguishes a known clean label from unavailable label metadata. */
+  cfcLabelAvailable: boolean;
+}
+
+const invokeDescribeHandle = async (
+  context: HarnessToolContext,
+  input: DescribeHandleToolInput,
+): Promise<DescribeHandleResearchResult> => {
+  const outputId = context.nextOutputId("describe_handle");
+  const token = typeof input.token === "string" ? input.token.trim() : "";
+  const entry = context.handleTable === undefined
+    ? undefined
+    : resolveHandleToken(context.handleTable, token);
+  if (entry === undefined) {
+    // An unknown token is an ordinary answer, not a failure: a token from
+    // another run, or one the model invented, simply names nothing here.
+    return {
+      output: {
         outputId,
         token,
         known: false,
         hasSchema: false,
-      };
-    }
-    if (entry.capability === "skill-context") {
-      return {
+      },
+      cfcLabelAvailable: false,
+    };
+  }
+  if (entry.capability === "skill-context") {
+    return {
+      output: {
         outputId,
         token: entry.token,
         known: true,
         hasSchema: false,
         error:
           "describe_handle cannot consume a skill-context handle; only delegate_task skillHandle can",
-      };
+      },
+      cfcLabelAvailable: false,
+    };
+  }
+  const path = pathSegmentsOf(entry.ref);
+  // What the referent DECLARES answers first, because the question asked is
+  // what is at this address and the document at it is the authority on
+  // that. A recorded schema is second-best — it is what whichever step
+  // minted the handle happened to know — and it answers when the run has no
+  // session, or when the session can state no shape for the address.
+  let described: DescribedReferent = {};
+  if (context.getFabricSession !== undefined) {
+    try {
+      described = await describeInFabric(
+        await context.getFabricSession(),
+        entry.ref,
+      );
+    } catch {
+      // A session that cannot be established leaves the record to answer,
+      // which is what a run without one does anyway.
     }
-    const path = pathSegmentsOf(entry.ref);
-    // What the referent DECLARES answers first, because the question asked is
-    // what is at this address and the document at it is the authority on
-    // that. A recorded schema is second-best — it is what whichever step
-    // minted the handle happened to know — and it answers when the run has no
-    // session, or when the session can state no shape for the address.
-    let described: DescribedReferent = {};
-    if (context.getFabricSession !== undefined) {
-      try {
-        described = await describeInFabric(
-          await context.getFabricSession(),
-          entry.ref,
-        );
-      } catch {
-        // A session that cannot be established leaves the record to answer,
-        // which is what a run without one does anyway.
-      }
-    }
-    const schema = described.schema ??
-      (entry.schemaSource === "harness" ? entry.schema : undefined);
-    // Structure only: whatever the source, the reported schema is rebuilt
-    // from structural keywords, so no value and no prose rides out on it.
-    const disclosed = schema === undefined
-      ? undefined
-      : schemaShapeOnly(schema);
-    return {
+  }
+  const schema = described.schema ??
+    (entry.schemaSource === "harness" ? entry.schema : undefined);
+  // Structure only: whatever the source, the reported schema is rebuilt
+  // from structural keywords, so no value and no prose rides out on it.
+  const disclosed = schema === undefined ? undefined : schemaShapeOnly(schema);
+  return {
+    output: {
       outputId,
       token: entry.token,
       known: true,
@@ -847,6 +887,25 @@ export const describeHandleTool: HarnessToolDefinition<
       ...(described.database !== undefined
         ? { database: described.database }
         : {}),
-    };
+    },
+    ...(described.cfcLabelAvailable === true
+      ? {
+        cfcLabel: structuredClone(described.cfcLabel ?? {}),
+        cfcLabelAvailable: true,
+      }
+      : { cfcLabelAvailable: false }),
+  };
+};
+
+/** Describes a handle while retaining exact label metadata for research. */
+export const describeHandleForResearch = invokeDescribeHandle;
+
+export const describeHandleTool: HarnessToolDefinition<
+  DescribeHandleToolInput,
+  DescribeHandleToolOutput
+> = {
+  descriptor: describeHandleToolDescriptor,
+  async invoke(context, input) {
+    return (await invokeDescribeHandle(context, input)).output;
   },
 };
