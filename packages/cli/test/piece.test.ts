@@ -274,6 +274,22 @@ describe("cli piece parsing", () => {
       identity: ID,
     })).toMatchObject(expected);
   });
+  it("parseSpaceOptions() refuses malformed URLs and missing spaces", () => {
+    expect(() => parseSpaceOptions({ url: "not a URL", identity: ID }))
+      .toThrow(/not a URL/);
+    expect(() => parseSpaceOptions({ url: API_URL, identity: ID }))
+      .toThrow(/does not contain a space/);
+    for (
+      const url of [
+        `${API_URL}/${SPACE}/${PIECE}%23argument`,
+        `${API_URL}/space%23argument/${PIECE}`,
+      ]
+    ) {
+      expect(() => parseSpaceOptions({ url, identity: ID }))
+        .toThrow(/selects a piece member/);
+    }
+  });
+
   it("parseSpaceOptions() throws on incomplete input", () => {
     expect(() =>
       parseSpaceOptions({
@@ -398,6 +414,10 @@ describe("cli piece parsing", () => {
     expect(() => mergePiecePath(config, "//other-space/other/title")).toThrow(
       /piece-relative/,
     );
+    expect(() => mergePiecePath(config, "../../.."))
+      .toThrow(/above the piece/);
+    expect(() => mergePiecePath(config, ".@unknown"))
+      .toThrow(/Invalid scope suffix/);
     expect(() => parsePieceOptions({ ...base, cell: `/${LLM_HANDLE}/items` }))
       .toThrow(/takes a piece id only/);
   });

@@ -1,5 +1,6 @@
 /** Reads recorded cell references, including short entity IDs in console fixtures. */
 
+import { entityUriSchemePrefix } from "@commonfabric/runner/entity-kind";
 import {
   parseCellReference,
   type ReferenceParts,
@@ -16,10 +17,9 @@ export const parseConsoleReference = (
   try {
     text = text.trimStart();
     const parts = parseCellReference(text.startsWith("/") ? text : `/${text}`);
-    const separator = parts.id.indexOf(":");
+    const prefix = entityUriSchemePrefix(parts.id);
     if (
-      !["of", "computed"].includes(parts.id.slice(0, separator)) ||
-      separator === parts.id.length - 1 ||
+      prefix === undefined || parts.id.length === prefix.length ||
       parts.member === "argument"
     ) return undefined;
     return { ...parts, scope: parts.scope ?? "space" };

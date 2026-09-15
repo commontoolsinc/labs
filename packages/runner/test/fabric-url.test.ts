@@ -183,6 +183,12 @@ describe("fabric-url", () => {
         expect(parseFabricUrl(`/of:fid1:${HASH}/%ZZ`)).toBeUndefined();
         expect(parseFabricUrl("%ZZ")).toBeUndefined();
         expect(
+          parseFabricUrl(`https://fabric.example/${SPACE}/${HASH}/%ZZ`, {
+            hosts: HOSTS,
+          }),
+        )
+          .toBeUndefined();
+        expect(
           parseFabricUrl("https://fabric.example/%ZZ/thing", { hosts: HOSTS }),
         )
           .toBeUndefined();
