@@ -28,20 +28,24 @@ import {
  * so the id gives away nothing the document does not. The keys that are not
  * content carry the selected database, its space and id, since a query's
  * `db` input can move from one database to another whose rows would
- * otherwise land on the same documents, and the handle's `tables`
- * declaration, so a stricter re-declaration of a label moves the row to a
- * new document that the commit writes and labels.
+ * otherwise land on the same documents; the projection, each output column
+ * and its origin, since a query's `sql` input can move to a projection whose
+ * columns carry other labels; and the handle's `tables` declaration, so a
+ * stricter re-declaration of a label moves the row to a new document that
+ * the commit writes and labels.
  */
 export type ResultRowKey =
   | { readonly row: unknown }
   | {
     readonly database: ResultRowDatabase;
+    readonly projection: readonly SqliteResultColumn[] | undefined;
     readonly table: string;
     readonly key: Record<string, unknown>;
     readonly tables: unknown;
   }
   | {
     readonly database: ResultRowDatabase;
+    readonly projection: readonly SqliteResultColumn[] | undefined;
     readonly index: number;
     readonly tables: unknown;
     readonly label?: unknown;
@@ -121,9 +125,13 @@ export function resultRowKeys(options: {
     : undefined;
   const keyed: ResultRowKey[] = rows.map((row, index) => {
     const label = rowLabel(index);
-    if (label !== undefined) return { database, index, tables, label };
+    if (label !== undefined) {
+      return { database, projection: columns, index, tables, label };
+    }
     if (!columnLabeled) return { row };
-    if (primaryKey === undefined) return { database, index, tables };
+    if (primaryKey === undefined) {
+      return { database, projection: columns, index, tables };
+    }
     const key: Record<string, unknown> = {};
     for (const [column, output] of primaryKey.outputs) {
       const value = columnValue(row, output);
@@ -131,11 +139,17 @@ export function resultRowKeys(options: {
       // are distinct rows that no key tells apart, so such a row is keyed on
       // its position.
       if (value === null || value === undefined) {
-        return { database, index, tables };
+        return { database, projection: columns, index, tables };
       }
       key[column] = value;
     }
-    return { database, table: primaryKey.table, key, tables };
+    return {
+      database,
+      projection: columns,
+      table: primaryKey.table,
+      key,
+      tables,
+    };
   });
   // A key that two rows share would put two rows in one document, so a result
   // in which that happens keys every primary-key row on position; content
@@ -151,7 +165,9 @@ export function resultRowKeys(options: {
     );
     if (seen.has(serialized)) {
       return rows.map((_, index) =>
-        "key" in keyed[index] ? { database, index, tables } : keyed[index]
+        "key" in keyed[index]
+          ? { database, projection: columns, index, tables }
+          : keyed[index]
       );
     }
     seen.add(serialized);

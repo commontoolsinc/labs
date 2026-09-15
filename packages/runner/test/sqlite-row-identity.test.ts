@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { table } from "@commonfabric/memory/sqlite/schema";
+import type { SqliteResultColumn } from "@commonfabric/memory/v2";
 
 import { resultRowKeys } from "../src/builtins/sqlite/row-identity.ts";
 
@@ -17,7 +18,7 @@ const tables = {
   tags: table({ id: "integer primary key", name: "text" }),
 };
 
-const notesColumns = [
+const notesColumns: SqliteResultColumn[] = [
   { output: "id", table: "notes", column: "id" },
   { output: "body", table: "notes", column: "body" },
 ];
@@ -30,6 +31,27 @@ const rows = [
 const never = () => undefined;
 
 const database = { space: "did:key:zTestSpace", id: "of:notes-db" };
+
+/** The key of a row keyed on `notes`'s primary key under `projection`. */
+const keyed = (
+  projection: readonly SqliteResultColumn[],
+  id: unknown,
+  declared: unknown = tables,
+) => ({ database, projection, table: "notes", key: { id }, tables: declared });
+
+/** The key of a row keyed on its position under `projection`. */
+const positional = (
+  projection: readonly SqliteResultColumn[],
+  index: number,
+  declared: unknown = tables,
+  label?: unknown,
+) => ({
+  database,
+  projection,
+  index,
+  tables: declared,
+  ...(label !== undefined && { label }),
+});
 
 describe("resultRowKeys()", () => {
   it("keys a row carrying no confidentiality on its content", () => {
@@ -55,10 +77,7 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([
-      { database, table: "notes", key: { id: 1 }, tables },
-      { database, table: "notes", key: { id: 2 }, tables },
-    ]);
+    ).toEqual([keyed(notesColumns, 1), keyed(notesColumns, 2)]);
   });
 
   it("reads the key off an entry-list row", () => {
@@ -71,7 +90,7 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([{ database, table: "notes", key: { id: 7 }, tables }]);
+    ).toEqual([keyed(notesColumns, 7)]);
   });
 
   it("keys a row under a row label on its position and its label", () => {
@@ -86,22 +105,25 @@ describe("resultRowKeys()", () => {
         rowLabel: (index) => index === 1 ? label : undefined,
       }),
     ).toEqual([
-      { database, table: "notes", key: { id: 1 }, tables },
-      { database, index: 1, tables, label },
+      keyed(notesColumns, 1),
+      positional(notesColumns, 1, tables, label),
     ]);
   });
 
   it("keys on position when the projection leaves the key out", () => {
+    const projection: SqliteResultColumn[] = [
+      { output: "body", table: "notes", column: "body" },
+    ];
     expect(
       resultRowKeys({
         rows: [{ body: "a" }],
-        columns: [{ output: "body", table: "notes", column: "body" }],
+        columns: projection,
         tables,
         database,
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([{ database, index: 0, tables }]);
+    ).toEqual([positional(projection, 0)]);
   });
 
   it("keys on position when the key column is labeled", () => {
@@ -124,30 +146,30 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([{ database, index: 0, tables: labeledKey }, {
-      database,
-      index: 1,
-      tables: labeledKey,
-    }]);
+    ).toEqual([
+      positional(notesColumns, 0, labeledKey),
+      positional(notesColumns, 1, labeledKey),
+    ]);
   });
 
   it("keys on position when the projection spans two tables", () => {
+    const projection: SqliteResultColumn[] = [
+      { output: "id", table: "notes", column: "id" },
+      { output: "name", table: "tags", column: "name" },
+    ];
     expect(
       resultRowKeys({
         rows: [{ id: 1, name: "t" }],
-        columns: [
-          { output: "id", table: "notes", column: "id" },
-          { output: "name", table: "tags", column: "name" },
-        ],
+        columns: projection,
         tables,
         database,
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([{ database, index: 0, tables }]);
+    ).toEqual([positional(projection, 0)]);
   });
 
-  it("keys every row on position when two rows share a key", () => {
+  it("keys every keyed row on position when two rows share a key", () => {
     expect(
       resultRowKeys({
         rows: [{ id: 1, body: "a" }, { id: 1, body: "b" }, {
@@ -160,11 +182,11 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([{ database, index: 0, tables }, { database, index: 1, tables }, {
-      database,
-      index: 2,
-      tables,
-    }]);
+    ).toEqual([
+      positional(notesColumns, 0),
+      positional(notesColumns, 1),
+      positional(notesColumns, 2),
+    ]);
   });
 
   it("keeps a row-label key when duplicate keys move the rest to position", () => {
@@ -181,11 +203,11 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: (index) => index === 2 ? label : undefined,
       }),
-    ).toEqual([{ database, index: 0, tables }, {
-      database,
-      index: 1,
-      tables,
-    }, { database, index: 2, tables, label }]);
+    ).toEqual([
+      positional(notesColumns, 0),
+      positional(notesColumns, 1),
+      positional(notesColumns, 2, tables, label),
+    ]);
   });
 
   it("keys a wide integer key that arrives as a `bigint`", () => {
@@ -199,32 +221,35 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([
-      { database, table: "notes", key: { id: wide }, tables },
-      { database, table: "notes", key: { id: wide + 1n }, tables },
-    ]);
+    ).toEqual([keyed(notesColumns, wide), keyed(notesColumns, wide + 1n)]);
   });
 
   it("keys a row whose key holds `NULL` on its position", () => {
     const textKey = {
       notes: table({ slug: "text primary key", body: "text" }),
     };
-    const columns = [
+    const projection: SqliteResultColumn[] = [
       { output: "slug", table: "notes", column: "slug" },
       { output: "body", table: "notes", column: "body" },
     ];
     expect(
       resultRowKeys({
         rows: [{ slug: "a", body: "x" }, { slug: null, body: "y" }],
-        columns,
+        columns: projection,
         tables: textKey,
         database,
         columnLabeled: true,
         rowLabel: never,
       }),
     ).toEqual([
-      { database, table: "notes", key: { slug: "a" }, tables: textKey },
-      { database, index: 1, tables: textKey },
+      {
+        database,
+        projection,
+        table: "notes",
+        key: { slug: "a" },
+        tables: textKey,
+      },
+      positional(projection, 1, textKey),
     ]);
   });
 
@@ -246,7 +271,32 @@ describe("resultRowKeys()", () => {
       columnLabeled: true,
       rowLabel: never,
     });
-    expect(first).toEqual({ database, table: "notes", key: { id: 1 }, tables });
+    expect(first).toEqual(keyed(notesColumns, 1));
+    expect(second).not.toEqual(first);
+  });
+
+  it("keys the same row of another projection on a different key", () => {
+    const aliased: SqliteResultColumn[] = [
+      { output: "id", table: "notes", column: "id" },
+      { output: "value", table: "notes", column: "body" },
+    ];
+    const [first] = resultRowKeys({
+      rows: [rows[0]],
+      columns: notesColumns,
+      tables,
+      database,
+      columnLabeled: true,
+      rowLabel: never,
+    });
+    const [second] = resultRowKeys({
+      rows: [{ id: 1, value: "a" }],
+      columns: aliased,
+      tables,
+      database,
+      columnLabeled: true,
+      rowLabel: never,
+    });
+    expect(second).toEqual(keyed(aliased, 1));
     expect(second).not.toEqual(first);
   });
 
@@ -261,6 +311,6 @@ describe("resultRowKeys()", () => {
         columnLabeled: true,
         rowLabel: never,
       }),
-    ).toEqual([{ database, index: 0, tables: keyless }]);
+    ).toEqual([positional(notesColumns, 0, keyless)]);
   });
 });

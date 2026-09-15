@@ -41,7 +41,9 @@ long way without a query-dependency analyzer.
   nothing the document does not. The keys that are not content also carry
   the selected database, its space and id, since a query's `db` input can
   move to another database whose rows would otherwise land on the same
-  documents, and the handle's `tables`
+  documents; the projection, each output column and its origin, since a
+  query's `sql` input can move to a projection whose columns carry other
+  labels; and the handle's `tables`
   declaration, because a commit attaches label metadata only to the documents
   it writes: a stricter re-declaration of a label moves every row to a new
   document that the commit writes and labels, rather than leaving a row with
