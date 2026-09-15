@@ -170,8 +170,18 @@ export interface DetachEvent {
 //
 // Module-scope lifts, because the declared parameter is what bounds the read.
 
+/** A session's identity as the connector's contract spells it
+ * (`connector/docs/interfaces.md`, "Session key"): both parts trimmed, the
+ * source id lowercased, each percent-encoded, and the two joined with one
+ * slash, so `("a/b", "c")` and `("a", "b/c")` stay apart. The one key for a
+ * record's `elementById` address and for every join against the index, so
+ * what is stored and what is shown agree. A control character, which the
+ * connector refuses, is encoded here rather than thrown on: a view does not
+ * refuse a row. */
 export const sessionKey = (sourceId: string, nativeSessionId: string): string =>
-  `${sourceId}/${nativeSessionId}`;
+  `${encodeURIComponent(sourceId.trim().toLowerCase())}/${
+    encodeURIComponent(nativeSessionId.trim())
+  }`;
 
 /** Whether the index carries a session in any state. A row the connector
  * has since marked deleted still confirms that the session existed, so a
@@ -181,11 +191,12 @@ const indexCarries = (
   index: SessionIndexView | undefined,
   sourceId: string,
   nativeSessionId: string,
-): boolean =>
-  (index?.sessions ?? []).some((s) =>
-    s !== undefined && s.sourceId === sourceId &&
-    s.nativeSessionId === nativeSessionId
+): boolean => {
+  const key = sessionKey(sourceId, nativeSessionId);
+  return (index?.sessions ?? []).some((s) =>
+    s !== undefined && sessionKey(s.sourceId, s.nativeSessionId) === key
   );
+};
 
 /** The starts the index has confirmed, as attachments: the connector
  * published the session the start named, so it is the person's. */
@@ -348,15 +359,9 @@ export const sessionDotColor = (active: boolean): string =>
 //
 // Keyed writes
 //
-// Handler-side helpers: a record per session, membership added if absent and
-// removed by value, the record cleared on removal so a later write of the
-// same session starts fresh.
-
-/** The key an attachment's or a start's record lives under: one per session. */
-export const attachmentKey = (
-  sourceId: string,
-  nativeSessionId: string,
-): string => JSON.stringify([sourceId, nativeSessionId]);
+// Handler-side helpers: a record per session under its `sessionKey`,
+// membership added if absent and removed by value, the record cleared on
+// removal so a later write of the same session starts fresh.
 
 /** Records the attachment when none is there and adds it to the list: a
  * keyed record and an add-if-absent membership, so the same person writing
@@ -367,7 +372,7 @@ export const recordAttachment = (
   attachment: Attachment,
 ): boolean => {
   const record = attached.elementById(
-    attachmentKey(attachment.sourceId, attachment.nativeSessionId),
+    sessionKey(attachment.sourceId, attachment.nativeSessionId),
   );
   const added = record.get() === undefined;
   if (added) record.set(attachment);
@@ -382,7 +387,7 @@ export const dropAttachment = (
   sourceId: string,
   nativeSessionId: string,
 ): void => {
-  const key = attachmentKey(sourceId, nativeSessionId);
+  const key = sessionKey(sourceId, nativeSessionId);
   attached.removeByValue(attached.elementById(key));
   const record: Writable<Attachment | undefined> = attached.elementById(key);
   record.set(undefined);
@@ -394,7 +399,7 @@ export const recordStart = (
   start: SessionStart,
 ): void => {
   const record = starts.elementById(
-    attachmentKey(start.sourceId, start.nativeSessionId),
+    sessionKey(start.sourceId, start.nativeSessionId),
   );
   record.set(start);
   starts.addUnique(record);
@@ -407,7 +412,7 @@ export const dropStart = (
   sourceId: string,
   nativeSessionId: string,
 ): void => {
-  const key = attachmentKey(sourceId, nativeSessionId);
+  const key = sessionKey(sourceId, nativeSessionId);
   starts.removeByValue(starts.elementById(key));
   const record: Writable<SessionStart | undefined> = starts.elementById(key);
   record.set(undefined);
