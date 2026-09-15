@@ -223,13 +223,14 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   at. The published row declares both sides `unknown` instead, so a consumer
   that only carries the graph onward expands neither.
 
-  The pivot holds one row per distinct topic, with distinctness decided by the
-  same `equals`: a topic the board lists at two entries has one row, so its
-  lookup returns its backlinks once, while each of those entries still counts as
-  a source in the rows of the topics it mentions. Every row is addressed by the
-  topic it describes (`Writable.for(topic)`), so a row keeps its identity
-  however the board is reordered, and a lookup re-run by an unrelated change
-  recomputes the same links at the same address and writes nothing.
+  The pivot works over the board's distinct topics, with distinctness decided by
+  the same `equals`: a topic the board lists at two entries, whether as the same
+  link twice or as a link and an alias of it, has one row, so its lookup returns
+  its backlinks once, and counts once as a source in the rows of the topics it
+  mentions, at the place of its first entry. Every row is addressed by the topic
+  it describes (`Writable.for(topic)`), so a row keeps its identity however the
+  board is reordered, and a lookup re-run by an unrelated change recomputes the
+  same links at the same address and writes nothing.
 - **Agents reference through a verb.** `mention` and `unmention` take the piece
   itself. With prose no longer scanned there is otherwise no headless way to
   make a reference, and `kind: "topic"` links are ordinary links unless their

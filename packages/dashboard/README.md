@@ -297,11 +297,11 @@ short enough to be read whole at the width the tile is actually given. Something
 longer is not a longer tile, it is a page.
 
 That page is an ordinary drill-down — a route the tile declares, reached through
-the tile's `href`, and named on the tile by its `hint` so that a person can see
-there is something behind it. `/bench` holds the histories behind the benchmark
-and duration tiles, and `/test-selection` holds the manifest behind the two test
-tiles. A page has the width to spell a test's whole name, so nothing on one has
-to be abbreviated.
+the tile's `href` and indicated by the top-right arrow. The tile's `hint` supplies
+the tooltip and accessible link description. `/bench` holds the histories behind
+the benchmark and duration tiles, and `/test-selection` holds the manifest behind
+the two test tiles. A page has the width to spell a test's whole name, so nothing
+on one has to be abbreviated.
 
 Where a tile has more than one candidate for its sub line, the one that explains
 the color it is wearing wins. The test selection tile carries the count of the
@@ -323,7 +323,7 @@ figure is the age badge in the header.
 | `duration` | a span in milliseconds, rendered (via `humanSpan`) in the chart's bottom-left corner |
 | `aside` | trusted inline HTML minor header facet (e.g. an MTD or a "running" badge) |
 | `href` | makes the whole tile a link (an `http…` link opens a new tab) |
-| `hint` | small drill affordance, e.g. `"commits ↗"` |
+| `hint` | tooltip for the top-right `↗` drill arrow and accessible link description, e.g. `"commits ↗"` |
 
 ## Tiles
 
