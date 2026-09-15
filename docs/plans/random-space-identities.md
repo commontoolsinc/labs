@@ -44,10 +44,9 @@ labels.
   its DID. They do not carry a host query parameter.
 - This change contains no partial support for future names. Display labels are
   Home metadata and have no resolution semantics.
-- Labs owns the complete space-creation protocol and its provider-neutral
-  routing contract. Deployment repositories only adapt that contract to their
-  placement and routing primitives. In particular, `common-cluster` must remain
-  a thin layer over labs rather than acquire a second creation state machine.
+- Labs owns the complete space-creation protocol. Deployment configuration only
+  supplies the existing routed Memory endpoint; it does not acquire a second
+  creation state machine.
 - Generate at least 256 bits of entropy with the platform cryptographic random
   source. The label, user DID, operation identifier, clock, and process state do
   not contribute key material.
@@ -103,16 +102,9 @@ labels.
   uses a shared durable store. The current production
   [storage routing](https://github.com/commontoolsinc/infra/blob/16e48222254059cc9eff53f5064ab696fbd37236/ansible/roles/nginx/templates/toolshed.conf.j2)
   is defined in `infra`: nginx sends each `space=<did>` Memory connection to
-  one of the host's Toolshed processes. The proposed Kubernetes replacement is
-  defined in `common-cluster`: a
-  [`SpacePlacement`](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/docs/design.md#july-2026-architecture-amendment-per-space-first-per-user-later)
-  maps a DID to a Toolshed shard, and its
-  [router](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/cmd/toolshed-router-extproc/router.go)
-  rejects unknown placements. Labs owns the route-readiness boundary in the
-  random-identity specification and the code that invokes, verifies, records,
-  and resumes it. `common-cluster` supplies only the placement adapter for that
-  boundary. The control spaces use the same space-keyed route as ordinary
-  spaces; they do not assume that embedded servers share process memory.
+  one of the host's Toolshed processes. The control spaces use that same
+  space-keyed route as ordinary spaces; they do not assume that embedded
+  servers share process memory.
 - The server-side execution
   [per-space lease](../specs/server-side-execution/serving-loop.md#2-the-lease-single-deriver-operationally)
   already fences competing processes. Creation events reuse that lease instead
@@ -176,26 +168,12 @@ labels.
   reaches the same backend for a given control-space DID and that two backends
   cannot serve independent writable histories for that DID. Creation must not
   depend on frontend-process state.
-- Define one deployment-neutral operation that idempotently makes a DID's
-  ordinary Memory route writable and reports when it is ready. It must not
-  expose a process identity or permit the caller to bypass ordinary
-  space-addressed routing.
-- Define that operation's request, result, error model, client, postcondition
-  check, and conformance tests in labs. Keep Kubernetes resources and
-  `common-cluster` types out of the labs interface. The operation accepts a DID;
-  successful completion means the ASP's normal routed Memory endpoint is
-  writable for that DID.
 - In the current Estuary and Rapids VM topology, confirm that every production
   `MEMORY_URL` uses the host-internal nginx endpoint rather than the Memory
   server embedded in the request process. Confirm that the nginx hash route
-  admits an arbitrary new DID and that its assigned backend retains the same
-  durable history across process restarts.
-- In a `common-cluster` deployment, implement a thin adapter for the labs-owned
-  route-readiness contract. Its only semantic work is an idempotent
-  create-or-find of the DID's `SpacePlacement` and reporting when the selected
-  shard is writable. Keep key generation, genesis, creation records,
-  idempotency, recovery, Home registration, and ACL policy in labs. Pre-create
-  placements for every provider control-space DID before enabling creation.
+  admits an arbitrary previously unseen DID, that Memory atomically creates its
+  history on accepted genesis, and that every later connection reaches the same
+  durable history across request-process restarts and backend-set changes.
 - Load-test each append-only namespace's fixed set of provider-private control
   shards and choose enough shards for the expected creation rate. Record their
   DIDs and immutable hash-to-shard mapping in the existing catalog.
@@ -236,12 +214,10 @@ labels.
     that allocation transaction to Common Memory, whatever response the commit
     attempt returns. Never persist the private key or report success before
     durable state can reproduce the result.
-  - After observing the durable accepted allocation, invoke the target ASP's
-    route-readiness operation for the accepted DID. Record `route-ready` only
-    after the normal space-addressed Memory endpoint reports that the route's
-    authority is writable. Then submit the recorded genesis transaction through
-    that endpoint. Never write genesis directly to a Memory server embedded in
-    the request process.
+  - After observing the durable accepted allocation, submit the recorded
+    genesis transaction through the normal space-addressed Memory endpoint.
+    Never write genesis directly to a Memory server embedded in the request
+    process.
   - Treat Home registration as part of this operation. Do not expose a second
     caller-managed "add to Home" operation for newly created spaces.
   - Keep the private key in memory only. Do not return it to the shell, store it
@@ -260,14 +236,8 @@ labels.
     transactions, content authorization, and background execution for
     consistency and recovery.
   - Implement the creation API, state machine, content rules, durable event
-    handlers, route-readiness client, readiness verification, and recovery in
-    labs. These components must be identical for a single-process Toolshed, the
-    current nginx fleet, and `common-cluster`.
-  - Put the provider-neutral route-readiness request and response schema in
-    labs. A deployment adapter may expose it through an ASP-internal endpoint,
-    but transport and placement details do not enter the creation document or
-    state graph. Prefer extending an existing internal provider boundary over
-    adding a cluster-specific call path to creation.
+    handlers, and recovery in labs. The same components serve a single-process
+    Toolshed and the current nginx fleet.
   - Provision each catalogued namespace as a fixed set of provider-owned
     control spaces. Select one with a stable hash of namespace version,
     normalized target public ASP origin, creator DID, and idempotency key.
@@ -282,19 +252,6 @@ labels.
     its own embedded server. Keep the durable storage path stable when the
     assigned process restarts. A single-process deployment uses its one
     embedded server directly.
-  - Implement route readiness without a new persistence service. In the current
-    VM fleet, the existing nginx DID hash accepts any new DID, so readiness
-    verifies that the routed Memory authority is writable. In `common-cluster`,
-    readiness creates or finds exactly one `SpacePlacement` for the accepted DID
-    and waits until its selected shard is writable. An unknown placement must
-    fail closed before genesis rather than fall back to the request process.
-  - Limit `common-cluster` changes to adapting the labs-owned contract to
-    `SpacePlacement`, exposing the adapter to Toolshed, and supplying the
-    deployment configuration and permissions it needs. Do not copy labs
-    validation or state transitions into Go controllers, Custom Resource
-    Definitions, admission policy, or deployment scripts. If another provider
-    could use a piece of the implementation, place it in labs and keep only the
-    Kubernetes translation in `common-cluster`.
   - Treat the creation document's stable Fabric address as the uniqueness
     boundary. Two frontend processes carrying the same signed creation intent
     therefore contend on the same document even when they receive the requests
@@ -317,12 +274,11 @@ labels.
     transaction identity and then reload the stable control document. Do not
     publish a losing DID or signed transaction.
   - Use explicit `intent-recorded`, `home-authorized`, `allocated`,
-    `route-ready`, `genesis-committed`, `complete`, `rejected`, `abandoning`,
-    `abandoned`, and `inconsistent` states. A process that receives the same
-    request returns its completed result, resumes its unfinished state, or
-    reports its terminal state. It cannot replace an accepted allocation.
-    `Abandoning` remains unfinished until Home records the matching terminal
-    state.
+    `genesis-committed`, `complete`, `rejected`, `abandoning`, `abandoned`, and
+    `inconsistent` states. A process that receives the same request returns its
+    completed result, resumes its unfinished state, or reports its terminal
+    state. It cannot replace an accepted allocation. `Abandoning` remains
+    unfinished until Home records the matching terminal state.
   - Enforce immutable intent fields, immutable accepted DID and genesis data,
     and the exact state-transition graph with content authorization on the
     provider control space. Permit a handler to set the deferred marker without
@@ -334,14 +290,15 @@ labels.
   - Ensure a losing concurrent process reads the durable document. It returns
     a completed result or resumes the recorded allocation. It must not publish
     an unused key or genesis transaction.
-  - From `allocated`, establish or recover the accepted DID's normal route and
-    transition to `route-ready`. A failure leaves the same allocation
-    resumable; it never authorizes another DID. From `route-ready`, submit the
-    recorded signed genesis transaction idempotently through that route. After
-    observing committed genesis, retain that immutable transaction, add the
-    matching committed genesis reference, and mark the genesis step complete in
-    one control-shard transaction. The signed transaction contains no private
-    key and authorizes nothing except the already committed genesis.
+  - From `allocated`, submit the recorded signed genesis transaction
+    idempotently through the ordinary DID-routed Memory endpoint. A failure
+    leaves the same allocation resumable; it never authorizes another DID.
+    Treat the exact transaction already committed as success and a different
+    genesis for the accepted DID as an integrity failure. After observing the
+    exact committed genesis, retain that immutable transaction, add the matching
+    committed genesis reference, and mark the genesis step complete in one
+    control-shard transaction. The signed transaction contains no private key
+    and authorizes nothing except the already committed genesis.
   - Schedule one durable server-side creation event for each continuation state.
     Derive its event identity from the control-document address and expected
     state and continuation generation. Atomically schedule the successor event
@@ -631,14 +588,12 @@ labels.
     different API frontends. Prove both use the same provider control document,
     the accepted DID follows nginx's `space=<did>` Memory route, and neither
     writes to its request process's embedded Memory server.
-  - In a `common-cluster` topology, prove an unknown DID fails closed before
-    genesis, concurrent route-readiness attempts converge on one placement, and
-    genesis succeeds only after that placement's shard is writable.
-  - Keep the provider-neutral conformance suite in labs and run it against the
-    single-process implementation, the current nginx topology, and the
-    `common-cluster` adapter. Keep cluster-only tests limited to DID-to-placement
-    translation, idempotent placement creation, readiness reporting, routing,
-    and failure closure.
+  - Open multiple independent Memory connections for the accepted DID, restart
+    its selected process, and change the available backend set. Prove every
+    connection observes the exact committed genesis and subsequent history,
+    without creating a second history or accepting a different genesis.
+  - Keep the routing conformance suite in labs and run it against both the
+    single-process implementation and the current nginx topology.
   - Replay a committed handler event and prove it refers to the original new
     space. Trigger a second event with identical inputs and prove it creates a
     different space.
@@ -647,9 +602,9 @@ labels.
     `spaces` entry, one effective site-table hint, and one completed immutable
     creation record in the creator's Home.
   - Exit a process after recording the intent, after Home authorization, after
-    allocation, after route readiness, after genesis, and after the Home commit.
-    Prove another process resumes each request without allocating a new DID or
-    creating duplicate Home entries.
+    allocation, after genesis, and after the Home commit. Prove another process
+    resumes each request without allocating a new DID or creating duplicate Home
+    entries.
   - Disconnect the allocating process after it hands Common Memory the
     conditional allocation transaction. Prove it destroys the private key
     without knowing the commit outcome, resolves the submitted transaction
@@ -660,7 +615,7 @@ labels.
     shard continue, and an authenticated Home wake schedules exactly one new
     continuation generation for the original request.
   - Ask Home to complete a record while the target control document is
-    `allocated` or `route-ready`.
+    `allocated`.
     Prove the target withholds a result and Home does not publish the `spaces`
     entry, site-table hint, or completed record before genesis commits.
   - Prove a creation is not reported as successful while its Home registration

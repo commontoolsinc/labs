@@ -54,22 +54,26 @@ the durable record.
 Creation completes after all of the following are durable:
 
 - the accepted random DID and signed genesis transaction;
-- a writable provider route for that DID;
-- the committed genesis transaction; and
+- the exact recorded genesis transaction committed as the DID's first history;
+  and
 - the DID-keyed entry in the creator's Home space.
 
 ## Routing across provider processes
 
 The process that receives a create request is not assumed to host the new
-space. Before submitting genesis, the target provider must make the accepted
-DID routable to one logical writable Common Memory history and its durable
-store. Establishing that route must be idempotent for the DID.
+space. Genesis and every later space operation use the provider's ordinary
+space-addressed Memory endpoint, which routes one DID to one logical writable
+Common Memory history and its durable store. They do not call a Memory server
+merely because it is embedded in the process handling the request. A retry
+through a different request process therefore reaches the same accepted
+allocation and the same space history.
 
-Genesis and every later space operation use the provider's ordinary
-space-addressed Memory endpoint. They do not call a Memory server merely
-because it is embedded in the process handling the request. A retry through a
-different request process therefore reaches the same accepted allocation and
-the same space history.
+The routed endpoint accepts a previously unseen DID and atomically creates its
+history when it accepts the recorded genesis transaction. Every connection for
+that DID reaches the same logical history even when request processes restart
+or the backend set changes. Finding the exact transaction already committed is
+success. Finding a different genesis for the accepted DID is an integrity
+failure.
 
 The selected process may change after a restart, failover, or placement move.
 Before another process accepts writes, the provider must preserve the durable
@@ -81,10 +85,9 @@ control spaces. Those control spaces use the same routed storage contract as
 ordinary spaces. A deployment that requires explicit space placement must
 place the control spaces before enabling creation.
 
-If route establishment fails after allocation, the create action remains
-unfinished. Recovery resumes route establishment for the recorded DID and
-then submits the recorded genesis transaction. It does not allocate another
-DID.
+If routed genesis submission fails after allocation, the create action remains
+unfinished. Recovery resubmits the recorded genesis transaction through the
+ordinary routed endpoint. It does not allocate another DID.
 
 ## Deployment mappings
 
@@ -101,16 +104,8 @@ and the host prepares one
 Random-space creation must send control-space and newly allocated space
 connections through that nginx route. In particular, each production
 `MEMORY_URL` must name the host-internal routed endpoint rather than a
-process-local endpoint.
-
-The Kubernetes replacement in `common-cluster` maps a space DID through a
-[`SpacePlacement`](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/docs/design.md#july-2026-architecture-amendment-per-space-first-per-user-later)
-to a `ToolshedShard`. Its current
-[router](https://github.com/commontoolsinc/common-cluster/blob/dc70d63f2ce44930a1b23793a998e78eeac863bf/cmd/toolshed-router-extproc/router.go)
-fails closed for an unknown placement. A deployment using that router must
-idempotently create or find the accepted DID's placement and wait for its
-shard to become writable before submitting genesis. The same operation places
-the fixed control spaces during deployment preparation.
+process-local endpoint. Process restarts and changes to the nginx backend set
+must not change the durable history selected by a DID.
 
 Labs supplies the common client boundary. A remote Memory session appends the
 space DID to its
