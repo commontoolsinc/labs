@@ -25,7 +25,9 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { openSpace, type SpaceDb } from "./db.ts";
 import { linksWithPaths, type LinkWalkBounds } from "./decode.ts";
+import { shortDid } from "./did-display.ts";
 import { candidatesMatching, reconstructDocument } from "./reconstruct.ts";
+import { parseScope } from "./scopes.ts";
 import type { DiscoveredSpace } from "./discover.ts";
 
 export type SpaceRole =
@@ -72,12 +74,10 @@ const SPACE_SIGNAL_WALK: LinkWalkBounds = {
   maxNodes: Number.POSITIVE_INFINITY,
 };
 
-const SESSION_RE = /^session:(did:key:[^:]+):/i;
-
 /** The acting-principal DID embedded in a `session_id`, if present. */
 export function principalFromSession(sessionId: string): string | null {
-  const m = decodeURIComponent(sessionId).match(SESSION_RE);
-  return m ? m[1] : null;
+  const scope = parseScope(sessionId);
+  return scope.kind === "session" ? scope.principal ?? null : null;
 }
 
 /** A space DB's own DID, from its file path (basename minus `.sqlite`). */
@@ -369,9 +369,4 @@ export function groupDiscoveredSpaces(
 
 function roleRank(r: SpaceRole): number {
   return r === "home" ? 0 : r === "profile" ? 1 : r === "main" ? 2 : 3;
-}
-
-function shortDid(did: string): string {
-  const tail = did.startsWith("did:key:") ? did.slice("did:key:".length) : did;
-  return tail.length > 12 ? `${tail.slice(0, 6)}…${tail.slice(-4)}` : tail;
 }

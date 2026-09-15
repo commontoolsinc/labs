@@ -21,6 +21,7 @@ import {
   WorkerReconciler,
 } from "@commonfabric/html/worker";
 import { DID, Identity, type Session } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
@@ -962,10 +963,9 @@ export class RuntimeProcessor {
             >();
             for (const entry of entries ?? []) {
               if (
-                typeof entry?.did !== "string" ||
+                !isDID(entry?.did) ||
                 typeof entry.host !== "string" ||
-                entry.host.length === 0 ||
-                !entry.did.startsWith("did:")
+                entry.host.length === 0
               ) {
                 continue;
               }
@@ -2743,7 +2743,7 @@ export class RuntimeProcessor {
     // Guard for untyped callers: the request must name the blob's space
     // (required since the federation work) — fail with a named error
     // rather than a confusing server 404 on /undefined/blobs/….
-    if (!request.space || !String(request.space).startsWith("did:")) {
+    if (!isDID(request.space)) {
       throw new Error("uploadBlob requires a space DID");
     }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";

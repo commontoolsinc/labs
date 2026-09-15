@@ -405,6 +405,21 @@ describe("view", () => {
     });
   });
 
+  it("returns `false` for a view whose space name is a DID", () => {
+    // The URL such a view produces reads back as a space DID, which addresses
+    // a different space than deriving the name would.
+    expect(isAppView({ spaceName: SPACE_DID })).toBe(false);
+    expect(isAppView({ spaceName: "did:" })).toBe(false);
+    // The prefix is compared exactly, so this one is an ordinary name.
+    expect(isAppView({ spaceName: "DID:key:z6Mk" })).toBe(true);
+  });
+
+  it("throws when asked for the URL of a view whose space name is a DID", () => {
+    expect(() => appViewToUrlPath({ spaceName: SPACE_DID })).toThrow(
+      "A space name must not be a DID",
+    );
+  });
+
   it("compares two views by their contents", () => {
     const view = { spaceName: "space", pieceSlug: "demo" } as const;
     expect(isAppViewEqual(view, view)).toBe(true);

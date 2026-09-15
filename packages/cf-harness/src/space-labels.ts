@@ -22,6 +22,7 @@ import {
   resolveSpace,
   type SpaceDb,
 } from "@commonfabric/state-inspector";
+import { isDID } from "@commonfabric/identity/did";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   HARNESS_CELL_LABELS_TYPE,
@@ -262,9 +263,6 @@ export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
   }
 };
 
-/** A space DID, as a store file is named after one and a reference spells one. */
-const SPACE_DID = /^did:[a-z0-9]+:[A-Za-z0-9._%-]+$/;
-
 /**
  * The DID of the space a database file holds, from the file's own name: a
  * space store is named for its space, which is how `discoverSpaceDbs` in
@@ -275,7 +273,7 @@ const SPACE_DID = /^did:[a-z0-9]+:[A-Za-z0-9._%-]+$/;
  */
 const spaceDidOfDbPath = (dbPath: string): string | undefined => {
   const name = (dbPath.split("/").pop() ?? dbPath).replace(/\.sqlite$/, "");
-  return SPACE_DID.test(name) ? name : undefined;
+  return isDID(name) ? name : undefined;
 };
 
 /**

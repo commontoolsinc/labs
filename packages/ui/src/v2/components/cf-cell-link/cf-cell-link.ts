@@ -6,7 +6,7 @@ import { BaseElement } from "../../core/base-element.ts";
 
 import "../cf-chip/index.ts";
 
-import type { DID } from "@commonfabric/identity";
+import { type DID, isDID } from "@commonfabric/identity/did";
 import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
@@ -390,10 +390,14 @@ export class CFCellLink extends BaseElement {
       }
 
       // TODO(runtime-worker-refactor):
-      const view = this.spaceName
+      // A name that is a DID addresses the space by DID; taken as a name it
+      // would name a space derived from the string instead.
+      const view = this.spaceName && !isDID(this.spaceName)
         ? { spaceName: this.spaceName, pieceId: this._resolvedCell.id() }
         : {
-          spaceDid: this._resolvedCell.space(),
+          spaceDid: isDID(this.spaceName)
+            ? this.spaceName
+            : this._resolvedCell.space(),
           pieceId: this._resolvedCell.id(),
         };
 

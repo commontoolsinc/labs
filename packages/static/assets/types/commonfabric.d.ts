@@ -3854,7 +3854,14 @@ export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
 
-export type DID = `did:${string}:${string}`;
+/**
+ * A decentralized identifier, most often a space DID.
+ *
+ * This package is the surface patterns compile against, so it carries no
+ * import of its own; the runtime-side twin of this type, and the predicate
+ * that decides whether a string is a DID, live in `@commonfabric/identity/did`.
+ */
+export type DID = `did:${string}`;
 
 export type WishParams = {
   query: WishTag | string;

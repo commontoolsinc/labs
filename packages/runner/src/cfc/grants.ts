@@ -1,4 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model";
+import { isDID } from "@commonfabric/identity/did";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
@@ -344,9 +345,6 @@ export const flushCfcGrantConsumptionClaims = (
   return reasons;
 };
 
-const isDid = (value: unknown): value is string =>
-  typeof value === "string" && value.startsWith("did:");
-
 // `var` is the atom-pattern placeholder key (atom-pattern.ts reserved-key
 // discipline). An audience entry carrying one anywhere would interact with
 // pattern matching when the entry later lands in a clause — refuse at write.
@@ -412,10 +410,10 @@ export const prepareCfcGrantWrite = (
   if (typeof kind !== "string" || kind.length === 0) {
     throw new Error("cfc-grant: kind must be a non-empty string");
   }
-  if (!isDid(owner)) {
+  if (!isDID(owner)) {
     throw new Error("cfc-grant: owner must be a DID");
   }
-  if (!isDid(actingPrincipal) || owner !== actingPrincipal) {
+  if (!isDID(actingPrincipal) || owner !== actingPrincipal) {
     throw new Error(
       "cfc-grant: owner must equal the transaction's acting principal " +
         "(release authority; §13.4.3 verification list, intent evidence " +
@@ -468,7 +466,7 @@ export const prepareCfcGrantWrite = (
     const revoked = input.revoked;
     if (
       !isObjectOrArray(revoked) || typeof revoked.at !== "number" ||
-      !Number.isFinite(revoked.at) || !isDid(revoked.by)
+      !Number.isFinite(revoked.at) || !isDID(revoked.by)
     ) {
       throw new Error("cfc-grant: revoked must be { at: number, by: DID }");
     }
@@ -526,7 +524,7 @@ export const verifyCfcGrantDocument = (
   const candidate = value as Partial<CfcGrant> & Record<string, unknown>;
   if (candidate.version !== CFC_GRANT_VERSION) return undefined;
   if (
-    typeof candidate.kind !== "string" || !isDid(candidate.owner) ||
+    typeof candidate.kind !== "string" || !isDID(candidate.owner) ||
     typeof candidate.space !== "string" || candidate.space !== space
   ) {
     return undefined;
@@ -557,7 +555,7 @@ export const verifyCfcGrantDocument = (
     const revoked = candidate.revoked;
     if (
       !isObjectOrArray(revoked) || typeof revoked.at !== "number" ||
-      !isDid((revoked as { by?: unknown }).by)
+      !isDID((revoked as { by?: unknown }).by)
     ) {
       return undefined;
     }
@@ -768,7 +766,7 @@ export const createTxCfcGrantResolver = (
   return (query: CfcGrantResolverQuery): readonly CfcAtom[] => {
     const owner = query.fields.owner;
     const resource = query.fields.resource;
-    if (!isDid(owner) || resource === undefined || resource === null) {
+    if (!isDID(owner) || resource === undefined || resource === null) {
       return [];
     }
     // v1 governing space == owner's identity space (module doc). An explicit

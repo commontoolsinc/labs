@@ -11,6 +11,8 @@
 // resolved lineage (clickable), outgoing links, and module source. Entity ids
 // are click-to-copy, and each piece/entity has a deep link into the live shell.
 
+import { DID_PREFIX } from "@commonfabric/identity/did";
+
 import type { SpaceDb } from "./db.ts";
 import { type SpaceSummary, summarizeSpace } from "./queries.ts";
 import { buildSpaceGraph, type SpaceGraph } from "./graph.ts";
@@ -275,7 +277,14 @@ function el(t, props={}, kids=[]) {
   for (const c of [].concat(kids)) if (c!=null && c!=="") n.append(c);
   return n;
 }
-const shortDid = d => { d=(d||"").replace(/^did:key:/,""); return d.length>14?d.slice(0,8)+"…"+d.slice(-4):d; };
+// This page ships as one standalone file with no imports, so the DID rule is
+// restated here against the prefix the build injects.
+const DID_PREFIX = ${JSON.stringify(DID_PREFIX)};
+const didTail = d => { d = d || "";
+  if (!d.startsWith(DID_PREFIX)) return d;
+  const rest = d.slice(DID_PREFIX.length), colon = rest.indexOf(":");
+  return colon === -1 ? "" : rest.slice(colon+1); };
+const shortDid = d => { d=didTail(d); return d.length>14?d.slice(0,8)+"…"+d.slice(-4):d; };
 const shortId = id => { const b = id.replace(/^of:/,"");
   return b.length>22 ? b.slice(0,12)+"…"+b.slice(-6) : b; };
 function flash(msg){ const f=$("#flash"); f.textContent=msg; f.classList.add("on");
@@ -506,8 +515,19 @@ function renderDetail(id){
   host.append(section("Version history ("+d.versions.length+" writes)", false,
     [el("table",{},[el("thead",{},el("tr",{},[el("th",{text:"seq"}),el("th",{text:"op"}),el("th",{text:"who"}),el("th",{text:"when"})])),vt])]));
 }
-function fmtSession(s){ try{ s=decodeURIComponent(s);}catch{} const m=s.match(/^session:(did:key:)?([^:]+):([0-9a-f-]+)/i);
-  if(m) return (m[2].length>12?m[2].slice(0,6)+"…"+m[2].slice(-4):m[2])+"/"+m[3].slice(0,6); return s.slice(0,18); }
+// Mirrors parseScope in scopes.ts: split before decoding, and the principal
+// has to come out a DID.
+function fmtSession(s){
+  const parts = (s||"").split(":"), decode = p => { try { return decodeURIComponent(p); } catch { return p; } };
+  if (parts[0]==="session" && parts.length>=3) {
+    const principal = decode(parts.slice(1,-1).join(":"));
+    if (principal.startsWith(DID_PREFIX)) {
+      const t = didTail(principal);
+      return (t.length>12?t.slice(0,6)+"…"+t.slice(-4):t)+"/"+decode(parts[parts.length-1]).slice(0,6);
+    }
+  }
+  try { s = decodeURIComponent(s); } catch {}
+  return s.slice(0,18); }
 
 //
 // tree view

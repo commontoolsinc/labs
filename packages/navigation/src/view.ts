@@ -1,4 +1,4 @@
-import { DID, isDID } from "@commonfabric/identity";
+import { assertNotDID, DID, isDID } from "@commonfabric/identity/did";
 import { asSpaceSegment } from "@commonfabric/runner/fabric-url";
 import { isSlugAddress, isValidSlug } from "@commonfabric/runner/slugs";
 
@@ -80,7 +80,11 @@ export function isAppView(view: unknown): view is AppView {
   if (!isAppViewModeRef(view)) return false;
   if (!isPieceViewRef(view)) return false;
   if ("spaceName" in view) {
-    return typeof view.spaceName === "string" && !!view.spaceName;
+    // A name that is also a DID is refused rather than tolerated: the URL a
+    // named space produces is read back as a space DID, so such a view would
+    // address one space going out and a different one coming back.
+    return typeof view.spaceName === "string" && !!view.spaceName &&
+      !isDID(view.spaceName);
   }
   if ("spaceDid" in view) {
     return isDID(view.spaceDid);
@@ -193,6 +197,10 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
         return `/`;
     }
   } else if ("spaceName" in view) {
+    // `urlToAppView` reads a DID-shaped first segment back as a space DID, so
+    // a name that is a DID would round-trip into a different space. Refuse it
+    // here, where the name is still attached to the view that carried it.
+    assertNotDID(view.spaceName, "A space name");
     return `${prefix}/${view.spaceName}${pieceUrlSegments(view)}`;
   } else if ("spaceDid" in view) {
     return `${prefix}/${view.spaceDid}${pieceUrlSegments(view)}`;

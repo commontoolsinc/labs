@@ -7,6 +7,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import { sameAcl } from "@commonfabric/memory/acl";
 import {
   acquireServerExecutionEnabler,
@@ -950,10 +951,6 @@ type RuntimeSetupOptions = {
   reapplyStoredSetup?: boolean;
   prepareForResume?: boolean;
 };
-
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
-}
 
 /**
  * Helper for `Runtime.getImmutableCell()`, which tells the storage preflight
@@ -3616,7 +3613,7 @@ export class Runtime {
    * re-running the handler/action (see RetryImmediately).
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
-    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    if (isDID(name)) return name;
     return this.#spaceNameToDid.get(name);
   }
 
@@ -3696,7 +3693,7 @@ export class Runtime {
     if (options?.genesisAcl !== undefined) {
       // A document the resolution cannot honor is refused, never dropped:
       // the caller asked for a space born closed.
-      if (isMemorySpaceDID(name)) {
+      if (isDID(name)) {
         throw new Error(
           `space-name resolution for the DID ${name} cannot register a ` +
             "genesisAcl: the runtime derives no space key for a bare DID, " +
