@@ -17,7 +17,7 @@ describe("RecursiveValueVisitor", () => {
     override visitCycle(): LeafVisitorResult<never, never> {
       return undefined;
     }
-    override visitNonFabricValue(): LeafVisitorResult<never, never> {
+    override visitPlusType(): LeafVisitorResult<never, never> {
       return undefined;
     }
     override visitPrimitive(): LeafVisitorResult<never, never> {

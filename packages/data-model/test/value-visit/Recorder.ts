@@ -144,7 +144,7 @@ export class Recorder extends RecursiveValueVisitor<unknown, unknown> {
     return this.onPrimitive ? this.onPrimitive(value, tag) : undefined;
   }
 
-  override visitNonFabricValue(
+  override visitPlusType(
     value: unknown,
   ): LeafVisitorResult<unknown, unknown> {
     this.events.push(["nonFabric", value]);

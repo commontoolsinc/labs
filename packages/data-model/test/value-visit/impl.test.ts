@@ -80,7 +80,7 @@ describe("value-visit/impl", () => {
         override visitValue(): DispatchingVisitorResult<never, number> {
           return DO_VISIT_SUBTYPE;
         }
-        override visitNonFabricValue(): LeafVisitorResult<never, number> {
+        override visitPlusType(): LeafVisitorResult<never, number> {
           throw new Error("should not be reached");
         }
       }

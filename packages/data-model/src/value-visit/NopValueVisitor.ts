@@ -70,7 +70,7 @@ export class NopValueVisitor<PlusType = never, ResultType = FabricValue>
   }
 
   /** @inheritDoc */
-  visitNonFabricValue(
+  visitPlusType(
     _value: PlusType,
   ): LeafVisitorResult<PlusType, ResultType> {
     return undefined;

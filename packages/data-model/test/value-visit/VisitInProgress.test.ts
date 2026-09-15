@@ -177,7 +177,7 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("routes a non-fabric replacement under a valid root to `visitNonFabricValue()`", () => {
+        it("routes a non-fabric replacement under a valid root to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
           rec.onValue = (v) => (v === "x") ? replace(date) : DO_VISIT_SUBTYPE;
@@ -487,7 +487,7 @@ describe("VisitInProgress", () => {
           );
         });
 
-        it("throws for a `recurse` from `visitNonFabricValue()`", () => {
+        it("throws for a `recurse` from `visitPlusType()`", () => {
           const rec = new Recorder();
           rec.onNonFabric = () => DO_RECURSE_VALUES;
 
@@ -650,7 +650,7 @@ describe("VisitInProgress", () => {
           });
         }
 
-        it("routes an array carrying a named property to `visitNonFabricValue()` under the shallow check", () => {
+        it("routes an array carrying a named property to `visitPlusType()` under the shallow check", () => {
           const rec = new Recorder();
           const array: unknown[] & { extra?: number } = [1];
           array.extra = 2;
@@ -661,7 +661,7 @@ describe("VisitInProgress", () => {
       });
 
       describe("type checking", () => {
-        it("routes a non-fabric root to `visitNonFabricValue()`", () => {
+        it("routes a non-fabric root to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
 
@@ -669,7 +669,7 @@ describe("VisitInProgress", () => {
           expect(rec.events).toEqual([["value", date], ["nonFabric", date]]);
         });
 
-        it("treats an array holding a function as a `FabricArray` under the shallow check, and routes the function to `visitNonFabricValue()`", () => {
+        it("treats an array holding a function as a `FabricArray` under the shallow check, and routes the function to `visitPlusType()`", () => {
           const rec = new Recorder();
           const fn = () => 1;
 
@@ -684,7 +684,7 @@ describe("VisitInProgress", () => {
           ]);
         });
 
-        it("routes an array holding a function to `visitNonFabricValue()` whole under the deep check", () => {
+        it("routes an array holding a function to `visitPlusType()` whole under the deep check", () => {
           const rec = new Recorder();
           const array = [() => 1];
 
@@ -705,7 +705,7 @@ describe("VisitInProgress", () => {
       });
 
       describe("`isDomainExtra()`", () => {
-        it("passes a non-fabric value to `isDomainExtra()` and, on `true`, to `visitNonFabricValue()`", () => {
+        it("passes a non-fabric value to `isDomainExtra()` and, on `true`, to `visitPlusType()`", () => {
           const rec = new Recorder();
           const date = new Date(0);
 
@@ -714,7 +714,7 @@ describe("VisitInProgress", () => {
           expect(rec.names).toEqual(["value", "nonFabric"]);
         });
 
-        it("throws for a non-fabric value, without calling `visitNonFabricValue()`, on `false`", () => {
+        it("throws for a non-fabric value, without calling `visitPlusType()`, on `false`", () => {
           const rec = new Recorder();
           rec.onIsDomainExtra = () => false;
 
@@ -822,7 +822,7 @@ describe("VisitInProgress", () => {
         it("keeps the outer visit's checking mode when a visitor swallows a re-entry error", () => {
           // The array holding a function is the tell: the outer visit is
           // shallow and iterates it, whereas the re-entry asked for a deep
-          // check, under which it would go whole to `visitNonFabricValue()`.
+          // check, under which it would go whole to `visitPlusType()`.
           const rec = new Recorder();
           const inProgress = new VisitInProgress<unknown, unknown>(rec);
           const array = [() => 1];

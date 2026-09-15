@@ -62,7 +62,7 @@ export abstract class BaseValueVisitor<
   ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /** @inheritDoc */
-  abstract visitNonFabricValue(
+  abstract visitPlusType(
     value: PlusType,
   ): LeafVisitorResult<PlusType, ResultType>;
 

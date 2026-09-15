@@ -194,8 +194,8 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
    * Indicates whether or not the given value is compatible with the
    * `PlusType` type defined by the visitor. This is a type predicate for
    * `PlusType`. The visitor engine calls it before dispatching to
-   * `visitNonFabricValue()`, and will instead `throw` an error if this method
-   * returns anything falsy.
+   * `visitPlusType()`, and will instead `throw` an error if this method returns
+   * anything falsy.
    */
   isDomainExtra(value: DomainFor<PlusType>): value is PlusType;
 
@@ -246,13 +246,11 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   ): DispatchingVisitorResult<PlusType, ResultType>;
 
   /**
-   * Visits a value determined to _not_ be a valid `FabricValue`. Before calling
-   * this method, the visitor engine will call `isDomainExtra()`, and will only
-   * call this method if `isDomainExtra()` returned a truthy value (`throw`ing
-   * if not). So, as long as that method tells the truth, this method will only
-   * ever get called with a value which is truly compatible with `PlusType`.
+   * Visits a value determined to be the `PlusType` by virtue of the visitor
+   * engine having called `isDomainExtra()` on it and gotten a truthy return
+   * value.
    */
-  visitNonFabricValue(
+  visitPlusType(
     value: PlusType,
   ): LeafVisitorResult<PlusType, ResultType>;
 
@@ -268,7 +266,7 @@ export interface ValueVisitor<PlusType = never, ResultType = FabricValue> {
   /**
    * Visits the given arbitrary value. If this returns type `visitSubtype`, then
    * the visitor system will call one of `visitFabricContainer()`,
-   * `visitNonFabricValue()`, or `visitPrimitive()`.
+   * `visitPlusType()`, or `visitPrimitive()`.
    */
   visitValue(
     value: DomainFor<PlusType>,

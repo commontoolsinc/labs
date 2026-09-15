@@ -289,7 +289,7 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
               `Encountered a non-\`FabricValue\` while doing an "assume valid" visit: ${desc}`,
             );
           } else if (vis.isDomainExtra(value)) {
-            result = vis.visitNonFabricValue(value);
+            result = vis.visitPlusType(value);
           } else {
             const desc = toCompactDebugString(value);
             throw new Error(
