@@ -336,9 +336,13 @@ describe("topic-board-pivot-contract", () => {
   // leaves a topic out of its own backlinks (`!equals(other, topic)` in
   // `packages/patterns/topics/main.tsx`) from a check by array position: both
   // pass it. Only a board listing one topic at two indices separates them, and
-  // that case is not here: a duplicate cannot be written into a board's list
-  // from outside it, by `push`, by seeding the array, or through the
-  // controller's `input` — the last is refused by `assertSchemaSubset`.
+  // that case is not here. A test cannot put a topic it holds onto a board's
+  // list by `push`, by seeding the array, or through the controller's `input`,
+  // and none of the three is refused over duplication. An action pushing a
+  // topic built in a pattern body reports a schema mismatch and never runs, so
+  // its `push`, which appends a repeated entry like any other, is not reached.
+  // Seeding the array with one hits `Cell.of()`'s static-data rule, and one
+  // passed through the controller's `input` is refused by `assertSchemaSubset`.
   // `assert_self_mention_inert_through_a_twin` in
   // `packages/patterns/topics/topics.test.tsx` hands `mentionedBy` a duplicated
   // list, and the "over a board listing one topic twice" group in
