@@ -4,11 +4,11 @@
  * cross it.
  *
  * The inbound work splits along one question -- does conversion produce a new
- * value? Minting a JS object's fabric form is one function, and vetting a
- * value that needs no minting is the other, in `validity-check.ts`. The shallow
- * conversion is those two asked in that order, plus a frozenness adjustment,
- * so that a caller can ask either without having to work the answer back out
- * of what it was handed.
+ * value? Minting a JS object's fabric form is one function, and vetting a value
+ * that needs no minting is the other, in `types/validation.ts`. The shallow
+ * conversion is those two asked in that order, plus a frozenness adjustment, so
+ * that a caller can ask either without having to work the answer back out of
+ * what it was handed.
  *
  * Inbound, anything not representable is refused rather than approximated: a
  * `Map`, a class instance, an unrecognized type all throw, on the principle
@@ -40,17 +40,18 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { isFabricSpecialObject } from "./type-check.ts";
+import {
+  assertValidFabricValueLayer,
+  isFabricSpecialObject,
+  isValidFabricConvertibleJsObject,
+  tagOfConvertibleJsValueElseNull,
+  VALUE_TAGS,
+} from "@/types";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
-import {
-  assertValidFabricValueLayer,
-  isValidFabricConvertibleJsObject,
-} from "./validity-check.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 

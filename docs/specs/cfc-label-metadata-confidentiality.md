@@ -24,6 +24,7 @@ persists into a space-B document:
 | `HasRole`, `UserSurfaceInput`, vouched-channel `ExternalIngest`, `authored-by`/`represents-principal` | **yes — DIDs** | role guards; authorship UI (product feature); fetch-ingest provenance carries a URL and commit SHA instead |
 | sigil-link `cfcLabelView` **inside `value`** | same atom set, second copy | link-carried enforcement at B |
 | `cfc.schemaHash` + replicated schema doc (`ensureSchemaDocument`) | policy structure, field names | schema-driven enforcement |
+| version-2 envelope `label.$ref` + replicated `cid:` label document | same atom set as the inline label, one copy per space | label resolution (`resolveStoredCfcMetadata`) |
 
 Two corrections to the audit item's inherited wording: `Origin` URIs have **no
 mint site** in the runner (nothing persists them), and policy names were never

@@ -53,6 +53,7 @@ import {
   type SinkMaxConfidentiality,
 } from "./sink-inventory.ts";
 import type {
+  CfcContentAddressedLabels,
   CfcDeclaredMonotonicityMode,
   CfcDecomposedEnvelopes,
   CfcEnforcementMode,
@@ -135,6 +136,7 @@ export interface CfcPostureReport {
   readonly writeFloor: CfcDialReport;
   readonly triggerReadGating: boolean;
   readonly decomposedEnvelopes: boolean;
+  readonly contentAddressedLabels: boolean;
   readonly policyEvaluation: CfcDialReport;
   readonly labelMetadataProtection: CfcDialReport;
   readonly declaredMonotonicity: CfcDialReport;
@@ -161,6 +163,7 @@ export interface CfcPostureSource {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcDecomposedEnvelopes: CfcDecomposedEnvelopes;
+  readonly cfcContentAddressedLabels: CfcContentAddressedLabels;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
@@ -285,6 +288,7 @@ export interface ResolvedCfcDials {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcDecomposedEnvelopes: CfcDecomposedEnvelopes;
+  readonly cfcContentAddressedLabels: CfcContentAddressedLabels;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
   readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
@@ -293,7 +297,7 @@ export interface ResolvedCfcDials {
 /**
  * What each dial resolves to when a construction leaves it unset.
  *
- * The Runtime's defaults, in one place, rather than eight `??` arms inside a
+ * The Runtime's defaults, in one place, rather than nine `??` arms inside a
  * constructor no other host can reach. `DEFAULT_CFC_*` in `types.ts` are not
  * these: those are the per-transaction floors an unconfigured transaction
  * carries, which is a different question with a different answer.
@@ -304,6 +308,7 @@ export const RUNTIME_CFC_DIAL_DEFAULTS: ResolvedCfcDials = Object.freeze({
   cfcWriteFloor: "off",
   cfcTriggerReadGating: false,
   cfcDecomposedEnvelopes: false,
+  cfcContentAddressedLabels: false,
   cfcPolicyEvaluation: "off",
   cfcLabelMetadataProtection: "off",
   cfcDeclaredMonotonicity: "off",
@@ -429,6 +434,10 @@ export const resolveCfcDials = (
     "cfcDecomposedEnvelopes",
     options.cfcDecomposedEnvelopes,
   ),
+  cfcContentAddressedLabels: resolveToggle(
+    "cfcContentAddressedLabels",
+    options.cfcContentAddressedLabels,
+  ),
   cfcPolicyEvaluation: resolveRung(
     "cfcPolicyEvaluation",
     options.cfcPolicyEvaluation,
@@ -463,6 +472,7 @@ const buildReport = (
   ),
   triggerReadGating: source.cfcTriggerReadGating === true,
   decomposedEnvelopes: source.cfcDecomposedEnvelopes === true,
+  contentAddressedLabels: source.cfcContentAddressedLabels === true,
   policyEvaluation: dial(
     source.cfcPolicyEvaluation,
     POLICY_EVALUATION_DECIDES[source.cfcPolicyEvaluation],

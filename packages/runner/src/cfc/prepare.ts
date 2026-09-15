@@ -12,6 +12,7 @@ import {
   internSchemaAsTaggedHashString,
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
+import { isDID } from "@commonfabric/identity/did";
 import {
   containsExternalSchemaRef,
   formatExternalSchemaRef,
@@ -51,8 +52,12 @@ import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
+import { storedLabelMapEntries } from "./label-documents.ts";
 import {
   isCfcMetadata,
+  isKnownCfcMetadataVersion,
+  resolveStoredCfcMetadata,
+  StoredCfcMetadataError,
   UnknownCfcMetadataVersionError,
   UnreadableCfcMetadataError,
 } from "./metadata.ts";
@@ -76,6 +81,7 @@ import {
   isSchedulerDependencyRead,
   stableInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
+import { getTransactionWriteAttempts } from "../storage/transaction-inspection.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -139,7 +145,12 @@ import {
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
-import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  type CfcSchemaMergeIssue,
+  cfcSchemaMergeIssue,
+  type MergeCfcSchemaEnvelopeOptions,
+  mergeCfcSchemaEnvelopes,
+} from "./schema-merge.ts";
 import {
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
@@ -157,6 +168,7 @@ import {
   type LabelMapEntry,
   type LabelObservationClass,
   runtimeWritePolicyAuthorization,
+  type StoredCfcMetadata,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -719,8 +731,7 @@ const hasLiteralDidCurrentPrincipalClaim = (value: unknown): boolean => {
     return value.some(hasLiteralDidCurrentPrincipalClaim);
   }
   if (isCurrentPrincipalClaimAtom(value)) {
-    return typeof value.subject === "string" &&
-      value.subject.startsWith("did:");
+    return isDID(value.subject);
   }
   if (isObjectOrArray(value)) {
     return Object.values(value).some(hasLiteralDidCurrentPrincipalClaim);
@@ -740,7 +751,7 @@ const literalDidSubjectsForPrincipalClaim = (
     return subjects;
   }
   if (isCurrentPrincipalClaimAtom(value) && value.kind === kind) {
-    if (typeof value.subject === "string" && value.subject.startsWith("did:")) {
+    if (isDID(value.subject)) {
       subjects.push(value.subject);
     }
     return subjects;
@@ -1143,14 +1154,25 @@ const storedMetadataFor = (
     return undefined;
   }
   const version = (metadata as { version?: unknown }).version;
-  if (version !== undefined && version !== 1) {
+  if (version !== undefined && !isKnownCfcMetadataVersion(version)) {
     // Fail closed on a format this build postdates: reading the envelope
-    // as version 1 would walk a schema it cannot interpret and silently
-    // under-label. Callers on the commit path turn this into an
+    // as a version it knows would walk labels it cannot interpret and
+    // silently under-label. Callers on the commit path turn this into an
     // unreadable envelope (rejected in enforcing modes) or abort loudly.
     throw new UnknownCfcMetadataVersionError(version);
   }
-  if (!isCfcMetadata(metadata) || !isWalkableLabelMap(metadata)) {
+  if (!isCfcMetadata(metadata)) {
+    throw new UnreadableCfcMetadataError(id);
+  }
+  // A version-2 envelope names labels by document; every consumer below
+  // walks labels inline, so they resolve here — through this transaction,
+  // under the same read policy — and a reference nothing backs throws the
+  // fail-closed resolution error, which the commit path records as an
+  // unreadable envelope.
+  const resolved = resolveStoredCfcMetadata(tx, space, id, metadata, {
+    meta: INTERNAL_VERIFIER_META,
+  });
+  if (!isWalkableLabelMap(resolved)) {
     // A record at the reserved position naming a version this build
     // interprets, carrying a label map it cannot walk. Every resolution
     // reads `labelMap.entries` and matches each entry's `path`, so the
@@ -1158,8 +1180,74 @@ const storedMetadataFor = (
     // first reaches the part that is missing.
     throw new UnreadableCfcMetadataError(id);
   }
-  return metadata;
+  return resolved;
 };
+
+/**
+ * Resolves input envelopes during one synchronous boundary preparation.
+ *
+ * Target verification shares successful reads, including absent envelopes.
+ * The transaction's applied-write log invalidates every document changed since
+ * the previous target, including whole-document writes inside schema helpers.
+ * Each preparation owns a fresh resolver. Without write inspection, reuse is
+ * limited to one target's input collection.
+ */
+class VerifierMetadataResolver {
+  #tx: IExtendedStorageTransaction;
+  #envelopes = new Map<string, Map<MediaType, CfcMetadata | undefined>>();
+  #seenWrites = 0;
+
+  /** Binds metadata reads and write inspection to the same transaction. */
+  constructor(tx: IExtendedStorageTransaction) {
+    this.#tx = tx;
+  }
+
+  /** Returns the current envelope, propagating unreadable-envelope errors. */
+  read(
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    type: MediaType,
+  ): CfcMetadata | undefined {
+    const key = stringTupleKey([space, scope, id]);
+    let types = this.#envelopes.get(key);
+    if (types === undefined) {
+      types = new Map();
+      this.#envelopes.set(key, types);
+    }
+    if (!types.has(type)) {
+      types.set(type, storedMetadataFor(this.#tx, space, id, scope, type));
+    }
+    return types.get(type);
+  }
+
+  /**
+   * Invalidates changed documents before a target collects its input labels.
+   * Applied writes form an append-only log during preparation, so only its
+   * new suffix needs inspection.
+   */
+  refresh(): void {
+    // The raw transaction distinguishes unavailable inspection from an empty
+    // log; the extended prefix-gating API returns an empty log for both.
+    const writes = getTransactionWriteAttempts(this.#tx.tx);
+    if (writes === undefined) {
+      this.#envelopes.clear();
+      this.#seenWrites = 0;
+      return;
+    }
+    for (let index = this.#seenWrites; index < writes.length; index++) {
+      const write = writes[index];
+      this.#envelopes.delete(
+        stringTupleKey([
+          write.space,
+          normalizeCellScope(write.scope),
+          write.id,
+        ]),
+      );
+    }
+    this.#seenWrites = writes.length;
+  }
+}
 
 // Whether this transaction's view of the document has a root value.
 //
@@ -2962,10 +3050,7 @@ const currentPrincipalIntegrityReason = (
     const ownerPrincipal = isCurrentPrincipalPlaceholder(ownerPrincipalSpec)
       ? trustSnapshot.actingPrincipal
       : ownerPrincipalSpec;
-    if (
-      typeof ownerPrincipal !== "string" ||
-      !ownerPrincipal.startsWith("did:")
-    ) {
+    if (!isDID(ownerPrincipal)) {
       return `ownerPrincipal must be a DID at /${path.join("/")}`;
     }
     const resolvedCurrentPrincipalValues = resolveCurrentPrincipalLabelValues(
@@ -3978,6 +4063,7 @@ const verifyInputRequirements = (
   // the per-path last-overlapping-write bounds each entry's input checks
   // quantify under.
   prefixBounds: WritePrefixBounds,
+  metadataResolver: VerifierMetadataResolver,
   // Stage-0 precision counters (docs/specs/cfc-value-level-provenance.md §6),
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
@@ -4008,24 +4094,11 @@ const verifyInputRequirements = (
   // interpret, by version or by shape, and a transaction that consumed such
   // a document fails closed whether or not anything asks what its label
   // says. That refusal must not depend on what a target declares, nor on
-  // whether the measurement dial is on. One resolution serves every read
-  // that landed in the same document: nothing writes between here and the
-  // end of this map, so a later read sees the envelope the first one saw.
-  const envelopes = new Map<string, CfcMetadata | undefined>();
-  const envelopeFor = (
-    space: MemorySpace,
-    id: URI,
-    scope: ReturnType<typeof normalizeCellScope>,
-    type: MediaType,
-  ): CfcMetadata | undefined => {
-    const key = `${targetKey({ space, id, scope })}\u0000${type}`;
-    if (!envelopes.has(key)) {
-      envelopes.set(key, storedMetadataFor(tx, space, id, scope, type));
-    }
-    return envelopes.get(key);
-  };
+  // whether the measurement dial is on. Resolutions remain valid until the
+  // transaction writes the document. The activity list stays live so newly
+  // recorded reads remain visible to later targets.
   let clockLessReads = 0;
-  const readSources = [
+  const currentReads = [
     ...[
       ...(tx.getPotentiallyExternalReadActivities?.() ??
         tx.getReadActivities?.() ?? []),
@@ -4052,10 +4125,15 @@ const verifyInputRequirements = (
       ...read,
       journalIndex: -Infinity,
     })),
-  ].map((read) => ({
+  ];
+  // Candidate-read inspection is an extension seam and may expose writes made
+  // while producing the current view. Refresh after that inspection so every
+  // envelope resolution observes those writes.
+  metadataResolver.refresh();
+  const readSources = currentReads.map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
-    metadata: envelopeFor(
+    metadata: metadataResolver.read(
       read.space,
       read.id,
       normalizeCellScope(read.scope),
@@ -4114,10 +4192,9 @@ const verifyInputRequirements = (
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
   // applied transaction-globally — so the baseline is the label filter
-  // without the prefix condition. The gate-visible read set is the same on
-  // every call within one prepare, hence assignment (not accumulation) for
-  // the per-prepare clock-less count. The counter describes the whole set,
-  // which the dial therefore resolves.
+  // without the prefix condition. The clock-less count describes the read
+  // set visible to the latest target, including any reads recorded earlier in
+  // preparation. The dial therefore resolves the whole set.
   const txGlobalGatedReads = provenance === undefined ? 0 : gatedReadsOf()
     .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
     .length;
@@ -5188,6 +5265,55 @@ export const decomposeToSameRoot = (
 };
 
 /**
+ * Whether a write under `candidate` leaves a document's stored envelope as it
+ * is, so that no merge runs: the two are equal but for writer stamps, they
+ * decompose to the same root document, or the stored envelope covers the
+ * candidate's.
+ */
+const storedEnvelopeUnchangedByCandidate = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+): boolean =>
+  schemasEqualIgnoringWriterStamp(stored, candidate) ||
+  decomposeToSameRoot(stored, candidate) ||
+  storedSchemaCoversCandidateEnvelope(stored, candidate);
+
+/**
+ * The envelope a document stores after a write under `candidate`: the stored
+ * envelope where the write leaves it unchanged, and the two merged otherwise.
+ * Throws what {@link mergeCfcSchemaEnvelopes} throws.
+ */
+const mergeStoredCfcEnvelope = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions,
+): JSONSchema =>
+  storedEnvelopeUnchangedByCandidate(stored, candidate)
+    ? stored
+    : mergeCfcSchemaEnvelopes(stored, candidate, options);
+
+/**
+ * Would a write under `candidate` commit over this stored envelope?
+ * `undefined` means yes.
+ *
+ * This is {@link mergeStoredCfcEnvelope} in dry run — the fast paths the
+ * persist loop takes before it merges, then the merge itself through
+ * `cfcSchemaMergeIssue` — and it is what `cf piece setsrc --check` drives, so
+ * the preflight and the commit cannot part on whether a candidate merges: a
+ * fast path the preflight skipped would manufacture a rejection the commit
+ * never makes, and one it took alone would hide a rejection the commit does
+ * make. Pure: no transaction, no writes.
+ */
+export const storedCfcEnvelopeMergeIssue = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
+): CfcSchemaMergeIssue | undefined =>
+  storedEnvelopeUnchangedByCandidate(stored, candidate)
+    ? undefined
+    : cfcSchemaMergeIssue(stored, candidate, options);
+
+/**
  * The decomposed spelling of an envelope schema: its root document, ready
  * to ensure. `undefined` keeps the inline spelling — decomposition
  * refused the input, or the root reduced to a `$defs` fragment reference,
@@ -5388,10 +5514,7 @@ export const loadStoredCfcEnvelope = (
     // An envelope this build cannot interpret is a property of the DOCUMENT,
     // not of the caller's transaction, so it lands in the unreadable arm of
     // the taxonomy; a transaction read failure keeps propagating.
-    if (
-      error instanceof UnknownCfcMetadataVersionError ||
-      error instanceof UnreadableCfcMetadataError
-    ) {
+    if (error instanceof StoredCfcMetadataError) {
       return { status: "unreadable", reason: error.message };
     }
     throw error;
@@ -6374,6 +6497,7 @@ export const prepareBoundaryCommit = (
       }
     }
   }
+  const metadataResolver = new VerifierMetadataResolver(tx);
   for (const key of targetKeys) {
     const candidateSchema = candidates.get(key);
     const schema = candidateSchema ?? emptySchemaObject();
@@ -6442,13 +6566,9 @@ export const prepareBoundaryCommit = (
     } else if (stored.status === "loaded") {
       storedSchema = stored.schema;
       try {
-        mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
-            decomposeToSameRoot(storedSchema, schema) ||
-            storedSchemaCoversCandidateEnvelope(storedSchema, schema)
-          ? storedSchema
-          : mergeCfcSchemaEnvelopes(storedSchema, schema, {
-            generatedOutputPaths: generatedOutputPaths.get(key),
-          });
+        mergedSchema = mergeStoredCfcEnvelope(storedSchema, schema, {
+          generatedOutputPaths: generatedOutputPaths.get(key),
+        });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
         // token so the default-root runnability backstop can key on THIS class
@@ -6486,6 +6606,7 @@ export const prepareBoundaryCommit = (
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
       prefixBounds,
+      metadataResolver,
       prefixProvenance,
     );
     // A verification failure records a reason (which rejects the whole commit
@@ -7848,8 +7969,12 @@ export const prepareBoundaryCommit = (
     const envelopeRoot = state.decomposedEnvelopes
       ? decomposeEnvelopeRoot(schemaAndHash.schema)
       : undefined;
+    // The flag decides the envelope VERSION the same way: version 2 names
+    // each label above the inline limit by content-addressed document,
+    // version 1 holds every label inline, and reading resolves either to
+    // the same metadata (`docs/specs/content-addressed-cfc-labels.md`).
     const metadata: CfcMetadata = {
-      version: 1,
+      version: state.contentAddressedLabels ? 2 : 1,
       schemaHash: envelopeRoot?.rootHash ?? schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,
@@ -7876,8 +8001,18 @@ export const prepareBoundaryCommit = (
     // existing.schemaHash, and that schema document was already loaded (and
     // content-verified) via loadSchemaDocument above — it exists, so there is
     // nothing to ensure.
+    //
+    // One exception to the skip, in one direction: a version-1 envelope
+    // whose labels are unchanged is rewritten in version 2 when the flag
+    // selects it, which is how a store migrates — each document at most
+    // once, on its next persist. A stored version 2 is left alone by a
+    // writer selecting version 1, so writers on either setting sharing a
+    // document do not rewrite it at each other (SC-11).
+    const migrates = existing !== undefined && existing.version === 1 &&
+      metadata.version === 2;
     if (
       existing !== undefined &&
+      !migrates &&
       deepEqual(
         canonicalizeCfcMetadata(existing),
         canonicalizeCfcMetadata(metadata),
@@ -7901,6 +8036,28 @@ export const prepareBoundaryCommit = (
         envelopeRoot.rootDocument,
       );
     }
+    // A version-2 envelope stages a label document for every label above
+    // the inline limit into THIS transaction, so the commit carries what
+    // the envelope references (the write-side obligation the commit
+    // boundary enforces); the staging dedupes per transaction and elides
+    // documents the space's server already holds.
+    const storedEnvelope: StoredCfcMetadata = metadata.version === 2
+      ? {
+        version: 2,
+        schemaHash: metadata.schemaHash,
+        labelMap: {
+          version: 1,
+          entries: storedLabelMapEntries(
+            metadata.labelMap.entries,
+            (content) =>
+              tx.stageContentAddressedDocument(
+                space,
+                content as unknown as FabricValue,
+              ),
+          ),
+        },
+      }
+      : metadata;
     tx.writeOrThrow({
       space,
       id,
@@ -7910,7 +8067,7 @@ export const prepareBoundaryCommit = (
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive
       // attempted-target tracking of this internal metadata update.
-    }, metadata);
+    }, storedEnvelope);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

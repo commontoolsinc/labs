@@ -97,6 +97,7 @@ describe("the CFC posture record", () => {
       cfcDeclaredMonotonicity: "on",
       cfcTriggerReadGating: "true",
       cfcDecomposedEnvelopes: 1,
+      cfcContentAddressedLabels: 1,
     };
 
     for (const [dial, value] of Object.entries(offLadder)) {

@@ -25,6 +25,7 @@ import {
   type Cancel,
   type Cell,
   type CellLinkInput,
+  cellOfOpaqueReference,
   ContextualFlowControl,
   convertCellsToLinks,
   isCell,
@@ -131,6 +132,15 @@ const DOM_LIVE_PROPS: ReadonlySet<string> = new Set([
 const DEFAULT_RENDER_POLICY: RenderPolicy = {
   declassifyConfidentiality: [],
 };
+
+// What a prop reads through an opaque reference: `unknown` decides only when
+// nothing else in the list does, so a string, number, boolean or null behind
+// the reference materializes, and a record or a list stays the reference its
+// declaration made it.
+const REFERENCED_SCALAR_SCHEMA: JSONSchema = {
+  type: ["unknown", "string", "number", "boolean", "null"],
+};
+
 // Mirrors CFC_ATOM_TYPE.Caveat in @commonfabric/api/cfc (not a dependency of
 // this package).
 const CFC_CAVEAT_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Caveat";
@@ -1803,6 +1813,50 @@ export class WorkerReconciler {
       !DOM_LIVE_PROPS.has(key);
   }
 
+  /**
+   * Subscribes to `cell` for a prop's value, reading through an opaque
+   * reference to the scalar it names.
+   *
+   * A prop that reaches the reconciler as a reference — a position the
+   * pattern declared `unknown`, or one reached through a link that does —
+   * projects to an object carrying nothing of what it names. A DOM attribute
+   * or property can hold only the value, so the renderer reads the
+   * reference's own position for the scalar there and follows it as it
+   * changes. A record or a list behind the reference stays the reference its
+   * declaration made it.
+   */
+  #sinkPropValue(
+    cell: Cell<unknown>,
+    deliver: (value: unknown) => void,
+  ): Cancel {
+    let referenced: { cell: Cell<unknown>; cancel: Cancel } | undefined;
+    const cancelOuter = cell.sink((value) => {
+      const named = cellOfOpaqueReference(value);
+      if (named === undefined) {
+        referenced?.cancel();
+        referenced = undefined;
+        deliver(value);
+        return;
+      }
+      // The reference's position outlives the read that projected it, so the
+      // subscription must not hold that read's transaction.
+      const scalar = named.withTx(undefined).asSchema(REFERENCED_SCALAR_SCHEMA);
+      if (referenced !== undefined && areLinksSame(referenced.cell, scalar)) {
+        return;
+      }
+      referenced?.cancel();
+      referenced = {
+        cell: scalar,
+        cancel: scalar.sink(deliver, { readOnly: true }),
+      };
+    }, { readOnly: true });
+    return () => {
+      cancelOuter();
+      referenced?.cancel();
+      referenced = undefined;
+    };
+  }
+
   #transformPropValueForState(
     state: NodeState,
     key: string,
@@ -2077,7 +2131,9 @@ export class WorkerReconciler {
         if (existingState) {
           existingState.cancel();
         }
-        const cancel = (value as Cell<unknown>).sink((resolvedValue) => {
+        const cancel = this.#sinkPropValue(value as Cell<unknown>, (
+          resolvedValue,
+        ) => {
           logger.debug(
             "prop-update",
             () => ({ nodeId: state.nodeId, key, value: resolvedValue }),
@@ -2097,7 +2153,7 @@ export class WorkerReconciler {
           if (this.#isTextIntegrityPolicyProp(key)) {
             this.#refreshTextIntegrityBoundary(ctx, state);
           }
-        }, { readOnly: true });
+        });
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
           cancel,
@@ -2497,7 +2553,9 @@ export class WorkerReconciler {
 
           // Schema `true` = accept everything → enables deep traversal of this prop
           const propKeyCell = propsCell.key(key).asSchema(true);
-          const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
+          const propSinkCancel = this.#sinkPropValue(propKeyCell, (
+            deepValue,
+          ) => {
             const propValue = this.#transformPropValueForState(
               state,
               key,
@@ -2510,7 +2568,7 @@ export class WorkerReconciler {
               key,
               value: propValue,
             }]);
-          }, { readOnly: true });
+          });
           state.propSubscriptions.set(key, {
             cell: propKeyCell as Cell<unknown>,
             cancel: propSinkCancel,
@@ -3302,7 +3360,9 @@ export class WorkerReconciler {
         }
       } else if (isCell(value)) {
         // Reactive prop value
-        const sinkCancel = (value as Cell<unknown>).sink((resolvedValue) => {
+        const sinkCancel = this.#sinkPropValue(value as Cell<unknown>, (
+          resolvedValue,
+        ) => {
           const propValue = this.#transformPropValueForState(
             state,
             key,
@@ -3318,7 +3378,7 @@ export class WorkerReconciler {
           if (this.#isTextIntegrityPolicyProp(key)) {
             this.#refreshTextIntegrityBoundary(ctx, state);
           }
-        }, { readOnly: true });
+        });
         state.propSubscriptions.set(key, {
           cell: value as Cell<unknown>,
           cancel: sinkCancel,

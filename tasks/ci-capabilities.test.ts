@@ -10,6 +10,7 @@ import {
   openCapabilities,
   pidOfBackgroundLaunch,
   resolveCapabilities,
+  takeGithubToken,
 } from "./ci-capabilities.ts";
 import {
   serverExecutionCiLane,
@@ -28,6 +29,36 @@ function stub(
     ...(needs === undefined ? {} : { needs }),
     open: () => Promise.resolve({ env, close: () => Promise.resolve() }),
   };
+}
+
+/**
+ * Runs `body` with each named variable set as given, `undefined` meaning
+ * unset, and puts back what the environment held before. Every name a
+ * case depends on is named here rather than left to the ambient
+ * environment, since a token a developer exported is exactly what these
+ * read. The names are written out rather than taken from the source,
+ * because what a lane is handed a token in has to be what a workflow
+ * writes.
+ */
+function withEnv(
+  values: Record<string, string | undefined>,
+  body: () => void,
+): void {
+  const before = new Map(
+    Object.keys(values).map((name) => [name, Deno.env.get(name)]),
+  );
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) Deno.env.delete(name);
+    else Deno.env.set(name, value);
+  }
+  try {
+    body();
+  } finally {
+    for (const [name, value] of before) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
 }
 
 describe("ci capabilities", () => {
@@ -77,12 +108,71 @@ describe("ci capabilities", () => {
       "deno",
       "fuse",
       "git-history",
+      "github-api",
       "jq",
       "local-dev-servers",
       "toolshed",
       "toolshed-baked",
       "toolshed-baked-opposite",
     ]);
+  });
+
+  it("hands the token to the suites that asked and to no others", async () => {
+    const opened = await openCapabilities(["github-api", "jq"], {
+      root: Deno.cwd(),
+      dryRun: false,
+      workDir: "/nonexistent",
+      exec: () => Promise.resolve(""),
+      githubToken: "a-token",
+    });
+    // Under both names, because the two consumers read different ones:
+    // `gh` reads `GH_TOKEN`, and `check-action-pins` reads
+    // `GITHUB_TOKEN` first.
+    expect(opened.envFor(["github-api"])).toEqual({
+      GITHUB_TOKEN: "a-token",
+      GH_TOKEN: "a-token",
+    });
+    expect(opened.envFor(["jq"])).toEqual({});
+    await opened.close();
+  });
+
+  it("exports nothing where the lane was handed no token", async () => {
+    const opened = await openCapabilities(["github-api"], {
+      root: Deno.cwd(),
+      dryRun: false,
+      workDir: "/nonexistent",
+      exec: () => Promise.resolve(""),
+    });
+    expect(opened.envFor(["github-api"])).toEqual({});
+    await opened.close();
+  });
+
+  it("takes the token out of this process under either name", () => {
+    // A token under a name this left behind would be inherited by every
+    // child of the lane, and `check-action-pins` would pass on it, so
+    // nothing downstream would report the hole.
+    withEnv({ GITHUB_TOKEN: "a-token", GH_TOKEN: "another-token" }, () => {
+      expect(takeGithubToken()).toBe("a-token");
+      expect(Deno.env.get("GITHUB_TOKEN")).toBeUndefined();
+      expect(Deno.env.get("GH_TOKEN")).toBeUndefined();
+      expect(takeGithubToken()).toBeUndefined();
+    });
+  });
+
+  it("takes a token handed under the second name alone", () => {
+    withEnv({ GITHUB_TOKEN: undefined, GH_TOKEN: "a-token" }, () => {
+      expect(takeGithubToken()).toBe("a-token");
+      expect(Deno.env.get("GH_TOKEN")).toBeUndefined();
+    });
+  });
+
+  it("reads an empty token as no token", () => {
+    // An unset Actions variable interpolates as an empty string.
+    withEnv({ GITHUB_TOKEN: "", GH_TOKEN: "" }, () => {
+      expect(takeGithubToken()).toBeUndefined();
+      expect(Deno.env.get("GITHUB_TOKEN")).toBeUndefined();
+      expect(Deno.env.get("GH_TOKEN")).toBeUndefined();
+    });
   });
 
   it("exports the environment a dry run's batches would see", async () => {

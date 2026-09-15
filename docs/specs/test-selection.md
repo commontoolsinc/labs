@@ -340,15 +340,37 @@ fails for these identities once per commit, and the first rule multiplies
 that. A consumer decides it per identity and never per invocation, since
 one invocation reports one status for many identities.
 
-It is a rule for tests. An identity that is a repository gate goes on
-failing the run whatever its share, because a gate's failure is a
-statement about the tree rather than about one change. A consumer reads
-the withheld entry's reason rather than its membership of the set, so a
-reason added later does not become non-gating without anybody deciding it.
+It is a rule for every identity the store holds back, and a repository
+gate is one of those. A gate introspects the tree where a test runs the
+code. That decides what a gate reads and how it is invoked, and nothing
+about what its failures are worth: a gate that disagrees with itself
+fails somebody's change for something its author cannot act on, which is
+the whole of what this rule is answering. A consumer reads the withheld
+entry's reason rather than its membership of the set, so a reason added
+later does not become non-gating without anybody deciding it.
+
+What asks for a flaky gate to be fixed is the same thing that asks for a
+flaky test to be fixed, which is a consumer's report of what the store
+holds back rather than a red run. A rule that kept gates gating would buy
+that prompt by failing a change for a reason its author cannot act on,
+which is the cost this whole section exists to avoid paying.
 
 An invocation is excused only when it accounted for every identity it was
 asked to run, since one that recorded a withheld failure and then stopped
-has run almost nothing while satisfying any weaker test. That is the rule
+has run almost nothing while satisfying any weaker test. A stand-in for a
+unit the store has never seen is accounted for by that unit recording
+anything at all, because no record can carry a stand-in's name: a record
+is named for a test and a stand-in for a file. And a unit that recorded
+nothing recorded nothing under any name, which fails the run whether or
+not anything was there to excuse.
+
+The rule is per invocation and not per set of them. A consumer that runs
+an identity several times, or that reaches one unit through several
+commands, has several invocations whose records arrive in one place, and
+one that ended badly having recorded no failure accounted for nothing
+whatever the others recorded. Reading them together would excuse a run
+that died part way through on the strength of the part that finished,
+which is the case the rule is for. That is the rule
 under [what a run owes the change behind
 it](#what-a-run-on-the-default-branch-owes-the-change-behind-it) applied
 here, that a conclusion rests on a record that is there and never on one

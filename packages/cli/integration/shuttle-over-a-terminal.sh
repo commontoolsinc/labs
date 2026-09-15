@@ -253,10 +253,10 @@ set label '"garble me"'
 edit label
 get label
 link /slugs/first/label /slugs/second/label
-link /slugs/first/label#argument /slugs/second/label
+link /slugs/first#argument/label /slugs/second/label
 set label '"pointed at"'
 set settings/note '"written once and never again"'
-link /slugs/first/label /slugs/second/label#argument
+link /slugs/first/label /slugs/second#argument/label
 edit
 watch settings/depth
 @frame q
@@ -266,7 +266,7 @@ set settings/depth 3
 where
 unwatch %1
 watches
-watch label#argument
+watch .#argument/label
 cd /pieces
 ls
 cd %1
@@ -275,6 +275,14 @@ cd /slugs/first
 ls settings
 cd %1
 pwd
+cd /slugs/first/settings
+get .#argument/items
+get /slugs/first#argument/items
+get /slugs/first/items#argument
+cd .#argument
+ls .#argument
+get ..#argument/items
+cd ../..
 LINES
 EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
@@ -429,6 +437,8 @@ check "" "$(said 16 "cd /slugs/first")" \
 check "shuttle first @space> " "$(prompt 16 "cd /slugs/first")" \
   "a rooted facet reference reaches the piece the slug names"
 contains "$FIRST" "$(said 17 "pwd")" "pwd names the handle the deploy printed"
+contains "position  //" "$(said 17 "pwd")" \
+  "pwd writes the complete form, the space after a doubled separator"
 
 step "15. get at a piece stands in for its picture of itself, and more writes the rest"
 WHOLE=$(said 18 "get")
@@ -620,12 +630,12 @@ check "Wrote a reference at \`/slugs/second/label\` naming \`/slugs/first/label\
 # Each refusal quotes the operand it was written on, which is also what says
 # the refusal is about the endpoint the line spelled rather than about
 # whichever of the two happens to be resolved first.
-contains "\`/slugs/first/label#argument\` selects a piece's arguments cell" \
-  "$(said 46 "link /slugs/first/label#argument /slugs/second/label")" \
-  "the source endpoint does not take the argument-cell suffix"
-contains "\`/slugs/second/label#argument\` selects a piece's arguments cell" \
-  "$(said 49 "link /slugs/first/label /slugs/second/label#argument")" \
-  "the target endpoint does not take the argument-cell suffix"
+contains "\`/slugs/first#argument/label\` selects a piece's arguments cell" \
+  "$(said 46 "link /slugs/first#argument/label /slugs/second/label")" \
+  "the source endpoint does not take the arguments member"
+contains "\`/slugs/second#argument/label\` selects a piece's arguments cell" \
+  "$(said 49 "link /slugs/first/label /slugs/second#argument/label")" \
+  "the target endpoint does not take the arguments member"
 
 step "26. watch arms a subscription, opens a view over it, and outlives it"
 # The half no unit case can reach. Every sink in the unit suite is stood in
@@ -674,7 +684,7 @@ check "<no watches are armed>" "$(said 56 "watches")" \
 # reasoned about, and until `packages/piece` offers a resolved cell for an
 # arguments path the spelling is refused rather than served silently.
 contains "does not serve a piece's arguments cell" \
-  "$(said 57 "watch label#argument")" \
+  "$(said 57 "watch .#argument/label")" \
   "watch turns down the arguments cell rather than watching it silently"
 
 step "27. The pieces facet numbers rows cd takes, and shows what each piece is called"
@@ -774,6 +784,42 @@ check '"jam"' "$(AFTER first summary)" \
 # would hold the value `first` had when the link was made.
 check '"pointed at"' "$(AFTER second label)" \
   "the linked cell reads the value written at the cell it names"
+
+step "30. The arguments member reads one cell on a head and on a piece segment, and no place stands in it"
+# The unit suite pins where each spelling points and which cell it selects;
+# what it cannot see is that the read the seam makes is of that cell. So one
+# arguments cell is read twice back to back, through the member on the head
+# and through the member on a piece segment, and the two must agree. Written
+# after a path segment instead, `items#argument` is one result key. The
+# fixture's result holds no key by that name, so the read fails naming it, and
+# the keys the failure lists are the result's: `addItem`, `clearItems`,
+# `settings` and `summary` are outputs the pattern's arguments do not take.
+# The rooted walk in front of them stands two segments inside the piece, which
+# is what makes the head's reading from the arguments cell's root a claim.
+check "shuttle first/settings @space> " \
+  "$(prompt 66 "cd /slugs/first/settings")" \
+  "a rooted walk stands two segments inside the piece"
+FROM_HEAD=$(said 67 "get .#argument/items")
+FROM_SEGMENT=$(said 68 "get /slugs/first#argument/items")
+contains "[" "$FROM_HEAD" "the member on the head reads the arguments cell's items"
+check "$FROM_HEAD" "$FROM_SEGMENT" \
+  "the member on the head and on the piece segment read one cell from its root"
+check 'Cannot access path "items#argument" - property "items#argument" not found. Available keys: addItem, clearItems, items, label, settings, summary' \
+  "$(said 69 "get /slugs/first/items#argument")" \
+  "a path ending in #argument names a result key, and the read of the result names that key among the result's own"
+contains "A place is result-rooted, so \`cd\` selects no \`#argument\` member" \
+  "$(said 70 "cd .#argument")" "cd refuses the member on its head"
+check "shuttle first/settings @space> " "$(prompt 70 "cd .#argument")" \
+  "the refused cd leaves the place where it stood"
+contains "\`#argument\` selects one of a piece's two cells" \
+  "$(said 71 "ls .#argument")" "ls refuses the member on its head"
+contains "climbs and selects the \`#argument\` member in one head" \
+  "$(said 72 "get ..#argument/items")" \
+  "a head that climbs and selects the member in one is refused"
+# The route, not the address: the rooted walk left a trail through `slugs/`,
+# so two climbs from `first/settings` land on the facet rather than the root.
+check "shuttle /slugs/ @space> " "$(prompt 73 "cd ../..")" \
+  "two climbs walk the route back out of the piece to the facet it came through"
 
 # What step 11 does not reach: a piece that changes under a shell already
 # standing on it. Step 11 reads storage before the session and the shell's own

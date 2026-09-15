@@ -11,7 +11,7 @@
  *
  * Each of these takes an `unknown`, that being what a caller holds before
  * membership is settled. The narrowings that ask a shape question of a value
- * already typed as a `FabricValue` are in `type-check.ts`, and are looser than
+ * already typed as a `FabricValue` are in `narrowing.ts`, and are looser than
  * membership on purpose.
  */
 
@@ -23,16 +23,17 @@ import {
 } from "@commonfabric/utils/objects";
 import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
-import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
+import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import {
   type FabricConvertibleJsObject,
   type FabricPlainObject,
   type FabricValue,
   type FabricValueLayer,
-} from "./interface.ts";
-import { isFabricPlainObject, isFabricSpecialObject } from "./type-check.ts";
-import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
+} from "@/interface.ts";
+import { isFabricPlainObject, isFabricSpecialObject } from "./narrowing.ts";
+import { tagOfConvertibleJsValueElseNull } from "./tag-of.ts";
+import { VALUE_TAGS } from "./tags.ts";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting

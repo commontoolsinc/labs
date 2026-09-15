@@ -72,7 +72,7 @@ export function postThrough(
  * Builds what stands in for a message the encoding refused.
  *
  * A reply is answered as a failure rather than dropped: the client is awaiting
- * one, and dropping it would hang that request until it times out. A
+ * one, and dropping it would leave that request pending until disposal. A
  * notification has nobody waiting, so it becomes an error report carrying a
  * rendering of what could not be sent -- degraded rather than silent, which
  * matters most for the console, whose whole job is to say what happened.

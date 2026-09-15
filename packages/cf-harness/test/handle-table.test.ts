@@ -66,6 +66,28 @@ describe("handle-table", () => {
   });
 
   describe("mintAddressHandle()", () => {
+    it("mints the same target from padded ID-only references", async () => {
+      for (const prefix of ["", "/", `//${SPACE_DID}/`, `/@${SPACE_DID}/`]) {
+        const ref = `${prefix}of:fid1:${HASH_A}`;
+        const plain = await mintAddressHandle(
+          createHarnessHandleTable("run-1"),
+          ref,
+        );
+        const padded = await mintAddressHandle(plain.table, `  ${ref}  `);
+        expect(padded.token).toBe(plain.token);
+        expect(padded.table.entries).toEqual(plain.table.entries);
+      }
+    });
+
+    it("retains trailing whitespace in a referenced path key", async () => {
+      const ref = `${LINK_A}/a#argument `;
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        ref,
+      );
+      expect(resolveHandleToken(table, token)?.ref).toBe(ref);
+    });
+
     it("records and never downgrades the skill-context capability", async () => {
       const restricted = await mintAddressHandle(
         createHarnessHandleTable("run-1"),
@@ -202,7 +224,9 @@ describe("handle-table", () => {
         createHarnessHandleTable("run-1"),
         ref,
       );
-      expect(resolveHandleToken(table, token)?.ref).toBe(ref);
+      expect(resolveHandleToken(table, token)?.ref).toBe(
+        `//${SPACE_DID}${LINK_A}@space/items/0`,
+      );
     });
 
     it("re-derives a fixed-width suffix on collision, keeping both tokens five characters and distinct", async () => {
@@ -326,7 +350,33 @@ describe("handle-table", () => {
         text,
       );
       expect(value).toBe(table.entries[0].token);
-      expect(table.entries[0].ref).toBe(text);
+      expect(table.entries[0].ref).toBe(`//${SPACE_DID}${LINK_A}@space/items`);
+    });
+
+    it("consumes complete references and named qualifiers without minting a shorter address", async () => {
+      const text = `//${SPACE_DID}${LINK_A}@scope=user@pin=${HASH_B}/items/`;
+      const { table, value } = await swapLinksForTokens(
+        createHarnessHandleTable("run-1"),
+        text,
+      );
+      expect(value).toBe(table.entries[0].token);
+      expect(table.entries[0].ref).toBe(`//${SPACE_DID}${LINK_A}@user/items/`);
+      for (
+        const invalid of [
+          `//unresolved${LINK_A}`,
+          `${LINK_A}@owner/items`,
+          `${LINK_A}@`,
+          `${LINK_A}#`,
+          `${LINK_A}#argument/items`,
+        ]
+      ) {
+        const result = await swapLinksForTokens(
+          createHarnessHandleTable("run-1"),
+          invalid,
+        );
+        expect(result.value).toBe(invalid);
+        expect(result.table.entries).toEqual([]);
+      }
     });
 
     it("mints one token for repeated occurrences of the same address", async () => {

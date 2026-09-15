@@ -33,6 +33,7 @@
 
 import { readLoomAuthoringConfig } from "../src/loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
+import { isDID } from "@commonfabric/identity/did";
 import {
   dirname,
   extname,
@@ -595,7 +596,7 @@ export const resolveConsoleConfig = async (
       "a fabric session is required: set --fabric-identity/CF_HARNESS_FABRIC_IDENTITY and --fabric-space/CF_HARNESS_FABRIC_SPACE",
     );
   }
-  if (space.startsWith("did:")) {
+  if (isDID(space)) {
     throw new Error(
       `--fabric-space must be a space name rather than a DID: assign_slug composes a URL from the name, and offers none for ${space}`,
     );

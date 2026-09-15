@@ -111,20 +111,24 @@ const writerClaimWithoutStampAndFile = (
  * Reconcile two `writeAuthorizedBy` writer-identity claims that mean the same
  * binding. The binding a claim MEANS is `path` (+ `moduleIdentity` once
  * stamped); the `file` spelling is resolver-dependent (the same module spells
- * differently across piece-deploy and HTTP compiles — labs#4772), so two
- * claims reconcile when their paths match, their file spellings CORRESPOND
- * (equal or one-leading-segment apart), and everything outside file + stamp
- * is equal. Returns the stamped side when exactly one carries the provenance
- * stamp (`moduleIdentity`, or a legacy `bundleId` on pre-migration claims),
- * and the existing side otherwise — both-unstamped, both same stamp, and
- * both stamped DIFFERENTLY (a version boundary: born-stamped claims make a
- * republished module re-present this binding under its new moduleIdentity
- * on every envelope write; the stored stamp is kept, never rotated, and the
- * successor's field writes are authorized at verification time by
- * authenticated `piece setsrc` module delegation — or fail closed loudly
- * without one — while the envelope's sibling writes keep committing).
- * `undefined` only when the claims name different bindings
- * (non-corresponding files or paths).
+ * differently across piece-deploy and HTTP compiles — labs#4772, and the same
+ * authored tree spells differently under the root each compile grounds it
+ * at), so two claims reconcile when their paths match and everything outside
+ * file + stamp is equal. Two stamped claims consult the spelling not at all:
+ * each stamp already names its module content-addressed. With at most one
+ * stamp the spellings must additionally CORRESPOND (equal or
+ * one-leading-segment apart), since the spelling is then part of what the
+ * unstamped side means. Returns the stamped side when exactly one carries
+ * the provenance stamp (`moduleIdentity`, or a legacy `bundleId` on
+ * pre-migration claims), and the existing side otherwise — both-unstamped,
+ * both same stamp, and both stamped DIFFERENTLY (a version boundary:
+ * born-stamped claims make a republished module re-present this binding
+ * under its new moduleIdentity on every envelope write; the stored stamp is
+ * kept, never rotated, and the successor's field writes are authorized at
+ * verification time by authenticated `piece setsrc` module delegation — or
+ * fail closed loudly without one — while the envelope's sibling writes keep
+ * committing). `undefined` only when the claims name different bindings
+ * (different paths, or non-corresponding files with at most one stamp).
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,
@@ -135,18 +139,6 @@ const reconcileWriterClaimStamp = (
   }
   const existingIdentity = existing.__ctWriterIdentityOf;
   const candidateIdentity = candidate.__ctWriterIdentityOf;
-  if (
-    !writerClaimFilesCorrespond(
-      typeof existingIdentity.file === "string"
-        ? existingIdentity.file
-        : undefined,
-      typeof candidateIdentity.file === "string"
-        ? candidateIdentity.file
-        : undefined,
-    )
-  ) {
-    return undefined;
-  }
   if (
     !deepEqual(
       {
@@ -164,18 +156,31 @@ const reconcileWriterClaimStamp = (
   const existingStamped = writerClaimIsStamped(existingIdentity);
   const candidateStamped = writerClaimIsStamped(candidateIdentity);
   if (existingStamped && candidateStamped) {
-    // Both stamped, same binding: the stored claim wins either way. With
-    // equal stamps this is plain stability (spelling included). With
+    // Both stamped, same path: the stored claim wins either way, and the
+    // spelling is not consulted, since each stamp names its module
+    // content-addressed. With equal stamps this is plain stability. With
     // DIFFERENT stamps it is a version boundary — claims are minted born
     // stamped, so a republished module re-presents this binding under its
     // new moduleIdentity on every envelope write. Keeping the stored stamp
     // (instead of conflict-aborting the transaction) preserves the
     // fail-closed posture at the right granularity: the new version's
-    // writes to THIS field are rejected loudly at verification until the
-    // setsrc-history delegation design authorizes the rotation, while the
-    // envelope's sibling fields keep committing. Rotation never happens
-    // here in either direction.
+    // writes to THIS field are refused at verification unless a
+    // `piece setsrc` delegation names the stored stamp as its predecessor,
+    // while the envelope's sibling fields keep committing. Rotation never
+    // happens here in either direction.
     return existing;
+  }
+  if (
+    !writerClaimFilesCorrespond(
+      typeof existingIdentity.file === "string"
+        ? existingIdentity.file
+        : undefined,
+      typeof candidateIdentity.file === "string"
+        ? candidateIdentity.file
+        : undefined,
+    )
+  ) {
+    return undefined;
   }
   if (!existingStamped && !candidateStamped) {
     return existing;
@@ -238,11 +243,12 @@ const mergeSetLikeIfcArray = (
           // One transaction can record the same protected field through a
           // schema input whose `writeAuthorizedBy` claim was rebound with the
           // authoring identity's provenance stamp and one recorded without an
-          // identity (unstamped). The BINDING (file + path) is what the claim
-          // means; the stamp is provenance added per input — keep the stamped
-          // claim. For two different stamps of the same binding, keep the
-          // stored stamp (a version boundary, never a rotation here). Different
-          // bindings still conflict.
+          // identity (unstamped). The BINDING (path, plus the stamp once
+          // there is one) is what the claim means; the stamp is provenance
+          // added per input — keep the stamped claim. For two different
+          // stamps of the same path, keep the stored stamp (a version
+          // boundary, never a rotation here). Different bindings still
+          // conflict.
           if (key === "writeAuthorizedBy") {
             const reconciled = reconcileWriterClaimStamp(existing, candidate);
             if (reconciled !== undefined) {
@@ -734,16 +740,19 @@ export interface CfcSchemaMergeIssue {
  * --check` is supposed to predict, so the preflight drives THIS seam — the
  * same merge the commit runs, called in dry-run — rather than a second
  * implementation of the rules that would drift out of agreement with
- * enforcement and start green-lighting swaps the deploy then refuses.
+ * enforcement and start green-lighting swaps the deploy then refuses. The
+ * preflight reaches it through `storedCfcEnvelopeMergeIssue` (prepare.ts),
+ * which puts the persist loop's merge-skipping fast paths in front of it.
  *
  * Pure: no transaction, no writes, because the merge itself is.
  */
 export const cfcSchemaMergeIssue = (
   existing: JSONSchema,
   candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): CfcSchemaMergeIssue | undefined => {
   try {
-    mergeCfcSchemaEnvelopes(existing, candidate);
+    mergeCfcSchemaEnvelopes(existing, candidate, options);
     return undefined;
   } catch (error) {
     if (error instanceof CfcSchemaMigrationError) {

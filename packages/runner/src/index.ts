@@ -119,6 +119,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
+export { cellOfOpaqueReference, isOpaqueReference } from "./back-to-cell.ts";
 export {
   CompilerStackLoadError,
   computeEntryIdentity,
@@ -398,3 +399,16 @@ export {
   overlayUnreadableLinkPlaceholders,
   storedArgumentValidationIssue,
 } from "./stored-argument-validation.ts";
+
+export {
+  parseCellReference,
+  parsePieceSegment,
+  parseReferenceContext,
+  parseRelativeReference,
+  type ReferenceContext,
+  type ReferenceMember,
+  type RelativeReferenceParts,
+  type RenderableCellReference,
+  renderCellReference,
+  renderReferenceContext,
+} from "./cell-reference.ts";

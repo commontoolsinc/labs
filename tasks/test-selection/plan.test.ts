@@ -11,6 +11,7 @@ import {
   type SelectionReason,
 } from "./plan.ts";
 import type { Calibration, Manifest, ManifestEntry } from "./manifest.ts";
+import type { WithheldReason } from "@commonfabric/test-support/records";
 import { sampleEntry, sampleManifest } from "./testing.ts";
 import {
   FULL_LANE_BUDGET_SECONDS,
@@ -780,11 +781,21 @@ describe("running everything", () => {
           cost: 2,
         }),
       ],
-      withheld: [{
-        test: { k: "unit", s: "memory", n: "worthless" },
-        suite: "workspace-unit",
-        reason: "flaky",
-      }],
+      withheld: [
+        {
+          test: { k: "unit", s: "memory", n: "worthless" },
+          suite: "workspace-unit",
+          reason: "flaky",
+        },
+        {
+          test: { k: "unit", s: "memory", n: "case 0" },
+          suite: "workspace-unit",
+          // A reason nothing gives today. What a flake rate excuses is
+          // narrower than what a pull request holds back, and a corpus
+          // whose every entry is flaky cannot tell the two apart.
+          reason: "quarantined" as WithheldReason,
+        },
+      ],
     });
   }
 
@@ -798,8 +809,26 @@ describe("running everything", () => {
   });
 
   it("says it withheld nothing, because it ran everything", () => {
-    expect(run(corpus()).withheld.length).toBe(1);
+    expect(run(corpus()).withheld).toEqual(corpus().withheld);
     expect(run(corpus(), { policy: "everything" }).withheld).toEqual([]);
+  });
+
+  it("says what it will not fail for, and a pull request says nothing", () => {
+    // A test too noisy to judge a change by is held back from a pull
+    // request and run here anyway: what this run learns about it is the
+    // whole of what says whether the exclusion should reverse. Failing
+    // for it would make the branch red for something no change caused.
+    //
+    // The reason decides, not membership of the withheld set: an entry
+    // held back for anything else runs here and goes on failing the run,
+    // so a reason added later is not excused by nobody's decision.
+    const flaky = corpus().withheld.filter((held) => held.reason === "flaky");
+    expect(flaky.length).toBeLessThan(corpus().withheld.length);
+    expect(run(corpus(), { policy: "everything" }).nonGating).toEqual(flaky);
+    expect(run(corpus()).nonGating).toEqual([]);
+    // And a pull request holds back everything the manifest names,
+    // whatever the reason.
+    expect(run(corpus()).withheld).toEqual(corpus().withheld);
   });
 
   it("runs what a budgeted plan withholds and excludes", () => {
@@ -902,6 +931,47 @@ describe("how many lanes the full run needs", () => {
       entries: entries(600, () => ({ cost: 1 })),
     });
     expect(count(manifest, { budgetSeconds: 100 })).toBe(6);
+  });
+
+  it("drops lanes the repeat count over-estimated, and keeps an overrun", () => {
+    // The starting figure charges every execution the packer was asked
+    // for, and the packer gives up runs rather than putting a lane past
+    // its bound, so it can land above the fewest lanes that hold the
+    // run. A search that only climbed would keep whatever it overshot
+    // by, which costs the default branch a job per commit for each lane.
+    //
+    // The identity costing more than a whole lane is what makes this
+    // worth measuring against the overrun rather than against zero: its
+    // overrun is there at every count, so a shrink that waited for zero
+    // would never run.
+    const manifest = sampleManifest({
+      entries: [
+        ...entries(20, () => ({ cost: 1, repeats: 10 })),
+        sampleEntry({ k: "unit", s: "memory", n: "vast" }, {
+          unit: "packages/memory/test/vast.test.ts",
+          cost: 4_000,
+        }),
+      ],
+    });
+    const lanes = count(manifest, { budgetSeconds: 100 });
+    // Every execution asked for comes to 200 seconds beside the one
+    // vast test, which the estimate divides into far more lanes than
+    // the packing needs.
+    const estimate = Math.ceil(
+      manifest.entries.reduce((t, e) => t + e.cost * e.repeats, 0) / 100,
+    );
+    expect(estimate).toBeGreaterThan(lanes);
+    // And what it settled on is a packing no smaller count matches.
+    const overrunAt = (count: number) =>
+      plan({
+        manifest,
+        mandatory: new Map(),
+        capabilities,
+        policy: "everything",
+        budgetSeconds: 100,
+        lanes: count,
+      }).lanes.reduce((t, l) => t + Math.max(0, l.projectedSeconds - 100), 0);
+    expect(overrunAt(lanes - 1)).toBeGreaterThanOrEqual(overrunAt(lanes) + 1);
   });
 
   it("adds lanes while each one still buys something", () => {
