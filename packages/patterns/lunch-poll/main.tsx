@@ -1404,10 +1404,13 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Current-day filter: the UI only shows votes cast on the current day
     // (local calendar), per the shared tick. While `#now/300` is still
     // resolving, the day key reads "" and the current-day vote set is empty.
+    // The filter reads the day key rather than the tick, so the tick advancing
+    // within one day leaves the key equal and the vote set is not recomputed;
+    // reading the tick here costs a full rescan of `votes` every five minutes.
     const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
     const todaysVotes = computed(() => {
-      if (!nowTick) return EMPTY_VOTES;
-      const key = dayKeyOf(nowTick);
+      const key = todayKey;
+      if (!key) return EMPTY_VOTES;
       return votes.filter((v) =>
         typeof v.castAt === "number" && dayKeyOf(v.castAt) === key
       );
