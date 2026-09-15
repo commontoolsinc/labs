@@ -148,6 +148,102 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     }
   }
 
+  for (const teardown of ["unmount", "replace"] as const) {
+    for (const wholeProps of [false, true]) {
+      await t.step(
+        `cancels in-place ${
+          wholeProps ? "Cell props" : "Cell prop values"
+        } and children on ${teardown}`,
+        async () => {
+          const collector = createOpsCollector();
+          const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+          const suffix = `${teardown}-${wholeProps}`;
+          const title = runtime.getCell<string>(
+            signer.did(),
+            `title-${suffix}`,
+          );
+          const props = runtime.getCell<{ title: string }>(
+            signer.did(),
+            `props-${suffix}`,
+          );
+          const children = runtime.getCell<string[]>(
+            signer.did(),
+            `children-${suffix}`,
+          );
+          const write = async (value: string) => {
+            const tx = runtime.edit();
+            title.withTx(tx).set(value);
+            props.withTx(tx).set({ title: value });
+            children.withTx(tx).set([value]);
+            expect((await tx.commit()).error).toBeUndefined();
+            await runtime.idle();
+            await t.settle();
+          };
+          await write("initial");
+          const root = new MockCell({
+            type: "vnode",
+            name: "div",
+            props: { title: "static" },
+            children: ["static"],
+          });
+          const cancel = reconciler.mount(root as unknown as Cell<unknown>);
+          try {
+            await t.settle();
+            const element = collector.getOps().find((op) =>
+              op.op === "create-element" && op.tagName === "div"
+            );
+            if (!element || element.op !== "create-element") {
+              throw new Error("Expected initial `div`");
+            }
+            collector.clear();
+            root.set({
+              type: "vnode",
+              name: "div",
+              props: wholeProps ? props : { title },
+              children,
+            });
+            await runtime.idle();
+            await t.settle();
+            expect(collector.getOpsOfType("create-element")).toEqual([]);
+            const expectRendered = (value: string) => {
+              expect(collector.getOps()).toContainEqual({
+                op: "set-prop",
+                nodeId: element.nodeId,
+                key: "title",
+                value,
+              });
+              expect(
+                collector.getOps().some((op) =>
+                  "text" in op && op.text === value
+                ),
+              ).toBe(true);
+            };
+            expectRendered("initial");
+            collector.clear();
+            await write("updated");
+            expectRendered("updated");
+            if (teardown === "unmount") {
+              cancel();
+            } else {
+              root.set({
+                type: "vnode",
+                name: "section",
+                props: {},
+                children: [],
+              });
+            }
+            await t.settle();
+            collector.clear();
+            await write("ignored");
+            expect(collector.getOps()).toEqual([]);
+          } finally {
+            cancel();
+          }
+        },
+      );
+    }
+  }
+
   await t.step(
     "keeps a reused element's new reactive props and children read-only and cancels them when replaced",
     async () => {
