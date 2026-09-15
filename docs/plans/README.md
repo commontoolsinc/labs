@@ -89,6 +89,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
+- [Stream markers out of stored data](stream-markers-out-of-stored-data.md)
+  moves stream-ness out of the stored `{ "$stream": true }` value and into the
+  link schema, the module wrapper, and a `schema` meta, deleting the
+  marker-keyed repair machinery.
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and
