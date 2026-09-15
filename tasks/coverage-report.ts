@@ -30,6 +30,7 @@ import {
   collectCoverageDebtMetricsFromLcov,
   collectMeasuredSetDebt,
   type CoverageDebtMetric,
+  parseLcov,
 } from "./coverage-metrics.ts";
 import { collectSetReports } from "./coverage-gate.ts";
 import {
@@ -170,6 +171,23 @@ export async function collectReports(at: string): Promise<LaneReports> {
 }
 
 /**
+ * Whether a report measured anything, which is one file record carrying
+ * at least one line.
+ *
+ * A lane writes a report for a profile directory whatever that directory
+ * holds, so a report file says that a lane got as far as converting and
+ * not that it measured. A record naming a file and carrying no line says
+ * nothing about that file either, which is the rule the measured sets are
+ * scored by.
+ */
+function measuresAnything(lcov: string): boolean {
+  for (const record of parseLcov(lcov).values()) {
+    if (record.lineHits.size > 0) return true;
+  }
+  return false;
+}
+
+/**
  * The repository-wide figures: every metric group's uncovered lines and
  * the workspace total, scored over the merge of every report.
  *
@@ -177,23 +195,30 @@ export async function collectReports(at: string): Promise<LaneReports> {
  * because this is the figure for the whole repository and every lane's
  * work contributes to it.
  *
- * A run that reported nothing publishes nothing. Scoring an empty report
- * charges every tracked line as uncovered, which states a measurement the
- * run did not make; the dashboard charts this series, so one run's spike
- * and the next run's recovery would both be invented. What a run reported
- * part of is scored against the members no lane launched, which is what
- * withholds those members' groups and the workspace total with them.
+ * A run that measured nothing publishes nothing. Scoring a report that
+ * holds no record charges every tracked line as uncovered, which states a
+ * measurement the run did not make; the dashboard charts this series, so
+ * one run's spike and the next run's recovery would both be invented.
+ * What a run measured part of is scored against the members no lane
+ * launched, which is what withholds those members' groups and the
+ * workspace total with them.
  */
 export async function repositoryFigures(
   options: ReportOptions,
   reports: LaneReports,
 ): Promise<CoverageDebtMetric[]> {
-  if (reports.lcov.length === 0) return [];
+  const lcov = reports.lcov.join("\n");
+  if (!measuresAnything(lcov)) return [];
   return await collectCoverageDebtMetricsFromLcov({
     rootDir: options.root,
-    lcov: reports.lcov.join("\n"),
+    lcov,
     unlaunchedMembers: reports.unlaunchedMembers,
   });
+}
+
+/** A workspace member path spelled the way the topology spells it. */
+function memberName(member: string): string {
+  return member.replace(/^\.\//, "");
 }
 
 /**
@@ -205,17 +230,27 @@ export async function repositoryFigures(
  * contains, so a run that lost a set's report leaves the previous run's
  * figure standing, where a zero-coverage figure would tell every later
  * pull request that the member's whole source had gone uncovered.
+ *
+ * So is a set over a member some lane never launched. A set is compared
+ * between runs on the understanding that it ran whole, and a run that
+ * started only part of the member's tests reaches fewer of its lines, so
+ * the figure is above what the set measures. Published, it becomes the
+ * bar every later pull request is held to, and the gate stops catching a
+ * rise it would have caught.
  */
 export async function measuredSetFigures(
   options: ReportOptions,
+  laneReports: LaneReports,
 ): Promise<CoverageDebtMetric[]> {
   const suites = await loadTopology(options.root);
   const members = (await readWorkspaceMembers(
     path.join(options.root, "deno.jsonc"),
-  )).map((member) => member.replace(/^\.\//, ""));
+  )).map(memberName);
+  const unlaunched = new Set(laneReports.unlaunchedMembers.map(memberName));
   const reports = await collectSetReports(reportsDirectory(options));
   const figures: CoverageDebtMetric[] = [];
   for (const ref of measuredSets(suites)) {
+    if (unlaunched.has(ref.set.member)) continue;
     const found = reports.get(measuredSetDirectory(ref));
     if (found === undefined || found.length === 0) continue;
     // A set's units are spread over as many lanes as the packer liked, so
@@ -276,7 +311,7 @@ export async function report(options: ReportOptions): Promise<string> {
   const reports = await collectReports(reportsDirectory(options));
   const figures = [
     ...await repositoryFigures(options, reports),
-    ...await measuredSetFigures(options),
+    ...await measuredSetFigures(options, reports),
   ];
   await writeCoverageBaselineFile(
     options.out,

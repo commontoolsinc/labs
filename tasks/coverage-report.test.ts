@@ -97,8 +97,14 @@ async function reportPathIn(lane: string): Promise<string> {
 }
 
 /** The measured-set figures a reports directory yields. */
-function setFiguresFrom(reports: string): Promise<CoverageDebtMetric[]> {
-  return measuredSetFigures(optionsFor(REPOSITORY, reports));
+function setFiguresFrom(
+  reports: string,
+  unlaunchedMembers: string[] = [],
+): Promise<CoverageDebtMetric[]> {
+  return measuredSetFigures(optionsFor(REPOSITORY, reports), {
+    lcov: [],
+    unlaunchedMembers,
+  });
 }
 
 describe("coverage-report", () => {
@@ -224,6 +230,24 @@ describe("coverage-report", () => {
       }
     });
 
+    it("returns no figure at all where every report is empty", async () => {
+      // A lane writes a report for a profile directory whatever that
+      // directory holds, so an empty one says a lane got as far as
+      // converting rather than that it measured.
+
+      const { root } = await workspaceOfTwo();
+      try {
+        expect(
+          await repositoryFigures(optionsFor(root, "artifacts"), {
+            lcov: ["TN:\nend_of_record\n"],
+            unlaunchedMembers: [],
+          }),
+        ).toEqual([]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
     it("returns no figure at all where no lane reported", async () => {
       // Scoring an empty report charges every tracked line as uncovered,
       // which states a measurement the run did not make. The dashboard
@@ -308,6 +332,24 @@ describe("coverage-report", () => {
       } finally {
         await Deno.remove(alone, { recursive: true });
         await Deno.remove(both, { recursive: true });
+      }
+    });
+
+    it("returns no figure for a set over a member nothing launched", async () => {
+      // A set is compared between runs on the understanding that it ran
+      // whole. A run that started only part of the member's tests reaches
+      // fewer of its lines, so the figure is above what the set measures,
+      // and published it becomes a bar the gate cannot catch a rise past.
+
+      const source = path.join(REPOSITORY, MEMBER, "src/index.ts");
+      const root = await directoryOf({
+        [await reportPathIn("lane-1")]:
+          `SF:${source}\nDA:1,1\nDA:2,0\nend_of_record\n`,
+      });
+      try {
+        expect(await setFiguresFrom(root, [`./${MEMBER}`])).toEqual([]);
+      } finally {
+        await Deno.remove(root, { recursive: true });
       }
     });
 
