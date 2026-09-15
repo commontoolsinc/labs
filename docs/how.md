@@ -468,16 +468,16 @@ default. A grep will also turn up
 `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in `cfc/types.ts`, which is
 the transaction-level default, not this one.
 
-The flow-control layer is `packages/runner/src/cfc/`: 50 modules, about
-26,000 lines, with 143 test files beside them in `packages/runner/test`.
-Every dial it exposes is implemented; what differs between hosts is
-which are switched on. The browser shell — the product surface — runs
-label propagation at `persist`, so a value derived from labeled data is
-written with its derived label rather than laundering it away
-(`packages/lib-shell/src/runtime.ts`). Access control on spaces defaults
-to `enforce` on the production server (`packages/toolshed/env.ts`). The
-harness that dogfoods the runtime turns the whole
-`MAX_ENFORCEMENT_CFC_OPTIONS` bundle on by default
+The flow-control layer is `packages/runner/src/cfc/`: about 50 modules
+and 26,000 lines, with about 150 test files beside them in
+`packages/runner/test`. Every dial it exposes is implemented; what
+differs between hosts is which are switched on. The browser shell — the
+product surface — runs label propagation at `persist`, so a value
+derived from labeled data is written with its derived label rather than
+laundering it away (`packages/lib-shell/src/runtime.ts`). Access control
+on spaces defaults to `enforce` on the production server
+(`packages/toolshed/env.ts`). The harness that dogfoods the runtime
+turns the whole `MAX_ENFORCEMENT_CFC_OPTIONS` bundle on by default
 (`packages/cf-harness/console/server.ts`), and its committed run ledgers
 record real refusals. A property suite runs on every pull request with
 labels persisted, because at the default rung "the properties below
