@@ -1,3 +1,5 @@
+import type { PendingRequestDiagnostic } from "@commonfabric/runtime-client";
+
 import { describeThrown } from "./describe-thrown.ts";
 import type { Page } from "./page.ts";
 
@@ -15,7 +17,8 @@ const CONSOLE_TAIL_LIMIT = 40;
  * {@link describeShellPage}. Every field answers a question an investigator
  * asks of a failed shell test: is this the shell at all, did the server answer
  * with the document that was asked for, had the shell booted far enough to
- * publish itself, and what was it showing.
+ * publish itself, what was it showing, and what was it waiting on the runtime
+ * worker for.
  */
 export interface ShellPageProbe {
   /** The document's own URL, which a redirect can make differ from the one requested. */
@@ -45,6 +48,24 @@ export interface ShellPageProbe {
   /** The DID of the identity that state carries, where it carries one. */
   identityDid?: string;
 
+  /**
+   * Whether the page carries a runtime on `globalThis.commonfabric.rt`. Every
+   * page does not: the shell builds one at login.
+   */
+  runtime: boolean;
+
+  /**
+   * The requests that runtime has sent its worker and has no reply to, oldest
+   * first, which is the order it reports them in. Reading these needs no
+   * worker round trip, so a worker that has stopped answering is named here
+   * all the same. Absent where there is no runtime to ask, and where the
+   * runtime is one that does not report them.
+   */
+  pendingRequests?: PendingRequestDiagnostic[];
+
+  /** Why those could not be read, when reading them threw. */
+  pendingRequestsError?: string;
+
   /** The start of the document's rendered text. */
   text: string;
 
@@ -61,6 +82,9 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
   return await page.evaluate((textLimit: number, tailLimit: number) => {
     const scope = globalThis as typeof globalThis & {
       app?: { serialize?: () => { view?: unknown; identityDid?: string } };
+      commonfabric?: {
+        rt?: { getPendingRequests?: () => PendingRequestDiagnostic[] };
+      };
       __cfConsoleTail?: Array<{ t: number; method: string; text: string }>;
     };
 
@@ -85,6 +109,17 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
       }
     }
 
+    const rt = scope.commonfabric?.rt;
+    let pendingRequests: PendingRequestDiagnostic[] | undefined;
+    let pendingRequestsError: string | undefined;
+    if (rt?.getPendingRequests) {
+      try {
+        pendingRequests = rt.getPendingRequests();
+      } catch (error) {
+        pendingRequestsError = String(error);
+      }
+    }
+
     const body = document.body;
     const text = (body?.innerText ?? body?.textContent ?? "").trim()
       .slice(0, textLimit);
@@ -103,10 +138,45 @@ export async function readShellPageProbe(page: Page): Promise<ShellPageProbe> {
       view,
       viewError,
       identityDid,
+      runtime: rt !== undefined,
+      pendingRequests,
+      pendingRequestsError,
       text,
       consoleTail,
     };
   }, { args: [TEXT_LIMIT, CONSOLE_TAIL_LIMIT] });
+}
+
+/**
+ * Helper for {@link describeShellPage}, which renders what the page's runtime
+ * is still waiting on, one line per request.
+ *
+ * No runtime to ask, a runtime that does not report, a report that threw, and
+ * a runtime with nothing in flight are four different diagnoses that would
+ * otherwise render alike, so each says which it is.
+ */
+function describePendingRequests(probe: ShellPageProbe): string[] {
+  if (!probe.runtime) {
+    return ["  pending runtime requests: none, the page carries no runtime"];
+  }
+  if (probe.pendingRequestsError !== undefined) {
+    return [
+      "  pending runtime requests: reading them threw: " +
+      probe.pendingRequestsError,
+    ];
+  }
+  const pending = probe.pendingRequests;
+  if (pending === undefined) {
+    return ["  pending runtime requests: this runtime does not report them"];
+  }
+  if (pending.length === 0) return ["  pending runtime requests: none"];
+  return [
+    `  pending runtime requests (${pending.length}, oldest first):`,
+    ...pending.map((request) =>
+      `    ${request.type} (msgId ${request.msgId}), outstanding for ` +
+      `${request.ageMs}ms`
+    ),
+  ];
 }
 
 /**
@@ -138,6 +208,7 @@ export function describeShellPage(probe: ShellPageProbe): string {
   } else {
     lines.push("  globalThis.app: absent");
   }
+  lines.push(...describePendingRequests(probe));
   if (!probe.rootView) {
     const text = probe.text.replace(/\s+/g, " ");
     lines.push(`  document text: ${text || "(empty)"}`);

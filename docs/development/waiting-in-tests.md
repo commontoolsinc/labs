@@ -12,7 +12,8 @@ studies](waiting-in-tests-rationale.md), holds the analysis behind these
 rules: the full argument for why a bounded timeout is never a guarantee, the
 sizing of the deno-web-test backstop, how the runner clock classifies timers
 across SES lockdown, the real-clock exemptions that were retired, why the
-runtime-client suite keeps the real clock, the CSP suite worked through as a
+runtime-client suite keeps the real clock, why neither runtime-disposal
+teardown carries a bound, the CSP suite worked through as a
 proving-a-negative example, the FUSE exec suite's design, and the production
 waits that apply the same principle outside tests. Nothing there is needed to
 write an ordinary test; read it when you need to know why a rule is what it
@@ -86,6 +87,18 @@ is the price of a collection that always returns, paid because the summary
 exists to explain a run already in trouble. The budget is a caller's option,
 so a case that wants the backstop exercised asks for a short one rather than
 waiting out the default.
+
+One bound a browser test runs under is not the repository's to sort, and
+belongs in an audit of these for that reason: astral puts its own deadline on
+every `page.evaluate`, so a page that never answers ends the call whether or
+not anything here asked for that. It sorts differently from the ones above,
+because it re-waits on the one in-flight call rather than reissuing it, which
+leaves a late answer still returned. [Sizing the deno-web-test
+backstop](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop)
+works that mechanism through and says what each of the two harnesses running
+under it sets the deadline to; [Tearing a runtime down waits on its
+worker](#tearing-a-runtime-down-waits-on-its-worker) is where a test leans on
+it hardest.
 
 ## The primitives to use instead
 
@@ -572,6 +585,48 @@ document](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop).
 `packages/deno-web-test/README.md` records what the bound does not cover: a test
 blocking the event loop outright, and the stuck test's own work, which goes on
 running in the page afterwards.
+
+## Tearing a runtime down waits on its worker
+
+A teardown that drops a runtime waits for the worker to say it is done.
+`RuntimeConnection.dispose()` sends a `Dispose` request and waits for the
+reply before it touches the transport, so that the storage the worker has
+buffered is flushed before the thread carrying it stops. Requests here carry
+no deadline, and this one is exempt from the abort that settles every other
+request in flight, which leaves the reply as the only thing that settles it. A
+worker that has stopped answering therefore never lets `dispose()` return.
+Neither of the two teardowns that await one adds a bound of its own, and what
+each is left exposed to differs.
+
+The browser teardown, `disposePageRuntime` in
+`packages/integration/shell-utils.ts`, asks the page through `page.evaluate`,
+which astral bounds on its own account at about five minutes for these suites
+— [the rationale
+document](waiting-in-tests-rationale.md#sizing-the-deno-web-test-backstop)
+has the mechanism and the arithmetic. That is a bound relied on rather than
+kept, and the teardown adds none of its own.
+
+What astral's bound does not supply is a name: a `RetryError` says only that
+the attempts ran out. So the catch reports the page instead, through the probe
+[the shared state primitive](#a-shared-state-primitive) describes. Nothing
+settled the disposal's request, so it is still in flight when the probe reads
+it, and the pending-request lines name it and say how long it has been
+outstanding. Those come from `RuntimeClient.getPendingRequests`, which reads
+main-thread bookkeeping and needs no round trip, so a wedged worker is the
+case it still answers. A failure warns rather than throws, since this is
+cleanup: a caller whose work is done has nothing left for it to fail, and a
+`finally` reaching it has a failure of its own to carry.
+
+The in-process suite, `packages/runtime-client/integration/client.test.ts`,
+binds each client with `await using`, so its teardown is `dispose()` itself
+with nothing between. Nothing bounds that: the worker holds Deno's event loop
+open, so the fail-fast the in-process waits above rely on never fires, and the
+run reaches the CI step limit. What places such a hang is the runner's own
+output — the last test printed without an `ok` is the one whose teardown is
+waiting — and what it is waiting for is a `Dispose` reply by construction,
+since that is the only request a teardown sends. Why a bound is not the answer
+there is in [the rationale
+document](waiting-in-tests-rationale.md#the-runtime-disposal-teardowns).
 
 ## Waiting for the scheduler and for the worker reconciler
 
@@ -1215,7 +1270,8 @@ come true, with a stack that points at `waitFor` and nothing about the page.
 the identity it was awaiting where one was given, the last state it managed to
 read, and what the page held at the moment it gave up: the document's URL,
 title, and HTTP status, whether the shell's `x-root-view` element is in it,
-whether `globalThis.app` is there and which view it holds, and the tail of
+whether `globalThis.app` is there and which view it holds, the requests its
+runtime has sent the worker and has no reply to, and the tail of
 console messages `Page.applyConsoleFormatter` retains in the page. The page half
 of that is `readShellPageProbe` in
 `packages/integration/shell-page-probe.ts`; `describeStateWaitFailure` in

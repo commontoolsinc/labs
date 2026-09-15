@@ -171,6 +171,41 @@ async function loginToPublishedApp(
   );
 }
 
+/**
+ * Drops the runtime `page` is holding, so its worker stops and the storage it
+ * has buffered is flushed.
+ *
+ * A disposal that never returns is a worker that never answered the `Dispose`
+ * request, which nothing else settles. Astral bounds the evaluate on its own
+ * account, and what it throws at the end of that names nothing, so the
+ * warning reports the page: the request is still in flight there, and the
+ * block names it and how long it has been outstanding. A rejection raised
+ * inside the page arrives here as a protocol record rather than an `Error`,
+ * which is the other reason the raw value is not what gets printed.
+ *
+ * A failure warns rather than throws. This is cleanup, called where a run's
+ * work is already done or where a `finally` has a failure of its own to
+ * carry, and neither wants a second one raised over it.
+ */
+export async function disposePageRuntime(page: Page): Promise<void> {
+  // Before disposing: the worker owns the collector, and disposing the
+  // runtime takes it with it.
+  await collectPatternCoverage(page);
+  try {
+    await page.evaluate(async () => {
+      await globalThis.commonfabric?.rt?.dispose();
+      if (globalThis.commonfabric) {
+        globalThis.commonfabric.rt = undefined;
+      }
+    });
+  } catch (error) {
+    console.warn(
+      `Disposing the shell page runtime failed: ${describeThrown(error)}\n` +
+        await readAndDescribeShellPage(page),
+    );
+  }
+}
+
 /** How a serialized `AppState` reads in a failure message. */
 function describeAppState(state: AppStateSerialized | undefined): string {
   if (!state) return "none (the page never yielded a state)";
@@ -351,8 +386,13 @@ export class ShellIntegration {
     await login(this.page(), identity);
   }
 
+  /**
+   * Drops the runtime this suite's page is holding, through
+   * {@link disposePageRuntime}. A suite that has opened no page has none to
+   * drop, and returns.
+   */
   async disposeRuntime(): Promise<void> {
-    await this.#disposePageRuntime();
+    if (this.#page) await disposePageRuntime(this.#page);
   }
 
   /**
@@ -536,31 +576,13 @@ export class ShellIntegration {
     if (this.#page) {
       await getPresentationSession()?.close(this.#page);
     }
-    await this.#disposePageRuntime();
+    await this.disposeRuntime();
     await this.#page?.close();
     await this.#browser?.close();
   };
 
   #checkIsOk() {
     if (!this.#page) throw new Error("Page not initialized.");
-  }
-
-  async #disposePageRuntime(): Promise<void> {
-    const page = this.#page;
-    if (!page) return;
-    // Before disposing: the worker owns the collector, and disposing the
-    // runtime takes it with it.
-    await collectPatternCoverage(page);
-    try {
-      await page.evaluate(async () => {
-        await globalThis.commonfabric?.rt?.dispose();
-        if (globalThis.commonfabric) {
-          globalThis.commonfabric.rt = undefined;
-        }
-      });
-    } catch (error) {
-      console.warn("Failed to dispose shell page runtime:", error);
-    }
   }
 
   #attachPage(page: Page) {

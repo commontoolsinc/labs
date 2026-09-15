@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
+import { RequestType } from "@commonfabric/runtime-client";
 
 import { Browser } from "../browser.ts";
 import type { Page } from "../page.ts";
@@ -10,10 +12,12 @@ import {
   describeShellPage,
   readAndDescribeShellPage,
   readShellPageProbe,
+  type ShellPageProbe,
 } from "../shell-page-probe.ts";
 import {
   describeShellReadyFailure,
   describeStateWaitFailure,
+  disposePageRuntime,
   login,
   waitForShellReady,
 } from "../shell-utils.ts";
@@ -39,6 +43,67 @@ const BOOTED_SHELL_DOCUMENT = `<!DOCTYPE html>
       view: { builtin: "home" },
       identityDid: "did:key:zBootedShellFixture",
     }),
+  };
+</script>
+</body></html>`;
+
+// A booted shell holding a runtime with two requests in flight, reported
+// oldest first, which is the order the runtime keeps them in. The request
+// types are the `RequestType` values a real report carries, which the
+// assertions below name through the enum so that a change to either is caught
+// here rather than diverging quietly.
+//
+// Its `dispose()` rejects, which is the cheapest way to reach the teardown's
+// catch; what a teardown failure arrives as does not change what the catch
+// then reports.
+const UNRESPONSIVE_RUNTIME_DOCUMENT = `<!DOCTYPE html>
+<html><head><title>Common Fabric</title></head>
+<body><x-root-view></x-root-view>
+<script>
+  globalThis.app = {
+    serialize: () => ({ view: { builtin: "home" }, identityDid: undefined }),
+  };
+  globalThis.commonfabric = {
+    rt: {
+      dispose: () => Promise.reject(new Error("the worker stopped answering")),
+      getPendingRequests: () => [
+        { msgId: 7, type: "dispose", ageMs: 41203 },
+        { msgId: 9, type: "cell:subscribe", ageMs: 84 },
+      ],
+    },
+  };
+</script>
+</body></html>`;
+
+// A booted shell holding a runtime that answers: nothing is in flight, and a
+// disposal returns.
+const IDLE_RUNTIME_DOCUMENT = `<!DOCTYPE html>
+<html><head><title>Common Fabric</title></head>
+<body><x-root-view></x-root-view>
+<script>
+  globalThis.commonfabric = {
+    rt: { dispose: () => Promise.resolve(), getPendingRequests: () => [] },
+  };
+</script>
+</body></html>`;
+
+// A booted shell whose runtime does not report what it is waiting on, and one
+// whose report throws.
+const SILENT_RUNTIME_DOCUMENT = `<!DOCTYPE html>
+<html><head><title>Common Fabric</title></head>
+<body><x-root-view></x-root-view>
+<script>
+  globalThis.commonfabric = { rt: {} };
+</script>
+</body></html>`;
+const REFUSING_RUNTIME_DOCUMENT = `<!DOCTYPE html>
+<html><head><title>Common Fabric</title></head>
+<body><x-root-view></x-root-view>
+<script>
+  globalThis.commonfabric = {
+    rt: {
+      getPendingRequests: () => { throw new Error("the connection is gone"); },
+    },
   };
 </script>
 </body></html>`;
@@ -77,8 +142,40 @@ function handle(request: Request): Response {
       return new Response(REFUSING_SHELL_DOCUMENT, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
+    case "/unresponsive-runtime":
+      return new Response(UNRESPONSIVE_RUNTIME_DOCUMENT, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    case "/idle-runtime":
+      return new Response(IDLE_RUNTIME_DOCUMENT, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    case "/silent-runtime":
+      return new Response(SILENT_RUNTIME_DOCUMENT, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    case "/refusing-runtime":
+      return new Response(REFUSING_RUNTIME_DOCUMENT, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
   }
   return new Response("not found", { status: 404 });
+}
+
+// `describeShellPage` rendered over a page holding nothing remarkable, split
+// into its lines, with `fields` deciding what the case is about. The default
+// carries a runtime, so a case about the absence of one says so.
+function describedLines(fields: Partial<ShellPageProbe>): string[] {
+  return describeShellPage({
+    url: "http://localhost/shell",
+    title: "Common Fabric",
+    rootView: true,
+    app: true,
+    runtime: true,
+    text: "",
+    consoleTail: [],
+    ...fields,
+  }).split("\n");
 }
 
 // The message of the error `work` rejects with. Fails the test when it
@@ -150,6 +247,55 @@ describe("shell-failure-reports", () => {
       expect(probe.app).toBe(true);
       expect(probe.view).toEqual({ builtin: "home" });
       expect(probe.identityDid).toBe("did:key:zBootedShellFixture");
+    });
+
+    it("returns the requests the page's runtime is still waiting on", async () => {
+      await load("/unresponsive-runtime");
+
+      const probe = await readShellPageProbe(page);
+      expect(probe.runtime).toBe(true);
+      expect(probe.pendingRequests).toEqual([
+        { msgId: 7, type: RequestType.Dispose, ageMs: 41203 },
+        { msgId: 9, type: RequestType.CellSubscribe, ageMs: 84 },
+      ]);
+      expect(probe.pendingRequestsError).toBeUndefined();
+    });
+
+    it("returns an empty list for a runtime with nothing in flight", async () => {
+      await load("/idle-runtime");
+
+      const probe = await readShellPageProbe(page);
+      expect(probe.runtime).toBe(true);
+      // An empty list and an absent one are different answers, and the
+      // boundary keeps them apart: a page's `undefined` property is dropped on
+      // the way back, while an empty array survives as one.
+      expect(probe.pendingRequests).toEqual([]);
+    });
+
+    it("returns no runtime for a page that carries none", async () => {
+      await load("/booted-shell");
+
+      const probe = await readShellPageProbe(page);
+      expect(probe.runtime).toBe(false);
+      expect(probe.pendingRequests).toBeUndefined();
+    });
+
+    it("returns a runtime that does not report its requests", async () => {
+      await load("/silent-runtime");
+
+      const probe = await readShellPageProbe(page);
+      expect(probe.runtime).toBe(true);
+      expect(probe.pendingRequests).toBeUndefined();
+      expect(probe.pendingRequestsError).toBeUndefined();
+    });
+
+    it("returns the reason when the runtime refuses to report them", async () => {
+      await load("/refusing-runtime");
+
+      const probe = await readShellPageProbe(page);
+      expect(probe.runtime).toBe(true);
+      expect(probe.pendingRequests).toBeUndefined();
+      expect(probe.pendingRequestsError).toContain("the connection is gone");
     });
 
     it("returns the console messages the page retained", async () => {
@@ -311,6 +457,55 @@ describe("shell-failure-reports", () => {
       const described = describeShellPage(await readShellPageProbe(page));
       expect(described).not.toContain("document text:");
     });
+
+    // The four pending-request cases render a probe built here rather than one
+    // read from a page. `describeShellPage` is a function of that record
+    // alone, and the four lines it chooses between differ by a few words, so
+    // each case asserts a whole line: a check for "pending runtime requests:
+    // none" is satisfied by three of the four.
+
+    it("names each request the runtime is waiting on, and its age", () => {
+      const lines = describedLines({
+        pendingRequests: [
+          { msgId: 7, type: RequestType.Dispose, ageMs: 41203 },
+          { msgId: 9, type: RequestType.CellSubscribe, ageMs: 84 },
+        ],
+      });
+      expect(lines).toContain("  pending runtime requests (2, oldest first):");
+      expect(lines).toContain("    dispose (msgId 7), outstanding for 41203ms");
+      expect(lines).toContain(
+        "    cell:subscribe (msgId 9), outstanding for 84ms",
+      );
+    });
+
+    it("reports that a runtime with nothing in flight has none", () => {
+      expect(describedLines({ pendingRequests: [] })).toContain(
+        "  pending runtime requests: none",
+      );
+    });
+
+    it("reports that a page carrying no runtime has none", () => {
+      expect(describedLines({ runtime: false })).toContain(
+        "  pending runtime requests: none, the page carries no runtime",
+      );
+    });
+
+    it("reports a runtime that does not report its requests", () => {
+      expect(describedLines({})).toContain(
+        "  pending runtime requests: this runtime does not report them",
+      );
+    });
+
+    it("reports why the requests could not be read", () => {
+      expect(
+        describedLines({
+          pendingRequestsError: "Error: the connection is gone",
+        }),
+      ).toContain(
+        "  pending runtime requests: reading them threw: " +
+          "Error: the connection is gone",
+      );
+    });
   });
 
   describe("describeStateWaitFailure()", () => {
@@ -382,6 +577,48 @@ describe("shell-failure-reports", () => {
 
       const described = await readAndDescribeShellPage(closed);
       expect(described).toContain("the page could not be probed:");
+    });
+  });
+
+  describe("disposePageRuntime()", () => {
+    // The teardown reports through `console.warn` rather than throwing, so
+    // each case reads what was warned. Collecting every warning and matching
+    // on the text keeps a case from turning on how many other warnings the
+    // browser produced.
+
+    it("warns naming the requests the runtime was still waiting on", async () => {
+      await load("/unresponsive-runtime");
+      const warnings: string[] = [];
+      using _warn = stub(console, "warn", (...args: unknown[]) => {
+        warnings.push(args.join(" "));
+      });
+
+      await disposePageRuntime(page);
+
+      const warned = warnings.join("\n");
+      expect(warned).toContain(
+        "Disposing the shell page runtime failed: Error: the worker stopped " +
+          "answering",
+      );
+      expect(warned).toContain("pending runtime requests (2, oldest first):");
+      expect(warned).toContain("dispose (msgId 7), outstanding for 41203ms");
+    });
+
+    it("drops a runtime that answers, and warns nothing", async () => {
+      await load("/idle-runtime");
+      const warnings: string[] = [];
+      using _warn = stub(console, "warn", (...args: unknown[]) => {
+        warnings.push(args.join(" "));
+      });
+
+      await disposePageRuntime(page);
+
+      expect(warnings.join("\n")).not.toContain(
+        "Disposing the shell page runtime failed",
+      );
+      expect(
+        await page.evaluate(() => globalThis.commonfabric.rt === undefined),
+      ).toBe(true);
     });
   });
 
