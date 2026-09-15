@@ -234,16 +234,24 @@ export const acquireSkillTool: HarnessToolDefinition<
     if (requestedCommit !== undefined) {
       const allowedPins = acquirablePins(context.allowedSkillScripts);
       if (!allowedPins.includes(input.id)) {
-        return errorOutput(
-          allowedPins.length === 0
-            ? `acquire_skill was given the commit-pinned id ${input.id}, and ` +
-              `this run allows the scripts of no acquired skill; acquire by ` +
-              `the skill id alone to read its default-branch head`
-            : `acquire_skill was given the commit-pinned id ${input.id}, ` +
-              `which this run does not allow the scripts of; it allows ` +
-              `${allowedPins.join(", ")}, and acquiring by the skill id ` +
-              `alone reads its default-branch head`,
-        );
+        // A refusal rather than an error: the operator's policy decided this,
+        // it will decide the same way every time, and a caller that read it as
+        // an operational failure would retry something that cannot succeed.
+        return {
+          outputId,
+          status: "refused",
+          reason: {
+            code: "commit_not_allowlisted",
+            message: allowedPins.length === 0
+              ? `the commit-pinned id ${input.id} names a commit this run ` +
+                `allows the scripts of no acquired skill at; acquire by the ` +
+                `skill id alone to read its default-branch head`
+              : `the commit-pinned id ${input.id} names a commit this run ` +
+                `does not allow the scripts of; it allows ` +
+                `${allowedPins.join(", ")}, and acquiring by the skill id ` +
+                `alone reads its default-branch head`,
+          },
+        };
       }
     }
 

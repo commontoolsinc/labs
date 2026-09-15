@@ -592,6 +592,71 @@ describe("prompt-loop delegate_task skillHandle", () => {
     expect(result.runState.subagentRuns ?? []).toEqual([]);
   });
 
+  it("refuses `withoutSkillScript` that is not a boolean", async () => {
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-without-skill-script-bad-shape",
+      model: "gpt-5.4",
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-without-script-bad-shape", {
+          goal: "Plan the trip.",
+          skillHandle: "cfh:a:abc",
+          withoutSkillScript: "yes",
+        }),
+        assistantTurn("Understood."),
+      ], []),
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Delegate the plan.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const toolMessage = result.transcript.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
+    expect(toolMessage?.content).toContain("runs no script of its skill");
+    expect(result.runState.subagentRuns ?? []).toEqual([]);
+  });
+
+  it("refuses `withoutSkillScript` on a delegation carrying no skill", async () => {
+    // Inert without a skill to be instructions-only about, and an inert field
+    // the harness accepted would read as a decision that took effect.
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-without-skill-script-no-handle",
+      model: "gpt-5.4",
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-without-script-no-handle", {
+          goal: "Plan the trip.",
+          withoutSkillScript: true,
+        }),
+        assistantTurn("Understood."),
+      ], []),
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Delegate the plan.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const toolMessage = result.transcript.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain("cf-harness.invalid-tool-call");
+    expect(toolMessage?.content).toContain("omitted when no `skillHandle`");
+    expect(result.runState.subagentRuns ?? []).toEqual([]);
+  });
+
   it("refuses a handle naming empty skill text", async () => {
     await withSkillCell(async ({ pieces, ref }) => {
       const runId = "run-skill-handle-empty";

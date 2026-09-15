@@ -380,12 +380,49 @@ describe("delegating an acquired skill to a child", () => {
         return assistantTurn("Parent done.");
       },
       assert: (engine, _artifactRoot, context) => {
+        // A refusal rather than an error: the operator's policy decided it,
+        // and it will decide the same way every time.
+        expect(JSON.parse(acquireOutput)).toMatchObject({
+          status: "refused",
+          reason: { code: "commit_not_allowlisted" },
+        });
         expect(acquireOutput).toContain(forkCommit);
         expect(acquireOutput).toContain(PIN);
         expect(engine.getRunState().acquiredSkills?.skills ?? []).toHaveLength(
           0,
         );
         // Refused before any request, so no bytes were fetched at that commit.
+        expect(context.githubUrls).toEqual([]);
+      },
+    });
+  });
+
+  it("says so when a commit-pinned id is named and the run allows no pin", async () => {
+    let acquireOutput = "";
+    await runAcquisitionScenario({
+      allowedSkillScripts: [],
+      turn: (index, body) => {
+        if (index === 0) {
+          return toolCallTurn("call-acquire", "acquire_skill", { id: PIN });
+        }
+        if (index === 1) {
+          acquireOutput = String(
+            (body.input ?? []).findLast((entry) =>
+              entry.type === "function_call_output"
+            )?.output,
+          );
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: (engine, _artifactRoot, context) => {
+        expect(JSON.parse(acquireOutput)).toMatchObject({
+          status: "refused",
+          reason: { code: "commit_not_allowlisted" },
+        });
+        expect(acquireOutput).toContain("no acquired skill");
+        expect(engine.getRunState().acquiredSkills?.skills ?? []).toHaveLength(
+          0,
+        );
         expect(context.githubUrls).toEqual([]);
       },
     });
@@ -413,14 +450,27 @@ describe("delegating an acquired skill to a child", () => {
         }
         return assistantTurn("Parent done.");
       },
-      assert: (engine) => {
+      assert: async (engine, artifactRoot) => {
         const child = engine.getRunState().subagentRuns?.[0];
         expect(child?.status).toBe("completed");
-        // It permits nothing: the child holds no script tool either way.
         expect(child?.manifest.allowedToolIds).not.toContain(
           "run_skill_script",
         );
         expect(child?.manifest.allowedSkillScripts ?? []).toEqual([]);
+        // Recorded, so a run report can tell this from an operator who
+        // allowlisted nothing.
+        expect(child?.withoutSkillScript).toBe(true);
+
+        // And the bytes are gone with the tool: a profile holding `bash` has
+        // nothing under the acquired-skill path to run directly.
+        const capabilities = JSON.parse(
+          await Deno.readTextFile(
+            join(artifactRoot, child!.childRunId, "capabilities.json"),
+          ),
+        ) as { cfc?: { sandbox?: { cfc?: { mounts?: { name?: string }[] } } } };
+        expect(
+          (capabilities.cfc?.sandbox?.cfc?.mounts ?? []).map((m) => m.name),
+        ).not.toContain("acquired-skill");
       },
     });
   });

@@ -97,7 +97,7 @@ export const delegateTaskTool: HarnessToolDefinition<
         withoutSkillScript: {
           type: "boolean",
           description:
-            "States that this delegation wants its skill's instructions and runs no script of it. Required only when the skillHandle names a skill the operator allowlisted the scripts of at a DIFFERENT commit, which is otherwise refused because the child would silently receive no run_skill_script. It attaches nothing and permits nothing; a child given it holds the same tools it would have held anyway.",
+            "States that this delegation wants its skill's instructions and runs no script of it. Requires skillHandle. Needed only when that handle names a skill the operator allowlisted the scripts of at a DIFFERENT commit, which is otherwise refused because the child would silently receive no run_skill_script. The child's sandbox then carries no acquired-skill mount either, so there are no script bytes under it to reach by other means; the skill's text still reaches the child.",
         },
       },
     },
