@@ -86,9 +86,8 @@ wrapper classes (Section 1.4).
 > operations a value of any class is subject to -- `deep-freeze.ts`,
 > `value-hash.ts`, `value-debug.ts`, the comparisons in `comparison/`, and the
 > tag vocabulary in `value-tags/`.
-> Of those, two are also exported subpaths: `api.ts` as
-> `@commonfabric/data-model/api`, which is how `@commonfabric/api` reaches it,
-> and `value-tags/` as `@commonfabric/data-model/value-tags`.
+> Of those, one is also an exported subpath: `api.ts` as
+> `@commonfabric/data-model/api`, which is how `@commonfabric/api` reaches it.
 > `codec-interface/` is internal in the same way, reached through
 > `@commonfabric/data-model/codec-common`, which re-exports it.
 > `codec-common/`, `fabric-bases/` and `fabric-instances/` are exported subpaths
