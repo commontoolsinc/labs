@@ -1410,27 +1410,39 @@ export function sqliteQuery(
                 return;
               }
               const base = result.getAsNormalizedFullLink();
-              // Every row is an entity document of its own, keyed on the
-              // row's content under the result cell. A row whose content
-              // this result cell has held before links to that document,
-              // and the diff finds nothing to write there; two rows of equal
-              // content share one document. The id must not depend on
-              // anything that varies between runs, or an unchanged result
-              // would mint a document per row per run.
+              // Every row is an entity document of its own, keyed under the
+              // result cell on the row's content and on the schema the row
+              // is written under, per-column labels and row label included.
+              // A row this result cell has stored before under the same
+              // schema links to that document, and the diff finds nothing to
+              // write there; two rows of equal content and label share one
+              // document. The id must not depend on anything else that
+              // varies between runs, or an unchanged result would mint a
+              // document per row per run.
               //
-              // The stored link is bare. The row's schema, per-column labels
-              // and row label included, goes on the write alone, whose
-              // policy input is what carries the labels to the row document.
-              // A link carrying a schema would install that schema as a
-              // content-addressed document, and two scoped instances of one
-              // result settling in separate waves would both write it, which
-              // the second wave refuses.
+              // The schema is part of the key because the commit attaches
+              // label metadata only to documents it writes. A row whose
+              // content is unchanged but whose label is not — a column's
+              // `ifc` re-declared stricter on the handle, say — therefore
+              // needs a document of its own, or it would keep the label its
+              // old document carries.
+              //
+              // The stored link is bare. The row's schema goes on the write
+              // alone, whose policy input is what carries the labels to the
+              // row document. A link carrying a schema would install that
+              // schema as a content-addressed document, and two scoped
+              // instances of one result settling in separate waves would
+              // both write it, which the second wave refuses.
               const storedRows = resultRows.map((row, i) => {
+                const schema = {
+                  ...rowSchemas[i],
+                  ...(perRow[i] !== undefined && { ifc: perRow[i] }),
+                };
                 const rowCell = createCell(
                   runtime,
                   {
                     ...base,
-                    id: toURI(createRef({ row }, {
+                    id: toURI(createRef({ row, schema }, {
                       parent: { id: base.id, space: base.space },
                       path: [...base.path, "result"],
                       context: "sqlite-result-row",
@@ -1439,12 +1451,9 @@ export function sqliteQuery(
                     schema: undefined,
                   },
                   wtx,
-                ).withTx(wtx);
+                );
                 rowCell.asSchema(
-                  {
-                    ...rowSchemas[i],
-                    ...(perRow[i] !== undefined && { ifc: perRow[i] }),
-                  } as Parameters<Cell<unknown>["asSchema"]>[0],
+                  schema as Parameters<Cell<unknown>["asSchema"]>[0],
                 ).set(row);
                 return rowCell;
               });

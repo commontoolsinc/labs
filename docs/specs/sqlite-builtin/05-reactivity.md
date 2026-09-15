@@ -23,14 +23,19 @@ long way without a query-dependency analyzer.
   themselves from the same handler that writes), trading precision for manual
   bookkeeping. v1 does not parse SQL to compute fine-grained read sets.
 - **A row keeps its document across re-runs.** The write-back stores each
-  result row as an entity document of its own, keyed on the row's content
-  under the query's result cell. Row content this result cell has stored
-  before, in the previous run or any earlier one, links to that same
-  document and writes nothing to it; content the result cell has never
-  stored gets a new document; two rows of equal content share one. What a
-  re-run writes is the result cell (its `pending` flag, request hash, and
-  the array of row links) plus one document per row whose content is new to
-  this result cell — not one document per row per run.
+  result row as an entity document of its own, keyed under the query's result
+  cell on the row's content and on the schema the row is written under — its
+  per-column labels and its row label (Section [06](./06-cfc.md)). A row this
+  result cell has stored before under the same schema, in the previous run or
+  any earlier one, links to that same document and writes nothing to it; a
+  row it has never stored, or has stored only under another schema, gets a
+  new document; two rows of equal content and label share one. What a re-run
+  writes is the result cell (its `pending` flag, request hash, and the array
+  of row links) plus one document per row that is new to this result cell —
+  not one document per row per run. The schema is part of the key because a
+  commit attaches label metadata only to the documents it writes: a row whose
+  content is unchanged but whose label is stricter than before takes a new
+  document rather than keeping the label its old one carries.
 
 This is deliberately the same shape the runtime uses elsewhere: reactivity is
 driven by observing cells, and the handle cell's changing `rev` stands in for

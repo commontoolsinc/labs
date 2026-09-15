@@ -4,10 +4,14 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { table } from "@commonfabric/memory/sqlite/schema";
+import type { URI } from "@commonfabric/memory/interface";
 import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { createBuilder } from "../src/builder/factory.ts";
+import type { Cell } from "../src/cell.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -25,6 +29,25 @@ type QueryState = {
 
 /** One entity write the server was asked to commit: its op and the entity. */
 type WrittenOp = { op: string; id: string };
+
+const NOTES_SQL = "SELECT id, body FROM notes ORDER BY id";
+
+/** The `notes` table with no column labeled. */
+const plainTables = {
+  notes: table({ id: "integer primary key", body: "text" }),
+};
+
+/** The `notes` table with `body` labeled, as a stricter re-declaration. */
+const labeledTables = {
+  notes: table({
+    id: "integer primary key",
+    body: {
+      type: "string",
+      sqlType: "text",
+      ifc: { confidentiality: ["secret"] },
+    },
+  }),
+};
 
 describe("sqlite-query-row-identity", () => {
   // Every commit a runtime sends crosses the loopback transport as a frame the
@@ -87,27 +110,33 @@ describe("sqlite-query-row-identity", () => {
   };
 
   /**
-   * A piece running one query over `notes`, re-issued whenever `tick`
-   * changes. Returns the piece's result cell and the tick cell that drives
-   * the re-run.
+   * A piece running one query over `db`, re-issued whenever `tick` changes.
+   * `db` is the handle itself or a cell holding it, so a case can re-declare
+   * the handle under a running query. Returns the piece's result cell and the
+   * tick cell that drives the re-run.
    */
-  const runQuery = async (db: SqliteDbRef, label: string) => {
+  const runQuery = async (
+    db: SqliteDbRef | Cell<SqliteDbRef>,
+    label: string,
+    sql = NOTES_SQL,
+  ) => {
     const tx = runtime.edit();
     const tick = runtime.getCell<number>(space, `${label}-tick`, undefined, tx);
     tick.set(0);
-    const queryPattern = cf.pattern<{ tick: number }>(({ tick }) =>
-      cf.sqliteQuery({
-        db,
-        sql: "SELECT id, body FROM notes ORDER BY id",
-        reactOn: tick,
-        // The raw handle object stands in for a `sqliteDatabase` result here.
-        // deno-lint-ignore no-explicit-any
-      } as any)
+    const queryPattern = cf.pattern<{ tick: number; db: SqliteDbRef }>(
+      ({ tick, db }) =>
+        cf.sqliteQuery({
+          db,
+          sql,
+          reactOn: tick,
+          // The raw handle object stands in for a `sqliteDatabase` result here.
+          // deno-lint-ignore no-explicit-any
+        } as any),
     );
     const result = runtime.run(
       tx,
       queryPattern,
-      { tick },
+      { tick, db },
       runtime.getCell(space, `${label}-result`, queryPattern.resultSchema, tx),
     );
     await tx.commit();
@@ -149,15 +178,33 @@ describe("sqlite-query-row-identity", () => {
     });
   };
 
-  const seededDb = async (): Promise<SqliteDbRef> => {
-    const db: SqliteDbRef = {
-      id: `of:rowid-${crypto.randomUUID()}`,
-      tables: { notes: table({ id: "integer primary key", body: "text" }) },
-    };
-    await execSqlite(
-      db,
-      "INSERT INTO notes (id, body) VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+  /**
+   * The confidentiality atoms the row document `id` carries at `body`, read
+   * off the document's own stored label under a transaction of its own.
+   */
+  const bodyConfidentiality = async (
+    id: string,
+  ): Promise<readonly unknown[]> => {
+    const tx = runtime.edit();
+    const row = runtime.getCellFromLink(
+      { space, id: id as URI, path: [] },
+      undefined,
+      tx,
     );
+    const atoms = cfcConfidentialityForObservationNode({
+      labelView: cfcLabelViewForCell(row),
+      logicalPath: ["body"],
+    });
+    await tx.commit();
+    return atoms;
+  };
+
+  const seededDb = async (
+    tables = plainTables,
+    rows = "(1, 'a'), (2, 'b'), (3, 'c')",
+  ): Promise<SqliteDbRef> => {
+    const db: SqliteDbRef = { id: `of:rowid-${crypto.randomUUID()}`, tables };
+    await execSqlite(db, `INSERT INTO notes (id, body) VALUES ${rows}`);
     return db;
   };
 
@@ -218,5 +265,97 @@ describe("sqlite-query-row-identity", () => {
     expect(
       secondRun.filter((w) => !known.has(w.id) && w.id !== rowsAfter[1]),
     ).toEqual([]);
+  });
+
+  it("links a row whose content returns to the document it had before", async () => {
+    const db = await seededDb();
+    const { result, tick } = await runQuery(db, "returning");
+    const first = await settledPast(result, undefined);
+    await runtime.settled();
+    expect(first.error).toBeUndefined();
+    const rowsBefore = rowDocIds(result);
+
+    await execSqlite(db, "UPDATE notes SET body = 'B' WHERE id = 2");
+    const second = await rerun(result, tick, first);
+    expect(second.error).toBeUndefined();
+    expect(rowDocIds(result)[1]).not.toBe(rowsBefore[1]);
+    const known = new Set(written.map((w) => w.id));
+    const mark = written.length;
+
+    await execSqlite(db, "UPDATE notes SET body = 'b' WHERE id = 2");
+    const third = await rerun(result, tick, second);
+    expect(third.error).toBeUndefined();
+    expect(third.result).toEqual(first.result);
+
+    const thirdRun = written.slice(mark);
+    expect(rowDocIds(result)).toEqual(rowsBefore);
+    expect(thirdRun.filter((w) => rowsBefore.includes(w.id))).toEqual([]);
+    expect(thirdRun.filter((w) => !known.has(w.id))).toEqual([]);
+  });
+
+  it("stores two rows of equal content as one document", async () => {
+    const db = await seededDb(plainTables, "(1, 'a'), (2, 'a'), (3, 'c')");
+    const { result } = await runQuery(
+      db,
+      "equal",
+      "SELECT body FROM notes ORDER BY id",
+    );
+    const first = await settledPast(result, undefined);
+    await runtime.settled();
+    expect(first.error).toBeUndefined();
+    expect(first.result).toEqual([{ body: "a" }, { body: "a" }, { body: "c" }]);
+
+    const rows = rowDocIds(result);
+    expect(rows[0]).toBe(rows[1]);
+    expect(rows[2]).not.toBe(rows[0]);
+    expect(written.filter((w) => w.id === rows[0])).toHaveLength(1);
+  });
+
+  it({
+    name:
+      "moves a row whose label changes under unchanged content to a document carrying the new label",
+    sanitizeResources: false,
+  }, async () => {
+    // A labeled handle has the server load the column-metadata library, which
+    // stays loaded for the life of the process, so this case is exempt from
+    // the dynamic-library leak check. The handle is re-declared with `body`
+    // labeled while the query runs, as a stricter re-declaration of a column
+    // is allowed to do; the rows read back identical, and only the label they
+    // are written under differs.
+
+    const db = await seededDb();
+    const tx = runtime.edit();
+    const handle = runtime.getCell<SqliteDbRef>(
+      space,
+      "relabel-handle",
+      undefined,
+      tx,
+    );
+    handle.set(db);
+    await tx.commit();
+    const { result, tick } = await runQuery(handle, "relabel");
+    const first = await settledPast(result, undefined);
+    await runtime.settled();
+    expect(first.error).toBeUndefined();
+    const rowsBefore = rowDocIds(result);
+    const mark = written.length;
+
+    const relabel = runtime.edit();
+    handle.withTx(relabel).set({ ...db, tables: labeledTables });
+    await relabel.commit();
+    const second = await rerun(result, tick, first);
+    expect(second.error).toBeUndefined();
+    expect(second.result).toEqual(first.result);
+
+    const rowsAfter = rowDocIds(result);
+    expect(rowsAfter.filter((id) => rowsBefore.includes(id))).toEqual([]);
+    const secondRun = written.slice(mark);
+    expect(secondRun.filter((w) => rowsBefore.includes(w.id))).toEqual([]);
+    for (const id of rowsAfter) {
+      expect(secondRun.map((w) => w.id)).toContain(id);
+    }
+    for (const id of rowsAfter) {
+      expect(await bodyConfidentiality(id)).toContainEqual("secret");
+    }
   });
 });
