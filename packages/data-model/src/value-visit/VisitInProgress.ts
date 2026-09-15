@@ -159,7 +159,9 @@ export class VisitInProgress<PlusType = never, ResultType = FabricValue> {
   /**
    * Visits a top-level value or contained sub-value.
    */
-  #visitValue(value: FabricValuePlus<PlusType>): BaselineVisitResult<ResultType> {
+  #visitValue(
+    value: FabricValuePlus<PlusType>,
+  ): BaselineVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     switch (result?.type) {

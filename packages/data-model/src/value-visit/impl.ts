@@ -4,10 +4,7 @@
 
 import type { FabricValue, FabricValuePlus } from "@/interface.ts";
 
-import {
-  type BaselineVisitResult,
-  type ValueVisitor,
-} from "./interface.ts";
+import type { BaselineVisitResult, ValueVisitor } from "./interface.ts";
 import { VisitInProgress } from "./VisitInProgress.ts";
 
 /**
