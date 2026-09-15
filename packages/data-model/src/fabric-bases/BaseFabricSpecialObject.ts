@@ -4,7 +4,7 @@
  * recognizes either. It has no members and carries no brand. It is not a type
  * a caller names: the pattern-visible `FabricSpecialObject` in `api.ts` is the
  * union of the two subclasses, and `isFabricSpecialObject()` in
- * `type-check.ts` is the check, narrowing to that union. The data model
+ * `types/narrowing.ts` is the check, narrowing to that union. The data model
  * defines no other subclass, and an instance of one defined elsewhere is not a
  * `FabricValue`.
  *

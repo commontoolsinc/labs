@@ -66,7 +66,7 @@ import {
   shallowFabricFromConvertibleJsObjectElseUndefined,
   shallowFabricFromConvertibleJsValue,
 } from "@/convertible-js.ts";
-import { assertValidFabricValueLayer } from "@/validity-check.ts";
+import { assertValidFabricValueLayer } from "@/types";
 import { LAYER_CORPUS, WeirdError } from "./fabric-value-corpus.ts";
 
 /** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
