@@ -1,9 +1,12 @@
 /**
  * The decisions behind `topics-browser-measurement.ts` that need no browser:
- * locating a lift in its source, deciding whether its module ran, confirming
- * which implementation runs at its position, reading timing deltas and the
- * worker's run count, and ending a sampling after its operation. The module
- * imports nothing, so a plain `deno test` exercises all of it.
+ * locating a lift in its authored source, reading a lift's compiled text from
+ * an emitted module, deciding whether a lift's module ran, requiring that the
+ * board runs the program compiled from the sources read, without coverage
+ * instrumentation, and with each lift's preview equal to its compiled text,
+ * reading timing deltas and the worker's run count, and ending a sampling after
+ * its operation. The module imports nothing, so a plain `deno test` exercises
+ * all of it.
  */
 
 /** A position in authored source: line 1-based, column 0-based. */
@@ -13,18 +16,6 @@ export interface SourcePosition {
 
   /** Authored column, 0-based. */
   readonly col: number;
-}
-
-/** Where a lift sits in its module's text. */
-export interface LiftDeclaration {
-  /** Where the lift's function starts, which a run's `src` reports. */
-  readonly position: SourcePosition;
-
-  /**
-   * The declaration's text from the function's start up to the next line that
-   * starts at column 0 with anything but a closing bracket.
-   */
-  readonly text: string;
 }
 
 /** A lift measured separately, named by its binding. */
@@ -45,10 +36,10 @@ export interface TopicsLiftSite extends TopicsLift {
   readonly site: string;
 }
 
-/** A located lift together with the declaration it was located by. */
-export interface ResolvedTopicsLift extends TopicsLiftSite {
-  /** {@link LiftDeclaration.text} for the lift. */
-  readonly declaration: string;
+/** A located lift together with its text as the board's compiler emits it. */
+export interface CompiledTopicsLift extends TopicsLiftSite {
+  /** The lift's compiled function, whose `toString()` a preview begins. */
+  readonly compiledText: string;
 }
 
 /** One timing key's samples accumulated over an operation. */
@@ -79,38 +70,24 @@ export type TimingSnapshot = Readonly<
 export const WORKER_RUN_TIMING_KEY = "scheduler/scheduler/run";
 
 /**
- * How many characters of an implementation's source the runner keeps as its
- * preview. A preview this long may end partway through a token.
+ * How many characters of an implementation's `toString()` the runner keeps as
+ * the preview a graph snapshot reports.
  */
 export const PREVIEW_LENGTH = 200;
 
-/**
- * How many tokens a preview cut at {@link PREVIEW_LENGTH} must reach past its
- * function's first `=>` to confirm a lift by. A cut preview is compared only up
- * to the cut, so one that barely reaches the body says little about the code
- * running there; eight tokens is an opening expression or statement.
- */
-export const MIN_CUT_PREVIEW_BODY_TOKENS = 8;
+/** The call pattern coverage instrumentation writes before each statement. */
+export const COVERAGE_HIT_CALL = "__cfPatternCoverage?.hit(";
 
 /** Matches a run's `src`: the module identity, then `/<path>:<line>:<col>`. */
 const SRC_PATTERN = /^cf:module\/([^/]+)(\/.+:\d+:\d+)$/;
 
 /**
- * Matches a line that starts at column 0 with anything but a closing bracket,
- * which in module-scope code starts a statement or a comment of its own.
- */
-const TOP_LEVEL_START = /(?<=\n)[^\s)\]}]/;
-
-/**
  * Returns where the function argument of `name`'s module-scope
  * `const <name> = lift(<function>)` declaration starts in `text`, which is the
  * position the transformer records for a hoisted builder and the runtime
- * reports in each run's `src`, and the declaration's text from there. Comments
- * between the call's parenthesis and the function are skipped; type arguments
- * on `lift`, and a function passed after schema arguments, are not recognized.
- * The declaration's text ends at the next line starting at column 0 with
- * anything but a closing bracket, so a lift body holding such a line, as a
- * multi-line template literal can, is cut short and fails to match.
+ * reports in each run's `src`. Comments between the call's parenthesis and the
+ * function are skipped; type arguments on `lift`, and a function passed after
+ * schema arguments, are not recognized.
  *
  * @throws If `text` holds no such declaration or more than one; `source` names
  *   the text in the message.
@@ -119,10 +96,8 @@ export function locateLift(
   text: string,
   name: string,
   source = "the source",
-): LiftDeclaration {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new Error(`\`${name}\` is not a plain identifier`);
-  }
+): SourcePosition {
+  requirePlainName(name);
   const trivia = String.raw`(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*`;
   const declaration = new RegExp(
     String.raw`\bconst\s+${name}\s*=\s*lift\s*\(` + trivia,
@@ -136,14 +111,60 @@ export function locateLift(
     );
   }
   const [match] = matches;
-  const start = match.index + match[0].length;
-  const lines = text.slice(0, start).split("\n");
-  const rest = text.slice(start);
-  const end = TOP_LEVEL_START.exec(rest);
-  return {
-    position: { line: lines.length, col: lines[lines.length - 1].length },
-    text: end === null ? rest : rest.slice(0, end.index),
-  };
+  const lines = text.slice(0, match.index + match[0].length).split("\n");
+  return { line: lines.length, col: lines[lines.length - 1].length };
+}
+
+/**
+ * Returns the function the compiled module `js` passes to the lift declared as
+ * `const <name> = (0, <alias>.lift)(<function>, ...)`, the form the compiler
+ * emits for an authored `const <name> = lift(<function>)`. The text is what the
+ * function's `toString()` returns, so a running action's preview is its first
+ * {@link PREVIEW_LENGTH} characters. The argument's end is found by scanning
+ * tokens, so brackets inside strings, template literals, regular expressions,
+ * and comments do not end it.
+ *
+ * @throws If `js` holds no such declaration or more than one, or the call has
+ *   no argument that closes; `source` names the module in the message.
+ */
+export function compiledLiftText(
+  js: string,
+  name: string,
+  source = "the compiled module",
+): string {
+  requirePlainName(name);
+  const declaration = new RegExp(
+    String.raw`\bconst\s+${name}\s*=\s*\(0,\s*[A-Za-z_$][\w$]*\.lift\)\(`,
+    "g",
+  );
+  const matches = [...js.matchAll(declaration)];
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected one compiled \`const ${name} = (0, <alias>.lift)(...)\` ` +
+        `declaration in ${source}, found ${matches.length}`,
+    );
+  }
+  const [match] = matches;
+  let depth = 0;
+  let first: Token | undefined;
+  let last: Token | undefined;
+  for (const token of scanTokens(js, match.index + match[0].length)) {
+    if (depth === 0 && (token.text === "," || token.text === ")")) {
+      if (first === undefined || last === undefined) break;
+      return js.slice(first.start, last.end);
+    }
+    if (token.text === "(" || token.text === "[" || token.text === "{") {
+      depth++;
+    } else if (token.text === ")" || token.text === "]" || token.text === "}") {
+      depth--;
+    }
+    first ??= token;
+    last = token;
+  }
+  throw new Error(
+    `The compiled \`${name}\` lift call in ${source} has no argument that ` +
+      `closes`,
+  );
 }
 
 /** Splits a run's `src` into module identity and site, if it has that form. */
@@ -183,7 +204,7 @@ export function liftRunningStates(
       continue;
     }
     sites.add(parsed.site);
-    const module = parsed.site.replace(/:\d+:\d+$/, "");
+    const module = moduleOf(parsed.site);
     const identities = identitiesByModule.get(module) ?? new Set();
     identities.add(parsed.identity);
     identitiesByModule.set(module, identities);
@@ -241,6 +262,136 @@ export function liftRunningStates(
 }
 
 /**
+ * Fails a sample taken on a board running a Topics module other than the one
+ * compiled from the sources read. `identities` holds the content identity of
+ * each compiled Topics module by `/<module>`; `srcs` are the `src` values of
+ * actions seen around the operation, each of which begins
+ * `cf:module/<identity>`. A module no `src` names is not checked, since nothing
+ * ran from it.
+ *
+ * @throws If `identities` lacks a lift's module, or a `src` naming a module in
+ *   `identities` carries another identity.
+ */
+export function requireSameProgram(
+  lifts: readonly TopicsLift[],
+  identities: ReadonlyMap<string, string>,
+  srcs: Iterable<string>,
+): void {
+  const running = new Map<string, Set<string>>();
+  for (const src of srcs) {
+    const parsed = parseSrc(src);
+    if (parsed === undefined) continue;
+    const module = moduleOf(parsed.site);
+    const seen = running.get(module) ?? new Set();
+    seen.add(parsed.identity);
+    running.set(module, seen);
+  }
+  for (const lift of lifts) {
+    if (!identities.has(`/${lift.module}`)) {
+      throw new Error(
+        `The program compiled from the sources read has no module ` +
+          `\`/${lift.module}\``,
+      );
+    }
+  }
+  for (const [module, compiled] of identities) {
+    for (const identity of running.get(module) ?? []) {
+      if (identity !== compiled) {
+        throw new Error(
+          `\`${module}\` runs as module \`${identity}\`, but the sources read ` +
+            `compile it to \`${compiled}\`: the sources read are not the ` +
+            `program the board runs`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Fails a sample taken where pattern coverage instruments the running code.
+ * Instrumentation writes a hit call before each statement of every lift, so
+ * no preview could equal the uninstrumented compiled text. `collecting` is
+ * whether the page's worker holds a coverage collector; `previews` are the
+ * implementation previews the graph reports.
+ *
+ * @throws If `collecting` is true, or a preview holds
+ *   {@link COVERAGE_HIT_CALL}.
+ */
+export function requireNoCoverage(
+  collecting: boolean,
+  previews: Iterable<string>,
+): void {
+  if (collecting) {
+    throw new Error(
+      "The page's worker collects pattern coverage, whose instrumentation " +
+        "rewrites every lift's code: measure on a page without coverage",
+    );
+  }
+  for (const preview of previews) {
+    if (preview.includes(COVERAGE_HIT_CALL)) {
+      throw new Error(
+        "A running implementation holds pattern coverage instrumentation, " +
+          `which rewrites every lift's code: \`${preview.split("\n")[0]}\``,
+      );
+    }
+  }
+}
+
+/**
+ * Returns, by site, the preview of the implementation running at each running
+ * lift's site, after requiring that every preview found there equals the first
+ * {@link PREVIEW_LENGTH} characters of the lift's compiled text. `actions` are
+ * graph snapshots' previews by `src`; `running` is {@link liftRunningStates}'s
+ * result.
+ *
+ * @throws If a running lift's site holds no action with a preview in any of
+ *   `actions`, which happens when the lift's only actions ran and were removed
+ *   between snapshots, or if a preview there differs from the compiled text;
+ *   that message names the lift and quotes both texts from their first
+ *   difference.
+ */
+export function confirmLiftImplementations(
+  lifts: readonly CompiledTopicsLift[],
+  actions: readonly Readonly<Record<string, readonly string[]>>[],
+  running: ReadonlyMap<string, boolean>,
+): Map<string, string> {
+  const previews = new Map<string, Set<string>>();
+  for (const snapshot of actions) {
+    for (const [src, found] of Object.entries(snapshot)) {
+      const site = parseSrc(src)?.site;
+      if (site === undefined) continue;
+      const atSite = previews.get(site) ?? new Set();
+      for (const preview of found) atSite.add(preview);
+      previews.set(site, atSite);
+    }
+  }
+  const confirmed = new Map<string, string>();
+  for (const lift of lifts) {
+    if (running.get(lift.site) !== true) continue;
+    const atSite = [...(previews.get(lift.site) ?? [])];
+    if (atSite.length === 0) {
+      throw new Error(
+        `\`${lift.name}\` resolves to \`${lift.site}\`, but no action in a ` +
+          `graph snapshot there shows its implementation to confirm it by`,
+      );
+    }
+    const expected = lift.compiledText.slice(0, PREVIEW_LENGTH);
+    const other = atSite.find((preview) => preview !== expected);
+    if (other !== undefined) {
+      const at = firstDifference(other, expected);
+      throw new Error(
+        `\`${lift.name}\` at \`${lift.site}\` runs an implementation that ` +
+          `differs from its compiled text at character ${at}: running ` +
+          `${JSON.stringify(other.slice(at, at + 40))}, compiled ` +
+          `${JSON.stringify(expected.slice(at, at + 40))}`,
+      );
+    }
+    confirmed.set(lift.site, expected);
+  }
+  return confirmed;
+}
+
+/**
  * Fails a sample whose runs cannot be attributed to lifts by position. `srcs`
  * are the `src` keys of the runs that carried a read sample, a run with no
  * `src` keyed by the empty string; `running` is {@link liftRunningStates}'s
@@ -270,124 +421,6 @@ export function requireAttributableRuns(
       );
     }
   }
-}
-
-/**
- * Returns whether `preview`, the runner's copy of an implementation's emitted
- * source, is the function `declaration` authors, compared token by token with
- * comments and whitespace dropped. Four differences are allowed:
- *
- * - type syntax in the declaration: annotations on parameters, destructured
- *   parameters, variables, and arrow return types; `as` and `satisfies`
- *   assertions; a postfix `!`; an optional parameter's `?`; and type arguments
- *   or type parameters before a `(`;
- * - the module alias the compiler puts on an imported name, `(0, alias_2.name)`
- *   or `alias_2.name`;
- * - a trailing comma before a closing bracket;
- * - the preview's cut at {@link PREVIEW_LENGTH} characters.
- *
- * A complete preview must end where the declaration's function does, followed
- * only by the lift call's `)` and `;`. A cut preview drops its last token,
- * which the cut may have split, and must reach
- * {@link MIN_CUT_PREVIEW_BODY_TOKENS} tokens past its first `=>`. Type syntax
- * is recognized by the positions it takes, not by parsing, so a declaration
- * using it anywhere else fails to match rather than matching another function.
- */
-export function implementationMatches(
-  preview: string,
-  declaration: string,
-): boolean {
-  const cut = preview.length >= PREVIEW_LENGTH;
-  const emitted = withoutTrailingCommas(
-    withoutModuleAliases(tokenize(preview)),
-  );
-  if (cut) emitted.pop();
-  if (emitted.length === 0) return false;
-  if (cut) {
-    const arrow = emitted.indexOf("=>");
-    if (
-      arrow === -1 ||
-      emitted.length - arrow - 1 < MIN_CUT_PREVIEW_BODY_TOKENS
-    ) {
-      return false;
-    }
-  }
-  const authored = withoutTrailingCommas(tokenize(declaration));
-  const walk: DeclarationWalk = { open: [], opens: new Map() };
-  let at = 0;
-  for (const token of emitted) {
-    while (authored[at] !== token) {
-      const next = afterTypeSyntax(authored, at, token, walk);
-      if (next === undefined) return false;
-      at = next;
-    }
-    if (token === "(" || token === "[" || token === "{") {
-      walk.open.push(at);
-    } else if (token === ")" || token === "]" || token === "}") {
-      const opener = walk.open.pop();
-      if (opener !== undefined) walk.opens.set(at, opener);
-    }
-    at++;
-  }
-  if (cut) return true;
-  while (authored[at] === "as" || authored[at] === "satisfies") {
-    const next = afterTypeSyntax(authored, at, undefined, walk);
-    if (next === undefined) return false;
-    at = next;
-  }
-  const rest = authored.slice(at);
-  return rest[0] === ")" &&
-    (rest.length === 1 || (rest.length === 2 && rest[1] === ";"));
-}
-
-/**
- * Returns, by site, the preview of the implementation running at each running
- * lift's site, after confirming each preview found there with
- * {@link implementationMatches}. `actions` are graph snapshots' previews by
- * `src`; `running` is {@link liftRunningStates}'s result.
- *
- * @throws If a running lift's site holds no action with a preview in any of
- *   `actions`, which happens when the lift's only actions ran and were removed
- *   between snapshots, or if an action there runs another function.
- */
-export function confirmLiftImplementations(
-  lifts: readonly ResolvedTopicsLift[],
-  actions: readonly Readonly<Record<string, readonly string[]>>[],
-  running: ReadonlyMap<string, boolean>,
-): Map<string, string> {
-  const previews = new Map<string, Set<string>>();
-  for (const snapshot of actions) {
-    for (const [src, found] of Object.entries(snapshot)) {
-      const site = parseSrc(src)?.site;
-      if (site === undefined) continue;
-      const atSite = previews.get(site) ?? new Set();
-      for (const preview of found) atSite.add(preview);
-      previews.set(site, atSite);
-    }
-  }
-  const confirmed = new Map<string, string>();
-  for (const lift of lifts) {
-    if (running.get(lift.site) !== true) continue;
-    const atSite = [...(previews.get(lift.site) ?? [])];
-    if (atSite.length === 0) {
-      throw new Error(
-        `\`${lift.name}\` resolves to \`${lift.site}\`, but no action in a ` +
-          `graph snapshot there shows its implementation to confirm it by`,
-      );
-    }
-    const other = atSite.find((preview) =>
-      !implementationMatches(preview, lift.declaration)
-    );
-    if (other !== undefined) {
-      throw new Error(
-        `\`${lift.name}\` resolves to \`${lift.site}\`, but the action there ` +
-          `runs \`${other.split("\n")[0]}\`: the sources read are not the ` +
-          `ones the board runs`,
-      );
-    }
-    confirmed.set(lift.site, atSite[0]);
-  }
-  return confirmed;
 }
 
 /**
@@ -474,17 +507,42 @@ export async function runThenStop<T, S>(
   return { value: outcome.value, stopped };
 }
 
+/** Helper for the lookups above, which refuses a name that is not plain. */
+function requirePlainName(name: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`\`${name}\` is not a plain identifier`);
+  }
+}
+
+/** Helper for the decisions above, which returns a site's module path. */
+function moduleOf(site: string): string {
+  return site.replace(/:\d+:\d+$/, "");
+}
+
+/**
+ * Helper for {@link confirmLiftImplementations}, which returns the index of
+ * the first character where `a` and `b` differ, or the shorter one's length.
+ */
+function firstDifference(a: string, b: string): number {
+  let at = 0;
+  while (at < a.length && at < b.length && a[at] === b[at]) at++;
+  return at;
+}
+
 //
-// Token comparison
+// Token scanning
 //
 
-/** Where a declaration's walk stands: its open brackets and matched pairs. */
-interface DeclarationWalk {
-  /** Indices of the brackets opened and not yet closed. */
-  open: number[];
+/** One token of source, with where it starts and ends. */
+interface Token {
+  /** The token's text. */
+  text: string;
 
-  /** The index of each closed bracket's opener, by the closer's index. */
-  opens: Map<number, number>;
+  /** Offset of its first character. */
+  start: number;
+
+  /** Offset just past its last character. */
+  end: number;
 }
 
 /** Multi-character punctuators, longest first. */
@@ -524,53 +582,62 @@ const PUNCTUATORS = [
   ">>",
 ];
 
-/** Tokens that may end a parameter's type annotation. */
-const PARAMETER_TYPE_ENDS: ReadonlySet<string> = new Set([",", ")", "="]);
-
-/** Tokens that may end a variable's type annotation. */
-const VARIABLE_TYPE_ENDS: ReadonlySet<string> = new Set(["=", ";", ","]);
-
-/** Tokens that may end an arrow function's return type. */
-const RETURN_TYPE_ENDS: ReadonlySet<string> = new Set(["=>"]);
-
-/** Tokens that may end the type of an `as` or `satisfies` assertion. */
-const ASSERTION_ENDS: ReadonlySet<string> = new Set([
-  ")",
-  ",",
-  ";",
-  "]",
-  "}",
+/**
+ * Keywords after which a `/` starts a regular expression literal rather than a
+ * division.
+ */
+const REGEX_PRECEDING_KEYWORDS: ReadonlySet<string> = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
 ]);
 
-/** Keywords that declare a variable. */
-const VARIABLE_KEYWORDS: ReadonlySet<string> = new Set(["const", "let", "var"]);
-
 /**
- * Helper for {@link implementationMatches}, which splits source into
- * identifiers, numbers, string and template literals, and punctuators, dropping
- * whitespace and comments. An unterminated literal runs to the end.
+ * Helper for {@link compiledLiftText}, which yields the tokens of `text` from
+ * offset `from`: identifiers, numbers, string, template, and regular
+ * expression literals, and punctuators, with whitespace and comments dropped.
+ * A template literal is one token, `${...}` substitutions included. An
+ * unterminated literal ends at the end of `text`, or for a quoted string at an
+ * unescaped line break.
  */
-function tokenize(text: string): string[] {
-  const tokens: string[] = [];
+function* scanTokens(text: string, from = 0): Generator<Token> {
   const word = /[A-Za-z_$][\w$]*|\d[\w.]*|\.\d\w*/y;
-  let at = 0;
+  let previous: string | undefined;
+  let at = from;
   while (at < text.length) {
     const char = text[at];
     if (/\s/.test(char)) {
       at++;
-    } else if (text.startsWith("//", at)) {
-      const end = text.indexOf("\n", at);
-      at = end === -1 ? text.length : end;
-    } else if (text.startsWith("/*", at)) {
-      const end = text.indexOf("*/", at + 2);
-      at = end === -1 ? text.length : end + 2;
-    } else if (char === '"' || char === "'" || char === "`") {
-      let end = at + 1;
-      while (end < text.length && text[end] !== char) {
-        end += text[end] === "\\" ? 2 : 1;
-      }
-      tokens.push(text.slice(at, end + 1));
-      at = end + 1;
+      continue;
+    }
+    if (text.startsWith("//", at)) {
+      const newline = text.indexOf("\n", at);
+      at = newline === -1 ? text.length : newline;
+      continue;
+    }
+    if (text.startsWith("/*", at)) {
+      const close = text.indexOf("*/", at + 2);
+      at = close === -1 ? text.length : close + 2;
+      continue;
+    }
+    let end: number;
+    if (char === '"' || char === "'") {
+      end = quotedEnd(text, at);
+    } else if (char === "`") {
+      end = templateEnd(text, at);
+    } else if (char === "/" && startsRegex(previous)) {
+      end = regexEnd(text, at);
     } else {
       word.lastIndex = at;
       const matched = word.exec(text)?.[0] ??
@@ -578,158 +645,100 @@ function tokenize(text: string): string[] {
           text.startsWith(punctuator, at) &&
           !(punctuator === "?." && /\d/.test(text[at + 2] ?? ""))
         ) ?? char;
-      tokens.push(matched);
-      at += matched.length;
+      end = at + matched.length;
     }
+    const token = { text: text.slice(at, end), start: at, end };
+    previous = token.text;
+    yield token;
+    at = end;
   }
-  return tokens;
 }
 
 /**
- * Helper for {@link implementationMatches}, which reads an imported name
- * through the module alias the compiler writes on it.
+ * Helper for {@link scanTokens}, which returns the offset past the quoted
+ * string starting at `at`.
  */
-function withoutModuleAliases(tokens: readonly string[]): string[] {
-  const alias = /^[A-Za-z_$][\w$]*_\d+$/;
-  const result: string[] = [];
-  for (let at = 0; at < tokens.length; at++) {
-    const [open, zero, comma, module, dot, name, close] = tokens.slice(
-      at,
-      at + 7,
-    );
-    if (
-      open === "(" && zero === "0" && comma === "," && alias.test(module) &&
-      dot === "." && isName(name) && close === ")"
-    ) {
-      result.push(name);
-      at += 6;
-    } else if (
-      alias.test(tokens[at]) && tokens[at + 1] === "." &&
-      isName(tokens[at + 2])
-    ) {
-      result.push(tokens[at + 2]);
-      at += 2;
+function quotedEnd(text: string, at: number): number {
+  const quote = text[at];
+  for (let end = at + 1; end < text.length; end++) {
+    if (text[end] === "\\") end++;
+    else if (text[end] === quote) return end + 1;
+    else if (text[end] === "\n") return end;
+  }
+  return text.length;
+}
+
+/**
+ * Helper for {@link scanTokens}, which returns the offset past the template
+ * literal starting at `at`, reading each `${...}` substitution as code.
+ */
+function templateEnd(text: string, at: number): number {
+  let end = at + 1;
+  while (end < text.length) {
+    if (text[end] === "\\") {
+      end += 2;
+    } else if (text[end] === "`") {
+      return end + 1;
+    } else if (text.startsWith("${", end)) {
+      end = substitutionEnd(text, end + 2);
     } else {
-      result.push(tokens[at]);
+      end++;
     }
   }
-  return result;
-}
-
-/** Helper for {@link implementationMatches}, which drops trailing commas. */
-function withoutTrailingCommas(tokens: readonly string[]): string[] {
-  return tokens.filter((token, at) =>
-    token !== "," ||
-    !(tokens[at + 1] === ")" || tokens[at + 1] === "]" ||
-      tokens[at + 1] === "}")
-  );
+  return text.length;
 }
 
 /**
- * Helper for {@link implementationMatches}, which returns the index past the
- * type syntax starting at `authored[at]`, the next token then being `wanted`
- * where one is given, or `undefined` when no type syntax starts there.
+ * Helper for {@link templateEnd}, which returns the offset past the `}` closing
+ * a substitution whose code starts at `from`.
  */
-function afterTypeSyntax(
-  authored: readonly string[],
-  at: number,
-  wanted: string | undefined,
-  walk: DeclarationWalk,
-): number | undefined {
-  const token = authored[at];
-  const previous = authored[at - 1];
-  const enclosing = walk.open.length === 0
-    ? undefined
-    : authored[walk.open[walk.open.length - 1]];
-  if (token === ":") {
-    const ends = previous === ")" ? RETURN_TYPE_ENDS : enclosing === "(" &&
-        (isName(previous) || previous === "}" || previous === "]" ||
-          previous === "?")
-      ? PARAMETER_TYPE_ENDS
-      : declaresVariable(authored, at, walk)
-      ? VARIABLE_TYPE_ENDS
-      : undefined;
-    return ends === undefined
-      ? undefined
-      : typeEnd(authored, at + 1, ends, wanted);
-  }
-  if (
-    (token === "as" || token === "satisfies") && previous !== undefined &&
-    (isName(previous) || /^[)\]}"'`\d]/.test(previous))
-  ) {
-    return typeEnd(authored, at + 1, ASSERTION_ENDS, wanted);
-  }
-  if (
-    token === "?" && authored[at + 1] === ":" && enclosing === "(" &&
-    isName(previous)
-  ) {
-    return at + 1;
-  }
-  if (
-    token === "!" && wanted !== "!" &&
-    (isName(previous) || previous === ")" || previous === "]")
-  ) {
-    return at + 1;
-  }
-  if (token === "<" && wanted === "(") {
-    let depth = 0;
-    for (let end = at; end < authored.length; end++) {
-      if (authored[end] === "<") depth++;
-      else if (/^>+$/.test(authored[end])) depth -= authored[end].length;
-      if (depth === 0) return authored[end + 1] === "(" ? end + 1 : undefined;
-      if (depth < 0) return undefined;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Helper for {@link afterTypeSyntax}, which returns the index of the first
- * token outside brackets opened within the type that is in `ends`, provided it
- * is `wanted` where one is given.
- */
-function typeEnd(
-  authored: readonly string[],
-  from: number,
-  ends: ReadonlySet<string>,
-  wanted: string | undefined,
-): number | undefined {
+function substitutionEnd(text: string, from: number): number {
   let depth = 0;
-  for (let at = from; at < authored.length; at++) {
-    const token = authored[at];
-    if (depth === 0 && ends.has(token)) {
-      return wanted === undefined || token === wanted ? at : undefined;
-    }
-    if (token === "(" || token === "[" || token === "{" || token === "<") {
+  for (const token of scanTokens(text, from)) {
+    if (token.text === "{") {
       depth++;
-    } else if (/^>+$/.test(token)) {
-      depth -= token.length;
-    } else if (token === ")" || token === "]" || token === "}") {
+    } else if (token.text === "}") {
+      if (depth === 0) return token.end;
       depth--;
     }
-    if (depth < 0) return undefined;
   }
-  return undefined;
+  return text.length;
 }
 
 /**
- * Helper for {@link afterTypeSyntax}, which returns whether the `:` at `at`
- * annotates a variable: a name, or a destructuring pattern, just after
- * `const`, `let`, or `var`.
+ * Helper for {@link scanTokens}, which returns whether a `/` after `previous`
+ * starts a regular expression literal: at the start, after a keyword that
+ * takes an expression, or after a punctuator other than a closing bracket.
  */
-function declaresVariable(
-  authored: readonly string[],
-  at: number,
-  walk: DeclarationWalk,
-): boolean {
-  const previous = authored[at - 1];
-  if (isName(previous)) return VARIABLE_KEYWORDS.has(authored[at - 2]);
-  const opener = walk.opens.get(at - 1);
-  return (previous === "}" || previous === "]") && opener !== undefined &&
-    VARIABLE_KEYWORDS.has(authored[opener - 1]);
+function startsRegex(previous: string | undefined): boolean {
+  if (previous === undefined) return true;
+  if (REGEX_PRECEDING_KEYWORDS.has(previous)) return true;
+  return !/^[\w$"'`]/.test(previous) && previous !== ")" &&
+    previous !== "]" && previous !== "}";
 }
 
-/** Helper for the token comparison, which tests for an identifier. */
-function isName(token: string | undefined): token is string {
-  return token !== undefined && /^[A-Za-z_$][\w$]*$/.test(token);
+/**
+ * Helper for {@link scanTokens}, which returns the offset past the regular
+ * expression literal starting at `at`, or past the `/` alone when no literal
+ * closes on its line.
+ */
+function regexEnd(text: string, at: number): number {
+  let inClass = false;
+  for (let end = at + 1; end < text.length; end++) {
+    const char = text[end];
+    if (char === "\\") {
+      end++;
+    } else if (char === "\n") {
+      return at + 1;
+    } else if (char === "[") {
+      inClass = true;
+    } else if (char === "]") {
+      inClass = false;
+    } else if (char === "/" && !inClass) {
+      const flags = /[A-Za-z]*/y;
+      flags.lastIndex = end + 1;
+      return end + 1 + (flags.exec(text)?.[0].length ?? 0);
+    }
+  }
+  return at + 1;
 }

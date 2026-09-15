@@ -1,22 +1,40 @@
+/**
+ * Unit tests of `topics-browser-measurement-core.ts`. Several cases read
+ * `topics-browser-measurement-core.fixture.json`, which holds output recorded
+ * from the Topics sources at one revision: each named lift's compiled module
+ * text around its declaration, as
+ * `cf check packages/patterns/topics/main.tsx --json --no-check` emits it; the
+ * function's length there; the preview a browser running a board seeded from
+ * those sources reported for it, and for `cardsByActivity`; the identities the
+ * Topics modules compile to with root `packages/patterns`, and the identity
+ * `/topics/main.tsx` compiles to with 68 lines added above it; and a preview
+ * from a compile with pattern coverage on.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  compiledLiftText,
+  type CompiledTopicsLift,
   confirmLiftImplementations,
-  implementationMatches,
+  COVERAGE_HIT_CALL,
   liftRunningStates,
   locateLift,
-  MIN_CUT_PREVIEW_BODY_TOKENS,
   parseSrc,
   PREVIEW_LENGTH,
   requireAttributableRuns,
-  type ResolvedTopicsLift,
+  requireNoCoverage,
+  requireSameProgram,
   runThenStop,
   timingDelta,
   type TopicsLiftSite,
   WORKER_RUN_TIMING_KEY,
   workerRunCount,
 } from "../integration/topics-browser-measurement-core.ts";
+import fixture from "./topics-browser-measurement-core.fixture.json" with {
+  type: "json",
+};
 
 describe("topics-browser-measurement-core", () => {
   const fryer = [
@@ -35,62 +53,17 @@ describe("topics-browser-measurement-core", () => {
 
   describe("locateLift()", () => {
     it("returns the line and column where the lift's function starts", () => {
-      expect(locateLift(fryer, "doubled").position).toEqual({
-        line: 4,
-        col: 2,
-      });
+      expect(locateLift(fryer, "doubled")).toEqual({ line: 4, col: 2 });
     });
 
     it("returns a later line for the same lift once lines are added above it", () => {
-      expect(locateLift(`// one\n// two\n\n${fryer}`, "doubled").position)
+      expect(locateLift(`// one\n// two\n\n${fryer}`, "doubled"))
         .toEqual({ line: 7, col: 2 });
     });
 
     it("returns the position after a comment between the call and the function", () => {
       const text = "const doubled = lift( /* note */ (value: number) => 2);";
-      expect(locateLift(text, "doubled").position).toEqual({
-        line: 1,
-        col: 33,
-      });
-    });
-
-    it("returns the declaration's text up to the next line starting at column 0", () => {
-      expect(locateLift(fryer, "doubled").text).toBe(
-        "(value: number) => value * 2,\n);\n\n",
-      );
-    });
-
-    it("returns declaration text ending before a column-0 statement of any kind", () => {
-      for (
-        const next of [
-          "fryAll();",
-          "enum Glaze { Maple }",
-          "@frosted",
-          "/* note */",
-        ]
-      ) {
-        expect(
-          locateLift(
-            `const doubled = lift(\n  (value: number) => value * 2,\n);\n${next}\n`,
-            "doubled",
-          ).text,
-        ).toBe("(value: number) => value * 2,\n);\n");
-      }
-    });
-
-    it("returns declaration text keeping column-0 lines that close its brackets", () => {
-      const text = [
-        "const glazed = lift((",
-        "  { donuts }: { donuts: Donut[] },",
-        "): number => {",
-        "  return donuts.length;",
-        "});",
-        "export const next = 1;",
-      ].join("\n");
-      expect(locateLift(text, "glazed").text).toBe(
-        "(\n  { donuts }: { donuts: Donut[] },\n): number => {\n" +
-          "  return donuts.length;\n});\n",
-      );
+      expect(locateLift(text, "doubled")).toEqual({ line: 1, col: 33 });
     });
 
     it("throws for a binding that is not declared as a lift", () => {
@@ -101,6 +74,53 @@ describe("topics-browser-measurement-core", () => {
 
     it("throws for a lift declared twice", () => {
       expect(() => locateLift(`${fryer}\n${fryer}`, "doubled"))
+        .toThrow("found 2");
+    });
+  });
+
+  describe("compiledLiftText()", () => {
+    it("returns each Topics lift's compiled function, which the browser's preview begins", () => {
+      for (const [name, lift] of Object.entries(fixture.lifts)) {
+        const text = compiledLiftText(lift.excerpt, name, lift.module);
+
+        expect([name, text.length, text.slice(0, PREVIEW_LENGTH)]).toEqual([
+          name,
+          lift.length,
+          lift.preview,
+        ]);
+      }
+    });
+
+    it("returns a function holding brackets in strings, template literals, regular expressions, and comments", () => {
+      const emitted = [
+        "const other = 1;",
+        "const glazed = (0, commonfabric_2.lift)((value) => {",
+        '    const note = "a ) b";',
+        "    const label = `glazed ${value} }`;",
+        "    // a ) in a comment",
+        "    return /[)]/.test(value);",
+        '}, { type: "string" });',
+        "const next = 2;",
+      ].join("\n");
+
+      expect(compiledLiftText(emitted, "glazed")).toBe(
+        [
+          "(value) => {",
+          '    const note = "a ) b";',
+          "    const label = `glazed ${value} }`;",
+          "    // a ) in a comment",
+          "    return /[)]/.test(value);",
+          "}",
+        ].join("\n"),
+      );
+    });
+
+    it("throws for a module declaring the lift twice or not at all", () => {
+      const once = "const glazed = (0, commonfabric_2.lift)((value) => value);";
+
+      expect(() => compiledLiftText("const other = 1;", "glazed", "/fryer.js"))
+        .toThrow("declaration in /fryer.js, found 0");
+      expect(() => compiledLiftText(`${once}\n${once}`, "glazed"))
         .toThrow("found 2");
     });
   });
@@ -203,171 +223,168 @@ describe("topics-browser-measurement-core", () => {
     });
   });
 
-  describe("implementationMatches()", () => {
-    const glazeCount = locateLift(fryer, "glazeCount").text;
-    const doubled = "(value: number) => value * 2,\n);\n";
-    // Shaped like a board pivot's declaration: a destructured parameter whose
-    // type holds a comment, a return type, and a block body.
-    const pivot = locateLift(
-      [
-        "const pivotTable = lift(",
-        "  (",
-        "    { sources }: {",
-        "      // The cells to pivot, one per donut.",
-        "      sources: ReadonlyCell<Donut>[] | Default<[]>;",
-        "    },",
-        "  ): PivotRow[] => {",
-        "    const rows: unknown[] = [];",
-        "    const list = Array.from(sources);",
-        "    for (const donut of list) rows.push(donut);",
-        "    return rows as PivotRow[];",
-        "  },",
-        ");",
-        "",
-      ].join("\n"),
-      "pivotTable",
-    ).text;
+  describe("requireSameProgram()", () => {
+    const lifts: TopicsLiftSite[] = [
+      {
+        name: "crossrefTable",
+        module: "topics/main.tsx",
+        role: "producer",
+        site: "/topics/main.tsx:337:2",
+      },
+      {
+        name: "backlinksOf",
+        module: "topics/topic.tsx",
+        role: "consumer",
+        site: "/topics/topic.tsx:1715:25",
+      },
+    ];
+    const identities = new Map(Object.entries(fixture.identities));
+    const mainIdentity = fixture.identities["/topics/main.tsx"];
+    const topicIdentity = fixture.identities["/topics/topic.tsx"];
 
-    it("returns `true` for the emitted form of the declared function", () => {
-      expect(
-        implementationMatches(
-          "({ donuts }) => donuts.filter((donut) => donut.glazed).length",
-          glazeCount,
-        ),
-      ).toBe(true);
-      expect(implementationMatches("(value) => value * 2", doubled)).toBe(true);
+    it("returns for running modules that carry the compiled identities", () => {
+      expect(() =>
+        requireSameProgram(lifts, identities, [
+          `cf:module/${mainIdentity}/topics/main.tsx:337:2`,
+          `cf:module/${topicIdentity}/topics/topic.tsx:1715:25`,
+          "",
+        ])
+      ).not.toThrow();
     });
 
-    it("returns `false` for a body with another operator", () => {
-      expect(implementationMatches("(value) => value + 2", doubled)).toBe(
-        false,
+    it("returns for a lift module no running action names", () => {
+      expect(() =>
+        requireSameProgram(lifts, identities, [
+          `cf:module/${mainIdentity}/topics/main.tsx:337:2`,
+        ])
+      ).not.toThrow();
+    });
+
+    it("throws for a running module compiled from other sources, as sources with 68 more lines above the pivot are", () => {
+      // With those lines, the pivot's position in the sources read is where
+      // the running `cardsByActivity` starts; the identity check fails first.
+
+      const shifted = new Map([
+        ...identities,
+        ["/topics/main.tsx", fixture.shiftedMainIdentity],
+      ]);
+
+      expect(fixture.shiftedMainIdentity).not.toBe(mainIdentity);
+      expect(() =>
+        requireSameProgram(lifts, shifted, [
+          `cf:module/${mainIdentity}/topics/main.tsx:405:2`,
+        ])
+      ).toThrow("the sources read are not the program the board runs");
+    });
+
+    it("throws for a running Topics module without a named lift that carries another identity", () => {
+      expect(() =>
+        requireSameProgram(
+          lifts,
+          new Map([...identities, ["/topics/schemas.ts", "schemas1"]]),
+          [`cf:module/schemas2/topics/schemas.ts:4:2`],
+        )
+      ).toThrow("`/topics/schemas.ts` runs as module `schemas2`");
+    });
+
+    it("throws for a lift module the compiled program lacks", () => {
+      expect(() =>
+        requireSameProgram(
+          lifts,
+          new Map([["/topics/main.tsx", mainIdentity]]),
+          [],
+        )
+      ).toThrow("has no module `/topics/topic.tsx`");
+    });
+  });
+
+  describe("requireNoCoverage()", () => {
+    it("throws naming pattern coverage for a worker that collects it", () => {
+      expect(() => requireNoCoverage(true, []))
+        .toThrow("The page's worker collects pattern coverage");
+    });
+
+    it("throws naming pattern coverage for a preview holding a coverage hit call", () => {
+      expect(fixture.instrumentedPreview).toContain(COVERAGE_HIT_CALL);
+      expect(() => requireNoCoverage(false, [fixture.instrumentedPreview]))
+        .toThrow("holds pattern coverage instrumentation");
+    });
+
+    it("returns for a worker without coverage and previews without hit calls", () => {
+      expect(() =>
+        requireNoCoverage(
+          false,
+          Object.values(fixture.lifts).map((lift) => lift.preview),
+        )
+      ).not.toThrow();
+    });
+  });
+
+  describe("confirmLiftImplementations()", () => {
+    const pivot: CompiledTopicsLift = {
+      name: "crossrefTable",
+      module: "topics/main.tsx",
+      role: "producer",
+      site: "/topics/main.tsx:337:2",
+      compiledText: compiledLiftText(
+        fixture.lifts.crossrefTable.excerpt,
+        "crossrefTable",
+      ),
+    };
+    const src = `cf:module/${
+      fixture.identities["/topics/main.tsx"]
+    }${pivot.site}`;
+    const running = new Map([[pivot.site, true]]);
+
+    it("returns the preview at a running lift's site that equals the start of its compiled text", () => {
+      expect(
+        confirmLiftImplementations(
+          [pivot],
+          [{ [src]: [fixture.lifts.crossrefTable.preview] }],
+          running,
+        ),
+      ).toEqual(new Map([[pivot.site, fixture.lifts.crossrefTable.preview]]));
+    });
+
+    it("throws naming the lift and the first difference for a preview one character off", () => {
+      const preview = fixture.lifts.crossrefTable.preview;
+      const offByOne = `${preview.slice(0, 50)}${
+        preview[50] === "x" ? "y" : "x"
+      }${preview.slice(51)}`;
+
+      expect(() =>
+        confirmLiftImplementations([pivot], [{ [src]: [offByOne] }], running)
+      ).toThrow(
+        "`crossrefTable` at `/topics/main.tsx:337:2` runs an implementation " +
+          "that differs from its compiled text at character 50",
       );
+    });
+
+    it("throws for another lift's implementation at the site, as where `cardsByActivity` starts", () => {
+      expect(() =>
+        confirmLiftImplementations(
+          [pivot],
+          [{ [src]: [fixture.cardsByActivityPreview] }],
+          running,
+        )
+      ).toThrow("differs from its compiled text at character 3");
+    });
+
+    it("returns no entry for a lift that is not running", () => {
       expect(
-        implementationMatches(
-          "(a, b) => a - b",
-          "(a: number, b: number) => a + b,\n);\n",
+        confirmLiftImplementations(
+          [pivot],
+          [{}],
+          new Map([[pivot.site, false]]),
         ),
-      ).toBe(false);
+      ).toEqual(new Map());
     });
 
-    it("returns `false` for a body with another literal", () => {
-      expect(implementationMatches("(value) => value * 3", doubled)).toBe(
-        false,
-      );
-    });
-
-    it("returns `false` for a function whose tokens are a prefix of the declared one", () => {
-      expect(implementationMatches("(value) => value", doubled)).toBe(false);
-    });
-
-    it("returns `true` for the emitted form of a pivot-shaped declaration", () => {
-      expect(
-        implementationMatches(
-          "({ sources }) => {\n    const rows = [];\n    const list = Array.from(sources);\n    for (const donut of list)\n        rows.push(donut);\n    return rows;\n}",
-          pivot,
-        ),
-      ).toBe(true);
-    });
-
-    it("returns `false` for short functions over the pivot's parameter", () => {
-      expect(
-        implementationMatches("({ sources }) => Array.from(sources)", pivot),
-      )
-        .toBe(false);
-      expect(
-        implementationMatches(
-          "({ list }) => list.map((topic) => topic)",
-          pivot,
-        ),
-      ).toBe(false);
-    });
-
-    it("returns `false` for destructured parameter names that differ", () => {
-      expect(
-        implementationMatches(
-          "({ sources, extra }) => {\n    const rows = [];",
-          pivot,
-        ),
-      ).toBe(false);
-      expect(
-        implementationMatches("({ source }) => {\n    const rows = [];", pivot),
-      ).toBe(false);
-    });
-
-    it("returns `false` for a complete preview when the declaration continues past its function", () => {
-      expect(
-        implementationMatches(
-          "(value) => value * 2",
-          "(value: number) => value * 2,\n);\nfryAll();\n",
-        ),
-      ).toBe(false);
-    });
-
-    it("returns `false` for object shorthand where the declaration names a value", () => {
-      expect(
-        implementationMatches(
-          "({ a }) => ({ a })",
-          "({ a }: { a: number }) => ({ a: b }),\n);\n",
-        ),
-      ).toBe(false);
-    });
-
-    it("returns `true` for an emitted form calling an import through a module alias", () => {
-      expect(
-        implementationMatches(
-          "({ table, self }) => table\n    .filter((row) => (0, commonfabric_2.equals)(self, row.topic))",
-          "({ table, self }: { table: Row[]; self: Cell }) =>\n" +
-            "  table.filter((row) => equals(self, row.topic)),\n);\n",
-        ),
-      ).toBe(true);
-    });
-
-    it("returns `true` across type parameters, return types, variable types, and assertions", () => {
-      const declaration = [
-        "<T extends { at: number }>(",
-        "  { rows }: { rows: T[] },",
-        "): T[] => {",
-        "  const sorted: T[] = rows.toSorted((a, b) => b.at - a.at);",
-        "  return sorted as T[];",
-        "},",
-        ");",
-      ].join("\n");
-      expect(
-        implementationMatches(
-          "({ rows }) => {\n    const sorted = rows.toSorted((a, b) => b.at - a.at);\n    return sorted;\n}",
-          declaration,
-        ),
-      ).toBe(true);
-    });
-
-    it("returns `true` for a cut preview of the declared function, and `false` for a cut preview of another", () => {
-      const body = "const glazed = donuts.length * 2;\n  ".repeat(12);
-      const declaration = `({ donuts }: { donuts: Donut[] }) => {\n  ${body}` +
-        "return glazedDonutCount;\n},\n);\n";
-      const emitted = `({ donuts }) => {\n    ${
-        body.replaceAll("\n  ", "\n    ")
-      }return glazedDonutCount;\n}`;
-      const preview = emitted.slice(0, PREVIEW_LENGTH);
-      const other = preview.replace("* 2", "* 3");
-
-      expect(preview.length).toBe(PREVIEW_LENGTH);
-      expect(implementationMatches(preview, declaration)).toBe(true);
-      expect(implementationMatches(other, declaration)).toBe(false);
-    });
-
-    it("returns `false` for a cut preview reaching too little of its body", () => {
-      const declaration = `(value: string) => "${"x".repeat(300)}",\n);\n`;
-      const preview = `(value) => "${"x".repeat(300)}"`.slice(
-        0,
-        PREVIEW_LENGTH,
-      );
-
-      expect(MIN_CUT_PREVIEW_BODY_TOKENS).toBeGreaterThan(1);
-      expect(implementationMatches(preview, declaration)).toBe(false);
-    });
-
-    it("returns `false` for an empty preview", () => {
-      expect(implementationMatches("", doubled)).toBe(false);
+    it("throws when no snapshot shows an implementation at a running lift's site", () => {
+      expect(() => confirmLiftImplementations([pivot], [{}], running))
+        .toThrow(
+          "no action in a graph snapshot there shows its implementation",
+        );
     });
   });
 
@@ -412,64 +429,6 @@ describe("topics-browser-measurement-core", () => {
       const running = liftRunningStates(lifts, srcs);
 
       expect(() => requireAttributableRuns(lifts, running, srcs)).not.toThrow();
-    });
-  });
-
-  describe("confirmLiftImplementations()", () => {
-    const glaze = locateLift(fryer, "glazeCount");
-    const resolved: ResolvedTopicsLift[] = [{
-      name: "glazeCount",
-      module: "donuts/fryer.tsx",
-      role: "consumer",
-      site: `/donuts/fryer.tsx:${glaze.position.line}:${glaze.position.col}`,
-      declaration: glaze.text,
-    }];
-    const site = resolved[0].site;
-    const glazePreview =
-      "({ donuts }) => donuts.filter((donut) => donut.glazed).length";
-
-    it("returns the preview of the implementation running at a running lift's site", () => {
-      expect(
-        confirmLiftImplementations(
-          resolved,
-          [{ [`cf:module/fryer1${site}`]: [glazePreview] }],
-          new Map([[site, true]]),
-        ),
-      ).toEqual(new Map([[site, glazePreview]]));
-    });
-
-    it("returns no entry for a lift that is not running", () => {
-      expect(
-        confirmLiftImplementations(resolved, [{}], new Map([[site, false]])),
-      ).toEqual(new Map());
-    });
-
-    it("throws when the site holds another lift, as when the sources read have extra lines", () => {
-      // The sources read put `glazeCount` two lines lower than the running
-      // module does, where the running `doubled` happens to start at the same
-      // column.
-
-      const shifted = locateLift(`\n\n${fryer}`, "glazeCount");
-      const collided: ResolvedTopicsLift[] = [{
-        ...resolved[0],
-        site: "/donuts/fryer.tsx:4:2",
-        declaration: shifted.text,
-      }];
-      expect(() =>
-        confirmLiftImplementations(
-          collided,
-          [{
-            "cf:module/fryer1/donuts/fryer.tsx:4:2": ["(value) => value * 2"],
-          }],
-          new Map([["/donuts/fryer.tsx:4:2", true]]),
-        )
-      ).toThrow("but the action there runs `(value) => value * 2`");
-    });
-
-    it("throws when no snapshot shows an implementation at a running lift's site", () => {
-      expect(() =>
-        confirmLiftImplementations(resolved, [{}], new Map([[site, true]]))
-      ).toThrow("no action in a graph snapshot there shows its implementation");
     });
   });
 

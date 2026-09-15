@@ -11,24 +11,41 @@
  * Neither records transaction-attempt reads; {@link ATTEMPT_READS_NOTE} says
  * why. Both need the runtime client that signing in creates, so neither
  * brackets cold initialization, and a sample whose client is replaced during
- * the operation fails. The decisions that need no page are in
- * `topics-browser-measurement-core.ts`.
+ * the operation fails.
+ *
+ * A measured sample attributes runs to lifts by position, against a
+ * {@link TopicsProgram} that {@link prepareTopicsProgram} compiles from the
+ * sources the board was seeded from. It requires the board to run that
+ * program's module identities, without coverage instrumentation, and each
+ * lift's preview to equal the first characters of its compiled text. The
+ * decisions that need no page are in `topics-browser-measurement-core.ts`.
  */
 
 import { join } from "@std/path";
 
+import { Identity } from "@commonfabric/identity";
 import type { Page } from "@commonfabric/integration";
+import {
+  experimentalOptionsFromEnv,
+  Runtime,
+  runtimePresets,
+} from "@commonfabric/runner";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { RequestType, type RuntimeClient } from "@commonfabric/runtime-client";
 
 import { describeThrown } from "../../integration/describe-thrown.ts";
 import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
 import {
+  compiledLiftText,
+  type CompiledTopicsLift,
   confirmLiftImplementations,
   liftRunningStates,
   locateLift,
   parseSrc,
   requireAttributableRuns,
-  type ResolvedTopicsLift,
+  requireNoCoverage,
+  requireSameProgram,
   runThenStop,
   timingDelta,
   type TimingRow,
@@ -89,6 +106,24 @@ export const TOPICS_LIFTS: readonly TopicsLift[] = [
   { name: "lastActivityOf", module: "topics/topic.tsx", role: "consumer" },
 ];
 
+/** The board's entry module, relative to the program root. */
+const TOPICS_MAIN = "topics/main.tsx";
+
+/** The Topics program compiled from the sources a board was seeded from. */
+export interface TopicsProgram {
+  /** Program root the sources were read from. */
+  readonly sourceRoot: string;
+
+  /** Each named lift, with its authored site and its compiled text. */
+  readonly lifts: readonly CompiledTopicsLift[];
+
+  /** Content identity of each compiled Topics module, by `/<module>`. */
+  readonly identities: ReadonlyMap<string, string>;
+
+  /** How long compiling the program took, in milliseconds. */
+  readonly compileMs: number;
+}
+
 /** Counters summed over a set of completed runs. */
 export interface ReadTotals {
   /** Completed runs carrying a read sample. */
@@ -125,8 +160,8 @@ export interface TopicsLiftRow extends ReadTotals, TopicsLiftSite {
 
   /**
    * The graph snapshot's preview of the implementation running at the lift's
-   * site, which the helper confirmed against the lift's declaration. Absent
-   * for a lift that is not running.
+   * site, which the helper confirmed equals the first characters of the lift's
+   * compiled text. Absent for a lift that is not running.
    */
   readonly implementation?: string;
 }
@@ -221,8 +256,8 @@ export interface TopicsOperationOptions {
 
 /** Options for {@link measureTopicsReads}. */
 export interface MeasureTopicsReadsOptions extends TopicsOperationOptions {
-  /** Program root the board was deployed from; {@link TOPICS_SOURCE_ROOT}. */
-  readonly sourceRoot?: string;
+  /** The program compiled from the sources the board was seeded from. */
+  readonly program: TopicsProgram;
 }
 
 /** The part of a `Deno.bench` context that brackets a timed interval. */
@@ -250,62 +285,106 @@ export interface TimeTopicsOperationOptions extends TopicsOperationOptions {
 }
 
 /**
- * Reads each lift's module under `sourceRoot` and returns where the lift's
- * function starts, with the declaration it was found by.
+ * Compiles the Topics program under `sourceRoot` the way the topic board
+ * fixture deploys it, with that directory as the program root, on an emulated
+ * runtime, and returns each named lift's authored site and compiled text with
+ * the content identity of every compiled module under `/topics/`. A compile
+ * takes about a second, so a caller
+ * prepares one program and passes it to every {@link measureTopicsReads} call
+ * against boards seeded from those sources.
  *
- * @throws If a module does not declare its lift as `locateLift()` requires.
+ * @throws If a module does not declare its lift as `locateLift()` requires, if
+ *   the compiled program lacks a lift's module, or if a compiled module does
+ *   not declare its lift as `compiledLiftText()` requires.
  */
-export async function resolveTopicsLiftSites(
+export async function prepareTopicsProgram(
   sourceRoot: string = TOPICS_SOURCE_ROOT,
   lifts: readonly TopicsLift[] = TOPICS_LIFTS,
-): Promise<ResolvedTopicsLift[]> {
-  const texts = new Map<string, string>();
-  const resolved: ResolvedTopicsLift[] = [];
-  for (const lift of lifts) {
-    const path = join(sourceRoot, lift.module);
-    let text = texts.get(path);
-    if (text === undefined) {
-      text = await Deno.readTextFile(path);
-      texts.set(path, text);
-    }
-    const { position, text: declaration } = locateLift(text, lift.name, path);
-    resolved.push({
-      ...lift,
-      site: `/${lift.module}:${position.line}:${position.col}`,
-      declaration,
+): Promise<TopicsProgram> {
+  const runtime = new Runtime(runtimePresets.localDev({
+    apiUrl: new URL(import.meta.url),
+    storageManager: StorageManager.emulate({
+      as: await Identity.fromPassphrase("topics browser measurement"),
+    }),
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
+  }));
+  try {
+    const main = join(sourceRoot, TOPICS_MAIN);
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      { main, root: sourceRoot },
+    );
+    const startedAt = performance.now();
+    const { modules } = await runtime.harness.compileToRecordGraph(program, {
+      noCheck: true,
     });
+    const compileMs = performance.now() - startedAt;
+    const identities = new Map(
+      modules.filter((module) => module.filename.startsWith("/topics/"))
+        .map((module) => [module.filename, module.identity]),
+    );
+    const texts = new Map<string, string>();
+    const compiled: CompiledTopicsLift[] = [];
+    for (const lift of lifts) {
+      const module = `/${lift.module}`;
+      const emitted = modules.find((candidate) =>
+        candidate.filename === module
+      );
+      if (emitted === undefined) {
+        throw new Error(
+          `Compiling \`${main}\` produced no module \`${module}\``,
+        );
+      }
+      const path = join(sourceRoot, lift.module);
+      let text = texts.get(path);
+      if (text === undefined) {
+        text = await Deno.readTextFile(path);
+        texts.set(path, text);
+      }
+      const { line, col } = locateLift(text, lift.name, path);
+      compiled.push({
+        ...lift,
+        site: `${module}:${line}:${col}`,
+        compiledText: compiledLiftText(emitted.js, lift.name, module),
+      });
+    }
+    return { sourceRoot, lifts: compiled, identities, compileMs };
+  } finally {
+    await runtime.dispose();
   }
-  return resolved;
 }
 
 /**
  * Runs `operation` with telemetry and body read accounting on, and returns
  * each named lift's read totals with graph size and timing. Accounting is
  * enabled just before the operation and disabled once the view has settled
- * over an idle runtime, whether or not the operation succeeds. Each running
- * lift is confirmed by the implementation the graph shows at its site. The
- * page must show the board, whose producer lift has to be running.
+ * over an idle runtime, whether or not the operation succeeds. The page must
+ * show a board seeded from the sources `program` was compiled from, whose
+ * producer lift has to be running.
  *
- * @throws If a lift cannot be identified in the sources; if its module's file
- *   runs where `liftRunningStates()` refuses; if the runs cannot be attributed
- *   by position, as `requireAttributableRuns()` decides; if the implementation
- *   at a running lift's site is not the lift's; if the runtime client is
- *   replaced;
- *   or if the operation completes no run with a read sample, fails an event
- *   commit, or raises a page error. When the operation throws and disabling
- *   accounting or releasing the sample also fails, an `AggregateError` holds
- *   the operation's error first. The sample's hold on the page is released on
- *   every exit.
+ * @throws If the page's worker collects pattern coverage; if the board runs a
+ *   module identity other than `program`'s, as `requireSameProgram()` decides;
+ *   if a lift's module file runs where `liftRunningStates()` refuses; if the
+ *   runs cannot be attributed by position, as `requireAttributableRuns()`
+ *   decides; if a preview holds coverage instrumentation or differs from its
+ *   lift's compiled text; if the runtime client is replaced, after read
+ *   accounting and telemetry are turned off on the client they were enabled
+ *   on; or if the operation completes no run with a read sample, fails an
+ *   event commit, or raises a page error. When the operation throws and
+ *   disabling accounting or releasing the sample also fails, an
+ *   `AggregateError` holds the operation's error first. The sample's hold on
+ *   the page is released on every exit.
  */
 export async function measureTopicsReads(
   page: Page,
   options: MeasureTopicsReadsOptions,
 ): Promise<TopicsReadSample> {
-  const sites = await resolveTopicsLiftSites(options.sourceRoot);
+  const sites = options.program.lifts;
   const pageErrors = watchPageErrors(page);
   const token = crypto.randomUUID();
   try {
     const { value } = await runThenStop(async (): Promise<TopicsReadSample> => {
+      requireNoCoverage(await patternCoverageCollecting(page), []);
       await startSampling(page, token);
       const { value: measured, stopped: state } = await runThenStop(
         async () => {
@@ -335,12 +414,20 @@ export async function measureTopicsReads(
         );
       }
 
-      const runningStates = liftRunningStates(sites, [
+      const srcs = [
         ...Object.keys(measured.before.actions),
         ...Object.keys(after.actions),
         ...Object.keys(state.bySrc),
-      ]);
+      ];
+      requireSameProgram(sites, options.program.identities, srcs);
+      const runningStates = liftRunningStates(sites, srcs);
       requireAttributableRuns(sites, runningStates, Object.keys(state.bySrc));
+      requireNoCoverage(
+        false,
+        [measured.before.actions, after.actions].flatMap((actions) =>
+          Object.values(actions).flat()
+        ),
+      );
       const implementations = confirmLiftImplementations(
         sites,
         [measured.before.actions, after.actions],
@@ -609,6 +696,7 @@ interface RuntimeState {
 const HELPER_REQUESTS: ReadonlySet<string> = new Set([
   RequestType.GetGraphSnapshot,
   RequestType.GetLoggerCounts,
+  RequestType.GetPatternCoverage,
   RequestType.SetReadStatsEnabled,
   RequestType.SetTelemetryEnabled,
 ]);
@@ -644,6 +732,22 @@ function assertNoPageErrors(label: string, errors: readonly string[]): void {
 async function settleOperation(page: Page): Promise<void> {
   await settleView(page);
   await waitForRuntimeIdle(page);
+}
+
+/**
+ * Helper for {@link measureTopicsReads}, which returns whether the page's
+ * worker holds a pattern coverage collector.
+ */
+async function patternCoverageCollecting(page: Page): Promise<boolean> {
+  return await inPage(() =>
+    page.evaluate(async () => {
+      const rt = (globalThis as MeasurementGlobal).commonfabric?.rt;
+      if (!rt) {
+        throw new Error("The shell exposes no runtime client to measure");
+      }
+      return (await rt.getPatternCoverage()) !== null;
+    })
+  );
 }
 
 /**
@@ -741,14 +845,18 @@ async function turnAccountingOff(page: Page, token: string): Promise<void> {
 
 /**
  * Helper for {@link measureTopicsReads}, which unsubscribes the sampling under
- * `token`, disables read accounting and telemetry, and returns what it
- * collected.
+ * `token`, disables read accounting and telemetry on the client the sampling
+ * enabled them on, and returns what it collected. Both are disabled on that
+ * client even when the page's client has since been replaced, and each is
+ * attempted even when the other fails.
  *
- * @throws If the runtime client is not the one the sampling started against:
- *   its listener and its accounting belonged to the replaced client.
+ * @throws If the runtime client is not the one the sampling started against,
+ *   since its runs were not all observed; a failure to disable either setting
+ *   is attached to that error as an `AggregateError` cause. Otherwise, an
+ *   `AggregateError` of the failures to disable, if any.
  */
 async function stopSampling(page: Page, token: string): Promise<PageSampling> {
-  return await inPage(() =>
+  const stopped = await inPage(() =>
     page.evaluate(async (token: string) => {
       const scope = globalThis as MeasurementGlobal;
       const entry = scope.__cfTopicsSamples?.[token];
@@ -756,17 +864,40 @@ async function stopSampling(page: Page, token: string): Promise<PageSampling> {
         throw new Error("The sampling under this token is gone");
       }
       entry.unsubscribe();
-      if (scope.commonfabric?.rt !== entry.client) {
-        throw new Error(
-          "The runtime client was replaced during the measured operation, so " +
-            "its runs were not all observed",
-        );
-      }
-      await entry.client.setReadStatsEnabled(false);
-      await entry.client.setTelemetryEnabled(false);
-      return entry.sampling;
+      const disabling = await Promise.allSettled([
+        entry.client.setReadStatsEnabled(false),
+        entry.client.setTelemetryEnabled(false),
+      ]);
+      return {
+        sampling: entry.sampling,
+        replaced: scope.commonfabric?.rt !== entry.client,
+        failures: disabling.flatMap((outcome) =>
+          outcome.status === "rejected"
+            ? [
+              outcome.reason instanceof Error
+                ? outcome.reason.message
+                : String(outcome.reason),
+            ]
+            : []
+        ),
+      };
     }, { args: [token] })
   );
+  const failures = stopped.failures.length === 0
+    ? undefined
+    : new AggregateError(
+      stopped.failures.map((message) => new Error(message)),
+      "Turning read accounting and telemetry off on the sampled client failed",
+    );
+  if (stopped.replaced) {
+    throw new Error(
+      "The runtime client was replaced during the measured operation, so its " +
+        "runs were not all observed",
+      failures === undefined ? undefined : { cause: failures },
+    );
+  }
+  if (failures !== undefined) throw failures;
+  return stopped.sampling;
 }
 
 /**

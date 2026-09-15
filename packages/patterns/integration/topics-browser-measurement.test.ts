@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { Identity } from "@commonfabric/identity";
-import { env } from "@commonfabric/integration";
+import { env, type Page } from "@commonfabric/integration";
 import type { RuntimeClient } from "@commonfabric/runtime-client";
 
 import {
@@ -22,19 +22,35 @@ import { BoardSession } from "./topic-board-session.ts";
 import {
   formatTopicsSample,
   measureTopicsReads,
+  prepareTopicsProgram,
   timeTopicsOperation,
+  type TopicsProgram,
   type TopicsSample,
 } from "./topics-browser-measurement.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
 
+/** The page globals the client-replacement cases read and write. */
+type ReplacementGlobal = typeof globalThis & {
+  /** The shell's debugging globals. */
+  commonfabric?: { rt?: RuntimeClient };
+
+  /** The client a replacement took out of `commonfabric.rt`. */
+  __cfReplacedClient?: RuntimeClient;
+
+  /** Telemetry markers the replaced client delivered, and how to stop counting. */
+  __cfReplacedClientMarkers?: { count: number; stop: () => void };
+};
+
 describe("topics-browser-measurement", () => {
   let fixture: TopicBoardFixture;
   let identity: Identity;
+  let program: TopicsProgram;
   let session: BoardSession;
 
   // The smallest board on which every named lift runs: the newest of two topics
   // cites the other, so the pivot has a row to build and a backlink to find.
   beforeAll(async () => {
+    program = await prepareTopicsProgram();
     identity = await seedIdentity(
       `topics browser measurement ${crypto.randomUUID()}`,
     );
@@ -66,9 +82,11 @@ describe("topics-browser-measurement", () => {
     }
   }
 
-  /** Tokens of the samples the page still holds. */
-  async function samplesLeftInPage(): Promise<string[]> {
-    return await session.page.evaluate(() =>
+  /** Tokens of the samples `page` still holds. */
+  async function samplesLeftInPage(
+    page: Page = session.page,
+  ): Promise<string[]> {
+    return await page.evaluate(() =>
       Object.keys(
         (globalThis as typeof globalThis & {
           __cfTopicsSamples?: Record<string, unknown>;
@@ -78,15 +96,15 @@ describe("topics-browser-measurement", () => {
   }
 
   /**
-   * Stands a client that answers only `idle()` in for the page's runtime
-   * client, as a replaced runtime would appear to a sample in progress.
+   * Stands a client that answers only `idle()` in for `page`'s runtime
+   * client, as a replaced runtime would appear to a sample in progress. The
+   * shell's own views keep the client they hold.
    */
-  async function replaceRuntimeClient(): Promise<void> {
-    await session.page.evaluate(() => {
-      const scope = globalThis as typeof globalThis & {
-        commonfabric?: { rt?: RuntimeClient };
-        __cfReplacedClient?: RuntimeClient;
-      };
+  async function replaceRuntimeClient(
+    page: Page = session.page,
+  ): Promise<void> {
+    await page.evaluate(() => {
+      const scope = globalThis as ReplacementGlobal;
       scope.__cfReplacedClient = scope.commonfabric!.rt;
       scope.commonfabric!.rt = {
         idle: () => Promise.resolve(),
@@ -95,20 +113,19 @@ describe("topics-browser-measurement", () => {
   }
 
   /**
-   * Puts the page's own runtime client back after
-   * {@link replaceRuntimeClient}, with telemetry and read accounting off.
+   * Puts `page`'s own runtime client back after {@link replaceRuntimeClient},
+   * leaving its telemetry and read accounting as they are.
    */
-  async function restoreRuntimeClient(): Promise<void> {
-    await session.page.evaluate(async () => {
-      const scope = globalThis as typeof globalThis & {
-        commonfabric?: { rt?: RuntimeClient };
-        __cfReplacedClient?: RuntimeClient;
-      };
+  async function restoreRuntimeClient(
+    page: Page = session.page,
+  ): Promise<void> {
+    await page.evaluate(() => {
+      const scope = globalThis as ReplacementGlobal;
+      scope.__cfReplacedClientMarkers?.stop();
+      delete scope.__cfReplacedClientMarkers;
       if (scope.__cfReplacedClient === undefined) return;
       scope.commonfabric!.rt = scope.__cfReplacedClient;
       delete scope.__cfReplacedClient;
-      await scope.commonfabric!.rt.setReadStatsEnabled(false);
-      await scope.commonfabric!.rt.setTelemetryEnabled(false);
     });
   }
 
@@ -120,11 +137,11 @@ describe("topics-browser-measurement", () => {
   }
 
   /**
-   * Opens the topmost topic, waiting for both topics' titles on its page, and
-   * returns its index.
+   * Opens the topmost topic in `on`, waiting for both topics' titles on its
+   * page, and returns its index.
    */
-  async function openTopmostTopic(): Promise<number> {
-    const pieceId = await session.openTopic((opened) => {
+  async function openTopmostTopic(on: BoardSession = session): Promise<number> {
+    const pieceId = await on.openTopic((opened) => {
       const index = topicIndexOf(opened);
       return [topicTitle(index), topicTitle(1 - index)];
     });
@@ -132,18 +149,33 @@ describe("topics-browser-measurement", () => {
   }
 
   /**
-   * Returns to the board through the shell's own navigation, so one runtime
-   * serves the whole sequence.
+   * Returns `on` to the board through the shell's own navigation, so one
+   * runtime serves the whole sequence.
    */
-  async function returnToBoard(): Promise<void> {
-    await session.page.evaluate(
+  async function returnToBoard(on: BoardSession = session): Promise<void> {
+    await on.page.evaluate(
       async (spaceName: string, pieceId: string) => {
         await globalThis.app.setView({ spaceName, pieceId });
       },
       { args: [fixture.spaceName, fixture.boardId] },
     );
-    await waitForPieceView(session.page, fixture.spaceName, fixture.boardId);
-    await session.showBoard();
+    await waitForPieceView(on.page, fixture.spaceName, fixture.boardId);
+    await on.showBoard();
+  }
+
+  /**
+   * Opens a browser on the seeded board and signs in, running `beforeSignIn`
+   * against the page first, then waits for the board's cards.
+   */
+  async function openFreshSession(
+    beforeSignIn?: (page: Page) => Promise<void>,
+  ): Promise<BoardSession> {
+    const fresh = await BoardSession.open({ fixture, identity });
+    await fresh.load();
+    await beforeSignIn?.(fresh.page);
+    await fresh.signIn();
+    await fresh.showBoard();
+    return fresh;
   }
 
   describe("measureTopicsReads()", () => {
@@ -151,10 +183,11 @@ describe("topics-browser-measurement", () => {
       // The implementation each row carries is the graph's own text for the
       // action counted there. Checking its parameters against the lift's
       // declaration here pins each row to its lift, independently of how the
-      // helper located the lift.
+      // helper located and confirmed the lift.
 
       const sample = await measureTopicsReads(session.page, {
         label: "open topic and return",
+        program,
         operation: async () => {
           await openTopmostTopic();
           await returnToBoard();
@@ -193,6 +226,7 @@ describe("topics-browser-measurement", () => {
       await expect(
         measureTopicsReads(session.page, {
           label: "undemanded",
+          program,
           operation: () => Promise.resolve(),
         }),
       ).rejects.toThrow(
@@ -206,24 +240,99 @@ describe("topics-browser-measurement", () => {
       await expect(
         measureTopicsReads(session.page, {
           label: "failing",
+          program,
           operation: () => Promise.reject(failure),
         }),
       ).rejects.toBe(failure);
       expect(await samplesLeftInPage()).toEqual([]);
     });
 
-    it("throws when the runtime client is replaced during the operation", async () => {
+    it("throws naming pattern coverage for a page whose worker collects it", async () => {
+      // The page asks for coverage the way the integration harness does, with
+      // the flag its worker reads when signing in constructs it.
+
+      const fresh = await openFreshSession(async (page) => {
+        await page.evaluate(() => {
+          globalThis.localStorage.setItem("patternCoverage", "true");
+        });
+      });
       try {
         await expect(
-          measureTopicsReads(session.page, {
+          measureTopicsReads(fresh.page, {
+            label: "coverage on",
+            program,
+            operation: async () => {
+              await openTopmostTopic(fresh);
+              await returnToBoard(fresh);
+            },
+          }),
+        ).rejects.toThrow("The page's worker collects pattern coverage");
+        expect(await samplesLeftInPage(fresh.page)).toEqual([]);
+      } finally {
+        await fresh.close();
+      }
+    });
+
+    it("throws when the runtime client is replaced during the operation, after turning telemetry and read accounting off on the client it enabled them on", async () => {
+      // A browser of its own, so that opening a topic runs work whichever
+      // cases ran first. What the replaced client reports is read before any
+      // cleanup: a listener on it counts the telemetry markers that work
+      // delivers, and its graph snapshot says whether any run of the work kept
+      // a read sample, since a run without accounting clears its node's.
+
+      const fresh = await openFreshSession();
+      try {
+        await expect(
+          measureTopicsReads(fresh.page, {
             label: "replaced client",
-            operation: replaceRuntimeClient,
+            program,
+            operation: () => replaceRuntimeClient(fresh.page),
           }),
         ).rejects.toThrow("The runtime client was replaced");
+        expect(await samplesLeftInPage(fresh.page)).toEqual([]);
+
+        const runCounts = await fresh.page.evaluate(async () => {
+          const scope = globalThis as ReplacementGlobal;
+          const client = scope.__cfReplacedClient!;
+          const counter = { count: 0, stop: () => {} };
+          const listener = () => {
+            counter.count++;
+          };
+          client.on("telemetry", listener);
+          counter.stop = () => client.off("telemetry", listener);
+          scope.__cfReplacedClientMarkers = counter;
+          const graph = await client.getGraphSnapshot();
+          return Object.fromEntries(
+            graph.nodes.map((node) => [node.id, node.stats?.runCount ?? 0]),
+          );
+        });
+        await openTopmostTopic(fresh);
+        await returnToBoard(fresh);
+        const reported = await fresh.page.evaluate(
+          async (runCounts: Record<string, number>) => {
+            const scope = globalThis as ReplacementGlobal;
+            const graph = await scope.__cfReplacedClient!.getGraphSnapshot();
+            const ran = graph.nodes.filter((node) =>
+              (node.stats?.runCount ?? 0) > (runCounts[node.id] ?? 0)
+            );
+            return {
+              ran: ran.length,
+              withReadSample: ran.filter((node) =>
+                node.stats?.lastRunReads !== undefined
+              ).length,
+              markers: scope.__cfReplacedClientMarkers!.count,
+            };
+          },
+          { args: [runCounts] },
+        );
+
+        expect(reported.ran).toBeGreaterThan(0);
+        expect(reported.withReadSample).toBe(0);
+        expect(reported.markers).toBe(0);
       } finally {
-        await restoreRuntimeClient();
+        await restoreRuntimeClient(fresh.page);
+        await fresh.close();
       }
-      expect(await samplesLeftInPage()).toEqual([]);
     });
   });
 
@@ -234,11 +343,8 @@ describe("topics-browser-measurement", () => {
       // An operation already run in a page can run nothing, and a count of
       // delivered markers over it would be zero whatever the sampler did.
 
-      const fresh = await BoardSession.open({ fixture, identity });
+      const fresh = await openFreshSession();
       try {
-        await fresh.load();
-        await fresh.signIn();
-        await fresh.showBoard();
         await fresh.page.evaluate(async () => {
           const scope = globalThis as typeof globalThis & {
             commonfabric?: { rt?: RuntimeClient };
@@ -260,22 +366,8 @@ describe("topics-browser-measurement", () => {
         const sample = await timeTopicsOperation(fresh.page, {
           label: "open topic and return, timed",
           operation: async () => {
-            await fresh.openTopic((opened) => {
-              const index = topicIndexOf(opened);
-              return [topicTitle(index), topicTitle(1 - index)];
-            });
-            await fresh.page.evaluate(
-              async (spaceName: string, pieceId: string) => {
-                await globalThis.app.setView({ spaceName, pieceId });
-              },
-              { args: [fixture.spaceName, fixture.boardId] },
-            );
-            await waitForPieceView(
-              fresh.page,
-              fixture.spaceName,
-              fixture.boardId,
-            );
-            await fresh.showBoard();
+            await openTopmostTopic(fresh);
+            await returnToBoard(fresh);
           },
         });
         const delivered = await fresh.page.evaluate(() => {
@@ -332,7 +424,7 @@ describe("topics-browser-measurement", () => {
         await expect(
           timeTopicsOperation(session.page, {
             label: "replaced client, timed",
-            operation: replaceRuntimeClient,
+            operation: () => replaceRuntimeClient(),
           }),
         ).rejects.toThrow("The runtime client was replaced");
       } finally {

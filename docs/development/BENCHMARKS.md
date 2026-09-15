@@ -341,26 +341,32 @@ interval, it starts the interval just before the operation and ends it at the
 settled boundary, or where the operation or that wait throws. Both samplers need
 the runtime client that signing in creates, so neither brackets cold
 initialization, and a sample whose client is replaced during the operation
-fails.
+fails; a measured sample first turns telemetry and read accounting off on the
+client it enabled them on.
 
-A lift is found by name. The helper reads its module from the program root the
-board was deployed from, finds `const <name> = lift(`, and takes the position
-where the lift's function starts, which is the position a run's `src` names. A
-candidate whose lines moved is therefore measured under the same names. The
-helper then confirms the lift by the implementation running there. The graph
-snapshot's preview of that implementation, the first 200 characters of its
-emitted source, must be the lift's declaration token for token. The only
-differences allowed are the declaration's type syntax, the compiler's module
-alias on an imported name, trailing commas, and the preview's cut. A complete
-preview must end where the declaration's function ends, and a cut preview must
-reach at least eight tokens into the function's body. A name not declared that
-way fails the measurement. So does a lift's module that is running but holds no
-action at the lift's position, holds another lift there, or runs in two
-versions: in each case the sources read are not the ones the board runs. A lift
-is reported as not running, with zero runs, only when its module has not started
-during the operation and no action's `src` names the module's file under any
-path. A `src` naming that file under another path, or the module itself under
-another root, fails the measurement instead.
+A measured sample is taken against a program that `prepareTopicsProgram()`
+compiles from the sources the board was seeded from, on an emulated runtime and
+with `packages/patterns` as the program root, as the topic board fixture deploys
+it. The compile takes about a second, so a caller prepares one program and
+passes it to each measurement. A lift is found by name: the helper finds
+`const <name> = lift(` in its module and takes the position where the lift's
+function starts, which is the position a run's `src` names, so a candidate whose
+lines moved is measured under the same names. Three checks then tie the running
+code to the compiled program, and each failure names the check that failed.
+Every Topics module an action's `src` names must carry the compiled module's
+content identity, the `<identity>` in `cf:module/<identity>/topics/...`; any
+other identity means the sources read are not the program the board runs. The
+page's worker must collect no pattern coverage, and no implementation preview
+may hold a coverage hit call, because coverage instrumentation rewrites every
+lift's code. Each running lift's preview in a graph snapshot, the first 200
+characters of its function's source, must equal the first 200 characters of the
+lift's function in the compiled module; a failure names the lift and the first
+character that differs. A name not declared as above fails the measurement, as
+does a lift's module that is running but holds no action at the lift's position
+or runs in two versions. A lift is reported as not running, with zero runs, only
+when its module has not started during the operation and no action's `src` names
+the module's file under any path. A `src` naming that file under another path,
+or the module itself under another root, fails the measurement instead.
 
 A measured operation fails when it completes no runs with a read sample, when an
 event commit fails, or when the page raises an error. It also fails when its
@@ -396,11 +402,15 @@ The helper does not record:
 `topics-browser-measurement.test.ts` runs both samplers on a two-topic board in
 which one topic cites the other: opening a topic and returning to the board runs
 each named lift at least once with reads recorded, attributed to its own
-implementation; an operation that demands nothing fails the measurement; and the
+implementation; an operation that demands nothing fails the measurement; a page
+whose worker collects pattern coverage fails it with a message naming coverage;
+a runtime client replaced during a measured operation fails it after telemetry
+and read accounting are turned off on the client they were turned on in; and the
 timed sampler turns off telemetry a caller left on. The decisions that need no
 browser live in `topics-browser-measurement-core.ts` beside the helper, and
 `packages/patterns/test/topics-browser-measurement-core.test.ts` tests them
-under a plain `deno test`.
+under a plain `deno test`, partly against compiled text, previews, and module
+identities recorded from the Topics sources in a fixture beside that test.
 
 ## The multiplayer contention benchmark
 
