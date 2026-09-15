@@ -176,6 +176,15 @@ import {
 
 export { SessionRegistry } from "./session-registry.ts";
 
+/**
+ * A space DID pinned tightly enough to name a store. `isDID`
+ * (`@commonfabric/identity/did`) answers only whether a string is a DID, so it
+ * admits a method-specific identifier of any shape, and this string goes on to
+ * name a file on disk. The narrower question is the one
+ * `foreignWriteAuthorityFor` has to ask.
+ */
+const WELL_FORMED_SPACE_DID = /^did:[^:]+:[^:]+$/;
+
 // Global OTel API tracer. Interface-only and inert when no provider is
 // registered, so this is a no-op unless the host process (toolshed) has an
 // OTLP SDK installed. Spans created here are purely additive observability and
@@ -7623,7 +7632,7 @@ export class Server {
     | { granted: true; via: "owner" | "creation" | "acl" }
     | { granted: false; reason: string }
   > {
-    if (!/^did:[^:]+:[^:]+$/.test(space)) {
+    if (!WELL_FORMED_SPACE_DID.test(space)) {
       return {
         granted: false,
         reason: `"${space}" is not a space DID — refusing to resolve (or ` +

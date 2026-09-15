@@ -12,6 +12,7 @@ import {
   internSchemaAsTaggedHashString,
   schemaTypeOfFabricPrimitive,
 } from "@commonfabric/data-model-schema";
+import { isDID } from "@commonfabric/identity/did";
 import {
   containsExternalSchemaRef,
   formatExternalSchemaRef,
@@ -725,8 +726,7 @@ const hasLiteralDidCurrentPrincipalClaim = (value: unknown): boolean => {
     return value.some(hasLiteralDidCurrentPrincipalClaim);
   }
   if (isCurrentPrincipalClaimAtom(value)) {
-    return typeof value.subject === "string" &&
-      value.subject.startsWith("did:");
+    return isDID(value.subject);
   }
   if (isObjectOrArray(value)) {
     return Object.values(value).some(hasLiteralDidCurrentPrincipalClaim);
@@ -746,7 +746,7 @@ const literalDidSubjectsForPrincipalClaim = (
     return subjects;
   }
   if (isCurrentPrincipalClaimAtom(value) && value.kind === kind) {
-    if (typeof value.subject === "string" && value.subject.startsWith("did:")) {
+    if (isDID(value.subject)) {
       subjects.push(value.subject);
     }
     return subjects;
@@ -3045,10 +3045,7 @@ const currentPrincipalIntegrityReason = (
     const ownerPrincipal = isCurrentPrincipalPlaceholder(ownerPrincipalSpec)
       ? trustSnapshot.actingPrincipal
       : ownerPrincipalSpec;
-    if (
-      typeof ownerPrincipal !== "string" ||
-      !ownerPrincipal.startsWith("did:")
-    ) {
+    if (!isDID(ownerPrincipal)) {
       return `ownerPrincipal must be a DID at /${path.join("/")}`;
     }
     const resolvedCurrentPrincipalValues = resolveCurrentPrincipalLabelValues(
