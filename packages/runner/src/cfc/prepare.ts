@@ -4092,9 +4092,8 @@ const verifyInputRequirements = (
   // whether the measurement dial is on. Resolutions remain valid until the
   // transaction writes the document. The activity list stays live so newly
   // recorded reads remain visible to later targets.
-  metadataResolver.refresh();
   let clockLessReads = 0;
-  const readSources = [
+  const candidateReadSources = [
     ...[
       ...(tx.getPotentiallyExternalReadActivities?.() ??
         tx.getReadActivities?.() ?? []),
@@ -4121,7 +4120,11 @@ const verifyInputRequirements = (
       ...read,
       journalIndex: -Infinity,
     })),
-  ].map((read) => ({
+  ];
+  // Candidate collection can record writes. Refresh after it completes so
+  // every resolved envelope reflects the transaction those reads belong to.
+  metadataResolver.refresh();
+  const readSources = candidateReadSources.map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
     metadata: metadataResolver.read(
