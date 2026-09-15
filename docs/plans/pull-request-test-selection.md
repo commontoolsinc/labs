@@ -1986,14 +1986,17 @@ tests, once per commit; the first rule multiplies that by the count. A
 nobody anything they did not already know, and several times per commit it
 tells them nothing several times.
 
-The rule is for tests and not for repository gates. Formatting, linting,
-the cycle check and the drift guard are withheld from pull requests by the
-same threshold as everything else, and a gate is exactly where this must
-not reach: a gate's failure is a statement about the tree rather than
-about one change, and the drift guard is what this design leans on to
-notice a suite that has silently stopped running. So the lane reads a
-`reason` of `flaky` on a withheld entry whose unit is a test, and every
-other withheld entry gates as it does today. Reading membership of the
+The rule reaches a repository gate like anything else. Formatting,
+linting, the cycle check and the drift guard are withheld from pull
+requests by the same threshold as everything else and excused on the
+default branch by the same one. A gate introspects the tree where a test
+runs the code, which decides what it reads and how it is invoked and
+nothing about what its failures are worth to a change: a gate that
+disagrees with itself fails somebody's change for something its author
+cannot act on, which is what the threshold answers. What asks for such a
+gate to be fixed is the flake tile, the same thing that asks for a flaky
+test. So the lane reads a `reason` of `flaky` on a withheld entry, and an
+entry held back for any other reason gates. Reading membership of the
 withheld set instead would make every reason somebody adds later
 non-gating without anybody deciding it.
 
@@ -3611,9 +3614,9 @@ The full run's treatment of a flaky test is tested at both ends. In
 `plan()`, a withheld and independent identity is placed under the
 `everything` policy with the count its share asks for and named in
 `nonGating`; a withheld identity without the independence flag is placed
-once; a withheld gate is named in neither; and an identity whose runs do
-not fit gives them up until they do rather than putting its lane past the
-bound. In the lane runner, a fixture of batch results and records proves
+once; a withheld entry whose reason is not `flaky` is held back and not
+named in `nonGating`; and an identity whose runs do not fit gives them up
+until they do rather than putting its lane past the bound. In the lane runner, a fixture of batch results and records proves
 four cases: a batch failing only on non-gating identities does not fail the
 lane, a batch failing on one other identity does, a batch failing on a
 non-gating identity in one run and not another does not, and a batch that
@@ -3902,31 +3905,49 @@ exercised on the branch on its own.
       into the unmarked lane spool. It also includes `--full`, `--dry-run`,
       and repeats.
 - [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
-      attestation, coverage and deploy jobs repointed at them.
-- [ ] The full run's treatment of a test too flaky for pull requests.
+      attestation, coverage and deploy jobs repointed at them. The lane's
+      coverage upload carries the whole of the lane's coverage directory
+      rather than its `.lcov` files: a measured set the lane saw fail is
+      marked by a file beside the report, and a glob over one extension
+      would drop it and publish the baseline anyway.
+- [x] The full run's treatment of a test too flaky for pull requests.
       The count is placed already: `tasks/test-selection/plan.ts` gives
       every mandatory identity the count `executionsFor` returns for its
       share, and gives up runs until what is left fits rather than
       putting a lane past its bound. What is left is that it returns a
       `nonGating` list beside `withheld` naming the identities whose
-      failures do not fail the run, and that a withheld repository gate
-      is in neither list.
+      failures do not fail the run. A repository gate is one of those
+      identities like any other: a gate introspects the tree where a test
+      runs the code, which says nothing about what its failures are worth
+      to a change.
       `tasks/ci-lane.ts` reads each batch's gathered records, exits
-      non-zero only where a failing identity is outside `nonGating`, fails
-      the lane whenever a batch did not account for every identity it was
-      asked to run, and names every non-gating failure in the job summary.
+      non-zero only where a failing identity is outside `nonGating`, and
+      names every non-gating failure in the job summary. Three rules
+      decide a lane. An excusal takes the specification's: an invocation
+      is excused only when it accounted for every identity it was asked
+      to run, and an execution that ended badly having recorded no
+      failure accounted for nothing, whatever the batch's other
+      executions recorded. A unit that recorded nothing recorded nothing
+      under any name, and that fails the lane whether or not anything was
+      there to excuse. And an identity no record accounts for costs the
+      batch its excusal rather than costing the run, since failing
+      outright would fail the run for every rename: a manifest is hours
+      old by construction and a test renamed since records under its new
+      name.
       The manifest gains no field and `executionsFor` needs no change: its
       line already runs past the exclusion rate. `fullLaneCount`'s work
-      sum counts the extra runs, which it does not today, so the floor its
-      search starts from is not an underestimate.
-- [ ] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
+      sum counts the extra runs, so the count its search starts from is
+      close to the answer rather than far below it, and the search walks
+      down as well as up so that where it starts cannot decide how many
+      lanes the run gets.
+- [x] `pendingMain` joins the windows `trimWindows` ages. A `main` failure
       waits there until a later run judges it, and an excluded test that
       stays broken no longer turns `main` red, so nothing bounds what
       accumulates.
-- [ ] A measured set whose lane held a non-gating failure is reported
+- [x] A measured set whose lane held a non-gating failure is reported
       rather than having a baseline published from it, the same way the
       gate already reports a run with a failing test.
-- [ ] `explain <identity>` gains the runs it is given and whether it is
+- [x] `explain <identity>` gains the runs it is given and whether it is
       withheld, replacing the three-way answer that no longer partitions.
 - [ ] Repository-wide coverage measurement moves to the full run and stops
       failing anything.

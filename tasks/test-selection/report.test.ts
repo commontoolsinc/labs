@@ -1033,6 +1033,9 @@ describe("report", () => {
         context,
       )!;
       expect(body).toContain("too flaky to judge a change by");
+      // And that the branch stayed green for it, which a reader of a
+      // failure list would otherwise assume the other way.
+      expect(body).toContain("does not fail the run on that branch");
     });
 
     it("says no run of a withheld test saw it pass and fail at once", () => {

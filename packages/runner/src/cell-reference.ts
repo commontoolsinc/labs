@@ -214,6 +214,11 @@ export function parseCellReference(
     if (text.startsWith("//") || text.startsWith("/@")) {
       space = text.startsWith("//") ? segments[2] : segments[1].slice(1);
       checkSpace(space);
+      if (text.startsWith("/@") && !space.startsWith("did:")) {
+        throw new Error(
+          `The named-space prefix \`/@${space}/\` is retired; use \`//${space}/\`.`,
+        );
+      }
       offset = text.startsWith("//") ? 3 : 2;
     } else {
       space = context?.space;

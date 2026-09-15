@@ -23,9 +23,9 @@ import * as path from "@std/path";
 import { walk } from "@std/fs/walk";
 import {
   changedFiles,
-  COVERAGE_REPORT_DIR,
   COVERAGE_REPORT_FILE,
   manifestMoment,
+  measuredSetOfReport,
 } from "./ci-lane.ts";
 import {
   acceptedCoverageDebt,
@@ -126,7 +126,6 @@ export async function collectSetReports(
   reportsDir: string,
 ): Promise<Map<string, string[]>> {
   const found = new Map<string, string[]>();
-  const layout = COVERAGE_REPORT_DIR.split("/");
   try {
     for await (
       const entry of walk(reportsDir, {
@@ -134,18 +133,9 @@ export async function collectSetReports(
         exts: [".lcov"],
       })
     ) {
-      const parts = entry.path.replaceAll("\\", "/").split("/");
-      // The lane's own layout, matched whole rather than by its last
-      // segment, so that a suite named after one of those segments
-      // cannot be read as the layout itself.
-      const at = parts.findIndex((_, index) =>
-        parts.slice(index, index + layout.length).join("/") ===
-          COVERAGE_REPORT_DIR
-      );
-      if (at === -1) continue;
-      const rest = parts.slice(at + layout.length);
-      if (rest.length !== 3 || rest[2] !== COVERAGE_REPORT_FILE) continue;
-      const name = `${rest[0]}/${rest[1]}`;
+      if (path.basename(entry.path) !== COVERAGE_REPORT_FILE) continue;
+      const name = measuredSetOfReport(entry.path);
+      if (name === undefined) continue;
       found.set(name, [...found.get(name) ?? [], entry.path]);
     }
   } catch (error) {

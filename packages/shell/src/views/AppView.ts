@@ -41,8 +41,8 @@ import type { LoadError } from "./BodyView.ts";
  *
  * - `pieceId` — which piece is rendered.
  * - `scope` — which document that piece is; one id in two scopes is two.
- * - `pathAfter` — whether the address keeps its member, and whether that
- *   member may be cited.
+ * - `pathAfter` — the segments the walk left unspent, which decide whether
+ *   the reference's member named anything.
  * - `refusal` — always absent on this arm, where it marks the landing rather
  *   than carrying anything. Including a constant would say nothing.
  */
@@ -132,6 +132,31 @@ interface SlugReference {
 /** Whether `a` and `b` are the same reference. */
 function sameSlugReference(a: SlugReference, b: SlugReference): boolean {
   return a.space === b.space && a.slug === b.slug && a.member === b.member;
+}
+
+/**
+ * What the view makes of where `reference` landed: the landing itself, or a
+ * refusal naming the member where the landing left that member unspent.
+ *
+ * A slug naming a piece at its root spends no member, and the resolution hands
+ * the member back. The member then names nothing in that piece, as a member a
+ * collection does not hold names nothing in the collection, so it is refused
+ * the same way. The selection and the watch both read a resolution through
+ * here, so the answer one records as shown is the answer the other compares.
+ */
+function answerFor(
+  reference: SlugReference,
+  landed: SlugReferenceTarget | SlugReferenceRefusal,
+): SlugReferenceTarget | SlugReferenceRefusal {
+  if (landed.refusal || landed.pathAfter.length === 0) return landed;
+  return {
+    refusal: {
+      code: "not-collection",
+      message:
+        `no member ${landed.pathAfter.join("/")} in ${reference.slug}, ` +
+        "which names a piece rather than a collection",
+    },
+  };
 }
 
 /**
@@ -399,6 +424,19 @@ export class XAppView extends BaseView {
           const member = "pieceMember" in app.view
             ? app.view.pieceMember
             : undefined;
+          // Segments past a member are refused from the address alone. Only
+          // the member is read out of an address, so what follows it names
+          // nothing whatever the slug turns out to name. No reference is
+          // watched for such an address, so there is no answer to record.
+          const extraPath = "pieceExtraPath" in app.view
+            ? app.view.pieceExtraPath
+            : undefined;
+          if (extraPath !== undefined) {
+            throw new Error(
+              `no piece at ${extraPath} after member ${member} in ` +
+                `${app.view.pieceSlug}, since nothing past a member resolves`,
+            );
+          }
           // This run's own address, held for as long as the run takes: what
           // it reports is what THIS reference reached, and the address may
           // have moved on by the time it reports.
@@ -409,7 +447,10 @@ export class XAppView extends BaseView {
           };
           let landed: SlugReferenceTarget | SlugReferenceRefusal;
           try {
-            landed = await rt.resolveSlug(space, app.view.pieceSlug, member);
+            landed = answerFor(
+              reference,
+              await rt.resolveSlug(space, app.view.pieceSlug, member),
+            );
           } catch (error) {
             // Around the resolution alone, for the reason the load below
             // carries its own wrapper: the outer catch also takes the
@@ -431,16 +472,11 @@ export class XAppView extends BaseView {
             this.#markShown(reference, landed, signal);
             throw new Error(landed.refusal.message);
           }
-          const { pieceId, scope, pathAfter } = landed;
-          this.#namedAMember = member !== undefined && pathAfter.length === 0;
+          const { pieceId, scope } = landed;
+          // `answerFor()` refuses a landing that leaves the member unspent, so
+          // a member carried this far named one.
+          this.#namedAMember = member !== undefined;
           this.#selectedPatternTargetId = pieceId;
-          // A slug naming a piece at its root spends no member, so the
-          // segment named nothing and the piece's address does not include
-          // it. Drop it, which is how an address the shell cannot honor
-          // normalizes — the same replacement a visited identity URL gets.
-          if (member !== undefined && pathAfter.length > 0) {
-            this.#replaceViewWithoutMember(app.view);
-          }
           let pattern: PieceHandle<NameSchema>;
           try {
             pattern = await rt.getPattern(space, pieceId, { scope });
@@ -616,11 +652,16 @@ export class XAppView extends BaseView {
    * The address is the one source of a reference: a watch is built for what
    * it names, and a recorded answer is held against what it names. Both read
    * it through here, so the two cannot disagree about what the address says.
+   *
+   * An address carrying segments past its member names none. The selection
+   * refuses it from the address alone, so there is nothing to watch and no
+   * answer to hold against it.
    */
   get #addressedReference(): SlugReference | undefined {
     const space = this.space;
     const view = this.app.view;
     if (!space || !("pieceSlug" in view) || !view.pieceSlug) return undefined;
+    if ("pieceExtraPath" in view && view.pieceExtraPath) return undefined;
     return {
       space,
       slug: view.pieceSlug,
@@ -711,10 +752,13 @@ export class XAppView extends BaseView {
   async #resolveAgainst(watch: SlugWatch): Promise<void> {
     let landed: SlugReferenceTarget | SlugReferenceRefusal;
     try {
-      landed = await watch.rt.resolveSlug(
-        watch.reference.space,
-        watch.reference.slug,
-        watch.reference.member,
+      landed = answerFor(
+        watch.reference,
+        await watch.rt.resolveSlug(
+          watch.reference.space,
+          watch.reference.slug,
+          watch.reference.member,
+        ),
       );
     } catch (error) {
       if (watch.rt.signal.aborted) {
@@ -790,18 +834,6 @@ export class XAppView extends BaseView {
     const event = e as CellUpdateEvent<string | undefined>;
     this.pieceTitle = event.detail ?? "";
   };
-
-  /**
-   * Drop the member from the address, leaving the collection's name. A
-   * segment the walk did not spend named nothing, so the page it opened is
-   * the one the name alone addresses, and the URL says so.
-   */
-  #replaceViewWithoutMember(view: typeof this.app.view) {
-    if (!("pieceSlug" in view) || !view.pieceSlug) return;
-    this.preserveRuntimeErrorsForNextViewChange?.();
-    const { pieceMember: _dropped, ...rest } = view;
-    this.#replaceView(rest);
-  }
 
   #replacePieceUrlWithSlug(view: typeof this.app.view, slug: string) {
     try {
