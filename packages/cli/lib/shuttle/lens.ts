@@ -92,6 +92,18 @@ export interface FrameCursor {
   readonly column: number;
 }
 
+/**
+ * What the modeline writes in front of a line of the kind `opening` names.
+ *
+ * The space is the form [`views.md`](../../../../docs/plans/shuttle/views.md)
+ * draws a command line in, and it is the form the prompt takes too — every
+ * line shuttle reads opens with a mark and a space, so a line typed at a frame
+ * reads as the same act as a line typed at the prompt.
+ */
+function prompting(opening: ":" | "/"): string {
+  return `${opening} `;
+}
+
 /** A line being typed at the frame: what it opens with, and what it holds. */
 interface Typing {
   /** `:` for a shuttle line, `/` for a search. */
@@ -542,7 +554,9 @@ export class ValueLens {
   #modeline(inner: number): string | undefined {
     if (this.#typing !== undefined) return this.#typedRow(inner).text;
     if (this.#running !== undefined) return `: ${this.#running}`;
-    if (this.#searched) return `/${this.#pattern}  ${this.#standing()}`;
+    if (this.#searched) {
+      return `${prompting("/")}${this.#pattern}  ${this.#standing()}`;
+    }
     if (this.#said !== "") return oneLineOf(this.#said);
     return undefined;
   }
@@ -582,9 +596,9 @@ export class ValueLens {
   #typedRow(inner: number): { readonly text: string; readonly column: number } {
     const typing = this.#typing!;
     const typed = typing.buffer.text();
-    const line = typing.opening + typed;
-    const before = typing.opening +
-      [...typed].slice(0, typing.buffer.col).join("");
+    const opening = prompting(typing.opening);
+    const line = opening + typed;
+    const before = opening + [...typed].slice(0, typing.buffer.col).join("");
     const room = Math.max(inner, 1);
     // A line as wide as the row is a line that fits: the cursor after its last
     // character stands in the column the padding holds, which is inside the
@@ -746,9 +760,19 @@ function offering(phrases: readonly string[], room: number): string {
  * The cut is by display width and at a character boundary, which is
  * {@link wrapped}'s (`page.ts`) — the one traversal every width in shuttle is
  * measured by, so a double-width character costs an edge what it costs a row.
+ *
+ * What {@link wrapped} gives back can still be wider than it was asked for: a
+ * single character wider than the whole width is taken on its own and
+ * overflows, there being nowhere narrower to put it. That is right for a page,
+ * which must show something or `more` could be asked forever, and wrong here,
+ * where every row of a frame is the same width and one column over puts the
+ * frame's right edge in two columns. So a piece that came back too wide is
+ * dropped: a column that cannot hold the character it was given holds nothing.
  */
 function fit(text: string, room: number): string {
-  return room <= 0 || text === "" ? "" : wrapped([text], room)[0] ?? "";
+  if (room <= 0 || text === "") return "";
+  const shown = wrapped([text], room)[0] ?? "";
+  return unicodeWidth(shown) > room ? "" : shown;
 }
 
 /**

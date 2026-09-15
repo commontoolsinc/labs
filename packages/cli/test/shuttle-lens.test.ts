@@ -147,18 +147,38 @@ describe("lens", () => {
           // came back wider than the rest would put the right edge in two
           // columns at exactly the width where there is no room to spare.
           //
-          // Bounded to text a column wide, which is what this drives: a label
-          // whose first character is drawn double-width does not fit the one
-          // column the edge has left at this size, and the edge comes back a
-          // column over. That is a defect of its own rather than a gap here,
-          // and it is tracked outside this change — so read this as the width
-          // holding for single-width text, and not as the width holding.
-          //
           // Kills: fitting either edge's text against the full width rather
           // than the width less its framing.
 
           const driven = driving("cell @space", ROWS, 5);
           driven.lens.showing({ a: 1, b: 2, c: 3 });
+          expect(last(driven).map((row) => unicodeWidth(row)))
+            .toEqual(Array(ROWS).fill(5));
+        });
+
+        it("holds that width against a character too wide for the column", () => {
+          // The three texts a frame fits rather than wraps — the title, the
+          // keys, and the line being typed — all reach `wrapped`, which takes a
+          // single character wider than the whole width on its own and
+          // overflows by a column, there being nowhere narrower to put it. That
+          // is right for a page, which must show something or `more` could be
+          // asked forever, and wrong on a frame, where the overflow puts the
+          // right edge in two columns.
+          //
+          // All three at once, because the fit is one helper: the title here is
+          // double-width, and the line being typed is opened and given a
+          // double-width character at a frame whose inner width is one column.
+          //
+          // Kills: taking what `wrapped` gives back without asking whether it
+          // fits, which draws `┌ 中 ┐` a column over on the top edge and the
+          // same on the modeline.
+
+          const driven = driving("中", ROWS, 5);
+          driven.lens.showing({ a: 1 });
+          expect(last(driven).map((row) => unicodeWidth(row)))
+            .toEqual(Array(ROWS).fill(5));
+          driven.lens.reads(key(":"));
+          driven.lens.reads({ name: "中", char: "中" });
           expect(last(driven).map((row) => unicodeWidth(row)))
             .toEqual(Array(ROWS).fill(5));
         });
@@ -396,7 +416,9 @@ describe("lens", () => {
         it("opens a command line on `:`, offering the two keys that end it", () => {
           const driven = driving("c", ROWS, 60);
           driven.lens.reads(key(":"));
-          expect(modeline(last(driven))).toBe(":");
+          // Read untrimmed, because the space after the mark is the form
+          // `views.md` draws a command line in and the trim would hide it.
+          expect(last(driven).at(-2)?.slice(2, 4)).toBe(": ");
           expect(keys(last(driven)))
             .toBe(
               "└ enter run · ctrl-c cancel ───────────────────────────────┘",
@@ -440,7 +462,7 @@ describe("lens", () => {
           const driven = driving();
           driven.lens.reads(key(":"));
           types(driven.lens, "get depth");
-          expect(modeline(last(driven))).toBe(":get depth");
+          expect(modeline(last(driven))).toBe(": get depth");
         });
 
         it("binds the line editor's table on the command line", () => {
@@ -455,7 +477,7 @@ describe("lens", () => {
           types(driven.lens, "depth");
           driven.lens.reads({ name: "ctrl-a", ctrl: true });
           types(driven.lens, "get ");
-          expect(modeline(last(driven))).toBe(":get depth");
+          expect(modeline(last(driven))).toBe(": get depth");
         });
 
         it("asks for the line the command line took on `enter`", () => {
@@ -514,7 +536,7 @@ describe("lens", () => {
           driven.lens.reads(key(":"));
           types(driven.lens, "q");
           expect(driven.lens.open).toBe(true);
-          expect(modeline(last(driven))).toBe(":q");
+          expect(modeline(last(driven))).toBe(": q");
         });
 
         it("asks for `edit` on the cell it is a lens onto on `e`", () => {
@@ -560,7 +582,7 @@ describe("lens", () => {
           types(driven.lens, "gamma");
           driven.lens.reads(key("enter"));
           expect(body(last(driven))[0]).toBe('  "gamma",');
-          expect(modeline(last(driven))).toBe("/gamma  1 of 1");
+          expect(modeline(last(driven))).toBe("/ gamma  1 of 1");
         });
 
         it("says how many matches there are and which one it is on", () => {
@@ -569,11 +591,11 @@ describe("lens", () => {
           driven.lens.reads(key("/"));
           types(driven.lens, "filler");
           driven.lens.reads(key("enter"));
-          expect(modeline(last(driven))).toBe("/filler  1 of 17");
+          expect(modeline(last(driven))).toBe("/ filler  1 of 17");
           driven.lens.reads(key("n"));
-          expect(modeline(last(driven))).toBe("/filler  2 of 17");
+          expect(modeline(last(driven))).toBe("/ filler  2 of 17");
           driven.lens.reads(key("N"));
-          expect(modeline(last(driven))).toBe("/filler  1 of 17");
+          expect(modeline(last(driven))).toBe("/ filler  1 of 17");
         });
 
         it("wraps from the last match back to the first on `n`", () => {
@@ -585,11 +607,11 @@ describe("lens", () => {
           driven.lens.reads(key("/"));
           types(driven.lens, "o");
           driven.lens.reads(key("enter"));
-          expect(modeline(last(driven))).toBe("/o  1 of 2");
+          expect(modeline(last(driven))).toBe("/ o  1 of 2");
           driven.lens.reads(key("n"));
-          expect(modeline(last(driven))).toBe("/o  2 of 2");
+          expect(modeline(last(driven))).toBe("/ o  2 of 2");
           driven.lens.reads(key("n"));
-          expect(modeline(last(driven))).toBe("/o  1 of 2");
+          expect(modeline(last(driven))).toBe("/ o  1 of 2");
         });
 
         it("says so where a search found nothing", () => {
@@ -598,7 +620,7 @@ describe("lens", () => {
           driven.lens.reads(key("/"));
           types(driven.lens, "nowhere");
           driven.lens.reads(key("enter"));
-          expect(modeline(last(driven))).toBe("/nowhere  no match");
+          expect(modeline(last(driven))).toBe("/ nowhere  no match");
         });
 
         it("offers `n` and `N` only once a pattern is set", () => {
@@ -621,7 +643,7 @@ describe("lens", () => {
           driven.lens.reads(key("/"));
           types(driven.lens, "one");
           driven.lens.reads(key("enter"));
-          expect(modeline(last(driven))).toBe("/one  1 of 1");
+          expect(modeline(last(driven))).toBe("/ one  1 of 1");
           driven.lens.reads(key("/"));
           driven.lens.reads(key("enter"));
           expect(keys(last(driven))).not.toContain("n/N next");
@@ -647,9 +669,9 @@ describe("lens", () => {
           driven.lens.reads(key("/"));
           types(driven.lens, "filler");
           driven.lens.reads(key("enter"));
-          expect(modeline(last(driven))).toBe("/filler  1 of 17");
+          expect(modeline(last(driven))).toBe("/ filler  1 of 17");
           driven.lens.showing(["filler", "filler"]);
-          expect(modeline(last(driven))).toBe("/filler  2 matches");
+          expect(modeline(last(driven))).toBe("/ filler  2 matches");
         });
 
         it("searches while a line it asked for is in flight", () => {
@@ -731,10 +753,10 @@ describe("lens", () => {
           const driven = driving("c", ROWS, COLUMNS);
           driven.lens.reads(key(":"));
           types(driven.lens, "get");
-          // The row above the bottom edge, and four columns in: past the
-          // frame's left edge, the space after it, and `:get`.
+          // The row above the bottom edge, and eight columns in: past the
+          // frame's left edge, the space after it, and `: get`.
           expect(driven.cursors[driven.cursors.length - 1])
-            .toEqual({ row: ROWS - 1, column: 7 });
+            .toEqual({ row: ROWS - 1, column: 8 });
         });
 
         it("follows the cursor within the line rather than its end", () => {
@@ -742,8 +764,10 @@ describe("lens", () => {
           driven.lens.reads(key(":"));
           types(driven.lens, "get");
           driven.lens.reads({ name: "ctrl-a", ctrl: true });
+          // `ctrl-a` moves to the start of what was typed, which is after the
+          // mark: the mark is the frame's and not part of the line.
           expect(driven.cursors[driven.cursors.length - 1])
-            .toEqual({ row: ROWS - 1, column: 4 });
+            .toEqual({ row: ROWS - 1, column: 5 });
         });
 
         it("scrolls a line longer than the row under the cursor", () => {
@@ -775,10 +799,10 @@ describe("lens", () => {
 
           const driven = driving("c", ROWS, 20);
           types(driven.lens, ":");
-          types(driven.lens, "set depth 43210");
+          types(driven.lens, "set depth 4321");
           const row = modeline(last(driven));
           expect(unicodeWidth(row)).toBe(16);
-          expect(row).toBe(":set depth 43210");
+          expect(row).toBe(": set depth 4321");
           expect(driven.cursors[driven.cursors.length - 1])
             .toEqual({ row: ROWS - 1, column: 19 });
         });

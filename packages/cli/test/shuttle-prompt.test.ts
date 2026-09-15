@@ -1618,7 +1618,9 @@ describe("prompt", () => {
       const cursors = drawn.filter((write) => write.kind === "frame")
         .map((write) => write.cursor);
       expect(cursors[0]).toBeUndefined();
-      expect(cursors[1]).toEqual({ row: 23, column: 4 });
+      // Past the frame's left edge, the space after it, and the `: ` the
+      // command line opens with.
+      expect(cursors[1]).toEqual({ row: 23, column: 5 });
       expect(cursors.at(-1)).toBeUndefined();
     });
 
