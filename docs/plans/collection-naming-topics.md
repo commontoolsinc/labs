@@ -33,10 +33,10 @@ execution.
 **Decided 2026-09-15: each member stores its own member name.** Built for the
 exemplar in #7532, and only there. `addItem` allocates the name over the board's
 names map and passes it into the member's input in the same transaction that
-creates the member, and the member publishes that stored name without reading
-the board's derived names table. So a member the create named reads its own name
-without the table. That is the whole of what is built. Three things it does not
-change.
+creates the member, and the member publishes what it stores. For decision 14 and
+for #7439 (items 1 and 2 below), that is the whole of what changes: a member the
+create named reads its own name from its own input, without the board's derived
+names table. Three things it does not change.
 
 The names map has not left the picture. It is still what a name is allocated
 over — `createNamed` reads its keys — and the derived `namesTable` is still what
@@ -53,11 +53,9 @@ reads its name through `ownName` over that table, so none of this is yet true of
 Topics.
 
 Items 1 and 2, and decisions 13 and 14, are not yet reconciled with this
-decision. They state the per-member `boardNames` input and the one-time
-link-bind of `namesTable` that goes with it, which is still what Topics runs and
-still what an existing member needs. Read as an elaboration of this decision
-they would give the wrong input contract for decision 14 and #7439. Reconciling
-them is its own stage, and is not done here.
+decision. Read as an elaboration of it they would give the wrong input contract
+for decision 14 and #7439. Reconciling them is its own stage, and is not done
+here.
 
 [The lenient-naming experiment record](../history/plans/collection-naming-lenient-naming-experiment-2026-09-14.md)
 holds the evidence behind the decision: a member reading its name through the
