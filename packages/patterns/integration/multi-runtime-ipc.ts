@@ -48,3 +48,23 @@ export type RuntimeDiagnosticsSnapshot = {
   settleStatsHistory: FabricValue[];
   actionRunTrace: FabricValue[];
 };
+
+/**
+ * One commit a runtime had refused, carrying the `storage.push.error`
+ * telemetry marker's fields.
+ *
+ * `error` is the rejection's name, `ConflictError` for a stale read.
+ * `message` is the rejection's text, which separates a root conflict — a
+ * "stale … read" of a named document — from a commit refused because a commit
+ * it stacked on was refused, which reads "pending dependency" and says how
+ * that dependency ended. One root conflict can cost several of the second
+ * kind, and a count of rolled-back writes adds them together. `reads` is the
+ * commit's conflict set and `writes` the entities it wrote, both as the marker
+ * gives them.
+ */
+export type CommitRejection = {
+  error: string;
+  message: string;
+  reads: string[];
+  writes: string[];
+};

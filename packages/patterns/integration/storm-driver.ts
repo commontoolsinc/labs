@@ -58,6 +58,8 @@ const harness = await MultiRuntimeHarness.create({
   programPath: PROGRAM_PATH,
   rootPath: ROOT_PATH,
   sessions: [mk("drv-alice"), mk("drv-bob"), mk("drv-observer")],
+  // Records every refused commit, which the refusal summary below reads.
+  recordRejections: true,
 });
 const [alice, bob, observer] = harness.sessions;
 await harness.settle();
@@ -173,6 +175,52 @@ for (const [label, path] of probePaths) {
       }`,
     );
   }
+}
+
+// Refusal attribution: what each refused commit was refused OVER, and what it
+// had written. A count says a fixture cost something; this says which document
+// the sessions contended for and whether the refusals are contention at all.
+// The message's leading clause names the kind: a "stale ... read" of a named
+// document is a root conflict, while a "pending dependency ..." is a commit
+// dropped because one it stacked on was dropped.
+const staleOver = (message: string): string | undefined =>
+  message.match(/stale [a-z]+ read: (\S+) /)?.[1];
+const classifyWrite = (id: string): string =>
+  id === msgLink.id ? "list" : id.startsWith("computed:") ? "computed" : "doc";
+for (
+  const [name, s] of [["alice", alice], ["bob", bob], [
+    "observer",
+    observer,
+  ]] as const
+) {
+  const refusals = await s.rejections();
+  const kinds: Record<string, number> = {};
+  const wrote: Record<string, number> = {};
+  const over: Record<string, number> = {};
+  for (const refusal of refusals) {
+    const stale = staleOver(refusal.message);
+    kinds[stale === undefined ? "cascade" : "root"] =
+      (kinds[stale === undefined ? "cascade" : "root"] ?? 0) + 1;
+    if (stale !== undefined) {
+      // A commit refused over a document it wrote itself is contending with
+      // its own output rather than with another session's writes.
+      const self = refusal.writes.includes(stale) ? "self-" : "";
+      over[`${self}${classifyWrite(stale)}:${stale.slice(-8)}`] =
+        (over[`${self}${classifyWrite(stale)}:${stale.slice(-8)}`] ?? 0) + 1;
+    }
+    for (const id of new Set(refusal.writes.map(classifyWrite))) {
+      wrote[id] = (wrote[id] ?? 0) + 1;
+    }
+  }
+  const show = (counts: Record<string, number>) =>
+    Object.entries(counts)
+      .sort((left, right) => right[1] - left[1])
+      .map(([key, count]) => `${key}=${count}`)
+      .join(" ") || "(none)";
+  console.log(
+    `[driver] refusals ${name}: ${refusals.length} ` +
+      `kind[${show(kinds)}] wrote[${show(wrote)}] staleOver[${show(over)}]`,
+  );
 }
 
 // Logger-count signal: which categories differ across sessions.

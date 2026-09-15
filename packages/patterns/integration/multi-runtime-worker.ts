@@ -25,6 +25,8 @@ import type { Cell } from "@commonfabric/runner";
 import {
   convertCellsToLinks,
   markUiInputBlindWriteTx,
+  type RuntimeTelemetry,
+  type RuntimeTelemetryEvent,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
@@ -39,6 +41,7 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import {
+  type CommitRejection,
   type RuntimeDiagnosticsSnapshot,
   type TrustedUiDescriptor,
   type WorkerRequest,
@@ -52,6 +55,42 @@ let cc: PiecesController | undefined;
 let piece: PieceController | undefined;
 let resultSchema: unknown;
 let resultSinkCancel: (() => void) | undefined;
+
+/**
+ * Every commit this runtime had refused since the last `clearRejections`,
+ * oldest first, or absent when this runtime was not asked to record them. A
+ * caller brackets the window it wants to read: an entry holds one commit's
+ * whole conflict set, so a contention-heavy run left unbracketed accumulates
+ * megabytes of addresses.
+ */
+let rejections: CommitRejection[] | undefined;
+
+/** Record every refused commit `telemetry` reports into {@link rejections}. */
+function recordRejectionsInto(telemetry: RuntimeTelemetry): void {
+  const recording: CommitRejection[] = [];
+  rejections = recording;
+  telemetry.addEventListener("telemetry", (event) => {
+    const marker = (event as RuntimeTelemetryEvent).marker;
+    if (marker.type !== "storage.push.error") return;
+    recording.push({
+      error: marker.error,
+      message: marker.message,
+      reads: marker.reads,
+      writes: marker.writes,
+    });
+  });
+}
+
+/** The recorded refusals, or a loud failure when nothing is recording them. */
+function recorded(): CommitRejection[] {
+  if (!rejections) {
+    throw new Error(
+      "no refused commits are being recorded; create the harness with " +
+        "`recordRejections: true`",
+    );
+  }
+  return rejections;
+}
 
 function controller(): PiecesController {
   if (!cc) throw new Error("worker not initialized");
@@ -208,6 +247,7 @@ const handlers: Record<
       spaceName,
       apiUrl,
       diagnostics,
+      recordRejections,
       wsDelayMs,
       cfcWriteFloor,
     },
@@ -224,6 +264,9 @@ const handlers: Record<
         ? { cfcWriteFloor: cfcWriteFloor as CfcWriteFloorMode }
         : {}),
     });
+    if (recordRejections === true) {
+      recordRejectionsInto(controller().runtime.telemetry);
+    }
     if (diagnostics === true) {
       const scheduler = controller().runtime.scheduler;
       scheduler.enableSettleStats();
@@ -568,6 +611,17 @@ const handlers: Record<
       settleStatsHistory: scheduler.getSettleStatsHistory(),
       actionRunTrace: scheduler.getActionRunTrace(),
     } satisfies RuntimeDiagnosticsSnapshot;
+  },
+
+  async rejections() {
+    await idle();
+    return { rejections: recorded() };
+  },
+
+  async clearRejections() {
+    await idle();
+    recorded().length = 0;
+    return {};
   },
 
   async loggerCounts() {

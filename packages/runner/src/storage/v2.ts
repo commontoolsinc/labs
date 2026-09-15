@@ -371,6 +371,47 @@ export const conflictEntityOf = (commit: ClientCommit): URI => {
   return UNKNOWN_CONFLICT_ENTITY;
 };
 
+/**
+ * One address in a `storage.push.error` marker's read set: the entity, then
+ * the scope when it is not the space's own, then the path. Scope is part of
+ * the address because it selects the instance a read resolved against, the
+ * same way {@link commitReadActivities} keys its own exclusion by it.
+ */
+const readAddress = (
+  read: { id: string; scope?: CellScope; path: readonly string[] },
+): string => {
+  const scope = normalizeCellScope(read.scope);
+  const instance = scope === "space" ? read.id : `${read.id}@${scope}`;
+  return read.path.length > 0 ? `${instance}/${read.path.join("/")}` : instance;
+};
+
+/**
+ * The `storage.push.error` marker's account of a refused commit: the
+ * rejection's text, the addresses in the commit's conflict set, and the
+ * entities its operations address.
+ *
+ * Confirmed and pending reads become one list of addresses; the baseline each
+ * was measured against is not part of an address.
+ */
+const rejectionAttribution = (
+  rejection: StorageTransactionRejected,
+  commit: ClientCommit,
+): { message: string; reads: string[]; writes: string[] } => ({
+  message: rejection.message,
+  reads: [
+    ...new Set(
+      [...commit.reads.confirmed, ...commit.reads.pending].map(readAddress),
+    ),
+  ],
+  writes: [
+    ...new Set(
+      commit.operations
+        .filter((operation) => operation.op !== "sqlite")
+        .map((operation) => operation.id),
+    ),
+  ],
+});
+
 const activeCommitPreconditions = (
   preconditions: readonly CommitPrecondition[] | undefined,
 ): readonly CommitPrecondition[] =>
@@ -6475,6 +6516,7 @@ export class SpaceReplica
             type: "storage.push.error",
             id: pushOpId,
             error: sealed.name,
+            ...rejectionAttribution(sealed, commit),
           });
           notifyRejectionSources(sealed);
           return await this.#finalizeRejection(
@@ -6568,6 +6610,7 @@ export class SpaceReplica
             id: pushOpId,
             sessionId: session.sessionId,
             error: sealed.name,
+            ...rejectionAttribution(sealed, commit),
           });
           notifyRejectionSources(sealed);
           return await this.#finalizeRejection(
@@ -6630,6 +6673,7 @@ export class SpaceReplica
             id: pushOpId,
             sessionId: session.sessionId,
             error: outcome.rejection.name ?? "TransactionError",
+            ...rejectionAttribution(outcome.rejection, commit),
           });
           notifyRejectionSources(outcome.rejection);
           return await this.#finalizeRejection(
@@ -6700,6 +6744,7 @@ export class SpaceReplica
           type: "storage.push.error",
           id: pushOpId,
           error: rejection.name ?? "TransactionError",
+          ...rejectionAttribution(rejection, commit),
         });
         if (schedulerDependencyRejection === undefined) {
           this.#attachProviderReadyToRetry(rejection, localSeq);
