@@ -237,7 +237,7 @@ export {
   gatedSinkRequestExists,
   loadStoredCfcEnvelope,
   prepareBoundaryCommit,
-  storedSchemaCoversCandidateEnvelope,
+  storedCfcEnvelopeMergeIssue,
 } from "./prepare.ts";
 export type {
   CfcPrefixBoundSource,
@@ -251,8 +251,11 @@ export {
   resetCfcDenialAnnouncements,
 } from "./denial-report.ts";
 export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
-export { cfcSchemaMergeIssue } from "./schema-merge.ts";
-export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
+export type {
+  CfcSchemaMergeIssue,
+  IfcKey,
+  MergeCfcSchemaEnvelopeOptions,
+} from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,

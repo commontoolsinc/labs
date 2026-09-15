@@ -734,16 +734,19 @@ export interface CfcSchemaMergeIssue {
  * --check` is supposed to predict, so the preflight drives THIS seam — the
  * same merge the commit runs, called in dry-run — rather than a second
  * implementation of the rules that would drift out of agreement with
- * enforcement and start green-lighting swaps the deploy then refuses.
+ * enforcement and start green-lighting swaps the deploy then refuses. The
+ * preflight reaches it through `storedCfcEnvelopeMergeIssue` (prepare.ts),
+ * which puts the persist loop's merge-skipping fast paths in front of it.
  *
  * Pure: no transaction, no writes, because the merge itself is.
  */
 export const cfcSchemaMergeIssue = (
   existing: JSONSchema,
   candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): CfcSchemaMergeIssue | undefined => {
   try {
-    mergeCfcSchemaEnvelopes(existing, candidate);
+    mergeCfcSchemaEnvelopes(existing, candidate, options);
     return undefined;
   } catch (error) {
     if (error instanceof CfcSchemaMigrationError) {
