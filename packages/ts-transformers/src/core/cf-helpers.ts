@@ -12,15 +12,29 @@ const CF_HELPERS_SPECIFIER = "commonfabric";
 const HELPERS_STMT =
   `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
 
+// Name of the forwarding JSX-factory shim appended after the source. It is
+// also the top-level binding name whose presence in the authored module swaps
+// the shim for the bare use statement below (see `injectCfHelpers`).
+const JSX_FACTORY_SHIM_NAME = "h";
+
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
-function h(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
+function ${JSX_FACTORY_SHIM_NAME}(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
 `;
 // Syntax-neutral variant injected into authored `.js`/`.jsx` sources, where the
 // `: any[]` annotation above would be a parse error ("Type annotations can only
 // be used in TypeScript files"). Keep both statements line-for-line identical
 // so injection shifts source lines the same way regardless of file kind.
 const HELPERS_USED_STMT_JS = `// @ts-ignore: Internals
-function h(...args) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
+function ${JSX_FACTORY_SHIM_NAME}(...args) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
+`;
+// Appended instead of the shim when the authored module already binds
+// `JSX_FACTORY_SHIM_NAME` at top level, where a second declaration would be a
+// duplicate identifier (TS2300). A plain use of the helper import is all the
+// shim contributes to binding once JSX itself dispatches through
+// `__cfHelpers.h`. Syntax-neutral, so one form serves both file kinds, and
+// the same line count as the shim variants.
+const HELPERS_USED_STMT_BARE = `// @ts-ignore: Internals
+void ${CF_HELPERS_IDENTIFIER};
 `;
 
 export class CFHelpers {
@@ -137,11 +151,16 @@ import { findFirstContentLineIndex } from "./runtime-contract.ts";
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.
 //
-// We must also inject usage of the module before the AST transformer
-// pipeline, otherwise the binding fails, and the helper module
-// is not available in the compiled JS. We repropagate the jsx `h`
-// function, which allows authors to not manually specify the import,
-// as well as "use" the helper to avoid treeshaking/binding failure.
+// We must also inject a usage of the module before the AST transformer
+// pipeline, otherwise the import is elided at emit and the helper module is
+// not available in the compiled JS. By default that usage is a forwarding
+// `h(...)` function delegating to `__cfHelpers.h`, which also lets authors
+// call `h` explicitly without importing it. JSX itself does not depend on the
+// shim: the js-compiler emits elements and fragments against `__cfHelpers.h`
+// directly (its `jsxFactory` / `jsxFragmentFactory`). When the authored
+// module already binds `h` at top level, the shim would collide with that
+// binding, so a bare `void __cfHelpers;` usage is appended instead and the
+// author's `h` keeps its meaning.
 //
 // Source maps are derived from this transformation.
 // Take care in maintaining source lines from its input.
@@ -153,8 +172,6 @@ export function transformCfDirective(
   // helper statement uses JS-only syntax. Defaults to TypeScript syntax.
   fileName?: string,
 ): string {
-  checkCFHelperVar(source);
-
   const lines = source.split("\n");
   const firstContentLineIndex = findFirstContentLineIndex(lines);
   if (firstContentLineIndex === null) {
@@ -167,8 +184,15 @@ export function transformCfDirective(
 const JS_FILE_RE = /\.(js|jsx|mjs|cjs)$/;
 
 export function injectCfHelpers(source: string, fileName?: string): string {
-  checkCFHelperVar(source);
-  const usedStmt = fileName !== undefined && JS_FILE_RE.test(fileName)
+  const sourceFile = ts.createSourceFile(
+    "source.tsx",
+    source,
+    ts.ScriptTarget.ES2023,
+  );
+  checkReservedHelperVar(sourceFile, CF_HELPERS_IDENTIFIER);
+  const usedStmt = declaresTopLevelBinding(sourceFile, JSX_FACTORY_SHIM_NAME)
+    ? HELPERS_USED_STMT_BARE
+    : fileName !== undefined && JS_FILE_RE.test(fileName)
     ? HELPERS_USED_STMT_JS
     : HELPERS_USED_STMT;
   return [
@@ -196,6 +220,9 @@ export function injectCfHelpers(source: string, fileName?: string): string {
  *   `"\n" + HELPERS_USED_STMT_JS` (both constants end in `"\n"`; a stripped
  *   final newline is tolerated);
  * - the prefix and trailer must not overlap.
+ *
+ * The bare-use trailer ({@link HELPERS_USED_STMT_BARE}) postdates #4158 and
+ * is never persisted, so it is deliberately not a legacy trailer.
  *
  * Interior `__cfHelpers` occurrences inside a valid envelope DO match: the
  * predicate is prefix+suffix only. That is chosen behavior — `__cfHelpers`
@@ -226,18 +253,9 @@ export function isLegacyInjectedEnvelope(source: string): boolean {
   return false;
 }
 
-// Throws if `__cfHelpers` was found as an Identifier
-// in the source code.
-function checkCFHelperVar(source: string) {
-  checkReservedHelperVar(source, CF_HELPERS_IDENTIFIER);
-}
-
-function checkReservedHelperVar(source: string, identifier: string) {
-  const sourceFile = ts.createSourceFile(
-    "source.tsx",
-    source,
-    ts.ScriptTarget.ES2023,
-  );
+// Throws if `identifier` (the reserved `__cfHelpers`) was found as an
+// Identifier anywhere in the parsed source.
+function checkReservedHelperVar(sourceFile: ts.SourceFile, identifier: string) {
   const visitor = (node: ts.Node): ts.Node => {
     if (ts.isIdentifier(node) && node.text === identifier) {
       throw new Error(
@@ -247,6 +265,54 @@ function checkReservedHelperVar(source: string, identifier: string) {
     return ts.visitEachChild(node, visitor, undefined);
   };
   ts.visitNode(sourceFile, visitor);
+}
+
+// Whether a top-level statement of `sourceFile` declares a value binding named
+// `name`: a function, class, enum, or namespace declaration, a variable
+// declaration (destructuring included), or an import binding. Type-only
+// declarations (`interface`, `type`) do not count: they occupy no value
+// declaration space, so the function shim coexists with them. Bindings nested
+// in any inner scope do not count either; they merely shadow the shim.
+function declaresTopLevelBinding(
+  sourceFile: ts.SourceFile,
+  name: string,
+): boolean {
+  const isName = (node: ts.Node | undefined): boolean =>
+    node !== undefined && ts.isIdentifier(node) && node.text === name;
+  const bindsName = (binding: ts.BindingName): boolean => {
+    if (ts.isIdentifier(binding)) return binding.text === name;
+    for (const element of binding.elements) {
+      if (!ts.isOmittedExpression(element) && bindsName(element.name)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const stmt of sourceFile.statements) {
+    if (
+      ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt) ||
+      ts.isEnumDeclaration(stmt) || ts.isModuleDeclaration(stmt) ||
+      ts.isImportEqualsDeclaration(stmt)
+    ) {
+      if (isName(stmt.name)) return true;
+    } else if (ts.isVariableStatement(stmt)) {
+      for (const declaration of stmt.declarationList.declarations) {
+        if (bindsName(declaration.name)) return true;
+      }
+    } else if (ts.isImportDeclaration(stmt) && stmt.importClause) {
+      const { name, namedBindings } = stmt.importClause;
+      if (isName(name)) return true;
+      if (namedBindings === undefined) continue;
+      if (ts.isNamespaceImport(namedBindings)) {
+        if (isName(namedBindings.name)) return true;
+      } else {
+        for (const element of namedBindings.elements) {
+          if (isName(element.name)) return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 function getCFHelpersIdentifier(

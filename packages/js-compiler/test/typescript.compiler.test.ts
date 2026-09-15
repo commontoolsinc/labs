@@ -194,6 +194,59 @@ export function render() {
         });
       });
     }
+
+    it("evaluates elements when the module itself binds `h` at top level", async () => {
+      // The pre-transform appends a bare `void __cfHelpers;` use instead of
+      // its forwarding `h` shim here, so the authored `h` is neither a
+      // duplicate identifier nor the JSX factory.
+      const name = "/main.tsx";
+      const compiler = new TypeScriptCompiler(types);
+      const source = `
+export const h = ["a", "b"];
+export function render() {
+  return <ul>{h.map((item) => <li>{item}</li>)}</ul>;
+}
+`;
+      const modules = await resolveAndCompileToModules(
+        compiler,
+        new InMemoryProgram(name, {
+          ...fabricTypeModules,
+          [name]: transformCfDirective(source, name),
+        }),
+        { runtimeModules: FABRIC_RUNTIME_MODULES },
+      );
+      const factory = (
+        name: string,
+        props: unknown,
+        ...children: unknown[]
+      ) => ({
+        name,
+        props,
+        children,
+      });
+      const exports: { h?: unknown; render?: () => unknown } = {};
+      let helpersRequired = 0;
+      new Function("exports", "require", modules.get(name)!.js)(
+        exports,
+        (specifier: string) => {
+          expect(specifier).toBe("commonfabric");
+          helpersRequired += 1;
+          return { __cfHelpers: { h: factory } };
+        },
+      );
+
+      expect(helpersRequired).toBe(1);
+      expect(exports.h).toEqual(["a", "b"]);
+      expect(exports.render!()).toEqual({
+        name: "ul",
+        props: null,
+        children: [["a", "b"].map((item) => ({
+          name: "li",
+          props: null,
+          children: [item],
+        }))],
+      });
+    });
   });
 
   it("registers virtual environment types as default libraries", async () => {
