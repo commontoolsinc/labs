@@ -6,10 +6,10 @@
  * `docs/development/BENCHMARKS.md` documents the matrix, the options, and the
  * output.
  *
- * Each case runs in a child process of its own, so a case that exhausts the
- * heap ends that process rather than the run: this process records the limit,
- * skips the larger sizes of that case's series, and carries on. Any other
- * failure ends the run. Output is JSON lines on stdout; progress, and
+ * Each measured case runs in a child process of its own, so a case that
+ * exhausts the heap ends that process rather than the run: this process records
+ * the limit, skips the larger sizes of that case's series, and carries on. Any
+ * other failure ends the run. Output is JSON lines on stdout; progress, and
  * everything a child prints, goes to stderr.
  */
 
@@ -44,10 +44,13 @@ import {
   presentCommentCount,
   topicIndicesOf,
   TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
+  TOPICS_LIFT_NAMES,
   type TopicsDemand,
   type TopicsFixture,
   type TopicsFixtureOptions,
+  type TopicsLiftName,
   type TopicsMeasurement,
+  type TopicsOperation,
   type TopicsReads,
 } from "../packages/patterns/integration/topics-headless-fixture.ts";
 
@@ -94,8 +97,20 @@ const THREAD_TOPIC_COUNT = 4;
 /** The mention graph of every thread case. */
 const THREAD_MENTIONS: MentionGraph = { shape: "low-degree", perSource: 1 };
 
-/** The demand workloads every case is measured under. */
-const WORKLOADS = ["board", "topic-open", "all-backlinks"] as const;
+/** The demand workloads each pivot case is recorded under. */
+const PIVOT_WORKLOADS = ["board", "topic-open", "all-backlinks"] as const;
+
+/** The demand workloads each thread case is measured under. */
+const THREAD_WORKLOADS = ["aggregates"] as const;
+
+/**
+ * Why no `board` case is measured, which each `board` sample says in place of
+ * a measurement.
+ */
+const BOARD_NOT_MEASURED =
+  "A board with no topic open reads its stored card values, and in a browser " +
+  "with client execution it ran none of the reached lifts, so there is no " +
+  "work of theirs to measure headlessly.";
 
 /**
  * The topic a `topic-open` case opens, and the one every warm update edits or
@@ -105,7 +120,9 @@ const WORKLOADS = ["board", "topic-open", "all-backlinks"] as const;
 const FOCUS_TOPIC = 0;
 
 /** A demand workload, by name. */
-type Workload = typeof WORKLOADS[number];
+type Workload =
+  | typeof PIVOT_WORKLOADS[number]
+  | typeof THREAD_WORKLOADS[number];
 
 /** One case of the matrix. */
 interface ProbeCase {
@@ -128,7 +145,7 @@ interface ProbeCase {
   /** The quantity the series scales: topics, comments, or links. */
   readonly size: number;
 
-  /** The demand the case is measured under. */
+  /** The demand the case is recorded under. */
   readonly workload: Workload;
 
   /** What the case's fixture is built from. */
@@ -142,13 +159,14 @@ function probeCases(): ProbeCase[] {
   // at `scaled` holds the count its series scales, which is `size`.
   const add = (
     family: ProbeCase["family"],
+    workloads: readonly Workload[],
     small: boolean,
     segments: readonly string[],
     scaled: number,
     size: number,
     options: TopicsFixtureOptions,
   ) => {
-    for (const workload of WORKLOADS) {
+    for (const workload of workloads) {
       const written = (value: string) =>
         [family, ...segments.with(scaled, value), workload].join("/");
       const id = written(segments[scaled]);
@@ -168,6 +186,7 @@ function probeCases(): ProbeCase[] {
     const perSource = mentions.shape === "none" ? 0 : mentions.perSource;
     add(
       "pivot",
+      PIVOT_WORKLOADS,
       topicCount === SMALL_TOPIC_COUNT,
       [mentions.shape, `mentions-${perSource}`, `topics-${topicCount}`],
       2,
@@ -179,6 +198,7 @@ function probeCases(): ProbeCase[] {
     const byLinks = linksPerTopic !== DEFAULT_LINKS_PER_TOPIC;
     add(
       "thread",
+      THREAD_WORKLOADS,
       commentsPerTopic === SMALL_THREAD_LENGTH &&
         linksPerTopic === SMALL_THREAD_LENGTH,
       [`comments-${commentsPerTopic}`, `links-${linksPerTopic}`],
@@ -230,6 +250,40 @@ function caseNamed(id: string): ProbeCase {
   return found;
 }
 
+/**
+ * Returns what every sample of `probeCase` records about the case itself, with
+ * `fixture` the data its options build.
+ */
+function caseRecord(
+  probeCase: ProbeCase,
+  fixture: TopicsFixture,
+): Record<string, unknown> {
+  const { id, family, series, size, workload, options } = probeCase;
+  return {
+    case: id,
+    family,
+    series,
+    size,
+    workload,
+    fixture: {
+      topicCount: options.topicCount,
+      mentions: options.mentions,
+      commentsPerTopic: options.commentsPerTopic ?? DEFAULT_COMMENTS_PER_TOPIC,
+      linksPerTopic: options.linksPerTopic ?? DEFAULT_LINKS_PER_TOPIC,
+      mentionEntries: fixture.topics.reduce(
+        (sum, topic) => sum + topic.mentions.length,
+        0,
+      ),
+      focusTopic: FOCUS_TOPIC,
+      focusMentioners: mentionersOf(fixture, FOCUS_TOPIC).length,
+    },
+    demandedActions: demandedActionsOf(
+      demandOf(workload),
+      options.topicCount,
+    ),
+  };
+}
+
 //
 // The run
 //
@@ -278,7 +332,8 @@ type CaseOutcome =
 
 /**
  * Runs every case `options` selects, in rounds, writing the environment, each
- * sample, each limit, and a completion record as JSON lines.
+ * sample, each limit, and a completion record as JSON lines. A `board` case
+ * starts no process: its sample records that it is not measured, and why.
  *
  * @throws Error when no case is selected, or when a case fails other than by
  * exhausting its process's heap.
@@ -320,6 +375,17 @@ async function runProbe(options: RunOptions): Promise<void> {
   for (let round = 1; round <= options.repeat; round++) {
     for (const probeCase of cases) {
       const { id, series, size } = probeCase;
+      if (probeCase.workload === "board") {
+        emit({
+          kind: "sample",
+          round,
+          ...caseRecord(probeCase, buildTopicsFixture(probeCase.options)),
+          measured: false,
+          reason: BOARD_NOT_MEASURED,
+        });
+        samples++;
+        continue;
+      }
       if (size >= (limits.get(series) ?? Infinity)) continue;
       console.error(`round ${round}: ${id}`);
       const outcome = await runCase(probeCase, v8Flags);
@@ -505,17 +571,21 @@ type PhaseRecord =
   };
 
 /**
- * Measures `probeCase` and writes its sample to `sampleFile`: the fixture it
- * built, the heap limit the process ran under, and a record for each phase.
+ * Measures `probeCase` and writes its sample to `sampleFile`: the case, the
+ * heap limit the process ran under, and a record for each phase.
  *
- * @throws Error when an output differs from what the fixture data says it
- * should be after any phase, or the runtime reports an error.
+ * @throws Error for a `board` case, which is not measured, or when an output
+ * differs from what the fixture data says it should be after any phase, or the
+ * runtime reports an error.
  */
 async function measureCase(
   probeCase: ProbeCase,
   sampleFile: string,
 ): Promise<void> {
-  const { id, options } = probeCase;
+  const { id, options, workload } = probeCase;
+  if (workload === "board") {
+    throw new Error(`Case \`${id}\` is not measured: ${BOARD_NOT_MEASURED}`);
+  }
   const heapSizeLimitBytes = getHeapStatistics().heap_size_limit;
   // Written before anything is measured, so that a limit record can name the
   // heap this process had even when the case never finishes. The sample
@@ -526,37 +596,23 @@ async function measureCase(
   await using measurement = await measureTopicsFixture(
     fixture,
     `topics-computation-cost ${id}`,
-    demandOf(probeCase.workload),
+    demandOf(workload),
   );
   const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
   verifyOutputs(measurement, fixture);
   const updated = await measureWarmUpdates(id, measurement, fixture, phases);
   console.error(`${id}: reopen`);
-  phases.push(phaseRecord("reopen", await measurement.reopen()));
+  const reopened = await measurement.reopen();
+  phases.push(phaseRecord("reopen", reopened));
   verifyOutputs(measurement, updated);
+  verifyReopen(measurement, reopened);
 
   await Deno.writeTextFile(
     sampleFile,
     JSON.stringify({
       kind: "sample",
-      case: id,
-      family: probeCase.family,
-      series: probeCase.series,
-      size: probeCase.size,
-      workload: probeCase.workload,
-      fixture: {
-        topicCount: options.topicCount,
-        mentions: options.mentions,
-        commentsPerTopic: options.commentsPerTopic ??
-          DEFAULT_COMMENTS_PER_TOPIC,
-        linksPerTopic: options.linksPerTopic ?? DEFAULT_LINKS_PER_TOPIC,
-        mentionEntries: fixture.topics.reduce(
-          (sum, topic) => sum + topic.mentions.length,
-          0,
-        ),
-        focusTopic: FOCUS_TOPIC,
-        focusMentioners: mentionersOf(fixture, FOCUS_TOPIC).length,
-      },
+      ...caseRecord(probeCase, fixture),
+      measured: true,
       heapSizeLimitBytes,
       phases,
     }),
@@ -571,6 +627,8 @@ function demandOf(workload: Workload): TopicsDemand {
     case "topic-open":
       return { workload, topic: FOCUS_TOPIC };
     case "all-backlinks":
+      return { workload };
+    case "aggregates":
       return { workload };
   }
 }
@@ -772,11 +830,88 @@ function withTopic(
   };
 }
 
+/** What a measurement under a demand holds, by topic index. */
+interface DemandedOutputs {
+  /** Whether it holds the pivot. */
+  readonly pivot: boolean;
+
+  /** The topics whose backlinks it holds, in topic order. */
+  readonly backlinks: readonly number[];
+
+  /** The topics whose present comment count it holds, in topic order. */
+  readonly commentCounts: readonly number[];
+
+  /** The topics whose last activity it holds, in topic order. */
+  readonly lastActivity: readonly number[];
+}
+
 /**
- * Checks the pivot, every topic's comment count and last activity, and every
- * demanded topic's backlinks against what `model` says they should be. The
- * pivot holds one entry per distinct topic on the board, in the order of each
- * topic's first entry.
+ * Returns what a measurement under `demand` over `topicCount` topics holds. It
+ * is worked out from `demand` alone, apart from the fixture, so the outputs a
+ * measurement holds are checked against it rather than against themselves.
+ */
+function demandedOutputsOf(
+  demand: TopicsDemand,
+  topicCount: number,
+): DemandedOutputs {
+  const every = Array.from({ length: topicCount }, (_, index) => index);
+  switch (demand.workload) {
+    case "board":
+      return {
+        pivot: false,
+        backlinks: [],
+        commentCounts: [],
+        lastActivity: [],
+      };
+    case "topic-open":
+      return {
+        pivot: true,
+        backlinks: [demand.topic],
+        commentCounts: [demand.topic],
+        lastActivity: [],
+      };
+    case "all-backlinks":
+      return {
+        pivot: true,
+        backlinks: every,
+        commentCounts: [],
+        lastActivity: [],
+      };
+    case "aggregates":
+      return {
+        pivot: false,
+        backlinks: [],
+        commentCounts: every,
+        lastActivity: every,
+      };
+  }
+}
+
+/**
+ * Returns how many actions of each reached lift a measurement under `demand`
+ * over `topicCount` topics starts.
+ */
+function demandedActionsOf(
+  demand: TopicsDemand,
+  topicCount: number,
+): Record<TopicsLiftName, number> {
+  const { pivot, backlinks, commentCounts, lastActivity } = demandedOutputsOf(
+    demand,
+    topicCount,
+  );
+  return {
+    crossrefTable: pivot ? 1 : 0,
+    backlinksOf: backlinks.length,
+    presentCommentCountOf: commentCounts.length,
+    lastActivityOf: lastActivity.length,
+  };
+}
+
+/**
+ * Checks that `measurement` holds exactly the outputs its demand names, and
+ * checks each of them, the pivot when demanded included, against what `model`
+ * says it should be. The pivot holds one entry per distinct topic on the
+ * board, in the order of each topic's first entry.
  *
  * @throws Error when one differs, or when the runtime has reported an error.
  */
@@ -784,30 +919,64 @@ function verifyOutputs(
   measurement: TopicsMeasurement,
   model: TopicsFixture,
 ): void {
-  const { seeded, outputs, errors } = measurement;
+  const { seeded, outputs, errors, demand } = measurement;
   expect(errors).toEqual([]);
-  expect(
-    pivotEntriesOf(seeded, outputs.table).map(({ topic, mentionedBy }) => ({
-      topic,
-      mentionedBy,
-    })),
-  ).toEqual([...new Set(model.board)].map((topic) => ({
-    topic,
-    mentionedBy: mentionersOf(model, topic),
-  })));
   expect({
-    commentCounts: outputs.commentCounts.map((cell) => cell.get()),
-    lastActivity: outputs.lastActivity.map((cell) => cell.get()),
-  }).toEqual({
-    commentCounts: model.topics.map(presentCommentCount),
-    lastActivity: model.topics.map(latestStamp),
-  });
+    pivot: outputs.table !== undefined,
+    backlinks: [...outputs.backlinks.keys()],
+    commentCounts: [...outputs.commentCounts.keys()],
+    lastActivity: [...outputs.lastActivity.keys()],
+  }).toEqual(demandedOutputsOf(demand, model.topics.length));
+  if (outputs.table !== undefined) {
+    expect(
+      pivotEntriesOf(seeded, outputs.table).map(({ topic, mentionedBy }) => ({
+        topic,
+        mentionedBy,
+      })),
+    ).toEqual([...new Set(model.board)].map((topic) => ({
+      topic,
+      mentionedBy: mentionersOf(model, topic),
+    })));
+  }
   for (const [topic, backlinks] of outputs.backlinks) {
     expect({ topic, backlinks: topicIndicesOf(seeded, backlinks) }).toEqual({
       topic,
       backlinks: mentionersOf(model, topic),
     });
   }
+  for (const [topic, commentCount] of outputs.commentCounts) {
+    expect({ topic, commentCount: commentCount.get() }).toEqual({
+      topic,
+      commentCount: presentCommentCount(model.topics[topic]),
+    });
+  }
+  for (const [topic, lastActivity] of outputs.lastActivity) {
+    expect({ topic, lastActivity: lastActivity.get() }).toEqual({
+      topic,
+      lastActivity: latestStamp(model.topics[topic]),
+    });
+  }
+}
+
+/**
+ * Checks that reopening completed at least one action of every lift
+ * `measurement.demand` starts.
+ *
+ * @throws Error when a demanded lift completed no action.
+ */
+function verifyReopen(
+  measurement: TopicsMeasurement,
+  reopened: TopicsOperation,
+): void {
+  const { demand, seeded } = measurement;
+  const started = demandedActionsOf(demand, seeded.topics.length);
+  const demanded = TOPICS_LIFT_NAMES.filter((lift) => started[lift] > 0);
+  expect(
+    demanded.map((lift) => ({
+      lift,
+      completed: reopened.reads.bodies[lift].actions.size > 0,
+    })),
+  ).toEqual(demanded.map((lift) => ({ lift, completed: true })));
 }
 
 /**
@@ -849,6 +1018,7 @@ function phaseRecord(
         lastActivityOf: { ...attempts.lastActivityOf },
       },
       other: { ...attempts.other },
+      unattributed: { ...attempts.unattributed },
       total: attemptTotalOf(Object.values(attempts)),
     },
     graph: { nodes: graph.nodes.length, edges: graph.edges.length },

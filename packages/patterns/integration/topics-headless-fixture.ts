@@ -517,13 +517,17 @@ export interface TopicsReads {
   readonly bodies: Readonly<Record<TopicsLiftName | "other", BodyReads>>;
 
   /**
-   * Attempt reads per reached lift, attributed by the action each attempt
-   * names: an attempt belongs to a lift when its action is one of the actions
-   * that lift's recorded body runs report. Every other attempt, the
-   * initialization attempt included, is under `other`. The attribution is made
-   * when recording stops.
+   * Attempt reads per reached lift, attributed when recording stops by the
+   * action each attempt names: an attempt belongs to a lift when its action
+   * completed a run of that lift while recording, and to `other` when its
+   * action completed some other run or it names no action, as the
+   * initialization attempt does. An attempt whose action completed no run
+   * while recording, such as one aborted because a read was unavailable, is
+   * under `unattributed`.
    */
-  readonly attempts: Readonly<Record<TopicsLiftName | "other", AttemptReads>>;
+  readonly attempts: Readonly<
+    Record<TopicsLiftName | "other" | "unattributed", AttemptReads>
+  >;
 }
 
 /** A fixture written to storage. */
@@ -562,40 +566,48 @@ export const TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS = {
 /**
  * Which of the reached lifts a measurement starts and holds demanded.
  *
- * A board with no topic open sorts its cards by each topic's last activity and
- * shows each topic's comment count, so every workload demands both for every
- * topic. Every workload also runs the pivot, although only a topic's backlinks
- * and the board's published `crossrefs` output read it, so a board with no
- * topic open may not run it at all. This fixture does not settle that; the
- * per-lift reads keep the pivot's work separable.
+ * The `board` and `topic-open` workloads follow what a browser ran on one small
+ * board with client execution, lazy materialization on, and card values
+ * already stored: loading the board ran none of the reached lifts, and opening
+ * a topic ran the pivot and that topic's backlinks and comment count but not
+ * its last activity. That is one small sample, and server execution and lazy
+ * materialization off were not measured.
  */
 export type TopicsDemand =
-  /**
-   * The board with no topic open: the pivot, and every topic's comment count
-   * and last activity.
-   */
+  /** The board with no topic open: none of the reached lifts. */
   | { readonly workload: "board" }
-  /** The board with one topic open: the board's demand, and its backlinks. */
+  /**
+   * The board with one topic open: the pivot, and that topic's backlinks and
+   * comment count.
+   */
   | { readonly workload: "topic-open"; readonly topic: number }
   /**
-   * The board's demand, and every topic's backlinks: a scaling probe, not what
-   * a board in use demands.
+   * The pivot, and every topic's backlinks: a scaling probe, not what a board
+   * in use demands.
    */
-  | { readonly workload: "all-backlinks" };
+  | { readonly workload: "all-backlinks" }
+  /**
+   * Every topic's comment count and last activity, and nothing else: the
+   * aggregates measured directly rather than through a board workload.
+   */
+  | { readonly workload: "aggregates" };
 
 /** The demanded lifts' outputs over a seeded fixture. */
 export interface TopicsOutputs {
-  /** The board's pivot over the fixture's board: a link to a row per entry. */
-  readonly table: Cell<PivotRow[]>;
-
-  /** Each topic's present comment count, by topic index. */
-  readonly commentCounts: readonly Cell<number>[];
-
-  /** Each topic's last activity, by topic index. */
-  readonly lastActivity: readonly Cell<number>[];
+  /**
+   * The board's pivot over the fixture's board, a link to a row per distinct
+   * topic, when the demand starts the pivot.
+   */
+  readonly table?: Cell<PivotRow[]>;
 
   /** Each demanded topic's backlinks, by topic index. */
   readonly backlinks: ReadonlyMap<number, Cell<unknown[]>>;
+
+  /** Each demanded topic's present comment count, by topic index. */
+  readonly commentCounts: ReadonlyMap<number, Cell<number>>;
+
+  /** Each demanded topic's last activity, by topic index. */
+  readonly lastActivity: ReadonlyMap<number, Cell<number>>;
 }
 
 /** An operation on a measurement, recorded through settlement. */
@@ -698,7 +710,7 @@ export async function measureTopicsFixture(
   passphrase: string,
   demand: TopicsDemand = { workload: "all-backlinks" },
 ): Promise<TopicsMeasurement> {
-  const backlinkTopics = backlinkTopicsOf(demand, fixture.topics.length);
+  const demanded = demandedLiftsOf(demand, fixture.topics.length);
   await using stack = new AsyncDisposableStack();
   const identity = await Identity.fromPassphrase(passphrase);
   const space: MemorySpace = identity.did();
@@ -710,7 +722,7 @@ export async function measureTopicsFixture(
       storage,
       space,
       errors,
-      { topicCount: fixture.topics.length, backlinkTopics, seed },
+      { topicCount: fixture.topics.length, demanded, seed },
     );
 
   // Unset only while `reopen()` is between disposing one session and opening
@@ -807,18 +819,17 @@ interface TopicsSession extends AsyncDisposable {
 /**
  * Helper for {@link measureTopicsFixture}, which opens a runtime over `storage`,
  * reaches the Topics lifts, writes `seed` into `space` or, absent one,
- * addresses the fixture already written there, and starts the pivot, every
- * topic's comment count and last activity, and the backlinks of each topic in
- * `backlinkTopics`, recording reads from that start through settlement.
- * Disposing the session disposes its runtime and leaves `storage` open.
+ * addresses the fixture already written there, and starts the lifts `demanded`
+ * names, recording reads from that start through settlement. Disposing the
+ * session disposes its runtime and leaves `storage` open.
  */
 async function openTopicsSession(
   storage: EmulatedStorageManager,
   space: MemorySpace,
   errors: string[],
-  { topicCount, backlinkTopics, seed }: {
+  { topicCount, demanded, seed }: {
     readonly topicCount: number;
-    readonly backlinkTopics: readonly number[];
+    readonly demanded: DemandedLifts;
     readonly seed?: TopicsFixture;
   },
 ): Promise<TopicsSession> {
@@ -848,15 +859,15 @@ async function openTopicsSession(
       space,
       derivations,
       seeded,
-      backlinkTopics,
+      demanded,
     );
-    const { table, commentCounts, lastActivity, backlinks } = outputs;
+    const { table, backlinks, commentCounts, lastActivity } = outputs;
     for (
       const cell of [
-        table,
-        ...commentCounts,
-        ...lastActivity,
+        ...(table === undefined ? [] : [table]),
         ...backlinks.values(),
+        ...commentCounts.values(),
+        ...lastActivity.values(),
       ]
     ) {
       stack.defer(cell.sink(() => {}));
@@ -909,19 +920,50 @@ function storedTopicsFixture(
   };
 }
 
+/** The reached lifts a demand starts, with the topics each topic lift runs for. */
+interface DemandedLifts {
+  /**
+   * Present when the pivot runs, with the topics whose backlinks run: backlinks
+   * read the pivot's result, so no demand runs them without it.
+   */
+  readonly pivot?: { readonly backlinks: readonly number[] };
+
+  /** The topics whose present comment count runs. */
+  readonly commentCounts: readonly number[];
+
+  /** The topics whose last activity runs. */
+  readonly lastActivity: readonly number[];
+}
+
 /**
- * Helper for {@link measureTopicsFixture}, which returns the index of each
- * topic whose backlinks `demand` names, in topic order.
+ * Helper for {@link measureTopicsFixture}, which returns the lifts `demand`
+ * starts over `topicCount` topics.
+ *
+ * @throws RangeError when `demand` opens a topic outside the fixture.
  */
-function backlinkTopicsOf(demand: TopicsDemand, topicCount: number): number[] {
+function demandedLiftsOf(
+  demand: TopicsDemand,
+  topicCount: number,
+): DemandedLifts {
+  const every = Array.from({ length: topicCount }, (_, index) => index);
   switch (demand.workload) {
     case "board":
-      return [];
+      return { commentCounts: [], lastActivity: [] };
     case "topic-open":
       requireCount("demand.topic", demand.topic, 0, topicCount - 1);
-      return [demand.topic];
+      return {
+        pivot: { backlinks: [demand.topic] },
+        commentCounts: [demand.topic],
+        lastActivity: [],
+      };
     case "all-backlinks":
-      return Array.from({ length: topicCount }, (_, index) => index);
+      return {
+        pivot: { backlinks: every },
+        commentCounts: [],
+        lastActivity: [],
+      };
+    case "aggregates":
+      return { commentCounts: every, lastActivity: every };
   }
 }
 
@@ -956,34 +998,35 @@ async function seedTopicsFixture(
 }
 
 /**
- * Helper for {@link openTopicsSession}, which starts the pivot over the seeded
- * board, every topic's comment count and last activity, and the backlinks of
- * each topic in `backlinkTopics`, in one transaction begun as an
- * initialization attempt.
+ * Helper for {@link openTopicsSession}, which starts the lifts `demanded`
+ * names over the seeded fixture, in one transaction begun as an initialization
+ * attempt.
  */
 async function startTopicsLifts(
   runtime: Runtime,
   space: MemorySpace,
   { lifts }: TopicsDerivations,
   seeded: SeededTopicsFixture,
-  backlinkTopics: readonly number[],
+  demanded: DemandedLifts,
 ): Promise<TopicsOutputs> {
   const tx = runtime.edit();
   runtime.scheduler.beginReadAttempt(tx, "initialization");
   const output = <T>(cause: string) =>
     runtime.getCell<T>(space, cause, undefined, tx);
-  const table = runtime.run(
+  const table = demanded.pivot === undefined ? undefined : runtime.run(
     tx,
     lifts.crossrefTable,
     { sources: seeded.board },
     output<PivotRow[]>("topics-fixture-crossrefs"),
   );
-  const withBacklinks = new Set(backlinkTopics);
+  const withBacklinks = new Set(demanded.pivot?.backlinks);
+  const withCommentCount = new Set(demanded.commentCounts);
+  const withLastActivity = new Set(demanded.lastActivity);
   const backlinks = new Map<number, Cell<unknown[]>>();
-  const commentCounts: Cell<number>[] = [];
-  const lastActivity: Cell<number>[] = [];
+  const commentCounts = new Map<number, Cell<number>>();
+  const lastActivity = new Map<number, Cell<number>>();
   seeded.topics.forEach((topic, index) => {
-    if (withBacklinks.has(index)) {
+    if (table !== undefined && withBacklinks.has(index)) {
       backlinks.set(
         index,
         runtime.run(
@@ -994,24 +1037,34 @@ async function startTopicsLifts(
         ),
       );
     }
-    commentCounts.push(runtime.run(
-      tx,
-      lifts.presentCommentCountOf,
-      { comments: topic.key("comments") },
-      output<number>(`topics-fixture-comment-count-${index}`),
-    ));
-    lastActivity.push(runtime.run(
-      tx,
-      lifts.lastActivityOf,
-      {
-        comments: topic.key("comments"),
-        links: topic.key("links"),
-        createdAt: topic.key("createdAt"),
-        bodyUpdatedAt: topic.key("bodyUpdatedAt"),
-        titleUpdatedAt: topic.key("titleUpdatedAt"),
-      },
-      output<number>(`topics-fixture-last-activity-${index}`),
-    ));
+    if (withCommentCount.has(index)) {
+      commentCounts.set(
+        index,
+        runtime.run(
+          tx,
+          lifts.presentCommentCountOf,
+          { comments: topic.key("comments") },
+          output<number>(`topics-fixture-comment-count-${index}`),
+        ),
+      );
+    }
+    if (withLastActivity.has(index)) {
+      lastActivity.set(
+        index,
+        runtime.run(
+          tx,
+          lifts.lastActivityOf,
+          {
+            comments: topic.key("comments"),
+            links: topic.key("links"),
+            createdAt: topic.key("createdAt"),
+            bodyUpdatedAt: topic.key("bodyUpdatedAt"),
+            titleUpdatedAt: topic.key("titleUpdatedAt"),
+          },
+          output<number>(`topics-fixture-last-activity-${index}`),
+        ),
+      );
+    }
   });
   runtime.prepareTxForCommit(tx);
   const { error } = await tx.commit();
@@ -1020,7 +1073,9 @@ async function startTopicsLifts(
       cause: error,
     });
   }
-  return { table, commentCounts, lastActivity, backlinks };
+  return table === undefined
+    ? { backlinks, commentCounts, lastActivity }
+    : { table, backlinks, commentCounts, lastActivity };
 }
 
 /**
@@ -1063,6 +1118,7 @@ function recordTopicsReads(
       presentCommentCountOf: emptyAttempts(),
       lastActivityOf: emptyAttempts(),
       other: emptyAttempts(),
+      unattributed: emptyAttempts(),
     },
   };
   // An attempt names its action, and an action's lift is known only from the
@@ -1109,7 +1165,12 @@ function recordTopicsReads(
           : TOPICS_LIFT_NAMES.find((name) =>
             reads.bodies[name].actions.has(actionId)
           );
-        const bucket = reads.attempts[lift ?? "other"];
+        const bucket = reads.attempts[
+          lift ??
+            (actionId === undefined || reads.bodies.other.actions.has(actionId)
+              ? "other"
+              : "unattributed")
+        ];
         bucket.attempts += held.attempts;
         bucket.proxyAccesses += held.proxyAccesses;
         bucket.linkResolutions += held.linkResolutions;

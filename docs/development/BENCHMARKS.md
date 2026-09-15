@@ -580,9 +580,11 @@ The options select what runs:
 
 ### The heap the 512-topic cases need
 
-Runs that include the `all-backlinks` cases at 512 topics set an 8,192MB heap,
-because V8's default heap can be too small for them. A case whose process
-exhausts its heap is recorded as a `limit` line rather than a sample:
+V8's default heap can be too small for the `all-backlinks` cases at 512 topics,
+so pass `--max-old-space-size=8192` to any run that includes them. The probe
+starts each case's process with a larger heap only when that option is given. A
+case whose process exhausts its heap is recorded as a `limit` line rather than a
+sample:
 
 ```sh
 deno run -A --frozen scripts/topics-computation-cost.ts --max-old-space-size=8192
@@ -601,26 +603,34 @@ The thread cases hold four topics, each with 10, 100, or 1,000 comments and
 three links, then with 10, 100, or 1,000 links and three comments. The small
 thread case gives each topic one comment and one link.
 
-Every case runs under each of three demand workloads. The first topic is the
-focus topic: the one `topic-open` opens, and the one every warm update edits or
-mentions.
+The pivot cases are recorded under three demand workloads. The first topic is
+the focus topic: the one `topic-open` opens, and the one every warm update edits
+or mentions.
 
-- `board`: what a board with no topic open renders, which is every topic's
-  present comment count and last activity, and the pivot.
-- `topic-open`: the board's demand, and the focus topic's backlinks.
-- `all-backlinks`: the board's demand, and every topic's backlinks. This is a
-  scaling probe, not what a board in use demands.
+- `board`: the board with no topic open, which demands none of the four lifts.
+  The probe does not measure it: each `board` case writes a sample recording
+  `measured: false` and the reason, and starts no process.
+- `topic-open`: the board with the focus topic open, which demands the pivot,
+  the focus topic's backlinks, and its present comment count, but not its last
+  activity.
+- `all-backlinks`: the pivot and every topic's backlinks. This is a scaling
+  probe, not what a board in use demands.
 
-The board sorts its cards by each topic's last activity and shows each topic's
-comment count, which is why every workload demands both. Only a topic's
-backlinks and the board's published `crossrefs` output read the pivot, so a
-board with no topic open may not run it at all. The headless tier does not
-settle that: every workload runs the pivot, and the per-lift records keep its
-work separable.
+The `board` and `topic-open` definitions come from one browser measurement of a
+small Topics board, with client execution, lazy materialization on, and card
+values already stored. Loading the board ran none of the four lifts, since the
+cards read their stored values. Opening a topic ran the pivot and that topic's
+backlinks and comment count; the topic's last activity ran only when the browser
+returned to the board. That is one small sample. Server execution, and lazy
+materialization off, were not measured.
+
+The thread cases are measured under one workload, `aggregates`, which demands
+every topic's present comment count and last activity and nothing else, so the
+aggregates are measured directly rather than through a board workload.
 
 A case's ID names all of that, as
 `pivot/<graph>/mentions-<count>/topics-<count>/<workload>` or
-`thread/comments-<count>/links-<count>/<workload>`.
+`thread/comments-<count>/links-<count>/aggregates`.
 
 ### The phases
 
@@ -658,12 +668,17 @@ from the transaction that starts the lifts through settlement, as initialization
 is; disposing the old runtime and compiling the sources for the new one come
 before it. Both runtimes share one storage manager, so the phase reopens storage
 the process holds open; it does not measure a new client connecting to that
-storage.
+storage. Initialization's `other` bucket counts runs that reopen does not
+repeat, so comparing the two phases' totals takes in that difference as well as
+the lifts' own work. After reopen the probe also checks that every lift the
+workload demands completed at least one action.
 
-A phase the fixture cannot give records why it was not measured. After every
-phase the probe checks the pivot, every topic's comment count and last activity,
-and every demanded backlinks output against values computed from the fixture
-data, and fails the run on a mismatch or on an error the runtime reports.
+A phase the fixture cannot give records `measured: false` and a `reason` saying
+why; every other phase record carries `measured: true`. After every phase the
+probe checks that the measurement holds exactly the outputs its workload demands
+and checks each of them, the pivot when demanded included, against values
+computed from the fixture data. It fails the run on a mismatch or on an error
+the runtime reports.
 
 ### The output
 
@@ -678,8 +693,10 @@ everything a case's process prints.
 - A `sample` line is one case in one `round`: the case, its `family` (`pivot` or
   `thread`), its series, the `size` its series scales, its `workload`, the
   fixture's options with its mention count, the `focusTopic` and its
-  `focusMentioners` count, the heap limit the process ran under, and a record
-  per phase.
+  `focusMentioners` count, and `demandedActions`, how many actions of each lift
+  the workload starts. A measured sample adds `measured: true`, the heap limit
+  its process ran under, and a record per phase; a `board` sample adds
+  `measured: false` and the `reason` instead.
 - A `limit` line records a case whose process exhausted its heap, which the
   probe recognizes by V8's out-of-memory message on the process's stderr. It
   names the case, its series (the ID with the scaled count written as `*`), the
@@ -688,8 +705,9 @@ everything a case's process prints.
   ran, the signal or exit code that ended it, and the out-of-memory message. No
   size of the series from `size` up runs again, and `skipped` lists the larger
   ones; an earlier round may already have sampled them.
-- The last line has the `kind` `complete`. A case that fails in any other way
-  ends the run with an error and no `complete` line.
+- The last line has the `kind` `complete`, with the number of `samples` the run
+  wrote and the `limitedSeries` that recorded a limit. A case that fails in any
+  other way ends the run with an error and no `complete` line.
 
 A measured phase records:
 
@@ -705,9 +723,12 @@ A measured phase records:
   accesses, link resolutions, and per-run sums of distinct documents and
   registered dependencies, with the most proxy accesses of any one run;
 - `attempts`, the transaction-attempt reads through settlement, of every kind,
-  grouped by the same roles: an attempt counts toward a lift when its action is
-  one of that lift's, every other attempt, initialization's included, is under
-  `other`, and `total` sums them all;
+  grouped by the same roles. An attempt counts toward a lift when its action
+  completed a run of that lift in the same phase, and toward `other` when its
+  action completed some other run there or when it names no action, as the
+  initialization attempt does. An attempt whose action completed no run in the
+  phase, such as one aborted because a read was unavailable, is under
+  `unattributed`. `total` sums them all;
 - `graph`, the scheduler's node and edge counts once settled;
 - `memory`, the heap used, heap total, resident set size, and external memory,
   with `collected` saying whether a full collection ran before they were read.
