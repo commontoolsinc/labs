@@ -58,6 +58,7 @@ import {
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
+  type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
@@ -3305,9 +3306,10 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     return this.#followReplacement((replica) =>
-      replica.sqliteQuery(db, sql, params)
+      replica.sqliteQuery(db, sql, params, reader)
     );
   }
 
@@ -4532,9 +4534,10 @@ export class SpaceReplica
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult> {
     const { session } = await this.#activeSessionHandle();
-    return await session.sqliteQuery(db, sql, params);
+    return await session.sqliteQuery(db, sql, params, reader);
   }
 
   async listEntityIds(): Promise<string[] | undefined> {
@@ -4738,6 +4741,17 @@ export class SpaceReplica
     return this.#delivered.has(key) ||
       (record?.confirmed.seq ?? 0) > 0 ||
       record?.pending.some((entry) => entry.op !== "patch") === true;
+  }
+
+  /** ISpaceReplica.confirmedDocumentSeq: the accepted seq this replica's
+   * confirmed base stands at for the instance, pending writes excluded. */
+  confirmedDocumentSeq(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): number {
+    return this.#docs.get(this.#docKeyOf({ id, scope }, identity))
+      ?.confirmed.seq ?? 0;
   }
 
   getDocument(

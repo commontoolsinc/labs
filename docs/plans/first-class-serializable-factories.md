@@ -217,7 +217,7 @@ Expected implementation and test files:
 
 ### WP1.3 — Make every Fabric operation see the same factory state
 
-- [ ] Update `packages/data-model/src/native-conversion.ts` so admitted
+- [ ] Update `packages/data-model/src/convertible-js.ts` so admitted
   factories are recognized through `tryFactoryState()`, and unbranded functions
   remain invalid. Codec dispatch remains the serialization layer's job.
 - [ ] Update `packages/data-model/src/validity-check.ts` and compatibility
@@ -241,7 +241,7 @@ Expected implementation and test files:
 
 Focused tests:
 
-- `packages/data-model/test/native-conversion.test.ts`
+- `packages/data-model/test/convertible-js.test.ts`
 - `packages/data-model/test/validity-check.test.ts`
 - `packages/data-model/test/deep-freeze.test.ts`
 - `packages/data-model/test/cloneIfNecessary.test.ts`

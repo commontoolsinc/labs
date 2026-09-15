@@ -6,6 +6,8 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
+import { expect } from "@std/expect";
+
 import {
   isLinkRef,
   linkRefFrom,
@@ -44,11 +46,35 @@ import type {
   NativeSessionSnapshot,
   SourceDescriptor,
 } from "../src/types.ts";
-import { commandReceiptCause, sessionCause } from "../src/session-contract.ts";
+import { commandReceiptCause } from "../src/session-contract.ts";
 import {
   type GitCommandRunner,
   GitContextResolver,
 } from "../src/git-context.ts";
+
+async function publishedManifestCell(
+  connection: Parameters<typeof readStableCellGraphValue>[0],
+  target: AgentFabricTarget,
+  nativeSessionId: string,
+): Promise<Cell<unknown>> {
+  const index = await readStableCellGraphValue(
+    connection,
+    target.cells.allIndex,
+    new Map(),
+    { preserveLinkFields: new Set(["manifest"]) },
+  ) as Record<string, unknown>;
+  const row = (index.sessions as Array<Record<string, unknown>>).find(
+    (session) => session.nativeSessionId === nativeSessionId,
+  );
+  if (!row || !isLinkRef(row.manifest)) {
+    throw new Error(`session manifest link is unavailable: ${nativeSessionId}`);
+  }
+  return connection.runtime.getCellFromLink(
+    linkRefPayload(row.manifest) as Parameters<
+      Runtime["getCellFromLink"]
+    >[0],
+  );
+}
 
 Deno.test("Fabric target validates a discovered checkout", async () => {
   const signer = await Identity.fromPassphrase(
@@ -277,7 +303,21 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
       Record<string, unknown>
     >)[0].link as Record<string, unknown>;
     assertEquals(publishedChunk.events, [{ type: "message", text: "hello" }]);
+    const firstManifestCell = await publishedManifestCell(
+      connection,
+      target,
+      "session-1",
+    );
     assertEquals(await target.publish(collected), 1);
+    const unchangedManifestCell = await publishedManifestCell(
+      connection,
+      target,
+      "session-1",
+    );
+    assertEquals(
+      unchangedManifestCell.getAsNormalizedFullLink(),
+      firstManifestCell.getAsNormalizedFullLink(),
+    );
 
     const reconfiguredSource: SourceDescriptor = {
       ...source,
@@ -794,6 +834,156 @@ Deno.test("Fabric target publishes sessions and command receipts", async () => {
   } finally {
     await runtime.dispose();
     await storageManager.close();
+  }
+});
+
+Deno.test("Fabric target releases graph storage after every session", async () => {
+  const server = new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
+  });
+  const identity = await Identity.fromPassphrase(
+    "agent graph storage release test",
+  );
+  const session = await createSession({
+    identity,
+    spaceName: `agent-graph-release-${crypto.randomUUID()}`,
+  });
+  const mainStorage = SharedServerStorageManager.connectTo(server, {
+    as: session.as,
+  });
+  const graphStorage = SharedServerStorageManager.connectTo(server, {
+    as: session.as,
+  });
+  const mainRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: mainStorage,
+  });
+  const graphRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: graphStorage,
+  });
+  let releases = 0;
+  let releaseFails = false;
+  let wrongOwner = false;
+  const connection = {
+    runtime: mainRuntime,
+    spaceDid: session.space,
+    ownerDid: identity.did(),
+  };
+  const graphConnection = {
+    runtime: graphRuntime,
+    spaceDid: session.space,
+    ownerDid: identity.did(),
+  };
+  try {
+    const target = await AgentFabricTarget.open(
+      connection,
+      undefined,
+      () =>
+        Promise.resolve({
+          connection: wrongOwner
+            ? { ...graphConnection, ownerDid: "did:key:other-owner" }
+            : graphConnection,
+          release: async () => {
+            releases++;
+            await graphStorage.close();
+            if (releaseFails) {
+              throw new Error("graph release failed");
+            }
+          },
+        }),
+    );
+    const source: SourceDescriptor = {
+      id: "codex:test",
+      driver: "codex-app-server",
+      capabilities: {
+        inventory: true,
+        read: true,
+        prompt: false,
+        cancel: false,
+        rename: false,
+        setMode: false,
+        setConfigOption: false,
+      },
+    };
+    const snapshot = (nativeSessionId: string): NativeSessionSnapshot => ({
+      summary: {
+        nativeSessionId,
+        title: nativeSessionId,
+        cwd: null,
+        createdAt: null,
+        updatedAt: new Date().toISOString(),
+        archived: false,
+        active: false,
+        raw: { nativeSessionId },
+      },
+      events: [{ type: "message", nativeSessionId }],
+      normalizedMessages: [],
+      complete: true,
+    });
+
+    assertEquals(
+      await target.publish([{
+        source,
+        sessions: [snapshot("session-1"), snapshot("session-2")],
+        errors: [],
+        complete: true,
+      }]),
+      2,
+    );
+    assertEquals(releases, 2);
+    const index = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    assertEquals(
+      (index.sessions as Array<Record<string, unknown>>).map((entry) =>
+        entry.nativeSessionId
+      ),
+      ["session-1", "session-2"],
+    );
+
+    releaseFails = true;
+    await expect(target.publish([{
+      source,
+      sessions: [snapshot("session-3")],
+      errors: [],
+      complete: true,
+    }])).rejects.toThrow("graph release failed");
+    expect(releases).toBe(3);
+    expect(await readStableCellGraphValue(connection, target.cells.allIndex))
+      .toEqual(index);
+
+    wrongOwner = true;
+    const error = await assertRejects(
+      () =>
+        target.publish([{
+          source,
+          sessions: [snapshot("session-3")],
+          errors: [],
+          complete: true,
+        }]),
+      AggregateError,
+      "agent session publication and graph storage release failed",
+    );
+    assertEquals(
+      error.errors.map((failure) => (failure as Error).message),
+      [
+        "agent graph session must use the target space and owner",
+        "graph release failed",
+      ],
+    );
+    expect(releases).toBe(4);
+  } finally {
+    await graphRuntime.dispose();
+    await mainRuntime.dispose();
+    await graphStorage.close();
+    await mainStorage.close();
   }
 });
 
@@ -1770,11 +1960,6 @@ Deno.test("publication finishes after its first graph commit", async () => {
   try {
     const target = await AgentFabricTarget.open(connection);
     await target.publish(collected("Before"));
-    const manifest = runtime.getCell(
-      space,
-      sessionCause(space, space, source.id, "session-1"),
-    );
-    const manifestId = manifest.getAsNormalizedFullLink().id;
     const controller = new AbortController();
     const originalEdit = runtime.edit;
     let manifestCommitObserved = false;
@@ -1783,8 +1968,21 @@ Deno.test("publication finishes after its first graph commit", async () => {
       let writesManifest = false;
       const originalWrite = tx.writeOrThrow.bind(tx);
       tx.writeOrThrow = (...args) => {
-        if (args[0].id === manifestId) writesManifest = true;
+        if (
+          args[0].path.at(-1) === "schema" &&
+          args[1] === AGENT_CONNECTOR_SCHEMAS.session
+        ) {
+          writesManifest = true;
+        }
         return originalWrite(...args);
+      };
+      const originalWriteValue = tx.writeValueOrThrow.bind(tx);
+      tx.writeValueOrThrow = (...args) => {
+        const value = args[1] as Record<string, unknown> | undefined;
+        if (value?.schema === AGENT_CONNECTOR_SCHEMAS.session) {
+          writesManifest = true;
+        }
+        return originalWriteValue(...args);
       };
       const originalCommit = tx.commit.bind(tx);
       tx.commit = async () => {
@@ -1812,9 +2010,14 @@ Deno.test("publication finishes after its first graph commit", async () => {
       target.cells.allIndex,
     ) as Record<string, unknown>;
     const session = (index.sessions as Array<Record<string, unknown>>)[0];
+    const currentManifest = await publishedManifestCell(
+      connection,
+      target,
+      "session-1",
+    );
     const publishedManifest = await readStableCellGraphValue(
       connection,
-      manifest,
+      currentManifest,
     ) as Record<string, unknown>;
     assertEquals(session.title, "After");
     assertEquals(
@@ -1887,20 +2090,33 @@ Deno.test("an interrupted publication leaves the prior session graph intact", as
       errors: [],
       complete: true,
     }]);
-    const manifest = runtime.getCell(
-      space,
-      sessionCause(space, space, source.id, "session-1"),
+    const manifest = await publishedManifestCell(
+      connection,
+      target,
+      "session-1",
     );
 
     const originalEdit = runtime.edit;
-    const manifestId = manifest.getAsNormalizedFullLink().id;
     runtime.edit = function () {
       const tx = originalEdit.call(this);
       let writesManifest = false;
       const originalWrite = tx.writeOrThrow.bind(tx);
       tx.writeOrThrow = (...args) => {
-        if (args[0].id === manifestId) writesManifest = true;
+        if (
+          args[0].path.at(-1) === "schema" &&
+          args[1] === AGENT_CONNECTOR_SCHEMAS.session
+        ) {
+          writesManifest = true;
+        }
         return originalWrite(...args);
+      };
+      const originalWriteValue = tx.writeValueOrThrow.bind(tx);
+      tx.writeValueOrThrow = (...args) => {
+        const value = args[1] as Record<string, unknown> | undefined;
+        if (value?.schema === AGENT_CONNECTOR_SCHEMAS.session) {
+          writesManifest = true;
+        }
+        return originalWriteValue(...args);
       };
       const originalCommit = tx.commit.bind(tx);
       tx.commit = () => {
@@ -1961,6 +2177,44 @@ Deno.test("an interrupted publication leaves the prior session graph intact", as
       type: "message",
       detail: { value: 1 },
     }]);
+
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const invalidLaterSession = snapshot("Invalid", [circular]);
+    invalidLaterSession.summary = {
+      ...invalidLaterSession.summary,
+      nativeSessionId: "session-2",
+    };
+    await assertRejects(
+      () =>
+        target.publish([{
+          source,
+          sessions: [
+            snapshot("Not committed", [{ id: "replacement" }]),
+            invalidLaterSession,
+          ],
+          errors: [],
+          complete: true,
+        }]),
+      Error,
+      "Conversion refuses a circular reference",
+    );
+    const retainedAfterLaterFailure = await readStableCellGraphValue(
+      connection,
+      manifest,
+    ) as Record<string, unknown>;
+    assertEquals(
+      (retainedAfterLaterFailure.summary as Record<string, unknown>).title,
+      "Before",
+    );
+    const retainedIndex = await readStableCellGraphValue(
+      connection,
+      target.cells.allIndex,
+    ) as Record<string, unknown>;
+    assertEquals(
+      (retainedIndex.sessions as Array<Record<string, unknown>>)[0].title,
+      "Before",
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -2027,9 +2281,10 @@ Deno.test("session publication captures native values once", async () => {
     }]);
     assertEquals(conversions, 1);
 
-    const manifest = runtime.getCell(
-      space,
-      sessionCause(space, space, source.id, "session-1"),
+    const manifest = await publishedManifestCell(
+      connection,
+      target,
+      "session-1",
     );
     const published = await readStableCellGraphValue(
       connection,
@@ -2044,6 +2299,83 @@ Deno.test("session publication captures native values once", async () => {
       first: { value: "captured-1" },
       second: { value: "captured-1" },
     }]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("session publication captures its snapshot before the first commit", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector incremental session publication test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = signer.did();
+  const connection = { runtime, spaceDid: space, ownerDid: space };
+  let captures = 0;
+  const events = ["one", "two", "three"].map((id) => ({
+    toJSON() {
+      captures++;
+      return { id, text: "x".repeat(530_000) };
+    },
+  }));
+  const source: SourceDescriptor = {
+    id: "codex:test",
+    driver: "codex-app-server",
+    capabilities: {
+      inventory: true,
+      read: true,
+      prompt: false,
+      cancel: false,
+      rename: false,
+      setMode: false,
+      setConfigOption: false,
+    },
+  };
+  try {
+    const target = await AgentFabricTarget.open(connection);
+    const capturesAtCommit: number[] = [];
+    const originalEdit = runtime.edit;
+    runtime.edit = function () {
+      const tx = originalEdit.call(this);
+      const originalCommit = tx.commit.bind(tx);
+      tx.commit = async () => {
+        capturesAtCommit.push(captures);
+        return await originalCommit();
+      };
+      return tx;
+    };
+    try {
+      await target.publish([{
+        source,
+        sessions: [{
+          summary: {
+            nativeSessionId: "session-1",
+            title: "Incremental publication",
+            cwd: null,
+            createdAt: null,
+            updatedAt: null,
+            archived: false,
+            active: false,
+            raw: { id: "session-1" },
+          },
+          events,
+          normalizedMessages: [],
+          complete: true,
+        }],
+        errors: [],
+        complete: true,
+      }]);
+    } finally {
+      runtime.edit = originalEdit;
+    }
+
+    assertEquals(captures, 3);
+    assertEquals(capturesAtCommit[0], 3);
   } finally {
     await runtime.dispose();
     await storageManager.close();

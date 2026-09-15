@@ -1,19 +1,15 @@
 /**
- * What a caller can still observe about a topic it filed through the board,
- * once the board demands only the fields it renders.
+ * What a caller can observe about a topic it filed through the board, when the
+ * board demands only the fields it renders.
  *
- * These three properties were pattern tests until the board's `topics` demand
- * narrowed. A pattern test can only reach a stored topic through the holder's
- * projection, and that projection no longer carries verbs, threads, or the
- * mention graph — so the properties stopped being observable there. They are
- * observable here, because this is the move the design says a caller makes:
- * survey the board, resolve the row to the topic's own address, and read or
- * call the topic itself, where its own schema governs.
+ * These cases make the move the design says a caller makes: survey the board,
+ * resolve the row to the topic's own address, and read or call the topic
+ * itself, where its own schema governs.
  *
- * Each `it()` therefore guards a property of `addTopic`'s children that nothing
- * else can: that the child is wired to the board's mention pivot, that a body
- * given at create is not recorded as a body update, and that the board's index
- * row tracks the child's thread after the fact.
+ * Each `it()` guards a property of `addTopic`'s children: that the child is
+ * wired to the board's mention pivot, that a body given at create is not
+ * recorded as a body update, and that the board's index row tracks the child's
+ * thread after the fact.
  */
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -139,7 +135,7 @@ describe("topic-board-child-contract", () => {
     await citing.result.set({ topic: cited.getCell() }, ["mention"]);
 
     // The edge exists only if `addTopic` handed this child the board's
-    // `crossrefs` pivot — which is the thing no pattern test can still see.
+    // `crossrefs` pivot.
     const inbound = await cited.result.get(["referencedBy"]) as {
       title: string;
     }[];
@@ -167,19 +163,15 @@ describe("topic-board-child-contract", () => {
 });
 
 /**
- * The board's mention pivot, exercised where it is still reachable.
+ * The board's mention pivot, exercised through a board and the topics it
+ * created.
  *
- * `crossrefTable` derives the whole reference graph once on the board, and each
- * topic reads its own row out of it. Testing that needs two things at the same
- * time: topics that are ON a board, so the pivot sees them, and `mention` /
- * `unmention` / `referencedBy` on those same topics. A pattern test can no
- * longer have both — the board's demand carries no verbs, and a topic
- * constructed in a pattern body cannot be placed on a board either (pushing one
- * in reports a schema mismatch and the action never runs; seeding the array at
- * construction fails because `Cell.of()` takes static data only).
- *
- * Here both hold, because a caller files through the board and then addresses
- * the created topic by its own fid.
+ * `crossrefTable()` derives the whole reference graph once on the board, and
+ * each topic reads its own row out of it. Testing that needs two things at the
+ * same time: topics that are ON a board, so the pivot sees them, and
+ * `mention` / `unmention` / `referencedBy` on those same topics. Here both
+ * hold, because a caller files through the board and then addresses the
+ * created topic by its own fid.
  */
 describe("topic-board-pivot-contract", () => {
   let cc: PiecesController;
@@ -332,16 +324,17 @@ describe("topic-board-pivot-contract", () => {
 
   // NOTE ON WHAT THIS CANNOT SEPARATE, because the distinction is easy to
   // assume from the wording: every topic here sits at exactly ONE index, so
-  // this case cannot tell the pivot's identity check from a position check —
-  // swap `!equals(other, topic)` for `from !== to` in `crossrefTable` and it
-  // still passes. Only a board listing one topic at two indices separates
-  // them, and that is `assert_twin_earns_no_edge` in
-  // `packages/patterns/topics/topics.test.tsx`, which stays where it is. It
-  // cannot move here: a duplicate cannot be written into a board's list from
-  // outside it, by `push`, by seeding the array, or through the controller's
-  // `input` — the last is refused by `assertSchemaSubset`. Retiring that test
-  // needs the pivot's join extracted into something a unit test can hand a
-  // duplicated list, not a rehousing.
+  // this case cannot tell the identity check `mentionedBy()` makes when it
+  // leaves a topic out of its own backlinks (`!equals(other, topic)` in
+  // `packages/patterns/topics/main.tsx`) from a check by array position: both
+  // pass it. Only a list naming one topic at two indices separates them, and
+  // the board's pivot hands `mentionedBy()` the list `distinctByIdentity()`
+  // returns, which names each topic once.
+  // `assert_self_mention_inert_through_a_twin` in
+  // `packages/patterns/topics/topics.test.tsx` hands `mentionedBy()` a
+  // duplicated list directly. No case here builds a board listing one topic
+  // twice; the "over a board listing one topic twice" group in
+  // `topics-headless-fixture.test.ts` runs the board's lifts over one.
   it("records a self-mention without earning the topic an inbound edge", async () => {
     // Referencing yourself is not being referenced from somewhere else.
     await target.result.set({ topic: target.getCell() }, ["mention"]);

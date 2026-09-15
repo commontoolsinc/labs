@@ -1,11 +1,11 @@
 import {
   deepFreeze,
-  fabricFromNativeValue,
+  fabricFromConvertibleJsValue,
   FabricInstance,
   type FabricPlainObject,
   type FabricValue,
   JS_TYPE_VALUE_TAGS,
-  tagFromNativeValueElseNull,
+  tagOfConvertibleJsValueElseNull,
   VALUE_TAGS,
 } from "@commonfabric/data-model";
 import {
@@ -78,8 +78,8 @@ function replaceCellsWithLinks(
     }
     return converted;
   }
-  const nativeTag = tagFromNativeValueElseNull(value);
-  if (nativeTag === VALUE_TAGS.JsError) {
+  const tag = tagOfConvertibleJsValueElseNull(value);
+  if (tag === VALUE_TAGS.JsError) {
     const error = value as Error;
     const existing = seen.get(error);
     if (existing) return existing;
@@ -102,9 +102,9 @@ function replaceCellsWithLinks(
     }
   }
   if (
-    nativeTag !== null &&
-    nativeTag !== VALUE_TAGS.Object &&
-    !Object.hasOwn(JS_TYPE_VALUE_TAGS, nativeTag)
+    tag !== null &&
+    tag !== VALUE_TAGS.Object &&
+    !Object.hasOwn(JS_TYPE_VALUE_TAGS, tag)
   ) {
     return value;
   }
@@ -243,12 +243,12 @@ function captureFabricValue(
 
 /**
  * Capture a graph value as an immutable `FabricValue`. Stable child cells
- * become links, while native values and shared references retain their
+ * become links, while JS values and shared references retain their
  * `FabricValue` semantics.
  */
 export function stableFabricValue(value: unknown): FabricValue {
   return captureFabricValue(
-    fabricFromNativeValue(
+    fabricFromConvertibleJsValue(
       replaceCellsWithLinks(value, new WeakMap()),
     ),
     new WeakMap(),

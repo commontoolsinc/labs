@@ -1,8 +1,8 @@
 /**
  * A `Map` as a `FabricInstance`, which is at present only half a value.
  *
- * Native conversion is the part that works: a frozen form is produced on
- * request, an already-frozen one is handed back rather than rebuilt, and a
+ * Convertible-JS conversion is the part that works: a frozen form is produced
+ * on request, an already-frozen one is handed back rather than rebuilt, and a
  * mutable form is copied only when what it holds is frozen.
  *
  * The freeze protocols and the codec are stubs that throw, and these cases

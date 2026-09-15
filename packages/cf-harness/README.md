@@ -122,7 +122,9 @@ What works today:
   - `view_image`
   - `web_fetch` (explicit parent allowlist or `web_fetch` subagent profile only)
   - `read_skill_resource`
-  - `run_skill_script`
+  - `run_skill_script` (a registry skill's script, or an acquired skill's, named
+    by the pin its bytes were read at; see
+    [Running an acquired skill's script](#running-an-acquired-skills-script))
   - `edit_file`
   - `write_file`
   - `delegate_task`
@@ -149,10 +151,11 @@ What works today:
   - `loom_compose`, `loom_inspect`, and `loom_authoring_context` (present only
     with `--loom-authoring-config`; collections and verified commit receipts,
     separate from Pattern Instance deployment)
-  - `query_docs` (present when the run resolves a documentation corpus; asks one
-    question of operator-provisioned reference material and returns a bounded
-    answer plus inert citations, never the documents; see
-    [Querying the documentation corpus](#querying-the-documentation-corpus))
+  - `research` (present when the run resolves a documentation corpus or pattern
+    index; performs bounded, iterative Common Fabric research over exact docs,
+    skills, published pattern source and dependencies, and safe handle shapes,
+    then returns a host-admitted implementation kit; see
+    [Researching Common Fabric](#researching-common-fabric))
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
@@ -176,8 +179,8 @@ What works today:
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser/web_fetch/web_search/pattern-author child profiles, retained
-  child run references, and a sanitized summary/state return channel, plus the
-  internal `explore` profile `query_docs` runs, which a delegation cannot name
+  child run references, and a sanitized summary/state return channel, plus a
+  bounded private research loop that is not a delegable profile
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -206,8 +209,9 @@ What works today:
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
-- exact-allowlisted skill script execution through `run_skill_script`, recorded
-  in `skill-script-executions.json`
+- exact-allowlisted skill script execution through `run_skill_script`, for a
+  registry skill's script and for an acquired skill's, recorded in
+  `skill-script-executions.json`
 
 The sandbox `bash` tool has a provisional direct-`curl` guard while sandbox
 networking is enabled: explicit `curl` invocations may target loopback HTTP(S)
@@ -350,14 +354,16 @@ From [packages/cf-harness](.):
   3). One direct batch run under `max-enforcement / enforce-strict` with a
   restricted parent surface (`delegate_task`, `describe_handle`,
   `search_skills`, `acquire_skill`) that runs two arms over one finance-labeled
-  input cell: a real skill acquired from the registry and used by handle, and
-  the malicious [`fixtures/hostile-skills-root/`](fixtures/README.md) skill
-  delivered into a `pattern-author` child. After the run it emits the three
-  receipts — the canary grep over the parent run directory, the release-refusal
-  trace, and the persisted label plus `TransformedBy` on derived data. It reads
-  the identity keyfile from `CF_HARNESS_FABRIC_IDENTITY` and never echoes it;
-  override the toolshed, space, cell, and space-db through the environment
-  variables it documents at the top.
+  input cell: a skill acquired by pin and used by handle, whose one allowlisted
+  script — `scripts/category-budgets.sh`, allowlisted at that pin — the child
+  runs in its sandbox and feeds into `run_pattern`; and the malicious
+  [`fixtures/hostile-skills-root/`](fixtures/README.md) skill delivered into a
+  `pattern-author` child. After the run it emits the four receipts — the canary
+  grep over the parent run directory, the acquired script's blast radius, the
+  release-refusal trace, and the persisted label plus `TransformedBy` on derived
+  data. It reads the identity keyfile from `CF_HARNESS_FABRIC_IDENTITY` and
+  never echoes it; override the toolshed, space, cell, and space-db through the
+  environment variables it documents at the top.
 
 ## CLI Example
 
@@ -1159,6 +1165,78 @@ is not a pin and never enters provenance. The tool returns the handle and this
 inert acquisition metadata; loading the handle remains a separate
 `delegate_task` decision.
 
+##### Running an acquired skill's script
+
+The scripts land at `<artifactRoot>/.acquired-skills/<runId>/<commitSha>/<slug>`
+— under the artifact root's one non-run directory, inside no run root.
+`acquire_skill` runs in the parent, and the artifact tree is not a
+confidentiality boundary — `bash` does not reserve it the way the file tools do
+— so a script written under the parent's run root is a script the planner could
+read wherever that tree is reachable. Sitting outside the run roots buys the
+lifecycle and not the boundary: the acquisition asks the sandbox it would be
+read from — every mount that sandbox describes, the workspace and every
+`--host-mount` alike — whether one covers the directory, and refuses naming the
+mount rather than writing bytes the acquiring run could read. Asked of the
+sandbox rather than of the configuration beside it, because for a run handed its
+runtime the configuration describes something else, and a question about what a
+container can read has to be put to that container. The refusal comes before the
+handle is minted, so a covering mount leaves no handle to a skill whose scripts
+its own planner could have read.
+
+The child a `delegate_task` hands that handle to mounts the directory read-only
+at `/acquired-skill`, and mounts the one skill its handle names and no other.
+Such a child does not share its parent's container — a mount is a property of
+the container, so the child is given the parent's sandbox configuration plus
+that one mount and builds its own sandbox from it. That is possible only where
+this harness built the parent's sandbox from a configuration; a run whose
+sandbox runtime was handed in has none to extend, and its children go on sharing
+it, acquired skill or not. It receives `run_skill_script` and the operator's
+allowlist entries for that pin, and for no other skill: the allowlist is the
+run's while a child's tool surface is its profile's, and neither reaches the
+other on its own. An acquisition is not an authorization — mounting the bytes
+and being allowed to run one stay separate decisions, and the second is the
+operator's.
+
+What backs the tool is the mount rather than a skills root, so a run given no
+`--skills-root` still offers it to such a child, and `--allow-skill-script`
+takes an acquired pin without one. Being backed is necessary and not sufficient:
+the child receives `run_skill_script` only where the operator allowlisted at
+least one script at that exact pin, so a child holding the handle and the mount
+and nothing else has no tool to invoke. A run that holds an acquired skill
+without mounting it is not backed at all: that is the acquiring parent, which
+deliberately mounts nothing, and a child that shares a handed-in runtime.
+
+Absence of the mount is not by itself absence of the tool, so the refusal says
+so rather than the tool merely not being there. A skills root backs
+`run_skill_script` on its own, so a parent that has one is offered the tool
+after it acquires a skill; what stops it calling the tool on what it acquired is
+that it never loaded that skill — no activation names the pin, and the call
+refuses `skill_not_activated`. A run that is activated for the pin and still
+lacks the mount refuses `script_not_mounted`, naming the sandbox root the script
+would have been addressed at: the path an acquired script is named by is the one
+its mount puts it at, so without the mount there is nothing to run.
+
+`read_skill_resource` is registry-backed throughout, an acquired skill carrying
+no resource index.
+
+It runs a script there through the same `run_skill_script` a registry skill's
+goes through: `--allow-skill-script` keys on the pin,
+`owner/repo/slug@<commit sha>`, in place of a registry name, and every other
+gate is the same call. Activation is by the acquisition rather than by a name —
+a handle activates under `handle:<token>`, so what says the run was given this
+skill is an activation whose acquisition records that pin. The digest the file
+is re-checked against is the one taken at acquisition, over the bytes the pinned
+commit served, so a file changed on the host between acquisition and execution
+refuses.
+
+The invocation is labeled with confidentiality alone. The acquisition's
+`ExternalIngest` provenance belongs on it and cannot go there: a non-empty
+`integrity` array in `cfcInputLabels` makes the sandbox fail to start, which is
+[CT-2302](https://linear.app/common-tools/issue/CT-2302). It rides the output
+instead — the tool output and the persisted execution record carry the
+acquisition as its own field, and the registry digest, size and match fields are
+absent, because they name a run-start snapshot an acquired script was never in.
+
 `delegate_task` takes an optional `skillHandle`: a handle the parent holds,
 naming a cell whose string value is skill text for the child. The text is
 materialized on the trusted host side at child spawn. Acquired handles carry the
@@ -1169,13 +1247,18 @@ it opaque. The authorized resolution still requires table membership, a string
 value, and the same Fabric space, with a structured refusal naming the reference
 on any miss before any child exists. The text is injected into the child's
 context as a `<skill_context source="handle:<token>">` block beside the
-profile's registry preload. The parent never reads the text, and the child never
-holds the handle. The return path is mediated too: every parent-facing return of
-such a delegation has the exact injected payload (and its JSON-escaped spelling)
-scrubbed to fixed inert text, so a child that echoes its instructions verbatim
-cannot walk the payload into the parent transcript. The scrub is deliberately no
-more than that — the child exists to act on the skill, so what it did because of
-the text is its ordinary, policy-mediated output.
+profile's registry preload. For acquired text, the header also carries
+`pin="owner/repo/slug@<commit sha>"` from the acquisition record. The child uses
+that pin as the `skill` argument to `run_skill_script`. When a name or handle
+fails registry lookup in a run holding acquired skills, the error points to the
+pin in this header or the `acquire_skill` output. The parent never reads the
+text, and the child never holds the handle. The return path is mediated too:
+every parent-facing return of such a delegation has the exact injected payload
+(and its JSON-escaped spelling) scrubbed to fixed inert text, so a child that
+echoes its instructions verbatim cannot walk the payload into the parent
+transcript. The scrub is deliberately no more than that — the child exists to
+act on the skill, so what it did because of the text is its ordinary,
+policy-mediated output.
 
 The tree the registry scans comes from `--skills-root`, or, when the run names
 none and is running out of a labs checkout, from that checkout's own `skills/`
@@ -1193,21 +1276,24 @@ A handle-delivered skill bypasses the registry entirely: it is transient run
 state from a cell, the untrusted-acquisition complement to the trusted operator
 `--skills-root`, and for the delegated path it retires selection by name — the
 name-squat surface — in favor of an unforgeable table entry. It carries no
-directory, so it has no supporting-resource index and no scripts;
-`run_skill_script`'s operator allowlist cannot name it, and the skill-context
-preamble that keeps a skill from authorizing tools applies to it unchanged. The
-child's activation record carries `source: "skill-handle"`, the token, and the
-digest of the exact text injected, so the artifacts say which reference supplied
-the skill and what it said.
+directory, so it has no supporting-resource index, and the skill-context
+preamble that keeps a skill from authorizing tools applies to it unchanged. A
+handle an acquisition minted is the one that can carry scripts, and the
+operator's allowlist names them by the pin rather than by a registry name — the
+[acquired-script section below](#running-an-acquired-skills-script) has the
+whole of it. The child's activation record carries `source: "skill-handle"`, the
+token, and the digest of the exact text injected, so the artifacts say which
+reference supplied the skill and what it said.
 
 #### Pattern references by search record
 
 `delegate_task` also takes up to eight optional `patternRefs`, each containing a
 `patternId` and an optional bounded parent note. The harness resolves an id only
-from successful `search_patterns` results retained by that parent run and
-restored from its persisted transcript on resume; it neither trusts
-model-retyped metadata nor fetches the index during delegation. A known id gives
-the child a neutral generated block with the record's kind, quality,
+from successful `search_patterns` results or host-confirmed `research` records
+retained by that parent run; search results are restored from its persisted
+transcript on resume, while research records live in run state. It neither
+trusts model-retyped metadata nor fetches the index during delegation. A known
+id gives the child a neutral generated block with the record's kind, quality,
 description, match evidence, import hint, argument shape, result shape, and the
 note verbatim. An id absent from the parent's record is omitted from child
 context and returned by name in `patternRefRefusals` with reason
@@ -1219,60 +1305,170 @@ somewhere, attached metadata accompanies it, and trusted-side code resolves it.
 They deliberately remain separate until experience supplies a concrete reason to
 unify them.
 
-### Querying the documentation corpus
+### Researching Common Fabric
 
-`query_docs` takes one question and returns a short answer with the sections it
-came from. It is on the parent surface and on the `pattern-author` child's,
-which is where it matters: that child has no `delegate_task` and the subagent
-manifest pins the depth at one, so an explore agent is a tool on its surface or
-it is unreachable from the one context that needs it.
+`research` takes a whole Common Fabric task or a focused follow-up and returns a
+structured implementation kit. It is on the parent surface and the
+`pattern-author` child's surface whenever the run can supply a documentation
+corpus or pattern index. This is a private tool loop, not web research and not a
+delegable child profile. The gateway transport uses `gemini-3.5-flash`; the
+owner-authenticated Codex transport uses `gpt-5.6-luna`.
 
-The corpus is Markdown split at headings into sections, read on the host from
-the roots the run resolved and never through the sandbox mount. Configure them
-with a repeatable `--docs-corpus-root <path>`. A run that names none and is
-running out of a labs checkout defaults to that checkout's `docs/common`,
-`docs/development`, and `skills`, so a console started with no documentation
-configuration is not documentation-blind. Either way the resolved roots and
-where they came from are recorded in `run-state.json` under `docsCorpus` and
-printed in operator output as a `docsCorpus:` line; a run that resolved none
-says so on that line, and `query_docs` is absent from its tool surface.
+The CLI and each interactive `start_turn` mark the current user task for an
+opening research call. A fresh root run executes that call through the ordinary
+tool-policy, artifact, provenance, cancellation, and usage-accounting path
+before its first parent model turn. Its admitted kit, including an incomplete
+kit and its missing items, becomes a host-supplied user-context message directly
+before the task rather than a fabricated assistant/tool exchange. Attached
+pattern references enter the private loop as trusted index leads, but the loop
+still has to inspect their exact published source before selecting them.
 
-Every section the loader admits carries an integrity endorsement — a `Resource`
-atom of class `CommonFabricHarnessOperatorProvisionedReference` whose subject is
-the root it was read under, minted from the operator's own configuration and
-never from the read bytes. Only an endorsed section is eligible for an answer,
-so text written into the workspace by an earlier child is not corpus and cannot
-reach one. Operator-provisioned documentation is trusted for confidentiality —
-we mount it, and it carries no secret — and endorsed for integrity provenance,
-which is what lets a reader of a run tell reference material apart from
-workspace text rather than trusting the mount.
+Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
+The driver records pending intent before invocation, then records whether a kit
+was returned together with the sanitized handoff and tool-output identity. After
+interruption it reconstructs a missing handoff from the exact persisted research
+result, or supplies an explicit source-free failure when no result was
+persisted; neither case repeats the call. A resumed legacy run with no
+checkpoint does not gain a new opening pass, and delegated child runs do not
+start one. The host-context message carries only the research call, tool, and
+output identity. When the raw result contains a private record,
+`transcript-omissions.json` uses that identity to retain its `/researchRecord`
+join to the raw tool artifact across persistence and recovery; a source-free
+error records no such location. The private record remains absent from the
+parent transcript and provider context. Opening activity and policy records
+carry `origin: "opening-research"`; its private model usage is descendant usage
+included in the root's total rather than in the parent's direct usage.
 
-The answer is produced by the `explore` profile: a cheap model with no tools at
-all, one turn, handed the selected sections and nothing else. It is one model
-call rather than a child run, so no subagent is spawned and the depth-one
-invariant is untouched; the call is recorded like every other, as a model
-attempt in the run report and with its tokens in the run's descendant usage.
-Which cheap model answers is the run's transport's to say — a transport serves
-only its own models, and a name it does not serve is a refused request rather
-than a fallback — so the gateway answers on `gemini-3.5-flash` and the Codex
-Responses transport on `gpt-5.6-luna`. The model that answered is on the
-artifact, in `exploreRecord.model`. A call that ended with no answer — the
-provider refused it, or what came back was not a reply the tool could read — is
-counted on the run, its children's included, and printed in operator output as a
-`docsQueryFailures:` line: the model reads an ordinary tool error and carries
-on, so without that count a documentation-blind run leaves no trace an operator
-sees. What was sent — the model, the question, each section by path and heading
-with the endorsement atoms it carries, and the two messages verbatim — is kept
-on the tool-output artifact under the call's output id as `exploreRecord`, and
-stripped before the answer reaches the caller.
+The private model can search the operator-provisioned docs and skills corpus,
+open exact section windows, search the published pattern index, inspect a
+pattern with its complete multi-file program and dependencies, open bounded
+source-file windows, and inspect the shape of general handles available to the
+calling run. It cannot delegate, execute commands, write files, browse the web,
+or mutate Fabric. Documentation sections remain complete at ingestion; an exact
+read returns `nextOffset` until the section is finished, so an example after the
+first 4,000 characters is reachable rather than silently lost.
 
-A citation is a path and a heading. It carries no text and no handle, so
-following one is a separate `read_file`. A citation naming a section the corpus
-does not hold is dropped rather than returned.
+The documentation corpus is Markdown split at headings and read on the host from
+the roots the run resolved, never through the sandbox mount. Configure it with
+repeatable `--docs-corpus-root <path>` flags. A run from a labs checkout that
+names no root defaults to that checkout's `docs/common`, `docs/development`, and
+`skills`. The resolved roots and their source are recorded under `docsCorpus` in
+`run-state.json` and printed in operator output. Every admitted section carries
+a `Resource` integrity atom of class
+`CommonFabricHarnessOperatorProvisionedReference` naming its root. Workspace
+text cannot enter this corpus.
 
-Not built yet: the optional `fullTextRef`, a capability-scoped handle over the
-retrieved text minted by the route `acquire_skill` uses, and any policy that
-would declassify it.
+Search results are leads, not citations. The private loop must open the exact
+material it relies on. Each admitted read records its source kind, exact
+location and range, total length, content digest, and a source id derived from
+that identity. Repeated headings remain distinct. An inspected pattern is
+confirmed only after its indexed source computes to the requested pattern id;
+the narrowly identified compiler case unsupported by the light identity path is
+recorded as deferred rather than misreported as verified. An identity mismatch
+is always refused.
+
+Each exact documentation, source-file, or metadata read is limited to 8,000
+characters. Metadata uses the rendered argument and result types; redundant raw
+schemas remain in the retained pattern record. Metadata larger than the limit is
+refused before its pattern is admitted; documentation and source-file reads
+support continuation windows.
+
+Documentation reads return both the exact `section-N` selector used to reopen a
+section and the distinct `documentation:*` source id used to cite that read.
+Before tool-free synthesis the private loop receives a concise catalog of the
+exact source ids read in the current call. If a draft claiming completeness
+still cites an unread id and one of the eight model turns remains, the loop
+allows one tool-free citation-only repair against that same catalog. It never
+fuzzily accepts, completes, or reopens an invented id, and the repair adds no
+research-tool calls to the 24-call bound.
+
+The returned kit distinguishes `complete` from `incomplete`, recommends direct
+run, composition, authoring, or a focused API answer, and carries admitted
+patterns, described external-handle bindings, ordered steps, rules,
+verification, exact citations, and explicit blockers. Direct-run and composition
+kits require verified published source and a complete invocation or source
+recipe. A direct-run example must parse as JSON matching the shared
+`run_pattern` input schema, name a selected inspected pattern, and omit inline
+source. An invalid invocation remains in an incomplete kit for local correction.
+Authoring kits require complete source. Focused API answers may consist only of
+cited rules. `inputs` contains only existing general handles that the loop
+successfully inspected; types, defaults, literals, and new local state belong in
+the recipe, and `[]` is correct when no external data is required. Every API
+shown by an example, comments included, must cite an exact opened read. Every
+source cited by a rule or example appears in the kit's source catalog, including
+sources not repeated in the model's top-level citation list. Routine reversible
+choices are stated as assumptions; only real blockers belong in `missing`.
+
+A complete `pattern-source` example also receives a host-side TypeScript parser
+check. The kit retains the complete source, citations, and exact diagnostic
+codes and locations when parsing fails, but admission marks the kit incomplete
+so the parent or pattern author can correct those diagnostics locally without
+repeating research. A `valid` result establishes syntax only: it does not
+resolve imports, type-check, compile, or execute the example. An unavailable
+parser is reported explicitly rather than treated as acceptance.
+
+Every research result carries a `cfc` projection alongside kit completeness.
+`sourceLabel` joins the existing labels known for the task, every documentation
+section observed while ranking a search (including unselected leads), exact
+handle descriptions, and inherited research output. `outputLabel` carries only
+that join's confidentiality into later model context; retained integrity is
+source provenance, not an assertion that the model-authored kit has
+operator-authored authority. Opening handoffs and ordinary research results add
+the output label to model context, and resume reconstructs it from the durable
+result or summary. Delegation always carries the parent's accumulated model
+context label, including when no research kit is selected, so omitting research
+context cannot remove confidentiality acquired earlier in the conversation.
+
+`cfc.coverage` describes metadata availability, independently of whether the kit
+is complete. Every influencing surface that exposes no label is retained in
+`missingLabels`; this includes each pattern-index metadata or source
+observation, a handle whose exact label metadata was unavailable, and a legacy
+prior-research summary with no CFC projection. The current pattern-index API
+exposes neither metadata labels nor source labels, and publication does not make
+its private indexed source public, so pattern-index research correctly reports
+incomplete CFC coverage. No missing label is replaced with a clean label. A
+failed handle-label read retains the runtime's fail-closed restriction while
+reporting availability as false. One acquisition supplies both results.
+
+The model-facing tool result contains the admitted kit and explicit guidance not
+to treat an incomplete kit as complete. The full private transcript, exact read
+provenance, confirmed pattern records, handle descriptions, and consumed budgets
+remain in the tool-output artifact under `researchRecord`; the transcript
+omission record points to that field. Provider errors, cancellation, budget
+exhaustion, and malformed synthesis retain the same partial record and increment
+`researchFailures`. Private token use is included in total run usage.
+
+Admission, retained evidence, and model projection have distinct owners.
+`research/admission.ts` checks recipes and citations using the shared tool
+contracts; `research/runner.ts` owns private search, reads, budgets, and
+retained failure evidence. `research/model-projection.ts` projects a kit at
+ordinary tool handoff, opening-handoff reconstruction, and child context. It
+uses the existing identifier scrub for free text, preserves confirmed import
+identities and exact source/CFC records, and leaves unused raw argument/result
+schemas in artifacts. The scrub produces its changed positions in the same walk.
+The omission writer and auditor share one provenance reader for tool and
+host-supplied results. Recorded handoff history stays authoritative during
+replay; reconstructed handoffs use the current projection. Pattern-search result
+rendering remains a separate surface from the derived research kit.
+
+Successful kits and their host-confirmed records remain intact in durable run
+state. Private follow-ups and delegated children receive the latest
+implementation kit and the two latest focused API answers in chronological
+order, with whole examples. A child retains those selected raw summaries in its
+own run state and receives projected kits in context, joined by research run id.
+It has no research tool call to own a separate omission entry for inherited
+context. Only handles in the selected kits' `inputs[].token` bindings transfer
+automatically; mentions in prose, blockers, or superseded kits transfer nothing.
+A pattern author starts from an inherited kit and uses `research` only for
+unresolved follow-ups rather than repeating the initial pass. Locally authored
+source artifacts record the research run ids that shaped them. The current
+pattern-index publication API has no research-association field, so that
+provenance remains local instead of being sent as an ignored index property.
+
+`query_docs` remains accepted only as a CLI or persisted-policy input alias and
+is normalized to `research` at the use boundary. Existing transcript and run
+state bytes are not rewritten, and the model is never offered two competing
+documentation tools.
 
 ### Running patterns against a Fabric space
 
@@ -1867,15 +2063,27 @@ deno task run -- \
   --prompt "Delegate inspection of https://example.com and summarize the result."
 ```
 
-The `web_search` profile is the provider-native search profile. It runs the
-child on the configured Gemini search model, requests the gateway's
-`google_search` native model tool, and gives the child no built-in file, shell,
-browser, or fetch tools. The intended use is the same CFC boundary as browser
-and web_fetch subagents: the parent delegates a focused search task, raw search
-observations stay in child artifacts, and the parent receives only the sanitized
-subagent return channel. Because this profile overrides the parent model, parent
-`--reasoning-effort` and `--prompt-cache-mode` settings remain on
-model-inheriting loops and do not apply to the search child.
+The `web_search` profile delegates focused provider-native search without
+built-in file, shell, browser, fetch, or nested delegation tools. Its effective
+profile is bound to the run's provider and recorded in the CFC policy snapshot
+and child manifest:
+
+- `openai-compatible-gateway` uses the configured Gemini search model and
+  `google_search`. Parent reasoning and prompt-cache controls do not cross this
+  model override.
+- `openai-codex` inherits the parent's model, subscription client, and
+  credential owner. The harness-native `openai_web_search` ID requests hosted
+  live `web_search` from the same Codex endpoint, without a gateway or shell
+  network grant. Provider/model availability errors fail the child; there is no
+  billing or model fallback.
+
+Codex search calls and citation annotations remain in the child transcript. The
+delegated result carries `nativeModelToolResults` with sources separately from
+answer text, preserving caller-supplied structured return schemas. Unstructured
+summaries also include a bounded source-link footer. As with other external
+observations, sources are data rather than instructions or write permission.
+`--describe-capabilities` reports native tools by provider as well as their
+union; advertised support is not an authenticated endpoint health check.
 
 The `pattern-author` profile is where Common Fabric pattern source gets written
 and run. Its child receives `run_pattern` (under the ordinary fabric-session

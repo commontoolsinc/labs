@@ -10,10 +10,18 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
+  publishing existing database and companion-cell references once per Loom
+  environment, with a staged person-inbox migration and compiled integration
+  acceptance gates.
 - [View-scoped client replication](view-scoped-client-replication.md) tracks
   rollout, recovery, and adversarial verification of active-view delivery and
   guarded speculative computation. It separates execution demand from delivery
   and stages document selection before optional field projections.
+- [cf-harness task research and composition](cf-harness-inbox-reliability.md)
+  adds a `research` service that reads documentation and indexed source,
+  prepares a usable implementation kit for every task, and supports tested email
+  components that authors can compose.
 - [Interaction cost in the unified inbox](person-inbox-interaction-cost.md)
   records the runtime work behind a thread open that cost 1482 ms paced and
   10.7-19.5 s against five people's data: the per-read prefix scan over a

@@ -7,6 +7,7 @@ import {
   parseReferenceContext,
   parseRelativeReference,
   type ReferenceContext,
+  type ReferenceParts,
   renderCellReference,
   renderReferenceContext,
 } from "../src/cell-reference.ts";
@@ -90,6 +91,44 @@ describe("cell-reference", () => {
         scope: "user",
         path: [],
       });
+    });
+
+    it("reads the spec's rooted examples as their listed cells", () => {
+      const handle = "of:fid1:Glaze";
+      const pin = "a".repeat(43);
+      const fixtures: [string, Partial<ReferenceParts>][] = [
+        [`/${handle}`, { id: handle }],
+        ["/glaze-tracker", {}],
+        ["/glaze-tracker/items/0/title", { path: ["items", "0", "title"] }],
+        ["/glaze-tracker@user", { scope: "user" }],
+        ["/glaze-tracker@scope=user", { scope: "user" }],
+        ["/glaze-tracker@session/items", { scope: "session", path: ["items"] }],
+        ["//bakery/glaze-tracker", { space: "bakery" }],
+        [`//did:key:z6MkBakery/${handle}`, {
+          space: "did:key:z6MkBakery",
+          id: handle,
+        }],
+        [`/glaze-tracker@pin=${pin}`, { pin }],
+        [`/glaze-tracker@user@pin=${pin}`, { scope: "user", pin }],
+        ["/glaze-tracker#argument", { member: "argument" }],
+        ["/glaze-tracker#argument@user/items", {
+          member: "argument",
+          scope: "user",
+          path: ["items"],
+        }],
+        ["/glaze-tracker/issue#12", { path: ["issue#12"] }],
+        ["/glaze-tracker/items/0#argument", { path: ["items", "0#argument"] }],
+        ["/glaze-tracker/", { path: [""] }],
+      ];
+      for (const [text, parts] of fixtures) {
+        const parsed = parseCellReference(text);
+        expect({ ...parsed, scope: parsed.scope ?? "space" }).toEqual({
+          id: "glaze-tracker",
+          scope: "space",
+          path: [],
+          ...parts,
+        });
+      }
     });
 
     it("preserves the DID alias and refuses retired named-space prefixes", () => {

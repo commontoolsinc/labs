@@ -147,7 +147,9 @@ export function parseFabricUrl(
       });
       if (reference.some((segment) => segment === undefined)) return undefined;
       const parts = parseCellReference(reference.join("/"));
-      const id = asEntityId(parts.id);
+      const id = asEntityId(
+        parts.path.length === 0 ? parts.id.trimEnd() : parts.id,
+      );
       if (id === undefined) return undefined;
       return {
         space: parts.space,

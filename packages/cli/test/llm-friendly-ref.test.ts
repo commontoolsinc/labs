@@ -114,6 +114,13 @@ describe("llm-friendly-ref", () => {
     });
   });
 
+  it("refuses the retired named-space migration alias", () => {
+    expect(() => normalizeLLMFriendlyRef("/@my-space/tracker/items"))
+      .toThrow(
+        "The named-space prefix `/@my-space/` is retired; use `//my-space/`.",
+      );
+  });
+
   it("settles two space names against each other at parse time", () => {
     // Same name, same space: nothing is left for the session to check.
     expect(

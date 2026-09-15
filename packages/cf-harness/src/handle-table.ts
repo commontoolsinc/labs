@@ -80,7 +80,7 @@ export const parseHandleRef = (refText: string): NormalizedFullLink => {
     );
   }
   return {
-    id: parsed.id,
+    id: parsed.path.length === 0 ? parsed.id.trimEnd() : parsed.id,
     path: parsed.path,
     scope: parsed.scope ?? "space",
     ...(parsed.space !== undefined ? { space: parsed.space } : {}),

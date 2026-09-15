@@ -1,5 +1,5 @@
 import {
-  fabricFromNativeValue,
+  fabricFromConvertibleJsValue,
   type FabricValue,
 } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
@@ -171,8 +171,8 @@ function adaptSandboxResult(
   if (!isSandboxResultContainer(value)) {
     try {
       const realmNormalized = normalizeSandboxNativeLeaf(value);
-      const converted = fabricFromNativeValue(realmNormalized, false);
-      return fabricFromNativeValue(converted);
+      const converted = fabricFromConvertibleJsValue(realmNormalized, false);
+      return fabricFromConvertibleJsValue(converted);
     } catch (cause) {
       throw formatActionResultError(value, cause, actionName, path);
     }
@@ -278,14 +278,14 @@ function validateFabricActionResult(
     // identity shortcut so validation still rejects frozen-but-illegal
     // primitives such as unique symbols. The second conversion retains the
     // normalized graph and applies the normal deep-freeze contract.
-    const converted = fabricFromNativeValue(value, false);
-    return fabricFromNativeValue(converted);
+    const converted = fabricFromConvertibleJsValue(value, false);
+    return fabricFromConvertibleJsValue(converted);
   } catch (cause) {
     if (isSandboxResultContainer(value) && !seen.has(value)) {
       seen.add(value);
       for (const [key, child] of Object.entries(value)) {
         try {
-          fabricFromNativeValue(child, false);
+          fabricFromConvertibleJsValue(child, false);
         } catch {
           validateFabricActionResult(
             child,

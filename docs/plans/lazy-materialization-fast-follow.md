@@ -3,8 +3,7 @@
 Status: F0 and F2 complete, F2 as an explicit deferral; F1 done as far as the
 deferral needed, with three bullets carried forward; F3's evidence assembled,
 with partial integration coverage recorded; F3's decision, F4, and F5 pending, the
-decision with the flag's owner and the rest behind it; the lift's synchronous
-refusal fix held, as the design plan's Stage 5 records. This plan is the
+decision with the flag's owner and the rest behind it. This plan is the
 separate follow-up to the
 [computation-cost](../history/plans/pattern-computation-cost.md) arc, whose
 [implementation
@@ -159,6 +158,18 @@ must not accidentally inherit it.
       The [reload evidence](../history/development/performance/2026-09-14-lazy-materialization-reload-evidence.md)
       records served eager browser errors and an unresolved default-on control
       failure; those findings remain part of the acceptance decision.
+      The [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
+      identifies the eager nullable-cell input and a stalled browser displaying
+      a note instead of its notebook. The [navigation-policy diagnosis](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
+      ties the reload test's selection assumption to the existing speculative
+      navigation contract: source assertions must read the captured notebook,
+      and reload measurement must explicitly select it. The corrected default-on
+      scenario passes; eager renders all notes but fails on nullable reads.
+      Resolve the eager correctness gap or select a rollback route that does not
+      depend on that posture before retiring the flag.
+      The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
+      permits two exact stale fetch-status transitions during vintage replay;
+      it does not retire the flag or waive other state-loss findings.
 - [ ] Obtain the retirement decision from the flag's owner with a concrete
       rollback route. No live data mutation is implied by this plan; coordinate
       any live deployment separately. Bernhard Seefeld, whom the registry's
@@ -174,19 +185,6 @@ must not accidentally inherit it.
 - [ ] Run affected package suites, authoritative pattern checks when patterns
       change, repository type/format/lint checks, and applicable independent
       gates. Require clean antagonistic and Cubic reviews before merging.
-
-Held beside F3/F4: the lift path drops a refusal its body throws synchronously,
-and the previous result stands (measured at the F0 record's pinned revision,
-[The lift
-path](../history/development/performance/2026-09-11-lazy-materialization-f0-baseline.md#the-lift-path)).
-The fix, on the branch the design plan's [Stage 5](lazy-cell-materialization.md)
-names, writes the undefined result the design specifies for a refusal the body
-raises (one raised during the argument read keeps the current disposition on
-that branch too), and with it the Pattern Update State and Baseline Integrity
-gate fails, because the fix clears a persisted derived value the defect had
-preserved, as that record's lift-path section says. It waits on a ruling from
-that gate's owner on how the vintage expectation moves. Until it lands, the
-design plan's Stage 5 records which arms hold.
 
 ### F5 — Measure and close
 

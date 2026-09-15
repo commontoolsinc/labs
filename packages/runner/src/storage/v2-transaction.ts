@@ -99,6 +99,7 @@ import {
   isUiInputBlindWriteTx,
   pendingWriteElisionRead,
   registerCommitRejectionListener,
+  stableInternalVerifierRead,
   takeCoverageWaits,
 } from "./reactivity-log.ts";
 import {
@@ -952,6 +953,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
+  #potentiallyExternalReadActivities: IReadActivity[] = [];
 
   /**
    * Per-transaction monotonic activity clock, shared between read activities
@@ -1076,6 +1078,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#state = { status: "done", result };
     this.#branches.clear();
     this.#readActivities.length = 0;
+    this.#potentiallyExternalReadActivities.length = 0;
     this.#writeAttemptLog.length = 0;
     this.#reactivityLogCache = undefined;
     this.#lastDocument = undefined;
@@ -1163,6 +1166,11 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   getReadActivities(): readonly IReadActivity[] {
     return this.#readActivities;
+  }
+
+  /** @inheritDoc */
+  getPotentiallyExternalReadActivities(): readonly IReadActivity[] {
+    return this.#potentiallyExternalReadActivities;
   }
 
   getWriteAttemptLog(): readonly IWriteAttempt[] {
@@ -1629,7 +1637,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
         journalIndex: this.#activityClock++,
       };
-      this.#readActivities.push(readActivity);
+      this.#recordReadActivity(readActivity);
       this.#invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
@@ -1898,7 +1906,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const scope = normalizeCellScope(address.scope);
     if (options?.nonRecursive === true) {
       for (let index = 0; index < paths.length; index++) {
-        this.#readActivities.push({
+        this.#recordReadActivity({
           space: address.space,
           scope,
           id: address.id,
@@ -1910,7 +1918,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     } else {
       for (let index = 0; index < paths.length; index++) {
-        this.#readActivities.push({
+        this.#recordReadActivity({
           space: address.space,
           scope,
           id: address.id,
@@ -3111,6 +3119,16 @@ export class V2StorageTransaction implements IStorageTransaction {
         ? { attemptedWrites }
         : {}),
     };
+  }
+
+  /** Records every read and retains mutable classifications for later checks. */
+  #recordReadActivity(read: IReadActivity): void {
+    if (read.meta === stableInternalVerifierRead) {
+      Object.freeze(read);
+    } else {
+      this.#potentiallyExternalReadActivities.push(read);
+    }
+    this.#readActivities.push(read);
   }
 
   #prepareWriteSpace(

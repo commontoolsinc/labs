@@ -1,7 +1,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import {
   cloneIfNecessary,
-  fabricFromNativeValue,
+  fabricFromConvertibleJsValue,
   type FabricValue,
   toCompactDebugString,
   toStructuredDebugValue,
@@ -408,7 +408,7 @@ function sqliteParamsForRuntime(
 }
 
 function sqliteValueForClient(value: unknown): FabricValue {
-  return fabricFromNativeValue(value);
+  return fabricFromConvertibleJsValue(value);
 }
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {

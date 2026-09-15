@@ -20,7 +20,7 @@ export interface TileView {
   alignChartBottom?: boolean; // keep the chart at the tile bottom when its grid row grows taller
   aside?: string; // trusted inline html minor header facet (e.g. an MTD or "running" badge)
   href?: string; // if set, the whole tile becomes a link (external opens a new tab)
-  hint?: string; // small drill affordance text, e.g. "commits ↗"
+  hint?: string; // drill arrow tooltip and accessible link description
 }
 
 export interface Route {
@@ -36,6 +36,10 @@ export type RunSource = ReturnType<typeof runSource>;
 
 export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
+
+  /** Header before a view is available; defaults to the tile's id. */
+  label?: string;
+
   intervalMs: number; // how often collect() runs, per source when runSources is set
   wide?: boolean; // render full-width below the grid, including before collection
   // Keep the last completed status and values while ignoring intermediate views.

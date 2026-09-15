@@ -395,7 +395,7 @@ function createViewProxy<T>(
   // without losing member resolution.
 
   // Stored objects are deep-frozen during storage normalization
-  // (fabricFromNativeValueModern). A frozen proxy target would force every
+  // (fabricFromConvertibleJsValue). A frozen proxy target would force every
   // property access through the invariant guard (ECMAScript 10.5.8: a [[Get]]
   // trap on a non-configurable, non-writable data property must return the
   // target's own value), bypassing the get trap's link resolution entirely.

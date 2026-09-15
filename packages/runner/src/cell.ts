@@ -11,8 +11,8 @@ import {
   assertValidFabricValueLayer,
   cloneIfNecessary,
   deepFreeze,
-  type FabricConvertibleValue,
-  fabricFromNativeValue,
+  type FabricConvertibleJsValue,
+  fabricFromConvertibleJsValue,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
@@ -22,7 +22,7 @@ import {
   refuseFabricInstance,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromConvertibleJsObjectElseUndefined,
   valueEqual,
 } from "@commonfabric/data-model";
 import {
@@ -202,6 +202,14 @@ const markDocumentSynced = Symbol("markDocumentSynced");
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+
+  /**
+   * Read-only host subscription for values and metadata. Its query and callback
+   * child-cell reads use independent read-only transactions; writes through
+   * delivered cells fail. Stream listeners create no subscription transaction.
+   * @internal
+   */
+  readOnly?: boolean;
 
   /**
    * Read the cell's display CFC label as part of the sink's tracked read set
@@ -2250,7 +2258,8 @@ export class CellImpl<T extends FabricValue>
 
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       // The anchor id source makes sure each object in an array gets its own
-      // doc; without a frame there is none, and such objects store inline.
+      // doc, its id drawn from the frame this cell was made in
+      // (`frameAnchorIds()`).
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -2504,8 +2513,8 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
-    // The anchor id source makes sure each pushed object gets its own doc;
-    // without a frame there is none, and such objects store inline.
+    // The anchor id source makes sure each pushed object gets its own doc,
+    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -2593,7 +2602,7 @@ export class CellImpl<T extends FabricValue>
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
     // by content, mirroring the server's keyless dedup. The content comparison
-    // runs against a fabric-normalized COPY of the candidate (a native `Date`
+    // runs against a fabric-normalized COPY of the candidate (a JS `Date`
     // must match its stored `FabricEpochNsec` form); the original candidate --
     // not the copy -- is what an accepted add writes, so no identity the write
     // path relies on is disturbed.
@@ -2624,15 +2633,15 @@ export class CellImpl<T extends FabricValue>
       // non-string-keyed internals.
       const comparable = isCellLink(candidate)
         ? candidate
-        : fabricFromNativeValue(flattenBuilderArtifacts(candidate));
+        : fabricFromConvertibleJsValue(flattenBuilderArtifacts(candidate));
       return existing.some((element) => valueEqual(element, comparable));
     };
     const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
     if (toAdd.length === 0) {
       return;
     }
-    // The anchor id source makes sure each added object gets its own doc;
-    // without a frame there is none, and such objects store inline.
+    // The anchor id source makes sure each added object gets its own doc,
+    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -3261,8 +3270,8 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Read the cell's value at the fabric layer (no native unwrapping, no
-   * Proxy wrapping). By default returns a deep-frozen `FabricValue`
+   * Read the cell's value at the fabric layer (no unwrapping to JS form,
+   * no Proxy wrapping). By default returns a deep-frozen `FabricValue`
    * snapshot; pass `{ frozen: false }` for a mutable deep copy.
    *
    * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
@@ -3300,9 +3309,9 @@ export class CellImpl<T extends FabricValue>
       }),
       readOptions,
     );
-    // Deep-copy with desired frozenness, without native unwrapping — getRaw()
-    // and getRawUntyped() return fabric-layer values, not native ("wild
-    // west") values.
+    // Deep-copy with desired frozenness, without unwrapping to JS form --
+    // getRaw() and getRawUntyped() return fabric-layer values, not
+    // convertible JS ("wild west") values.
     return cloneIfNecessary(value, { frozen });
   }
 
@@ -4112,6 +4121,7 @@ function subscribeToReferencedDocs<T>(
   options: SinkOptions = {},
 ): Cancel {
   const link = ref.link;
+  const readOnly = options.readOnly === true;
   const sink: SinkAction = {
     cleanup: undefined,
     action: (tx) => {
@@ -4121,7 +4131,7 @@ function subscribeToReferencedDocs<T>(
       // dependencies for the initial get, not further cells the callback might
       // read. The callback is responsible for calling sink on those cells if it
       // wants to stay updated.
-      const extraTx = runtime.edit();
+      const extraTx = readOnly ? runtime.readTx() : runtime.edit();
       const wrappedTx = createChildCellTransaction(tx, extraTx);
       const schema = link.schema;
       const needsTraversal = schema === undefined ||
@@ -4171,6 +4181,19 @@ function sinkHelper(
   address: IMemorySpaceAddress,
   options: SinkOptions = {},
 ) {
+  if (options.readOnly === true) {
+    const action = sink.action;
+    sink.action = (tx) => {
+      if (tx.setReadOnly === undefined) {
+        throw new Error(
+          "Read-only subscriptions require transaction read-only support.",
+        );
+      }
+      tx.setReadOnly("Cell.sink()");
+      return action(tx);
+    };
+  }
+
   // Attach a name to the sink action
   const sinkName = `sink:${address.space}/${address.id}/${
     address.path.join("/")
@@ -4475,8 +4498,15 @@ function validateStaticData(value: unknown): void {
 
 /**
  * The per-frame id source for anchoring plain array-element objects into
- * entity documents during a write (`DiffWalkState.nextAnchorId`). Without a
- * frame there is no source, and such objects store inline.
+ * entity documents during a write (`DiffWalkState.nextAnchorId`).
+ *
+ * A cell holds whichever frame was on top of the builder frame stack when the
+ * cell was made, and hands that frame here. The `Runtime` constructor pushes a
+ * frame that nothing pops until that runtime is disposed, so a cell made while
+ * a runtime is alive always carries one and this always hands back a source.
+ * Making the cell inside a handler or a lift puts that frame's counter behind
+ * the ids instead. Where the cell was made is what decides, not where the write
+ * happens.
  */
 export function frameAnchorIds(
   frame: Frame | undefined,
@@ -4486,18 +4516,18 @@ export function frameAnchorIds(
 
 /**
  * What `convertCellsToLinks()` is handed: what a pattern produced. That is a
- * `FabricValue` or a native convertible to one, and on top of that the `Cell`s
+ * `FabricValue` or a convertible JS value, and on top of that the `Cell`s
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *
- * `FabricConvertibleValue` is an arm rather than something restated, so
+ * `FabricConvertibleJsValue` is an arm rather than something restated, so
  * this stays true of whatever that comes to admit. The container arms are here
  * as well, and they are not redundant with it: theirs hold only what is already
  * fabric or convertible, where a cell may sit at any depth in what a pattern
  * produced. Replacing a nested one is the whole of what this conversion is for.
  */
 export type CellLinkInput =
-  | FabricConvertibleValue
+  | FabricConvertibleJsValue
   | readonly CellLinkInput[]
   | { readonly [key: string]: CellLinkInput }
   | Cell<any>;
@@ -4686,11 +4716,11 @@ function convertOneToLinks(
             | Record<string, unknown>;
       }
     } else {
-      // A native object carrying a fabric form is minted into it here: a
+      // A JS object carrying a fabric form is minted into it here: a
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
       // `FabricError`. Anything else comes back `undefined`, which says only
       // that nothing needed minting.
-      const minted = shallowFabricFromNativeObjectElseUndefined(value);
+      const minted = shallowFabricFromConvertibleJsObjectElseUndefined(value);
 
       if (minted === undefined) {
         // Nothing was minted, so the value has to be usable as it stands. This
@@ -4942,7 +4972,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         validateStaticData(value);
       }
 
-      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
+      // TODO(danfuzz): JS values in a `Cell.of(...)` initial value are NOT
       // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
       // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
       // (whose diff normalizes at the write boundary). The raw value flows into

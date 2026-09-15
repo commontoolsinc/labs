@@ -5,10 +5,10 @@
  * a `FabricPrimitive`, and their cases are about what each declines: a type
  * lie, a class outside the vocabulary, and a primitive whose reported tag is
  * not one the vocabulary holds. One group cross-checks them against the
- * native-side dispatch over the whole corpus, on the values membership
+ * JS-side dispatch over the whole corpus, on the values membership
  * accepts, which is where the two are required to agree.
  *
- * The native-side cases classify a value by what it actually is, across the
+ * The JS-side cases classify a value by what it actually is, across the
  * cases where the obvious check fails. A prototype can be severed, an `Error`
  * can arrive from another realm or from a subclass nobody here knows, an
  * array can be an `Array` subclass, and an object can have no prototype at
@@ -26,6 +26,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { JsTypeTagIncludingNull } from "@commonfabric/utils/types";
+
 import {
   BaseFabricPrimitive,
   VALUE_TAG,
@@ -41,24 +43,23 @@ import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricPrimitive, type FabricValue } from "@/interface.ts";
 import {
-  isValidFabricNativeObject,
+  isValidFabricConvertibleJsObject,
   isValidFabricValueLayer,
 } from "@/validity-check.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   JS_TYPE_VALUE_TAGS,
-  jsTagFromValue,
   type JsTypeValueTag,
-  tagFromFabricPrimitive,
-  tagFromFabricPrimitiveElseNull,
-  tagFromFabricValue,
-  tagFromFabricValueElseNull,
-  tagFromNativeBuiltinClassElseNull,
-  tagFromNativeValueElseNull,
+  tagOfConvertibleJsValueElseNull,
+  tagOfFabricPrimitive,
+  tagOfFabricPrimitiveElseNull,
+  tagOfFabricValue,
+  tagOfFabricValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags.ts";
-import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
+  type ValueTag,
+} from "@/value-tags";
+import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 
 /**
  * A `BaseFabricPrimitive` subclass whose reported tag is one the vocabulary
@@ -203,34 +204,20 @@ describe("value-tags", () => {
         new Set(Object.values(JS_TYPE_VALUE_TAGS)),
       );
     });
-  });
 
-  describe("jsTagFromValue()", () => {
-    for (const [label, value, tag] of JS_TYPE_TAGS) {
-      it(`returns \`${tag}\` for ${label}`, () => {
-        expect(jsTagFromValue(value)).toBe(tag);
-      });
-    }
+    it("is the `typeOfIncludingNull()` vocabulary, less `object`", () => {
+      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
+        : false;
 
-    it("returns `object` for an object of any kind", () => {
-      // The value `null` has a tag and every other object has none, whatever
-      // its class; a plain object, an array, and both kinds of fabric class
-      // are the same to this.
-
-      expect(jsTagFromValue({})).toBe("object");
-      expect(jsTagFromValue([])).toBe("object");
-      expect(jsTagFromValue(new Date())).toBe("object");
-      expect(jsTagFromValue(new FabricHash(new Uint8Array(32), "fid1")))
-        .toBe("object");
-      expect(jsTagFromValue(FabricError.fromNativeError(new Error("x"))))
-        .toBe("object");
+      const _same: Same<JsTypeValueTag | "object", JsTypeTagIncludingNull> =
+        true;
     });
   });
 
-  describe("tagFromFabricPrimitive()", () => {
+  describe("tagOfFabricPrimitive()", () => {
     for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
-        expect(tagFromFabricPrimitive(value)).toBe(tag);
+        expect(tagOfFabricPrimitive(value)).toBe(tag);
       });
     }
 
@@ -246,7 +233,7 @@ describe("value-tags", () => {
 
     it("returns a distinct tag for each registered primitive class", () => {
       const tags = FABRIC_PRIMITIVE_TAGS.map(([value]) =>
-        tagFromFabricPrimitive(value)
+        tagOfFabricPrimitive(value)
       );
       expect(new Set(tags).size).toBe(FABRIC_PRIMITIVE_TAGS.length);
     });
@@ -257,7 +244,7 @@ describe("value-tags", () => {
       // the subset, fails here.
 
       const tags = FABRIC_PRIMITIVE_TAGS.map(([value]) =>
-        tagFromFabricPrimitive(value)
+        tagOfFabricPrimitive(value)
       );
       expect(new Set(tags)).toEqual(
         new Set(Object.values(FABRIC_PRIMITIVE_VALUE_TAGS)),
@@ -269,96 +256,96 @@ describe("value-tags", () => {
       // such a subclass means is the subclass's concern; the dispatch reads
       // what it reports.
 
-      expect(tagFromFabricPrimitive(new SubBytes(new Uint8Array([1]))))
+      expect(tagOfFabricPrimitive(new SubBytes(new Uint8Array([1]))))
         .toBe(FABRIC_PRIMITIVE_VALUE_TAGS.FabricBytes);
     });
 
     it("returns the tag a subclass reports, whatever its class", () => {
-      expect(tagFromFabricPrimitive(new TaggedProbe())).toBe(
+      expect(tagOfFabricPrimitive(new TaggedProbe())).toBe(
         VALUE_TAGS.FabricHash,
       );
     });
 
     it("throws for a `FabricPrimitive` that is not a `BaseFabricPrimitive`", () => {
-      expect(() => tagFromFabricPrimitive(new RoguePrimitive())).toThrow(
+      expect(() => tagOfFabricPrimitive(new RoguePrimitive())).toThrow(
         "Not a valid `FabricPrimitive`",
       );
     });
 
     it("throws for a reported tag the vocabulary lacks", () => {
-      expect(() => tagFromFabricPrimitive(new MistaggedProbe())).toThrow(
+      expect(() => tagOfFabricPrimitive(new MistaggedProbe())).toThrow(
         "Not a valid `FabricPrimitive`",
       );
     });
 
     it("throws for a reported tag outside the primitive subset", () => {
-      expect(() => tagFromFabricPrimitive(new NonPrimitiveTagProbe())).toThrow(
+      expect(() => tagOfFabricPrimitive(new NonPrimitiveTagProbe())).toThrow(
         "Not a valid `FabricPrimitive`",
       );
     });
 
     it("throws for a type lie", () => {
-      expect(() => tagFromFabricPrimitive({} as FabricPrimitive)).toThrow(
+      expect(() => tagOfFabricPrimitive({} as FabricPrimitive)).toThrow(
         "Not a valid `FabricPrimitive`",
       );
     });
   });
 
-  describe("tagFromFabricPrimitiveElseNull()", () => {
+  describe("tagOfFabricPrimitiveElseNull()", () => {
     for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
-        expect(tagFromFabricPrimitiveElseNull(value)).toBe(tag);
+        expect(tagOfFabricPrimitiveElseNull(value)).toBe(tag);
       });
     }
 
     it("returns `null` for a `FabricPrimitive` that is not a `BaseFabricPrimitive`", () => {
-      expect(tagFromFabricPrimitiveElseNull(new RoguePrimitive())).toBe(null);
+      expect(tagOfFabricPrimitiveElseNull(new RoguePrimitive())).toBe(null);
     });
 
     it("returns `null` for a reported tag the vocabulary lacks", () => {
-      expect(tagFromFabricPrimitiveElseNull(new MistaggedProbe())).toBe(null);
+      expect(tagOfFabricPrimitiveElseNull(new MistaggedProbe())).toBe(null);
     });
 
     it("returns `null` for a reported tag outside the primitive subset", () => {
       // `JsError` is a tag, but not one a primitive may report; a primitive
       // reporting it would otherwise be rebuilt as an error by conversion.
 
-      expect(tagFromFabricPrimitiveElseNull(new NonPrimitiveTagProbe()))
+      expect(tagOfFabricPrimitiveElseNull(new NonPrimitiveTagProbe()))
         .toBe(null);
     });
 
     it("returns `null` for a reported tag that is only an inherited name", () => {
-      expect(tagFromFabricPrimitiveElseNull(new InheritedNameProbe())).toBe(
+      expect(tagOfFabricPrimitiveElseNull(new InheritedNameProbe())).toBe(
         null,
       );
     });
 
     it("returns `null` for a reported tag that is no string", () => {
-      expect(tagFromFabricPrimitiveElseNull(new UntaggedProbe())).toBe(null);
+      expect(tagOfFabricPrimitiveElseNull(new UntaggedProbe())).toBe(null);
     });
 
     it("returns `null` for a type lie", () => {
-      expect(tagFromFabricPrimitiveElseNull({} as FabricPrimitive)).toBe(null);
-      expect(tagFromFabricPrimitiveElseNull(null as unknown as FabricPrimitive))
+      expect(tagOfFabricPrimitiveElseNull({} as FabricPrimitive)).toBe(null);
+      expect(tagOfFabricPrimitiveElseNull(null as unknown as FabricPrimitive))
         .toBe(null);
     });
   });
 
-  describe("tagFromFabricValue()", () => {
+  describe("tagOfFabricValue()", () => {
     for (const [label, value, tag] of JS_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for ${label}`, () => {
-        expect(tagFromFabricValue(value)).toBe(tag);
+        expect(tagOfFabricValue(value)).toBe(tag);
       });
     }
 
     it("returns `Array` for an array", () => {
-      expect(tagFromFabricValue([])).toBe(VALUE_TAGS.Array);
-      expect(tagFromFabricValue([1, [2]])).toBe(VALUE_TAGS.Array);
+      expect(tagOfFabricValue([])).toBe(VALUE_TAGS.Array);
+      expect(tagOfFabricValue([1, [2]])).toBe(VALUE_TAGS.Array);
     });
 
     it("returns `Object` for a plain object", () => {
-      expect(tagFromFabricValue({})).toBe(VALUE_TAGS.Object);
-      expect(tagFromFabricValue({ a: 1 })).toBe(VALUE_TAGS.Object);
+      expect(tagOfFabricValue({})).toBe(VALUE_TAGS.Object);
+      expect(tagOfFabricValue({ a: 1 })).toBe(VALUE_TAGS.Object);
     });
 
     it("returns `Object` for a null-prototype object", () => {
@@ -367,85 +354,85 @@ describe("value-tags", () => {
       // here. That is the looseness the function's doc comment reserves.
 
       const obj = Object.create(null) as FabricValue;
-      expect(tagFromFabricValue(obj)).toBe(VALUE_TAGS.Object);
+      expect(tagOfFabricValue(obj)).toBe(VALUE_TAGS.Object);
     });
 
     for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
-        expect(tagFromFabricValue(value)).toBe(tag);
+        expect(tagOfFabricValue(value)).toBe(tag);
       });
     }
 
     it("returns `FabricInstance` for each `FabricInstance` kind", () => {
-      expect(tagFromFabricValue(FabricError.fromNativeError(new Error("x"))))
+      expect(tagOfFabricValue(FabricError.fromNativeError(new Error("x"))))
         .toBe(VALUE_TAGS.FabricInstance);
-      expect(tagFromFabricValue(new FabricMap(new Map([["a", 1]]))))
+      expect(tagOfFabricValue(new FabricMap(new Map([["a", 1]]))))
         .toBe(VALUE_TAGS.FabricInstance);
     });
 
     it("throws for a function", () => {
-      expect(() => tagFromFabricValue((() => {}) as unknown as FabricValue))
+      expect(() => tagOfFabricValue((() => {}) as unknown as FabricValue))
         .toThrow("Not possibly a valid `FabricValue`");
     });
 
     it("throws for a class instance outside the vocabulary", () => {
-      expect(() => tagFromFabricValue(new Date() as unknown as FabricValue))
+      expect(() => tagOfFabricValue(new Date() as unknown as FabricValue))
         .toThrow("Not possibly a valid `FabricValue`");
-      expect(() => tagFromFabricValue(new Map() as unknown as FabricValue))
+      expect(() => tagOfFabricValue(new Map() as unknown as FabricValue))
         .toThrow("Not possibly a valid `FabricValue`");
     });
 
     it("throws for a primitive whose reported tag the vocabulary lacks", () => {
-      expect(() => tagFromFabricValue(new MistaggedProbe())).toThrow(
+      expect(() => tagOfFabricValue(new MistaggedProbe())).toThrow(
         "Not possibly a valid `FabricValue`",
       );
     });
   });
 
-  describe("tagFromFabricValueElseNull()", () => {
+  describe("tagOfFabricValueElseNull()", () => {
     for (const [label, value, tag] of JS_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for ${label}`, () => {
-        expect(tagFromFabricValueElseNull(value)).toBe(tag);
+        expect(tagOfFabricValueElseNull(value)).toBe(tag);
       });
     }
 
     it("returns `Array` for an array and `Object` for a plain object", () => {
-      expect(tagFromFabricValueElseNull([1])).toBe(VALUE_TAGS.Array);
-      expect(tagFromFabricValueElseNull({ a: 1 })).toBe(VALUE_TAGS.Object);
+      expect(tagOfFabricValueElseNull([1])).toBe(VALUE_TAGS.Array);
+      expect(tagOfFabricValueElseNull({ a: 1 })).toBe(VALUE_TAGS.Object);
     });
 
     for (const [value, tag] of FABRIC_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for a \`${value.constructor.name}\``, () => {
-        expect(tagFromFabricValueElseNull(value)).toBe(tag);
+        expect(tagOfFabricValueElseNull(value)).toBe(tag);
       });
     }
 
     it("returns `FabricInstance` for a `FabricInstance`", () => {
       expect(
-        tagFromFabricValueElseNull(FabricError.fromNativeError(new Error("x"))),
+        tagOfFabricValueElseNull(FabricError.fromNativeError(new Error("x"))),
       ).toBe(VALUE_TAGS.FabricInstance);
     });
 
     it("returns `null` for a function", () => {
-      expect(tagFromFabricValueElseNull((() => {}) as unknown as FabricValue))
+      expect(tagOfFabricValueElseNull((() => {}) as unknown as FabricValue))
         .toBe(null);
     });
 
     it("returns `null` for a class instance outside the vocabulary", () => {
-      expect(tagFromFabricValueElseNull(new Date() as unknown as FabricValue))
+      expect(tagOfFabricValueElseNull(new Date() as unknown as FabricValue))
         .toBe(null);
-      expect(tagFromFabricValueElseNull(/x/ as unknown as FabricValue))
+      expect(tagOfFabricValueElseNull(/x/ as unknown as FabricValue))
         .toBe(null);
     });
 
     it("returns `null` for a primitive whose reported tag the vocabulary lacks", () => {
-      expect(tagFromFabricValueElseNull(new MistaggedProbe())).toBe(null);
-      expect(tagFromFabricValueElseNull(new NonPrimitiveTagProbe())).toBe(null);
-      expect(tagFromFabricValueElseNull(new RoguePrimitive())).toBe(null);
+      expect(tagOfFabricValueElseNull(new MistaggedProbe())).toBe(null);
+      expect(tagOfFabricValueElseNull(new NonPrimitiveTagProbe())).toBe(null);
+      expect(tagOfFabricValueElseNull(new RoguePrimitive())).toBe(null);
     });
   });
 
-  describe("the fabric dispatch and the native dispatch", () => {
+  describe("the fabric dispatch and the convertible-JS dispatch", () => {
     // On a value membership accepts, the two dispatches are asked the same
     // question from different sides -- one of a value typed as a `FabricValue`,
     // one of an `unknown` -- and must give the same answer. Where membership
@@ -460,9 +447,9 @@ describe("value-tags", () => {
 
     for (const [label, value] of accepted) {
       it(`tags ${label} the same from either side`, () => {
-        const fabric = tagFromFabricValue(value as FabricValue);
-        expect(fabric).toBe(tagFromNativeValueElseNull(value));
-        expect(fabric).toBe(tagFromFabricValueElseNull(value as FabricValue));
+        const fabric = tagOfFabricValue(value as FabricValue);
+        expect(fabric).toBe(tagOfConvertibleJsValueElseNull(value));
+        expect(fabric).toBe(tagOfFabricValueElseNull(value as FabricValue));
       });
     }
 
@@ -472,12 +459,16 @@ describe("value-tags", () => {
     });
   });
 
-  describe("tagFromNativeValueElseNull()", () => {
-    for (const [label, value, tag] of JS_TYPE_TAGS) {
+  describe("tagOfConvertibleJsValueElseNull()", () => {
+    for (const [label, value, tag] of JS_PRIMITIVE_TAGS) {
       it(`returns \`${tag}\` for ${label}`, () => {
-        expect(tagFromNativeValueElseNull(value)).toBe(tag);
+        expect(tagOfConvertibleJsValueElseNull(value)).toBe(tag);
       });
     }
+
+    it("returns `null` for a function", () => {
+      expect(tagOfConvertibleJsValueElseNull(() => {})).toBe(null);
+    });
 
     it("returns `JsError` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [
@@ -490,7 +481,7 @@ describe("value-tags", () => {
         ["EvalError", new EvalError("test")],
       ];
       for (const [_name, value] of cases) {
-        expect(tagFromNativeValueElseNull(value)).toBe(VALUE_TAGS.JsError);
+        expect(tagOfConvertibleJsValueElseNull(value)).toBe(VALUE_TAGS.JsError);
       }
     });
 
@@ -504,7 +495,7 @@ describe("value-tags", () => {
       const exotic = new MyFancyError("exotic");
       // Recognized at the value level: `Error.isError()` reads the internal
       // slot, so an `Error` subclass is tagged before any class is read.
-      expect(tagFromNativeValueElseNull(exotic)).toBe(VALUE_TAGS.JsError);
+      expect(tagOfConvertibleJsValueElseNull(exotic)).toBe(VALUE_TAGS.JsError);
     });
 
     it("returns `JsError` tag for an `Error` whose prototype was severed", () => {
@@ -516,61 +507,64 @@ describe("value-tags", () => {
       expect((severed as { constructor?: unknown }).constructor).toBe(
         undefined,
       );
-      expect(tagFromNativeValueElseNull(severed)).toBe(VALUE_TAGS.JsError);
+      expect(tagOfConvertibleJsValueElseNull(severed)).toBe(VALUE_TAGS.JsError);
     });
 
     it("returns `Array` tag for an `Array` subclass", () => {
       class MyArray extends Array {}
 
-      expect(tagFromNativeBuiltinClassElseNull(MyArray)).toBe(null);
-      expect(tagFromNativeValueElseNull(new MyArray())).toBe(VALUE_TAGS.Array);
+      expect(tagOfConvertibleJsValueElseNull(new MyArray())).toBe(
+        VALUE_TAGS.Array,
+      );
     });
 
     it("returns `Array` tag for an array whose prototype was severed", () => {
       const severed = [1, 2];
       Object.setPrototypeOf(severed, null);
 
-      expect(tagFromNativeValueElseNull(severed)).toBe(VALUE_TAGS.Array);
+      expect(tagOfConvertibleJsValueElseNull(severed)).toBe(VALUE_TAGS.Array);
     });
 
     it("returns `JsMap` tag for `Map` instances", () => {
-      expect(tagFromNativeValueElseNull(new Map())).toBe(VALUE_TAGS.JsMap);
+      expect(tagOfConvertibleJsValueElseNull(new Map())).toBe(VALUE_TAGS.JsMap);
     });
 
     it("returns `JsSet` tag for `Set` instances", () => {
-      expect(tagFromNativeValueElseNull(new Set())).toBe(VALUE_TAGS.JsSet);
+      expect(tagOfConvertibleJsValueElseNull(new Set())).toBe(VALUE_TAGS.JsSet);
     });
 
     it("returns `JsDate` tag for `Date` instances", () => {
-      expect(tagFromNativeValueElseNull(new Date())).toBe(VALUE_TAGS.JsDate);
+      expect(tagOfConvertibleJsValueElseNull(new Date())).toBe(
+        VALUE_TAGS.JsDate,
+      );
     });
 
     it("returns `JsUint8Array` tag for `Uint8Array` instances", () => {
-      expect(tagFromNativeValueElseNull(new Uint8Array())).toBe(
+      expect(tagOfConvertibleJsValueElseNull(new Uint8Array())).toBe(
         VALUE_TAGS.JsUint8Array,
       );
     });
 
     it("returns `Object` tag for plain objects", () => {
-      expect(tagFromNativeValueElseNull({})).toBe(VALUE_TAGS.Object);
+      expect(tagOfConvertibleJsValueElseNull({})).toBe(VALUE_TAGS.Object);
     });
 
     it("returns `Array` tag for arrays", () => {
-      expect(tagFromNativeValueElseNull([])).toBe(VALUE_TAGS.Array);
+      expect(tagOfConvertibleJsValueElseNull([])).toBe(VALUE_TAGS.Array);
     });
 
     it("returns `JsRegExp` tag for `RegExp` instances", () => {
-      expect(tagFromNativeValueElseNull(/abc/)).toBe(VALUE_TAGS.JsRegExp);
+      expect(tagOfConvertibleJsValueElseNull(/abc/)).toBe(VALUE_TAGS.JsRegExp);
     });
 
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
-      expect(tagFromNativeValueElseNull(obj)).toBe(VALUE_TAGS.Object);
+      expect(tagOfConvertibleJsValueElseNull(obj)).toBe(VALUE_TAGS.Object);
     });
 
     it("returns `null` for class instances", () => {
       class Custom {}
-      expect(tagFromNativeValueElseNull(new Custom())).toBe(null);
+      expect(tagOfConvertibleJsValueElseNull(new Custom())).toBe(null);
     });
 
     describe("an own `constructor` property does not decide the class", () => {
@@ -588,12 +582,14 @@ describe("value-tags", () => {
         ] as ReadonlyArray<[string, unknown]>
       ) {
         it(`returns \`Object\` for a record claiming ${label}`, () => {
-          expect(tagFromNativeValueElseNull({ constructor: forged, a: 1 }))
+          expect(tagOfConvertibleJsValueElseNull({ constructor: forged, a: 1 }))
             .toBe(VALUE_TAGS.Object);
         });
 
         it(`returns \`false\` from the membership check for one claiming ${label}`, () => {
-          expect(isValidFabricNativeObject({ constructor: forged, a: 1 }))
+          expect(
+            isValidFabricConvertibleJsObject({ constructor: forged, a: 1 }),
+          )
             .toBe(false);
         });
       }
@@ -601,8 +597,10 @@ describe("value-tags", () => {
       it("reads an inherited `constructor`, which is the real one", () => {
         // The counterpart: what the prototype says IS the answer, so a value
         // whose class is reachable only through its prototype is tagged by it.
-        expect(tagFromNativeValueElseNull(new Map())).toBe(VALUE_TAGS.JsMap);
-        expect(isValidFabricNativeObject(new Map())).toBe(true);
+        expect(tagOfConvertibleJsValueElseNull(new Map())).toBe(
+          VALUE_TAGS.JsMap,
+        );
+        expect(isValidFabricConvertibleJsObject(new Map())).toBe(true);
       });
     });
 
@@ -630,11 +628,11 @@ describe("value-tags", () => {
         ] as ReadonlyArray<[string, unknown]>
       ) {
         it(`tags ${label} \`Array\``, () => {
-          expect(tagFromNativeValueElseNull(value)).toBe(VALUE_TAGS.Array);
+          expect(tagOfConvertibleJsValueElseNull(value)).toBe(VALUE_TAGS.Array);
         });
 
-        it(`reports ${label} as no \`FabricNativeObject\``, () => {
-          expect(isValidFabricNativeObject(value)).toBe(false);
+        it(`reports ${label} as no \`FabricConvertibleJsObject\``, () => {
+          expect(isValidFabricConvertibleJsObject(value)).toBe(false);
         });
       }
     });
@@ -647,15 +645,16 @@ describe("value-tags", () => {
       // wholesale.
 
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
-        expect(tagFromNativeValueElseNull({ toJSON: () => "converted" })).toBe(
-          VALUE_TAGS.Object,
-        );
+        expect(tagOfConvertibleJsValueElseNull({ toJSON: () => "converted" }))
+          .toBe(
+            VALUE_TAGS.Object,
+          );
       });
 
       it("returns `Array` tag for an array carrying an own `toJSON()`", () => {
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
-        expect(tagFromNativeValueElseNull(arr)).toBe(VALUE_TAGS.Array);
+        expect(tagOfConvertibleJsValueElseNull(arr)).toBe(VALUE_TAGS.Array);
       });
 
       it("returns `Array` tag despite an inherited `toJSON()`", () => {
@@ -664,7 +663,7 @@ describe("value-tags", () => {
           proto.toJSON = () => "hijacked";
           const arr = [1, 2];
           expect(Object.hasOwn(arr, "toJSON")).toBe(false);
-          expect(tagFromNativeValueElseNull(arr)).toBe(VALUE_TAGS.Array);
+          expect(tagOfConvertibleJsValueElseNull(arr)).toBe(VALUE_TAGS.Array);
         } finally {
           delete proto.toJSON;
         }
@@ -676,7 +675,7 @@ describe("value-tags", () => {
             return [7, 8];
           }
         }
-        expect(tagFromNativeValueElseNull(new ProtoJson())).toBe(
+        expect(tagOfConvertibleJsValueElseNull(new ProtoJson())).toBe(
           VALUE_TAGS.Array,
         );
       });
@@ -687,109 +686,81 @@ describe("value-tags", () => {
             return { x: 1 };
           }
         }
-        expect(tagFromNativeValueElseNull(new Custom())).toBe(null);
+        expect(tagOfConvertibleJsValueElseNull(new Custom())).toBe(null);
       });
 
-      it("returns `function` for a function carrying `toJSON()`", () => {
+      it("returns `null` for a function carrying `toJSON()`", () => {
         const fn = Object.assign(() => {}, { toJSON: () => "converted" });
-        expect(tagFromNativeValueElseNull(fn)).toBe(VALUE_TAGS.function);
+        expect(tagOfConvertibleJsValueElseNull(fn)).toBe(null);
       });
     });
   });
 
-  describe("tagFromNativeBuiltinClassElseNull()", () => {
-    it("returns `JsError` tag for standard `Error` constructors", () => {
-      const constructors = [
-        Error,
-        TypeError,
-        RangeError,
-        SyntaxError,
-        ReferenceError,
-        URIError,
-        EvalError,
-      ];
-      for (const ctor of constructors) {
-        expect(tagFromNativeBuiltinClassElseNull(ctor)).toBe(
-          VALUE_TAGS.JsError,
-        );
-      }
-    });
+  describe("recognition is by the class the prototype names", () => {
+    // The class is read from the prototype and compared by identity, so an
+    // object created from a recognized builtin's prototype is tagged as that
+    // builtin whether or not it carries the builtin's internal slots. A plain
+    // object, an array, and an error are decided by tests that read the value
+    // itself, so an object merely built on one of those prototypes is none of
+    // them and is unrecognized.
 
-    it("returns `JsError` tag for exotic `Error` subclass constructor", () => {
+    for (
+      const [label, ctor, tag] of [
+        ["`Map`", Map, VALUE_TAGS.JsMap],
+        ["`Set`", Set, VALUE_TAGS.JsSet],
+        ["`Date`", Date, VALUE_TAGS.JsDate],
+        ["`Uint8Array`", Uint8Array, VALUE_TAGS.JsUint8Array],
+        ["`RegExp`", RegExp, VALUE_TAGS.JsRegExp],
+      ] as ReadonlyArray<[string, { prototype: object }, ValueTag]>
+    ) {
+      it(`returns \`${tag}\` for an object whose prototype is that of ${label}`, () => {
+        expect(tagOfConvertibleJsValueElseNull(Object.create(ctor.prototype)))
+          .toBe(tag);
+      });
+    }
+
+    for (
+      const [label, ctor] of [
+        ["`Array`", Array],
+        ["`Error`", Error],
+        ["`TypeError`", TypeError],
+        ["`RangeError`", RangeError],
+        ["`SyntaxError`", SyntaxError],
+        ["`ReferenceError`", ReferenceError],
+        ["`URIError`", URIError],
+        ["`EvalError`", EvalError],
+      ] as ReadonlyArray<[string, { prototype: object }]>
+    ) {
+      it(`returns \`null\` for a non-instance whose prototype is that of ${label}`, () => {
+        expect(tagOfConvertibleJsValueElseNull(Object.create(ctor.prototype)))
+          .toBe(null);
+      });
+    }
+
+    it("returns `null` for a non-error whose prototype is that of an exotic `Error` subclass", () => {
       class ExoticError extends Error {}
-      // Not in the switch, so the default arm's `prototype instanceof Error`
-      // is what recognizes it.
-      expect(tagFromNativeBuiltinClassElseNull(ExoticError)).toBe(
-        VALUE_TAGS.JsError,
-      );
+
+      expect(
+        tagOfConvertibleJsValueElseNull(Object.create(ExoticError.prototype)),
+      ).toBe(null);
     });
 
-    it("returns correct tags for `Array`, `Object`, `Map`, `Set`, `Date`, `Uint8Array`", () => {
-      expect(tagFromNativeBuiltinClassElseNull(Array)).toBe(VALUE_TAGS.Array);
-      expect(tagFromNativeBuiltinClassElseNull(Object)).toBe(VALUE_TAGS.Object);
-      expect(tagFromNativeBuiltinClassElseNull(Map)).toBe(VALUE_TAGS.JsMap);
-      expect(tagFromNativeBuiltinClassElseNull(Set)).toBe(VALUE_TAGS.JsSet);
-      expect(tagFromNativeBuiltinClassElseNull(Date)).toBe(VALUE_TAGS.JsDate);
-      expect(tagFromNativeBuiltinClassElseNull(Uint8Array)).toBe(
-        VALUE_TAGS.JsUint8Array,
-      );
+    it("returns `null` for an object whose prototype is a plain object", () => {
+      expect(tagOfConvertibleJsValueElseNull(Object.create({}))).toBe(null);
     });
 
-    it("returns `JsRegExp` tag for `RegExp` constructor", () => {
-      expect(tagFromNativeBuiltinClassElseNull(RegExp)).toBe(
-        VALUE_TAGS.JsRegExp,
-      );
-    });
-
-    it("returns `null` for unrecognized constructors", () => {
-      expect(tagFromNativeBuiltinClassElseNull(WeakMap)).toBe(null);
-      expect(tagFromNativeBuiltinClassElseNull(Promise)).toBe(null);
-    });
-
-    it("returns `null` for a plain class", () => {
-      class Plain {}
-      expect(tagFromNativeBuiltinClassElseNull(Plain)).toBe(null);
-    });
-
-    describe("`toJSON()` is intentionally not supported", () => {
-      it("returns `null` for a class with `toJSON` on its prototype", () => {
-        class WithToJSON {
-          toJSON() {
-            return { x: 1 };
-          }
-        }
-        expect(tagFromNativeBuiltinClassElseNull(WithToJSON)).toBe(null);
-      });
-
-      it("returns `null` for a subclass inheriting `toJSON`", () => {
-        class Base {
-          toJSON() {
-            return "base";
-          }
-        }
-        class Sub extends Base {}
-        expect(tagFromNativeBuiltinClassElseNull(Sub)).toBe(null);
-      });
-
-      it("returns `JsDate` tag for `Date`, whose `toJSON` is not consulted", () => {
-        expect(tagFromNativeBuiltinClassElseNull(Date)).toBe(VALUE_TAGS.JsDate);
-      });
+    it("returns `null` for an instance of an unrecognized builtin class", () => {
+      expect(tagOfConvertibleJsValueElseNull(new WeakMap())).toBe(null);
+      expect(tagOfConvertibleJsValueElseNull(Promise.resolve())).toBe(null);
     });
   });
 
-  describe("the value dispatch and the builtin class lookup", () => {
-    // `tagFromNativeValueElseNull()` ends at
-    // `tagFromNativeBuiltinClassElseNull()`, asked of the value's class, once
-    // the array, error, and fabric tests ahead of it have declined. So a value
-    // none of those claim, and whose class that lookup recognizes, gets that
-    // lookup's tag; and a fabric primitive gets the tag its instance carries,
-    // its class being one the builtin lookup declines. An array or an error is
-    // decided before its class is read, and where the two would disagree -- an
-    // array whose prototype is `Date.prototype` -- the value rule wins; the
-    // `tagFromNativeValueElseNull()` group above holds those. The corpus holds
-    // every kind, and it is partitioned here rather than inside a test so that
-    // each assertion below is unconditional: a test that only asserts on one
-    // side of an `if` skips the case it was written for.
+  describe("the value dispatch and the fabric primitives", () => {
+    // A fabric primitive is tagged by the tag its instance carries, its class
+    // being one the value dispatch does not name. Asserted against the fabric
+    // classes by name rather than against whatever the corpus happens to hold,
+    // so a class the corpus stopped carrying is a failure here rather than a
+    // silence.
 
     const fabricClasses = [
       FabricBytes,
@@ -801,53 +772,17 @@ describe("value-tags", () => {
     ];
 
     const objects = LAYER_CORPUS
-      .filter(([, value]) => (value !== null) && (typeof value === "object"))
-      .map(([label, value]) =>
-        [
-          label,
-          value,
-          Object.getPrototypeOf(value as object)?.constructor,
-        ] as const
-      );
-
-    const decidedAhead = objects
-      .filter(([, value]) => Array.isArray(value) || Error.isError(value));
-
-    const builtinBacked = objects
-      .filter(([, value, ctor]) =>
-        !(Array.isArray(value) || Error.isError(value)) &&
-        (typeof ctor === "function") &&
-        (tagFromNativeBuiltinClassElseNull(ctor) !== null)
-      );
-
-    for (const [label, value, ctor] of builtinBacked) {
-      it(`tags ${label} as the builtin lookup tags its class`, () => {
-        expect(tagFromNativeValueElseNull(value)).toBe(
-          tagFromNativeBuiltinClassElseNull(ctor),
-        );
-      });
-    }
+      .filter(([, value]) => (value !== null) && (typeof value === "object"));
 
     for (const cls of fabricClasses) {
-      it(`tags a \`${cls.name}\` by its instance, its class unrecognized`, () => {
-        // Asserted against the fabric classes by name rather than against
-        // whatever the builtin lookup happens to decline, so a class the
-        // corpus stopped carrying is a failure here rather than a silence.
+      it(`tags a \`${cls.name}\` by its instance`, () => {
         const carried = objects.filter(([, value]) => value instanceof cls);
         expect(carried.length).toBeGreaterThan(0);
-        for (const [, value, ctor] of carried) {
-          expect(tagFromNativeBuiltinClassElseNull(ctor)).toBe(null);
-          expect(tagFromNativeValueElseNull(value)).not.toBe(null);
-          expect(tagFromNativeValueElseNull(value))
-            .toBe(tagFromFabricPrimitive(value as FabricPrimitive));
+        for (const [, value] of carried) {
+          expect(tagOfConvertibleJsValueElseNull(value))
+            .toBe(tagOfFabricPrimitive(value as FabricPrimitive));
         }
       });
     }
-
-    it("reaches values on every side of the split", () => {
-      expect(decidedAhead.length).toBeGreaterThan(0);
-      expect(builtinBacked.length).toBeGreaterThan(0);
-      expect(fabricClasses.length).toBeGreaterThan(0);
-    });
   });
 });

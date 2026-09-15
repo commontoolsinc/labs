@@ -273,8 +273,8 @@ export function findAndInlineDataUriLinks(value: any): any {
     //
     // Nothing reaches this today, de facto rather than by construction. A link
     // ends up inside an error only if an author attaches a cell to one, which
-    // `fabricFromNativeValue()` would then convert, and nothing in the tree
-    // does that; the whole suite runs green with this throw in place.
+    // `fabricFromConvertibleJsValue()` would then convert, and nothing in the
+    // tree does that; the whole suite runs green with this throw in place.
     //
     // It cannot be narrowed to instances that actually carry such a link, which
     // is the shape that would sound safer: deciding that means reading the

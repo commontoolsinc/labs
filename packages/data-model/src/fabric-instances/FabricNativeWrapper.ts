@@ -14,7 +14,7 @@ import {
 export abstract class FabricNativeWrapper<T extends object>
   extends BaseFabricInstance {
   /**
-   * The wrapped native value, used by `toNativeValue()` for freeze-state
+   * The wrapped JS value, used by `toNativeValue()` for freeze-state
    * checks.
    */
   protected abstract get wrappedValue(): T;
@@ -31,7 +31,7 @@ export abstract class FabricNativeWrapper<T extends object>
    */
   protected abstract toNativeThawed(): T;
 
-  /** Returns the underlying native value, optionally frozen. */
+  /** Returns the underlying JS value, optionally frozen. */
   toNativeValue(frozen: boolean): T {
     const value = this.wrappedValue;
     if (frozen === Object.isFrozen(value)) return value;

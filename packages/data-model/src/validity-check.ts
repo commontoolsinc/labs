@@ -26,13 +26,13 @@ import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 import {
-  type FabricNativeObject,
+  type FabricConvertibleJsObject,
   type FabricPlainObject,
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
 import { isFabricPlainObject, isFabricSpecialObject } from "./type-check.ts";
-import { tagFromNativeBuiltinClassElseNull, VALUE_TAGS } from "./value-tags.ts";
+import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting
@@ -144,10 +144,10 @@ function classNameOf(
  * this adds nothing to it, everything past the decision existing to say why it
  * went the way it did.
  *
- * A `FabricNativeObject` gets a reason of its own: a `Date` and a `Map` alike
- * are values conversion has a say over, which is a different position from a
- * class instance that has no fabric form at all. The message says which, and
- * sends the caller to ask.
+ * A `FabricConvertibleJsObject` gets a reason of its own: a `Date` and a `Map`
+ * alike are values conversion has a say over, which is a different position
+ * from a class instance that has no fabric form at all. The message says which,
+ * and sends the caller to ask.
  *
  * @param value The value to check.
  */
@@ -210,7 +210,7 @@ export function assertValidFabricValueLayer(
   // prototype that throws is the reachable way that happens.
   let isNativeObject: boolean;
   try {
-    isNativeObject = isValidFabricNativeObject(value);
+    isNativeObject = isValidFabricConvertibleJsObject(value);
   } catch {
     isNativeObject = false;
   }
@@ -219,7 +219,7 @@ export function assertValidFabricValueLayer(
     throw new Error(
       `Not already a \`FabricValue\`: ${
         backtickQuote(classNameOf(ctor, value))
-      } (a \`FabricNativeObject\`, so conversion is what decides it)`,
+      } (a \`FabricConvertibleJsObject\`, so conversion is what decides it)`,
     );
   }
 
@@ -285,7 +285,7 @@ export function assertValidFabricValueLayer(
  * that a membership check must not invoke.
  *
  * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
- * `isValidFabricConvertibleValue()` (which additionally accepts native values
+ * `isValidFabricConvertibleJsValue()` (which additionally accepts JS values
  * *convertible* to fabric form).
  *
  * This is the admission test the encoding path's input contract is written
@@ -387,44 +387,23 @@ export function isValidFabricPlainObject(
 }
 
 /**
- * Returns `true` if the value is a `FabricNativeObject`: one of the
- * "wild-west" native JS instances that the conversion layer wraps into a
+ * Returns `true` if the value is a `FabricConvertibleJsObject`: one of the
+ * "wild-west" convertible JS objects that the conversion layer wraps into a
  * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
  *
  * Arrays, plain objects, and system-defined `FabricPrimitive`s are _not_
- * `FabricNativeObject`s -- they have their own handling paths in the
+ * `FabricConvertibleJsObject`s -- they have their own handling paths in the
  * conversion layer.
  *
  * Membership is not convertibility: a `Map` and a `Set` are members whose
  * fabric form has yet to be built.
  *
- * This function is a TypeScript type guard for `FabricNativeObject`.
+ * This function is a TypeScript type guard for `FabricConvertibleJsObject`.
  */
-export function isValidFabricNativeObject(
+export function isValidFabricConvertibleJsObject(
   value: unknown,
-): value is FabricNativeObject {
-  if (value === null || typeof value !== "object") return false;
-
-  // Arrays first, and unconditionally, exactly as the full dispatch does it.
-  // An array's class is USUALLY `Array`, whose tag is not one of the six
-  // below -- but a prototype can be re-pointed, and an array whose
-  // `prototype` is `Date.prototype` would otherwise be reported as a
-  // convertible `Date`.
-  // `Array.isArray()` sees through that, and through a subclass and a severed
-  // prototype besides, which is why the array rule alone decides what an array
-  // may be.
-  if (Array.isArray(value)) return false;
-
-  const ctor = constructorOfObject(value);
-  const tag = (ctor !== undefined)
-    ? tagFromNativeBuiltinClassElseNull(ctor)
-    : null;
-
-  // `Error.isError()` is the test that holds across realms, where `instanceof`
-  // does not, and it is what sees an error whose constructor is unreachable.
-  // The one environment here that rebuilds the `Error` constructor -- SES
-  // lockdown -- has the method restored before any of this runs.
-  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.JsError : null)) {
+): value is FabricConvertibleJsObject {
+  switch (tagOfConvertibleJsValueElseNull(value)) {
     case VALUE_TAGS.JsError:
     case VALUE_TAGS.JsMap:
     case VALUE_TAGS.JsSet:

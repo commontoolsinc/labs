@@ -198,10 +198,11 @@ interface HarnessCommonConfig {
   skillsRootRecord?: HarnessSkillsRootRecord;
 
   /**
-   * Host directories of operator-provisioned reference material `query_docs`
+   * Host directories of operator-provisioned reference material `research`
    * answers out of, and where they came from. Read-only by use: the harness
    * reads them and never writes to them, and no other path admits a document
-   * into the corpus. A run naming none does not offer the tool.
+   * into the corpus. Research can consult a configured pattern index without
+   * a documentation corpus.
    */
   docsCorpus?: HarnessDocsCorpusRecord;
 

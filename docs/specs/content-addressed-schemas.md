@@ -521,11 +521,20 @@ external closure is complete.
 
 ### Space boundaries
 
+A link's schema belongs to the space holding the link declaration. When a
+document in space A links to a document in space B, the schema's `cid:`
+references resolve in A, including their transitive closure. Before carrying
+that schema into B, traversal and link resolution recompose it into a
+self-contained schema. Path narrowing, target queries, and derived Cell
+handles therefore do not require B to hold A's schema documents. A schema
+declared by a link inside B resolves in B when that next link is followed.
+
 A schema document's value is space-free: content addressing makes the
 bytes identical wherever they are stored, so the realm-wide registry
 shares one verified object across spaces, and using a shared value can
-never produce a wrong answer. Which space a document EXISTS in matters in
-exactly two guarantees, both about delivery rather than about values:
+never produce a wrong answer. Document residency determines where a missing
+closure is loaded, as described above. Two delivery guarantees keep those
+documents available alongside their declarations:
 
 - **The write-side guarantee.** The client that replaces an inline schema
   with a reference created the obligation, so it discharges it: the
@@ -556,7 +565,7 @@ exactly two guarantees, both about delivery rather than about values:
   results are cached per document version, so in steady state a version
   is scanned once however many sessions or refreshes deliver it.
   Traversal keeps its own gate where a schema enters it — the selector
-  and a link: a schema whose closure the space does not hold selects
+  and a link: a schema whose closure the declaring space does not hold selects
   nothing, since selecting by an uncollectable schema would produce a
   result whose shape the receiving client could never reproduce from
   what arrives.
@@ -644,7 +653,7 @@ delivery and traversal split the work in two layers:
 - **Traversal** loads the closure where a schema enters it — the selector
   and a link — because resolution during the traversal needs the
   documents at hand, and its availability gate (a schema whose closure
-  the space does not hold selects nothing) lives on the same reads.
+  the declaring space does not hold selects nothing) lives on the same reads.
   Traversal does not recurse into `cid:` documents.
 - **Result assembly** owns delivery: it scans every complete document the
   query delivers — link positions and the `schema` metadata member —

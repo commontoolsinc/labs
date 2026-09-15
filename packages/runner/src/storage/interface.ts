@@ -42,6 +42,7 @@ import type {
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
+  SqliteQueryReader,
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
   ViewInterest,
@@ -755,6 +756,7 @@ export interface IStorageProvider {
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    reader?: SqliteQueryReader,
   ): Promise<SqliteQueryResult>;
 
   // No `sqliteExecute`: SQLite writes go through the commit fold
@@ -1385,6 +1387,15 @@ export interface IStorageTransaction {
    * scan journal activity.
    */
   getReadActivities?(): Iterable<IReadActivity>;
+
+  /**
+   * Optional ordered superset of reads that can be noninternal CFC inputs.
+   * Only records whose internal-verifier classification is permanently sealed
+   * may be omitted. Mutable records remain here and consumers recheck their
+   * metadata. Preserves duplicates, activity-clock positions and record
+   * identity; the full journal remains available through getReadActivities.
+   */
+  getPotentiallyExternalReadActivities?(): Iterable<IReadActivity> | undefined;
 
   /**
    * Optional ordered log of every applied write attempt, in transaction
@@ -2865,6 +2876,22 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean;
+
+  /**
+   * The seq this replica's CONFIRMED view stands at for the document
+   * instance — the last accepted write to it this replica has taken, and 0
+   * for one it has taken none of. Says nothing about the replica's own
+   * pending writes over that base, which carry no accepted seq.
+   *
+   * A caller comparing this against the store's head learns whether the
+   * replica is behind the store on the document, and so whether a run that
+   * read it here read what the store now holds.
+   */
+  confirmedDocumentSeq(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): number;
 
   /** Observes changes in residency, including delivery of a known absence. */
   subscribeLocalCoverage?(

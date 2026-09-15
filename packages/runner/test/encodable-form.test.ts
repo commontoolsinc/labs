@@ -17,7 +17,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { fabricFromNativeValue } from "@commonfabric/data-model";
+import { fabricFromConvertibleJsValue } from "@commonfabric/data-model";
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -256,7 +256,7 @@ describe("encodable-form", () => {
 
       it("makes the result representable as a `FabricValue`", () => {
         const value = { tools: { send: { handler: artifact({ ok: true }) } } };
-        expect(fabricFromNativeValue(flatten(value)))
+        expect(fabricFromConvertibleJsValue(flatten(value)))
           .toEqual({ tools: { send: { handler: { ok: true } } } });
       });
 
@@ -267,10 +267,10 @@ describe("encodable-form", () => {
         // of the form the artifact serializes to, key order included.
         const value = { tools: { send: { handler: artifact({ ok: true }) } } };
         const inline = { tools: { send: { handler: { ok: true } } } };
-        expect(dataUriFromValue(fabricFromNativeValue(
+        expect(dataUriFromValue(fabricFromConvertibleJsValue(
           flatten(value),
         )))
-          .toBe(dataUriFromValue(fabricFromNativeValue(inline)));
+          .toBe(dataUriFromValue(fabricFromConvertibleJsValue(inline)));
       });
 
       it("is the only route by which an artifact becomes representable", () => {
@@ -279,7 +279,7 @@ describe("encodable-form", () => {
         // nothing about. So flattening is load-bearing rather than an
         // optimization, and skipping it is a loud rejection.
         const value = { tools: { send: { handler: artifact({ ok: true }) } } };
-        expect(() => fabricFromNativeValue(value))
+        expect(() => fabricFromConvertibleJsValue(value))
           .toThrow(/Not representable as a `FabricValue`: function/);
       });
     });
@@ -340,7 +340,7 @@ describe("encodable-form", () => {
         const value: Record<string, unknown> = { a: 1 };
         value.self = value;
         expect(flatten(value)).toBe(value);
-        expect(() => fabricFromNativeValue(value)).toThrow(/circular/);
+        expect(() => fabricFromConvertibleJsValue(value)).toThrow(/circular/);
       });
     });
 

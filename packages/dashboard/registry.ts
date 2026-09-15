@@ -6,7 +6,7 @@
 
 import type { Tile } from "./types.ts";
 
-import { benchmark } from "./tiles/benchmark.ts";
+import { benchmark, keyBenchmarks } from "./tiles/benchmark.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { coverageDebt } from "./tiles/coverage-debt.ts";
@@ -17,7 +17,6 @@ import { gcpSpend } from "./tiles/gcp-spend.ts";
 import { githubCiSpend } from "./tiles/github-ci-spend.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
-import { makeMetricPlaceholder } from "./tiles/metric-placeholder.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
 import { prodErrors } from "./tiles/prod-errors.ts";
 import { prodUptime } from "./tiles/prod-uptime.ts";
@@ -35,7 +34,7 @@ export const TILES: Tile[] = [
   loomCi,
   loomCiTrust,
   loomCiDuration,
-  makeMetricPlaceholder("loom-metric-placeholder"),
+  keyBenchmarks,
 
   testFlakes,
   testSelection,

@@ -1,5 +1,6 @@
 import {
-  fabricFromNativeValue,
+  convertibleJsFromFabricValue,
+  fabricFromConvertibleJsValue,
   FabricInstance,
   type FabricValue,
   hashOf,
@@ -7,7 +8,6 @@ import {
   isDeepFrozen,
   isKeyableObjectOrArray,
   isWalkableObjectOrArray,
-  nativeFromFabricValue,
   refuseFabricInstance,
   toCompactDebugString,
   valueEqual,
@@ -2915,7 +2915,9 @@ export class Runner {
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
     // actually store, which is the whole point of converting first.
-    const fabricResult = fabricFromNativeValue(flattenBuilderArtifacts(result));
+    const fabricResult = fabricFromConvertibleJsValue(
+      flattenBuilderArtifacts(result),
+    );
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -2950,7 +2952,7 @@ export class Runner {
 
     // Our internal meta field contains a manifest with information about all
     // the individual internal cells.
-    const nativeInternal = nativeFromFabricValue(internal);
+    const nativeInternal = convertibleJsFromFabricValue(internal);
     const existingManifest: InternalCellDescriptor[] =
       Array.isArray(nativeInternal)
         ? [...nativeInternal] as InternalCellDescriptor[]
@@ -2999,13 +3001,15 @@ export class Runner {
             meta: ignoreReadForScheduling,
           });
           if (currentValue === undefined) {
-            derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
+            derivedCell.setRawUntyped(
+              fabricFromConvertibleJsValue(schemaDefault),
+            );
           }
         }
       }
     }
 
-    return fabricFromNativeValue(manifest);
+    return fabricFromConvertibleJsValue(manifest);
   }
 
   /**
@@ -5931,7 +5935,7 @@ export class Runner {
       ) !== undefined;
     if (!present(argumentLink)) return true;
     const cell = resultCell.withTx(readTx);
-    const manifest = nativeFromFabricValue(
+    const manifest = convertibleJsFromFabricValue(
       cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
     );
     if (!Array.isArray(manifest)) return false;
@@ -10562,9 +10566,10 @@ export class Runner {
       };
 
       let popFrameAfterReturn = true;
-      // Assigned inside the try, and reachable from the catch: a refusal that
-      // escaped the body is disposed of through the same result path as one
-      // the body swallowed.
+      // Assigned inside the try before the body is invoked, and reachable from
+      // the catch: a refusal that escaped the body, synchronously or as a
+      // rejection, is disposed of through the same result path as one the
+      // body swallowed.
       let postRun: ((result: any) => any) | undefined;
       try {
         logger.timeStart("action", "readInputs");
@@ -10609,27 +10614,6 @@ export class Runner {
           previouslyInvalidArgument = !isValidArgument;
         }
 
-        let result: any = undefined;
-        if (isValidArgument) {
-          logger.timeStart("action", "invokeJavaScriptImplementation");
-          try {
-            result = this.#invokeJavaScriptImplementation(
-              module,
-              fn,
-              argument,
-            );
-            if (result instanceof Promise) {
-              result = result.finally(() =>
-                logger.timeEnd("action", "invokeJavaScriptImplementation")
-              );
-            } else {
-              logger.timeEnd("action", "invokeJavaScriptImplementation");
-            }
-          } catch (error) {
-            logger.timeEnd("action", "invokeJavaScriptImplementation");
-            throw error;
-          }
-        }
         postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
@@ -10674,6 +10658,28 @@ export class Runner {
             logger.timeEnd("action", "postRun");
           }
         };
+
+        let result: any = undefined;
+        if (isValidArgument) {
+          logger.timeStart("action", "invokeJavaScriptImplementation");
+          try {
+            result = this.#invokeJavaScriptImplementation(
+              module,
+              fn,
+              argument,
+            );
+            if (result instanceof Promise) {
+              result = result.finally(() =>
+                logger.timeEnd("action", "invokeJavaScriptImplementation")
+              );
+            } else {
+              logger.timeEnd("action", "invokeJavaScriptImplementation");
+            }
+          } catch (error) {
+            logger.timeEnd("action", "invokeJavaScriptImplementation");
+            throw error;
+          }
+        }
 
         const postRunResult = result instanceof Promise
           // An async body reaches mismatching data after an `await`, so its

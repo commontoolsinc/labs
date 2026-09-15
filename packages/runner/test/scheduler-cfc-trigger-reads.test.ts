@@ -49,6 +49,23 @@ function makeChange(
 }
 
 describe("invalid cause dedup keys", () => {
+  it("retains empty paths and embedded delimiters in encounter order", () => {
+    const nodes = new NodeRegistry();
+    const record = nodes.register(() => {}, "effect");
+    const addresses: IMemorySpaceAddress[] = [
+      { space, id: "of:cell", path: [] },
+      { space, id: "of:cell", path: [""] },
+      { space, id: "of:cell", path: ["a\0b", "c"] },
+      { space, id: "of:cell", path: ["a", "b\0c"] },
+      { space, id: "of:cell\0a", path: ["b"] },
+      { space, id: "of:cell", path: ["a\0b"] },
+    ];
+    for (const address of [...addresses, ...addresses]) {
+      addInvalidCause(record, address);
+    }
+    expect([...record.invalidCauses.values()]).toEqual(addresses);
+  });
+
   it("keeps addresses distinct across scope and ambiguous path joins", () => {
     const action: Action = () => {};
     const nodes = new NodeRegistry();

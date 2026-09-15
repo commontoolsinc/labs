@@ -19,7 +19,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { shallowFabricFromNativeValue } from "@/index.ts";
+import { shallowFabricFromConvertibleJsValue } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 describe("FabricEpochNsec", () => {
@@ -179,14 +179,14 @@ describe("FabricEpochNsec", () => {
     });
   });
 
-  describe("`shallowFabricFromNativeValue()` integration", () => {
-    // Exercises the free `shallowFabricFromNativeValue()` rather than a member
-    // of the class, so it lives directly under the class `describe()`.
+  describe("`shallowFabricFromConvertibleJsValue()` integration", () => {
+    // Exercises the free `shallowFabricFromConvertibleJsValue()` rather than a
+    // member of the class, so it lives directly under the class `describe()`.
 
     it("passes through unchanged even with `freeze=false`", () => {
       const nsec = new FabricEpochNsec(123n);
       // freeze=false should still return the same instance (not a copy).
-      expect(shallowFabricFromNativeValue(nsec, false)).toBe(nsec);
+      expect(shallowFabricFromConvertibleJsValue(nsec, false)).toBe(nsec);
     });
   });
 });

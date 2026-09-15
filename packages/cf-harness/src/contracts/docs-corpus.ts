@@ -1,5 +1,5 @@
 /**
- * Contract shapes of the documentation corpus `query_docs` answers out of, and
+ * Contract shapes of the documentation corpus `research` inspects, and
  * the integrity endorsement that says where a piece of it came from.
  *
  * The endorsement is the whole trust story of this corpus. Operator-provisioned

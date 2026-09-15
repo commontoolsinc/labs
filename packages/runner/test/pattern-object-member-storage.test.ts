@@ -12,7 +12,7 @@
 //
 // Two candidate outcomes were considered up front:
 //   (a) THROW — storing the result throws "Not representable as a
-//       `FabricValue`: function" (packages/data-model native-conversion).
+//       `FabricValue`: function" (packages/data-model convertible-js).
 //   (b) DROP — the function member is silently dropped (the result schema /
 //       projection omits function members before storage) and the rest of the
 //       result is stored fine.
@@ -22,10 +22,10 @@
 //
 //   * METHOD member (`read() { ... }`) -> THROW. The member is a live function
 //     on the materialized result object. When `Runner.#updateResultProjection`
-//     converts the result with `fabricFromNativeValue(result)`, the function
-//     reaches `shallowFabricFromNativeValue` and throws
+//     converts the result with `fabricFromConvertibleJsValue(result)`, the
+//     function reaches `shallowFabricFromConvertibleJsValue` and throws
 //       "Not representable as a `FabricValue`: function"
-//     (packages/data-model/src/native-conversion.ts). The throw happens
+//     (packages/data-model/src/convertible-js.ts). The throw happens
 //     synchronously inside `runtime.run(...)` at setup time, before any commit.
 //
 //   * GETTER member (`get derived() { return 2; }`) -> NOT a function at all by
@@ -106,7 +106,7 @@ describe("Pattern result object with a function member", () => {
 
     // ...but running it throws synchronously at result-projection time, when
     // the live function is converted to a `FabricValue`. The error originates
-    // in packages/data-model/src/native-conversion.ts.
+    // in packages/data-model/src/convertible-js.ts.
     expect(() => runtime.run(tx, methodPattern, {}, resultCell)).toThrow(
       "Not representable as a `FabricValue`: function",
     );

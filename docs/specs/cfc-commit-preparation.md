@@ -89,6 +89,23 @@ transaction is skipped so that both call sites reach the same answer about
 one — `commit()` takes none of the step for a read-only transaction — and a
 transaction that admits no writes has nothing to stamp in any case.
 
+## Read-only renderer subscriptions
+
+The worker VDOM reconciler subscribes through the internal `readOnly` option
+on `Cell.sink`. Each subscription retains its own reactive read journal, and
+reads through child cells in the callback use a separate read-only transaction.
+The option applies on initial delivery and scheduler reruns; `sinkMeta` applies
+it to its metadata-read transaction. Stream listeners create no subscription
+transaction.
+
+These subscriptions admit no writes through their delivered cells, so their
+commits take the read-only path above. Generic subscriptions retain writable
+callback child cells. Rendering still evaluates confidentiality and integrity
+at the display boundary, and label metadata reads remain reactive dependencies;
+read-only transaction mode grants no additional render authority. Event handlers
+and bindings resolve their writable cells independently of the subscription
+transaction.
+
 ## What materializing schema documents cannot do
 
 Materialization is the one thing the boundary does that an earlier

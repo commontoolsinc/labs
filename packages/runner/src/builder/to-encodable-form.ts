@@ -7,7 +7,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   refuseFabricInstance,
-  shallowFabricFromNativeObjectElseUndefined,
+  shallowFabricFromConvertibleJsObjectElseUndefined,
 } from "@commonfabric/data-model";
 import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
@@ -190,7 +190,7 @@ export function withAliasBindings(
   if (
     isObjectOrArray(value) && !isPattern(value) && !isInertPlainObject(value)
   ) {
-    const minted = shallowFabricFromNativeObjectElseUndefined(value);
+    const minted = shallowFabricFromConvertibleJsObjectElseUndefined(value);
     if (minted === undefined) {
       // Nothing was minted, so the value would have to be walkable as it
       // stands, and this is what holds it to that. Everything reaching this

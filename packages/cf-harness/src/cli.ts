@@ -101,6 +101,7 @@ import {
   createHarnessSkillsShSearchClientFactory,
 } from "./skills-sh/search-client.ts";
 import {
+  parseAcquiredSkillPin,
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
@@ -285,6 +286,9 @@ export interface CfHarnessCliCapabilities {
   builtinToolIds: readonly BuiltinToolId[];
   subagentProfiles: readonly HarnessSubagentProfile[];
   nativeModelToolIds: readonly string[];
+  nativeModelToolIdsByProvider: Readonly<
+    Record<HarnessModelProviderId, readonly string[]>
+  >;
   modelProviders: readonly HarnessModelProviderId[];
   authProviders: readonly string[];
   features: {
@@ -487,13 +491,15 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs | loom_compose | loom_inspect | loom_authoring_context);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | research | loom_compose | loom_inspect | loom_authoring_context);
                                 run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
                                 search_skills and acquire_skill require --skills-registry-url,
-                                query_docs requires a resolved documentation corpus,
+                                research requires a documentation corpus or pattern index (query_docs is a deprecated input alias),
                                 and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
-  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
+  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path,
+                                where skill is a registry name or an acquired pin owner/repo/slug@<commit sha>;
+                                a registry name requires --skills-root, a pin does not)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
@@ -504,13 +510,13 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
-  --docs-corpus-root <path>     Reference tree query_docs answers out of (repeatable)
+  --docs-corpus-root <path>     Reference tree research may inspect (repeatable)
   --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
-  --no-docs-corpus              Resolve no documentation corpus, so query_docs is absent
+  --no-docs-corpus              Resolve no documentation corpus for research
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
                                 (no default; select one here, through
@@ -665,12 +671,22 @@ const CLI_PARENT_TOOL_IDS = [
   "record_feedback",
   "search_skills",
   "acquire_skill",
-  "query_docs",
+  "research",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
   values: readonly T[],
 ): readonly T[] => [...new Set(values)];
+
+const nativeModelToolsForProvider = (
+  provider: HarnessModelProviderId,
+): readonly string[] =>
+  uniqueStrings(
+    HARNESS_SUBAGENT_PROFILES.flatMap((profile) =>
+      getHarnessSubagentProfileConfig(profile, provider).nativeModelToolIds ??
+        []
+    ),
+  );
 
 export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
   type: "cf-harness.capabilities",
@@ -683,11 +699,16 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
   parentToolIds: [...CLI_PARENT_TOOL_IDS],
   builtinToolIds: BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId),
   subagentProfiles: [...HARNESS_SUBAGENT_PROFILES],
-  nativeModelToolIds: uniqueStrings(
-    HARNESS_SUBAGENT_PROFILES.flatMap((profile) =>
-      getHarnessSubagentProfileConfig(profile).nativeModelToolIds ?? []
+  nativeModelToolIds: uniqueStrings([
+    ...nativeModelToolsForProvider("openai-compatible-gateway"),
+    ...nativeModelToolsForProvider("openai-codex"),
+  ]),
+  nativeModelToolIdsByProvider: {
+    "openai-compatible-gateway": nativeModelToolsForProvider(
+      "openai-compatible-gateway",
     ),
-  ),
+    "openai-codex": nativeModelToolsForProvider("openai-codex"),
+  },
   modelProviders: ["openai-compatible-gateway", "openai-codex"],
   authProviders: ["openai-codex"],
   features: {
@@ -739,7 +760,9 @@ const parseModelProvider = (
 const parseBuiltinToolId = (
   input: string,
 ): BuiltinToolId | undefined =>
-  (CLI_PARENT_TOOL_IDS as readonly string[]).includes(input)
+  input === "query_docs"
+    ? "research"
+    : (CLI_PARENT_TOOL_IDS as readonly string[]).includes(input)
     ? input as BuiltinToolId
     : undefined;
 
@@ -1336,11 +1359,22 @@ export const parseCfHarnessCliArgs = async (
   const allowedSkillScripts = parseAllowedSkillScripts(
     args["allow-skill-script"] as string | readonly string[] | undefined,
   );
-  if (allowedSkillScripts.length > 0 && configuredSkillsRoot === undefined) {
-    // A skill script runs in the sandbox and is addressed by the sandbox path
-    // only a named tree has, so this one asks for the flag rather than for a
-    // tree.
-    throw new Error("--allow-skill-script requires --skills-root");
+  // A REGISTRY skill's script is addressed by the sandbox path only a named
+  // tree has, so an entry keyed on a registry name asks for the flag rather
+  // than for a tree. An acquired skill's is not: it is keyed on the pin its
+  // bytes were read at, and those bytes reach the sandbox through the mount
+  // the acquisition made, which no skills root takes part in. Requiring one
+  // of both would make the operator name a tree for a skill that never came
+  // from one.
+  if (
+    configuredSkillsRoot === undefined &&
+    allowedSkillScripts.some((script) =>
+      parseAcquiredSkillPin(script.skill) === undefined
+    )
+  ) {
+    throw new Error(
+      "--allow-skill-script requires --skills-root, except for an acquired pin",
+    );
   }
   const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
     typeof args["skill-script-execution-target"] === "string"
@@ -2453,6 +2487,10 @@ const summarizeToolCallArguments = (
         return typeof parsed.id === "string"
           ? `id=${JSON.stringify(parsed.id)}`
           : undefined;
+      case "research":
+        return typeof parsed.task === "string"
+          ? `task=${JSON.stringify(parsed.task)}`
+          : undefined;
       case "query_docs":
         return typeof parsed.question === "string"
           ? `question=${JSON.stringify(parsed.question)}`
@@ -2565,7 +2603,7 @@ export const formatCfHarnessCliResult = (
   const docsCorpus = result.runState.docsCorpus;
   lines.push(
     docsCorpus === undefined || docsCorpus.roots.length === 0
-      ? "docsCorpus: none — query_docs is absent and children cannot look documentation up"
+      ? "docsCorpus: none — research cannot consult local documentation"
       : `docsCorpus: ${docsCorpus.source} ${docsCorpus.roots.join(", ")}`,
   );
   const skillsRoot = result.runState.skillsRoot;
@@ -2577,7 +2615,13 @@ export const formatCfHarnessCliResult = (
   const docsQueryFailures = result.runState.docsQueryFailures ?? 0;
   if (docsQueryFailures > 0) {
     lines.push(
-      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children that ended with no answer`,
+      `docsQueryFailures: ${docsQueryFailures} — legacy query_docs calls in this run or its children that ended with no answer`,
+    );
+  }
+  const researchFailures = result.runState.researchFailures ?? 0;
+  if (researchFailures > 0) {
+    lines.push(
+      `researchFailures: ${researchFailures} — research calls in this run or its children that returned no kit`,
     );
   }
   if (
@@ -3445,6 +3489,7 @@ export const runCfHarnessCli = async (
       });
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
+        openingResearchTask: parsed.prompt!,
         imageAttachments: parsed.imageAttachments,
         systemPrompt: resolveCfHarnessCliSystemPrompt({
           ...parsed,

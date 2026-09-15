@@ -44,6 +44,7 @@ export type HarnessToolPolicyDecision =
   | "withheld";
 
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
+export type HarnessToolInvocationOrigin = "model" | "opening-research";
 export type HarnessRunTimelineKind =
   | "run_started"
   | "transcript_message"
@@ -61,6 +62,9 @@ export interface HarnessToolActivity {
   endedAt: string;
   toolCallId: string;
   toolId: string;
+
+  /** Absent for legacy and model-authored calls; set for driver-authored calls. */
+  origin?: HarnessToolInvocationOrigin;
 
   /** Absent when the call named a tool the run offers no descriptor for. */
   effectClass?: HarnessToolEffectClass;
@@ -100,6 +104,7 @@ export interface HarnessRunTimelineEntry {
   toolCallIds?: string[];
   toolCallId?: string;
   toolId?: string;
+  origin?: HarnessToolInvocationOrigin;
   toolActivitySequence?: number;
   policyDecision?: HarnessToolPolicyDecision;
   executionStatus?: HarnessToolExecutionStatus;
@@ -249,6 +254,7 @@ export const createHarnessRunTimeline = (
       toolActivitySequence: activity.sequence,
       toolCallId: activity.toolCallId,
       toolId: activity.toolId,
+      ...(activity.origin !== undefined ? { origin: activity.origin } : {}),
       policyDecision: activity.policyDecision,
       executionStatus: activity.executionStatus,
     });

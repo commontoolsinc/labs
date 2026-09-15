@@ -194,6 +194,7 @@ import type { Status, Tile, TileView } from "../types.ts";
 
 export const myTile: Tile = {
   id: "my-tile",          // unique, stable
+  label: "my tile",       // header before collection; defaults to id
   intervalMs: 60_000,     // how often collect() runs
   // wide: true,           // optional full-width placement
   // runSources: [{ repo: "owner/repo", workflow: "ci.yml" }],
@@ -296,11 +297,11 @@ short enough to be read whole at the width the tile is actually given. Something
 longer is not a longer tile, it is a page.
 
 That page is an ordinary drill-down — a route the tile declares, reached through
-the tile's `href`, and named on the tile by its `hint` so that a person can see
-there is something behind it. `/bench` holds the histories behind the benchmark
-and duration tiles, and `/test-selection` holds the manifest behind the two test
-tiles. A page has the width to spell a test's whole name, so nothing on one has
-to be abbreviated.
+the tile's `href` and indicated by the top-right arrow. The tile's `hint` supplies
+the tooltip and accessible link description. `/bench` holds the histories behind
+the benchmark and duration tiles, and `/test-selection` holds the manifest behind
+the two test tiles. A page has the width to spell a test's whole name, so nothing
+on one has to be abbreviated.
 
 Where a tile has more than one candidate for its sub line, the one that explains
 the color it is wearing wins. The test selection tile carries the count of the
@@ -322,13 +323,12 @@ figure is the age badge in the header.
 | `duration` | a span in milliseconds, rendered (via `humanSpan`) in the chart's bottom-left corner |
 | `aside` | trusted inline HTML minor header facet (e.g. an MTD or a "running" badge) |
 | `href` | makes the whole tile a link (an `http…` link opens a new tab) |
-| `hint` | small drill affordance, e.g. `"commits ↗"` |
+| `hint` | tooltip for the top-right `↗` drill arrow and accessible link description, e.g. `"commits ↗"` |
 
 ## Tiles
 
 | tile | source | needs |
 |---|---|---|
-| YOUR METRIC HERE (one slot) | a static green placeholder reserved for a future metric | none |
 | labs ci, labs ci trust, labs ci duration | GitHub Actions (`deno.yml` on main in `commontoolsinc/labs`), via the REST API | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci, loom ci trust, loom ci duration | the same three tiles for `commontoolsinc/loom` (`test-fast.yml` on main) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
 | recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo | `GH_TOKEN` |
@@ -344,7 +344,8 @@ figure is the age badge in the header.
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | github spend | the organization's whole metered GitHub bill, projected to month-end in USD: every product its billing report carries, added into one figure. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0. "What the GitHub figure covers" below says which spend reaches the API | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
 | cubic spend | the spend row's slot for Cubic, the code review service. Cubic's API reports no billing figure, so the tile stays green and says why it shows none | none |
-| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), with a `failed (was <trend>)` headline when cached measurements are available and `failed` otherwise; orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| all benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), with a `failed (was <trend>)` headline when cached measurements are available and `failed` otherwise; orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| key benchmarks | the same index and status rules as all benchmarks, restricted to `topic board/journey` and `topic board scale/100`. Machine calibration still uses the run's calibration measurements. Counts and data availability refer to the selected benchmarks. Opens the per-benchmark history with "key only" checked | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
@@ -764,7 +765,7 @@ Notes:
   dates it. Four days without a row is a stopped feed rather than a slow one. A
   classic-plan organization falls back to minutes against its included
   allowance.
-- **`benchmarks`** trends one **scale-invariant index per CPU** on the
+- **`all benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
   over the bench files that workflow lists — micro-benchmarks across the runner,
   utils, fuse, and memory packages, plus the topic-board navigation and scaling
@@ -828,7 +829,9 @@ Notes:
   settles. An empty completed fetch shows **benchmark data unavailable**.
   Adding or removing a benchmark does not move an index. The benchmark is
   absent from one side of that adjacent comparison, so it drops out of the
-  geometric mean.
+  geometric mean. When two runs share no selected positive measurements, the
+  whole index step stays unchanged, including machine calibration. Both tiles
+  use the same workflow runs and artifacts when collecting concurrently.
   A CPU change starts another line instead of connecting measurements from
   unlike machines. A CPU model is not a machine, though. The runner group has
   served six processor models over a forty-five day stretch, and two runs on
@@ -908,7 +911,11 @@ Notes:
     latest **duration** or **trend**. The mean selector was once labeled
     `p50`, and `?stat=p50` still opens it so that a saved link does not quietly
     fall back to the default column.
-    A "hide green" checkbox drops the steady ones. A slider from 1
+    A "key only" checkbox limits the rows and CPU legend to `topic board/journey`
+    and `topic board scale/100`. The key benchmarks tile opens this view with
+    `key=1` in the URL. Metric, sort, and window changes preserve the filter.
+    Clearing it restores the full list. A "hide green" checkbox drops the steady
+    ones. A slider from 1
     through 45 days changes the visible calendar range. The displayed samples
     are spread across at most 200 time buckets, so a shorter window uses more of
     the collected samples per day. Each graph chooses its vertical scale after

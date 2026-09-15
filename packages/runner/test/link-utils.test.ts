@@ -26,6 +26,7 @@ import {
   parseLLMFriendlyLink,
   parseReferenceParts,
   sanitizeSchemaForLinks,
+  schemaForSpaceCrossing,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
@@ -60,6 +61,44 @@ describe("link-utils", () => {
     tx.abort();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  describe("schemaForSpaceCrossing()", () => {
+    it("recovers after a missing closure arrives and shares the self-contained result", () => {
+      const schema = {
+        type: "string",
+        title: "crossing cache recovery",
+      } as const;
+      const hash = internSchemaAsTaggedHashString(schema);
+      const reference = { $ref: `cid:${hash}` };
+      expect(schemaForSpaceCrossing(tx, space, reference)).toBe(false);
+
+      registerSchemaDocument(hash, schema);
+      const first = schemaForSpaceCrossing(tx, space, reference);
+      expect(first).toEqual(schema);
+      expect(schemaForSpaceCrossing(tx, space, { ...reference })).toBe(first);
+    });
+
+    it("requires the closure again after the storage manager's registry lease ends", async () => {
+      const schema = { type: "number", title: "crossing cache epoch" } as const;
+      const hash = internSchemaAsTaggedHashString(schema);
+      const reference = { $ref: `cid:${hash}` };
+      registerSchemaDocument(hash, schema);
+      expect(schemaForSpaceCrossing(tx, space, reference)).toEqual(schema);
+
+      tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+      expect(schemaForSpaceCrossing(tx, space, reference)).toBe(false);
+      registerSchemaDocument(hash, schema);
+      expect(schemaForSpaceCrossing(tx, space, reference)).toEqual(schema);
+    });
   });
 
   describe("isSigilLink", () => {

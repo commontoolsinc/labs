@@ -1,9 +1,8 @@
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
-remains is removing the flag and the eager path for lift arguments, and landing
-the synchronous refusal arm of Stage 5; handler materialization is settled
-there.
+remains is removing the flag and the eager path for lift arguments; handler
+materialization is settled under Stage 5.
 
 The remaining execution sequence and acceptance gates are owned by the separate
 [lazy materialization fast-follow](lazy-materialization-fast-follow.md). This
@@ -20,7 +19,7 @@ each path when it is touched, narrowing the schema as it descends and refusing
 the read when the data no longer matches. A transaction can be flipped into a
 mode where every cell read hands back such a proxy; the runner flips it for the
 transaction that runs a lift, and treats a schema refusal as it treats an
-argument that did not resolve, with the exception the status line names.
+argument that did not resolve.
 
 ## Status convention
 
@@ -432,23 +431,20 @@ chain so a wrapper and the transaction it wraps answer alike.
 
 ### Stage 5 — Runner integration
 
-**Done, except a refusal a synchronous body throws.** The runner marks the
-action's transaction around argument materialization and the body, and unmarks
-it before the result is written, so diffing and the scheduler's own reads keep
-eager semantics.
+**Done.** The runner marks the action's transaction around argument
+materialization and the body, and unmarks it before the result is written, so
+diffing and the scheduler's own reads keep eager semantics.
 
 - [x] A refusal caught inside the body and found on the transaction afterwards,
       or rejected out of an asynchronous body, writes an undefined result
       through the ordinary path. Logged at info level as a non-run, not reported
       as an action error. Verified by reading the path; no test in the tree
       asserts the result for these two arms.
-- [ ] Not landed: a refusal a synchronous body throws writes the same undefined
-      result. Today it reaches the catch before `postRun` is assigned, so the
-      previous result stands;
-      `packages/runner/test/unresolved-input-lift.test.ts` pins this arm and
-      passes only because its case has no previous result to stand. The fix is
-      on the branch `codex/lift-refusal-disposition`, held for a ruling from the
-      Pattern Update State and Baseline Integrity gate's owner.
+- [x] A refusal a synchronous body throws writes the same undefined result:
+      `postRun` is assigned before the body is invoked, and
+      `packages/runner/test/lift-refusal-disposition.test.ts` pins it in both
+      postures. A refusal raised during the argument read still precedes the
+      assignment and keeps the earlier disposition.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The
@@ -473,7 +469,7 @@ eager semantics.
       read drops it, and three reads that were answered without being
       registered. None of them was the "argument refused for a missing field"
       story the earlier note here guessed at; that disposition was not among
-      them, though it carries the synchronous-throw gap Stage 5 names.
+      them.
 - [x] Read `.length` off a string. `.length` on a string output lowers to a link
       ending in that segment, and a string's `length` is not a stored path, so
       the store cannot serve the address the link resolves to. Eager traversal

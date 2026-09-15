@@ -181,10 +181,7 @@ usage:
   cannot retract one, because these verbs name their target by reference and a
   comment carries no fid an inline JSON event could name — [#6713], where the
   candidate keys are set out. And the rule that a retracted link stops
-  resolving into `mentions` is carried by reading rather than by a test: it
-  needs a link whose URL names a real piece, and `cellFromUrl` answers with no
-  cell for any URL a pattern test can build, so a retracted link and a plain
-  web link are indistinguishable to the suite.
+  resolving into `mentions` is carried by reading rather than by a test.
 
 - **`AgentActor` execution provenance** replacing per-event `agentName`, when
   the retention-and-provenance track clears its review. That review has not
@@ -210,8 +207,7 @@ usage:
 
 ## Testing the board through a narrowed demand
 
-A pattern test reaches a stored topic only through the holder's projection, so
-the narrowing takes several properties out of its reach. They are guarded in
+Several properties of the topics a board creates are guarded in
 `packages/patterns/integration/topic-board-child-contract.test.ts`, which does
 what a caller does: file through the board, resolve the row to the topic's own
 address, then read and call the topic there. That covers `addTopic` wiring its
@@ -219,19 +215,23 @@ child to the pivot, a body given at create not being recorded as a body update,
 an index row tracking a thread that grew after the row was built, and the
 pivot's own rules.
 
-Two constraints shape what can be tested where, and both are worth knowing
-before writing a case:
+Two facts shape what can be tested where, and both are worth knowing before
+writing a case:
 
-- A piece built in a pattern body cannot be placed on a board. Pushing one in
-  reports a schema mismatch and the write never runs, seeding the array at
-  construction is refused because a cell constructor takes static data, and
-  writing the board's input through the piece controller is refused by the
-  contract check. A test therefore cannot hold a topic that is both on a board
-  and callable.
+- A board built in a pattern test with topics in its argument lists them, one
+  topic twice included, and runs its pivot over them. Those topics get no
+  `referencedBy` of their own, because the board wires `boardCrossrefs` only
+  into the topics `addTopic` and the composer create. An action that pushes a
+  Topic built in a pattern body does not run: its argument reads as undefined,
+  which the runner logs as a potential schema mismatch.
 - The pivot excludes a topic from its own inbound edges by identity rather than
-  array position. Only a list holding the same topic twice separates those, and
-  no board can produce one, so `mentionedBy` is exported for a test to call
-  with a list built by hand.
+  array position. Only a list holding the same topic twice separates those. A
+  board can hold one: writing the live handle of a topic the board already
+  lists into its `topics` through the piece controller's `input`, or linking
+  that topic there with `PiecesController.link`, adds a second entry for it.
+  The pivot hands its join the list `distinctByIdentity` returns, which names
+  that topic once, so `mentionedBy` is exported for a test to hand a duplicated
+  list directly.
 
 ## Deploying to the team board
 

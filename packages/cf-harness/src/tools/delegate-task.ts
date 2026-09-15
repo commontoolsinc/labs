@@ -54,7 +54,7 @@ export const delegateTaskTool: HarnessToolDefinition<
                 type: "string",
                 minLength: 1,
                 description:
-                  "Pattern id exactly as this parent received it from search_patterns.",
+                  "Pattern id exactly as this parent received it from search_patterns or host-confirmed research.",
               },
               note: {
                 type: "string",
@@ -67,7 +67,7 @@ export const delegateTaskTool: HarnessToolDefinition<
             additionalProperties: false,
           },
           description:
-            "Optional published patterns selected from this parent's earlier search_patterns results. The harness attaches their trusted metadata to the child; supply ids and optional notes only.",
+            "Optional published patterns selected from this parent's earlier search_patterns results or host-confirmed research. The harness attaches their trusted metadata to the child; supply ids and optional notes only.",
         },
         maxModelTurns: {
           type: "integer",

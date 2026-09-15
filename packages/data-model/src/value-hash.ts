@@ -19,8 +19,8 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { shallowFabricFromNativeValue } from "./native-conversion.ts";
-import { tagFromNativeValueElseNull, VALUE_TAGS } from "./value-tags.ts";
+import { shallowFabricFromConvertibleJsValue } from "./convertible-js.ts";
+import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
 import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -253,16 +253,16 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 /**
  * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via
- * `tagFromNativeValueElseNull()` / `VALUE_TAGS` for recognized types. The
+ * `tagOfConvertibleJsValueElseNull()` / `VALUE_TAGS` for recognized types. The
  * `null` case is handled by the caller (`feedValue()`).
  */
 function feedObjectValue(
   hasher: IncrementalHasher,
   value: object,
 ): void {
-  const nativeTag = tagFromNativeValueElseNull(value);
+  const tag = tagOfConvertibleJsValueElseNull(value);
 
-  switch (nativeTag) {
+  switch (tag) {
     case VALUE_TAGS.FabricEpochNsec: {
       hasher.update(TAG_EPOCH_NSEC_BYTES);
       const bytes = bigintToMinimalTwosComplement(
@@ -352,7 +352,7 @@ function feedObjectValue(
     case VALUE_TAGS.JsUint8Array: {
       // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
-      const converted = shallowFabricFromNativeValue(value, false);
+      const converted = shallowFabricFromConvertibleJsValue(value, false);
       feedValue(hasher, converted);
       return;
     }

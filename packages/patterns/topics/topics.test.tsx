@@ -30,6 +30,7 @@ import {
   type NamesTableRow,
 } from "../collection-naming/naming.ts";
 import Topics, {
+  distinctByIdentity,
   mentionedBy,
   mentionListsOf,
   submitProfileTopic,
@@ -324,10 +325,9 @@ export default pattern(() => {
   // --- actions ---
 
   // The verbs, and every read of what they write, are exercised on a direct
-  // instance. The board's demand carries neither the verbs nor the thread,
-  // links, or update stamps they produce, and a topic built here cannot be put
-  // on a board to be reached through it. `addTopic`'s own create behavior is
-  // still asserted through the board below, on the fields it does demand.
+  // instance, because the board's demand carries neither the verbs nor the
+  // thread, links, or update stamps they produce. `addTopic`'s own create
+  // behavior is asserted through the board below, on the fields it does demand.
   const boardVerbTopic = Topic({
     title: "Board verb target",
     createdBy: { kind: "agent", name: "Sol" },
@@ -584,24 +584,38 @@ export default pattern(() => {
       profileLinkKindDraft.get() === "web";
   });
 
-  // A fresh comment on the FIRST topic makes it the most recently active.
-  // The pivot's join, handed a list a board cannot produce: the SAME topic at
-  // two indices. That is the only shape that separates the rule the pivot
-  // actually holds — exclude by identity — from the one that passes every
-  // board-built test, exclude by array position. With a position check the
-  // twin at index 1 is not excluded, its mention of `twin` matches, and a
-  // topic that only ever mentioned itself is reported as referenced from
-  // elsewhere.
+  // The pivot's join, handed the SAME topic at two indices. That is the only
+  // shape that separates the rule the pivot actually holds — exclude by
+  // identity — from the one that passes every test where each topic appears
+  // once, exclude by array position. With a position check the twin at index 1
+  // is not excluded, its self-mention matches, and the topic is reported as
+  // referenced from its own second entry.
   const twinA = Topic({ title: "Twin" });
   const twinB = Topic({ title: "Other" });
-  const assert_self_mention_inert_through_a_twin = assert(() =>
-    mentionedBy(twinA, [twinA, twinA, twinB], [[twinA], [twinA], []])
-        .length === 0 &&
-    // The same list still reports a real inbound edge, so the exclusion is
+  const assert_self_mention_inert_through_a_twin = assert(() => {
+    // `twinB`'s mention of `twinA` is a real inbound edge, so the exclusion is
     // not simply swallowing everything.
-    mentionedBy(twinB, [twinA, twinA, twinB], [[twinB], [twinB], []])
-        .length === 2
-  );
+    const inbound = mentionedBy(
+      twinA,
+      [twinA, twinA, twinB],
+      [[twinA], [twinA], [twinA]],
+    );
+    return inbound.length === 1 && equals(inbound[0], twinB);
+  });
+
+  // `mentionedBy` lists a source once for each entry of the list it is handed
+  // whose mentions name the topic, so `twinA` at two entries is listed twice.
+  // The board's backlinks count a duplicated source once because the pivot
+  // hands `mentionedBy` the list `distinctByIdentity` returns.
+  const assert_mentioned_by_counts_each_matching_entry = assert(() => {
+    const inbound = mentionedBy(
+      twinB,
+      [twinA, twinA, twinB],
+      [[twinB], [twinB], []],
+    );
+    return inbound.length === 2 && equals(inbound[0], twinA) &&
+      equals(inbound[1], twinA);
+  });
 
   const assert_repeated_mentions_contribute_one_edge_per_source_entry = assert(
     () => {
@@ -613,6 +627,37 @@ export default pattern(() => {
       return inbound.length === 1 && equals(inbound[0], twinA);
     },
   );
+
+  // The pivot's row list, handed a board naming `identityTarget` twice: once
+  // directly and once as the slot of a list holding a link to it. The slot is
+  // a different link that resolves to the same document, so only a comparison
+  // that resolves both sides, as `mentionedBy`'s does, counts it as the same
+  // topic. A mid-sync entry is left out, and `identityOther`, listed again
+  // last, keeps the place of its first entry.
+  const identityTarget = new Writable({ title: "Identity target" });
+  const identityOther = new Writable({ title: "Identity other" });
+  const identityHolder = new Writable<{ title: string }[] | Default<[]>>([]);
+  const action_alias_identity_target = action(() => {
+    identityHolder.push(identityTarget);
+  });
+  const assert_distinct_by_identity_keeps_each_first_occurrence = assert(() => {
+    // Taken here rather than captured: a captured cell whose value is a link
+    // arrives already pointing at that link's target, so it would hand over
+    // the target's own link.
+    const identityAlias = identityHolder.key(0);
+    const distinct = distinctByIdentity([
+      identityOther,
+      undefined,
+      identityTarget,
+      identityAlias,
+      identityOther,
+    ]);
+    return !Writable.equalLinks(identityAlias, identityTarget) &&
+      equals(identityAlias, identityTarget) &&
+      distinct.length === 2 &&
+      Writable.equalLinks(distinct[0], identityOther) &&
+      Writable.equalLinks(distinct[1], identityTarget);
+  });
 
   // A source mid-sync reads back as undefined, and taking `.mentions` of that
   // throws — which killed the pivot and, with it, the append that produced the
@@ -687,13 +732,10 @@ export default pattern(() => {
   const assert_index_tracks_the_board = assert(() =>
     (board.index ?? []).length === 3 &&
     board.index?.[2]?.title === "Composed topic" &&
-    // That a row carries a count updated AFTER the row was built needs a
-    // comment landing on a topic the board holds, and a comment can only be
-    // sent to an instance this test holds directly — which cannot also be on
-    // the board. That claim is guarded in
+    // That a row carries a count updated AFTER the row was built is guarded in
     // `integration/topic-board-child-contract.test.ts` ("carries the updated
-    // comment count on the board's index row"); what stays here is that the
-    // index tracks the board's membership.
+    // comment count on the board's index row"); this assertion covers the
+    // index tracking the board's membership.
     board.index?.[2]?.createdBy?.name === "Sol"
   );
 
@@ -763,7 +805,7 @@ export default pattern(() => {
     )
   );
 
-  // The derivation's own rules, on sources a board cannot produce mid-run:
+  // The derivation's own rules, on sources built by hand:
   // a mid-sync entry contributes no row, the display name falls back to the
   // persisted title until a topic derives its `[NAME]` (and past a blank
   // one), the collection's name for a member is copied off the member's own
@@ -821,19 +863,13 @@ export default pattern(() => {
 
   // --- mention retraction through the UI affordance ---
 
-  // The board's mention PIVOT is no longer exercisable from a pattern test.
-  // Its rules need topics that are on a board and have callable verbs at the
-  // same time, and the board's demand carries no verbs while a topic built
-  // here cannot be put on a board at all — `push` reports a schema mismatch,
-  // seeding the array hits `Cell.of()`'s static-data rule, and the piece
-  // controller's `input` is refused by `assertSchemaSubset`. Those rules moved
-  // rather than went: a pivot row per topic, a self-mention earning no inbound
-  // edge, two mentions each landing their own, and an unmention dropping only
-  // what it retracted are all in
+  // The rules of the board's mention pivot — one row per topic, a self-mention
+  // earning no inbound edge, two mentions each landing their own, and an
+  // unmention dropping only what it retracted — are in
   // `packages/patterns/integration/topic-board-child-contract.test.ts`, and
-  // the identity-not-position rule the duplicate-listing case guarded is in
+  // the identity-not-position rule is in
   // `assert_self_mention_inert_through_a_twin` above, which hands
-  // `mentionedBy` a list a board cannot produce.
+  // `mentionedBy()` a list holding one topic twice.
   //
   // What stays here is the part that never needed the pivot: `dropMention` is
   // a UI affordance over a caller's own list, and it needs two piece
@@ -841,21 +877,16 @@ export default pattern(() => {
   // Plain cells rather than Topic pieces. `dropMention` removes by IDENTITY —
   // `removeByValue` matches a cell by its link — so a cell is a faithful stand
   // -in for the piece a real caller would hold, and the rule under test is the
-  // same. A piece built in the pattern body cannot be pushed into a list at
-  // all (the write reports a schema mismatch and the action never runs), which
-  // is why the entries a board once supplied cannot simply be rebuilt here.
-  // `mention` and `unmention` themselves, on a directly held topic. The board's
-  // PIVOT needs a board — that is why its cases live in
-  // `integration/topic-board-child-contract.test.ts` — but these verbs do not:
-  // each one writes the topic's OWN `mentioned` list, and the set semantics
-  // that make them mergeable are the part worth pinning here.
+  // same.
+  // `mention` and `unmention` themselves, on a directly held topic. Each one
+  // writes the topic's OWN `mentioned` list, and the set semantics that make
+  // them mergeable are the part worth pinning here.
   // --- Stamped removals (Stage C item 1) ---
   //
   // A retraction stamps the record and leaves it in place. Driven on a
   // directly held topic that owns its own cells, for the reason the mention
   // cases below are: these verbs write the topic's OWN lists, and the caller
-  // has to hand each one a REFERENCE to a stored element, which a projected
-  // array read back off a board cannot supply.
+  // hands each one a REFERENCE to a stored element.
   const retractionComments = new Writable<TopicComment[]>([]);
   const retractionLinks = new Writable<TopicLink[]>([]);
   const retractionSubject = Topic({
@@ -966,8 +997,7 @@ export default pattern(() => {
 
   const mentionSubject = Topic({ title: "Mention subject" });
   // Plain cells, because `MentionEvent.topic` declares `Writable<{ title }>`
-  // rather than a piece: the verb matches by cell identity, and a piece built
-  // in a pattern body cannot be handed to one anyway.
+  // rather than a piece, and the verb matches by cell identity.
   const mentionTargetA = new Writable({ title: "Mention target A" });
   const mentionTargetB = new Writable({ title: "Mention target B" });
   // A link on the same topic, so the outbound-reference derivation runs over
@@ -1068,10 +1098,7 @@ export default pattern(() => {
   // are the only other `cf-input`s on the page, so the count discriminates:
   // two while reading, three while renaming.
   // These assert what RENDERS and nothing else; `editingTitle`'s own value is
-  // covered by the lifecycle assertions below. Keeping them apart matters
-  // here: a session cell's initial value is not observable through the result
-  // until something writes it, so an unwritten `editingTitle` reads back
-  // undefined while the header correctly renders its read branch.
+  // covered by the lifecycle assertions below.
   const assert_header_reads = assert(() =>
     findAllByTag(directTopic[UI], "cf-input").length === 2
   );
@@ -1225,10 +1252,13 @@ export default pattern(() => {
       { action: action_seed_row_universe },
       { assertion: assert_row_universe_accepted },
       { assertion: assert_self_mention_inert_through_a_twin },
+      { assertion: assert_mentioned_by_counts_each_matching_entry },
       {
         assertion:
           assert_repeated_mentions_contribute_one_edge_per_source_entry,
       },
+      { action: action_alias_identity_target },
+      { assertion: assert_distinct_by_identity_keeps_each_first_occurrence },
       { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
       { action: action_mention_subject_gets_a_link },
       { assertion: assert_plain_link_is_no_mention },

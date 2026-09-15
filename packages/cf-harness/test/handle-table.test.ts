@@ -66,6 +66,19 @@ describe("handle-table", () => {
   });
 
   describe("mintAddressHandle()", () => {
+    it("mints the same target from padded ID-only references", async () => {
+      for (const prefix of ["", "/", `//${SPACE_DID}/`, `/@${SPACE_DID}/`]) {
+        const ref = `${prefix}of:fid1:${HASH_A}`;
+        const plain = await mintAddressHandle(
+          createHarnessHandleTable("run-1"),
+          ref,
+        );
+        const padded = await mintAddressHandle(plain.table, `  ${ref}  `);
+        expect(padded.token).toBe(plain.token);
+        expect(padded.table.entries).toEqual(plain.table.entries);
+      }
+    });
+
     it("retains trailing whitespace in a referenced path key", async () => {
       const ref = `${LINK_A}/a#argument `;
       const { table, token } = await mintAddressHandle(

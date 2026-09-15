@@ -1,11 +1,5 @@
 import type { CellScope } from "@commonfabric/api";
-import {
-  createSession,
-  DID,
-  Identity,
-  isDID,
-  Session,
-} from "@commonfabric/identity";
+import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
@@ -353,17 +347,8 @@ export function createRuntimeClientOptions({
   // The identity the runtime renders as. A delegated host names it in its own
   // trust snapshot; a snapshot that names nobody leaves the session identity
   // as the render audience, the fallback the worker's own resolver applies to
-  // the same field in `runtime-processor.ts`. A named principal must be a DID:
-  // the ceiling's entries are identity atoms over one.
-  const namedPrincipal = trustSnapshot?.actingPrincipal;
-  if (namedPrincipal !== undefined && !isDID(namedPrincipal)) {
-    throw new Error(
-      `A trust snapshot's acting principal must be a DID: ${
-        JSON.stringify(namedPrincipal)
-      }`,
-    );
-  }
-  const actingPrincipal = namedPrincipal ?? session.as.did();
+  // the same field in `runtime-processor.ts`.
+  const actingPrincipal = trustSnapshot?.actingPrincipal ?? session.as.did();
   const resolvedTrustSnapshot = trustSnapshot === undefined
     ? { id: `principal:${actingPrincipal}`, actingPrincipal }
     : trustSnapshot ?? undefined;
@@ -971,8 +956,6 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    // Built before anything is connected, so a host's bad options are
-    // refused while a worker this page would own is still unspawned.
     const clientOptions = createRuntimeClientOptions({
       session,
       apiUrl,
