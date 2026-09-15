@@ -16,19 +16,21 @@
  * file spelling is diagnostic. The tolerant correspondence below is consumed
  * in exactly one place — `reconcileWriterClaimStamp` (schema-merge.ts), where
  * a stamp minted under the current compile's spelling meets a stored claim
- * carrying an aged spelling of the same binding. It deliberately does NOT
- * gate stamp MINTING (`rebindWriteAuthorizedByClaims` requires exact
- * slash-normalized equality: a claim being stamped rides a schema emitted by
- * the same compile as the writer, so exact holds wherever stamping is
- * genuine), so the tolerance never widens who can create authority — only
- * how an already-minted stamp meets an aged spelling. Residual: at the
- * reconcile-adoption edge, a hostile verified module whose forged path
- * differs from a stored unstamped claim's by one leading segment is accepted
- * where before it needed the exact spelling — a marginal widening of the
- * pre-existing path-forgeability that #4871's mint-time identity binding closes
- * at the source for newly engine-minted claims (aged unstamped claims remain
- * compatibility state), with authenticated `piece setsrc` delegation carrying
- * authority across legitimate updates (this PR).
+ * carrying an aged spelling of the same binding, and only while at most one
+ * of the two is stamped: two stamped claims each name their module
+ * content-addressed, and their spellings are not compared at all. It
+ * deliberately does NOT gate stamp MINTING (`rebindWriteAuthorizedByClaims`
+ * requires exact slash-normalized equality: a claim being stamped rides a
+ * schema emitted by the same compile as the writer, so exact holds wherever
+ * stamping is genuine), so the tolerance never widens who can create
+ * authority — only how an already-minted stamp meets an aged spelling.
+ * Residual: at the reconcile-adoption edge, a hostile verified module whose
+ * forged path differs from a stored unstamped claim's by one leading segment
+ * is accepted where before it needed the exact spelling — a marginal widening
+ * of the pre-existing path-forgeability that #4871's mint-time identity
+ * binding closes at the source for newly engine-minted claims (aged unstamped
+ * claims remain compatibility state), with authenticated `piece setsrc`
+ * delegation carrying authority across legitimate updates.
  *
  * The correspondence is deliberately no wider than the divergence the
  * toolchain actually produced: equal after slash-normalization, or exactly

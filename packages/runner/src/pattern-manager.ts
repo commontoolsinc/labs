@@ -1583,6 +1583,7 @@ export class PatternManager {
             identity,
             filename: doc.filename,
           })),
+          { previous: previousEntryIdentity, next: entryIdentity },
         ),
       });
       return prepared;
