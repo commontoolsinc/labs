@@ -31,6 +31,7 @@ import {
   resolveExternalRootRefForStructure,
 } from "./cfc.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
+import { CfcLabelViewRebaser } from "./cfc/label-view-rebaser.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -222,7 +223,7 @@ const isPrefix = (
 
 const labelViewForLink = (
   baseLink: NormalizedFullLink,
-  baseView: CfcLabelView | undefined,
+  baseView: CfcLabelViewRebaser,
   link: NormalizedFullLink,
 ): CfcLabelView | undefined => {
   if (
@@ -230,9 +231,9 @@ const labelViewForLink = (
     baseLink.id === link.id &&
     isPrefix(baseLink.path, link.path)
   ) {
-    return rebaseCfcLabelView(baseView, link.path.slice(baseLink.path.length));
+    return baseView.rebase(link.path.slice(baseLink.path.length));
   }
-  return rebaseCfcLabelView(baseView, link.path);
+  return baseView.rebase(link.path);
 };
 
 const matchesConcreteValue = (
@@ -1095,14 +1096,6 @@ export function validateAndTransform(
     ...resolvedLink,
     ...(effectiveSchema !== undefined && { schema: effectiveSchema }),
   };
-  const objectCreator = new TransformObjectCreator(
-    runtime,
-    tx!,
-    options?.synced ?? false,
-    link,
-    cfcLabelView,
-  );
-
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
   if (
     (
@@ -1136,7 +1129,13 @@ export function validateAndTransform(
   if (schemaHasIfc(resolvedValueLink.schema)) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
-  objectCreator.setBase(resolvedValueLink, cfcLabelView);
+  const objectCreator = new TransformObjectCreator(
+    runtime,
+    tx,
+    options?.synced ?? false,
+    resolvedValueLink,
+    cfcLabelView,
+  );
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
@@ -1400,7 +1399,7 @@ class TransformObjectCreator
 
   #synced: boolean;
   #baseLink: NormalizedFullLink;
-  #cfcLabelView: CfcLabelView | undefined;
+  #cfcLabelView: CfcLabelViewRebaser;
 
   constructor(
     runtime: Runtime,
@@ -1413,7 +1412,7 @@ class TransformObjectCreator
     this.#tx = tx;
     this.#synced = synced;
     this.#baseLink = baseLink;
-    this.#cfcLabelView = cfcLabelView;
+    this.#cfcLabelView = new CfcLabelViewRebaser(cfcLabelView);
   }
 
   setBase(
@@ -1421,7 +1420,7 @@ class TransformObjectCreator
     cfcLabelView: CfcLabelView | undefined,
   ): void {
     this.#baseLink = baseLink;
-    this.#cfcLabelView = cloneCfcLabelView(cfcLabelView);
+    this.#cfcLabelView.setView(cfcLabelView);
   }
 
   #labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
