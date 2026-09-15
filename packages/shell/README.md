@@ -24,8 +24,10 @@ The shell supports these browser URL forms:
   offers the member's portable reference, `/@<space>/<collection>/<member>`,
   which carries its own space and so depends on no binding of the reader's.
   Where the slug names a piece rather than a collection there are no members to
-  name, so the segment is dropped and the address settles on the piece the page
-  is showing.
+  name, so the segment is reported by name, alongside the slug, and nothing
+  opens. An address carrying segments past the member opens nothing either: no
+  segment after a member is resolved, so a nested address such as
+  `/<space>/top/42/comments/7` is reported by the segments past the member.
 - `/@<space-name-or-did>/...`: any of the other forms, `.embed` included,
   written with the mark that says which segment is the space. This is the
   spelling the portable reference above is written in, so what one page copies

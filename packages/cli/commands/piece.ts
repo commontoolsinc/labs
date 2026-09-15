@@ -26,6 +26,7 @@ import {
   linkPathSegmentToCellPathSegment,
   parseCellReference,
   parseScopedIdSegment,
+  renderCellReference,
 } from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
@@ -1458,7 +1459,7 @@ const CELL_FLAG = `"--cell" (or "--piece")`;
 
 const PIECE_OPTION_HELP =
   "The target cell: an id, slug, or reference (/tracker, /of:fid1:.../). A " +
-  "space embedded in the reference (/@my-space/tracker) supplies --space " +
+  "space embedded in the reference (//my-space/tracker) supplies --space " +
   "when the flag is absent, and must agree with it when both are given. " +
   '"--piece" is a deprecated name for this flag, still accepted and meaning ' +
   "the same thing.";
@@ -1604,7 +1605,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
 ADDRESS: The target is best written in the first positional, as a reference
 (it begins with "/"): cf ${spelling} /tracker/items 0/name. A reference names
 the piece by handle or by slug, and may carry the space by name or by DID
-(/@my-space/tracker). --cell takes the same word when a flag suits better, and
+(//my-space/tracker). --cell takes the same word when a flag suits better, and
 is where the bare id and slug spellings go. Put #argument on the piece segment,
 before qualifiers or path, to select the arguments cell the way --input does.`,
     )
@@ -1620,7 +1621,7 @@ before qualifiers or path, to select the arguments cell the way --input does.`,
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} --api-url ${EX_HOST} /@${EX_SPACE}/tracker`,
+        `cf ${spelling} ${EX_ID} --api-url ${EX_HOST} //${EX_SPACE}/tracker`,
       ),
       "Name the space inside the reference instead of on --space.",
     )
@@ -1740,7 +1741,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf ${spelling} ...
 ADDRESS: The target is best written in the first positional, as a reference
 (it begins with "/"): a path embedded in it counts, so cf ${spelling}
 /tracker/title needs no path argument. A reference names the piece by handle
-or by slug, and may carry the space (/@my-space/tracker). --cell takes the
+or by slug, and may carry the space (//my-space/tracker). --cell takes the
 same word when a flag suits better, and is where the bare id and slug
 spellings go. #argument on the piece segment, before qualifiers and the path,
 selects the arguments cell the way --input does, on any of them.`,
@@ -1808,7 +1809,7 @@ argument is present.
 ADDRESS: The target is best written before the callable name, as a reference
 (it begins with "/"): cf ${spelling} /tracker addItem '{"title":"Milk"}'. A
 reference names the piece by handle or by slug, and may carry the space
-(/@my-space/tracker). --cell takes the same word when a flag suits better.`,
+(//my-space/tracker). --cell takes the same word when a flag suits better.`,
     )
     .usage(`${pieceUsage} [address] <callable> [input]`)
     .example(
@@ -5221,7 +5222,7 @@ export function spaceWasWritten(
 //
 // The space can arrive four ways: `--url` carries it, `--space` names it,
 // `CF_SPACE` supplies it when the flag is absent, and a reference may carry it
-// as a `/@<space>/` prefix. Only a written `--space` refuses `--url`; an
+// as a `//<space>/` prefix. Only a written `--space` refuses `--url`; an
 // ambient one yields to the space the URL carries. A reference's space fills an
 // absent `--space`; a present one must agree — checked at parse time when the
 // two are written the same way, and at session open through
@@ -5541,11 +5542,20 @@ function decomposeUrl(
       { exitCode: 1 },
     );
   }
-  return {
-    apiUrl,
-    space,
-    reference: encodeJsonPointer(["", `@${space}`, piece, ...path]),
-  };
+  let reference: string;
+  try {
+    reference = renderCellReference({
+      ...parseCellReference(`/${encodeJsonPointer([piece])}`),
+      space,
+      path,
+    });
+  } catch (error) {
+    throw new ValidationError(
+      error instanceof Error ? error.message : String(error),
+      { exitCode: 1 },
+    );
+  }
+  return { apiUrl, space, reference };
 }
 
 // We use stdin for piece input which must be an `Object`

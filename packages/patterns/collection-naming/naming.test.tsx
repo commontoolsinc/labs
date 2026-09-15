@@ -2,12 +2,14 @@
  * Pattern tests for the naming library's own rules, driven on plain cells
  * with no board: the sequence over the names in use, the allocator re-run
  * against a stale read — the shape a lost commit race leaves behind — the
- * reverse lookup, and the declaration.
+ * agreement between the name `createNamed()` hands `create` and the name it
+ * records the member under, the reverse lookup, and the declaration.
  */
 
 import { action, assert, equals, pattern, TESTS, Writable } from "commonfabric";
 import {
   assignName,
+  createNamed,
   nameOf,
   type NamesMap,
   namesTable,
@@ -88,6 +90,47 @@ export default pattern(() => {
     equals(names.get()["3"] as object, loser)
   );
 
+  // `createNamed()` builds the member with the name it records it under, and
+  // returns that same name. The middle step records a member under a name the
+  // allocator did not issue, so the allocation after it runs over a map that
+  // gained a key — the map a re-run reads once it has lost a commit race.
+  // Producing that re-run takes two transactions in flight at once, which no
+  // sequence of steps has: the runner settles each step before sending the
+  // next. `../integration/collection-naming-concurrency.test.ts` overlaps two
+  // creates and holds the re-run to this same agreement.
+  const builtNames = new Writable<NamesMap>({});
+  const builtFirst = new Writable({ title: "built first" });
+  const recordedByAnother = new Writable({ title: "recorded by another" });
+  const builtAfter = new Writable({ title: "built after" });
+  const built = new Writable<string[]>([]);
+  const returned = new Writable<string[]>([]);
+
+  const action_create_first = action(() => {
+    const { name } = createNamed(builtNames, (allocated) => {
+      built.push(allocated);
+      return builtFirst;
+    });
+    returned.push(name);
+  });
+  const action_another_name_lands = action(() => {
+    builtNames.key("2").set(recordedByAnother);
+  });
+  const action_create_after_it = action(() => {
+    const { name } = createNamed(builtNames, (allocated) => {
+      built.push(allocated);
+      return builtAfter;
+    });
+    returned.push(name);
+  });
+  const assert_create_builds_with_the_name_it_records = assert(() =>
+    built.get().join(",") === "1,3" &&
+    returned.get().join(",") === "1,3" &&
+    Object.keys(builtNames.get()).join(",") === "1,2,3" &&
+    equals(builtNames.get()["1"] as object, builtFirst) &&
+    equals(builtNames.get()["2"] as object, recordedByAnother) &&
+    equals(builtNames.get()["3"] as object, builtAfter)
+  );
+
   // Foreign keys on a real map, as a client over the memory protocol could
   // leave them: they neither block allocation nor count as the largest, so
   // the next name follows the sequence's own largest.
@@ -161,6 +204,10 @@ export default pattern(() => {
       { assertion: assert_stale_name_was_the_winners },
       { action: action_loser_reruns },
       { assertion: assert_rerun_takes_the_next_distinct_name },
+      { action: action_create_first },
+      { action: action_another_name_lands },
+      { action: action_create_after_it },
+      { assertion: assert_create_builds_with_the_name_it_records },
       { assertion: assert_names_stay_decimal_past_the_safe_integers },
       { assertion: assert_foreign_keys_are_not_names },
       { action: action_foreign_keys_land },

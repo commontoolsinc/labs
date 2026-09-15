@@ -1,4 +1,3 @@
-import { parseCellReference } from "./cell-reference.ts";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   isLinkRef,
@@ -10,6 +9,7 @@ import {
   encodeJsonPointer,
 } from "@commonfabric/utils/json-pointer";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { parseCellReference, renderCellReference } from "./cell-reference.ts";
 import {
   type CellScope,
   type JSONSchema,
@@ -503,8 +503,8 @@ export function parseLLMFriendlyLink(
 
 /**
  * Creates an LLM-friendly link string from a normalized link.
- * If contextSpace is provided and differs from the link's space,
- * includes the space DID in the link for cross-space resolution.
+ * Uses the caller's space and base scope as context when supplied. Without a
+ * context, writes the complete address, including its space and scope.
  *
  * @param link - The normalized link to encode
  * @param contextSpace - The current execution space (optional)
@@ -514,12 +514,8 @@ export function createLLMFriendlyLink(
   link: NormalizedFullLink,
   contextSpace?: MemorySpace,
 ): string {
-  const id = link.scope && link.scope !== "space"
-    ? `${link.id}@${link.scope}`
-    : link.id;
-  // If contextSpace provided and differs, include space in link
-  if (contextSpace && link.space && link.space !== contextSpace) {
-    return encodeJsonPointer(["", `@${link.space}`, id, ...link.path]);
-  }
-  return encodeJsonPointer(["", id, ...link.path]);
+  return renderCellReference(
+    link,
+    contextSpace === undefined ? {} : { space: contextSpace, scope: "space" },
+  );
 }

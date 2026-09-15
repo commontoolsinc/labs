@@ -219,6 +219,11 @@ segment, so adding a field to an item's schema cannot change what an existing
 name resolves to. The collection segment is always written, and compression
 belongs to prose, which has a sigil and a round-trip check.
 
+The shell does not yet resolve nested collection addresses such as
+`<space>/top/42/comments/7`. It reads one member after a collection's name and
+refuses an address carrying segments past that member, naming them, so the
+address above states the design rather than one that opens today.
+
 ## Resolution scope
 
 A name resolves through a scope chain, innermost first:
@@ -590,18 +595,21 @@ has nothing to walk with.
 **4. Walk segments in the URL layer.** Built for the shell's page URLs.
 `urlToAppView` (`packages/navigation/src/view.ts`) reads the segment after a
 slug as the member name and carries it in the view, which serializes back to
-`<space>/<collection>/<member>`. It reads a leading `@` on the first segment as
-the mark on the space, so the fully qualified reference and the page URL are
-one address written two ways: the mark is what a reference carries and is no
-part of the space, so the shell opens `/@<space>/top/42` and settles on
-`/<space>/top/42`. Resolution is a separate worker round trip, `slug:resolve`
+`<space>/<collection>/<member>`. It walks no further: segments past the member
+are carried in the view as written, and the shell refuses such an address by
+naming them, as [Items contain collections](#items-contain-collections) records.
+It reads a leading `@` on the first segment as the mark on the space, so the
+fully qualified reference and the page URL are one address written two ways: the
+mark is what a reference carries and is no part of the space, so the shell opens
+`/@<space>/top/42` and settles on `/<space>/top/42`. Resolution is a separate
+worker round trip, `slug:resolve`
 (`packages/runtime-client/src/backends/runtime-processor.ts`), which hands the
 reference to the runner's walk and answers with the piece and whatever the walk
 did not spend. A name with no member after it is a different question of the
 same slug — which piece is this name inside — and `resolveSlugTargetInPiece`
 answers it directly, so `<space>/top` opens the piece holding the collection.
-The slug grammar in `packages/runner/src/slugs.ts` does not change, and a
-member answers to it too.
+The slug grammar in `packages/runner/src/slugs.ts` does not change, and a member
+answers to it too.
 
 Where the walk lives is what that split settles. `parseFabricUrl`
 (`packages/runner/src/fabric-url.ts`) is deliberately pure and synchronous, and
