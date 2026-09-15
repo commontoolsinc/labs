@@ -1,11 +1,15 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { splitSkillsShPin } from "../../src/skills-sh/pin.ts";
+
 import {
   allowedSkillScriptKey,
   allowedSkillScriptsContextMessage,
+  isAllowedSkillScriptSkill,
   isSkillScriptAllowlisted,
   normalizeAllowedSkillScript,
+  parseAcquiredSkillPin,
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "../../src/skills/scripts.ts";
@@ -195,6 +199,39 @@ describe("scripts.ts", () => {
     it("returns nothing for an empty or absent allowlist", () => {
       expect(allowedSkillScriptsContextMessage([])).toBeUndefined();
       expect(allowedSkillScriptsContextMessage(undefined)).toBeUndefined();
+    });
+  });
+
+  describe("parseAcquiredSkillPin()", () => {
+    it("splits a pin exactly as `splitSkillsShPin` does", () => {
+      // Two splitters that agree only by inspection would reopen the failure
+      // the one spelling exists to prevent: an allowlist entry and an
+      // acquisition naming different bytes while both look valid.
+      for (
+        const candidate of [
+          PIN,
+          `${PIN}@${SHA}`,
+          `owner/repo/slug@${SHA}`,
+          `owner/repo/slug@${SHA.toUpperCase()}`,
+          `owner/repo/slug@${SHA.slice(0, 7)}`,
+          "owner/repo/slug@main",
+          "owner/repo/slug",
+          "agent-browser",
+          `@${SHA}`,
+          "",
+        ]
+      ) {
+        const split = splitSkillsShPin(candidate);
+        const parsed = parseAcquiredSkillPin(candidate);
+        if (parsed !== undefined) {
+          expect(parsed).toEqual(split);
+        } else {
+          // Where they part it is the head, which only this one validates.
+          expect(
+            split === undefined || !isAllowedSkillScriptSkill(candidate),
+          ).toBe(true);
+        }
+      }
     });
   });
 });

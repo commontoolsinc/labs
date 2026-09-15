@@ -761,6 +761,20 @@ export interface DelegateTaskToolInput {
   skillHandle?: string;
 
   /**
+   * States that this delegation wants its skill's instructions and runs no
+   * script of it.
+   *
+   * Meaningful only where {@link skillHandle} names a skill whose scripts the
+   * operator allowlisted at a DIFFERENT commit. That delegation is otherwise
+   * refused, because the child would receive no `run_skill_script` and an
+   * absent tool reads exactly as an operator who allowed nothing. Saying so
+   * here is how a parent that wanted the prose rather than the script
+   * proceeds; it attaches nothing and permits nothing, and the child holds
+   * the tools it would have held anyway.
+   */
+  withoutSkillScript?: boolean;
+
+  /**
    * States that this delegation deliberately carries no acquired skill. It is
    * required — and meaningful — only while the run has outstanding skill
    * custody: a delegation that carried a handle did not complete, and the

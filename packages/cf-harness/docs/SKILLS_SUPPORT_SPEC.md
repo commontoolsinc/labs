@@ -539,13 +539,18 @@ Policy rules:
   bytes rather than the repository's default-branch head, and the run is told
   which scripts its operator allowed before its first turn, pins and all — so an
   entry and an acquisition name the same commit by construction rather than by
-  the branch not having moved. A run that acquires the skill at another commit
-  anyway is refused at `delegate_task`, naming both commits, rather than handing
-  its child a mounted skill and no tool. It has no registry and no run-start
-  snapshot either, so the two conditions above are met differently: the run must
-  hold an activation whose acquisition names that pin, and the file must match
-  the digest taken at acquisition. It runs in the sandbox; a run whose
-  skill-script execution target is the host refuses it.
+  the branch not having moved. A commit-pinned id is accepted only where the
+  run's allowlist names that pin, since GitHub serves a commit object to a
+  repository's whole fork network and a free sha would record another
+  repository's bytes under the named one. A run that acquires the skill at
+  another commit by its bare id is refused at `delegate_task`, naming both
+  commits, rather than handing its child a mounted skill and no tool; a
+  delegation wanting the prose rather than the script says `withoutSkillScript`
+  and proceeds. It has no registry and no run-start snapshot either, so the two
+  conditions above are met differently: the run must hold an activation whose
+  acquisition names that pin, and the file must match the digest taken at
+  acquisition. It runs in the sandbox; a run whose skill-script execution target
+  is the host refuses it.
 - What backs `run_skill_script` for an acquired script is the mount that puts it
   at a path, so a run given no `--skills-root` still offers the tool to a child
   whose sandbox carries that mount, and `--allow-skill-script` takes an acquired

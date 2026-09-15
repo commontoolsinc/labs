@@ -866,6 +866,18 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  if (
+    input.withoutSkillScript !== undefined &&
+    typeof input.withoutSkillScript !== "boolean"
+  ) {
+    return {
+      invalid: {
+        field: "withoutSkillScript",
+        expected:
+          "`true` to state the delegation runs no script of its skill, or omit it",
+      },
+    };
+  }
   // Both together is a call that says two things at once, and the harness
   // would have to pick one. Refusing states which fields disagree instead.
   if (input.skillHandle !== undefined && input.withoutSkillHandle === true) {
@@ -927,6 +939,9 @@ const parseDelegateTaskInput = (
         : {}),
       ...(input.withoutSkillHandle === true
         ? { withoutSkillHandle: true }
+        : {}),
+      ...(input.withoutSkillScript === true
+        ? { withoutSkillScript: true }
         : {}),
     },
   };
@@ -4008,15 +4023,19 @@ export class CfHarnessPromptLoop {
         // acquisition fetched another. Left alone the child receives no
         // `run_skill_script` at all, which reads exactly as an operator who
         // allowed nothing, so the delegation is refused with both commits
-        // named instead. The model can act on it: `acquire_skill` takes a pin,
-        // so acquiring the allowed one is the answer.
-        const mismatch = acquiredSkillScriptSurface(
-          this.engine.config.allowedSkillScripts,
-          acquiredSkillForHandle(
-            this.engine.getRunState().acquiredSkills?.skills,
-            resolvedDelegateSkill.acquisition,
-          ),
-        ).pinMismatch;
+        // named instead. The model can act on it two ways: `acquire_skill`
+        // takes a pin, so acquiring the allowed one is one answer, and a
+        // delegation that wanted the skill's instructions rather than its
+        // script says so with `withoutSkillScript` and proceeds.
+        const mismatch = delegateInput.withoutSkillScript === true
+          ? undefined
+          : acquiredSkillScriptSurface(
+            this.engine.config.allowedSkillScripts,
+            acquiredSkillForHandle(
+              this.engine.getRunState().acquiredSkills?.skills,
+              resolvedDelegateSkill.acquisition,
+            ),
+          ).pinMismatch;
         if (mismatch !== undefined) {
           return await this.#rejectInvalidToolCall({
             toolCall,

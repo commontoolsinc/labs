@@ -299,12 +299,13 @@ describe("delegating an acquired skill to a child", () => {
       },
       assert: (engine, _artifactRoot, context) => {
         expect(engine.getRunState().acquiredSkills?.skills[0]?.pin).toBe(PIN);
-        expect(context.githubUrls).not.toContain(
-          `https://api.github.com/repos/${OWNER}/${REPO}`,
-        );
-        expect(context.githubUrls).not.toContain(
-          `https://api.github.com/repos/${OWNER}/${REPO}/branches/main`,
-        );
+        // The whole request list rather than two absences: a reshaped URL
+        // makes this fail rather than pass by no longer matching.
+        expect(context.githubUrls).toEqual([
+          `https://api.github.com/repos/${OWNER}/${REPO}/git/trees/${COMMIT_SHA}?recursive=1`,
+          RAW(`${SLUG}/SKILL.md`),
+          RAW(`${SLUG}/${SCRIPT_PATH}`),
+        ]);
       },
     });
   });
@@ -313,13 +314,19 @@ describe("delegating an acquired skill to a child", () => {
     // The child would otherwise receive no `run_skill_script` at all, which
     // reads exactly as an operator who allowed nothing — so the two commits
     // are said, and no child is spawned to hold a skill it cannot run.
+    //
+    // Acquired by the skill id alone, which is the only way to reach a commit
+    // the allowlist does not name: a commit-pinned id the run allows no script
+    // of is refused at acquisition.
     const otherPin = `${SKILL_ID}@${"1".repeat(40)}`;
     let delegateOutput = "";
     await runAcquisitionScenario({
       allowedSkillScripts: [{ skill: otherPin, path: SCRIPT_PATH }],
       turn: (index, body, context) => {
         if (index === 0) {
-          return toolCallTurn("call-acquire", "acquire_skill", { id: PIN });
+          return toolCallTurn("call-acquire", "acquire_skill", {
+            id: SKILL_ID,
+          });
         }
         if (index === 1) {
           context.handleToken = handleFromOutput(body);
@@ -343,6 +350,77 @@ describe("delegating an acquired skill to a child", () => {
         expect(delegateOutput).toContain(PIN);
         expect(delegateOutput).toContain("another commit");
         expect(engine.getRunState().subagentRuns ?? []).toHaveLength(0);
+      },
+    });
+  });
+
+  it("refuses a commit-pinned acquisition the run allows no script of", async () => {
+    // GitHub serves a commit object to a repository's whole fork network, so
+    // a free choice of sha reaches bytes that were never in the named
+    // repository's history while the record still names that repository. The
+    // only reason to name a commit is to hit an allowed pin, so only those
+    // resolve.
+    const forkCommit = "2".repeat(40);
+    let acquireOutput = "";
+    await runAcquisitionScenario({
+      allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+      turn: (index, body) => {
+        if (index === 0) {
+          return toolCallTurn("call-acquire", "acquire_skill", {
+            id: `${SKILL_ID}@${forkCommit}`,
+          });
+        }
+        if (index === 1) {
+          acquireOutput = String(
+            (body.input ?? []).findLast((entry) =>
+              entry.type === "function_call_output"
+            )?.output,
+          );
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: (engine, _artifactRoot, context) => {
+        expect(acquireOutput).toContain(forkCommit);
+        expect(acquireOutput).toContain(PIN);
+        expect(engine.getRunState().acquiredSkills?.skills ?? []).toHaveLength(
+          0,
+        );
+        // Refused before any request, so no bytes were fetched at that commit.
+        expect(context.githubUrls).toEqual([]);
+      },
+    });
+  });
+
+  it("delegates a differently-pinned skill when the task says it runs no script", async () => {
+    // A parent that wanted the skill's prose rather than its script says so,
+    // rather than being refused for a tool it never intended to use.
+    const otherPin = `${SKILL_ID}@${"1".repeat(40)}`;
+    await runAcquisitionScenario({
+      allowedSkillScripts: [{ skill: otherPin, path: SCRIPT_PATH }],
+      turn: (index, body, context) => {
+        if (index === 0) {
+          return toolCallTurn("call-acquire", "acquire_skill", {
+            id: SKILL_ID,
+          });
+        }
+        if (index === 1) {
+          context.handleToken = handleFromOutput(body);
+          return toolCallTurn("call-delegate", "delegate_task", {
+            goal: "Read the acquired skill and summarize it.",
+            skillHandle: context.handleToken,
+            withoutSkillScript: true,
+          });
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: (engine) => {
+        const child = engine.getRunState().subagentRuns?.[0];
+        expect(child?.status).toBe("completed");
+        // It permits nothing: the child holds no script tool either way.
+        expect(child?.manifest.allowedToolIds).not.toContain(
+          "run_skill_script",
+        );
+        expect(child?.manifest.allowedSkillScripts ?? []).toEqual([]);
       },
     });
   });

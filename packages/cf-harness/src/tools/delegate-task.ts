@@ -94,6 +94,11 @@ export const delegateTaskTool: HarnessToolDefinition<
           description:
             "States that this delegation deliberately runs with no acquired skill. Required only after a delegation carrying a skillHandle failed, where omitting both fields is refused: the harness cannot tell a considered choice from a dropped one, and the child's work would carry no record either way. It attaches nothing and permits nothing.",
         },
+        withoutSkillScript: {
+          type: "boolean",
+          description:
+            "States that this delegation wants its skill's instructions and runs no script of it. Required only when the skillHandle names a skill the operator allowlisted the scripts of at a DIFFERENT commit, which is otherwise refused because the child would silently receive no run_skill_script. It attaches nothing and permits nothing; a child given it holds the same tools it would have held anyway.",
+        },
       },
     },
     tags: ["subagent", "orchestration"],

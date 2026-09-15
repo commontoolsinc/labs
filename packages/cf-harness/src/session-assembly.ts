@@ -327,7 +327,8 @@ export interface EstablishHarnessSessionContextOptions {
  * skills, the acquired-skill scripts the operator allowed, the well-known
  * grants of the session's space, and the operator's input cells.
  *
- * The three differ in how they fail, and deliberately. A missing skills root
+ * Three of these differ in how they fail, and deliberately; the allowlist
+ * disclosure is read from what the run already holds and cannot fail at all. A missing skills root
  * simply yields no messages. Grants are best-effort: a session that will not
  * connect is reported and the run continues, because a grant is an
  * entitlement the run did not ask for. Input cells are explicit operator

@@ -98,6 +98,32 @@ export const parseSkillsShSkillId = (id: string): SkillsShAddressSegments => {
 };
 
 /**
+ * Splits a pin into the skill it names and the commit it pins, or `undefined`
+ * where the string carries no commit.
+ *
+ * The one place the pin spelling is decided. An allowlist entry and an
+ * acquisition naming different things while both looking valid is the failure
+ * this module exists to make impossible, so a second splitter that agreed only
+ * by inspection would reopen it the first time one of them loosened.
+ *
+ * The head is not validated here: a caller that needs a skill address says so
+ * by running it through {@link parseSkillsShSkillId}, and a caller that only
+ * has to recognize the shape does not pay for that.
+ */
+export const splitSkillsShPin = (
+  pin: string,
+): { readonly id: string; readonly commitSha: string } | undefined => {
+  const at = pin.lastIndexOf("@");
+  if (at <= 0) {
+    return undefined;
+  }
+  const commitSha = pin.slice(at + 1);
+  return FULL_GIT_COMMIT_SHA_PATTERN.test(commitSha)
+    ? { id: pin.slice(0, at), commitSha }
+    : undefined;
+};
+
+/**
  * Returns the skill a request names and the commit it pins, refusing before
  * any request whatever {@link parseSkillsShSkillId} refuses.
  *
@@ -109,15 +135,10 @@ export const parseSkillsShSkillId = (id: string): SkillsShAddressSegments => {
 export const parseSkillsShAcquisitionRequest = (
   request: string,
 ): SkillsShAcquisitionRequest => {
-  const at = request.lastIndexOf("@");
-  if (at > 0) {
-    const commitSha = request.slice(at + 1);
-    if (FULL_GIT_COMMIT_SHA_PATTERN.test(commitSha)) {
-      const id = request.slice(0, at);
-      return { id, ...parseSkillsShSkillId(id), commitSha };
-    }
-  }
-  return { id: request, ...parseSkillsShSkillId(request) };
+  const split = splitSkillsShPin(request);
+  return split === undefined
+    ? { id: request, ...parseSkillsShSkillId(request) }
+    : { ...parseSkillsShSkillId(split.id), ...split };
 };
 
 /** Adds the discovery hit's redundant source agreement to the id check. */

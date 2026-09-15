@@ -11,6 +11,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { stampExternalFetchIngest } from "@commonfabric/runner/cfc";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 
+import type { HarnessAllowedSkillScript } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import {
   SkillsShAcquisitionError,
@@ -19,9 +20,11 @@ import {
 import {
   type SkillsShPinnedAddress,
   SkillsShPinResolutionError,
+  splitSkillsShPin,
 } from "../skills-sh/pin.ts";
 import { sanitizeRegistryString } from "../skills-sh/search-client.ts";
 import { AcquiredSkillDirectoryReadableError } from "../skills/acquired-skill-mount.ts";
+import { parseAcquiredSkillPin } from "../skills/scripts.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface AcquireSkillToolInput {
@@ -177,6 +180,17 @@ const safeErrorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error),
   );
 
+/** The pins this run allows the scripts of, deduplicated, in entry order. */
+const acquirablePins = (
+  allowlist: readonly HarnessAllowedSkillScript[] | undefined,
+): readonly string[] => [
+  ...new Set(
+    (allowlist ?? [])
+      .filter((script) => parseAcquiredSkillPin(script.skill) !== undefined)
+      .map((script) => script.skill),
+  ),
+];
+
 const operationalAcquisitionCodes: ReadonlySet<
   SkillsShAcquisitionFailureCode
 > = new Set(["request_failed", "http_error"]);
@@ -205,6 +219,32 @@ export const acquireSkillTool: HarnessToolDefinition<
       return errorOutput(
         "acquire_skill requires the host skill-context handle mint",
       );
+    }
+
+    // An explicit commit is accepted only where the operator's allowlist names
+    // it. GitHub serves a commit object to the whole of a repository's FORK
+    // NETWORK, so a free choice of sha reaches bytes that were never in the
+    // named repository's own history while the acquisition record, its
+    // `ExternalIngest` stamp and its `git-commit-sha` verification all still
+    // read as that repository. Resolving a bare id cannot reach them — it goes
+    // to the repository's own default-branch head — so the constraint costs
+    // nothing a caller had before, and the only reason to name a commit at all
+    // is to hit a pin the operator already allowed.
+    const requestedCommit = splitSkillsShPin(input.id)?.commitSha;
+    if (requestedCommit !== undefined) {
+      const allowedPins = acquirablePins(context.allowedSkillScripts);
+      if (!allowedPins.includes(input.id)) {
+        return errorOutput(
+          allowedPins.length === 0
+            ? `acquire_skill was given the commit-pinned id ${input.id}, and ` +
+              `this run allows the scripts of no acquired skill; acquire by ` +
+              `the skill id alone to read its default-branch head`
+            : `acquire_skill was given the commit-pinned id ${input.id}, ` +
+              `which this run does not allow the scripts of; it allows ` +
+              `${allowedPins.join(", ")}, and acquiring by the skill id ` +
+              `alone reads its default-branch head`,
+        );
+      }
     }
 
     let pin: SkillsShPinnedAddress | undefined;
