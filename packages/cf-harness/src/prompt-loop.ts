@@ -55,12 +55,12 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
-import type {
-  HarnessSkillAcquisition,
-  HarnessSkillActivation,
-  HarnessSkillRegistry,
+import {
+  HARNESS_SKILL_ACTIVATIONS_TYPE,
+  type HarnessSkillAcquisition,
+  type HarnessSkillActivation,
+  type HarnessSkillRegistry,
 } from "./contracts/skill.ts";
-import { HARNESS_SKILL_ACTIVATIONS_TYPE } from "./contracts/skill.ts";
 import {
   asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
@@ -144,6 +144,12 @@ import { sumHarnessModelUsage } from "./model/usage.ts";
 import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnostic-collapse.ts";
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import { isTerminalHarnessRunStatus } from "./run-state.ts";
+import {
+  acquiredSkillForHandle,
+  acquiredSkillScriptBacking,
+  acquiredSkillScriptSurface,
+  childSandboxOptions,
+} from "./skills/acquired-skill-mount.ts";
 import {
   loadHarnessSkillContext,
   loadHarnessSkillContextFromText,
@@ -2840,6 +2846,16 @@ export class CfHarnessPromptLoop {
       // has yet to scan still knows it will, and one that never will offers
       // neither tool.
       skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
+      // The second backing `run_skill_script` has. An acquired skill's script
+      // needs no registry: its bytes came from a pinned commit and this run
+      // mounts them, so a run that mounts one can execute a script whether or
+      // not it was given a skills root. A run that holds one without mounting
+      // it — the acquiring parent, or a child sharing a handed-in runtime —
+      // has nothing to run and is not backed.
+      acquiredSkillsAvailable: acquiredSkillScriptBacking(
+        this.engine.ownedSandboxConfig,
+        this.engine.getRunState().acquiredSkills?.skills,
+      ),
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
       loomAuthoringAvailable: this.engine.config.loomAuthoring !== undefined,
     };
@@ -4546,11 +4562,52 @@ export class CfHarnessPromptLoop {
       parentToolCallId: options.toolCall.id,
       depth: (parentRunState.lineage?.depth ?? 0) + 1,
     };
+    // The acquired skill this child may run scripts of: the one its
+    // `skillHandle` names, and no other.
+    const parentAcquiredSkills = this.engine.getRunState().acquiredSkills;
+    const childAcquiredSkill = acquiredSkillForHandle(
+      parentAcquiredSkills?.skills,
+      options.resolvedSkill?.acquisition,
+    );
+    // The operator's allowlist is the run's and the tool surface is the
+    // profile's, so a child given an acquired skill needs both brought to it or
+    // it holds a mounted skill it cannot run a script of.
+    const acquiredScripts = acquiredSkillScriptSurface(
+      this.engine.config.allowedSkillScripts,
+      childAcquiredSkill,
+    );
+    const childAllowedSkillScripts = [
+      ...(profileConfig.allowedSkillScripts ?? []),
+      ...acquiredScripts.allowedSkillScripts,
+    ];
+    const childAllowedToolIds = [
+      ...profileConfig.allowedToolIds,
+      ...acquiredScripts.toolIds.filter((toolId) =>
+        !profileConfig.allowedToolIds.includes(toolId)
+      ),
+    ];
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
-      sandboxRuntime: this.engine.sandbox,
-      sandbox: this.engine.config.sandbox,
+      // A child that mounts an acquired skill gets a sandbox of its own, built
+      // from this run's configuration plus that one mount; every other child
+      // shares this run's runtime.
+      ...childSandboxOptions({
+        sandbox: this.engine.sandbox,
+        ownedSandboxConfig: this.engine.ownedSandboxConfig,
+        configuredSandbox: this.engine.config.sandbox,
+      }, childAcquiredSkill),
+      // The parent's own record, narrowed to the one skill. Narrowed rather
+      // than rebuilt so the child's record keeps the time the acquisition was
+      // written, which is what it is a record of.
+      ...(childAcquiredSkill !== undefined && parentAcquiredSkills !== undefined
+        ? {
+          acquiredSkills: {
+            ...parentAcquiredSkills,
+            skills: [childAcquiredSkill],
+          },
+        }
+        : {}),
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
@@ -4597,8 +4654,8 @@ export class CfHarnessPromptLoop {
       ...(this.engine.docsCorpus !== undefined
         ? { docsCorpus: this.engine.docsCorpus }
         : {}),
-      ...(profileConfig.allowedSkillScripts !== undefined
-        ? { allowedSkillScripts: profileConfig.allowedSkillScripts }
+      ...(childAllowedSkillScripts.length > 0
+        ? { allowedSkillScripts: childAllowedSkillScripts }
         : {}),
       ...(profileConfig.skillScriptExecutionTarget !== undefined
         ? {
@@ -4702,14 +4759,14 @@ export class CfHarnessPromptLoop {
         : {}),
       model: childModel.model,
       modelSource: childModel.source,
-      allowedToolIds: [...profileConfig.allowedToolIds],
+      allowedToolIds: childAllowedToolIds,
       hostToolIds: [...profileConfig.hostToolIds],
       ...(profileConfig.skillNames !== undefined
         ? { skillNames: [...profileConfig.skillNames] }
         : {}),
-      ...(profileConfig.allowedSkillScripts !== undefined
+      ...(childAllowedSkillScripts.length > 0
         ? {
-          allowedSkillScripts: profileConfig.allowedSkillScripts.map((
+          allowedSkillScripts: childAllowedSkillScripts.map((
             script,
           ) => ({ ...script })),
         }
@@ -4760,7 +4817,7 @@ export class CfHarnessPromptLoop {
         ? { reasoningEffort: this.#reasoningEffort }
         : {}),
       maxModelTurns,
-      allowedToolIds: profileConfig.allowedToolIds,
+      allowedToolIds: childAllowedToolIds,
       allowedSubagentProfiles: [],
       nativeModelToolIds: profileConfig.nativeModelToolIds,
     });

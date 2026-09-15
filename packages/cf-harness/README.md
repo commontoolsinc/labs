@@ -122,7 +122,9 @@ What works today:
   - `view_image`
   - `web_fetch` (explicit parent allowlist or `web_fetch` subagent profile only)
   - `read_skill_resource`
-  - `run_skill_script`
+  - `run_skill_script` (a registry skill's script, or an acquired skill's, named
+    by the pin its bytes were read at; see
+    [Running an acquired skill's script](#running-an-acquired-skills-script))
   - `edit_file`
   - `write_file`
   - `delegate_task`
@@ -206,8 +208,9 @@ What works today:
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
-- exact-allowlisted skill script execution through `run_skill_script`, recorded
-  in `skill-script-executions.json`
+- exact-allowlisted skill script execution through `run_skill_script`, for a
+  registry skill's script and for an acquired skill's, recorded in
+  `skill-script-executions.json`
 
 The sandbox `bash` tool has a provisional direct-`curl` guard while sandbox
 networking is enabled: explicit `curl` invocations may target loopback HTTP(S)
@@ -1159,6 +1162,78 @@ is not a pin and never enters provenance. The tool returns the handle and this
 inert acquisition metadata; loading the handle remains a separate
 `delegate_task` decision.
 
+##### Running an acquired skill's script
+
+The scripts land at `<artifactRoot>/.acquired-skills/<runId>/<commitSha>/<slug>`
+— under the artifact root's one non-run directory, inside no run root.
+`acquire_skill` runs in the parent, and the artifact tree is not a
+confidentiality boundary — `bash` does not reserve it the way the file tools do
+— so a script written under the parent's run root is a script the planner could
+read wherever that tree is reachable. Sitting outside the run roots buys the
+lifecycle and not the boundary: the acquisition asks the sandbox it would be
+read from — every mount that sandbox describes, the workspace and every
+`--host-mount` alike — whether one covers the directory, and refuses naming the
+mount rather than writing bytes the acquiring run could read. Asked of the
+sandbox rather than of the configuration beside it, because for a run handed its
+runtime the configuration describes something else, and a question about what a
+container can read has to be put to that container. The refusal comes before the
+handle is minted, so a covering mount leaves no handle to a skill whose scripts
+its own planner could have read.
+
+The child a `delegate_task` hands that handle to mounts the directory read-only
+at `/acquired-skill`, and mounts the one skill its handle names and no other.
+Such a child does not share its parent's container — a mount is a property of
+the container, so the child is given the parent's sandbox configuration plus
+that one mount and builds its own sandbox from it. That is possible only where
+this harness built the parent's sandbox from a configuration; a run whose
+sandbox runtime was handed in has none to extend, and its children go on sharing
+it, acquired skill or not. It receives `run_skill_script` and the operator's
+allowlist entries for that pin, and for no other skill: the allowlist is the
+run's while a child's tool surface is its profile's, and neither reaches the
+other on its own. An acquisition is not an authorization — mounting the bytes
+and being allowed to run one stay separate decisions, and the second is the
+operator's.
+
+What backs the tool is the mount rather than a skills root, so a run given no
+`--skills-root` still offers it to such a child, and `--allow-skill-script`
+takes an acquired pin without one. Being backed is necessary and not sufficient:
+the child receives `run_skill_script` only where the operator allowlisted at
+least one script at that exact pin, so a child holding the handle and the mount
+and nothing else has no tool to invoke. A run that holds an acquired skill
+without mounting it is not backed at all: that is the acquiring parent, which
+deliberately mounts nothing, and a child that shares a handed-in runtime.
+
+Absence of the mount is not by itself absence of the tool, so the refusal says
+so rather than the tool merely not being there. A skills root backs
+`run_skill_script` on its own, so a parent that has one is offered the tool
+after it acquires a skill; what stops it calling the tool on what it acquired is
+that it never loaded that skill — no activation names the pin, and the call
+refuses `skill_not_activated`. A run that is activated for the pin and still
+lacks the mount refuses `script_not_mounted`, naming the sandbox root the script
+would have been addressed at: the path an acquired script is named by is the one
+its mount puts it at, so without the mount there is nothing to run.
+
+`read_skill_resource` is registry-backed throughout, an acquired skill carrying
+no resource index.
+
+It runs a script there through the same `run_skill_script` a registry skill's
+goes through: `--allow-skill-script` keys on the pin,
+`owner/repo/slug@<commit sha>`, in place of a registry name, and every other
+gate is the same call. Activation is by the acquisition rather than by a name —
+a handle activates under `handle:<token>`, so what says the run was given this
+skill is an activation whose acquisition records that pin. The digest the file
+is re-checked against is the one taken at acquisition, over the bytes the pinned
+commit served, so a file changed on the host between acquisition and execution
+refuses.
+
+The invocation is labeled with confidentiality alone. The acquisition's
+`ExternalIngest` provenance belongs on it and cannot go there: a non-empty
+`integrity` array in `cfcInputLabels` makes the sandbox fail to start, which is
+[CT-2302](https://linear.app/common-tools/issue/CT-2302). It rides the output
+instead — the tool output and the persisted execution record carry the
+acquisition as its own field, and the registry digest, size and match fields are
+absent, because they name a run-start snapshot an acquired script was never in.
+
 `delegate_task` takes an optional `skillHandle`: a handle the parent holds,
 naming a cell whose string value is skill text for the child. The text is
 materialized on the trusted host side at child spawn. Acquired handles carry the
@@ -1193,12 +1268,14 @@ A handle-delivered skill bypasses the registry entirely: it is transient run
 state from a cell, the untrusted-acquisition complement to the trusted operator
 `--skills-root`, and for the delegated path it retires selection by name — the
 name-squat surface — in favor of an unforgeable table entry. It carries no
-directory, so it has no supporting-resource index and no scripts;
-`run_skill_script`'s operator allowlist cannot name it, and the skill-context
-preamble that keeps a skill from authorizing tools applies to it unchanged. The
-child's activation record carries `source: "skill-handle"`, the token, and the
-digest of the exact text injected, so the artifacts say which reference supplied
-the skill and what it said.
+directory, so it has no supporting-resource index, and the skill-context
+preamble that keeps a skill from authorizing tools applies to it unchanged. A
+handle an acquisition minted is the one that can carry scripts, and the
+operator's allowlist names them by the pin rather than by a registry name — the
+[acquired-script section below](#running-an-acquired-skills-script) has the
+whole of it. The child's activation record carries `source: "skill-handle"`, the
+token, and the digest of the exact text injected, so the artifacts say which
+reference supplied the skill and what it said.
 
 #### Pattern references by search record
 

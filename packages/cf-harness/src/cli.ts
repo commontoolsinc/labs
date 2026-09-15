@@ -101,6 +101,7 @@ import {
   createHarnessSkillsShSearchClientFactory,
 } from "./skills-sh/search-client.ts";
 import {
+  parseAcquiredSkillPin,
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
@@ -493,7 +494,9 @@ Options:
                                 search_skills and acquire_skill require --skills-registry-url,
                                 query_docs requires a resolved documentation corpus,
                                 and the three loom_* tools require --loom-authoring-config (or CF_HARNESS_LOOM_AUTHORING_CONFIG)
-  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
+  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path,
+                                where skill is a registry name or an acquired pin owner/repo/slug@<commit sha>;
+                                a registry name requires --skills-root, a pin does not)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
@@ -1336,11 +1339,22 @@ export const parseCfHarnessCliArgs = async (
   const allowedSkillScripts = parseAllowedSkillScripts(
     args["allow-skill-script"] as string | readonly string[] | undefined,
   );
-  if (allowedSkillScripts.length > 0 && configuredSkillsRoot === undefined) {
-    // A skill script runs in the sandbox and is addressed by the sandbox path
-    // only a named tree has, so this one asks for the flag rather than for a
-    // tree.
-    throw new Error("--allow-skill-script requires --skills-root");
+  // A REGISTRY skill's script is addressed by the sandbox path only a named
+  // tree has, so an entry keyed on a registry name asks for the flag rather
+  // than for a tree. An acquired skill's is not: it is keyed on the pin its
+  // bytes were read at, and those bytes reach the sandbox through the mount
+  // the acquisition made, which no skills root takes part in. Requiring one
+  // of both would make the operator name a tree for a skill that never came
+  // from one.
+  if (
+    configuredSkillsRoot === undefined &&
+    allowedSkillScripts.some((script) =>
+      parseAcquiredSkillPin(script.skill) === undefined
+    )
+  ) {
+    throw new Error(
+      "--allow-skill-script requires --skills-root, except for an acquired pin",
+    );
   }
   const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
     typeof args["skill-script-execution-target"] === "string"

@@ -72,14 +72,29 @@ const SKILLS_SH_ACQUISITION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
 );
 
 /**
- * The tools that exist only over a skill registry, gated on the same terms.
- * A run given no skills root scans no registry, so `read_skill_resource`
- * would answer `skill_registry_missing` on every call and `run_skill_script`
- * has nothing to run — absent rather than present-but-failing, so a model
- * does not spend turns discovering a tool it was never backed to use.
+ * The tool that exists only over a skill registry. A run given no skills root
+ * scans no registry, so `read_skill_resource` would answer
+ * `skill_registry_missing` on every call — absent rather than
+ * present-but-failing, so a model does not spend turns discovering a tool it
+ * was never backed to use.
  */
 const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
-  ["read_skill_resource", "run_skill_script"] as const,
+  ["read_skill_resource"] as const,
+);
+
+/**
+ * The tool two different backings can supply, and which is absent only when
+ * neither does.
+ *
+ * A registry script needs the skills root that scanned it. An acquired script
+ * needs no registry at all: its bytes came from a pinned commit and sit where
+ * the run that holds the skill's handle mounts them. A child given an acquired
+ * skill in a run with no skills root is backed to run its script, and
+ * withholding the tool from it would hand it a mounted skill it could not
+ * execute.
+ */
+const SKILL_SCRIPT_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["run_skill_script"] as const,
 );
 
 /** Tools backed only by an explicitly configured host Loom transport. */
@@ -96,6 +111,14 @@ export interface HarnessToolBackingAvailability {
   skillsShSearchAvailable: boolean;
   skillsShAcquisitionAvailable: boolean;
   skillRegistryAvailable: boolean;
+
+  /**
+   * Whether this run holds a skill it acquired scripts for. The second backing
+   * `run_skill_script` has, independent of any registry: absent, the tool
+   * rests on the skills root alone.
+   */
+  acquiredSkillsAvailable?: boolean;
+
   docsCorpusAvailable: boolean;
 
   /** Whether the operator configured host Loom authoring for this run. */
@@ -114,6 +137,10 @@ export const withheldToolIds = (
       ? []
       : SKILLS_SH_ACQUISITION_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
+    ...(availability.skillRegistryAvailable ||
+        availability.acquiredSkillsAvailable
+      ? []
+      : SKILL_SCRIPT_TOOL_IDS),
     ...(availability.docsCorpusAvailable ? [] : DOCS_CORPUS_TOOL_IDS),
     ...(availability.loomAuthoringAvailable ? [] : LOOM_AUTHORING_TOOL_IDS),
   ]);
