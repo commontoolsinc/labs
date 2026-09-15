@@ -7,7 +7,7 @@
  * storage; resolution through a transaction is `metadata.ts`.
  */
 
-import { taggedHashStringOf } from "@commonfabric/data-model";
+import { deepFreeze, taggedHashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { canonicalizeCfcLabel } from "./canonical.ts";
 import type { IFCLabel } from "./label-view-core.ts";
@@ -19,14 +19,16 @@ import type {
 } from "./types.ts";
 
 /**
- * The byte length of a label's canonical JSON above which a version-2
- * envelope stores it by reference. A reference is 63 bytes, so below two
- * references' worth the saving is under half the label and the document
- * costs more than it saves. Part of the versioned envelope contract: the
- * same label takes the same form wherever it is written, so it hashes to
- * one document rather than existing as two spellings.
+ * The length of a label's canonical JSON, in UTF-8 bytes, above which a
+ * version-2 envelope stores it by reference. A reference is 63 bytes, so
+ * below two references' worth the saving is under half the label and the
+ * document costs more than it saves. Part of the versioned envelope
+ * contract: the same label takes the same form wherever it is written, so
+ * it hashes to one document rather than existing as two spellings.
  */
 export const CFC_LABEL_INLINE_LIMIT = 128;
+
+const utf8 = new TextEncoder();
 
 const CID_PREFIX = "cid:";
 
@@ -55,21 +57,38 @@ export const formatCfcLabelReference = (hash: string): CfcLabelReference => ({
   $ref: `${CID_PREFIX}${hash}`,
 });
 
+const LABEL_MEMBERS = ["confidentiality", "integrity"] as const;
+
+/**
+ * Whether `value` has the shape of a label document's content: a record
+ * whose every member is one of the two label members holding an array.
+ * A record of any other shape hashes like any other value, so the content
+ * hash alone cannot tell a label from a document that merely verifies;
+ * this is the check that keeps a malformed document from resolving as a
+ * label whose members a consumer then reads as empty.
+ */
+export const isCfcLabelDocumentContent = (value: unknown): value is IFCLabel =>
+  isObjectNotArray(value) &&
+  Object.keys(value).every((key) =>
+    (LABEL_MEMBERS as readonly string[]).includes(key) &&
+    Array.isArray(value[key])
+  );
+
 /**
  * The canonical content of a label document: the label with its clauses
  * normalized and every `undefined` member dropped, so a label written with
  * `integrity: undefined` and one written without the member are one
- * document. Only the two label members survive; nothing else of the input
- * reaches the document.
+ * document. Only the two label members survive, each as a fresh array, so
+ * freezing the content leaves the caller's label untouched.
  */
 export const cfcLabelDocumentContent = (label: IFCLabel): IFCLabel => {
   const canonical = canonicalizeCfcLabel(label);
   const content: IFCLabel = {};
   if (canonical.confidentiality !== undefined) {
-    content.confidentiality = canonical.confidentiality;
+    content.confidentiality = [...canonical.confidentiality];
   }
   if (canonical.integrity !== undefined) {
-    content.integrity = canonical.integrity;
+    content.integrity = [...canonical.integrity];
   }
   return content;
 };
@@ -80,12 +99,12 @@ export const cfcLabelDocumentHash = (content: IFCLabel): string =>
 
 /**
  * Whether a label's canonical content is stored by reference in a
- * version-2 envelope: its JSON is longer than {@link CFC_LABEL_INLINE_LIMIT}.
- * A pure function of the content, which is what makes the stored form
- * canonical.
+ * version-2 envelope: its JSON, encoded as UTF-8, is longer than
+ * {@link CFC_LABEL_INLINE_LIMIT} bytes. A pure function of the content,
+ * which is what makes the stored form canonical.
  */
 export const cfcLabelTakesReference = (content: IFCLabel): boolean =>
-  JSON.stringify(content).length > CFC_LABEL_INLINE_LIMIT;
+  utf8.encode(JSON.stringify(content)).length > CFC_LABEL_INLINE_LIMIT;
 
 /** Thrown when a label document's content does not hash to its claimed id. */
 export class CfcLabelDocumentHashMismatchError extends Error {
@@ -94,6 +113,16 @@ export class CfcLabelDocumentHashMismatchError extends Error {
       `CFC label document content does not match its id: claimed \`${claimed}\`, hashed \`${actual}\``,
     );
     this.name = "CfcLabelDocumentHashMismatchError";
+  }
+}
+
+/** Thrown when a value registered as a label document is not label-shaped. */
+export class CfcLabelDocumentMalformedError extends Error {
+  constructor(readonly hash: string) {
+    super(
+      `CFC label document \`${hash}\` does not hold a label: every member must be \`confidentiality\` or \`integrity\` holding an array`,
+    );
+    this.name = "CfcLabelDocumentMalformedError";
   }
 }
 
@@ -108,23 +137,32 @@ onSchemaRegistryClear(() => labelsByHash.clear());
 
 /**
  * Registers `label` as the content of the label document `hash` names,
- * verifying the content against the claim first — a mismatch throws
- * {@link CfcLabelDocumentHashMismatchError} and never enters the registry.
- * Returns the registered label. Registering a hash twice is idempotent by
+ * checking its shape and verifying the content against the claim first —
+ * a malformed value throws {@link CfcLabelDocumentMalformedError}, a
+ * mismatch {@link CfcLabelDocumentHashMismatchError}, and neither enters
+ * the registry. Returns the registered label, deep-frozen: an entry is
+ * shared realm-wide under a hash that names its content, so nothing may
+ * change it after the verification. Freezing is in place, as interning a
+ * schema is; the content a caller registers is a document's value, which
+ * is immutable by contract. Registering a hash twice is idempotent by
  * construction: only one content can verify against it.
  */
 export const registerCfcLabelDocument = (
   hash: string,
   label: IFCLabel,
 ): IFCLabel => {
+  if (!isCfcLabelDocumentContent(label)) {
+    throw new CfcLabelDocumentMalformedError(hash);
+  }
   const actual = cfcLabelDocumentHash(label);
   if (actual !== hash) {
     throw new CfcLabelDocumentHashMismatchError(hash, actual);
   }
   const existing = labelsByHash.get(hash);
   if (existing !== undefined) return existing;
-  labelsByHash.set(hash, label);
-  return label;
+  const frozen = deepFreeze(label);
+  labelsByHash.set(hash, frozen);
+  return frozen;
 };
 
 /**

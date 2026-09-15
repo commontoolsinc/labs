@@ -5586,24 +5586,45 @@ const applyCommitTransaction = (
   // sees: an assembly failure downstream means the patch gap documented
   // above, out-of-band tampering, or a store that predates this
   // validation.
+  // A label document's content is a record whose every member is
+  // `confidentiality` or `integrity` holding an array. The hash alone
+  // cannot tell a label from a record that merely verifies, and a reader
+  // resolving a malformed one would fail closed on every read of the
+  // envelope, so the shape is refused here, where the writer can act on it.
+  const isLabelDocumentShape = (value: unknown): boolean =>
+    value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.entries(value).every(([key, member]) =>
+      (key === "confidentiality" || key === "integrity") &&
+      Array.isArray(member)
+    );
   for (const hash of requiredLabelDocs) {
     const id = `cid:${hash}`;
     // A set in this commit reached here with its content verified against
-    // its id, so it backs the reference by itself.
-    if (cidSetsInCommit?.has(id)) continue;
-    const state = readState(engine, { id, branch });
+    // its id, so what remains to check of it is the shape.
+    const installed = cidSetsInCommit?.has(id)
+      ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
+      : undefined;
+    const state = installed === undefined
+      ? readState(engine, { id, branch })
+      : undefined;
     const storedInner = state?.document === null ||
         state?.document === undefined
       ? undefined
       : (state.document as { value?: unknown }).value;
-    if (storedInner === undefined) {
+    const content = installed ?? storedInner;
+    if (content === undefined) {
       throw new ProtocolError(
         `memory v2 commit references CFC label document ${id} that is neither included in the commit nor stored in the space`,
       );
     }
-    if (taggedHashStringOf(storedInner) !== hash) {
+    if (installed === undefined && taggedHashStringOf(content) !== hash) {
       throw new ProtocolError(
         `memory v2 commit references CFC label document ${id} whose stored content does not verify`,
+      );
+    }
+    if (!isLabelDocumentShape(content)) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} whose content does not hold a label`,
       );
     }
   }

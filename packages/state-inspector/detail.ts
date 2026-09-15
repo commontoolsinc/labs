@@ -196,26 +196,25 @@ function atomLabel(a: unknown): string {
 
 /**
  * The label a stored entry holds: its own when inline, else the value of
- * the `cid:` label document its single-member `$ref` names, looked up
- * among the space's documents. A reference the dump does not hold renders
- * as an empty label.
+ * the `cid:` label document its single-member `$ref` names, read out of the
+ * space. A reference the space does not hold renders as an empty label.
  */
 function storedLabelOf(
   entry: Record<string, unknown>,
-  docs: Map<string, EntityDocument>,
+  readDocument: DetailContext["readDocument"],
 ): Record<string, unknown> {
   const label = isObjectNotArray(entry.label) ? entry.label : {};
   const ref = label.$ref;
   if (typeof ref !== "string" || Object.keys(label).length !== 1) {
     return label;
   }
-  const content = docs.get(ref)?.value;
+  const content = readDocument(ref)?.value;
   return isObjectNotArray(content) ? content : {};
 }
 
 function parseCfc(
   cfc: unknown,
-  docs: Map<string, EntityDocument>,
+  readDocument: DetailContext["readDocument"],
 ): CfcSummary | undefined {
   if (!isObjectNotArray(cfc)) return undefined;
   const out: CfcSummary = {
@@ -228,7 +227,7 @@ function parseCfc(
     : [];
   for (const e of entries) {
     if (!isObjectNotArray(e)) continue;
-    const label = storedLabelOf(e, docs);
+    const label = storedLabelOf(e, readDocument);
     out.entries.push({
       path: Array.isArray(e.path) ? (e.path as string[]).join("/") : "",
       confidentiality: Array.isArray(label.confidentiality)
@@ -320,6 +319,13 @@ interface DetailContext {
 
   moduleIndex: Map<string, ModuleEntry>;
   docs: Map<string, EntityDocument>;
+
+  /**
+   * Reads one document out of the space by id, whether or not the detail
+   * pass scanned it: the pass is capped, and a `cid:` label document has one
+   * revision and so sits past the cap whenever it is exceeded.
+   */
+  readDocument: (id: string) => EntityDocument | undefined;
 }
 
 function refTo(
@@ -451,7 +457,7 @@ function detailFromDoc(
   const ifc = isObjectNotArray(value) && "ifc" in value
     ? annotate(value.ifc)
     : undefined;
-  const cfc = parseCfc(doc.cfc, ctx.docs);
+  const cfc = parseCfc(doc.cfc, ctx.readDocument);
 
   return {
     id,
@@ -590,7 +596,22 @@ export function buildAllDetails(
     labelOf.set(id, { kind: c.kind, label });
   }
 
-  const ctx: DetailContext = { ownDid, labelOf, nameOf, moduleIndex, docs };
+  // Content-addressed documents live at space scope only, so a label
+  // document is read there whatever scope the pass describes.
+  const readDocument = (id: string): EntityDocument | undefined => {
+    const scanned = docs.get(id);
+    if (scanned !== undefined) return scanned;
+    const outcome = reconstructOutcome(space, { id, branch, scope: "space" });
+    return outcome.status === "present" ? outcome.document : undefined;
+  };
+  const ctx: DetailContext = {
+    ownDid,
+    labelOf,
+    nameOf,
+    moduleIndex,
+    docs,
+    readDocument,
+  };
 
   // Pass 3: per-entity detail + version log, read from the branch that OWNS the
   // entity's visible row. An entity a child branch INHERITED has its writes on

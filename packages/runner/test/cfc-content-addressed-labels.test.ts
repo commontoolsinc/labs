@@ -10,6 +10,7 @@ import {
   cfcLabelDocumentContent,
   cfcLabelDocumentHash,
   CfcLabelDocumentHashMismatchError,
+  CfcLabelDocumentMalformedError,
   cfcLabelTakesReference,
   isCfcLabelReference,
   referencedCfcLabelDocumentHashes,
@@ -304,6 +305,14 @@ describe("CFC content-addressed labels", () => {
         confidentiality: [`${atLimit.confidentiality![0]}y`],
       })).toBe(true);
     });
+
+    it("measures the limit in UTF-8 bytes, not string length", () => {
+      // Thirty four-byte characters: 84 code units of JSON, 144 bytes.
+      const wide: IFCLabel = { confidentiality: ["😀".repeat(30)] };
+      expect(JSON.stringify(wide).length).toBeLessThan(CFC_LABEL_INLINE_LIMIT);
+      expect(bytesOf(wide)).toBeGreaterThan(CFC_LABEL_INLINE_LIMIT);
+      expect(cfcLabelTakesReference(wide)).toBe(true);
+    });
   });
 
   describe("label documents", () => {
@@ -333,6 +342,35 @@ describe("CFC content-addressed labels", () => {
           confidentiality: ["other"],
         })
       ).toThrow(CfcLabelDocumentHashMismatchError);
+    });
+
+    it("refuses to register content that is not label-shaped", () => {
+      const malformed = { confidentiality: "secret" };
+      expect(() =>
+        registerCfcLabelDocument(
+          cfcLabelDocumentHash(malformed as unknown as IFCLabel),
+          malformed as unknown as IFCLabel,
+        )
+      ).toThrow(CfcLabelDocumentMalformedError);
+      expect(() =>
+        registerCfcLabelDocument(
+          cfcLabelDocumentHash({ extra: [] } as unknown as IFCLabel),
+          { extra: [] } as unknown as IFCLabel,
+        )
+      ).toThrow(CfcLabelDocumentMalformedError);
+    });
+
+    it("registers labels deep-frozen, so a shared entry cannot change", () => {
+      const content = cfcLabelDocumentContent({
+        confidentiality: [{ type: CFC_ATOM_TYPE.User, subject: did(11) }],
+      });
+      const registered = registerCfcLabelDocument(
+        cfcLabelDocumentHash(content),
+        content,
+      );
+      expect(Object.isFrozen(registered)).toBe(true);
+      expect(Object.isFrozen(registered.confidentiality)).toBe(true);
+      expect(Object.isFrozen(registered.confidentiality![0])).toBe(true);
     });
 
     it("lists the distinct documents a stored map references, in order", () => {
@@ -632,6 +670,26 @@ describe("CFC content-addressed labels", () => {
         const id = writeReferencingEnvelope(runtime, tx, "forged", forgedHash);
         expect(() => readStoredCfcMetadata(tx, { space, id })).toThrow(
           "hashes to",
+        );
+        tx.abort();
+        return Promise.resolve();
+      });
+    });
+
+    it("refuses a label document whose content is not label-shaped", async () => {
+      await withRuntime((runtime) => {
+        const tx = runtime.edit();
+        const malformed = { confidentiality: "secret" };
+        const hash = cfcLabelDocumentHash(malformed as unknown as IFCLabel);
+        tx.writeOrThrow({
+          space,
+          scope: "space",
+          id: `cid:${hash}` as URI,
+          path: [],
+        }, { value: malformed });
+        const id = writeReferencingEnvelope(runtime, tx, "malformed", hash);
+        expect(() => readStoredCfcMetadata(tx, { space, id })).toThrow(
+          "does not hold a label",
         );
         tx.abort();
         return Promise.resolve();

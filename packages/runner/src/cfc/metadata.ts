@@ -10,6 +10,7 @@ import { normalizeCellScope } from "../scope.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import {
   cfcLabelDocumentHash,
+  isCfcLabelDocumentContent,
   isCfcLabelReference,
   lookupCfcLabelDocument,
   parseCfcLabelReference,
@@ -103,11 +104,11 @@ export class UnreadableCfcMetadataError extends StoredCfcMetadataError {
 
 /**
  * A version-2 envelope naming a label document that neither the space nor
- * the realm's label registry can back with content verifying against its
- * id, or naming one outside the `cid:` namespace. The label cannot be
- * produced, so every consumer fails CLOSED on this error, as on an unknown
- * version. Recoverable in principle — the document may arrive by sync — so
- * the failure is never memoized.
+ * the realm's label registry can back with label-shaped content verifying
+ * against its id, or naming one outside the `cid:` namespace. The label
+ * cannot be produced, so every consumer fails CLOSED on this error, as on
+ * an unknown version. Recoverable in principle — the document may arrive
+ * by sync — so the failure is never memoized.
  */
 export class UnresolvableCfcLabelDocumentError extends StoredCfcMetadataError {
   constructor(readonly reference: string, readonly reason: string) {
@@ -164,20 +165,23 @@ const resolveStoredLabel = (
       "the label document is neither stored in the space nor registered",
     );
   }
-  if (!isObjectNotArray(content)) {
+  // Shape before hash: a record that hashes to the id but is not
+  // label-shaped would register as a label whose members a consumer reads
+  // as empty, which is the one reading a stored envelope must never get.
+  if (!isCfcLabelDocumentContent(content)) {
     throw new UnresolvableCfcLabelDocumentError(
       entry.label.$ref,
       "the stored document does not hold a label",
     );
   }
-  const actual = cfcLabelDocumentHash(content as IFCLabel);
+  const actual = cfcLabelDocumentHash(content);
   if (actual !== hash) {
     throw new UnresolvableCfcLabelDocumentError(
       entry.label.$ref,
       `the stored content hashes to \`${actual}\``,
     );
   }
-  return registerCfcLabelDocument(hash, content as IFCLabel);
+  return registerCfcLabelDocument(hash, content);
 };
 
 /**

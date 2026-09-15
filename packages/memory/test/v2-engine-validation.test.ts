@@ -1424,6 +1424,26 @@ Deno.test("validates the label documents a version-2 CFC envelope references", a
       }),
     });
 
+    // A document that verifies against its id but is not label-shaped is
+    // refused as well: the hash cannot tell a label from any other record,
+    // and a reader resolving it would fail closed on every read.
+    const malformed = { confidentiality: "secret" };
+    const malformedHash = taggedHashStringOf(malformed);
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(5, {
+            operations: [
+              docWithLabel(`cid:${malformedHash}`),
+              setOp(`cid:${malformedHash}`, malformed),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "does not hold a label",
+    );
+
     // A patch that lands a reference at the reserved member is collected
     // from the post-patch document like the schema reference is.
     const otherHash = taggedHashStringOf({ confidentiality: ["other"] });
@@ -1431,7 +1451,7 @@ Deno.test("validates the label documents a version-2 CFC envelope references", a
       () =>
         applyCommit(engine, {
           sessionId: "s:a",
-          commit: commit(5, {
+          commit: commit(6, {
             operations: [
               {
                 op: "patch",

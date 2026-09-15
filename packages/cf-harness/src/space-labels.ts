@@ -118,22 +118,23 @@ interface StoredCellLabels {
 /**
  * The label a stored entry holds: the entry's own label when inline, else
  * the value of the `cid:` label document its single-member `$ref` names,
- * read out of the same store. A reference the store cannot back reads as
- * an empty label here — this reader reports what a space holds and
- * enforces nothing, and an entry with a path and no atoms is what says
- * the label could not be read.
+ * read out of the same store. `undefined` for a reference the store cannot
+ * supply a label for — no document, or one holding no record — which the
+ * caller records as an unread path rather than as a label with no atoms:
+ * an entry list is a positive finding about what the space holds, and a
+ * label that could not be read is not a label of nothing.
  */
 const storedLabelOf = (
   raw: Record<string, unknown>,
   read: (id: string) => Record<string, unknown> | undefined,
-): Record<string, unknown> => {
+): Record<string, unknown> | undefined => {
   const label = isRecord(raw.label) ? raw.label : {};
   const ref = label.$ref;
   if (typeof ref !== "string" || Object.keys(label).length !== 1) {
     return label;
   }
   const content = read(ref)?.value;
-  return isRecord(content) ? content : {};
+  return isRecord(content) ? content : undefined;
 };
 
 /**
@@ -144,7 +145,8 @@ const storedLabelOf = (
  * and what they observed, and all of them are kept: the effective label at a
  * path is the join of its components, so dropping one changes the answer. A
  * label the entry holds by reference is read from the label document `read`
- * resolves the reference to.
+ * resolves the reference to; one the store cannot supply is recorded as an
+ * unread path at the entry's path, with the `no-document` reason.
  */
 const labelsOf = (
   document: Record<string, unknown> | undefined,
@@ -159,21 +161,27 @@ const labelsOf = (
     ? labelMap.entries
     : [];
   const entries: HarnessCellLabelEntry[] = [];
+  const unreadPaths: HarnessCellLabelUnreadPath[] = [];
   for (const raw of stored) {
     if (!isRecord(raw)) {
       continue;
     }
+    const entryPath = Array.isArray(raw.path)
+      ? raw.path.filter((segment): segment is string =>
+        typeof segment === "string"
+      )
+      : [];
     const label = storedLabelOf(raw, read);
+    if (label === undefined) {
+      unreadPaths.push({ path: entryPath, reason: "no-document" });
+      continue;
+    }
     const integrity = atomsOf(label.integrity);
     const transformedBy = integrity.find((atom) =>
       atom.type === TRANSFORMED_BY
     );
     entries.push({
-      path: Array.isArray(raw.path)
-        ? raw.path.filter((segment): segment is string =>
-          typeof segment === "string"
-        )
-        : [],
+      path: entryPath,
       confidentiality: atomsOf(label.confidentiality),
       integrity,
       ...(typeof raw.origin === "string" ? { origin: raw.origin } : {}),
@@ -186,6 +194,7 @@ const labelsOf = (
     ...(typeof cfc.schemaHash === "string"
       ? { schemaHash: cfc.schemaHash }
       : {}),
+    ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
   };
 };
 
@@ -477,10 +486,17 @@ const walkLinkedLabels = (
         continue;
       }
       const through = { path, into };
-      for (const entry of labelsOf(document, read).entries) {
+      const labels = labelsOf(document, read);
+      for (const entry of labels.entries) {
         const at = throughLink(through, entry.path);
         if (at !== undefined) {
           entries.push({ ...entry, path: at, source: id });
+        }
+      }
+      for (const unread of labels.unreadPaths ?? []) {
+        const at = throughLink(through, unread.path);
+        if (at !== undefined) {
+          unreadPaths.push({ path: at, reason: unread.reason });
         }
       }
       // A document reached through itself has just had its labels recorded at
@@ -647,11 +663,12 @@ export const openSpaceLabelReader = async (
             `large is usually a cycle.`,
         );
       }
+      const allUnreadPaths = [...(own.unreadPaths ?? []), ...unreadPaths];
       return {
         ...own,
         entries: [...own.entries, ...entries],
         linked,
-        ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
+        ...(allUnreadPaths.length > 0 ? { unreadPaths: allUnreadPaths } : {}),
         ...(truncation !== undefined ? { truncation } : {}),
       };
     },

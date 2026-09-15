@@ -34,6 +34,7 @@ export interface ExpectedPosture {
   declaredMonotonicity?: string;
   triggerReadGating?: boolean;
   decomposedEnvelopes?: boolean;
+  contentAddressedLabels?: boolean;
 
   /** The policy-snapshot digest, or `null` asserting that none is configured. */
   policyDigest?: string | null;
@@ -82,7 +83,11 @@ const RUNG_FIELD_DIALS = {
 const rungLadder = (field: typeof RUNG_FIELDS[number]): readonly string[] =>
   Object.keys(CFC_DIAL_LADDERS[RUNG_FIELD_DIALS[field]]);
 
-const BOOLEAN_FIELDS = ["triggerReadGating", "decomposedEnvelopes"] as const;
+const BOOLEAN_FIELDS = [
+  "triggerReadGating",
+  "decomposedEnvelopes",
+  "contentAddressedLabels",
+] as const;
 
 /** Every field that asserts something, so a spec asserting nothing is caught. */
 const ASSERTING_FIELDS: readonly string[] = [
