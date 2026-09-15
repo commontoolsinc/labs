@@ -137,6 +137,36 @@ function seed(path: string) {
     `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
      VALUES ('of:pref', 'user:did%3Akey%3AzUser', 7, 0, 'set', ?, 7)`,
   ).run(JSON.stringify({ value: { theme: "dark" } }));
+  // a label document, and a document whose version-2 envelope holds one
+  // label by reference to it and one by a reference nothing resolves.
+  commit.run(8, 8);
+  rev.run(
+    "cid:lbl",
+    8,
+    JSON.stringify({ value: { confidentiality: ["room-secret"] } }),
+    8,
+  );
+  commit.run(9, 9);
+  rev.run(
+    "of:labeled",
+    9,
+    JSON.stringify({
+      value: { a: 1, b: 2 },
+      cfc: {
+        version: 2,
+        schemaHash: "fid1:hash",
+        labelMap: {
+          version: 1,
+          entries: [
+            { path: ["a"], label: { $ref: "cid:lbl" }, origin: "declared" },
+            { path: ["b"], label: { $ref: "of:piece" }, origin: "declared" },
+            "bogus",
+          ],
+        },
+      },
+    }),
+    9,
+  );
   db.close();
 }
 
@@ -209,6 +239,21 @@ Deno.test("html explorer: rich bundle + self-contained render", async (t) => {
         ]);
         assert(mod.code, "module should carry source");
       });
+
+      await t.step(
+        "CFC labels held by reference are resolved or marked",
+        () => {
+          const labeled = byId("of:labeled");
+          assert(labeled.cfc, "labeled document should carry cfc");
+          assertEquals(labeled.cfc!.entries.length, 2);
+          assertEquals(labeled.cfc!.entries[0].confidentiality, [
+            "room-secret",
+          ]);
+          assertEquals(labeled.cfc!.entries[0].unresolved, undefined);
+          assertEquals(labeled.cfc!.entries[1].confidentiality, []);
+          assertEquals(labeled.cfc!.entries[1].unresolved, true);
+        },
+      );
 
       await t.step("render is self-contained HTML", () => {
         const html = renderInspectorHtml(bundle);

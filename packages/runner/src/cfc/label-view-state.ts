@@ -1,8 +1,5 @@
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import {
-  readStoredCfcMetadata,
-  UnknownCfcMetadataVersionError,
-} from "./metadata.ts";
+import { readStoredCfcMetadata, StoredCfcMetadataError } from "./metadata.ts";
 import { entryObservationClass } from "./observation-classes.ts";
 import type { CfcAddress, CfcDereferenceTrace, CfcMetadata } from "./types.ts";
 import {
@@ -82,12 +79,13 @@ const deriveCfcLabelViewForAddress = (
       canonicalizeCfcLogicalPath(address.path),
     );
   } catch (error) {
-    // The one error the reader THROWS to fail closed must keep failing
-    // closed here: swallowing it would serve this labeled document as
-    // unlabeled — the exact reading the version guard exists to prevent —
-    // and this view feeds the flow join that decides what a write may
-    // carry. Every other failure keeps the pre-existing no-view answer.
-    if (error instanceof UnknownCfcMetadataVersionError) throw error;
+    // The errors the reader THROWS to fail closed must keep failing
+    // closed here: swallowing one would serve this labeled document as
+    // unlabeled — the exact reading the version guard and the label
+    // resolver exist to prevent — and this view feeds the flow join that
+    // decides what a write may carry. Every other failure keeps the
+    // no-view answer.
+    if (error instanceof StoredCfcMetadataError) throw error;
     return undefined;
   }
 };

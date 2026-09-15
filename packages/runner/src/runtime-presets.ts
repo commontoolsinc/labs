@@ -71,6 +71,8 @@
  * |                            | first-party rollout begins                       |
  * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
  * |                            | reader resolves stored roots' references         |
+ * | cfcContentAddressedLabels  | core-default (off) — flip after every deployed   |
+ * |                            | reader interprets version-2 envelopes            |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
  * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
  * |                            | rollout: observe first, then enforce)            |
@@ -196,6 +198,7 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcWriteFloor",
   "cfcTriggerReadGating",
   "cfcDecomposedEnvelopes",
+  "cfcContentAddressedLabels",
   "cfcPolicyEvaluation",
   "cfcLabelMetadataProtection",
   "cfcDeclaredMonotonicity",
@@ -652,6 +655,8 @@ export const MAX_ENFORCEMENT_SINK_CEILINGS: SinkMaxConfidentiality =
  *   what make that raise conform (strict requires persist).
  * - `cfcDecomposedEnvelopes` — gated on every deployed reader resolving
  *   stored roots' references, a readiness question, not an enforcement one.
+ * - `cfcContentAddressedLabels` — gated the same way, on every deployed
+ *   reader interpreting version-2 envelopes.
  * - `cfcTrustConfig` — deployment-specific declarations; nothing generic to
  *   bundle.
  * - `cfcPrefixProvenanceStats` — measurement, not enforcement.
@@ -780,7 +785,7 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     storageManager: params.storageManager,
     experimental: params.experimental,
     // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
-    // cfcDecomposedEnvelopes /
+    // cfcDecomposedEnvelopes / cfcContentAddressedLabels /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
     // cfcTrustConfig / cfcSinkMaxConfidentiality /

@@ -5350,6 +5350,7 @@ const applyCommitTransaction = (
       return schema;
     });
   };
+  const requiredLabelDocs = new Set<string>();
   // A stored CFC envelope's `schemaHash` is a schema-document reference in
   // everything but spelling: the read side assembles the label envelope
   // through `cid:<schemaHash>`, so a commit that lands metadata without
@@ -5360,11 +5361,39 @@ const applyCommitTransaction = (
   // domain, so it polices backing, not format. A spelling no content can
   // verify against is simply unbackable, and a commit naming it refuses
   // here rather than reading as unreadable later.
+  //
+  // A version-2 envelope names labels by document as well: an entry whose
+  // `label` is a single-member `{ "$ref": "cid:<hash>" }` record reads its
+  // label out of that document, so the commit must back it too — by a
+  // set in this commit, whose content the `cid:` rule below has already
+  // verified, or by a stored document whose value hashes to the id. The
+  // same policy as the schema reference, with the document's own content
+  // hash as the identity check, since a label is not a schema and has no
+  // closure of its own. Those hashes collect into `requiredLabelDocs`,
+  // declared above the schema-reference collector so the two stay one
+  // scan.
   const collectCfcEnvelopeRef = (metadata: unknown): void => {
     if (metadata === null || typeof metadata !== "object") return;
     const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;
-    if (typeof schemaHash !== "string" || schemaHash.length === 0) return;
-    requiredSchemaRefs.add(schemaHash);
+    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+      requiredSchemaRefs.add(schemaHash);
+    }
+    const entries = (metadata as { labelMap?: { entries?: unknown } })
+      .labelMap?.entries;
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      const label = (entry as { label?: unknown } | null)?.label;
+      if (label === null || typeof label !== "object") continue;
+      const keys = Object.keys(label);
+      const ref = (label as { $ref?: unknown }).$ref;
+      if (keys.length !== 1 || typeof ref !== "string") continue;
+      if (!ref.startsWith("cid:") || ref.length === "cid:".length) {
+        throw new ProtocolError(
+          `memory v2 commit writes a CFC label reference \`${ref}\` outside the cid: namespace`,
+        );
+      }
+      requiredLabelDocs.add(ref.slice("cid:".length));
+    }
   };
   // A document's reserved `schema` metadata member is a schema position
   // in the link spelling — a self-contained inline schema, or a single
@@ -5655,6 +5684,49 @@ const applyCommitTransaction = (
         );
       },
     });
+  }
+
+  // A label document's content is a record whose every member is
+  // `confidentiality` or `integrity` holding an array. The hash alone
+  // cannot tell a label from a record that merely verifies, and a reader
+  // resolving a malformed one would fail closed on every read of the
+  // envelope, so the shape is refused here, where the writer can act on it.
+  const isLabelDocumentShape = (value: unknown): boolean =>
+    value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.entries(value).every(([key, member]) =>
+      (key === "confidentiality" || key === "integrity") &&
+      Array.isArray(member)
+    );
+  for (const hash of requiredLabelDocs) {
+    const id = `cid:${hash}`;
+    // A set in this commit reached here with its content verified against
+    // its id, so what remains to check of it is the shape.
+    const installed = cidSetsInCommit?.has(id)
+      ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
+      : undefined;
+    const state = installed === undefined
+      ? readState(engine, { id, branch })
+      : undefined;
+    const storedInner = state?.document === null ||
+        state?.document === undefined
+      ? undefined
+      : (state.document as { value?: unknown }).value;
+    const content = installed ?? storedInner;
+    if (content === undefined) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} that is neither included in the commit nor stored in the space`,
+      );
+    }
+    if (installed === undefined && taggedHashStringOf(content) !== hash) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} whose stored content does not verify`,
+      );
+    }
+    if (!isLabelDocumentShape(content)) {
+      throw new ProtocolError(
+        `memory v2 commit references CFC label document ${id} whose content does not hold a label`,
+      );
+    }
   }
 
   // An identity commit leaves every document it writes as the space

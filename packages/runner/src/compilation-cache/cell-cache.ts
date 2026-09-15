@@ -1519,8 +1519,8 @@ function cellCarriesIntegrity(
   path: readonly (string | number)[] = [],
 ): boolean {
   const link = cell.getAsNormalizedFullLink();
-  // An UnknownCfcMetadataVersionError propagates, deliberately: an
-  // uninterpretable envelope must not read as cacheable-unlabeled.
+  // A `StoredCfcMetadataError` propagates, deliberately: an envelope this
+  // build cannot produce labels from must not read as cacheable-unlabeled.
   const metadata = readStoredCfcMetadata(tx, {
     space: link.space,
     id: link.id,
