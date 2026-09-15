@@ -27,6 +27,11 @@ import {
   schemaTypeOfFabricPrimitive,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
+import {
+  collectExternalSchemaRefHashes,
+  containsExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   resolveScopeKey,
@@ -50,10 +55,6 @@ import {
   isPrimitive,
   isString,
 } from "../../utils/src/types.ts";
-import {
-  collectExternalSchemaRefHashes,
-  containsExternalSchemaRef,
-} from "./schema-decompose.ts";
 import {
   externalResolutionMissCount,
   lookupSchemaDocument,
@@ -2707,20 +2708,19 @@ function loadExternalSchemaDocs(
   // The verdict: every hash transitively reachable from the schema's own
   // refs was collected in this traversal (this call or an earlier one — the
   // per-context set accumulates).
-  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
-  const checked = new Set<string>();
-  while (pendingCheck.length > 0) {
-    const hash = pendingCheck.pop()!;
-    if (checked.has(hash)) continue;
-    checked.add(hash);
-    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
-      return false;
-    }
-    const document = lookupSchemaDocument(hash);
-    if (document === undefined) return false;
-    pendingCheck.push(...collectExternalSchemaRefHashes(document));
-  }
-  return true;
+  const { missing } = walkSchemaDocumentClosure({
+    roots: collectExternalSchemaRefHashes(schema),
+    load: (hash) => {
+      if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+        return undefined;
+      }
+      const document = lookupSchemaDocument(hash);
+      return document === undefined
+        ? undefined
+        : { kind: "verified", schema: document };
+    },
+  });
+  return missing.size === 0;
 }
 
 function loadSchemaDocClosure(
@@ -2729,62 +2729,62 @@ function loadSchemaDocClosure(
   initialHashes: ReadonlySet<string>,
   context: TraversalContext,
 ): void {
-  const pending = [...initialHashes];
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    const address = {
-      space: referrer.space,
-      id: `cid:${hash}` as URI,
-      scope: "space" as const,
-      path: [],
-    };
-    const key = getTrackerKey(address, context.scopeKeyIdentity);
-    if (context.schemaDocsLoaded.has(key)) continue;
-    context.schemaDocsLoaded.add(key);
-    // A plain read: loads the document AND records the dependency, so an
-    // absent document's later arrival re-triggers the reader.
-    const result = tx.read(address);
-    if (result.error !== undefined) {
-      // Absence is the only failure the missing-link-target channel is
-      // for (the followPointer pattern): a permission or transport error
-      // is not a doc to fetch, and reporting it would kick spurious loads.
-      if (result.error.name === "NotFoundError") {
-        context.onMissingLinkTarget?.(
-          {
-            space: address.space,
-            id: address.id,
-            path: [],
-            scope: address.scope,
-          } as NormalizedFullLink,
-          referrer.space,
-        );
+  walkSchemaDocumentClosure({
+    roots: initialHashes,
+    load: (hash) => {
+      const address = {
+        space: referrer.space,
+        id: `cid:${hash}` as URI,
+        scope: "space" as const,
+        path: [],
+      };
+      const key = getTrackerKey(address, context.scopeKeyIdentity);
+      if (context.schemaDocsLoaded.has(key)) return { kind: "settled" };
+      context.schemaDocsLoaded.add(key);
+      // A plain read: loads the document AND records the dependency, so an
+      // absent document's later arrival re-triggers the reader.
+      const result = tx.read(address);
+      if (result.error !== undefined) {
+        // Absence is the only failure the missing-link-target channel is
+        // for (the followPointer pattern): a permission or transport error
+        // is not a doc to fetch, and reporting it would kick spurious loads.
+        if (result.error.name === "NotFoundError") {
+          context.onMissingLinkTarget?.(
+            {
+              space: address.space,
+              id: address.id,
+              path: [],
+              scope: address.scope,
+            } as NormalizedFullLink,
+            referrer.space,
+          );
+        }
+        return undefined;
       }
-      continue;
-    }
-    context.schemaTracker.add(key, REJECTING_SELECTOR);
-    const doc = result.ok.value;
-    if (!isObjectNotArray(doc) || !("value" in doc)) continue;
-    const schemaValue = (doc as { value?: FabricValue }).value;
-    try {
-      const interned = registerSchemaDocument(
-        hash,
-        schemaValue as JSONSchema,
-      );
+      context.schemaTracker.add(key, REJECTING_SELECTOR);
+      const doc = result.ok.value;
+      if (!isObjectNotArray(doc) || !("value" in doc)) return undefined;
+      return {
+        kind: "stored",
+        value: (doc as { value?: FabricValue }).value,
+      };
+    },
+    onVerified: (hash, schema) => {
+      registerSchemaDocument(hash, schema);
       // Loaded in this space and verified.
-      context.schemaDocsAvailable.add(`${address.space}/${hash}`);
-      for (const dep of collectExternalSchemaRefHashes(interned)) {
-        pending.push(dep);
-      }
-    } catch (error) {
-      // Fail closed: the document stays unregistered, so refs to it stay
-      // unresolvable, and nothing below it is followed.
+      context.schemaDocsAvailable.add(`${referrer.space}/${hash}`);
+    },
+    onMissing: (hash, miss) => {
+      // An absent document was reported where its read failed. One that is
+      // not the schema its id names fails closed: it stays unregistered, so
+      // refs to it stay unresolvable, and nothing below it is followed.
+      if (miss !== "mismatch") return;
       logger.warn("traverse", () => [
         "Rejected schema document (content does not match its id):",
-        address.id,
-        error,
+        `cid:${hash}`,
       ]);
-    }
-  }
+    },
+  });
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {

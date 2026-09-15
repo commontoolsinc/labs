@@ -1,12 +1,14 @@
 import { parseCellReference } from "./cell-reference.ts";
-import { encodeJsonPointer } from "./json-pointer.ts";
-export { decodeJsonPointer, encodeJsonPointer } from "./json-pointer.ts";
 import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   isLinkRef,
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import {
+  decodeJsonPointer,
+  encodeJsonPointer,
+} from "@commonfabric/utils/json-pointer";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type CellScope,
@@ -27,6 +29,8 @@ import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
+
+export { decodeJsonPointer, encodeJsonPointer };
 
 /** The scopes an `@scope` suffix on a link handle may name. */
 export const CELL_SCOPE_VALUES: ReadonlySet<string> = new Set([

@@ -7,6 +7,14 @@ import {
   shallowMutableClone,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
+import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
+import {
+  classifySchemaMeta,
+  collectExternalSchemaRefHashes,
+  collectSchemaMetaRefHashes,
+  MalformedSchemaMetaError,
+  SCHEMA_META_MEMBER,
+} from "@commonfabric/data-model-schema/schema-refs";
 import { aclDocId } from "@commonfabric/memory/acl";
 import type {
   CommitPrecondition,
@@ -98,13 +106,6 @@ import {
   storedMetaFields,
 } from "../meta-seam.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
-import {
-  classifySchemaMeta,
-  collectExternalSchemaRefHashes,
-  collectSchemaMetaRefHashes,
-  MalformedSchemaMetaError,
-  SCHEMA_META_MEMBER,
-} from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
@@ -2438,37 +2439,41 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * store — need their documents delivered whatever the flag says.
    */
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {
-    const pending = [rootHash];
-    while (pending.length > 0) {
-      const hash = pending.pop()!;
-      const key = `${space}|${hash}`;
-      if (this.#ensuredSchemaDocs.has(key)) continue;
-      this.#ensuredSchemaDocs.add(key);
-      if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
-        continue;
-      }
-      const document = lookupSchemaDocument(hash);
-      if (document === undefined) {
+    walkSchemaDocumentClosure({
+      roots: [rootHash],
+      load: (hash) => {
+        const key = `${space}|${hash}`;
+        if (this.#ensuredSchemaDocs.has(key)) return { kind: "settled" };
+        this.#ensuredSchemaDocs.add(key);
+        if (this.tx.isContentAddressedDocPersisted?.(space, hash) === true) {
+          return { kind: "settled" };
+        }
+        const document = lookupSchemaDocument(hash);
+        return document === undefined
+          ? undefined
+          : { kind: "verified", schema: document };
+      },
+      onVerified: (hash, document) => {
+        this.#runPrivilegedSystemWrite(() => {
+          this.writeOrThrow(
+            {
+              space,
+              id: `cid:${hash}` as URI,
+              type: "application/json",
+              path: [],
+            },
+            { value: document },
+          );
+        });
+      },
+      onMissing: (hash) => {
         logger.warn(
           "schema-doc-materialize",
           "A staged reference names a schema document the registry cannot supply:",
           `cid:${hash}`,
         );
-        continue;
-      }
-      this.#runPrivilegedSystemWrite(() => {
-        this.writeOrThrow(
-          {
-            space,
-            id: `cid:${hash}` as URI,
-            type: "application/json",
-            path: [],
-          },
-          { value: document },
-        );
-      });
-      pending.push(...collectExternalSchemaRefHashes(document));
-    }
+      },
+    });
   }
 
   /**

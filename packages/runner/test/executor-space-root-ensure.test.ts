@@ -45,10 +45,12 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
+import {
+  collectExternalSchemaRefHashes,
+} from "@commonfabric/data-model-schema/schema-refs";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { SessionFactory, SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
-import { collectExternalSchemaRefHashes } from "../src/schema-decompose.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
