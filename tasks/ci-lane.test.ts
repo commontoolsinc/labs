@@ -1592,18 +1592,17 @@ describe("what a lane records about itself", () => {
     // reader that took it apart itself could not part company with the
     // writer.
     expect(batchMeasurement(batchMeasurementName("workspace-unit", false)))
-      .toEqual({ suite: "workspace-unit", measured: false });
+      .toEqual({ suite: "workspace-unit", measured: false, kind: "spent" });
     expect(batchMeasurement(batchMeasurementName("workspace-unit", true)))
-      .toEqual({ suite: "workspace-unit", measured: true });
+      .toEqual({ suite: "workspace-unit", measured: true, kind: "spent" });
     expect(batchMeasurement("ci-lane setup deno")).toBeUndefined();
     expect(batchMeasurement("ci-lane batch ")).toBeUndefined();
   });
 
   it("names what a measured batch cost apart from an unmeasured one", async () => {
     // Instrumenting a run costs it time, and how much is a property of
-    // the suite rather than a constant. One correction fitted over both
-    // would charge every unmeasured run part of what an instrumented one
-    // costs, and charge a measured one less than it takes.
+    // the suite rather than a constant, so the name records which kind of
+    // run the measurement came from.
     const spooledNames = async (coverage?: { dir: string }) => {
       const workDir = await Deno.makeTempDir({ prefix: "lane-measured-" });
       const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });

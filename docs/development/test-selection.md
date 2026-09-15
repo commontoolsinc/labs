@@ -245,6 +245,8 @@ setting to fix.
 | `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
 | `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
 | `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
+| `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between two batches' charges. Down when a suite's real slope is going unbelieved for too long; up when a slope fitted inside a narrow range is being read far outside it. |
+| `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `FLAKE_EXCLUSION_RATE` | 0.005 | share of runs | chosen | Up when fewer tests should be held back from pull requests; down when flakes are still blocking people. |
 | `FLAKE_MIN_EXECUTIONS` | 2 | runs of one item | chosen | What an item that has ever disagreed runs. Down to one when the cheapest evidence of intermittency is not worth a second execution; nowhere useful above two, since the line through the anchor covers everything flakier. |
 | `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |
@@ -504,6 +506,15 @@ enumerates them and no lane can be asked to run one, so no suite has a
 unit for them and none should. `isLaneMeasurement` is what says so, and
 everything that reads a recorded identity asks it: the drift guard, the
 publisher, and the list the publisher keeps from one run to the next.
+
+Left out of everything scored, they are not discarded. The publisher
+keeps them in its rolling aggregate over `COST_WINDOW_DAYS`, the same
+window it measures a test's cost over, and fits `setupCost`,
+`suiteOverhead` and `correction` from them for the next manifest. A lane
+writes one record per capability it opens and two per batch — what it
+was packed to spend, and what it spent — and it is the pair that makes a
+fit possible, since what the packer expected the tests to take cannot be
+recovered from the records the batch produced.
 
 The publisher leaves all of those out rather than putting an entry in the
 manifest that no lane could run. The next record that says enough puts the

@@ -2113,13 +2113,34 @@ publishes the result in the next manifest. Both start at zero and one
 respectively, and converge within a few days of lanes running. Two numbers
 per suite, both measured, neither maintained by hand.
 
+The intercept is then raised until no batch anybody has seen is
+under-predicted, because a least-squares line sits in the middle of its
+observations and half the lanes would otherwise run past the budget they
+were packed against. The slope is fitted at all only once a suite has
+enough batches, charged far enough apart, for a slope to mean something:
+it is read far outside the range it was fitted over, since a suite
+charged six seconds in every batch anybody has seen may be charged
+thousands the first time a lane packs it whole. Nothing bounds it from
+above. A slope fitted too high only over-charges, and what a bound took
+off it would land on the intercept, which a lane pays to run one test of
+the suite where the slope is charged in proportion.
+
 The measurements travel through the machinery that already exists: the
-lane runner writes them as ordinary test records of kind `gate` and scope
-`ci`, named `ci-lane setup <capability>` and `ci-lane batch <suite>`. They
-ship in the lane's normal test-records artifact, the relay stores them
-like anything else, and the publisher reads them with the same reader it
-uses for everything else. No new pipeline, and the numbers show up in the
-existing dashboards for free.
+lane runner writes them as ordinary test records of kind `gate` and
+scope `ci`, named `ci-lane setup <capability>` and `ci-lane batch
+<suite>`. A batch is written twice, the second named `ci-lane planned
+batch <suite>`, because what the packer expected its tests to take
+cannot be recovered from the records the batch produced: those say what
+the tests took and not what the packer thought they would. A batch run
+with coverage on carries `with coverage` on the end of its name, because
+instrumenting a run costs it time and how much is a property of the
+suite. A calibration is keyed by suite alone, so the two are fitted
+together for now and an uninstrumented batch is charged what an
+instrumented one cost; telling them apart wants a calibration keyed by
+both. They ship in the lane's normal test-records artifact, the relay
+stores them like anything else, and the publisher reads them with the
+same reader it uses for everything else. No new pipeline, and the
+numbers show up in the existing dashboards for free.
 
 ### The budget, and why it is derived rather than chosen
 
