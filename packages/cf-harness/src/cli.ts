@@ -286,6 +286,9 @@ export interface CfHarnessCliCapabilities {
   builtinToolIds: readonly BuiltinToolId[];
   subagentProfiles: readonly HarnessSubagentProfile[];
   nativeModelToolIds: readonly string[];
+  nativeModelToolIdsByProvider: Readonly<
+    Record<HarnessModelProviderId, readonly string[]>
+  >;
   modelProviders: readonly HarnessModelProviderId[];
   authProviders: readonly string[];
   features: {
@@ -675,6 +678,16 @@ const uniqueStrings = <T extends string>(
   values: readonly T[],
 ): readonly T[] => [...new Set(values)];
 
+const nativeModelToolsForProvider = (
+  provider: HarnessModelProviderId,
+): readonly string[] =>
+  uniqueStrings(
+    HARNESS_SUBAGENT_PROFILES.flatMap((profile) =>
+      getHarnessSubagentProfileConfig(profile, provider).nativeModelToolIds ??
+        []
+    ),
+  );
+
 export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
   type: "cf-harness.capabilities",
   version: 1,
@@ -686,11 +699,16 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
   parentToolIds: [...CLI_PARENT_TOOL_IDS],
   builtinToolIds: BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId),
   subagentProfiles: [...HARNESS_SUBAGENT_PROFILES],
-  nativeModelToolIds: uniqueStrings(
-    HARNESS_SUBAGENT_PROFILES.flatMap((profile) =>
-      getHarnessSubagentProfileConfig(profile).nativeModelToolIds ?? []
+  nativeModelToolIds: uniqueStrings([
+    ...nativeModelToolsForProvider("openai-compatible-gateway"),
+    ...nativeModelToolsForProvider("openai-codex"),
+  ]),
+  nativeModelToolIdsByProvider: {
+    "openai-compatible-gateway": nativeModelToolsForProvider(
+      "openai-compatible-gateway",
     ),
-  ),
+    "openai-codex": nativeModelToolsForProvider("openai-codex"),
+  },
   modelProviders: ["openai-compatible-gateway", "openai-codex"],
   authProviders: ["openai-codex"],
   features: {

@@ -119,7 +119,10 @@ readiness.
   Codex subscription transport. Gateway `gpt-*` turns use the Responses API,
   which accepts function tools together with reasoning; provider-native tools
   and non-OpenAI models use chat completions, which cannot serve that
-  combination. Native model tools are declared separately in either case.
+  combination. Codex's `web_search` child instead inherits its parent's model
+  and subscription owner and requests hosted Responses web search. Native model
+  tools are declared separately in either case, with provider-specific profile
+  resolution captured in policy and provenance.
 - Provider and credentials: versioned private provider configuration and Codex
   credentials live beneath `CF_HARNESS_HOME`. Provider resolution is explicit; a
   broken Codex binding does not fall back to gateway billing or retention. The

@@ -1,9 +1,11 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { JSONSchema } from "@commonfabric/api";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
 import {
-  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
-  type LLMNativeModelToolId,
-} from "@commonfabric/llm/types";
+  type HarnessNativeModelToolId,
+  type HarnessOpenAIWebSearchResult,
+  OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL,
+} from "./native-model-tool.ts";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type {
   HarnessModelAuthSource,
@@ -295,7 +297,7 @@ export type HarnessDelegableSubagentProfile =
   typeof HARNESS_SUBAGENT_PROFILES[number];
 export type HarnessSubagentProfile = HarnessDelegableSubagentProfile;
 export type HarnessSubagentModelSource = "parent" | "profile";
-export type HarnessNativeModelToolId = LLMNativeModelToolId;
+export type { HarnessNativeModelToolId } from "./native-model-tool.ts";
 export type HarnessSubagentRunStatus = "completed" | "failed";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
@@ -426,8 +428,10 @@ export const isHarnessSubagentProfile = (
 ): input is HarnessDelegableSubagentProfile =>
   (HARNESS_SUBAGENT_PROFILES as readonly string[]).includes(input);
 
+/** Resolves the profile against the run's provider before policy is captured. */
 export const getHarnessSubagentProfileConfig = (
   profile: HarnessSubagentProfile,
+  provider: HarnessModelProviderId = "openai-compatible-gateway",
 ): HarnessSubagentProfileConfig => {
   switch (profile) {
     case DEFAULT_SUBAGENT_PROFILE:
@@ -437,6 +441,14 @@ export const getHarnessSubagentProfileConfig = (
     case WEB_FETCH_SUBAGENT_PROFILE:
       return WEB_FETCH_SUBAGENT_PROFILE_CONFIG;
     case WEB_SEARCH_SUBAGENT_PROFILE:
+      if (provider === "openai-codex") {
+        const { modelOverride: _modelOverride, ...config } =
+          WEB_SEARCH_SUBAGENT_PROFILE_CONFIG;
+        return {
+          ...config,
+          nativeModelToolIds: [OPENAI_WEB_SEARCH_NATIVE_MODEL_TOOL],
+        };
+      }
       return WEB_SEARCH_SUBAGENT_PROFILE_CONFIG;
     case PATTERN_AUTHOR_SUBAGENT_PROFILE:
       return PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG;
@@ -562,6 +574,9 @@ export interface HarnessSubagentResult {
   runState: HarnessSubagentRunStateSummary;
   manifest: HarnessSubagentRunManifest;
   structuredReturn?: HarnessSubagentStructuredReturn;
+
+  /** Cited sources survive structured returns without changing their schema. */
+  nativeModelToolResults?: HarnessOpenAIWebSearchResult[];
 }
 
 interface HarnessSubagentRunRefBase {
