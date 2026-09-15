@@ -30,6 +30,15 @@ member names end to end: allocation, resolution at the CLI, the shell opening
 being finished.** Five things are outstanding, and each still needs
 execution.
 
+**Decided 2026-09-15: each member stores its own member name.** For decision 14
+and for #7439 (items 1 and 2 below), this means a member no longer needs the
+board's names table for its own name. Items 1 and 2, and decisions 13 and 14,
+carry the details of the wiring the names table is part of.
+[The lenient-naming experiment record](../history/plans/collection-naming-lenient-naming-experiment-2026-09-14.md)
+holds the evidence behind the decision: a member reading its name through the
+board's table, and what it took to bind the board onto members filed before
+the namespace.
+
 1. **Decision 14 — a member takes one input naming its board.** Ruled, and
    measured buildable in
    [the board-demand measurement](../history/plans/collection-naming-board-demand-measurement-2026-09-07.md):
