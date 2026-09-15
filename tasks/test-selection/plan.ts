@@ -652,8 +652,16 @@ function excused(manifest: Manifest): Manifest["withheld"] {
  * lanes do, so there is no second packing anywhere that could disagree
  * with the first.
  *
- * The search starts at the fewest lanes the work could conceivably fit
- * in and adds one while that helps. What it measures is the total by
+ * The search starts at what the work divided by a lane's budget comes to
+ * and moves in both directions: down while dropping a lane costs under a
+ * second, then up while adding one buys at least that. Both directions
+ * are needed because that starting figure is an estimate rather than a
+ * bound — it charges every execution the packer was asked for, and the
+ * packer gives up runs to fit — so it can land either side of the
+ * answer, and a search that only climbed would keep whatever it
+ * overshot by.
+ *
+ * What it measures is the total by
  * which the lanes are over budget rather than the worst single lane: a
  * test costing more than a whole lane holds its own lane over budget at
  * every count, so the worst lane stops moving while every other lane is
@@ -698,14 +706,22 @@ export function fullLaneCount(
       0,
     );
   let best = overrun(packed(count));
-  // Fewer lanes first, while every lane still holds what it was given.
-  // The figure above charges every execution the packer was asked for
-  // and the packer gives up runs to fit, so it can land past the fewest
+  // Fewer lanes first, while dropping one costs under a second. The
+  // figure above charges every execution the packer was asked for and
+  // the packer gives up runs to fit, so it can land past the fewest
   // lanes that carry the run, and the climb below never comes back down.
   // Leaving it there costs the default branch a job per commit for each
   // lane the estimate overshot by.
-  while (best === 0 && count > 1 && overrun(packed(count - 1)) === 0) {
+  //
+  // Measured against the overrun rather than against zero, because an
+  // identity costing more than a lane holds overruns at every count, so
+  // a run holding one would never shrink at all. What a lane has to buy
+  // to be worth keeping is the same second the climb below makes it buy.
+  while (count > 1) {
+    const fewer = overrun(packed(count - 1));
+    if (fewer >= best + 1) break;
     count -= 1;
+    best = fewer;
   }
   while (best > 0 && count < most) {
     const next = overrun(packed(count + 1));

@@ -1986,14 +1986,17 @@ tests, once per commit; the first rule multiplies that by the count. A
 nobody anything they did not already know, and several times per commit it
 tells them nothing several times.
 
-The rule is for tests and not for repository gates. Formatting, linting,
-the cycle check and the drift guard are withheld from pull requests by the
-same threshold as everything else, and a gate is exactly where this must
-not reach: a gate's failure is a statement about the tree rather than
-about one change, and the drift guard is what this design leans on to
-notice a suite that has silently stopped running. So the lane reads a
-`reason` of `flaky` on a withheld entry whose unit is a test, and every
-other withheld entry gates as it does today. Reading membership of the
+The rule reaches a repository gate like anything else. Formatting,
+linting, the cycle check and the drift guard are withheld from pull
+requests by the same threshold as everything else and excused on the
+default branch by the same one. A gate introspects the tree where a test
+runs the code, which decides what it reads and how it is invoked and
+nothing about what its failures are worth to a change: a gate that
+disagrees with itself fails somebody's change for something its author
+cannot act on, which is what the threshold answers. What asks for such a
+gate to be fixed is the flake tile, the same thing that asks for a flaky
+test. So the lane reads a `reason` of `flaky` on a withheld entry, and an
+entry held back for any other reason gates. Reading membership of the
 withheld set instead would make every reason somebody adds later
 non-gating without anybody deciding it.
 
@@ -3611,9 +3614,9 @@ The full run's treatment of a flaky test is tested at both ends. In
 `plan()`, a withheld and independent identity is placed under the
 `everything` policy with the count its share asks for and named in
 `nonGating`; a withheld identity without the independence flag is placed
-once; a withheld gate is named in neither; and an identity whose runs do
-not fit gives them up until they do rather than putting its lane past the
-bound. In the lane runner, a fixture of batch results and records proves
+once; a withheld entry whose reason is not `flaky` is held back and not
+named in `nonGating`; and an identity whose runs do not fit gives them up
+until they do rather than putting its lane past the bound. In the lane runner, a fixture of batch results and records proves
 four cases: a batch failing only on non-gating identities does not fail the
 lane, a batch failing on one other identity does, a batch failing on a
 non-gating identity in one run and not another does not, and a batch that

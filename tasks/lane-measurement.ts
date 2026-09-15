@@ -47,6 +47,12 @@ export function batchMeasurementName(
  * it. Nothing else for the name: a reader that took it apart itself
  * would be a second answer to how it is composed, and the two would
  * part company the first time either moved.
+ *
+ * A suite whose id ended with the suffix would be read as a shorter
+ * suite's measured run, and the two would be fitted as one.
+ * `tasks/test-topology.test.ts` holds the topology to naming no such
+ * suite, which is cheaper than escaping every id for a collision no
+ * identifier in the tree comes near.
  */
 export function batchMeasurement(
   name: string,

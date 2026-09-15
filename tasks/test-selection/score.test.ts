@@ -960,6 +960,26 @@ describe("a main failure resolved in a later batch", () => {
     expect(state.flakesByDay["2026-08-20"]).toBeUndefined();
     expect(state.mainCatches).toBe(1);
   });
+
+  it("is nothing at all when the failure is older than the window", () => {
+    // A failure nothing has judged for the longest window a state keeps
+    // is one the default branch has carried for that long, and the
+    // change that passes now did not fix it. A fold resolves every
+    // observation it reads before it ages anything, so the age is
+    // checked here as well as in `trimWindows`.
+    const context = emptyContext();
+    const first = foldObservations([
+      saw("fail", { commit: "c1", day: "2026-01-01" }),
+    ], { context });
+    const second = foldObservations([
+      saw("pass", { commit: "c2", day: "2026-08-20" }),
+    ], { context, prior: first });
+    const state = second.get(KEY)!;
+    expect(state.mainCatches).toBe(0);
+    expect(state.flakesByDay["2026-01-01"]).toBeUndefined();
+    // And the wait is over either way, so nothing keeps accumulating.
+    expect(state.pendingMain).toEqual([]);
+  });
 });
 
 describe("a failure seen from many places at once", () => {

@@ -341,6 +341,20 @@ describe("coverage-report", () => {
       expect([...await markedSets("/nonexistent-coverage-artifacts")])
         .toEqual([]);
     });
+
+    it("refuses a reports directory it cannot walk", async () => {
+      // An absent directory is a run whose lanes uploaded nothing, which
+      // is ordinary. Anything else is a failure worth ending on rather
+      // than reading as a run that marked nothing.
+      const root = await Deno.makeTempDir({ prefix: "coverage-report-" });
+      const at = path.join(root, "not-a-directory");
+      await Deno.writeTextFile(at, "");
+      try {
+        await expect(markedSets(at)).rejects.toThrow();
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
   });
 
   describe("measuredSetFigures()", () => {

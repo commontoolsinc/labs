@@ -28,6 +28,7 @@ import {
   main,
   manifestMoment,
   markMeasuredFailures,
+  measuredSetOfReport,
   parseLaneArgs,
   runBatch,
   runInvocation,
@@ -1906,18 +1907,9 @@ describe("reading a batch's records against what it was asked to run", () => {
     expect(found).toEqual({
       gating: [],
       excused: [],
-      silent: [],
       unaccounted: [],
       failedUnits: [],
     });
-  });
-
-  it("names a unit that recorded nothing at all", () => {
-    // A unit runs its tests or it does not. Nothing recorded is a
-    // runner that ran none of it, which is the one way a lane could
-    // pass over a set no run covered.
-    const found = accountFor(batch(), asked("glaze > sets"), [], new Set());
-    expect(found.silent).toEqual([UNIT]);
   });
 
   it("keeps a failure the run fails for apart from one it excuses", () => {
@@ -1944,23 +1936,6 @@ describe("reading a batch's records against what it was asked to run", () => {
       new Set(),
     );
     expect(found.gating.length).toBe(1);
-  });
-
-  it("reads a record no suite locates as saying nothing about a unit", () => {
-    // A record outside the suite's own surfaces belongs to no unit of
-    // it, so it cannot stand in for one having run.
-    const found = accountFor(
-      batch(),
-      asked("glaze > sets"),
-      [{
-        line: "record",
-        test: { k: "unit", s: "pantry", n: "elsewhere" },
-        outcome: "pass",
-        durationMs: 1,
-      }],
-      new Set(),
-    );
-    expect(found.silent).toEqual([UNIT]);
   });
 
   it("names the unit a failure was seen in, excused or not", () => {
@@ -1990,7 +1965,6 @@ describe("reading a batch's records against what it was asked to run", () => {
     expect(found.unaccounted).toEqual([
       testIdentityKey({ k: "unit", s: "bakery", n: "glaze > sets" }),
     ]);
-    expect(found.silent).toEqual([]);
   });
 
   it("reads only the selections its own suite was given", () => {
@@ -2016,13 +1990,17 @@ describe("reading a batch's records against what it was asked to run", () => {
       const log = console.log;
       console.log = (line: string) => lines.push(line);
       try {
-        describeAccounting("workspace-unit", {
-          gating: [],
-          excused: ["unit\tbakery\tflaky"],
-          silent: [UNIT],
-          unaccounted: [],
-          failedUnits: [],
-        }, excusing);
+        describeAccounting(
+          "workspace-unit",
+          {
+            gating: [],
+            excused: ["unit\tbakery\tflaky"],
+            unaccounted: [],
+            failedUnits: [],
+          },
+          excusing,
+          [UNIT],
+        );
       } finally {
         console.log = log;
       }
@@ -2044,13 +2022,17 @@ describe("reading a batch's records against what it was asked to run", () => {
     const log = console.log;
     console.log = (line: string) => lines.push(line);
     try {
-      describeAccounting("workspace-unit", {
-        gating: ["unit\tbakery\tglaze > burns"],
-        excused: ["unit\tbakery\tflaky"],
-        silent: [UNIT],
-        unaccounted: ["unit\tbakery\tglaze > sets"],
-        failedUnits: [UNIT],
-      }, false);
+      describeAccounting(
+        "workspace-unit",
+        {
+          gating: ["unit\tbakery\tglaze > burns"],
+          excused: ["unit\tbakery\tflaky"],
+          unaccounted: ["unit\tbakery\tglaze > sets"],
+          failedUnits: [UNIT],
+        },
+        false,
+        [UNIT],
+      );
     } finally {
       console.log = log;
     }
@@ -2074,13 +2056,17 @@ describe("reading a batch's records against what it was asked to run", () => {
     const log = console.log;
     console.log = (line: string) => lines.push(line);
     try {
-      describeAccounting("workspace-unit", {
-        gating: [],
-        excused: [],
-        silent: [],
-        unaccounted: [],
-        failedUnits: [UNIT],
-      }, true);
+      describeAccounting(
+        "workspace-unit",
+        {
+          gating: [],
+          excused: [],
+          unaccounted: [],
+          failedUnits: [UNIT],
+        },
+        true,
+        [],
+      );
     } finally {
       console.log = log;
     }
@@ -2375,6 +2361,44 @@ describe("what a lane does with the batches it was given", () => {
     }
   });
 
+  it("fails when a later execution ran nothing and said so with a zero", async () => {
+    // The exit status cannot answer this one: the second execution
+    // reports success having run none of its unit, and the first
+    // execution's record of that unit sits in the same list. Only a
+    // reader that keeps the executions apart sees that one of them ran
+    // nothing, and a repeated unit is exactly what a flaky identity is
+    // given.
+    const counter = await Deno.makeTempFile({ prefix: "lane-quiet-" });
+    const manifest = withholding();
+    manifest.entries[0]!.repeats = 2;
+    try {
+      const { ok } = await run([
+        Deno.execPath(),
+        "eval",
+        `const dir = Deno.env.get("CF_TEST_RECORDS_DIR");
+         const at = ${JSON.stringify(counter)};
+         const before = Number(Deno.readTextFileSync(at) || "0");
+         Deno.writeTextFileSync(at, String(before + 1));
+         if (before === 0) {
+           Deno.mkdirSync(dir, { recursive: true });
+           Deno.writeTextFileSync(
+             \`\${dir}/fragment-\${crypto.randomUUID()}.ndjson\`,
+             JSON.stringify({
+               line: "record",
+               test: { k: "unit", s: "bakery", n: "glaze > sets" },
+               outcome: "pass",
+               durationMs: 1,
+             }) + "\\n",
+           );
+         }`,
+      ], { full: true, manifest });
+      expect(ok).toBe(false);
+      expect(Deno.readTextFileSync(counter)).toBe("2");
+    } finally {
+      await Deno.remove(counter);
+    }
+  });
+
   it("fails for an excused failure beside an identity nothing accounts for", async () => {
     // An invocation that recorded a withheld failure and then stopped
     // has run almost nothing while satisfying any weaker test, so the
@@ -2582,6 +2606,17 @@ describe("converting what a lane collected", () => {
   function measuring(id: string, member: string, units: string[]): Suite {
     return suite({ id, units, measured: [{ member, units, reachedBy: [] }] });
   }
+
+  it("belongs to no set where the path is outside the report layout", () => {
+    // Every reader of a downloaded artifact walks files the lanes never
+    // wrote, so saying which set a path is under has to have an answer
+    // for "none of them".
+    expect(measuredSetOfReport("lane-1/notes.txt")).toBeUndefined();
+    expect(measuredSetOfReport(`lane-1/${COVERAGE_REPORT_DIR}/a/b/c/d.lcov`))
+      .toBeUndefined();
+    expect(measuredSetOfReport(`x/${COVERAGE_REPORT_DIR}/suite/member/r.lcov`))
+      .toBe("suite/member");
+  });
 
   it("marks a set whose unit the lane saw fail", async () => {
     // A run that excused a flaky failure stays green, so nothing

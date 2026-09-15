@@ -162,8 +162,13 @@ is what measures and writes them, over a directory holding the lanes'
 uploaded coverage:
 
 ```
-deno run -A tasks/coverage-report.ts --reports <directory>
+deno run -A tasks/coverage-report.ts --reports <directory> \
+  --run-id 1 --sha $(git rev-parse HEAD) --created-at $(date -u +%FT%TZ)
 ```
+
+The run's identity is required rather than defaulted, because the gate
+looks a baseline up by the commit it was measured at and a figure stamped
+with none matches nothing.
 
 One set can come out of that with no baseline. A lane that saw a unit of
 a measured set fail writes a marker beside that set's report, and the

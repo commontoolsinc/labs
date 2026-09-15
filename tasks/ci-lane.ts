@@ -145,7 +145,11 @@ export const COVERAGE_REPORT_FILE = "coverage.lcov";
 export function measuredSetOfReport(at: string): string | undefined {
   const layout = COVERAGE_REPORT_DIR.split("/");
   const parts = at.replaceAll("\\", "/").split("/");
-  const start = parts.findIndex((_, index) =>
+  // The last occurrence rather than the first: a lane whose coverage
+  // directory itself lies under a path spelling the layout would
+  // otherwise be read from the wrong one, and every report under it
+  // dismissed.
+  const start = parts.findLastIndex((_, index) =>
     parts.slice(index, index + layout.length).join("/") === COVERAGE_REPORT_DIR
   );
   if (start === -1) return undefined;
@@ -616,11 +620,17 @@ export async function runBatch(
   conflicts: TestRecord[];
   seconds: number;
   unexplained: number;
+  silent: string[];
 }> {
   const records: TestRecord[] = [];
   const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
+  // Units an execution was asked to run and recorded nothing for. Only
+  // this loop can answer that: a unit runs its tests or it does not, and
+  // a reader taking the batch's records as one list sees the execution
+  // that ran beside the one that did not and cannot tell them apart.
+  const silent = new Set<string>();
   // Executions that ended badly having recorded no failure of their own,
   // which is a failure somewhere the records cannot see: a runner that
   // could not start, a command that died before reporting.
@@ -636,7 +646,11 @@ export async function runBatch(
     const outputDir = path.join(workDir, `${batch.suite.id}-${run}`);
     const batchSpool = path.join(outputDir, "spool");
     await Deno.mkdir(batchSpool, { recursive: true });
-    const invocations = await batch.suite.command(unitsForRun(batch, run), {
+    const asked = unitsForRun(batch, run);
+    // The units this execution recorded anything at all for, gathered
+    // across whatever invocations the suite splits it into.
+    const heard = new Set<string>();
+    const invocations = await batch.suite.command(asked, {
       root: options.root,
       outputDir,
       spoolDir: batchSpool,
@@ -680,10 +694,17 @@ export async function runBatch(
       ) {
         unexplained += 1;
       }
+      for (const record of collected.records) {
+        const location = batch.suite.locate(record);
+        if (location?.level === "unit") heard.add(location.unit);
+      }
       records.push(...collected.records);
       conflicts.push(...collected.conflicts);
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
+    }
+    for (const request of asked) {
+      if (!heard.has(request.unit)) silent.add(request.unit);
     }
   }
   if (spool !== undefined) {
@@ -696,7 +717,14 @@ export async function runBatch(
       ),
     ]);
   }
-  return { ok, records, conflicts, seconds, unexplained };
+  return {
+    ok,
+    records,
+    conflicts,
+    seconds,
+    unexplained,
+    silent: [...silent].sort(),
+  };
 }
 
 /** What reading a batch's records against what it was asked to run found. */
@@ -706,14 +734,6 @@ export interface Accounting {
 
   /** Failing identities a flake rate excuses, where they are excused. */
   excused: string[];
-
-  /**
-   * Units the batch was asked to run that recorded nothing at all. A
-   * unit runs its tests or it does not, so a unit with no record is a
-   * runner that ran none of it — a skip list that swallowed the whole
-   * unit, or a command that reported success having done nothing.
-   */
-  silent: string[];
 
   /**
    * Identities the batch was asked to run and no record accounts for.
@@ -740,11 +760,15 @@ export interface Accounting {
  * ever carry its name, because a real record is named for a test rather
  * than for a file.
  *
- * A unit that recorded nothing recorded nothing under any name, and that
- * is the state no run should pass in. An identity that went unaccounted
- * for while its unit recorded is ordinary churn — a manifest is hours old
- * by construction, and a test renamed since records under the new name —
- * so it costs an excusal rather than the run.
+ * An identity that went unaccounted for while its unit recorded is
+ * ordinary churn — a manifest is hours old by construction, and a test
+ * renamed since records under the new name — so it costs an excusal
+ * rather than the run.
+ *
+ * Whether every execution ran what it was asked to is not a question for
+ * this. A batch's records arrive as one list however many executions
+ * wrote them, so only the loop that ran them can tell an execution that
+ * recorded its unit from one that did not; `runBatch` answers that.
  */
 export function accountFor(
   batch: Batch,
@@ -774,13 +798,9 @@ export function accountFor(
         : !heard.has(testIdentityKey(selection.entry.test))
     )
     .map((selection) => testIdentityKey(selection.entry.test));
-  const silent = batch.units
-    .map((request) => request.unit)
-    .filter((unit) => !heardUnits.has(unit));
   return {
     gating: [...new Set(gating)].sort(),
     excused: [...new Set(excused)].sort(),
-    silent: silent.sort(),
     unaccounted: [...new Set(unaccounted)].sort(),
     failedUnits: [...failedUnits].sort(),
   };
@@ -791,6 +811,7 @@ export function describeAccounting(
   suite: string,
   accounting: Accounting,
   excusing: boolean,
+  silent: readonly string[],
 ): void {
   const lines: string[] = [];
   /** One paragraph of the batch's summary, headed and then listed. */
@@ -823,9 +844,9 @@ export function describeAccounting(
     accounting.unaccounted,
   );
   section(
-    `${suite}: ${accounting.silent.length} units recorded nothing, so ` +
-      `nothing ran them:`,
-    accounting.silent,
+    `${suite}: ${silent.length} units an execution recorded nothing for, ` +
+      `so nothing ran them:`,
+    silent,
   );
   if (lines.length > 0) say(lines);
 }
@@ -1267,9 +1288,9 @@ export async function runLane(
       // then stopped has run almost nothing while satisfying any weaker
       // test.
       const excusing = accounting.unaccounted.length === 0;
-      describeAccounting(batch.suite.id, accounting, excusing);
+      describeAccounting(batch.suite.id, accounting, excusing, result.silent);
       if (
-        accounting.gating.length > 0 || accounting.silent.length > 0 ||
+        accounting.gating.length > 0 || result.silent.length > 0 ||
         result.unexplained > 0 ||
         (accounting.excused.length > 0 && !excusing)
       ) {
