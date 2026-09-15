@@ -20,8 +20,9 @@ import {
  * equal rows share a document and a row keeps its document wherever it lands
  * in the result. A row with per-column labels is keyed on its origin table's
  * primary key when the projection carries the whole key from one table, no
- * key column is labeled, and no two rows share a key; a row under a row label,
- * or one without such a key, is keyed on its position. The keys that are not
+ * key column is labeled, the row's key holds no `NULL`, and no two rows share
+ * a key; a row under a row label, or one without such a key, is keyed on its
+ * position. The keys that are not
  * content carry the handle's `tables` declaration, so a stricter
  * re-declaration of a label moves the row to a new document that the commit
  * writes and labels.
@@ -105,7 +106,12 @@ export function resultRowKeys(options: {
     }
     const key: Record<string, unknown> = {};
     for (const [column, output] of primaryKey.outputs) {
-      key[column] = columnValue(row, output);
+      const value = columnValue(row, output);
+      // A key column that is not `INTEGER` admits `NULL`, and rows holding one
+      // are distinct rows that no key tells apart, so such a row is keyed on
+      // its position.
+      if (value === null || value === undefined) return { index, tables };
+      key[column] = value;
     }
     return { table: primaryKey.table, key, tables };
   });

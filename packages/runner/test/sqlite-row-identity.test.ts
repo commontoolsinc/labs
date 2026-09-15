@@ -170,6 +170,28 @@ describe("resultRowKeys()", () => {
     ]);
   });
 
+  it("keys a row whose key holds `NULL` on its position", () => {
+    const textKey = {
+      notes: table({ slug: "text primary key", body: "text" }),
+    };
+    const columns = [
+      { output: "slug", table: "notes", column: "slug" },
+      { output: "body", table: "notes", column: "body" },
+    ];
+    expect(
+      resultRowKeys({
+        rows: [{ slug: "a", body: "x" }, { slug: null, body: "y" }],
+        columns,
+        tables: textKey,
+        columnLabeled: true,
+        rowLabeled: never,
+      }),
+    ).toEqual([
+      { table: "notes", key: { slug: "a" }, tables: textKey },
+      { index: 1, tables: textKey },
+    ]);
+  });
+
   it("keys on position when the origin table declares no primary key", () => {
     const keyless = { notes: table({ id: "integer", body: "text" }) };
     expect(
