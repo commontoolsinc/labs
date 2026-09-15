@@ -237,6 +237,92 @@ describe("codex-native-search", () => {
     expect(JSON.stringify(input.input)).toContain("Filtered answer.");
   });
 
+  it("does not resurrect native evidence a host edited before persisting and resuming", async () => {
+    const assistant = normalizeTerminalResponse(
+      terminal(searchOutput),
+      model,
+      provider,
+      "test",
+    );
+    const native = assistant.nativeModelToolResults![0];
+    if (native.toolId !== "openai_web_search") {
+      throw new Error("Expected Codex evidence");
+    }
+    const edits = [
+      { ...assistant, nativeModelToolResults: [] },
+      { ...assistant, nativeModelToolResults: [{ ...native, sources: [] }] },
+      {
+        ...assistant,
+        nativeModelToolResults: [{
+          ...native,
+          providerMetadata: {
+            searchCalls: [{
+              ...native.providerMetadata.searchCalls[0],
+              action: { type: "search", query: "Host-filtered query" },
+            }],
+          },
+        }],
+      },
+    ];
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const store = await openSqliteHarnessChatSessionStore({
+      url: toFileUrl(path),
+    });
+    const requests: Record<string, unknown>[] = [];
+    const client = new OpenAICodexResponsesClient({
+      credentialResolver: {
+        credentialOwner: owner,
+        resolve: () =>
+          Promise.resolve({
+            type: "oauth",
+            providerId: provider,
+            accessToken: "synthetic-access",
+            refreshToken: "synthetic-refresh",
+            accountId: "synthetic-account",
+            expiresAt: Date.now() + 60000,
+          }),
+      },
+      fetchFn: (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return Promise.resolve(sse([{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Continued." }],
+        }]));
+      },
+    });
+    try {
+      for (const [i, edited] of edits.entries()) {
+        const sessionId = `edited-search-${i}`;
+        store.saveSession({
+          session: createHarnessChatSessionStatus({
+            sessionId,
+            createdAt: "2026-09-15T00:00:00Z",
+            workspace: { hostPath: "/workspace" },
+          }),
+          transcript: [edited],
+        });
+        const restored = store.getSession(sessionId)!.transcript;
+        expect(restored).toEqual([edited]);
+        await client.complete({
+          model,
+          transcript: restored,
+          tools: [],
+          runId: sessionId,
+          nativeModelToolIds: [],
+        });
+        const input = JSON.stringify(requests.at(-1)!.input);
+        expect(input).toContain("A sourced answer.");
+        expect(input).not.toContain("web_search_call");
+        expect(input).not.toContain("url_citation");
+        expect(input).not.toContain("example.test/source");
+      }
+    } finally {
+      store.close();
+      await Deno.remove(path);
+    }
+  });
+
   it("keeps gateway profiles and provider capabilities distinct", () => {
     expect(getHarnessSubagentProfileConfig("web_search")).toMatchObject({
       modelOverride: "gemini-3.5-flash",
@@ -329,7 +415,8 @@ describe("codex-native-search", () => {
     for (
       const calls of [[], [{
         ...assistant.toolCalls![0],
-        function: { name: "read_file", arguments: '{"path":"two"}' },
+        id: "changed_call",
+        function: { name: "changed_reader", arguments: '{"path":"two"}' },
       }]]
     ) {
       const edited = { ...assistant, toolCalls: calls };
@@ -343,8 +430,19 @@ describe("codex-native-search", () => {
       expect(JSON.stringify(reconstructed.input)).not.toContain(
         "web_search_call",
       );
-      expect(reconstructed.input.filter((i) => i.type === "function_call"))
-        .toHaveLength(calls.length);
+      expect(
+        reconstructed.input.filter((i) => i.type === "function_call").map(
+          ({ call_id, name, arguments: args }) => ({
+            call_id,
+            name,
+            arguments: args,
+          }),
+        ),
+      ).toEqual(calls.map((editedCall) => ({
+        call_id: editedCall.id,
+        name: editedCall.function.name,
+        arguments: editedCall.function.arguments,
+      })));
       expect(edited.nativeModelToolResults).toEqual(
         assistant.nativeModelToolResults,
       );
@@ -464,6 +562,34 @@ describe("codex-native-search", () => {
     expect(summary).not.toContain("secret");
     expect(summary.length).toBeLessThan(12000);
   });
+  it("bounds the entire source footer without cutting links and reports omissions", () => {
+    const sources = Array.from({ length: 32 }, (_, index) => ({
+      url: `https://example.test/${index}/` + "x".repeat(4050),
+      title: "Long source " + index,
+    }));
+    sources.push({ url: "https://example.test/short", title: "Short source" });
+    const summary = searchSourceSummary([{
+      type: "cf-harness.native-model-tool-result",
+      toolId: "openai_web_search",
+      provider,
+      providerMetadata: { searchCalls: [] },
+      sources,
+    }]);
+    expect(summary.length).toBeLessThanOrEqual(12000);
+    expect(summary).toContain("omitted");
+    expect(summary).toContain("https://example.test/short");
+    const links = summary.split("\n").filter((line) => line.startsWith("- ["));
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(
+        sources.some((source) =>
+          link === `- [${source.title}](<${source.url}>)`
+        ),
+      ).toBe(true);
+    }
+    expect(sources).toHaveLength(33);
+  });
+
   it("retains citation-only follow-up answers after an earlier search", async () => {
     const output = [searchOutput[2]];
     const assistant = normalizeTerminalResponse(

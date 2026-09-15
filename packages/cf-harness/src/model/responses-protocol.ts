@@ -173,8 +173,8 @@ export const continuationFunctionCallItemId = (
 
 /**
  * Search-bearing output is replayed in its original order only while its
- * assistant projection remains unchanged. Filters may rewrite text or calls;
- * in that case reconstruction must not resurrect the provider's old answer.
+ * assistant projection remains unchanged. Filters may rewrite text, calls, or
+ * native evidence; reconstruction must not resurrect the provider's old answer.
  */
 const unchangedSearchOutput = (
   message: HarnessAssistantTranscriptMessage,
@@ -209,8 +209,8 @@ const unchangedSearchOutput = (
     })
   ) return undefined;
   // Use the same projection as ingestion rather than trusting a second saved
-  // copy of the text or calls. Invalid optional replay state falls back to the
-  // current transcript; it must not replace that transcript with stale text.
+  // copy of the text, calls, or evidence. Invalid optional replay state falls
+  // back to the current transcript rather than replacing it with stale text.
   let projection: HarnessAssistantTranscriptMessage;
   try {
     projection = normalizeTerminalResponse(
@@ -225,7 +225,9 @@ const unchangedSearchOutput = (
   if (
     projection.content !== message.content ||
     JSON.stringify(projection.toolCalls ?? []) !==
-      JSON.stringify(message.toolCalls ?? [])
+      JSON.stringify(message.toolCalls ?? []) ||
+    JSON.stringify(projection.nativeModelToolResults ?? []) !==
+      JSON.stringify(message.nativeModelToolResults ?? [])
   ) return undefined;
   return structuredClone(record.searchOutput);
 };

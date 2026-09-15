@@ -362,6 +362,9 @@ describe("prompt-loop delegate_task skillHandle", () => {
                 );
               } else {
                 expect(JSON.stringify(requests[1])).toContain(returnedToken);
+                const nextParentInput = JSON.stringify(requests[2].input);
+                expect(nextParentInput).toContain(returnedToken);
+                expect(nextParentInput).not.toContain(`${ref}/resource`);
                 expect(evidence.sources[0].title).toBe(returnedToken);
                 expect(evidence.providerMetadata.searchCalls[0].action.query)
                   .toBe(returnedToken);

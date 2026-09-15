@@ -72,12 +72,26 @@ export const searchSourceSummary = (
       source,
     ) => [source.url, source]),
   );
-  const links = [...sources.values()].slice(0, 32).map((source) => {
+  if (sources.size === 0) return "";
+  const heading = "\n\nSources:\n";
+  const omission =
+    "\nAdditional sources omitted; full source evidence is retained.";
+  // Reserve the notice before admitting complete links: no URL is truncated,
+  // and a long destination cannot multiply into an oversized summary footer.
+  let remaining = 12000 - heading.length - omission.length;
+  const links: string[] = [];
+  for (const source of sources.values()) {
+    if (links.length === 32) break;
     const title = source.title.replace(/\s+/g, " ").slice(0, 300).replace(
       /[\\[\]<>]/g,
       "\\$&",
     );
-    return `- [${title || "Source"}](<${source.url}>)`;
-  });
-  return links.length ? `\n\nSources:\n${links.join("\n")}` : "";
+    const link = `- [${title || "Source"}](<${source.url}>)`;
+    const size = link.length + (links.length > 0 ? 1 : 0);
+    if (size > remaining) continue;
+    remaining -= size;
+    links.push(link);
+  }
+  return heading + links.join("\n") +
+    (links.length < sources.size ? omission : "");
 };

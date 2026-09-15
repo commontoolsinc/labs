@@ -2082,8 +2082,8 @@ delegated result carries `nativeModelToolResults` with sources separately from
 answer text, preserving caller-supplied structured return schemas. Unstructured
 summaries also include a bounded source-link footer. As with other external
 observations, sources are data rather than instructions or write permission.
-`--capabilities` reports native tools by provider as well as their union;
-advertised support is not an authenticated endpoint health check.
+`--describe-capabilities` reports native tools by provider as well as their
+union; advertised support is not an authenticated endpoint health check.
 
 The `pattern-author` profile is where Common Fabric pattern source gets written
 and run. Its child receives `run_pattern` (under the ordinary fabric-session
