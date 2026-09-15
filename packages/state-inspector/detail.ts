@@ -197,7 +197,9 @@ function atomLabel(a: unknown): string {
 /**
  * The label a stored entry holds: its own when inline, else the value of
  * the `cid:` label document its single-member `$ref` names, read out of the
- * space. A reference the space does not hold renders as an empty label.
+ * space. A reference the space does not hold, or one outside the `cid:`
+ * namespace — which names no label document and is not followed into
+ * whatever entity it names — renders as an empty label.
  */
 function storedLabelOf(
   entry: Record<string, unknown>,
@@ -208,6 +210,7 @@ function storedLabelOf(
   if (typeof ref !== "string" || Object.keys(label).length !== 1) {
     return label;
   }
+  if (!ref.startsWith("cid:")) return {};
   const content = readDocument(ref)?.value;
   return isObjectNotArray(content) ? content : {};
 }

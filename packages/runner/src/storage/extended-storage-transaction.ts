@@ -928,7 +928,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void {
     // A spelling dial like the one above: either envelope version resolves
-    // to the same labels, so nothing is pinned or invalidated.
+    // to the same labels, so nothing is pinned or invalidated. The value is
+    // read when the transaction prepares; a change after that reaches the
+    // next transaction, not the envelope this one already staged.
     this.#cfcState.contentAddressedLabels = enabled;
   }
 

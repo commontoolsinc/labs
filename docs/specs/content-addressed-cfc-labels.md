@@ -209,9 +209,11 @@ The commit boundary makes the write-side obligation server-checked: a
 commit whose envelope references a label document that is neither
 included in the commit nor stored in the space, or whose content does not
 hash to its id, is refused with a protocol error, exactly as a dangling
-`schemaHash` is. The reference is collected from a `set`'s `cfc` member
-and from the post-patch document of any patch that can reach it, on the
-same scan that collects the schema reference.
+`schemaHash` is. The reference is collected on the same scan that collects
+the schema reference: from a non-`cid:` set's `cfc` member, and from the
+post-patch document of any non-`cid:` patch that can reach it. A `cid:`
+document's own `cfc` member is not a metadata position, as for the schema
+reference.
 
 ### Availability wherever the entity is
 

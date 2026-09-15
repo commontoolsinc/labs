@@ -119,10 +119,12 @@ interface StoredCellLabels {
  * The label a stored entry holds: the entry's own label when inline, else
  * the value of the `cid:` label document its single-member `$ref` names,
  * read out of the same store. `undefined` for a reference the store cannot
- * supply a label for — no document, or one holding no record — which the
- * caller records as an unread path rather than as a label with no atoms:
- * an entry list is a positive finding about what the space holds, and a
- * label that could not be read is not a label of nothing.
+ * supply a label for — no document, one holding no record, or a reference
+ * outside the `cid:` namespace, which names no label document and is not
+ * followed into whatever entity it names — which the caller records as an
+ * unread path rather than as a label with no atoms: an entry list is a
+ * positive finding about what the space holds, and a label that could not
+ * be read is not a label of nothing.
  */
 const storedLabelOf = (
   raw: Record<string, unknown>,
@@ -133,6 +135,7 @@ const storedLabelOf = (
   if (typeof ref !== "string" || Object.keys(label).length !== 1) {
     return label;
   }
+  if (!ref.startsWith("cid:")) return undefined;
   const content = read(ref)?.value;
   return isRecord(content) ? content : undefined;
 };

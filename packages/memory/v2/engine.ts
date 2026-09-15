@@ -5312,6 +5312,7 @@ const applyCommitTransaction = (
       return schema;
     });
   };
+  const requiredLabelDocs = new Set<string>();
   // A stored CFC envelope's `schemaHash` is a schema-document reference in
   // everything but spelling: the read side assembles the label envelope
   // through `cid:<schemaHash>`, so a commit that lands metadata without
@@ -5330,8 +5331,9 @@ const applyCommitTransaction = (
   // verified, or by a stored document whose value hashes to the id. The
   // same policy as the schema reference, with the document's own content
   // hash as the identity check, since a label is not a schema and has no
-  // closure of its own.
-  const requiredLabelDocs = new Set<string>();
+  // closure of its own. Those hashes collect into `requiredLabelDocs`,
+  // declared above the schema-reference collector so the two stay one
+  // scan.
   const collectCfcEnvelopeRef = (metadata: unknown): void => {
     if (metadata === null || typeof metadata !== "object") return;
     const schemaHash = (metadata as { schemaHash?: unknown }).schemaHash;

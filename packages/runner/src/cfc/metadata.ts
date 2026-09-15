@@ -12,6 +12,7 @@ import {
   cfcLabelDocumentHash,
   isCfcLabelDocumentContent,
   isCfcLabelReference,
+  isStoredLabelMapEntry,
   lookupCfcLabelDocument,
   parseCfcLabelReference,
   registerCfcLabelDocument,
@@ -150,12 +151,26 @@ const resolveStoredLabel = (
       "the reference is outside the cid: namespace",
     );
   }
-  const stored = tx.readOrThrow({
-    space,
-    id: `cid:${hash}` as URI,
-    type: "application/json",
-    path: [],
-  }, meta);
+  let stored: unknown;
+  try {
+    stored = tx.readOrThrow({
+      space,
+      id: `cid:${hash}` as URI,
+      type: "application/json",
+      path: [],
+    }, meta);
+  } catch (error) {
+    // A read that fails outright — a closed transaction, a refusal — is
+    // still a label that could not be produced, and a consumer that
+    // swallows other read failures must fail closed on this one, so it
+    // arrives as the fail-closed error rather than as its own class.
+    throw new UnresolvableCfcLabelDocumentError(
+      entry.label.$ref,
+      `the label document could not be read: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   const content = isObjectOrArray(stored) ? stored.value : undefined;
   if (content === undefined) {
     const registered = lookupCfcLabelDocument(hash);
@@ -185,24 +200,38 @@ const resolveStoredLabel = (
 };
 
 /**
- * The resolved form of a stored envelope: every label inline, whichever
- * version it was stored as. A version-1 envelope is returned as it is. A
- * version-2 envelope resolves each referenced label through `tx` in
- * `space`, with `meta` on every read (the caller's read policy for the
- * envelope itself), and throws {@link UnresolvableCfcLabelDocumentError}
- * for a reference nothing can back — fail closed, never a partially
- * resolved envelope. The result is memoized by the stored `labelMap`'s
- * identity, so a document read many times in a session resolves once.
+ * The resolved form of the envelope stored for document `id`: every label
+ * inline, whichever version it was stored as. A version-1 envelope is
+ * returned as it is, unless an entry holds a reference — a spelling
+ * version 1 does not define, which read as a label would drop the policy
+ * it names — in which case the envelope is unreadable. A version-2
+ * envelope is unreadable when an entry is not entry-shaped, and otherwise
+ * resolves each referenced label through `tx` in `space`, with `meta` on
+ * every read (the caller's read policy for the envelope itself), throwing
+ * {@link UnresolvableCfcLabelDocumentError} for a reference nothing can
+ * back — fail closed, never a partially resolved envelope. The result is
+ * memoized by the stored `labelMap`'s identity, so a document read many
+ * times in a session resolves once.
  */
 export const resolveStoredCfcMetadata = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
+  id: string,
   stored: StoredCfcMetadata,
   meta: Parameters<IExtendedStorageTransaction["readOrThrow"]>[1],
 ): CfcMetadata => {
-  if (stored.version === 1) return stored as CfcMetadata;
+  if (stored.version === 1) {
+    const holdsReference = stored.labelMap.entries.some((entry) =>
+      isObjectNotArray(entry) && isCfcLabelReference(entry.label)
+    );
+    if (holdsReference) throw new UnreadableCfcMetadataError(id);
+    return stored;
+  }
   const memoized = resolvedByLabelMap.get(stored.labelMap);
   if (memoized !== undefined) return memoized;
+  if (!stored.labelMap.entries.every(isStoredLabelMapEntry)) {
+    throw new UnreadableCfcMetadataError(id);
+  }
   const entries: LabelMapEntry[] = stored.labelMap.entries.map((entry) => ({
     ...entry,
     label: resolveStoredLabel(tx, space, entry, meta),
@@ -273,11 +302,23 @@ export const readStoredCfcMetadata = (
     path: ["cfc"],
   }, meta);
   if (isCfcMetadata(document)) {
-    return resolveStoredCfcMetadata(tx, target.space, document, meta);
+    return resolveStoredCfcMetadata(
+      tx,
+      target.space,
+      target.id,
+      document,
+      meta,
+    );
   }
   refuseUnknownMetadataVersion(document);
   if (isObjectOrArray(document) && isCfcMetadata(document.cfc)) {
-    return resolveStoredCfcMetadata(tx, target.space, document.cfc, meta);
+    return resolveStoredCfcMetadata(
+      tx,
+      target.space,
+      target.id,
+      document.cfc,
+      meta,
+    );
   }
   if (isObjectOrArray(document)) {
     refuseUnknownMetadataVersion(document.cfc);

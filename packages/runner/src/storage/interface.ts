@@ -1845,9 +1845,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void;
 
   /**
-   * Selects the envelope version the persist path writes: version 2, whose
-   * labels are content-addressed label documents, or version 1 with every
-   * label inline. A spelling dial: neither setting is pinned.
+   * Selects the envelope version the persist path writes: version 2, which
+   * holds each label above the inline limit as a reference to a
+   * content-addressed label document and shorter ones inline, or version 1
+   * with every label inline. A spelling dial: neither setting is pinned,
+   * and the value is read when the transaction prepares.
    */
   setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void;
 

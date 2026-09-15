@@ -23,6 +23,7 @@ import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
   StoredCfcMetadataError,
+  UnreadableCfcMetadataError,
   UnresolvableCfcLabelDocumentError,
 } from "../src/cfc/metadata.ts";
 import { loadStoredCfcEnvelope } from "../src/cfc/prepare.ts";
@@ -218,8 +219,8 @@ const withRuntime = async (
   try {
     await body(runtime);
   } finally {
+    // Disposing the runtime closes the storage manager it was built on.
     await runtime.dispose();
-    await storageManager.close();
   }
 };
 
@@ -540,11 +541,10 @@ describe("CFC content-addressed labels", () => {
         ).toBe(false);
       } finally {
         await runtime.dispose();
-        await storageManager.close();
       }
     });
 
-    it("delegates the flag through the transaction wrapper", () => {
+    it("delegates the flag through the transaction wrapper", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -561,8 +561,7 @@ describe("CFC content-addressed labels", () => {
         expect(tx.getCfcState().contentAddressedLabels).toBe(true);
         tx.abort();
       } finally {
-        runtime.dispose();
-        storageManager.close();
+        await runtime.dispose();
       }
     });
   });
@@ -691,6 +690,71 @@ describe("CFC content-addressed labels", () => {
         expect(() => readStoredCfcMetadata(tx, { space, id })).toThrow(
           "does not hold a label",
         );
+        tx.abort();
+        return Promise.resolve();
+      });
+    });
+
+    it("refuses a version-1 envelope holding a reference", async () => {
+      await withRuntime((runtime) => {
+        const tx = runtime.edit();
+        const content: IFCLabel = { confidentiality: ["v1-referenced"] };
+        const hash = cfcLabelDocumentHash(content);
+        registerCfcLabelDocument(hash, content);
+        const id = parseLink(runtime.getCell(space, "v1-ref").getAsLink()).id!;
+        writeSeedEnvelopeDoc(tx, space);
+        tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+          value: { secret: "sealed" },
+          cfc: {
+            version: 1,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{ path: ["secret"], label: { $ref: `cid:${hash}` } }],
+            },
+          },
+        });
+        expect(() => readStoredCfcMetadata(tx, { space, id })).toThrow(
+          UnreadableCfcMetadataError,
+        );
+        expect(storedCfcMetadataAppliesToPath(tx, {
+          space,
+          id: id as URI,
+          scope: "space",
+          path: ["value", "secret"],
+        })).toBe(true);
+        tx.abort();
+        return Promise.resolve();
+      });
+    });
+
+    it("refuses a version-2 entry that is not entry-shaped", async () => {
+      await withRuntime((runtime) => {
+        const tx = runtime.edit();
+        const id = parseLink(runtime.getCell(space, "v2-shape").getAsLink())
+          .id!;
+        writeSeedEnvelopeDoc(tx, space);
+        tx.writeOrThrow({ space, scope: "space", id, path: [] }, {
+          value: { secret: "sealed" },
+          cfc: {
+            version: 2,
+            schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+            labelMap: {
+              version: 1,
+              entries: [{ path: ["secret"], label: "not-a-label" }],
+            },
+          },
+        });
+        expect(() => readStoredCfcMetadata(tx, { space, id })).toThrow(
+          UnreadableCfcMetadataError,
+        );
+        expect(() =>
+          cfcLabelViewForDereference(
+            tx,
+            { space, scope: "space", id, path: [] },
+            { space, scope: "space", id, path: [] },
+          )
+        ).toThrow(UnreadableCfcMetadataError);
         tx.abort();
         return Promise.resolve();
       });

@@ -388,19 +388,25 @@ export type StoredLabelMapEntry = Omit<LabelMapEntry, "label"> & {
 };
 
 /**
- * A CFC envelope as it is stored at a document's reserved `cfc` member.
- * Readers resolve it to a {@link CfcMetadata} — every label inline —
- * before any consumer walks it; the stored spelling is visible only to
- * the persist path, which needs to know which version a document holds.
+ * A CFC envelope as it is stored at a document's reserved `cfc` member,
+ * discriminated by version: version 1 holds every label inline, and a
+ * reference in one is a spelling it does not define; version 2 may hold a
+ * label by reference. Readers resolve either to a {@link CfcMetadata} —
+ * every label inline — before any consumer walks it; the stored spelling
+ * is visible only to the persist path, which needs to know which version
+ * a document holds.
  */
-export type StoredCfcMetadata = {
-  version: CfcMetadataVersion;
-  schemaHash: string;
-  labelMap: {
+export type StoredCfcMetadata =
+  | {
     version: 1;
-    entries: Array<StoredLabelMapEntry>;
+    schemaHash: string;
+    labelMap: { version: 1; entries: Array<LabelMapEntry> };
+  }
+  | {
+    version: 2;
+    schemaHash: string;
+    labelMap: { version: 1; entries: Array<StoredLabelMapEntry> };
   };
-};
 
 /**
  * `schemaHash` names the envelope's ROOT schema document. The root may be

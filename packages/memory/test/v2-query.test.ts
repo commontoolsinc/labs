@@ -1990,6 +1990,43 @@ Deno.test("memory v2 delivers the label documents a version-2 CFC envelope refer
     assertEquals(tracked.state.entities.get(labelKey)?.document, {
       value: label,
     });
+
+    // Only version 2 defines the reference: a version-1 envelope whose
+    // entry happens to hold one names no label document, so the walk
+    // tracks none for it.
+    const legacy = "of:label-document-legacy-referrer";
+    applyCommit(engine, {
+      sessionId: "session:label-document-writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: legacy,
+          value: {
+            value: { n: 2 },
+            cfc: {
+              version: 1,
+              schemaHash: labelSchemaId.slice("cid:".length),
+              labelMap: {
+                version: 1,
+                entries: [{ path: ["n"], label: { $ref: labelId } }],
+              },
+            },
+          },
+        }],
+      },
+    });
+    const legacyTracked = trackGraph(space, engine, {
+      roots: [{
+        id: legacy,
+        selector: { path: [], schema: false },
+      }],
+    });
+    assert(legacyTracked.state.tracker.has(schemaKey));
+    assert(!legacyTracked.state.tracker.has(labelKey));
   } finally {
     close(engine);
     await Deno.remove(path);

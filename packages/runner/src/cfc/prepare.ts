@@ -1163,7 +1163,7 @@ const storedMetadataFor = (
   // under the same read policy — and a reference nothing backs throws the
   // fail-closed resolution error, which the commit path records as an
   // unreadable envelope.
-  const resolved = resolveStoredCfcMetadata(tx, space, metadata, {
+  const resolved = resolveStoredCfcMetadata(tx, space, id, metadata, {
     meta: INTERNAL_VERIFIER_META,
   });
   if (!isWalkableLabelMap(resolved)) {
@@ -7932,7 +7932,8 @@ export const prepareBoundaryCommit = (
     // documents the space's server already holds.
     const storedEnvelope: StoredCfcMetadata = metadata.version === 2
       ? {
-        ...metadata,
+        version: 2,
+        schemaHash: metadata.schemaHash,
         labelMap: {
           version: 1,
           entries: storedLabelMapEntries(

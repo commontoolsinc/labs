@@ -2821,11 +2821,11 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
 /**
  * The same-space `cid:` links a `cfc` envelope names its label documents
  * by: one per entry whose `label` is a single-member `{ "$ref": "cid:…" }`
- * record, deduplicated. A version-1 envelope, whose labels are inline,
- * names none.
+ * record, deduplicated. Only version 2 defines the reference, so an
+ * envelope of any other version names none, whatever its entries hold.
  */
 function cfcLabelDocumentLinks(envelope: unknown): SigilLink[] {
-  if (!isObjectOrArray(envelope)) return [];
+  if (!isObjectOrArray(envelope) || envelope["version"] !== 2) return [];
   const labelMap = envelope["labelMap"];
   const entries = isObjectOrArray(labelMap) ? labelMap["entries"] : undefined;
   if (!Array.isArray(entries)) return [];

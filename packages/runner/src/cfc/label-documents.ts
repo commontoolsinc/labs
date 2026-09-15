@@ -75,6 +75,33 @@ export const isCfcLabelDocumentContent = (value: unknown): value is IFCLabel =>
   );
 
 /**
+ * Whether `value` has the shape of an inline label as an envelope stores
+ * one: a record whose every member is one of the two label members holding
+ * an array or `undefined`. Like {@link isCfcLabelDocumentContent}, except
+ * that an absent member may be present as `undefined`, which a stored
+ * inline label may carry and a document never does.
+ */
+export const isInlineCfcLabelShape = (value: unknown): value is IFCLabel =>
+  isObjectNotArray(value) &&
+  Object.keys(value).every((key) =>
+    (LABEL_MEMBERS as readonly string[]).includes(key) &&
+    (value[key] === undefined || Array.isArray(value[key]))
+  );
+
+/**
+ * Whether `value` has the shape of a stored version-2 entry: a record
+ * with a `path` of strings and a `label` that is either a reference or an
+ * inline label. An entry of any other shape is one no reader can produce
+ * a label from, and the envelope holding it is unreadable.
+ */
+export const isStoredLabelMapEntry = (
+  value: unknown,
+): value is StoredLabelMapEntry =>
+  isObjectNotArray(value) && Array.isArray(value.path) &&
+  value.path.every((segment) => typeof segment === "string") &&
+  (isCfcLabelReference(value.label) || isInlineCfcLabelShape(value.label));
+
+/**
  * The canonical content of a label document: the label with its clauses
  * normalized and every `undefined` member dropped, so a label written with
  * `integrity: undefined` and one written without the member are one

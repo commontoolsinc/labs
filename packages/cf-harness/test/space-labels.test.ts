@@ -147,6 +147,12 @@ const LABEL_DOCUMENT = `cid:fid1:${"label".padEnd(43, "0")}`;
 const REFERENCED_MISSING = entity("referenced-missing");
 const MISSING_LABEL_DOCUMENT = `cid:fid1:${"missing".padEnd(43, "0")}`;
 
+/**
+ * A version-2 envelope whose reference names an ordinary entity rather than
+ * a `cid:` document, which no label document can be read from.
+ */
+const REFERENCED_ENTITY = entity("referenced-entity");
+
 /** One stored link, in the at-rest sigil form the store holds. */
 const link = (id: string, space?: string, path: string[] = []) => ({
   "/": {
@@ -194,6 +200,17 @@ const documents: Record<string, unknown> = {
         entries: [
           stored(["secret"], { $ref: MISSING_LABEL_DOCUMENT }, "declared"),
         ],
+      },
+    },
+  },
+  [REFERENCED_ENTITY]: {
+    value: { secret: "held by a reference to an entity" },
+    cfc: {
+      version: 2,
+      schemaHash: SCHEMA_HASH,
+      labelMap: {
+        version: 1,
+        entries: [stored(["secret"], { $ref: DECLARED }, "declared")],
       },
     },
   },
@@ -439,6 +456,7 @@ const PLAIN = new Set([
   LABEL_DOCUMENT,
   REFERENCED,
   REFERENCED_MISSING,
+  REFERENCED_ENTITY,
   UNLABELLED,
   LINKER,
   NESTER,
@@ -654,6 +672,14 @@ describe("space-labels", () => {
 
     it("records a label whose document the store lacks as an unread path", () => {
       const read = reader.read({ id: REFERENCED_MISSING, scope: "space" });
+      expect(read.entries).toEqual([]);
+      expect(read.unreadPaths).toEqual([
+        { path: ["secret"], reason: "no-document" },
+      ]);
+    });
+
+    it("does not follow a reference outside the cid: namespace", () => {
+      const read = reader.read({ id: REFERENCED_ENTITY, scope: "space" });
       expect(read.entries).toEqual([]);
       expect(read.unreadPaths).toEqual([
         { path: ["secret"], reason: "no-document" },
