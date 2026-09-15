@@ -789,8 +789,11 @@ step "30. The arguments member reads one cell on a head and on a piece segment, 
 # The unit suite pins where each spelling points and which cell it selects;
 # what it cannot see is that the read the seam makes is of that cell. So one
 # arguments cell is read twice back to back, through the member on the head
-# and through the member on a piece segment, and the two must agree — while
-# the result key spelled like them, `items#argument`, must not read the same.
+# and through the member on a piece segment, and the two must agree. Written
+# after a path segment instead, `items#argument` is one result key. The
+# fixture's result holds no key by that name, so the read fails naming it, and
+# the keys the failure lists are the result's: `addItem`, `clearItems`,
+# `settings` and `summary` are outputs the pattern's arguments do not take.
 # The rooted walk in front of them stands two segments inside the piece, which
 # is what makes the head's reading from the arguments cell's root a claim.
 check "shuttle first/settings @space> " \
@@ -801,9 +804,9 @@ FROM_SEGMENT=$(said 68 "get /slugs/first#argument/items")
 contains "[" "$FROM_HEAD" "the member on the head reads the arguments cell's items"
 check "$FROM_HEAD" "$FROM_SEGMENT" \
   "the member on the head and on the piece segment read one cell from its root"
-RESULT_KEY=$(said 69 "get /slugs/first/items#argument")
-contains 'Cannot access path "items#argument" - property "items#argument" not found.' "$RESULT_KEY" \
-  "a path ending in #argument names a missing literal result key"
+check 'Cannot access path "items#argument" - property "items#argument" not found. Available keys: addItem, clearItems, items, label, settings, summary' \
+  "$(said 69 "get /slugs/first/items#argument")" \
+  "a path ending in #argument names a result key, and the read of the result names that key among the result's own"
 contains "A place is result-rooted, so \`cd\` selects no \`#argument\` member" \
   "$(said 70 "cd .#argument")" "cd refuses the member on its head"
 check "shuttle first/settings @space> " "$(prompt 70 "cd .#argument")" \
