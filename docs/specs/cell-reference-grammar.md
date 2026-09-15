@@ -2,16 +2,14 @@
 
 ## Status
 
-Proposed. This is a decision record for the cell reference grammar — the one
+Adopted. This is a decision record for the cell reference grammar — the one
 string form that names a cell — and for the mechanism by which that grammar
 admits a new requirement. It records the requirements the grammar answers to,
 the decisions taken against them, the alternatives a reader would ask about, and
 the decisions elsewhere in this tree that each confirms or replaces.
 
-Until it is adopted, `parseReferenceParts` in
-`packages/runner/src/link-types.ts` and the documents that quote its form
-describe the grammar as it stands, and [Migration](#migration) names the
-distance between that and this.
+`packages/runner/src/cell-reference.ts` owns the shared reader and renderer.
+[Migration](#migration) describes their adoption across callers.
 [#6775](https://github.com/commontoolsinc/labs/issues/6775) is the question this
 document answers.
 
@@ -441,11 +439,14 @@ filesystem's own spelling of "up one, here." The head is read longest-match, so
 `..` that would leave the piece is refused by this grammar, which has nothing
 above a piece; a layer with a larger tree above the piece may continue the walk
 on its own terms. Everything after the head is one RFC 6901 pointer, in which
-`.` and `..` are keys like any other. Within a document a climb in the middle of
-a path is always a climb at the head — `a/../../b` names what `../b` names — so
-keeping climbs in the head loses nothing, and every key keeps its spelling. At a
-position that is a piece's root, the common case, "against the position" and
-"from the piece's root" coincide.
+`.` and `..` are keys like any other: `a/../b` names three literal keys.
+This rule also governs shuttle's `cd`. Leading climbs in shuttle follow its
+recorded route, including above the piece; walking into a child and then back
+out takes separate navigation commands. `parseRelativeReference` exposes the
+leading climb count and decoded literal path without applying a position, so a
+route reader can execute those climbs without parsing the head again. At a
+position that is a piece's root, "against the position" and "from the piece's
+root" coincide.
 
 A relative reference takes a member or a qualifier only on its head, whichever
 head it is: `.@user/items` is the context's piece at scope `user`, then `items`;
@@ -1006,12 +1007,13 @@ leaves the tree consistent.
    piece-relative form against it; `cf`'s positional path is one already, and
    gains the `.` and `..` heads; every reader of the piece-relative form — an
    interactive reader with a position among them — takes them from the shared
-   reader rather than reading them on its own. A trailing empty segment is the
-   key `""` and is no longer dropped: `parseReferenceParts` and the interactive
-   reader's `moveBySegments` (`packages/cli/lib/shuttle/place.ts`) both pop it
-   today. `#argument` is read on the piece segment, and the trailing slot is
-   refused with a message naming the new one: no writer has rendered it, so
-   nothing rendered carries it.
+   reader rather than reading them on its own. A trailing empty segment inside
+   a piece names the key `""`; shared readers and shuttle preserve it.
+   `#argument` selects a member only on the piece segment or relative
+   head. In a path it is literal data, including a final key named
+   `a#argument`. Readers must preserve these keys so every cell remains
+   addressable; they cannot distinguish a literal key from an intended
+   member selection written in the wrong slot.
 2. **Write the new forms.** `renderCellReference` is the reader's inverse, in
    the same module, and takes the same context, and every writer moves onto it.
    `createLLMFriendlyLink` becomes a wrapper that passes a context holding its
@@ -1039,7 +1041,7 @@ leaves the tree consistent.
    examples in `docs/tutorial/06-workflow.md`; the doc comment on
    `packages/cli/lib/llm-friendly-ref.ts` and its `splitArgumentSuffix`; the
    `#argument` paragraphs and completion in `packages/cli/README.md`; the
-   `/@my-space/` row in `docs/plans/cli-surface-shape.md`; and
+   `//my-space/` row in `docs/plans/cli-surface-shape.md`; and
    `docs/plans/shuttle/grammar.md`, which quotes the forms `pwd` and `ls` print.
    Tests and pattern baselines that hold a rendered reference follow the writer.
 4. **The specifier's pin.** When [pattern imports](pattern-imports/README.md)
@@ -1055,7 +1057,6 @@ exit (R12):
 | ------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/@did:key:…/` space prefix                             | the writers rendered it into harness refs, stored messages, and markdown | a segment beginning `@did:`, which no scope word or qualifier name can | a migration rewrites the stored strings — harness `ref`s re-render from the fields beside them; messages and markdown are people's content, which is the real decision — or the owner rules the residue acceptable |
 | `/@<name>/` space prefix                                | `cf --url` renders one from a page URL today                             | the same segment, holding a name                                       | step 2, when that writer moves; no stored string holds it                                                                                                                                                          |
-| trailing `…/path#argument`                              | —                                                                        | —                                                                      | at adoption: no writer has rendered it, so it is refused with a message naming the piece segment, not aliased                                                                                                      |
 | the CLI's bare form, `pieceId[@scope]` and a slug alone | a typing convenience the README already calls an alias                   | slots where no path competes: `--cell`, link endpoints                 | a CLI decision — the [open question](#open-questions) on retiring it in favor of `/slug`                                                                                                                           |
 
 ## Relationship to existing decisions

@@ -579,6 +579,19 @@ describe("console/cell-labels", () => {
       );
     });
 
+    it("preserves the space of a complete reference with a short entity id", () => {
+      const labelled = record("of:short", "/of:short", [declared]);
+      const inSpace = consoleCellLabelIndex({
+        ...snapshot([labelled]),
+        space: { configured: "demo-space", did: OWN_DID },
+      });
+      expect(cellLabelsAt(inSpace, `//${OWN_DID}/of:short@space`)).toEqual(
+        consoleCellLabels(labelled),
+      );
+      expect(cellLabelsAt(inSpace, `//${FOREIGN_DID}/of:short@space`))
+        .toBeUndefined();
+    });
+
     it("leaves a cell the snapshot marked unread out of the index it answers from", () => {
       const unread = consoleCellLabelIndex(snapshot([
         record(LABELLED, `/${LABELLED}`, [declared]),

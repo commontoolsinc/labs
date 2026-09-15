@@ -3020,7 +3020,8 @@ export class CFCodeEditor extends BaseElement {
     // on this side, and a slug addresses a redirect document that would need a
     // read before it could name a piece.
     if (
-      !target || !target.id ||
+      !target || !target.id || target.member === "argument" ||
+      (target.scope !== undefined && target.scope !== "space") ||
       (target.space && !target.space.startsWith("did:"))
     ) {
       return false;

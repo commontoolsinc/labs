@@ -85,7 +85,7 @@ Deno.test("parseTargetString recognizes handle format", () => {
   }
 });
 
-Deno.test("parseTargetString handles whitespace in handle paths", () => {
+Deno.test("parseTargetString preserves trailing whitespace in handle paths", () => {
   const parsed = parseLLMFriendlyLink(
     "  /of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/foo ",
     "did:test:123",
@@ -94,7 +94,7 @@ Deno.test("parseTargetString handles whitespace in handle paths", () => {
     parsed.id,
     "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
   );
-  assertEquals(parsed.path, ["foo"]);
+  assertEquals(parsed.path, ["foo "]);
 });
 
 Deno.test("parseTargetString recognizes ~ encoded path elements", () => {
@@ -106,7 +106,7 @@ Deno.test("parseTargetString recognizes ~ encoded path elements", () => {
     parsed.id,
     "of:baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q",
   );
-  assertEquals(parsed.path, ["foo/bar", "~"]);
+  assertEquals(parsed.path, ["foo/bar", "~", ""]);
 });
 
 Deno.test("parseTargetString parses cross-space link with embedded space DID", () => {
