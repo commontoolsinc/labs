@@ -21,8 +21,8 @@ export interface LiftDeclaration {
   readonly position: SourcePosition;
 
   /**
-   * The declaration's text from the function's start up to the module's next
-   * top-level statement.
+   * The declaration's text from the function's start up to the next line that
+   * starts at column 0 with anything but a closing bracket.
    */
   readonly text: string;
 }
@@ -80,16 +80,26 @@ export const WORKER_RUN_TIMING_KEY = "scheduler/scheduler/run";
 
 /**
  * How many characters of an implementation's source the runner keeps as its
- * preview. A preview this long may end partway through an identifier.
+ * preview. A preview this long may end partway through a token.
  */
 export const PREVIEW_LENGTH = 200;
+
+/**
+ * How many tokens a preview cut at {@link PREVIEW_LENGTH} must reach past its
+ * function's first `=>` to confirm a lift by. A cut preview is compared only up
+ * to the cut, so one that barely reaches the body says little about the code
+ * running there; eight tokens is an opening expression or statement.
+ */
+export const MIN_CUT_PREVIEW_BODY_TOKENS = 8;
 
 /** Matches a run's `src`: the module identity, then `/<path>:<line>:<col>`. */
 const SRC_PATTERN = /^cf:module\/([^/]+)(\/.+:\d+:\d+)$/;
 
-/** Matches the start of a top-level statement at the beginning of a line. */
-const TOP_LEVEL_START =
-  /(?<=\n)(?:(?:export|const|let|var|function|async|class|interface|type|import)\b|\/\*\*|\/\/)/;
+/**
+ * Matches a line that starts at column 0 with anything but a closing bracket,
+ * which in module-scope code starts a statement or a comment of its own.
+ */
+const TOP_LEVEL_START = /(?<=\n)[^\s)\]}]/;
 
 /**
  * Returns where the function argument of `name`'s module-scope
@@ -98,8 +108,9 @@ const TOP_LEVEL_START =
  * reports in each run's `src`, and the declaration's text from there. Comments
  * between the call's parenthesis and the function are skipped; type arguments
  * on `lift`, and a function passed after schema arguments, are not recognized.
- * The declaration's text ends at the next line opening with a top-level
- * statement, so a lift body holding such a line at column 0 is cut short.
+ * The declaration's text ends at the next line starting at column 0 with
+ * anything but a closing bracket, so a lift body holding such a line, as a
+ * multi-line template literal can, is cut short and fails to match.
  *
  * @throws If `text` holds no such declaration or more than one; `source` names
  *   the text in the message.
@@ -230,30 +241,103 @@ export function liftRunningStates(
 }
 
 /**
+ * Fails a sample whose runs cannot be attributed to lifts by position. `srcs`
+ * are the `src` keys of the runs that carried a read sample, a run with no
+ * `src` keyed by the empty string; `running` is {@link liftRunningStates}'s
+ * result. Every sample is taken on a page showing the board, so a producer
+ * lift's module that is not running means the positions read say nothing
+ * about the runs, not that the producer ran nothing.
+ *
+ * @throws If `srcs` is not empty and none of them is in the form
+ *   {@link parseSrc} accepts, or if a producer lift is not running.
+ */
+export function requireAttributableRuns(
+  lifts: readonly TopicsLiftSite[],
+  running: ReadonlyMap<string, boolean>,
+  srcs: readonly string[],
+): void {
+  if (srcs.length > 0 && srcs.every((src) => parseSrc(src) === undefined)) {
+    throw new Error(
+      `Runs with a read sample carried no source location to attribute them ` +
+        `by: ${srcs.map((src) => `\`${src}\``).join(", ")}`,
+    );
+  }
+  for (const lift of lifts) {
+    if (lift.role === "producer" && running.get(lift.site) !== true) {
+      throw new Error(
+        `\`${lift.name}\`'s module \`/${lift.module}\` is not running, but a ` +
+          `sample is taken on a page showing the board`,
+      );
+    }
+  }
+}
+
+/**
  * Returns whether `preview`, the runner's copy of an implementation's emitted
- * source, can be the function `declaration` authors: each identifier of the
- * preview appears in the declaration, in order. Emitting a function removes
- * types and comments and adds nothing but module aliases on imported names,
- * which are read through. A preview {@link PREVIEW_LENGTH} long has its last
- * identifier dropped, since the cut may have split it.
+ * source, is the function `declaration` authors, compared token by token with
+ * comments and whitespace dropped. Four differences are allowed:
+ *
+ * - type syntax in the declaration: annotations on parameters, destructured
+ *   parameters, variables, and arrow return types; `as` and `satisfies`
+ *   assertions; a postfix `!`; an optional parameter's `?`; and type arguments
+ *   or type parameters before a `(`;
+ * - the module alias the compiler puts on an imported name, `(0, alias_2.name)`
+ *   or `alias_2.name`;
+ * - a trailing comma before a closing bracket;
+ * - the preview's cut at {@link PREVIEW_LENGTH} characters.
+ *
+ * A complete preview must end where the declaration's function does, followed
+ * only by the lift call's `)` and `;`. A cut preview drops its last token,
+ * which the cut may have split, and must reach
+ * {@link MIN_CUT_PREVIEW_BODY_TOKENS} tokens past its first `=>`. Type syntax
+ * is recognized by the positions it takes, not by parsing, so a declaration
+ * using it anywhere else fails to match rather than matching another function.
  */
 export function implementationMatches(
   preview: string,
   declaration: string,
 ): boolean {
-  const unaliased = preview
-    .replace(/\(0,\s*[A-Za-z_$][\w$]*\.([A-Za-z_$][\w$]*)\)/g, "$1")
-    .replace(/\b[A-Za-z_$][\w$]*_\d+\.(?=[A-Za-z_$])/g, "");
-  const wanted = identifiersOf(unaliased);
-  if (preview.length >= PREVIEW_LENGTH) wanted.pop();
-  const available = identifiersOf(declaration);
-  let next = 0;
-  for (const identifier of wanted) {
-    while (next < available.length && available[next] !== identifier) next++;
-    if (next === available.length) return false;
-    next++;
+  const cut = preview.length >= PREVIEW_LENGTH;
+  const emitted = withoutTrailingCommas(
+    withoutModuleAliases(tokenize(preview)),
+  );
+  if (cut) emitted.pop();
+  if (emitted.length === 0) return false;
+  if (cut) {
+    const arrow = emitted.indexOf("=>");
+    if (
+      arrow === -1 ||
+      emitted.length - arrow - 1 < MIN_CUT_PREVIEW_BODY_TOKENS
+    ) {
+      return false;
+    }
   }
-  return true;
+  const authored = withoutTrailingCommas(tokenize(declaration));
+  const walk: DeclarationWalk = { open: [], opens: new Map() };
+  let at = 0;
+  for (const token of emitted) {
+    while (authored[at] !== token) {
+      const next = afterTypeSyntax(authored, at, token, walk);
+      if (next === undefined) return false;
+      at = next;
+    }
+    if (token === "(" || token === "[" || token === "{") {
+      walk.open.push(at);
+    } else if (token === ")" || token === "]" || token === "}") {
+      const opener = walk.open.pop();
+      if (opener !== undefined) walk.opens.set(at, opener);
+    }
+    at++;
+  }
+  if (cut) return true;
+  while (authored[at] === "as" || authored[at] === "satisfies") {
+    const next = afterTypeSyntax(authored, at, undefined, walk);
+    if (next === undefined) return false;
+    at = next;
+  }
+  const rest = authored.slice(at);
+  return rest[0] === ")" &&
+    (rest.length === 1 || (rest.length === 2 && rest[1] === ";"));
 }
 
 /**
@@ -390,7 +474,262 @@ export async function runThenStop<T, S>(
   return { value: outcome.value, stopped };
 }
 
-/** Helper for {@link implementationMatches}, which lists identifiers in order. */
-function identifiersOf(text: string): string[] {
-  return text.match(/[A-Za-z_$][\w$]*/g) ?? [];
+//
+// Token comparison
+//
+
+/** Where a declaration's walk stands: its open brackets and matched pairs. */
+interface DeclarationWalk {
+  /** Indices of the brackets opened and not yet closed. */
+  open: number[];
+
+  /** The index of each closed bracket's opener, by the closer's index. */
+  opens: Map<number, number>;
+}
+
+/** Multi-character punctuators, longest first. */
+const PUNCTUATORS = [
+  ">>>=",
+  "...",
+  "===",
+  "!==",
+  "**=",
+  "<<=",
+  ">>=",
+  ">>>",
+  "&&=",
+  "||=",
+  "??=",
+  "=>",
+  "==",
+  "!=",
+  "<=",
+  ">=",
+  "&&",
+  "||",
+  "??",
+  "?.",
+  "++",
+  "--",
+  "+=",
+  "-=",
+  "*=",
+  "/=",
+  "%=",
+  "&=",
+  "|=",
+  "^=",
+  "**",
+  "<<",
+  ">>",
+];
+
+/** Tokens that may end a parameter's type annotation. */
+const PARAMETER_TYPE_ENDS: ReadonlySet<string> = new Set([",", ")", "="]);
+
+/** Tokens that may end a variable's type annotation. */
+const VARIABLE_TYPE_ENDS: ReadonlySet<string> = new Set(["=", ";", ","]);
+
+/** Tokens that may end an arrow function's return type. */
+const RETURN_TYPE_ENDS: ReadonlySet<string> = new Set(["=>"]);
+
+/** Tokens that may end the type of an `as` or `satisfies` assertion. */
+const ASSERTION_ENDS: ReadonlySet<string> = new Set([
+  ")",
+  ",",
+  ";",
+  "]",
+  "}",
+]);
+
+/** Keywords that declare a variable. */
+const VARIABLE_KEYWORDS: ReadonlySet<string> = new Set(["const", "let", "var"]);
+
+/**
+ * Helper for {@link implementationMatches}, which splits source into
+ * identifiers, numbers, string and template literals, and punctuators, dropping
+ * whitespace and comments. An unterminated literal runs to the end.
+ */
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  const word = /[A-Za-z_$][\w$]*|\d[\w.]*|\.\d\w*/y;
+  let at = 0;
+  while (at < text.length) {
+    const char = text[at];
+    if (/\s/.test(char)) {
+      at++;
+    } else if (text.startsWith("//", at)) {
+      const end = text.indexOf("\n", at);
+      at = end === -1 ? text.length : end;
+    } else if (text.startsWith("/*", at)) {
+      const end = text.indexOf("*/", at + 2);
+      at = end === -1 ? text.length : end + 2;
+    } else if (char === '"' || char === "'" || char === "`") {
+      let end = at + 1;
+      while (end < text.length && text[end] !== char) {
+        end += text[end] === "\\" ? 2 : 1;
+      }
+      tokens.push(text.slice(at, end + 1));
+      at = end + 1;
+    } else {
+      word.lastIndex = at;
+      const matched = word.exec(text)?.[0] ??
+        PUNCTUATORS.find((punctuator) =>
+          text.startsWith(punctuator, at) &&
+          !(punctuator === "?." && /\d/.test(text[at + 2] ?? ""))
+        ) ?? char;
+      tokens.push(matched);
+      at += matched.length;
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Helper for {@link implementationMatches}, which reads an imported name
+ * through the module alias the compiler writes on it.
+ */
+function withoutModuleAliases(tokens: readonly string[]): string[] {
+  const alias = /^[A-Za-z_$][\w$]*_\d+$/;
+  const result: string[] = [];
+  for (let at = 0; at < tokens.length; at++) {
+    const [open, zero, comma, module, dot, name, close] = tokens.slice(
+      at,
+      at + 7,
+    );
+    if (
+      open === "(" && zero === "0" && comma === "," && alias.test(module) &&
+      dot === "." && isName(name) && close === ")"
+    ) {
+      result.push(name);
+      at += 6;
+    } else if (
+      alias.test(tokens[at]) && tokens[at + 1] === "." &&
+      isName(tokens[at + 2])
+    ) {
+      result.push(tokens[at + 2]);
+      at += 2;
+    } else {
+      result.push(tokens[at]);
+    }
+  }
+  return result;
+}
+
+/** Helper for {@link implementationMatches}, which drops trailing commas. */
+function withoutTrailingCommas(tokens: readonly string[]): string[] {
+  return tokens.filter((token, at) =>
+    token !== "," ||
+    !(tokens[at + 1] === ")" || tokens[at + 1] === "]" ||
+      tokens[at + 1] === "}")
+  );
+}
+
+/**
+ * Helper for {@link implementationMatches}, which returns the index past the
+ * type syntax starting at `authored[at]`, the next token then being `wanted`
+ * where one is given, or `undefined` when no type syntax starts there.
+ */
+function afterTypeSyntax(
+  authored: readonly string[],
+  at: number,
+  wanted: string | undefined,
+  walk: DeclarationWalk,
+): number | undefined {
+  const token = authored[at];
+  const previous = authored[at - 1];
+  const enclosing = walk.open.length === 0
+    ? undefined
+    : authored[walk.open[walk.open.length - 1]];
+  if (token === ":") {
+    const ends = previous === ")" ? RETURN_TYPE_ENDS : enclosing === "(" &&
+        (isName(previous) || previous === "}" || previous === "]" ||
+          previous === "?")
+      ? PARAMETER_TYPE_ENDS
+      : declaresVariable(authored, at, walk)
+      ? VARIABLE_TYPE_ENDS
+      : undefined;
+    return ends === undefined
+      ? undefined
+      : typeEnd(authored, at + 1, ends, wanted);
+  }
+  if (
+    (token === "as" || token === "satisfies") && previous !== undefined &&
+    (isName(previous) || /^[)\]}"'`\d]/.test(previous))
+  ) {
+    return typeEnd(authored, at + 1, ASSERTION_ENDS, wanted);
+  }
+  if (
+    token === "?" && authored[at + 1] === ":" && enclosing === "(" &&
+    isName(previous)
+  ) {
+    return at + 1;
+  }
+  if (
+    token === "!" && wanted !== "!" &&
+    (isName(previous) || previous === ")" || previous === "]")
+  ) {
+    return at + 1;
+  }
+  if (token === "<" && wanted === "(") {
+    let depth = 0;
+    for (let end = at; end < authored.length; end++) {
+      if (authored[end] === "<") depth++;
+      else if (/^>+$/.test(authored[end])) depth -= authored[end].length;
+      if (depth === 0) return authored[end + 1] === "(" ? end + 1 : undefined;
+      if (depth < 0) return undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Helper for {@link afterTypeSyntax}, which returns the index of the first
+ * token outside brackets opened within the type that is in `ends`, provided it
+ * is `wanted` where one is given.
+ */
+function typeEnd(
+  authored: readonly string[],
+  from: number,
+  ends: ReadonlySet<string>,
+  wanted: string | undefined,
+): number | undefined {
+  let depth = 0;
+  for (let at = from; at < authored.length; at++) {
+    const token = authored[at];
+    if (depth === 0 && ends.has(token)) {
+      return wanted === undefined || token === wanted ? at : undefined;
+    }
+    if (token === "(" || token === "[" || token === "{" || token === "<") {
+      depth++;
+    } else if (/^>+$/.test(token)) {
+      depth -= token.length;
+    } else if (token === ")" || token === "]" || token === "}") {
+      depth--;
+    }
+    if (depth < 0) return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Helper for {@link afterTypeSyntax}, which returns whether the `:` at `at`
+ * annotates a variable: a name, or a destructuring pattern, just after
+ * `const`, `let`, or `var`.
+ */
+function declaresVariable(
+  authored: readonly string[],
+  at: number,
+  walk: DeclarationWalk,
+): boolean {
+  const previous = authored[at - 1];
+  if (isName(previous)) return VARIABLE_KEYWORDS.has(authored[at - 2]);
+  const opener = walk.opens.get(at - 1);
+  return (previous === "}" || previous === "]") && opener !== undefined &&
+    VARIABLE_KEYWORDS.has(authored[opener - 1]);
+}
+
+/** Helper for the token comparison, which tests for an identifier. */
+function isName(token: string | undefined): token is string {
+  return token !== undefined && /^[A-Za-z_$][\w$]*$/.test(token);
 }

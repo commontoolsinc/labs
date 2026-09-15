@@ -6,8 +6,10 @@ import {
   implementationMatches,
   liftRunningStates,
   locateLift,
+  MIN_CUT_PREVIEW_BODY_TOKENS,
   parseSrc,
   PREVIEW_LENGTH,
+  requireAttributableRuns,
   type ResolvedTopicsLift,
   runThenStop,
   timingDelta,
@@ -52,9 +54,42 @@ describe("topics-browser-measurement-core", () => {
       });
     });
 
-    it("returns the declaration's text up to the next top-level statement", () => {
+    it("returns the declaration's text up to the next line starting at column 0", () => {
       expect(locateLift(fryer, "doubled").text).toBe(
         "(value: number) => value * 2,\n);\n\n",
+      );
+    });
+
+    it("returns declaration text ending before a column-0 statement of any kind", () => {
+      for (
+        const next of [
+          "fryAll();",
+          "enum Glaze { Maple }",
+          "@frosted",
+          "/* note */",
+        ]
+      ) {
+        expect(
+          locateLift(
+            `const doubled = lift(\n  (value: number) => value * 2,\n);\n${next}\n`,
+            "doubled",
+          ).text,
+        ).toBe("(value: number) => value * 2,\n);\n");
+      }
+    });
+
+    it("returns declaration text keeping column-0 lines that close its brackets", () => {
+      const text = [
+        "const glazed = lift((",
+        "  { donuts }: { donuts: Donut[] },",
+        "): number => {",
+        "  return donuts.length;",
+        "});",
+        "export const next = 1;",
+      ].join("\n");
+      expect(locateLift(text, "glazed").text).toBe(
+        "(\n  { donuts }: { donuts: Donut[] },\n): number => {\n" +
+          "  return donuts.length;\n});\n",
       );
     });
 
@@ -170,6 +205,28 @@ describe("topics-browser-measurement-core", () => {
 
   describe("implementationMatches()", () => {
     const glazeCount = locateLift(fryer, "glazeCount").text;
+    const doubled = "(value: number) => value * 2,\n);\n";
+    // Shaped like a board pivot's declaration: a destructured parameter whose
+    // type holds a comment, a return type, and a block body.
+    const pivot = locateLift(
+      [
+        "const pivotTable = lift(",
+        "  (",
+        "    { sources }: {",
+        "      // The cells to pivot, one per donut.",
+        "      sources: ReadonlyCell<Donut>[] | Default<[]>;",
+        "    },",
+        "  ): PivotRow[] => {",
+        "    const rows: unknown[] = [];",
+        "    const list = Array.from(sources);",
+        "    for (const donut of list) rows.push(donut);",
+        "    return rows as PivotRow[];",
+        "  },",
+        ");",
+        "",
+      ].join("\n"),
+      "pivotTable",
+    ).text;
 
     it("returns `true` for the emitted form of the declared function", () => {
       expect(
@@ -178,35 +235,183 @@ describe("topics-browser-measurement-core", () => {
           glazeCount,
         ),
       ).toBe(true);
+      expect(implementationMatches("(value) => value * 2", doubled)).toBe(true);
+    });
+
+    it("returns `false` for a body with another operator", () => {
+      expect(implementationMatches("(value) => value + 2", doubled)).toBe(
+        false,
+      );
+      expect(
+        implementationMatches(
+          "(a, b) => a - b",
+          "(a: number, b: number) => a + b,\n);\n",
+        ),
+      ).toBe(false);
+    });
+
+    it("returns `false` for a body with another literal", () => {
+      expect(implementationMatches("(value) => value * 3", doubled)).toBe(
+        false,
+      );
+    });
+
+    it("returns `false` for a function whose tokens are a prefix of the declared one", () => {
+      expect(implementationMatches("(value) => value", doubled)).toBe(false);
+    });
+
+    it("returns `true` for the emitted form of a pivot-shaped declaration", () => {
+      expect(
+        implementationMatches(
+          "({ sources }) => {\n    const rows = [];\n    const list = Array.from(sources);\n    for (const donut of list)\n        rows.push(donut);\n    return rows;\n}",
+          pivot,
+        ),
+      ).toBe(true);
+    });
+
+    it("returns `false` for short functions over the pivot's parameter", () => {
+      expect(
+        implementationMatches("({ sources }) => Array.from(sources)", pivot),
+      )
+        .toBe(false);
+      expect(
+        implementationMatches(
+          "({ list }) => list.map((topic) => topic)",
+          pivot,
+        ),
+      ).toBe(false);
+    });
+
+    it("returns `false` for destructured parameter names that differ", () => {
+      expect(
+        implementationMatches(
+          "({ sources, extra }) => {\n    const rows = [];",
+          pivot,
+        ),
+      ).toBe(false);
+      expect(
+        implementationMatches("({ source }) => {\n    const rows = [];", pivot),
+      ).toBe(false);
+    });
+
+    it("returns `false` for a complete preview when the declaration continues past its function", () => {
+      expect(
+        implementationMatches(
+          "(value) => value * 2",
+          "(value: number) => value * 2,\n);\nfryAll();\n",
+        ),
+      ).toBe(false);
+    });
+
+    it("returns `false` for object shorthand where the declaration names a value", () => {
+      expect(
+        implementationMatches(
+          "({ a }) => ({ a })",
+          "({ a }: { a: number }) => ({ a: b }),\n);\n",
+        ),
+      ).toBe(false);
     });
 
     it("returns `true` for an emitted form calling an import through a module alias", () => {
-      const declaration =
-        "({ table, self }) =>\n  table.filter((row) => equals(self, row.topic))\n";
       expect(
         implementationMatches(
           "({ table, self }) => table\n    .filter((row) => (0, commonfabric_2.equals)(self, row.topic))",
+          "({ table, self }: { table: Row[]; self: Cell }) =>\n" +
+            "  table.filter((row) => equals(self, row.topic)),\n);\n",
+        ),
+      ).toBe(true);
+    });
+
+    it("returns `true` across type parameters, return types, variable types, and assertions", () => {
+      const declaration = [
+        "<T extends { at: number }>(",
+        "  { rows }: { rows: T[] },",
+        "): T[] => {",
+        "  const sorted: T[] = rows.toSorted((a, b) => b.at - a.at);",
+        "  return sorted as T[];",
+        "},",
+        ");",
+      ].join("\n");
+      expect(
+        implementationMatches(
+          "({ rows }) => {\n    const sorted = rows.toSorted((a, b) => b.at - a.at);\n    return sorted;\n}",
           declaration,
         ),
       ).toBe(true);
     });
 
-    it("returns `true` for a preview cut partway through its last identifier", () => {
-      const declaration = `({ donuts }) => {\n  ${
-        "const glazed = donuts;\n  ".repeat(12)
-      }return glazedDonutCount;\n}`;
+    it("returns `true` for a cut preview of the declared function, and `false` for a cut preview of another", () => {
+      const body = "const glazed = donuts.length * 2;\n  ".repeat(12);
+      const declaration = `({ donuts }: { donuts: Donut[] }) => {\n  ${body}` +
+        "return glazedDonutCount;\n},\n);\n";
       const emitted = `({ donuts }) => {\n    ${
-        "const glazed = donuts;\n    ".repeat(12)
+        body.replaceAll("\n  ", "\n    ")
       }return glazedDonutCount;\n}`;
       const preview = emitted.slice(0, PREVIEW_LENGTH);
+      const other = preview.replace("* 2", "* 3");
+
       expect(preview.length).toBe(PREVIEW_LENGTH);
       expect(implementationMatches(preview, declaration)).toBe(true);
+      expect(implementationMatches(other, declaration)).toBe(false);
     });
 
-    it("returns `false` for another lift's function", () => {
-      expect(implementationMatches("(value) => value * 2", glazeCount)).toBe(
-        false,
+    it("returns `false` for a cut preview reaching too little of its body", () => {
+      const declaration = `(value: string) => "${"x".repeat(300)}",\n);\n`;
+      const preview = `(value) => "${"x".repeat(300)}"`.slice(
+        0,
+        PREVIEW_LENGTH,
       );
+
+      expect(MIN_CUT_PREVIEW_BODY_TOKENS).toBeGreaterThan(1);
+      expect(implementationMatches(preview, declaration)).toBe(false);
+    });
+
+    it("returns `false` for an empty preview", () => {
+      expect(implementationMatches("", doubled)).toBe(false);
+    });
+  });
+
+  describe("requireAttributableRuns()", () => {
+    const lifts: TopicsLiftSite[] = [
+      {
+        name: "pivotTable",
+        module: "donuts/board.tsx",
+        role: "producer",
+        site: "/donuts/board.tsx:30:2",
+      },
+      {
+        name: "glazeCount",
+        module: "donuts/fryer.tsx",
+        role: "consumer",
+        site: "/donuts/fryer.tsx:12:20",
+      },
+    ];
+
+    it("throws for runs whose read samples carry no `src`, which would read every lift as not running", () => {
+      const running = liftRunningStates(lifts, ["", ""]);
+
+      expect([...running.values()]).toEqual([false, false]);
+      expect(() => requireAttributableRuns(lifts, running, [""]))
+        .toThrow("carried no source location to attribute them by");
+    });
+
+    it("throws for a producer whose module is not running", () => {
+      const running = liftRunningStates(lifts, [
+        "cf:module/fryer1/donuts/fryer.tsx:12:20",
+      ]);
+
+      expect(() =>
+        requireAttributableRuns(lifts, running, [
+          "cf:module/fryer1/donuts/fryer.tsx:12:20",
+        ])
+      ).toThrow("`pivotTable`'s module `/donuts/board.tsx` is not running");
+    });
+
+    it("returns for attributable runs with the producer running and a consumer not running", () => {
+      const srcs = ["cf:module/board1/donuts/board.tsx:30:2", ""];
+      const running = liftRunningStates(lifts, srcs);
+
+      expect(() => requireAttributableRuns(lifts, running, srcs)).not.toThrow();
     });
   });
 

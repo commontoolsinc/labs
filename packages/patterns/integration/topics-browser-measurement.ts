@@ -20,12 +20,14 @@ import { join } from "@std/path";
 import type { Page } from "@commonfabric/integration";
 import { RequestType, type RuntimeClient } from "@commonfabric/runtime-client";
 
+import { describeThrown } from "../../integration/describe-thrown.ts";
 import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
 import {
   confirmLiftImplementations,
   liftRunningStates,
   locateLift,
   parseSrc,
+  requireAttributableRuns,
   type ResolvedTopicsLift,
   runThenStop,
   timingDelta,
@@ -47,12 +49,10 @@ export const TIMING_NOTE =
   "Timing: a row sums spans that can overlap, so its total can exceed the " +
   "elapsed time. `vdomApply` is the main thread's " +
   "`vdom-applicator/apply-batch`, applying worker VDOM batches' operations " +
-  "to the DOM. The main thread's other rows include `vdom-renderer` mount " +
-  "and unmount spans, which wait on the worker, `vdom-renderer` batch spans " +
-  "around applying a batch, `vdom-applicator` dispose and remove-node spans, " +
-  "and `runtime-client/ipc/*` waits on the worker. Lit element updates, " +
-  "style, layout, and paint have no timing of their own and fall only in the " +
-  "elapsed time.";
+  "to the DOM. The other main-thread spans, some of which wait on the " +
+  'worker, are listed under "Topics browser measurement" in ' +
+  "`docs/development/BENCHMARKS.md`. Lit element updates, style, layout, " +
+  "and paint have no timing of their own and fall only in the elapsed time.";
 
 /** Why a timed interval reports no event commit error. */
 export const COMMIT_ERRORS_NOTE =
@@ -116,11 +116,12 @@ export interface ReadTotals {
 /** One named lift's totals over a measured operation. */
 export interface TopicsLiftRow extends ReadTotals, TopicsLiftSite {
   /**
-   * Whether the lift's module ran before, during, or after the operation. A
-   * lift reports `false`, with zero runs, only when no action's `src` named its
-   * module's file under any path.
+   * Whether an action's `src` named `/<module>`, in a graph snapshot taken
+   * before or after the operation or in a run marker during it. A lift reports
+   * `false`, with zero runs, only when no such `src` named the module's file
+   * under any path.
    */
-  readonly instantiated: boolean;
+  readonly running: boolean;
 
   /**
    * The graph snapshot's preview of the implementation running at the lift's
@@ -282,14 +283,19 @@ export async function resolveTopicsLiftSites(
  * each named lift's read totals with graph size and timing. Accounting is
  * enabled just before the operation and disabled once the view has settled
  * over an idle runtime, whether or not the operation succeeds. Each running
- * lift is confirmed by the implementation the graph shows at its site.
+ * lift is confirmed by the implementation the graph shows at its site. The
+ * page must show the board, whose producer lift has to be running.
  *
  * @throws If a lift cannot be identified in the sources; if its module's file
- *   runs where `liftRunningStates()` refuses; if the implementation at a
- *   running lift's site is not the lift's; if the runtime client is replaced;
+ *   runs where `liftRunningStates()` refuses; if the runs cannot be attributed
+ *   by position, as `requireAttributableRuns()` decides; if the implementation
+ *   at a running lift's site is not the lift's; if the runtime client is
+ *   replaced;
  *   or if the operation completes no run with a read sample, fails an event
  *   commit, or raises a page error. When the operation throws and disabling
- *   accounting also fails, an `AggregateError` holds both.
+ *   accounting or releasing the sample also fails, an `AggregateError` holds
+ *   the operation's error first. The sample's hold on the page is released on
+ *   every exit.
  */
 export async function measureTopicsReads(
   page: Page,
@@ -297,83 +303,87 @@ export async function measureTopicsReads(
 ): Promise<TopicsReadSample> {
   const sites = await resolveTopicsLiftSites(options.sourceRoot);
   const pageErrors = watchPageErrors(page);
+  const token = crypto.randomUUID();
   try {
-    const token = crypto.randomUUID();
-    await startSampling(page, token);
-    const { value: measured, stopped: state } = await runThenStop(
-      async () => {
-        const before = await readRuntimeState(page, token);
-        const startedAt = performance.now();
-        await options.operation();
-        await settleOperation(page);
-        return { before, elapsedMs: performance.now() - startedAt };
-      },
-      () => stopSampling(page, token),
-    );
-    const after = await readRuntimeState(page, token, true);
+    const { value } = await runThenStop(async (): Promise<TopicsReadSample> => {
+      await startSampling(page, token);
+      const { value: measured, stopped: state } = await runThenStop(
+        async () => {
+          const before = await readRuntimeState(page, token);
+          const startedAt = performance.now();
+          await options.operation();
+          await settleOperation(page);
+          return { before, elapsedMs: performance.now() - startedAt };
+        },
+        () => stopSampling(page, token),
+      );
+      const after = await readRuntimeState(page, token);
 
-    assertNoPageErrors(options.label, pageErrors.errors);
-    if (state.eventCommitErrors.length > 0) {
-      throw new Error(
-        `${options.label}: ${state.eventCommitErrors.length} event commit(s) ` +
-          `failed: ${state.eventCommitErrors.join("; ")}`,
-      );
-    }
-    const measuredRuns = Object.values(state.bySrc)
-      .reduce((sum, totals) => sum + totals.runs, 0);
-    if (measuredRuns === 0) {
-      throw new Error(
-        `${options.label}: the measured operation produced no runs with a ` +
-          `read sample`,
-      );
-    }
+      assertNoPageErrors(options.label, pageErrors.errors);
+      if (state.eventCommitErrors.length > 0) {
+        throw new Error(
+          `${options.label}: ${state.eventCommitErrors.length} event commit(s) ` +
+            `failed: ${state.eventCommitErrors.join("; ")}`,
+        );
+      }
+      const measuredRuns = Object.values(state.bySrc)
+        .reduce((sum, totals) => sum + totals.runs, 0);
+      if (measuredRuns === 0) {
+        throw new Error(
+          `${options.label}: the measured operation produced no runs with a ` +
+            `read sample`,
+        );
+      }
 
-    const running = liftRunningStates(sites, [
-      ...Object.keys(measured.before.actions),
-      ...Object.keys(after.actions),
-      ...Object.keys(state.bySrc),
-    ]);
-    const implementations = confirmLiftImplementations(
-      sites,
-      [measured.before.actions, after.actions],
-      running,
-    );
-    const bySite = new Map(sites.map((lift) => [lift.site, {
-      totals: emptyTotals(),
-      implementation: implementations.get(lift.site),
-    }]));
-    const remaining = emptyTotals();
-    for (const [src, totals] of Object.entries(state.bySrc)) {
-      const site = parseSrc(src)?.site;
-      addTotals(
-        (site === undefined ? undefined : bySite.get(site)?.totals) ??
-          remaining,
-        totals,
+      const runningStates = liftRunningStates(sites, [
+        ...Object.keys(measured.before.actions),
+        ...Object.keys(after.actions),
+        ...Object.keys(state.bySrc),
+      ]);
+      requireAttributableRuns(sites, runningStates, Object.keys(state.bySrc));
+      const implementations = confirmLiftImplementations(
+        sites,
+        [measured.before.actions, after.actions],
+        runningStates,
       );
-    }
-    return {
-      label: options.label,
-      readAccounting: true,
-      elapsedMs: measured.elapsedMs,
-      graph: { before: measured.before.graph, after: after.graph },
-      timing: timingBetween(measured.before, after),
-      lifts: sites.map((lift) => {
-        const entry = bySite.get(lift.site)!;
-        return {
-          name: lift.name,
-          module: lift.module,
-          role: lift.role,
-          site: lift.site,
-          ...entry.totals,
-          instantiated: running.get(lift.site)!,
-          implementation: entry.implementation,
-        };
-      }),
-      remaining,
-      runsWithoutReads: state.runsWithoutReads,
-      eventCommits: state.eventCommits,
-      notes: [ACCOUNTING_ON_NOTE, ATTEMPT_READS_NOTE, TIMING_NOTE],
-    };
+      const bySite = new Map(sites.map((lift) => [lift.site, {
+        totals: emptyTotals(),
+        implementation: implementations.get(lift.site),
+      }]));
+      const remaining = emptyTotals();
+      for (const [src, totals] of Object.entries(state.bySrc)) {
+        const site = parseSrc(src)?.site;
+        addTotals(
+          (site === undefined ? undefined : bySite.get(site)?.totals) ??
+            remaining,
+          totals,
+        );
+      }
+      return {
+        label: options.label,
+        readAccounting: true,
+        elapsedMs: measured.elapsedMs,
+        graph: { before: measured.before.graph, after: after.graph },
+        timing: timingBetween(measured.before, after),
+        lifts: sites.map((lift) => {
+          const entry = bySite.get(lift.site)!;
+          return {
+            name: lift.name,
+            module: lift.module,
+            role: lift.role,
+            site: lift.site,
+            ...entry.totals,
+            running: runningStates.get(lift.site)!,
+            implementation: entry.implementation,
+          };
+        }),
+        remaining,
+        runsWithoutReads: state.runsWithoutReads,
+        eventCommits: state.eventCommits,
+        notes: [ACCOUNTING_ON_NOTE, ATTEMPT_READS_NOTE, TIMING_NOTE],
+      };
+    }, () => releaseSample(page, token));
+    return value;
   } finally {
     pageErrors.stop();
   }
@@ -388,54 +398,66 @@ export async function measureTopicsReads(
  *
  * @throws If the page raises an error; if the runtime client is replaced; if
  *   the worker's timing has no run span to count; or if the worker records no
- *   scheduler run and the caller did not declare `mayRunNothing`.
+ *   scheduler run and the caller did not declare `mayRunNothing`. When the
+ *   operation throws and releasing the sample also fails, an `AggregateError`
+ *   holds the operation's error first. The sample's hold on the page is
+ *   released on every exit.
  */
 export async function timeTopicsOperation(
   page: Page,
   options: TimeTopicsOperationOptions,
 ): Promise<TopicsTimedSample> {
   const pageErrors = watchPageErrors(page);
+  const token = crypto.randomUUID();
   try {
-    const token = crypto.randomUUID();
-    await turnAccountingOff(page, token);
-    const before = await readRuntimeState(page, token);
-    const startedAt = performance.now();
-    options.interval?.start();
-    try {
-      await options.operation();
-      await settleOperation(page);
-    } finally {
-      options.interval?.end();
-    }
-    const elapsedMs = performance.now() - startedAt;
-    const after = await readRuntimeState(page, token, true);
+    const { value } = await runThenStop(
+      async (): Promise<TopicsTimedSample> => {
+        await turnAccountingOff(page, token);
+        const before = await readRuntimeState(page, token);
+        const startedAt = performance.now();
+        options.interval?.start();
+        try {
+          await options.operation();
+          await settleOperation(page);
+        } finally {
+          options.interval?.end();
+        }
+        const elapsedMs = performance.now() - startedAt;
+        const after = await readRuntimeState(page, token);
 
-    assertNoPageErrors(options.label, pageErrors.errors);
-    const workerRuns = workerRunCount(before.workerTiming, after.workerTiming);
-    const mayRunNothing = options.mayRunNothing ?? false;
-    if (workerRuns === 0 && !mayRunNothing) {
-      throw new Error(
-        `${options.label}: the timed operation ran nothing in the worker; ` +
-          "declare `mayRunNothing` for an operation that may",
-      );
-    }
-    return {
-      label: options.label,
-      readAccounting: false,
-      accountingTurnedOff: true,
-      mayRunNothing,
-      elapsedMs,
-      graph: { before: before.graph, after: after.graph },
-      timing: timingBetween(before, after),
-      workerRuns,
-      notes: [
-        ACCOUNTING_OFF_NOTE,
-        COMMIT_ERRORS_NOTE,
-        WORKER_RUNS_NOTE,
-        ATTEMPT_READS_NOTE,
-        TIMING_NOTE,
-      ],
-    };
+        assertNoPageErrors(options.label, pageErrors.errors);
+        const workerRuns = workerRunCount(
+          before.workerTiming,
+          after.workerTiming,
+        );
+        const mayRunNothing = options.mayRunNothing ?? false;
+        if (workerRuns === 0 && !mayRunNothing) {
+          throw new Error(
+            `${options.label}: the timed operation ran nothing in the worker; ` +
+              "declare `mayRunNothing` for an operation that may",
+          );
+        }
+        return {
+          label: options.label,
+          readAccounting: false,
+          accountingTurnedOff: true,
+          mayRunNothing,
+          elapsedMs,
+          graph: { before: before.graph, after: after.graph },
+          timing: timingBetween(before, after),
+          workerRuns,
+          notes: [
+            ACCOUNTING_OFF_NOTE,
+            COMMIT_ERRORS_NOTE,
+            WORKER_RUNS_NOTE,
+            ATTEMPT_READS_NOTE,
+            TIMING_NOTE,
+          ],
+        };
+      },
+      () => releaseSample(page, token),
+    );
+    return value;
   } finally {
     pageErrors.stop();
   }
@@ -488,7 +510,7 @@ export function formatTopicsSample(
       lines.push(row(
         `${lift.role} ${lift.name}`,
         lift,
-        lift.instantiated ? lift.site : `${lift.site} (not running)`,
+        lift.running ? lift.site : `${lift.site} (not running)`,
       ));
     }
     lines.push(row("remaining", sample.remaining, ""));
@@ -630,69 +652,73 @@ async function settleOperation(page: Page): Promise<void> {
  * the page as it found it when enabling fails.
  */
 async function startSampling(page: Page, token: string): Promise<void> {
-  await page.evaluate(async (token: string) => {
-    const scope = globalThis as MeasurementGlobal;
-    const rt = scope.commonfabric?.rt;
-    if (!rt) throw new Error("The shell exposes no runtime client to measure");
-    const sampling: PageSampling = {
-      bySrc: {},
-      runsWithoutReads: 0,
-      eventCommits: 0,
-      eventCommitErrors: [],
-    };
-    const listener: Parameters<typeof rt.on<"telemetry">>[1] = (marker) => {
-      if (marker.type === "scheduler.event.commit") {
-        if (marker.error) sampling.eventCommitErrors.push(marker.error);
-        else sampling.eventCommits++;
-        return;
+  await inPage(() =>
+    page.evaluate(async (token: string) => {
+      const scope = globalThis as MeasurementGlobal;
+      const rt = scope.commonfabric?.rt;
+      if (!rt) {
+        throw new Error("The shell exposes no runtime client to measure");
       }
-      if (marker.type !== "scheduler.run.complete") return;
-      if (!marker.reads) {
-        sampling.runsWithoutReads++;
-        return;
-      }
-      const totals = sampling.bySrc[marker.src ?? ""] ??= {
-        runs: 0,
-        durationMs: 0,
-        proxyAccesses: 0,
-        maxProxyAccesses: 0,
-        linkResolutions: 0,
-        distinctDocuments: 0,
-        registeredDependencies: 0,
+      const sampling: PageSampling = {
+        bySrc: {},
+        runsWithoutReads: 0,
+        eventCommits: 0,
+        eventCommitErrors: [],
       };
-      totals.runs++;
-      totals.durationMs += marker.durationMs;
-      totals.proxyAccesses += marker.reads.proxyAccesses;
-      totals.maxProxyAccesses = Math.max(
-        totals.maxProxyAccesses,
-        marker.reads.proxyAccesses,
-      );
-      totals.linkResolutions += marker.reads.linkResolutions;
-      totals.distinctDocuments += marker.reads.distinctDocuments;
-      totals.registeredDependencies += marker.reads.registeredDependencies;
-    };
-    rt.on("telemetry", listener);
-    const samples = scope.__cfTopicsSamples ??= {};
-    samples[token] = {
-      client: rt,
-      sampling,
-      unsubscribe: () => rt.off("telemetry", listener),
-    };
-    try {
-      await rt.setTelemetryEnabled(true);
-      await rt.setReadStatsEnabled(true);
-    } catch (error) {
-      // Leave the page as it was found. The enabling failure is what the
-      // caller hears about, so a failure to disable does not replace it.
-      rt.off("telemetry", listener);
-      delete samples[token];
-      await Promise.allSettled([
-        rt.setReadStatsEnabled(false),
-        rt.setTelemetryEnabled(false),
-      ]);
-      throw error;
-    }
-  }, { args: [token] });
+      const listener: Parameters<typeof rt.on<"telemetry">>[1] = (marker) => {
+        if (marker.type === "scheduler.event.commit") {
+          if (marker.error) sampling.eventCommitErrors.push(marker.error);
+          else sampling.eventCommits++;
+          return;
+        }
+        if (marker.type !== "scheduler.run.complete") return;
+        if (!marker.reads) {
+          sampling.runsWithoutReads++;
+          return;
+        }
+        const totals = sampling.bySrc[marker.src ?? ""] ??= {
+          runs: 0,
+          durationMs: 0,
+          proxyAccesses: 0,
+          maxProxyAccesses: 0,
+          linkResolutions: 0,
+          distinctDocuments: 0,
+          registeredDependencies: 0,
+        };
+        totals.runs++;
+        totals.durationMs += marker.durationMs;
+        totals.proxyAccesses += marker.reads.proxyAccesses;
+        totals.maxProxyAccesses = Math.max(
+          totals.maxProxyAccesses,
+          marker.reads.proxyAccesses,
+        );
+        totals.linkResolutions += marker.reads.linkResolutions;
+        totals.distinctDocuments += marker.reads.distinctDocuments;
+        totals.registeredDependencies += marker.reads.registeredDependencies;
+      };
+      rt.on("telemetry", listener);
+      const samples = scope.__cfTopicsSamples ??= {};
+      samples[token] = {
+        client: rt,
+        sampling,
+        unsubscribe: () => rt.off("telemetry", listener),
+      };
+      try {
+        await rt.setTelemetryEnabled(true);
+        await rt.setReadStatsEnabled(true);
+      } catch (error) {
+        // Leave the page as it was found. The enabling failure is what the
+        // caller hears about, so a failure to disable does not replace it.
+        rt.off("telemetry", listener);
+        delete samples[token];
+        await Promise.allSettled([
+          rt.setReadStatsEnabled(false),
+          rt.setTelemetryEnabled(false),
+        ]);
+        throw error;
+      }
+    }, { args: [token] })
+  );
 }
 
 /**
@@ -701,14 +727,16 @@ async function startSampling(page: Page, token: string): Promise<void> {
  * interval does not inherit either.
  */
 async function turnAccountingOff(page: Page, token: string): Promise<void> {
-  await page.evaluate(async (token: string) => {
-    const scope = globalThis as MeasurementGlobal;
-    const rt = scope.commonfabric?.rt;
-    if (!rt) throw new Error("The shell exposes no runtime client to time");
-    (scope.__cfTopicsSamples ??= {})[token] = { client: rt };
-    await rt.setReadStatsEnabled(false);
-    await rt.setTelemetryEnabled(false);
-  }, { args: [token] });
+  await inPage(() =>
+    page.evaluate(async (token: string) => {
+      const scope = globalThis as MeasurementGlobal;
+      const rt = scope.commonfabric?.rt;
+      if (!rt) throw new Error("The shell exposes no runtime client to time");
+      (scope.__cfTopicsSamples ??= {})[token] = { client: rt };
+      await rt.setReadStatsEnabled(false);
+      await rt.setTelemetryEnabled(false);
+    }, { args: [token] })
+  );
 }
 
 /**
@@ -720,83 +748,118 @@ async function turnAccountingOff(page: Page, token: string): Promise<void> {
  *   its listener and its accounting belonged to the replaced client.
  */
 async function stopSampling(page: Page, token: string): Promise<PageSampling> {
-  return await page.evaluate(async (token: string) => {
-    const scope = globalThis as MeasurementGlobal;
-    const entry = scope.__cfTopicsSamples?.[token];
-    if (!entry?.sampling || !entry.unsubscribe) {
-      throw new Error("The sampling under this token is gone");
-    }
-    entry.unsubscribe();
-    if (scope.commonfabric?.rt !== entry.client) {
-      delete scope.__cfTopicsSamples![token];
-      throw new Error(
-        "The runtime client was replaced during the measured operation, so " +
-          "its runs were not all observed",
-      );
-    }
-    await entry.client.setReadStatsEnabled(false);
-    await entry.client.setTelemetryEnabled(false);
-    return entry.sampling;
-  }, { args: [token] });
+  return await inPage(() =>
+    page.evaluate(async (token: string) => {
+      const scope = globalThis as MeasurementGlobal;
+      const entry = scope.__cfTopicsSamples?.[token];
+      if (!entry?.sampling || !entry.unsubscribe) {
+        throw new Error("The sampling under this token is gone");
+      }
+      entry.unsubscribe();
+      if (scope.commonfabric?.rt !== entry.client) {
+        throw new Error(
+          "The runtime client was replaced during the measured operation, so " +
+            "its runs were not all observed",
+        );
+      }
+      await entry.client.setReadStatsEnabled(false);
+      await entry.client.setTelemetryEnabled(false);
+      return entry.sampling;
+    }, { args: [token] })
+  );
 }
 
 /**
  * Helper for the samplers, which reads graph size, implementation previews,
- * and timing, and with `release` forgets the sample under `token`.
+ * and timing.
  *
  * @throws If the runtime client is not the one the sample started against.
  */
 async function readRuntimeState(
   page: Page,
   token: string,
-  release = false,
 ): Promise<RuntimeState> {
-  return await page.evaluate(async (token: string, release: boolean) => {
-    const scope = globalThis as MeasurementGlobal;
-    const entry = scope.__cfTopicsSamples?.[token];
-    const cf = scope.commonfabric;
-    const mainBreakdown = cf?.getTimingStatsBreakdown;
-    if (!entry || !mainBreakdown) {
-      throw new Error("The sample or the shell's timing to read is gone");
-    }
-    if (release) delete scope.__cfTopicsSamples![token];
-    if (cf?.rt !== entry.client) {
-      throw new Error(
-        "The runtime client was replaced during the operation, so its graph " +
-          "and timing describe another runtime",
+  return await inPage(() =>
+    page.evaluate(async (token: string) => {
+      const scope = globalThis as MeasurementGlobal;
+      const entry = scope.__cfTopicsSamples?.[token];
+      const cf = scope.commonfabric;
+      const mainBreakdown = cf?.getTimingStatsBreakdown;
+      if (!entry || !mainBreakdown) {
+        throw new Error("The sample or the shell's timing to read is gone");
+      }
+      if (cf?.rt !== entry.client) {
+        throw new Error(
+          "The runtime client was replaced during the operation, so its graph " +
+            "and timing describe another runtime",
+        );
+      }
+      const flatten = (
+        groups: Record<
+          string,
+          Record<string, { count: number; totalTime: number }>
+        >,
+      ) => {
+        const flat: Record<string, [number, number]> = {};
+        for (const [logger, keys] of Object.entries(groups)) {
+          for (const [key, stats] of Object.entries(keys)) {
+            flat[`${logger}/${key}`] = [stats.count, stats.totalTime];
+          }
+        }
+        return flat;
+      };
+      const graph = await entry.client.getGraphSnapshot();
+      const workerTiming = flatten(
+        (await entry.client.getLoggerCounts()).timing,
       );
-    }
-    const flatten = (
-      groups: Record<
-        string,
-        Record<string, { count: number; totalTime: number }>
-      >,
-    ) => {
-      const flat: Record<string, [number, number]> = {};
-      for (const [logger, keys] of Object.entries(groups)) {
-        for (const [key, stats] of Object.entries(keys)) {
-          flat[`${logger}/${key}`] = [stats.count, stats.totalTime];
+      const actions: Record<string, string[]> = {};
+      for (const node of graph.nodes) {
+        if (node.src === undefined) continue;
+        const previews = actions[node.src] ??= [];
+        if (node.preview !== undefined && !previews.includes(node.preview)) {
+          previews.push(node.preview);
         }
       }
-      return flat;
-    };
-    const graph = await entry.client.getGraphSnapshot();
-    const workerTiming = flatten((await entry.client.getLoggerCounts()).timing);
-    const actions: Record<string, string[]> = {};
-    for (const node of graph.nodes) {
-      if (node.src === undefined) continue;
-      const previews = actions[node.src] ??= [];
-      if (node.preview !== undefined && !previews.includes(node.preview)) {
-        previews.push(node.preview);
-      }
-    }
-    return {
-      graph: { nodes: graph.nodes.length, edges: graph.edges.length },
-      actions,
-      mainTiming: flatten(mainBreakdown()),
-      workerTiming,
-    };
-  }, { args: [token, release] });
+      return {
+        graph: { nodes: graph.nodes.length, edges: graph.edges.length },
+        actions,
+        mainTiming: flatten(mainBreakdown()),
+        workerTiming,
+      };
+    }, { args: [token] })
+  );
+}
+
+/**
+ * Helper for the samplers, which releases the sample under `token`: its
+ * telemetry listener, if still subscribed, and its record of the runtime
+ * client. Releasing a sample already released does nothing.
+ */
+async function releaseSample(page: Page, token: string): Promise<void> {
+  await inPage(() =>
+    page.evaluate((token: string) => {
+      const scope = globalThis as MeasurementGlobal;
+      const entry = scope.__cfTopicsSamples?.[token];
+      if (entry === undefined) return;
+      entry.unsubscribe?.();
+      delete scope.__cfTopicsSamples![token];
+    }, { args: [token] })
+  );
+}
+
+/**
+ * Helper for the page access above, which runs `evaluate` and rethrows a page
+ * exception as an `Error` carrying the page's message. The browser protocol
+ * reports an exception thrown in the page as a detail record rather than an
+ * `Error`; the record becomes the rethrown error's cause.
+ */
+async function inPage<T>(evaluate: () => Promise<T>): Promise<T> {
+  try {
+    return await evaluate();
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error(describeThrown(error), { cause: error });
+  }
 }
 
 //
