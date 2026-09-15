@@ -52,11 +52,6 @@ export const parseCfcLabelReference = (
     ? reference.$ref.slice(CID_PREFIX.length)
     : undefined;
 
-/** The reference a stored entry carries for the label document `hash` names. */
-export const formatCfcLabelReference = (hash: string): CfcLabelReference => ({
-  $ref: `${CID_PREFIX}${hash}`,
-});
-
 const LABEL_MEMBERS = ["confidentiality", "integrity"] as const;
 
 /**

@@ -153,6 +153,9 @@ const MISSING_LABEL_DOCUMENT = `cid:fid1:${"missing".padEnd(43, "0")}`;
  */
 const REFERENCED_ENTITY = entity("referenced-entity");
 
+/** A document linking at `via` to {@link REFERENCED_MISSING}. */
+const VIA_MISSING = entity("via-missing");
+
 /** One stored link, in the at-rest sigil form the store holds. */
 const link = (id: string, space?: string, path: string[] = []) => ({
   "/": {
@@ -186,6 +189,8 @@ const documents: Record<string, unknown> = {
         version: 1,
         entries: [
           stored(["secret"], { $ref: LABEL_DOCUMENT }, "declared"),
+          // An entry that is not a record is skipped rather than read.
+          "bogus",
         ],
       },
     },
@@ -202,6 +207,9 @@ const documents: Record<string, unknown> = {
         ],
       },
     },
+  },
+  [VIA_MISSING]: {
+    value: { via: link(REFERENCED_MISSING) },
   },
   [REFERENCED_ENTITY]: {
     value: { secret: "held by a reference to an entity" },
@@ -457,6 +465,7 @@ const PLAIN = new Set([
   REFERENCED,
   REFERENCED_MISSING,
   REFERENCED_ENTITY,
+  VIA_MISSING,
   UNLABELLED,
   LINKER,
   NESTER,
@@ -675,6 +684,14 @@ describe("space-labels", () => {
       expect(read.entries).toEqual([]);
       expect(read.unreadPaths).toEqual([
         { path: ["secret"], reason: "no-document" },
+      ]);
+    });
+
+    it("carries an unread label through the link that reaches it", () => {
+      const read = reader.read({ id: VIA_MISSING, scope: "space" });
+      expect(read.entries).toEqual([]);
+      expect(read.unreadPaths).toEqual([
+        { path: ["via", "secret"], reason: "no-document" },
       ]);
     });
 

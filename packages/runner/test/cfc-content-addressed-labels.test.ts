@@ -7,6 +7,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
 import {
   CFC_LABEL_INLINE_LIMIT,
+  cfcEnvelopeLabelDocumentHashes,
   cfcLabelDocumentContent,
   cfcLabelDocumentHash,
   CfcLabelDocumentHashMismatchError,
@@ -335,6 +336,38 @@ describe("CFC content-addressed labels", () => {
           cfcLabelDocumentContent({ confidentiality: [orClause] }),
         ),
       );
+    });
+
+    it("keeps integrity atoms in the canonical content", () => {
+      const content = cfcLabelDocumentContent({
+        confidentiality: ["c"],
+        integrity: ["cf-compiled-by:cf-compiler"],
+      });
+      expect(content).toEqual({
+        confidentiality: ["c"],
+        integrity: ["cf-compiled-by:cf-compiler"],
+      });
+    });
+
+    it("refuses a staged id outside the cid: namespace", () => {
+      expect(() =>
+        storedLabelMapEntries(FIXTURE_ENTRIES, () => "of:not-content-addressed")
+      ).toThrow("outside the cid: namespace");
+    });
+
+    it("scans an envelope of any shape for the documents it references", () => {
+      const { stored } = storedForm(FIXTURE_METADATA);
+      expect(cfcEnvelopeLabelDocumentHashes(stored).length).toBe(6);
+      // Only version 2 defines the reference; other shapes name nothing.
+      expect(cfcEnvelopeLabelDocumentHashes({ ...stored, version: 1 }))
+        .toEqual([]);
+      expect(cfcEnvelopeLabelDocumentHashes(undefined)).toEqual([]);
+      expect(cfcEnvelopeLabelDocumentHashes({ version: 2, labelMap: {} }))
+        .toEqual([]);
+      expect(cfcEnvelopeLabelDocumentHashes({
+        version: 2,
+        labelMap: { entries: ["bogus", { label: { $ref: "cid:fid1:x" } }] },
+      })).toEqual(["fid1:x"]);
     });
 
     it("refuses to register content under a hash it does not produce", () => {
@@ -764,6 +797,48 @@ describe("CFC content-addressed labels", () => {
         tx.abort();
         return Promise.resolve();
       });
+    });
+
+    it("fails closed when the label document cannot be read at all", () => {
+      // A transaction whose read of the document throws — a refusal, a
+      // closed transaction — surfaces as the fail-closed error, not as the
+      // read's own class, which consumers would swallow.
+      const tx = {
+        readOrThrow: () => {
+          throw new Error("refused by the store");
+        },
+      } as unknown as Parameters<typeof resolveStoredCfcMetadata>[0];
+      const stored: StoredCfcMetadata = {
+        version: 2,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: {
+          version: 1,
+          entries: [{ path: ["secret"], label: { $ref: `cid:${absentHash}` } }],
+        },
+      };
+      expect(() =>
+        resolveStoredCfcMetadata(tx, space, "of:unreadable", stored, {
+          meta: {},
+        })
+      ).toThrow("could not be read: refused by the store");
+    });
+
+    it("reports that policy applies for an unknown version at the fallback position", () => {
+      const tx = {
+        readOrThrow: () => ({
+          cfc: {
+            version: 3,
+            schemaHash: "future-format",
+            labelMap: { version: 1, entries: [] },
+          },
+        }),
+      } as unknown as Parameters<typeof storedCfcMetadataAppliesToPath>[0];
+      expect(storedCfcMetadataAppliesToPath(tx, {
+        space,
+        id: "of:nested" as URI,
+        scope: "space",
+        path: ["value", "anything"],
+      })).toBe(true);
     });
 
     it("refuses a version-1 envelope holding a reference", async () => {

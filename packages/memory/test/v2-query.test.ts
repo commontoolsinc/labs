@@ -2027,6 +2027,42 @@ Deno.test("memory v2 delivers the label documents a version-2 CFC envelope refer
     });
     assert(legacyTracked.state.tracker.has(schemaKey));
     assert(!legacyTracked.state.tracker.has(labelKey));
+
+    // A metadata link is a same-space link: an envelope written as a sigil
+    // link into another space names nothing the per-space engine could
+    // read, so nothing is tracked for it.
+    const foreign = "of:label-document-foreign-referrer";
+    applyCommit(engine, {
+      sessionId: "session:label-document-writer",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: foreign,
+          value: {
+            value: { n: 3 },
+            cfc: {
+              "/": {
+                "link@1": {
+                  id: labelSchemaId,
+                  space: "did:key:z6Mk-memory-v2-some-other-space",
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+    const foreignTracked = trackGraph(space, engine, {
+      roots: [{
+        id: foreign,
+        selector: { path: [], schema: false },
+      }],
+    });
+    assert(!foreignTracked.state.tracker.has(schemaKey));
   } finally {
     close(engine);
     await Deno.remove(path);

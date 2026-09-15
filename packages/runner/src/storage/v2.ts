@@ -3904,6 +3904,7 @@ export class SpaceReplica
       scope?: CellScope,
       identity?: ScopeKeyIdentity,
     ): boolean;
+    hydrateArrivedCfcSchemaRefs(sync: SessionSync): void;
   } {
     return {
       noteCaughtUpLocalSeq: (localSeq) => this.#noteCaughtUpLocalSeq(localSeq),
@@ -3921,6 +3922,8 @@ export class SpaceReplica
         this.#waitForConflictReadRepair(rejection),
       hasDocumentRecord: (id, scope, identity) =>
         this.#hasDocumentRecord(id, scope, identity),
+      hydrateArrivedCfcSchemaRefs: (sync) =>
+        this.#hydrateArrivedCfcSchemaRefs(sync),
     };
   }
 

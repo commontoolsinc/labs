@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type { SessionSync } from "@commonfabric/memory/v2";
 import {
   cfcLabelDocumentHash,
   lookupCfcLabelDocument,
@@ -24,6 +25,7 @@ import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { StoredCfcMetadata } from "../src/cfc/types.ts";
 import type { URI } from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import {
   SEED_ENVELOPE_SCHEMA,
@@ -46,8 +48,15 @@ const SECOND_LABEL: IFCLabel = {
     "https://commonfabric.org/cfc/atom/Public/room-general-chat-delta",
   ],
 };
+const THIRD_LABEL: IFCLabel = {
+  confidentiality: [
+    "https://commonfabric.org/cfc/atom/Public/room-general-chat-epsilon",
+    "https://commonfabric.org/cfc/atom/Public/room-general-chat-zeta",
+  ],
+};
 const firstHash = cfcLabelDocumentHash(FIRST_LABEL);
 const secondHash = cfcLabelDocumentHash(SECOND_LABEL);
+const thirdHash = cfcLabelDocumentHash(THIRD_LABEL);
 
 const referencing = (hash: string): StoredCfcMetadata => ({
   version: 2,
@@ -198,5 +207,70 @@ describe("CFC label document delivery", () => {
       cancel();
       await writer.dispose();
     }
+  });
+
+  it("kicks a pull for a label document an arrived envelope names", async () => {
+    // The arrival hydration on its own: a frame naming a label document
+    // the replica and the registry both lack kicks a pull of it, and one
+    // naming a document the server does not hold completes empty. The
+    // frame is handed to the replica directly, since a served frame here
+    // carries the document already.
+    await seed([
+      {
+        id: `cid:${SEED_ENVELOPE_SCHEMA_HASH}`,
+        value: { value: SEED_ENVELOPE_SCHEMA },
+      },
+      { id: `cid:${thirdHash}`, value: { value: THIRD_LABEL } },
+    ]);
+    const provider = manager.open(space);
+    const replica = provider.replica;
+    expect(lookupCfcLabelDocument(thirdHash)).toBeUndefined();
+    expect(replica.getDocument(`cid:${thirdHash}`)).toBeUndefined();
+    const absentHash = cfcLabelDocumentHash({ confidentiality: ["never"] });
+    const frame = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [
+        // Skipped: a content-addressed document names nothing to pull.
+        { branch: "", id: `cid:${thirdHash}`, doc: { value: THIRD_LABEL } },
+        // Skipped: no envelope.
+        { branch: "", id: "of:plain", doc: { value: {} } },
+        {
+          branch: "",
+          id: "of:arrived",
+          doc: { value: { secret: "sealed" }, cfc: referencing(thirdHash) },
+        },
+        {
+          branch: "",
+          id: "of:arrived-absent",
+          doc: { value: { secret: "sealed" }, cfc: referencing(absentHash) },
+        },
+      ],
+      removes: [],
+    } as unknown as SessionSync;
+    (replica as SpaceReplica).accessForTestingOnly
+      .hydrateArrivedCfcSchemaRefs(frame);
+    // A pull issued after the kicked ones on the same session settles
+    // after them, so once it resolves the kicked pulls have too.
+    await provider.sync(`cid:${SEED_ENVELOPE_SCHEMA_HASH}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(replica.getDocument(`cid:${thirdHash}`)).toBeDefined();
+    expect(replica.getDocument(`cid:${absentHash}`)).toBeUndefined();
+    const tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      scope: "space",
+      id: "of:arrived" as URI,
+      path: [],
+    }, {
+      value: { secret: "sealed" },
+      cfc: referencing(thirdHash),
+    });
+    const resolved = readStoredCfcMetadata(tx, { space, id: "of:arrived" });
+    expect(resolved?.labelMap.entries[0].label).toEqual(THIRD_LABEL);
+    tx.abort();
   });
 });

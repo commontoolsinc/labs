@@ -1424,6 +1424,40 @@ Deno.test("validates the label documents a version-2 CFC envelope references", a
       }),
     });
 
+    // Entries that hold no reference — inline labels, a malformed label,
+    // an envelope with no entries array — name no document and pass the
+    // scan; the boundary polices backing, not the map's shape.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(40, {
+        operations: [{
+          op: "set",
+          id: "of:inline-carrier",
+          value: {
+            value: { field: "v" },
+            cfc: {
+              version: 2,
+              schemaHash: envelopeHash,
+              labelMap: {
+                version: 1,
+                entries: [
+                  { path: ["field"], label: { confidentiality: ["secret"] } },
+                  { path: ["field"], label: "malformed" },
+                ],
+              },
+            },
+          },
+        } as never, {
+          op: "set",
+          id: "of:entryless-carrier",
+          value: {
+            value: { field: "v" },
+            cfc: { version: 2, schemaHash: envelopeHash, labelMap: {} },
+          },
+        } as never],
+      }),
+    });
+
     // A document that verifies against its id but is not label-shaped is
     // refused as well: the hash cannot tell a label from any other record,
     // and a reader resolving it would fail closed on every read.
