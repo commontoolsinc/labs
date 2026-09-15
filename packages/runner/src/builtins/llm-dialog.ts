@@ -1304,12 +1304,17 @@ function extractRunArguments(input: unknown): Record<string, any> {
 }
 
 /**
- * Flattens tools by extracting handlers from piece-based tools.
- * Converts { piece: ... } entries into individual handler entries.
+ * Builds the tool catalog a reader displays: an entry for each tool the
+ * pattern supplies other than a piece-backed one, and the built-in tools
+ * unless `includeBuiltinTools` is false.
+ *
+ * An entry holds the tool's description, its input schema, and its handler
+ * as a link. It holds nothing a turn needs to run the tool, which the turn
+ * reads from `tools` itself.
  *
  * @param toolsCell - Cell containing the tools
- * @param toolHandlers - Optional map to populate with handler references for invocation
- * @returns Flattened tools object with handler/pattern entries
+ * @param includeBuiltinTools - Whether the catalog lists the built-in tools
+ * @returns The catalog, keyed by tool name
  */
 function flattenTools(
   toolsCell: Cell<any>,
