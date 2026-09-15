@@ -371,9 +371,13 @@ interface FabricCodec<PlusType, Encoded> {
   get uniqueHandledClass(): Constructor | undefined;
   get recognizedTypeTag(): string | undefined;
   canEncode(value: FabricValuePlus<PlusType>): boolean;
+  canDecode(state: Encoded): boolean;
   tagForValue(value: FabricValuePlus<PlusType>): string;
-  encode(value: FabricValuePlus<PlusType>): Encoded;  // shallow
-  decode(                                             // shallow
+  encode(                                    // shallow
+    value: FabricValuePlus<PlusType>,
+    env: LiveEnvironment,
+  ): Encoded;
+  decode(                                    // shallow
     typeTag: string,
     state: Encoded,
     env: LiveEnvironment,
