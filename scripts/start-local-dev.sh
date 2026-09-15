@@ -69,6 +69,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --allow-skill-script)
+            # Without this the next flag becomes the value, and a
+            # `--allow-skill-script --cf-harness` starts no console at all.
+            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+                echo "Error: --allow-skill-script requires a value." >&2
+                exit 1
+            fi
             CONSOLE_SKILL_SCRIPT_ARGS+=(--allow-skill-script "$2")
             shift 2
             ;;

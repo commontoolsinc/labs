@@ -165,6 +165,13 @@ That entry keys on a commit, so changing the fixture under
 `packages/cf-harness/fixtures/acquirable-skills/` means changing that constant
 to the commit carrying the change.
 
+Two shapes are refused at launch rather than at the call. An entry keyed on a
+registry name needs a skills tree, since that is what gives its script a sandbox
+path — an acquired pin needs none, its bytes arriving through the acquisition's
+own mount. And neither flag may be passed after `--`: the allowlist is one of
+the values the launch resolves and prints, so a console argument setting it
+again would leave that report describing other scripts.
+
 What an entry bounds is the _tool_: a run holding no entry for a script is
 offered no `run_skill_script` for it. It does not bound the bytes — the sandbox
 the script runs in is what does.

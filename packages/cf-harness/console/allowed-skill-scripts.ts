@@ -12,6 +12,7 @@
 
 import type { HarnessAllowedSkillScript } from "../src/contracts/skill.ts";
 import {
+  parseAcquiredSkillPin,
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "../src/skills/scripts.ts";
@@ -79,4 +80,34 @@ export const resolveAllowedSkillScripts = (
     }
   });
   return uniqueAllowedSkillScripts(parsed);
+};
+
+/**
+ * Throws when an entry could not address the script it names.
+ *
+ * A REGISTRY entry names its script by the sandbox path a skills tree gives
+ * it, so with no tree resolved the entry addresses nothing and every call it
+ * was written to allow is refused as un-allowlisted. An acquired pin is
+ * exempt: its bytes reach the sandbox through the acquisition's own mount,
+ * which no skills root takes part in.
+ */
+export const assertAllowedSkillScriptsAddressable = (
+  scripts: readonly HarnessAllowedSkillScript[],
+  skillsRootResolved: boolean,
+): void => {
+  if (skillsRootResolved) {
+    return;
+  }
+  const unaddressable = scripts.find((script) =>
+    parseAcquiredSkillPin(script.skill) === undefined
+  );
+  if (unaddressable !== undefined) {
+    throw new Error(
+      `\`${unaddressable.skill}\` is a registry skill, whose script is ` +
+        `addressed by the path a skills tree gives it, and this console ` +
+        `resolved no tree: set \`--skills-root\` or ` +
+        `\`CF_HARNESS_CONSOLE_SKILLS_ROOT\`, or key the entry on an ` +
+        `acquired pin`,
+    );
+  }
 };

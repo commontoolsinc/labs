@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import {
   ALLOWED_SKILL_SCRIPTS_VARIABLE,
+  assertAllowedSkillScriptsAddressable,
   parseAllowedSkillScriptsVariable,
   resolveAllowedSkillScripts,
 } from "../../console/allowed-skill-scripts.ts";
@@ -80,6 +81,42 @@ describe("console/allowed-skill-scripts", () => {
           "--flag",
         )
       ).toThrow("acquired pin");
+    });
+  });
+
+  describe("assertAllowedSkillScriptsAddressable()", () => {
+    it("throws naming a registry entry when no skills tree resolved", () => {
+      expect(() =>
+        assertAllowedSkillScriptsAddressable(
+          [{ skill: "cf-tidy", path: "scripts/a.sh" }],
+          false,
+        )
+      ).toThrow("`cf-tidy` is a registry skill");
+    });
+
+    it("accepts an acquired pin when no skills tree resolved", () => {
+      // Its bytes reach the sandbox through the acquisition's own mount,
+      // which no skills root takes part in.
+      expect(() =>
+        assertAllowedSkillScriptsAddressable(
+          [{ skill: PIN, path: "scripts/budgets.sh" }],
+          false,
+        )
+      ).not.toThrow();
+    });
+
+    it("accepts a registry entry once a skills tree resolved", () => {
+      expect(() =>
+        assertAllowedSkillScriptsAddressable(
+          [{ skill: "cf-tidy", path: "scripts/a.sh" }],
+          true,
+        )
+      ).not.toThrow();
+    });
+
+    it("accepts an empty allowlist either way", () => {
+      expect(() => assertAllowedSkillScriptsAddressable([], false)).not
+        .toThrow();
     });
   });
 });

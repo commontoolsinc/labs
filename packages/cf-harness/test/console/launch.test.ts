@@ -1063,6 +1063,56 @@ describe("launch", () => {
       ).rejects.toThrow("CF_HARNESS_ALLOWED_SKILL_SCRIPTS");
     });
 
+    it("refuses an allowlist flag passed through to the console", async () => {
+      // The launch prints what it resolved, so a console argument setting the
+      // allowlist again would leave that report describing other scripts.
+      for (
+        const argument of [
+          "--allow-skill-script",
+          "--allow-skill-script=cf-tidy:scripts/tidy.sh",
+          "--no-allow-skill-script",
+        ]
+      ) {
+        await expect(
+          prepareConsoleLaunch([...NAMED_ARGS, "--", argument], {}, io()),
+        ).rejects.toThrow("cannot be passed through");
+      }
+    });
+
+    it("passes other console flags through unchanged", async () => {
+      const { consoleArgs } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--", "--host-mount", "name=c"],
+        {},
+        io(),
+      );
+
+      expect(consoleArgs).toEqual(["--host-mount", "name=c"]);
+    });
+
+    it("ignores a malformed variable a flag overrides", async () => {
+      // An inherited value this launch does not use is not this launch's
+      // problem, and refusing over its spelling would refuse a command whose
+      // own entries were named correctly.
+      const malformed = { CF_HARNESS_ALLOWED_SKILL_SCRIPTS: "not json" };
+
+      const named = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--allow-skill-script", "cf-tidy:scripts/tidy.sh"],
+        malformed,
+        io(),
+      );
+      expect(
+        JSON.parse(named.plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual(["cf-tidy:scripts/tidy.sh"]);
+
+      const waived = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--no-allow-skill-script"],
+        malformed,
+        io(),
+      );
+      expect(waived.plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS)
+        .toBeUndefined();
+    });
+
     it("leaves the registries out when both are waived", async () => {
       const { plan } = await prepareConsoleLaunch(
         [...NAMED_ARGS, "--no-pattern-index", "--no-skills-registry"],

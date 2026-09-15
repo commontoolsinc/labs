@@ -933,7 +933,14 @@ export const prepareConsoleLaunch = async (
       return trimmed;
     },
   );
-  const inheritedSkillScripts = nonEmpty(env[ALLOWED_SKILL_SCRIPTS_VARIABLE]);
+  // Read only when it can still decide the allowlist. An inherited value a
+  // flag or the waiver is about to override is one this launch does not use,
+  // and failing the launch over its spelling would refuse a command that
+  // named its entries correctly.
+  const inheritedSkillScripts = namedSkillScripts.length > 0 ||
+      parsed["no-allow-skill-script"] === true
+    ? undefined
+    : nonEmpty(env[ALLOWED_SKILL_SCRIPTS_VARIABLE]);
 
   // Not configurable: the sandbox runs `docker`, so a launcher reading the
   // runtime table from anything else would print directories the runs never
@@ -1017,7 +1024,25 @@ export const prepareConsoleLaunch = async (
       : {}),
   });
 
-  return { plan, consoleArgs: (parsed["--"] ?? []).map(String) };
+  // The allowlist is printed as one of the values this launch resolved, so a
+  // console argument setting it again would leave that report describing
+  // scripts the console does not permit. Every other flag stays reachable
+  // through the passthrough; these two are named here instead.
+  const consoleArgs = (parsed["--"] ?? []).map(String);
+  const passedThrough = consoleArgs.find((argument) =>
+    argument === "--allow-skill-script" ||
+    argument.startsWith("--allow-skill-script=") ||
+    argument === "--no-allow-skill-script"
+  );
+  if (passedThrough !== undefined) {
+    throw new Error(
+      `\`${passedThrough}\` cannot be passed through to the console: the ` +
+        `allowlist is one of the values this launch resolves and prints, so ` +
+        `name it before \`--\` instead`,
+    );
+  }
+
+  return { plan, consoleArgs };
 };
 
 /**

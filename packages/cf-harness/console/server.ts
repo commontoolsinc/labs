@@ -117,6 +117,7 @@ import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import {
   ALLOWED_SKILL_SCRIPTS_VARIABLE,
+  assertAllowedSkillScriptsAddressable,
   parseAllowedSkillScriptsVariable,
   resolveAllowedSkillScripts,
 } from "./allowed-skill-scripts.ts";
@@ -692,6 +693,10 @@ export const resolveConsoleConfig = async (
       parseAllowedSkillScriptsVariable(inheritedSkillScripts),
       ALLOWED_SKILL_SCRIPTS_VARIABLE,
     );
+  assertAllowedSkillScriptsAddressable(
+    allowedSkillScripts,
+    skillsRootRecord !== undefined,
+  );
   const sessionDb = flag("session-db") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_SESSION_DB) ??
     join(dataDir, "sessions.sqlite");
