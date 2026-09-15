@@ -39,9 +39,14 @@ seconds. So the fixed part is somewhere between one and four seconds, and
 the run is 94% or more variable.
 
 Four disjoint slices of 100 patterns each, checked in isolation, cost 8.9
-s, 10.4 s, 32.0 s and 11.8 s — 63.2 seconds between them, against 65 to
-71 seconds for one run over all of them. Splitting the corpus into four
-invocations therefore costs about what one invocation costs.
+s, 10.4 s, 32.0 s and 11.8 s — 63.1 seconds between them. Those four
+slices are the first 400 of the 414, so the comparison is against what
+the same 400 cost inside one run rather than against the whole-corpus
+row above: at the measured 0.14 seconds a pattern the remaining 14 add
+about 2 seconds, which puts one run over the 400 at 63 to 69 seconds.
+Splitting the corpus into four invocations therefore costs about what
+one invocation costs, and the fixed cost a split pays again is the one
+to four seconds above rather than anything larger.
 
 The third slice is three times the cost of its neighbors. The
 per-pattern figures below say why: 46 of its 100 patterns are the
@@ -51,41 +56,57 @@ seconds.
 
 ## What the time is
 
-Inside one batched TypeScript program over all 414 patterns (1,729
-authored files):
+One batched TypeScript program over all 414 patterns holds 1,732 files.
+1,729 of them are authored; the rest are declaration libraries, which
+`skipLibCheck` keeps out of the diagnostics pass and which emit nothing.
+Timing the authored ones:
 
 | Phase | Time | Share |
 | --- | --- | --- |
 | `ts.createProgram` — parse and bind | 0.4 s | 0.5% |
 | Per-file semantic and syntactic diagnostics | 14.8 s | 22% |
 | Transform and emit | 51.3 s | 77% |
+| SES verification of each emitted body | 5.1% of the two above | |
 
 The type check is not the expensive part. The Common Fabric transformer
-pipeline, which runs during emit, is.
+pipeline, which runs during emit, is. The SES figure is a share rather
+than a duration because it was measured in a later session on a loaded
+machine, where it was 8.4 s against 157.2 s for the two phases above; a
+ratio taken inside one run is what survives the load the absolutes do
+not.
 
 Both of the expensive phases are already per-file work.
 `getSemanticDiagnostics()` takes a source file, and `emit()` takes an
 optional target source file. Emitting a file at a time rather than the
-whole program at once was measured as output-identical — 542 writes and
-8,559,880 bytes either way on a 52-pattern shard — and no slower, 41.9 s
-against 51.3 s over the whole corpus and 6.9 s against 6.6 s on the
-shard.
+whole program at once was measured as output-identical: 542 writes and
+8,559,880 bytes either way on a 52-pattern shard. It costs nothing
+material either, though the two measurements do not agree on the sign —
+41.9 s against 51.3 s over the whole corpus, and 6.9 s against 6.6 s on
+the shard. The shard's 0.3 s is within the spread two runs of the same
+work show here, so what these support is that the per-file form is not
+materially slower, not that it is faster.
 
 ## Every file belongs to exactly one pattern
 
 The batch prefixes each program's files with that program's own
 content-derived identity, so two patterns that both import one helper
-carry two prefixed copies of it and the union holds both. Over the 414
-patterns, 422 distinct source files become 1,730 entries in the batch.
-Attribution therefore needs no convention for shared files: a file's
-prefix names the one program it came from.
+carry two prefixed copies of it and the union holds both. The 1,729
+authored entries above come from 422 distinct source paths, which is
+where the factor of four between the two numbers is. Attribution
+therefore needs no convention for shared files: a file's prefix names
+the one program it came from.
 
 ## What a pattern costs
 
-With each file's diagnostics and emit timed and charged to the program
-that resolved it, a whole run attributes 57.2 seconds of a 67.0-second
-process. The remaining 10 seconds is process startup, module loading,
-runtime construction, resolution, and the program-wide parse and bind.
+A pattern is charged its own files' diagnostics, emit, and SES
+verification. Over a whole run those came to 57.2 seconds of a
+67.0-second process before the SES share was folded in, which puts the
+attribution at about 60 of the 67. What is left out is process startup,
+module loading, runtime construction, resolution, and the program-wide
+parse and bind, none of which belongs to any one pattern.
+
+The per-pattern figures below are from that earlier run and so exclude
+the SES share, which is 5.1% spread across them.
 
 Per-pattern figures across the corpus: minimum 1 ms, tenth percentile 5
 ms, median 29 ms, ninetieth percentile 401 ms, maximum 2,400 ms. The

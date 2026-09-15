@@ -26,24 +26,35 @@ function formatError(error: unknown): string {
 }
 
 /**
- * The `--only` terms a command line carries. Anything else ends the run: an
- * argument nobody reads would quietly check the whole corpus instead of the
- * part the caller asked for.
+ * The `--only` terms a command line carries. An argument that is not one, and
+ * a `--only` carrying nothing, both end the run: a term dropped for being
+ * empty leaves the run looking unfiltered, so it would check the whole corpus
+ * while its caller was charged for one pattern.
  */
 function parseOnly(argv: readonly string[]): string[] {
   const only: string[] = [];
+  const refuse = (why: string): never => {
+    console.error(why);
+    console.error("usage: deno task cfcheck [--only <pattern>]...");
+    Deno.exit(2);
+  };
   for (let i = 0; i < argv.length; i++) {
     const argument = argv[i]!;
-    if (argument === "--only") only.push(argv[++i] ?? "");
-    else if (argument.startsWith("--only=")) {
-      only.push(argument.slice("--only=".length));
-    } else {
-      console.error(`Unknown argument: ${argument}`);
-      console.error("usage: deno task cfcheck [--only <pattern>]...");
-      Deno.exit(2);
+    let value: string;
+    if (argument === "--only") {
+      value = argv[++i] ?? refuse("--only needs a value");
+    } else if (argument.startsWith("--only=")) {
+      value = argument.slice("--only=".length);
+    } else value = refuse(`Unknown argument: ${argument}`);
+    // A value opening with `--` is the caller's next flag, read as a
+    // filter. It matches no pattern, so the run would check nothing and
+    // say so only by the count it prints.
+    if (value.length === 0 || value.startsWith("--")) {
+      refuse(`--only needs a value, and was given ${JSON.stringify(value)}`);
     }
+    only.push(value);
   }
-  return only.filter((value) => value.length > 0);
+  return only;
 }
 
 // Optional sharding for CI fan-out: CFCHECK_SHARD="i/n" (1-based) checks only

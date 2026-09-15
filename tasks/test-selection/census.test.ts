@@ -395,6 +395,65 @@ describe("what the tree says and the manifest does not", () => {
   });
 });
 
+describe("an entry whose unit its suite has re-grained", () => {
+  // A suite that splits one unit into many leaves every entry it
+  // published naming the unit that is gone. Read as stored, the history
+  // covers nothing and each unit that replaced it is charged as new.
+
+  const split = suite({
+    id: "workspace-unit",
+    units: ["packages/bakery/glaze.test.ts", "packages/bakery/proof.test.ts"],
+    locate: (record) =>
+      record.test.n.startsWith("glaze")
+        ? { level: "unit", unit: "packages/bakery/glaze.test.ts" }
+        : record.test.n === "the whole bakery"
+        ? { level: "suite" }
+        : undefined,
+  });
+
+  it("reads it against the unit its suite gives it now", () => {
+    const before = manifestOf([
+      { test: { k: "unit", s: "bakery", n: "glaze > sets" }, unit: "bakery" },
+    ]);
+
+    const seen = census([split], before, new Set());
+
+    // Placed, so the unit it belongs to is recorded rather than new, and
+    // nothing about it is mandatory.
+    expect(seen.manifest.entries.map((entry) => entry.unit).toSorted())
+      .toEqual([
+        "packages/bakery/glaze.test.ts",
+        "packages/bakery/proof.test.ts",
+      ]);
+    expect(seen.unmeasured).toBe(1);
+    expect(
+      seen.manifest.entries.find((entry) =>
+        entry.unit === "packages/bakery/glaze.test.ts"
+      )?.test.n,
+    ).toBe("glaze > sets");
+  });
+
+  it("leaves one its suite cannot place where the manifest put it", () => {
+    // A suite answering for the suite rather than for a unit, and one
+    // answering not at all, each keep the stored unit and drop out with
+    // it. Reading the suite can only place an entry the stored value
+    // would have lost, never lose one it would have kept.
+    const before = manifestOf([
+      { test: { k: "unit", s: "bakery", n: "the whole bakery" }, unit: "gone" },
+      { test: { k: "unit", s: "bakery", n: "proof > rises" }, unit: "gone" },
+    ]);
+
+    const seen = census([split], before, new Set());
+
+    expect(seen.unmeasured).toBe(2);
+    expect(
+      seen.manifest.entries.every((entry) =>
+        entry.test.n.startsWith("unrecorded ")
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("what a measured set makes mandatory", () => {
   const measured = suite({
     id: "workspace-unit",

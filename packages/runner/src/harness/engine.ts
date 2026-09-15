@@ -1021,9 +1021,11 @@ export class Engine extends EventTarget {
     // (verifyCompiledModuleBody); compileToModules does not, so the batch must
     // run it explicitly or it would silently lose cfcheck's SES coverage. Body
     // verification is per-body AST work (no type-checking), so it stays cheap.
+    const verified = new Map<string, number>();
     if (runTransform) {
       for (const [name, body] of modules) {
         if (name.endsWith(".d.ts")) continue;
+        const at = performance.now();
         try {
           verifyCompiledModuleBody(body.js, name);
         } catch (error) {
@@ -1032,22 +1034,27 @@ export class Engine extends EventTarget {
             message: error instanceof Error ? error.message : String(error),
           });
         }
+        verified.set(name, (verified.get(name) ?? 0) + performance.now() - at);
       }
     }
 
     // A file's `/<id>` prefix is the first path segment of its name, so the
     // program it belongs to is one lookup rather than a scan of the batch.
     // The injected `cfc.ts` helper carries no prefix and belongs to none of
-    // them, which is why an unmatched name is passed over.
+    // them, which is why an unmatched name is passed over. Verifying a body
+    // is per-file work like checking and emitting one, so it is charged
+    // alongside them rather than left in what the sum does not reach.
     const mainById = new Map(
       batchIds.map((id, index) => [`/${id}`, programs[index]!.main]),
     );
     const durations = new Map<string, number>();
-    for (const [name, ms] of fileDurations) {
-      const cut = name.indexOf("/", 1);
-      const main = cut === -1 ? undefined : mainById.get(name.slice(0, cut));
-      if (main === undefined) continue;
-      durations.set(main, (durations.get(main) ?? 0) + ms);
+    for (const spent of [fileDurations, verified]) {
+      for (const [name, ms] of spent) {
+        const cut = name.indexOf("/", 1);
+        const main = cut === -1 ? undefined : mainById.get(name.slice(0, cut));
+        if (main === undefined) continue;
+        durations.set(main, (durations.get(main) ?? 0) + ms);
+      }
     }
 
     return {
