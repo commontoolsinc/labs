@@ -8,7 +8,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@/interface.ts";
-import { type PrimitiveValueTag } from "@/value-tags";
+import { type PrimitiveValueTag } from "@/types/tags.ts";
 
 import { BaseValueVisitor } from "./BaseValueVisitor.ts";
 import {

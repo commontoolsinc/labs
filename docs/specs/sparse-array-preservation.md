@@ -116,7 +116,7 @@ because their sparse support was part of the original design:
 - **`packages/data-model/src/value-hash.ts`** — Feeds holes to the hash
   directly, coalescing each run into one hole entry.
 
-### Value validation (`packages/data-model/src/validity-check.ts`)
+### Value validation (`packages/data-model/src/types/validation.ts`)
 
 `isValidFabricValueLayer()` and `isValidFabricValue()` accept sparse arrays —
 holes are valid fabric structure. `isValidFabricValue()` uses `for` + `i in`

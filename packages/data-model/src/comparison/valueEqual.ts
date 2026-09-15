@@ -10,7 +10,7 @@ import {
   type FabricSpecialObject,
   type FabricValue,
 } from "@/interface.ts";
-import { isFabricSpecialObject } from "@/type-check.ts";
+import { isFabricSpecialObject } from "@/types/narrowing.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { cachedHashStringOf, hashStringOf } from "@/value-hash.ts";
 

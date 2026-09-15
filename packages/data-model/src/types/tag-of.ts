@@ -1,5 +1,5 @@
 /**
- * The dispatches that return a tag from the vocabulary in `interface.ts`, one
+ * The dispatches that return a tag from the vocabulary in `tags.ts`, one
  * per kind of value a caller can be holding.
  *
  * Which classes a given dispatch recognizes varies with where it is layered:
@@ -29,7 +29,7 @@ import {
   type FabricPrimitiveValueTag,
   type FabricValueTag,
   VALUE_TAGS,
-} from "./interface.ts";
+} from "./tags.ts";
 
 /**
  * Maps a `FabricPrimitive` to its tag. This `throw`s if it determines that the

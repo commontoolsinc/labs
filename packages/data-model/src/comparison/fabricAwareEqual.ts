@@ -1,6 +1,6 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
-import { isFabricSpecialObject } from "@/type-check.ts";
+import { isFabricSpecialObject } from "@/types/narrowing.ts";
 import { valueEqual } from "./valueEqual.ts";
 
 /**

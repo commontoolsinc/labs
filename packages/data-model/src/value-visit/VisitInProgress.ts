@@ -15,14 +15,14 @@ import {
 import {
   isValidFabricValue,
   isValidFabricValueLayer,
-} from "@/validity-check.ts";
+} from "@/types/validation.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
   type FabricValueTag,
   tagOfFabricValue,
   tagOfFabricValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags";
+} from "@/types";
 
 import {
   type BaselineVisitResult,

@@ -1,6 +1,6 @@
 /**
  * The tag vocabulary: the names a dispatch returns when asked what a value
- * already is. The dispatches themselves are in `impl.ts`; this module imports
+ * already is. The dispatches themselves are in `tag-of.ts`; this module imports
  * nothing, so that a class which reports a tag of its own can name the
  * vocabulary without reaching the dispatches, which recognize that class.
  */

@@ -29,8 +29,8 @@ import {
   shallowFabricFromConvertibleJsValue,
 } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { isValidFabricConvertibleJsObject } from "@/validity-check.ts";
-import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
+import { isValidFabricConvertibleJsObject } from "@/types/validation.ts";
+import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/types";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {

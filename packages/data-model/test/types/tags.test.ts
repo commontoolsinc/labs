@@ -45,7 +45,7 @@ import { FabricPrimitive, type FabricValue } from "@/interface.ts";
 import {
   isValidFabricConvertibleJsObject,
   isValidFabricValueLayer,
-} from "@/validity-check.ts";
+} from "@/types/validation.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
@@ -58,7 +58,7 @@ import {
   tagOfFabricValueElseNull,
   VALUE_TAGS,
   type ValueTag,
-} from "@/value-tags";
+} from "@/types";
 import { LAYER_CORPUS } from "../fabric-value-corpus.ts";
 
 /**
@@ -157,7 +157,7 @@ const FABRIC_PRIMITIVE_TAGS: ReadonlyArray<
   [new FabricRegExp(/a/), VALUE_TAGS.FabricRegExp],
 ];
 
-describe("value-tags", () => {
+describe("tags", () => {
   describe("VALUE_TAGS", () => {
     it("is frozen", () => {
       expect(Object.isFrozen(VALUE_TAGS)).toBe(true);
