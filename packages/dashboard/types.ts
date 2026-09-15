@@ -3,7 +3,9 @@
  * statuses a tile may report, the render-ready view its `collect()` returns,
  * the shared context it is handed to gather that view, and the drill-down
  * routes it may claim. A file under tiles/ becomes a tile by exporting a
- * `Tile`.
+ * `Tile`. Its optional `collectActivity()` is refreshed independently:
+ * `true` shows workflow activity, `false` means idle, and `undefined` means
+ * activity is unavailable.
  */
 
 export type Status = "good" | "warn" | "bad" | "unknown";

@@ -465,7 +465,9 @@ if you lose it you have to regenerate.
 
 Powers **labs ci**, **labs ci trust**, **labs ci duration**, the **loom**
 counterparts, **recent main runs**, **coverage debt**, **github spend**, and
-**github users**. Needs
+**github users**. It also powers the optional publisher-activity indicators on
+**flaky tests** and **test selection**; their public measurements need no token.
+Needs
 repo **Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`;
 the github-ci-spend tile additionally needs org **Administration: read** on
 `commontoolsinc`. The **github users** tile needs org **Members: read**. One
