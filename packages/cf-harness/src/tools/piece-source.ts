@@ -20,19 +20,27 @@
  * without them asking, and what it would buy is a button that already exists.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
+import { pieceId } from "@commonfabric/piece";
+import {
+  type PatternCompatibilityReport,
+  type PatternUpdateReceipt,
+  type PieceController,
+  type PiecesController,
+  type PieceSourceState,
+  readPieceSourceState,
+} from "@commonfabric/piece/ops";
 import { type Cell, getPatternIdentityRef } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { pieceId } from "@commonfabric/piece";
 import {
-  type PiecesController,
-  type PieceSourceState,
-  readPieceSourceState,
-} from "@commonfabric/piece/ops";
-import type { JSONSchema } from "@commonfabric/api";
+  type DisclosedCfcLabel,
+  disclosedCfcLabels,
+} from "../cfc-label-disclosure.ts";
+import { errorMessage } from "../error-message.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
@@ -50,13 +58,6 @@ export type PieceSourceProvenance =
   | "deployment-served"
   | "followed-in-fabric"
   | "authored-in-place";
-
-/** One label the referent carries, as atom types and nothing else. */
-export interface PieceSourceLabel {
-  path?: string[];
-  confidentiality: string[][];
-  integrity: string[];
-}
 
 export interface ReadPieceSourceToolInput {
   token: string;
@@ -88,7 +89,7 @@ export interface ReadPieceSourceToolSuccessOutput {
    * them, so they are stated rather than left to be discovered at the
    * boundary that withholds something.
    */
-  labels: PieceSourceLabel[];
+  labels: DisclosedCfcLabel[];
 }
 
 export interface PieceSourceToolErrorOutput {
@@ -237,41 +238,6 @@ export const revisePieceToolDescriptor: HarnessToolDescriptor = {
   tags: ["fabric", "piece", "source"],
 };
 
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
-/** The type an atom names: its `type` field, or the whole of a string atom. */
-const atomType = (atom: unknown): string | undefined => {
-  if (typeof atom === "string") return atom;
-  const type = (atom as { type?: unknown } | null)?.type;
-  return typeof type === "string" ? type : undefined;
-};
-
-/** One confidentiality clause's alternatives, as atom types. */
-const clauseTypes = (clause: unknown): string[] => {
-  const alternatives = (clause as { anyOf?: unknown } | null)?.anyOf;
-  return (Array.isArray(alternatives) ? alternatives : [clause])
-    .map(atomType)
-    .filter((type): type is string => type !== undefined);
-};
-
-/**
- * The piece's labels as atom types alone, the same projection
- * `describe_handle` reports over the same referent: a context may know what
- * it is holding and what handling that demands, and may not read what a
- * label was computed from.
- */
-const pieceLabels = (cell: Cell<unknown>): PieceSourceLabel[] =>
-  (cfcLabelViewForCellFailClosed(cell)?.entries ?? []).map((entry) => ({
-    ...(entry.path.length > 0 ? { path: [...entry.path] } : {}),
-    confidentiality: (entry.label.confidentiality ?? [])
-      .map(clauseTypes)
-      .filter((clause) => clause.length > 0),
-    integrity: (entry.label.integrity ?? [])
-      .map(atomType)
-      .filter((type): type is string => type !== undefined),
-  }));
-
 /** Where the piece says its current source came from. */
 const provenanceOf = (state: PieceSourceState): PieceSourceProvenance => {
   if (state.origin === undefined) return "authored-in-place";
@@ -419,7 +385,7 @@ export const readPieceSourceTool: HarnessToolDefinition<
         ? { sourceRevisionId: state.currentRevisionId }
         : {}),
       provenance: provenanceOf(state),
-      labels: pieceLabels(piece.cell),
+      labels: disclosedCfcLabels(cfcLabelViewForCellFailClosed(piece.cell)),
     };
   },
 };
@@ -470,7 +436,7 @@ export const revisePieceTool: HarnessToolDefinition<
       files: [{ name: "/main.tsx", contents: input.sourceText }],
     };
     const previousPattern = getPatternIdentityRef(piece.cell);
-    let controller;
+    let controller: PieceController;
     try {
       controller = await pieces.get(piece.id);
     } catch (error) {
@@ -509,7 +475,7 @@ export const revisePieceTool: HarnessToolDefinition<
     // once rather than with whichever low-level assertion fires first. The
     // apply path revalidates independently, so this is a better message and
     // not the enforcement.
-    let report;
+    let report: PatternCompatibilityReport;
     try {
       report = await controller.checkPattern(program);
     } catch (error) {
@@ -537,7 +503,7 @@ export const revisePieceTool: HarnessToolDefinition<
       );
     }
 
-    let receipt;
+    let receipt: PatternUpdateReceipt;
     try {
       receipt = await controller.setPattern(program, {
         // The pin the write transaction re-checks: a concurrent writer
