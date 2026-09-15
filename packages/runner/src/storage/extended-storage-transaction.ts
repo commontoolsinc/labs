@@ -34,6 +34,7 @@ import {
   CFC_ENFORCING_STRICTNESS,
   CFC_GRANT_ID_PREFIX,
   type CfcAddress,
+  type CfcContentAddressedLabels,
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
   type CfcDecomposedEnvelopes,
@@ -56,6 +57,7 @@ import {
   type ConsultedGrant,
   type ConsultedPolicyManifest,
   type ConsumedRead,
+  DEFAULT_CFC_CONTENT_ADDRESSED_LABELS,
   DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_DECOMPOSED_ENVELOPES,
   DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -449,6 +451,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
     decomposedEnvelopes: DEFAULT_CFC_DECOMPOSED_ENVELOPES,
+    contentAddressedLabels: DEFAULT_CFC_CONTENT_ADDRESSED_LABELS,
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
     labelMetadataProtectionMode: DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
     declaredMonotonicityMode: DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
@@ -921,6 +924,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // sound envelope and no gate consumes the value, so there is no pin
     // and no prepared-state invalidation to protect.
     this.#cfcState.decomposedEnvelopes = enabled;
+  }
+
+  setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void {
+    // A spelling dial like the one above: either envelope version resolves
+    // to the same labels, so nothing is pinned or invalidated. The value is
+    // read when the transaction prepares; a change after that reaches the
+    // next transaction, not the envelope this one already staged.
+    this.#cfcState.contentAddressedLabels = enabled;
   }
 
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void {
@@ -3717,6 +3728,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   setCfcDecomposedEnvelopes(enabled: CfcDecomposedEnvelopes): void {
     this.#wrapped.setCfcDecomposedEnvelopes(enabled);
+  }
+
+  setCfcContentAddressedLabels(enabled: CfcContentAddressedLabels): void {
+    this.#wrapped.setCfcContentAddressedLabels(enabled);
   }
 
   stageSchemaDocClosure(space: MemorySpace, rootHash: string): void {

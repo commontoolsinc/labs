@@ -451,7 +451,9 @@ Why this shape:
   space-free `cf:pattern:<identity>` form. Authored static imports may still use
   a slug because deployment pins its terminal content identity. A piece origin
   does not accept that slug-shaped form under the tentative direction in Open
-  question 1. Human-readable URL aliases belong in a separate shortlink layer.
+  question 1. Human-readable browser aliases belong to the dormant
+  [Common Fabric URLs](../fabric-urls.md) concept, outside this retained-source
+  layer; no alias resolver is planned for deployment.
 - **Publication = naming.** `slug → a cell carrying patternIdentity` (a piece,
   or a published-pointer cell) in a readable space is the whole publish story;
   updating the slug is publishing a new version (dist-tag semantics). Pieces and
@@ -1087,7 +1089,7 @@ unchanged.
 
 ## Open questions
 
-1. **Identifier-only durable URLs and future shortlinks, tentative.** The
+1. **Identifier-only durable source URLs.** The
    current resolver rejects a name in the space position. The tentative
    direction is to preserve that boundary rather than add name-to-DID
    resolution to the fabric URL grammar. A durable piece-origin URL uses the
@@ -1099,12 +1101,14 @@ unchanged.
    the space-free content identity. The piece-origin validator rejects a
    slug-shaped or root-only fabric reference, including a pinned slug. Existing
    authored import aliases remain a separate case because deployment pins their
-   terminal content identity into source. A UI or future shortlink service may
-   map a custom string to a canonical identifier URL before the lifecycle sees
-   it. The shortlink is not itself the durable origin or a repoint target.
-   Further study must settle whether spaces should eventually have FIDs rather
-   than DIDs, shortlink ownership and reassignment, and whether supplied aliases
-   receive separate optional provenance metadata.
+   terminal content identity into source. Under the dormant
+   [Common Fabric URLs](../fabric-urls.md) concept, a UI could resolve a
+   registered browser name before the lifecycle sees the resulting DID. No such
+   resolver is planned for deployment. The registered name would not itself be
+   the durable origin or a repoint target. Further study must settle whether
+   spaces should
+   eventually have FIDs rather than DIDs and whether supplied aliases receive
+   separate optional provenance metadata.
 2. **Slug-cell typing.** The uniform chase duck-types its hops (a
    `patternIdentity` meta present ⇒ a pattern-bearing cell). Good enough, or
    should slug assignment stamp an explicit kind on the slug cell for better
@@ -1123,6 +1127,10 @@ unchanged.
    are authenticated, how stale site-table entries are replaced, whether
    failover is allowed, and how an open session closes and reconnects without
    losing or duplicating work after a seed or hint has made the route explicit.
+   The dormant
+   [Common Fabric URLs](../fabric-urls.md#moving-a-space-between-asps) concept
+   proposes a browser-level ASP handoff and old-ASP redirect. The
+   storage-session work remains separate.
 
 ### One way to build a local program
 
