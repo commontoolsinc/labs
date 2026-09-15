@@ -370,9 +370,9 @@ Current v1 behavior:
   an operator narrowing it must include `run_skill_script` — an entry alone does
   not add a tool to a list the operator wrote. A delegated child's surface is
   its profile's, which the operator never writes, so a child handed an acquired
-  skill receives `run_skill_script` when two things hold together, neither of
-  which the operator names: the run allowlisted at least one script at that
-  skill's pin, and the child's own sandbox mounts that skill. The second is the
+  skill receives `run_skill_script` when two things hold together: the run
+  allows skill scripts — the run-wide switch, or at least one entry at that
+  skill's pin — and the child's own sandbox mounts that skill. The second is the
   backing gate, which a child sharing a handed-in runtime fails, no mount having
   been added for it — so the allowlist decides what may run and the mount is
   whether there is anything to run. There is no configuration anyone wants in
@@ -543,8 +543,10 @@ Policy rules:
   no entry at all. It has no registry and no run-start snapshot either, so the
   two conditions above are met differently: the run must hold an activation
   whose acquisition names that pin, and the file must match the digest taken at
-  acquisition. It runs in the sandbox; a run whose skill-script execution target
-  is the host refuses it.
+  acquisition. The run-wide switch satisfies the allowlist gate for an acquired
+  script as for a registry one, and replaces neither of those two conditions. It
+  runs in the sandbox; a run whose skill-script execution target is the host
+  refuses it.
 - What backs `run_skill_script` for an acquired script is the mount that puts it
   at a path, so a run given no `--skills-root` still offers the tool to a child
   whose sandbox carries that mount, and `--allow-skill-script` takes an acquired

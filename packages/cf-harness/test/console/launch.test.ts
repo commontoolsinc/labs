@@ -973,6 +973,26 @@ describe("launch", () => {
         .toBeUndefined();
     });
 
+    it("refuses the skill-script switch passed through to the console", async () => {
+      await expect(
+        prepareConsoleLaunch(
+          [...NAMED_ARGS, "--", "--allow-skill-scripts"],
+          {},
+          io(),
+        ),
+      ).rejects.toThrow("cannot be passed through");
+    });
+
+    it("passes other console flags through unchanged", async () => {
+      const { consoleArgs } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--", "--host-mount", "name=c"],
+        {},
+        io(),
+      );
+
+      expect(consoleArgs).toEqual(["--host-mount", "name=c"]);
+    });
+
     it("leaves the registries out when both are waived", async () => {
       const { plan } = await prepareConsoleLaunch(
         [...NAMED_ARGS, "--no-pattern-index", "--no-skills-registry"],

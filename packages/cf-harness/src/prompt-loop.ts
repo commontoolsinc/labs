@@ -2978,6 +2978,7 @@ export class CfHarnessPromptLoop {
         promptSlotBindingSource,
         parentToolAllowance: this.#parentToolAllowance(),
         allowedToolIds: this.#allowedToolIdsForSnapshot(),
+        allowSkillScripts: this.engine.config.allowSkillScripts === true,
         allowedSkillScripts: this.engine.config.allowedSkillScripts ?? [],
         allowedSubagentProfiles,
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>

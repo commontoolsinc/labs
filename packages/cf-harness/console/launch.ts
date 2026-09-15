@@ -928,7 +928,20 @@ export const prepareConsoleLaunch = async (
       : {}),
   });
 
-  return { plan, consoleArgs: (parsed["--"] ?? []).map(String) };
+  // The launch prints what it resolved, and this is one of the values it
+  // resolves, so a console argument setting it again would leave that report
+  // describing a console that does something else. Every other server flag
+  // still passes through.
+  const consoleArgs = (parsed["--"] ?? []).map(String);
+  if (consoleArgs.includes("--allow-skill-scripts")) {
+    throw new Error(
+      "`--allow-skill-scripts` cannot be passed through to the console: it " +
+        "is one of the values this launch resolves and prints, so name it " +
+        "before `--` instead",
+    );
+  }
+
+  return { plan, consoleArgs };
 };
 
 /**

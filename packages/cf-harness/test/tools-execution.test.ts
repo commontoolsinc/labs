@@ -2788,11 +2788,36 @@ Deno.test({
       assertEquals(notActivated.error?.code, "skill_activations_missing");
       assertEquals(notAllowlisted.status, "error");
       assertEquals(notAllowlisted.error?.code, "script_not_allowlisted");
+      // The switch is about the sandbox, so a host-target run is still held to
+      // an exactly-named script: it must not open host execution to every
+      // activated script on the strength of a decision that never said host.
+      const hostUnderTheSwitch = await runSkillScriptTool.invoke(
+        createContext(
+          new FakeSandboxRuntime(),
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [],
+          [],
+          "host",
+          undefined,
+          true,
+        ),
+        { skill: "pattern-test", path: "scripts/check.ts" },
+      );
+
       assertEquals(allowedByTheSwitch.status, "error");
       assertEquals(
         allowedByTheSwitch.error?.code,
         "script_snapshot_mismatch",
       );
+      assertEquals(hostUnderTheSwitch.status, "error");
+      assertEquals(hostUnderTheSwitch.error?.code, "script_not_allowlisted");
       assertEquals(drift.status, "error");
       assertEquals(drift.error?.code, "script_snapshot_mismatch");
       assertEquals(drift.digestMatchesRegistry, false);

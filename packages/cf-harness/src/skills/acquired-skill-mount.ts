@@ -195,9 +195,9 @@ export const acquiredSkillScriptSurface = (
  * in for the mount this made, which is a coincidence rather than a backing.
  *
  * Being backed is necessary and not sufficient. What the child may actually
- * run is what the operator allowlisted at the pin — see
- * {@link acquiredSkillScriptSurface} — and a run backed with no such entry
- * receives no tool.
+ * run is what the operator allows — the run-wide switch, or an entry at the
+ * pin; see {@link acquiredSkillScriptSurface} — and a run backed with
+ * neither receives no tool.
  */
 export const acquiredSkillScriptBacking = (
   ownedSandboxConfig: DockerRunscSandboxConfig | undefined,

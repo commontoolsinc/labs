@@ -147,11 +147,11 @@ task, since it is about the server rather than about the work:
 ./scripts/start-local-dev.sh --cf-harness --allow-skill-scripts
 ```
 
-Off unless named, and named once for every skill the run holds — a registry
-skill and an acquired one alike, because what a script is trusted with is the
-sandbox it runs in, which does not vary with where the skill came from. The
-value is printed beside the record that decided it, with the rest of what the
-launch resolved, so what a console will run is on screen before it binds.
+Off unless named, and naming it once covers every skill the run holds — a
+registry skill and an acquired one alike, because what a script is trusted with
+is the sandbox it runs in, which does not vary with where the skill came from.
+The value is printed beside the record that decided it, with the rest of what
+the launch resolved, so what a console will run is on screen before it binds.
 
 The switch decides whether scripts run and nothing about which bytes. A registry
 script is still checked against the run-start registry snapshot, and an acquired
