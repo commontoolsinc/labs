@@ -1387,6 +1387,15 @@ export interface IStorageTransaction {
   getReadActivities?(): Iterable<IReadActivity>;
 
   /**
+   * Optional ordered superset of reads that can be noninternal CFC inputs.
+   * Only records whose internal-verifier classification is permanently sealed
+   * may be omitted. Mutable records remain here and consumers recheck their
+   * metadata. Preserves duplicates, activity-clock positions and record
+   * identity; the full journal remains available through getReadActivities.
+   */
+  getPotentiallyExternalReadActivities?(): Iterable<IReadActivity> | undefined;
+
+  /**
    * Optional ordered log of every applied write attempt, in transaction
    * order, stamped on the same per-transaction activity clock as read
    * activities. Unlike `getWriteDetails` (per-path, last-value upserts,

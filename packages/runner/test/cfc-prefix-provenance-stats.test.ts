@@ -113,6 +113,84 @@ const seedPlainDoc = async (
 };
 
 describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
+  it("refreshes candidate reads and source envelopes for each target", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager });
+    try {
+      await seedLabeledDoc(runtime, "candidate-current-source", "source", {
+        integrity: [FLOOR_ATOM],
+      });
+      await seedLabeledDoc(runtime, "candidate-late-source", "late", {
+        integrity: [FLOOR_ATOM],
+      });
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "candidate-current-source",
+        undefined,
+        tx,
+      );
+      source.get();
+      for (const name of ["candidate-first-sink", "candidate-second-sink"]) {
+        runtime.getCell(signer.did(), name, SINK_SCHEMA, tx).set({ out: name });
+      }
+      let passes = 0;
+      const lengths: number[] = [];
+      const view = new Proxy(tx, {
+        get(target, prop) {
+          if (prop === "getPotentiallyExternalReadActivities") {
+            return () => {
+              passes++;
+              if (passes === 2) {
+                runtime.getCell(
+                  signer.did(),
+                  "candidate-late-source",
+                  undefined,
+                  target,
+                ).get();
+                // Model a metadata write between target checks. The native
+                // write keeps this fixture separate from application-write
+                // authorization; the gate must read the current envelope.
+                expect(
+                  target.tx.write({
+                    space: signer.did(),
+                    id: source.getAsNormalizedFullLink().id as URI,
+                    type: "application/json",
+                    path: ["cfc", "labelMap"],
+                  }, {
+                    version: 1,
+                    entries: [{ path: [], label: { integrity: [OTHER_ATOM] } }],
+                  }).ok,
+                ).toBeDefined();
+              }
+              const reads = [
+                ...target.getPotentiallyExternalReadActivities?.() ?? [],
+              ];
+              lengths.push(reads.length);
+              return reads;
+            };
+          }
+          const member = Reflect.get(target, prop, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
+      const reasons = prepareBoundaryCommit(view);
+      expect(passes).toBe(2);
+      expect(lengths[1]).toBeGreaterThan(lengths[0]);
+      expect(
+        reasons.some((reason) => reason.includes("requiredIntegrity failed")),
+      )
+        .toBe(true);
+      expect(
+        reasons.filter((reason) => reason.includes("requiredIntegrity failed")),
+      )
+        .toHaveLength(1);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("a labeled read past the last overlapping write reports prefix-gated < transaction-global", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
@@ -394,6 +472,7 @@ describe("CFC prefix-provenance summary (direct gate probes)", () => {
   ): IExtendedStorageTransaction =>
     new Proxy(tx, {
       get(target, prop) {
+        if (prop === "getPotentiallyExternalReadActivities") return undefined;
         if (prop === "getReadActivities") {
           return (): IReadActivity[] =>
             [...target.getReadActivities?.() ?? []].map((activity) => {

@@ -62,7 +62,6 @@ import {
   parseLink,
 } from "../link-utils.ts";
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -75,6 +74,7 @@ import {
   isLinkResolutionProbe,
   isMachineryRead,
   isSchedulerDependencyRead,
+  stableInternalVerifierRead,
 } from "../storage/reactivity-log.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
@@ -166,10 +166,7 @@ import {
 } from "./ui-contract.ts";
 import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
-const INTERNAL_VERIFIER_META = {
-  ...ignoreReadForScheduling,
-  ...internalVerifierRead,
-};
+const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 
 // The link-source schema read, which reactivity SEES. Prepare's other reads
 // carry `ignoreReadForScheduling` and are invisible to it. This one decides
@@ -4029,9 +4026,10 @@ const verifyInputRequirements = (
   };
   let clockLessReads = 0;
   const readSources = [
-    ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
-      !isInternalVerifierRead(read.meta)
-    ).map((read) => {
+    ...[
+      ...(tx.getPotentiallyExternalReadActivities?.() ??
+        tx.getReadActivities?.() ?? []),
+    ].filter((read) => !isInternalVerifierRead(read.meta)).map((read) => {
       if (provenance !== undefined && read.journalIndex === undefined) {
         clockLessReads += 1;
       }
