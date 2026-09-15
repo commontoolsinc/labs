@@ -242,7 +242,7 @@ Expected implementation and test files:
 Focused tests:
 
 - `packages/data-model/test/convertible-js.test.ts`
-- `packages/data-model/test/validity-check.test.ts`
+- `packages/data-model/test/types/validation.test.ts`
 - `packages/data-model/test/deep-freeze.test.ts`
 - `packages/data-model/test/cloneIfNecessary.test.ts`
 - `packages/data-model/test/cloneForMutation.test.ts`

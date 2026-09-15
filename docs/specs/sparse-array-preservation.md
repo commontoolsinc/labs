@@ -242,7 +242,7 @@ the preferred entry point in runner code.
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/data-model/test/validity-check.test.ts`** —
+- **`packages/data-model/test/types/validation.test.ts`** —
   `isValidFabricValueLayer()` accepts sparse arrays.
 - **`packages/data-model/test/convertible-js.test.ts`** — 
   `fabricFromConvertibleJsValue()` preserves holes.
