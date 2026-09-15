@@ -209,6 +209,9 @@ describe("cellFromUrl builtin", () => {
       tx = runtime.edit();
       await result.pull();
       expect(result.key("cell").getRaw()).toBeDefined();
+      const slot = result.key("cell");
+      const sub = runtime.getCellFromLink(parseLink(slot.getRaw(), slot)!);
+      expect(parseLink(sub.getRaw(), sub)?.id).toBe(id);
 
       const edit = runtime.edit();
       url.withTx(edit).set(
@@ -219,8 +222,6 @@ describe("cellFromUrl builtin", () => {
       edit.commit();
       await result.pull();
 
-      const slot = result.key("cell");
-      const sub = runtime.getCellFromLink(parseLink(slot.getRaw(), slot)!);
       expect(sub.getRaw()).toBeUndefined();
     });
   }
