@@ -45,8 +45,9 @@ describe("Server", () => {
         };
       });
 
-      afterEach(() => {
+      afterEach(async () => {
         console.warn = realWarn;
+        await server.close();
       });
 
       /** One authored commit, writing `id`. */
