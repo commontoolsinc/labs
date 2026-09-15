@@ -3,8 +3,9 @@
  * the test file that runs them; the five counts it gates in each measured
  * phase, read from the probe's phase records; how a limit follows from the
  * counts observed; which regression variant each limit is assigned to; and the
- * checks a read-budget test makes against the limits table. The "Topics read
- * budget" section of `docs/development/BENCHMARKS.md` documents them.
+ * checks the read-budget test and `--derive-limits` make against the limits
+ * table. The "Topics read budget" section of `docs/development/BENCHMARKS.md`
+ * documents them.
  */
 
 import type {

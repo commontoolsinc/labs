@@ -13,8 +13,9 @@
  * everything a child prints, goes to stderr.
  *
  * Given `--derive-limits`, it instead runs the read-budget cases five times
- * each and writes the read-budget limits module to stdout, as the "Topics read
- * budget" section of `docs/development/BENCHMARKS.md` describes.
+ * each, writes the read-budget limits module to stdout, and runs each case
+ * again under every regression variant its limits are assigned to, as the
+ * "Topics read budget" section of `docs/development/BENCHMARKS.md` describes.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -37,6 +38,7 @@ import {
   TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
 } from "../packages/patterns/integration/topics-headless-fixture.ts";
 import {
+  assignedLimitsNotExceeded,
   GATED_MEASURES,
   type GatedMeasure,
   gatedMeasuresOf,
@@ -44,7 +46,12 @@ import {
   limitsModuleSource,
   type ReadBudgetLimits,
   TOPICS_READ_BUDGET_GROUPS,
+  variantsAssignedTo,
 } from "../packages/patterns/integration/topics-read-budget.ts";
+import {
+  READ_BUDGET_VARIANTS,
+  type ReadBudgetVariantName,
+} from "../packages/patterns/integration/topics-read-budget-variants.ts";
 
 /** The repository root, where a child process finds the workspace config. */
 const REPOSITORY_ROOT = fromFileUrl(new URL("..", import.meta.url));
@@ -222,9 +229,10 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 }
 
 /**
- * Runs `probeCase` in a child process started with `v8Flags`, forwarding
- * everything the child prints to stderr, and returns its sample, or the limit
- * its process reached by exhausting its heap.
+ * Runs `probeCase` in a child process started with `v8Flags`, under the
+ * regression variant `variant` when one is named, forwarding everything the
+ * child prints to stderr, and returns its sample, or the limit its process
+ * reached by exhausting its heap.
  *
  * @throws Error when the child fails other than by exhausting its heap, or
  * exits successfully without writing its sample.
@@ -232,6 +240,7 @@ async function gitState(): Promise<{ revision: string; dirty: boolean }> {
 async function runCase(
   probeCase: ProbeCase,
   v8Flags: readonly string[],
+  variant?: ReadBudgetVariantName,
 ): Promise<CaseOutcome> {
   const sampleFile = await Deno.makeTempFile({
     prefix: "topics-computation-cost-",
@@ -248,6 +257,7 @@ async function runCase(
         fromFileUrl(import.meta.url),
         `--case=${probeCase.id}`,
         `--sample-file=${sampleFile}`,
+        ...(variant === undefined ? [] : [`--variant=${variant}`]),
       ],
       cwd: REPOSITORY_ROOT,
       stdin: "null",
@@ -317,14 +327,16 @@ async function forwardToStderr(
 //
 
 /**
- * Measures `probeCase` and writes its sample to `sampleFile`: the case, the
- * heap limit the process ran under, and a record for each phase.
+ * Measures `probeCase`, under the regression variant `variant` when one is
+ * named, and writes its sample to `sampleFile`: the case, the heap limit the
+ * process ran under, and a record for each phase.
  *
  * @throws Error as {@link measureCasePhases} does.
  */
 async function measureCase(
   probeCase: ProbeCase,
   sampleFile: string,
+  variant?: ReadBudgetVariantName,
 ): Promise<void> {
   const heapSizeLimitBytes = getHeapStatistics().heap_size_limit;
   // Written before anything is measured, so that a limit record can name the
@@ -333,6 +345,9 @@ async function measureCase(
   await Deno.writeTextFile(sampleFile, JSON.stringify({ heapSizeLimitBytes }));
   const { fixture, phases } = await measureCasePhases(probeCase, {
     progress: (line) => console.error(line),
+    variant: variant === undefined
+      ? undefined
+      : READ_BUDGET_VARIANTS[variant](probeCase),
   });
   await Deno.writeTextFile(
     sampleFile,
@@ -355,14 +370,15 @@ const DERIVATION_ROUNDS = 5;
 
 /**
  * Runs every case the read-budget groups name in {@link DERIVATION_ROUNDS}
- * rounds, each case in a process of its own started with `v8Flags`, and writes
- * the read-budget limits module to stdout. Each gated count of each measured
- * phase gets {@link limitFor} the largest value the rounds observed, or, where
- * the rounds observed different values, is written as ungated with those
- * values.
+ * rounds, each case in a process of its own started with `v8Flags`, writes the
+ * read-budget limits module to stdout, and then runs {@link deriveControls} on
+ * the limits it wrote. Each gated count of each measured phase gets
+ * {@link limitFor} the largest value the rounds observed, or, where the rounds
+ * observed different values, is written as ungated with those values.
  *
  * @throws Error when a case fails or exhausts its heap, and, once the module is
- * written, when any gated count differed between rounds.
+ * written, when any gated count differed between rounds or a variant left a
+ * limit assigned to it unexceeded.
  */
 async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
   const ids = Object.values(TOPICS_READ_BUDGET_GROUPS).flat();
@@ -434,11 +450,84 @@ async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
         `ungated:\n${differing.join("\n")}`,
     );
   }
+  await deriveControls(ids, limits, v8Flags);
+}
+
+/**
+ * Runs each case of `ids` once under every regression variant the limits of
+ * `limits` assign to it, each in a process of its own started with `v8Flags`,
+ * and so shows every limit exceeded by a regression that grows the count it
+ * gates. An ungated count is assigned no variant and is not checked.
+ *
+ * @throws Error when a case fails or exhausts its heap, and when a variant
+ * leaves a limit assigned to it unexceeded, naming the workload, case, phase,
+ * count, variant, observed value, and limit of each.
+ */
+async function deriveControls(
+  ids: readonly string[],
+  limits: ReadBudgetLimits,
+  v8Flags: readonly string[],
+): Promise<void> {
+  const unexceeded: string[] = [];
+  for (const id of ids) {
+    const probeCase = caseNamed(id);
+    for (const variant of variantsAssignedTo(probeCase)) {
+      console.error(`control: ${id} under \`${variant}\``);
+      const outcome = await runCase(probeCase, v8Flags, variant);
+      if (outcome.kind === "limit") {
+        throw new Error(
+          `Case \`${id}\` exhausted its heap under the \`${variant}\` ` +
+            `variant: ${outcome.message}`,
+        );
+      }
+      const phases = outcome.sample.phases as PhaseRecord[];
+      for (
+        const check of assignedLimitsNotExceeded(
+          probeCase,
+          variant,
+          phases,
+          limits,
+        )
+      ) {
+        unexceeded.push(
+          `${check.workload}, ${check.case}, ${check.phase}, ` +
+            `${check.measure}: the \`${variant}\` variant observed ` +
+            `${check.observed ?? "no count"}, which does not exceed its ` +
+            `limit of ${check.limit}.`,
+        );
+      }
+    }
+  }
+  if (unexceeded.length > 0) {
+    throw new Error(
+      `These limits are not exceeded by the variant they are assigned to, ` +
+        `so they gate a count no regression grows:\n${unexceeded.join("\n")}`,
+    );
+  }
 }
 
 //
 // Entry point
 //
+
+/**
+ * Helper for {@link main}, which returns `value` as the name of a regression
+ * variant, and `undefined` when it is `undefined`.
+ *
+ * @throws Error when `value` names no variant.
+ */
+function variantNamed(value?: string): ReadBudgetVariantName | undefined {
+  if (value === undefined) return undefined;
+  if (!Object.hasOwn(READ_BUDGET_VARIANTS, value)) {
+    const names = Object.keys(READ_BUDGET_VARIANTS)
+      .map((name) => `\`${name}\``)
+      .join(", ");
+    throw new Error(
+      `No variant is named \`${value}\`. The variants are ${names}.`,
+    );
+  }
+  return value as ReadBudgetVariantName;
+}
 
 /**
  * Helper for {@link main}, which returns `value` as a positive integer.
@@ -455,7 +544,8 @@ function positiveInteger(name: string, value: string): number {
 
 /**
  * Runs the probe, or, given `--case`, measures that one case as a child of a
- * run, or, given `--derive-limits`, derives the read-budget limits.
+ * run, under the variant `--variant` names when it is given, or, given
+ * `--derive-limits`, derives the read-budget limits.
  *
  * @throws Error for an argument the probe does not take.
  */
@@ -467,6 +557,7 @@ async function main(): Promise<void> {
     "max-old-space-size",
     "repeat",
     "sample-file",
+    "variant",
   ] as const;
   const args = parseArgs(Deno.args, {
     boolean: booleanOptions,
@@ -501,8 +592,15 @@ async function main(): Promise<void> {
     if (args["sample-file"] === undefined) {
       throw new Error("`--case` needs `--sample-file`.");
     }
-    await measureCase(caseNamed(args.case), args["sample-file"]);
+    await measureCase(
+      caseNamed(args.case),
+      args["sample-file"],
+      variantNamed(args.variant),
+    );
     return;
+  }
+  if (args.variant !== undefined) {
+    throw new Error("`--variant` needs `--case`.");
   }
   await runProbe({
     repeat: args.repeat === undefined

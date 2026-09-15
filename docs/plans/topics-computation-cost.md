@@ -89,7 +89,8 @@ implementation and prototypes can begin earlier.
       every deliverable below is checked off and the acceptance limits are set.
   - [ ] The headless tier's fixture.
   - [ ] The probe script and its baseline.
-  - [ ] The CI read-budget test with its negative controls.
+  - [ ] The CI read-budget test, and the negative controls the command that
+        derives its limits runs.
   - [ ] Browser instrumentation.
   - [ ] Browser workloads, extending the
         [scale](../../packages/patterns/integration/topic-board-scale.bench.ts)
@@ -254,7 +255,8 @@ graph limits live in a code table beside the headless read-budget test, not as
 numbers in this plan. A gated count must repeat identically across five runs
 before its limit is set, and the limit is the largest observed value plus 10%.
 Each gated measure has a negative control: a regression variant that grows that
-measure and must exceed its limit. Startup and latency limits are recorded in
+measure and must exceed its limit, which the command that derives the limits
+runs against them. Startup and latency limits are recorded in
 this section and are not gated in CI. An accepted candidate must preserve
 semantics, improve its targeted scaling/work measure, and stay within the read,
 graph, startup, and latency limits. If measurement noise prevents a latency

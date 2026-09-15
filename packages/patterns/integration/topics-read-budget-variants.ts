@@ -1,8 +1,8 @@
 /**
  * The regression variants of the Topics read budget, each built here in test
  * code over the unmodified Topics sources. A variant starts extra work beside
- * the demanded lifts, so that a read-budget test can show each limit exceeded
- * by a regression that grows the count the limit gates.
+ * the demanded lifts, so that `--derive-limits` can show each limit it derives
+ * exceeded by a regression that grows the count the limit gates.
  * `topics-read-budget.ts` assigns each limit its variant.
  */
 

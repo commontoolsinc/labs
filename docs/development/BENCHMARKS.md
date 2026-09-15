@@ -805,9 +805,11 @@ is such a phase in every gated case, since no measured lift reads a title. A
 change that adds any read there exceeds the limit.
 
 Each limit has a negative control: a regression variant that grows the count the
-limit gates, and that must exceed it. The variants are built in
-`topics-read-budget-variants.ts` over the unmodified Topics sources, and each
-starts its work beside the demanded lifts, in the same transaction:
+limit gates, and that must exceed it. `--derive-limits` runs the controls, on
+the limits it has just derived, so that every limit is shown to gate a count a
+regression grows. The variants are built in `topics-read-budget-variants.ts`
+over the unmodified Topics sources, and each starts its work beside the demanded
+lifts, in the same transaction:
 
 - `scan`, assigned every read count, is one lift over the board that reads each
   topic's title, the titles of the topics it mentions, and every stamp on its
@@ -818,11 +820,10 @@ starts its work beside the demanded lifts, in the same transaction:
 - `per-record`, assigned the graph counts of the thread cases, starts a lift
   for each comment position and each link position on every topic.
 
-A case's tests fail when a count exceeds its limit, when a measured count has
-no limit, when a limit names a phase the case did not record, or when a variant
-does not exceed a limit assigned to it. The failure names the workload, case,
-phase, count, observed value, and limit. Run one group from `packages/patterns`
-with:
+A case's test fails when a count exceeds its limit, when a measured count has no
+limit, or when a limit names a phase the case did not record. The failure names
+the workload, case, phase, count, observed value, and limit. Run one group from
+`packages/patterns` with:
 
 ```sh
 deno test --v8-flags=--max-old-space-size=4096 -A \
@@ -851,6 +852,12 @@ printed as ungated, with the value each run observed, and is not checked; the
 command then fails, naming it, and leaves `topics-read-budget-limits.derived`
 holding what it printed. `.gitignore` covers that file; delete it once you have
 read it.
+
+Once the module is printed, the command runs each gated case once more under
+every variant its limits are assigned to, and fails when a variant leaves one of
+those limits unexceeded, naming the workload, case, phase, count, variant,
+observed value, and limit of each. A limit written as ungated is assigned no
+variant and is not controlled.
 
 A failing read-budget test has found a count that grew. Attribute the added
 reads or graph size to a phase and a role in the probe's records before

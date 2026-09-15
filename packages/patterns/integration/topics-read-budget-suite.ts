@@ -10,7 +10,6 @@ import { describe, it } from "@std/testing/bdd";
 
 import { caseNamed, measureCasePhases } from "./topics-cost-cases.ts";
 import {
-  assignedLimitsNotExceeded,
   limitsExceeded,
   type ReadBudgetGroup,
   readBudgetGroups,
@@ -18,10 +17,8 @@ import {
   readBudgetTestFile,
   readBudgetTestFiles,
   TOPICS_READ_BUDGET_GROUPS,
-  variantsAssignedTo,
 } from "./topics-read-budget.ts";
 import { TOPICS_READ_BUDGET_LIMITS } from "./topics-read-budget-limits.ts";
-import { READ_BUDGET_VARIANTS } from "./topics-read-budget-variants.ts";
 
 /**
  * Registers the read-budget tests of `group` inside the calling `describe()`,
@@ -32,11 +29,11 @@ import { READ_BUDGET_VARIANTS } from "./topics-read-budget-variants.ts";
  *   named for;
  * - that the limits table holds limits for exactly the cases the groups name;
  * - for each of the group's cases, that every count its phases record stays
- *   within its limit, and that each variant its limits are assigned to exceeds
- *   every one of those limits.
+ *   within its limit.
  *
- * Each case is measured once for the limits and once more for each variant, in
- * this process.
+ * Each case is measured once, in this process. The regression variant each
+ * limit is assigned to is run by `--derive-limits`, which the "Topics read
+ * budget" section of `docs/development/BENCHMARKS.md` describes.
  */
 export function describeReadBudgetGroup(
   group: ReadBudgetGroup,
@@ -82,16 +79,6 @@ export function describeReadBudgetGroup(
         const { phases } = await measureCasePhases(probeCase);
         expect(limitsExceeded(probeCase, phases)).toEqual([]);
       });
-
-      for (const variant of variantsAssignedTo(probeCase)) {
-        it(`exceeds each limit assigned to the \`${variant}\` variant when that variant runs`, async () => {
-          const { phases } = await measureCasePhases(probeCase, {
-            variant: READ_BUDGET_VARIANTS[variant](probeCase),
-          });
-          expect(assignedLimitsNotExceeded(probeCase, variant, phases))
-            .toEqual([]);
-        });
-      }
     });
   }
 }
