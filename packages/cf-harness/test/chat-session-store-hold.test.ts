@@ -91,8 +91,16 @@ const withDatabaseUrl = async (
 
 const readHolderFile = async (url: URL): Promise<unknown> =>
   JSON.parse(
-    await Deno.readTextFile(sqliteHarnessChatSessionStoreHolderPath(url)),
+    await Deno.readTextFile(
+      await sqliteHarnessChatSessionStoreHolderPath(url),
+    ),
   );
+
+const holder = (instanceId: string): HarnessChatStoreHolder => ({
+  instanceId,
+  pid: Deno.pid,
+  heldSince: "2026-09-15T00:00:00.000Z",
+});
 
 /** Records a session in the store with `turnId` still running in it. */
 const saveRunningTurn = (
@@ -281,6 +289,60 @@ describe("chat session store hold", () => {
       });
     });
 
+    it("commits nothing to a held store before refusing", async () => {
+      await withDatabaseUrl(async (url) => {
+        const first = await openSqliteHarnessChatSessionStore({ url });
+        try {
+          saveRunningTurn(first, "session-1", "turn-1");
+          expect(await first.hold(holder("instance-1"))).toEqual({
+            held: true,
+          });
+          // `PRAGMA data_version` moves on this connection once any other
+          // connection commits, which is what a second opener's pragmas,
+          // schema statements, or recovery would do.
+          const dataVersion = () =>
+            (first.database.prepare("PRAGMA data_version").get() as {
+              data_version: number;
+            }).data_version;
+          const before = dataVersion();
+
+          const second = await openSqliteHarnessChatSessionStore({ url });
+          try {
+            const late = new HarnessInteractiveChatService({
+              createPromptLoop: noPromptLoop,
+              now: nextIsoNow(),
+              sessionStore: second,
+            });
+            await expect(late.initializeFromStore()).rejects.toThrow(
+              HarnessChatStoreHeldError,
+            );
+
+            expect(dataVersion()).toBe(before);
+            expect(first.getTurn("session-1", "turn-1")?.turn.status).toBe(
+              "running",
+            );
+            expect(await readHolderFile(url)).toEqual(holder("instance-1"));
+
+            // A commit from that connection is what the check above rules
+            // out; this one shows the check can see one.
+            second.saveSession({
+              session: createHarnessChatSessionStatus({
+                sessionId: "session-2",
+                createdAt: "2026-09-15T00:00:00.000Z",
+                workspace: { hostPath: "/workspace" },
+              }),
+              transcript: [],
+            });
+            expect(dataVersion()).not.toBe(before);
+          } finally {
+            second.close();
+          }
+        } finally {
+          first.close();
+        }
+      });
+    });
+
     it("takes over a store whose holder has died and settles the turn it left running", async () => {
       await withDatabaseUrl(async (url) => {
         const store = await openSqliteHarnessChatSessionStore({ url });
@@ -400,12 +462,6 @@ describe("chat session store hold", () => {
   });
 
   describe("SqliteHarnessChatSessionStore.hold()", () => {
-    const holder = (instanceId: string): HarnessChatStoreHolder => ({
-      instanceId,
-      pid: Deno.pid,
-      heldSince: "2026-09-15T00:00:00.000Z",
-    });
-
     it("takes an unheld store and writes the holder beside the database", async () => {
       await withDatabaseUrl(async (url) => {
         const store = await openSqliteHarnessChatSessionStore({ url });
@@ -440,6 +496,35 @@ describe("chat session store hold", () => {
       });
     });
 
+    it("returns the holder for a store held under another spelling of its path", async () => {
+      // The link is on the database file itself, so a hold file placed beside
+      // each spelling would be two different files.
+      const dir = await Deno.makeTempDir();
+      try {
+        const first = await openSqliteHarnessChatSessionStore({
+          url: toFileUrl(join(dir, "real.sqlite")),
+        });
+        await Deno.symlink(join(dir, "real.sqlite"), join(dir, "alias.sqlite"));
+        const second = await openSqliteHarnessChatSessionStore({
+          url: toFileUrl(join(dir, "alias.sqlite")),
+        });
+        try {
+          expect(await first.hold(holder("instance-1"))).toEqual({
+            held: true,
+          });
+          expect(await second.hold(holder("instance-2"))).toEqual({
+            held: false,
+            holder: holder("instance-1"),
+          });
+        } finally {
+          second.close();
+          first.close();
+        }
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("returns no holder where the record beside a held store is not one", async () => {
       await withDatabaseUrl(async (url) => {
         const first = await openSqliteHarnessChatSessionStore({ url });
@@ -449,7 +534,7 @@ describe("chat session store hold", () => {
             held: true,
           });
           await Deno.writeTextFile(
-            sqliteHarnessChatSessionStoreHolderPath(url),
+            await sqliteHarnessChatSessionStoreHolderPath(url),
             "{",
           );
           expect(await second.hold(holder("instance-2"))).toEqual({

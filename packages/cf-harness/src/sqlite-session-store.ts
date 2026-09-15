@@ -140,9 +140,19 @@ const parseNullableJsonColumn = <Value>(
 /** Suffix of the file beside a database that carries its hold. */
 const HOLDER_FILE_SUFFIX = "-holder";
 
-/** Returns the path of the file carrying the hold on the database at `url`. */
-export const sqliteHarnessChatSessionStoreHolderPath = (url: URL): string =>
-  `${fromFileUrl(databaseAddress(url))}${HOLDER_FILE_SUFFIX}`;
+/**
+ * Returns the path of the file carrying the hold on the database at `url`,
+ * which must exist. The database path is resolved through every link first,
+ * so two spellings of one database name one hold file rather than one each;
+ * a hard link is a second name the resolution cannot see, as it is for the
+ * database's own journal.
+ */
+export const sqliteHarnessChatSessionStoreHolderPath = async (
+  url: URL,
+): Promise<string> =>
+  `${await Deno.realPath(
+    fromFileUrl(databaseAddress(url)),
+  )}${HOLDER_FILE_SUFFIX}`;
 
 const isStoreHolder = (value: unknown): value is HarnessChatStoreHolder => {
   if (typeof value !== "object" || value === null) {
@@ -562,6 +572,14 @@ const decodeTurnRow = (row: TurnRow): HarnessChatTurnRecord => {
   };
 };
 
+/**
+ * Opens the database at `options.url`, creating it and its schema when they
+ * are absent. Everything run here is a no-op on a database that already
+ * carries the schema — the pragmas set connection state, and every schema
+ * statement is `IF NOT EXISTS` — so opening a store another process holds
+ * commits nothing to it, and the hold a caller then asks for is the first
+ * thing it does to that store.
+ */
 export const openSqliteHarnessChatSessionStore = async (
   options: OpenSqliteHarnessChatSessionStoreOptions,
 ): Promise<SqliteHarnessChatSessionStore> => {
@@ -573,6 +591,6 @@ export const openSqliteHarnessChatSessionStore = async (
   database.exec(INIT);
   return new SqliteHarnessChatSessionStore(
     database,
-    sqliteHarnessChatSessionStoreHolderPath(address),
+    await sqliteHarnessChatSessionStoreHolderPath(address),
   );
 };
