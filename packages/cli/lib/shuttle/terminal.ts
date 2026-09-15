@@ -217,11 +217,21 @@ class StandardTerminal implements PromptTerminal {
    * from parting: the reader awaits it before every read, and every write
    * checks it, so a program that has the terminal has all of it.
    */
+  #held: Promise<void> | undefined;
+
+  /**
+   * The frame as its composer last drew it, and absent where none has the
+   * screen.
+   *
+   * It is kept because the screen a frame holds can be taken from it: a
+   * program this prompt hands the terminal to draws where it likes, and what
+   * puts the frame back afterwards is drawing it again
+   * ({@link StandardTerminal.suspend}).
+   */
   #frame: {
     readonly rows: readonly string[];
     readonly cursor: FrameCursor | undefined;
   } | undefined;
-  #held: Promise<void> | undefined;
 
   /** Ends {@link StandardTerminal.#held}, held by the suspension that made it. */
   #release: (() => void) | undefined;
@@ -305,11 +315,7 @@ class StandardTerminal implements PromptTerminal {
       this.#framed = true;
       this.#write(takingScreen());
     }
-    // Kept as well as sent, because the screen a frame holds can be taken from
-    // it: a program this prompt hands the terminal to draws where it likes,
-    // and what puts the frame back afterwards is drawing it again
-    // ({@link StandardTerminal.suspend}). What it draws is the last thing this
-    // was given, which is the frame as its composer last had it.
+    // Kept as well as sent, for what a suspension does with it.
     this.#frame = { rows, cursor };
     this.#paint();
   }
@@ -330,6 +336,24 @@ class StandardTerminal implements PromptTerminal {
     this.#framed = false;
     this.#frame = undefined;
     this.#write(givingScreen());
+    // Held back again where a program has the terminal, rather than written
+    // into a write that is dropped. Those lines are a run's record, and a
+    // frame given up during a suspension — which a key typed behind the one
+    // that started the program does — would otherwise take the whole of what
+    // it was holding with it. {@link StandardTerminal.suspend} is where they
+    // land instead.
+    if (this.#held === undefined) this.#flush();
+  }
+
+  /**
+   * Helper for the two that stop holding lines back, which writes what a frame
+   * kept while it had the screen.
+   *
+   * It goes through {@link StandardTerminal.announce}, so a line written this
+   * way is written exactly as one that never waited: the same glyphing, and
+   * above the same line being edited.
+   */
+  #flush(): void {
     const waiting = this.#waiting;
     this.#waiting = [];
     for (const text of waiting) this.announce(text);
@@ -377,8 +401,7 @@ class StandardTerminal implements PromptTerminal {
     // is the one thing taking the screen exists to prevent. Written before the
     // hold rather than inside it, because nothing this object draws goes out
     // while the terminal is held.
-    const framed = this.#framed;
-    if (framed) this.#write(givingScreen());
+    if (this.#framed) this.#write(givingScreen());
     this.#held = new Promise<void>((resolve) => {
       this.#release = resolve;
     });
@@ -393,13 +416,26 @@ class StandardTerminal implements PromptTerminal {
       Deno.stdin.setRaw(true);
       this.#painted = NOTHING_PAINTED;
       this.#held = undefined;
-      // Taken and drawn in one, rather than left blank for whatever comes
-      // next to repaint: what comes next is a verb settling, which can be a
-      // write to a server away, and an empty screen for the length of one is
-      // a frame a reader watches disappear.
-      if (framed) {
+      // Asked again rather than remembered from before the program, because a
+      // frame can be given up while one is running: keys already decoded out of
+      // one read go on reaching the prompt during the hold, so a `q` typed
+      // behind the key that started the editor closes the view from under it.
+      // A frame taken back on a remembered answer would be an alternate screen
+      // nothing is drawing on and nothing will leave, the `unframe` that would
+      // have left it having been dropped as every write is.
+      if (this.#framed) {
+        // Taken and drawn in one, rather than left blank for whatever comes
+        // next to repaint: what comes next is a verb settling, which can be a
+        // write to a server away, and an empty screen for the length of one is
+        // a frame a reader watches disappear.
         this.#write(takingScreen());
         this.#paint();
+      } else {
+        // What the frame was holding back, where it stopped holding the screen
+        // while this program had it: the writing that gives it up is dropped
+        // like every other, so the lines it would have flushed are still here
+        // and this is the first moment they can land.
+        this.#flush();
       }
       this.#release?.();
       this.#release = undefined;

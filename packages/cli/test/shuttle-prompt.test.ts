@@ -1505,23 +1505,25 @@ describe("prompt", () => {
       expect(gave).toBeGreaterThan(stopped);
     });
 
-    it("closes the frame on a second `ctrl-c` at a stopped line", async () => {
+    it("answers two `ctrl-c`s at a hung line with the screen and the line", async () => {
       // Two presses against a line that will not answer: the first stops the
-      // line, and the second is a person asking for the way out.
+      // line, and the second is a person asking for the way out. What a person
+      // gets is that the screen goes back, once, and the stopped line answers.
       //
-      // What this case reaches and what it does not. It reaches the second key
-      // whichever side of the settle it lands on, which is the property a
-      // person has: the frame goes back, once, and the stopped line answers.
-      // It does not reach the window inside the settle — a cancel reaches the
-      // work through a signal and the outcome arrives three or four turns of
-      // the microtask queue later, and there is no honest way to hold the loop
-      // inside that window from out here. A case that tried would be counting
-      // microtasks, which is the shape that goes flaky when anything between
-      // the abort and the arrival grows an await.
+      // What this does *not* guard, said plainly because a case filed under a
+      // fix that does not guard it is worse than no case at all: the window the
+      // fix closes. A cancel reaches the work through a signal and the outcome
+      // arrives three or four turns of the microtask queue later, and two keys
+      // both landing inside that window is not something this harness can
+      // arrange — the settle is already in flight when the second key is asked
+      // for, and every way of winning that race came down to counting
+      // microtasks, which is the shape that goes flaky the moment anything
+      // between the abort and the arrival grows an await. So these assertions
+      // pass on the behavior before the fix as well.
       //
-      // So the window is guarded by the loop's own rule rather than by this:
-      // `running.stopped()` is the abort signal itself, so a key arriving
-      // inside the window reads the same fact a key arriving after it does.
+      // What guards the window is that there is no second state to get wrong:
+      // `Running.stopped()` is the abort signal itself, so a key arriving
+      // inside the window reads the same fact as one arriving after it.
 
       const read = gated();
       const run = awaiting(
@@ -1541,8 +1543,6 @@ describe("prompt", () => {
       const drawn = await run.writes;
       expect(drawn.filter((write) => write.kind === "unframe").length).toBe(1);
       expect(produced(drawn)).toContain("Interrupted.");
-      // The prompt is back and being drawn at, which is what says the frame
-      // gave the screen up rather than the run ending with it still held.
       expect(drawn.at(-1)?.kind).toBe("finish");
     });
 

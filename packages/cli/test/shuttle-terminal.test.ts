@@ -807,6 +807,55 @@ describe("terminal", () => {
       expect(written.slice(retook)).toContain("\x1b[1;1H\x1b[2Ka");
     });
 
+    it("leaves the screen given up where the frame went during the program", async () => {
+      // Keys already decoded out of one read go on reaching the prompt while a
+      // program holds the terminal, so a `q` typed behind the key that started
+      // an editor closes the view from under it. The `unframe` that would have
+      // left the alternate screen is dropped as every write during a hold is —
+      // this one already gave the screen back on the way in, so what is left to
+      // get right is not taking it again.
+      //
+      // Kills: restoring on what the frame was before the program rather than
+      // on what it is now, which ends on an alternate screen nothing is drawing
+      // on and nothing will leave.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        await terminal.suspend(() => {
+          terminal.unframe();
+          return Promise.resolve();
+        });
+        await Promise.resolve();
+      });
+      const written = watched.written();
+      // One taking and one giving, in that order, and nothing after them.
+      expect(written.split("\x1b[?1049h").length - 1).toBe(1);
+      expect(written.split("\x1b[?1049l").length - 1).toBe(1);
+      expect(written.indexOf("\x1b[?1049l"))
+        .toBeGreaterThan(written.indexOf("\x1b[?1049h"));
+    });
+
+    it("writes what the frame held back where it went during the program", async () => {
+      // Those lines are a run's record — a pattern's console output and an
+      // armed watch's event lines — and a frame given up during a suspension
+      // would otherwise take the whole of what it was holding with it: the
+      // writing that flushes them is dropped like every other.
+      //
+      // Kills: flushing in `unframe` whatever the terminal is doing, which
+      // sends them into a write nobody receives.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.announce("a watch said so");
+        await terminal.suspend(() => {
+          terminal.unframe();
+          return Promise.resolve();
+        });
+        await Promise.resolve();
+      });
+      expect(watched.written()).toContain("a watch said so");
+    });
+
     it("draws nothing again where no frame held the screen", async () => {
       // A `suspend` at the prompt hands over a terminal with nothing on the
       // alternate screen, so there is no screen to give back and none to take.
