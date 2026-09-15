@@ -222,16 +222,17 @@ pivot's own rules.
 Two constraints shape what can be tested where, and both are worth knowing
 before writing a case:
 
-- A piece built in a pattern body cannot be placed on a board. Pushing one in
-  reports a schema mismatch and the write never runs, seeding the array at
-  construction is refused because a cell constructor takes static data, and
-  writing the board's input through the piece controller is refused by the
-  contract check. A test therefore cannot hold a topic that is both on a board
-  and callable.
+- A piece built in a pattern body cannot be placed on a board. An action pushing
+  one never runs, its argument logged as a potential schema mismatch, and
+  seeding the array at construction is refused because a cell constructor takes
+  static data. A pattern test therefore cannot hold a topic that is both on a
+  board and callable.
 - The pivot excludes a topic from its own inbound edges by identity rather than
   array position. Only a list holding the same topic twice separates those, and
-  no board can produce one, so `mentionedBy` is exported for a test to call
-  with a list built by hand.
+  a board can hold one: writing a live topic handle into the board's `topics`
+  through the piece controller's `input`, or linking a topic there with
+  `PiecesController.link`, adds an entry for a topic the board already lists.
+  `mentionedBy` is exported so that a test can hand it such a list directly.
 
 ## Deploying to the team board
 

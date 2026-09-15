@@ -332,20 +332,13 @@ describe("topic-board-pivot-contract", () => {
 
   // NOTE ON WHAT THIS CANNOT SEPARATE, because the distinction is easy to
   // assume from the wording: every topic here sits at exactly ONE index, so
-  // this case cannot tell the identity check `mentionedBy` makes when it
+  // this case cannot tell the identity check `mentionedBy()` makes when it
   // leaves a topic out of its own backlinks (`!equals(other, topic)` in
   // `packages/patterns/topics/main.tsx`) from a check by array position: both
   // pass it. Only a board listing one topic at two indices separates them, and
-  // that case is not here. A test cannot put a topic it holds onto a board's
-  // list by `push`, by seeding the array, or through the controller's `input`,
-  // and none of the three is refused over duplication. An action pushing a
-  // topic built in a pattern body reports a schema mismatch and never runs, so
-  // its `push`, which appends a repeated entry like any other, is not reached.
-  // Seeding the array with one hits `Cell.of()`'s static-data rule, and one
-  // passed through the controller's `input` is refused by `assertSchemaSubset`.
-  // `assert_self_mention_inert_through_a_twin` in
-  // `packages/patterns/topics/topics.test.tsx` hands `mentionedBy` a duplicated
-  // list, and the "over a board listing one topic twice" group in
+  // no case here builds one. `assert_self_mention_inert_through_a_twin` in
+  // `packages/patterns/topics/topics.test.tsx` hands `mentionedBy()` a
+  // duplicated list, and the "over a board listing one topic twice" group in
   // `topics-headless-fixture.test.ts` runs the board's lifts over one.
   it("records a self-mention without earning the topic an inbound edge", async () => {
     // Referencing yourself is not being referenced from somewhere else.

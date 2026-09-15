@@ -586,10 +586,10 @@ export default pattern(() => {
   });
 
   // A fresh comment on the FIRST topic makes it the most recently active.
-  // The pivot's join, handed a list a board cannot produce: the SAME topic at
-  // two indices. That is the only shape that separates the rule the pivot
-  // actually holds — exclude by identity — from the one that passes every
-  // board-built test, exclude by array position. With a position check the
+  // The pivot's join, handed the SAME topic at two indices. That is the only
+  // shape that separates the rule the pivot actually holds — exclude by
+  // identity — from the one that passes every test where each topic appears
+  // once, exclude by array position. With a position check the
   // twin at index 1 is not excluded, its mention of `twin` matches, and a
   // topic that only ever mentioned itself is reported as referenced from
   // elsewhere.
@@ -853,19 +853,18 @@ export default pattern(() => {
 
   // --- mention retraction through the UI affordance ---
 
-  // The board's mention PIVOT is no longer exercisable from a pattern test.
-  // Its rules need topics that are on a board and have callable verbs at the
-  // same time, and the board's demand carries no verbs while a topic built
-  // here cannot be put on a board at all — `push` reports a schema mismatch,
-  // seeding the array hits `Cell.of()`'s static-data rule, and the piece
-  // controller's `input` is refused by `assertSchemaSubset`. Those rules moved
-  // rather than went: a pivot row per topic, a self-mention earning no inbound
-  // edge, two mentions each landing their own, and an unmention dropping only
-  // what it retracted are all in
+  // The board's mention PIVOT is not exercisable from a pattern test. Its
+  // rules need topics that are on a board and have callable verbs at the same
+  // time, and the board's demand carries no verbs while a topic built here
+  // cannot be put on a board: an action pushing one never runs, its argument
+  // logged as a potential schema mismatch, and seeding the array with one hits
+  // `Cell.of()`'s static-data rule. A pivot row per topic, a self-mention
+  // earning no inbound edge, two mentions each landing their own, and an
+  // unmention dropping only what it retracted are in
   // `packages/patterns/integration/topic-board-child-contract.test.ts`, and
-  // the identity-not-position rule the duplicate-listing case guarded is in
+  // the identity-not-position rule is in
   // `assert_self_mention_inert_through_a_twin` above, which hands
-  // `mentionedBy` a list a board cannot produce.
+  // `mentionedBy()` a list holding one topic twice.
   //
   // What stays here is the part that never needed the pivot: `dropMention` is
   // a UI affordance over a caller's own list, and it needs two piece
