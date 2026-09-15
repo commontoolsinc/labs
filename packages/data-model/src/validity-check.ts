@@ -32,7 +32,7 @@ import {
   type FabricValueLayer,
 } from "./interface.ts";
 import { isFabricPlainObject, isFabricSpecialObject } from "./type-check.ts";
-import { tagFromNativeBuiltinClassElseNull, VALUE_TAGS } from "@/value-tags";
+import { tagOfNativeBuiltinClassElseNull, VALUE_TAGS } from "@/value-tags";
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting
@@ -417,7 +417,7 @@ export function isValidFabricNativeObject(
 
   const ctor = constructorOfObject(value);
   const tag = (ctor !== undefined)
-    ? tagFromNativeBuiltinClassElseNull(ctor)
+    ? tagOfNativeBuiltinClassElseNull(ctor)
     : null;
 
   // `Error.isError()` is the test that holds across realms, where `instanceof`

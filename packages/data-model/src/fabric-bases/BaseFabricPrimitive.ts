@@ -51,7 +51,7 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
 
   /**
    * The tag this instance reports, one of `FABRIC_PRIMITIVE_VALUE_TAGS`, which
-   * the `tagFrom*()` dispatches return for it. Each concrete class supplies
+   * the `tagOf*()` dispatches return for it. Each concrete class supplies
    * its own. A subclass of one that does not is tagged as its parent, which
    * is a bug in that subclass and not one the dispatches defend against.
    */
