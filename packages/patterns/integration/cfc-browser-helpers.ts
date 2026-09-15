@@ -2103,8 +2103,15 @@ export interface BrowserLoadSummary {
  * a summary that could have carried it. A collection that always returns is
  * worth that, since the summary exists to explain a run that is already in
  * trouble.
+ *
+ * The size guards against that loss rather than against a long wait. Reading
+ * the counters costs the worker almost nothing, so a slow answer means a busy
+ * worker, and the runs that most need a summary are the loaded ones where a
+ * worker stays busy longest. A budget of seconds would fire on those; this one
+ * is set where only a worker that has stopped reaches it, and a wedged worker
+ * still costs far less than the step it runs in.
  */
-const WORKER_STATS_BUDGET_MS = 5_000;
+const WORKER_STATS_BUDGET_MS = 30_000;
 
 /**
  * Collect aggregate timing stats from one browser: main-thread IPC waits
