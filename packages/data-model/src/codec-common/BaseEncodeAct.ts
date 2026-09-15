@@ -2,7 +2,7 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { isFabricSpecialObject } from "@/type-check.ts";
+import { isFabricSpecialObject } from "@/types";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,

@@ -6,9 +6,7 @@ export {
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
 
-export type * from "./interface.ts";
-
-export { FabricInstance, FabricPrimitive } from "./interface.ts";
+export * from "./interface.ts";
 
 export {
   convertibleJsFromFabricValue,
@@ -19,29 +17,6 @@ export {
   shallowFabricFromConvertibleJsObjectElseUndefined,
   shallowFabricFromConvertibleJsValue,
 } from "./convertible-js.ts";
-
-export { refuseFabricInstance } from "./refuseFabricInstance.ts";
-
-export {
-  isFabricArray,
-  isFabricContainerValue,
-  isFabricObjectOrArray,
-  isFabricPlainContainer,
-  isFabricPlainObject,
-  isFabricSpecialObject,
-  isKeyableObjectNotArray,
-  isKeyableObjectOrArray,
-  isWalkableObjectNotArray,
-  isWalkableObjectOrArray,
-} from "./type-check.ts";
-
-export {
-  assertValidFabricValueLayer,
-  isValidFabricConvertibleJsObject,
-  isValidFabricPlainObject,
-  isValidFabricValue,
-  isValidFabricValueLayer,
-} from "./validity-check.ts";
 
 export {
   cloneForMutation,
@@ -65,4 +40,4 @@ export {
 
 export { hashOf, hashStringOf, taggedHashStringOf } from "./value-hash.ts";
 
-export * from "@/value-tags";
+export * from "@/types";

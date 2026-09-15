@@ -26,12 +26,13 @@ import {
   MutableFabricContainerValueLayer,
   MutableFabricPlainObjectLayer,
 } from "./interface.ts";
-import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/value-tags";
-import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricContainerValue,
   isFabricPlainContainer,
-} from "./type-check.ts";
+  tagOfConvertibleJsValueElseNull,
+  VALUE_TAGS,
+} from "@/types";
+import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
