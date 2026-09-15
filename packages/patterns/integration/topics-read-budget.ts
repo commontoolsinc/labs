@@ -35,16 +35,16 @@ export const TOPICS_READ_BUDGET_GROUPS = {
     "thread/comments-3/links-100/aggregates",
   ],
   "single-bucket": [
-    "pivot/single-bucket/mentions-4/topics-128/topic-open",
-    "pivot/single-bucket/mentions-4/topics-128/all-backlinks",
+    "pivot/single-bucket/mentions-4/topics-32/topic-open",
+    "pivot/single-bucket/mentions-4/topics-32/all-backlinks",
   ],
   "high-degree": [
-    "pivot/high-degree/mentions-4/topics-128/topic-open",
-    "pivot/high-degree/mentions-4/topics-128/all-backlinks",
+    "pivot/high-degree/mentions-4/topics-32/topic-open",
+    "pivot/high-degree/mentions-4/topics-32/all-backlinks",
   ],
   "mentions-16": [
-    "pivot/low-degree/mentions-16/topics-128/topic-open",
-    "pivot/low-degree/mentions-16/topics-128/all-backlinks",
+    "pivot/low-degree/mentions-16/topics-32/topic-open",
+    "pivot/low-degree/mentions-16/topics-32/all-backlinks",
   ],
 } as const satisfies Readonly<Record<string, readonly string[]>>;
 

@@ -195,8 +195,8 @@ holds it rather than by registered name. It runs at 32, 128, and 512 topics,
 with low-degree and high-degree mention graphs, and varies E independently of N.
 Exercise a single large inbound bucket as well as distributed links. Test
 threads at 10, 100, and 1,000 comments, varying L separately. The headless
-read-budget test runs in CI at sizes up to 128 topics and threads up to 100
-comments; 512 topics and 1,000 comments run only from this tier's probe script.
+read-budget test runs in CI at 32 topics and threads up to 100 comments; 128 and
+512 topics and 1,000 comments run only from this tier's probe script.
 T0 builds this tier's fixture; if a size cannot be built, T0 records the
 measured limit and the tier runs at the largest size it builds.
 

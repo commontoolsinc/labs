@@ -771,15 +771,17 @@ share of a pattern integration job.
 The gated cases are:
 
 - the 4-topic `low-degree` pivot cases under `topic-open` and `all-backlinks`;
-- the 128-topic pivot cases under both workloads for the `high-degree` and
+- the 32-topic pivot cases under both workloads for the `high-degree` and
   `single-bucket` graphs at four mentions per source, and for the `low-degree`
   graph at 16;
 - the thread cases with one comment and one link, with 100 comments, and with
   100 links.
 
-No `board` case is gated, since the probe measures none. No gated case holds
-more than 128 topics or 100 comments or links; the larger sizes run only from
-the probe.
+No `board` case is gated, since the probe measures none. Every gated pivot
+case holds 32 topics or the small case's 4, and no gated thread case holds more
+than 100 comments or links; the larger sizes run only from the probe. A
+regression that appears only above 32 topics is one the probe finds, not
+continuous integration.
 
 Every measured phase of a gated case has a limit on each of five counts, read
 from its phase record:
