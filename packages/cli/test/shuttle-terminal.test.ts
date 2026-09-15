@@ -777,6 +777,47 @@ describe("terminal", () => {
       );
     });
 
+    it("gives the screen back around a program and draws the frame again", async () => {
+      // A terminal keeps no stack of alternate screens. A full-screen editor
+      // takes one and leaves it, which puts this terminal back on its primary
+      // screen — where the transcript is — while the frame is still this
+      // object's as far as it knows. The next drawing would then paint the
+      // frame over the transcript, which is the one thing taking the screen
+      // exists to prevent.
+      //
+      // Drawn again rather than left for whatever comes next, because what
+      // comes next is a verb settling, which can be a write to a server away.
+      //
+      // Kills: handing the terminal over with the frame's screen still taken,
+      // which sends no `?1049l` before the program and no `?1049h` after it.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        await terminal.suspend(() => Promise.resolve());
+        await Promise.resolve();
+      });
+      const written = watched.written();
+      const took = written.indexOf("\x1b[?1049h");
+      const gave = written.indexOf("\x1b[?1049l", took);
+      const retook = written.indexOf("\x1b[?1049h", gave);
+      expect(gave).toBeGreaterThan(took);
+      expect(retook).toBeGreaterThan(gave);
+      // The frame is on the screen it was given back, drawn from what the last
+      // `frame()` was handed rather than from whatever the program left.
+      expect(written.slice(retook)).toContain("\x1b[1;1H\x1b[2Ka");
+    });
+
+    it("draws nothing again where no frame held the screen", async () => {
+      // A `suspend` at the prompt hands over a terminal with nothing on the
+      // alternate screen, so there is no screen to give back and none to take.
+
+      const watched = await watching({}, async (terminal) => {
+        await terminal.suspend(() => Promise.resolve());
+        await Promise.resolve();
+      });
+      expect(watched.written()).not.toContain("\x1b[?1049");
+    });
+
     it("puts the cursor where a frame being typed at says", async () => {
       // A frame with a command line open on it is typed at, and a line being
       // typed with no cursor on it is one a person cannot see where they are

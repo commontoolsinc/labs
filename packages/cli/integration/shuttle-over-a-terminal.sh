@@ -190,6 +190,9 @@ step "3. Drive a session over a pseudo-terminal"
 # system — no seam below `openEditor` is replaced, which is what would make
 # this a stub rather than a walkthrough.
 #
+# It takes and leaves the alternate screen as a full-screen editor does, which
+# is the half of the round trip the shell has to undo for itself.
+#
 # It has no state and takes no turn: what it saves is decided by what it was
 # given, so each of the three lines below reaches it with a different value and
 # gets a different one of `edit`'s three endings. That is what lets one editor
@@ -200,6 +203,20 @@ step "3. Drive a session over a pseudo-terminal"
 EDITOR_SCRIPT=$(mktemp)
 cat >"$EDITOR_SCRIPT" <<'EDITS'
 #!/usr/bin/env bash
+# The screen a full-screen editor takes. A terminal keeps no stack of alternate
+# screens, so an editor that takes one and leaves it puts the shell back on its
+# primary screen — the transcript — whatever the shell thought it was holding,
+# and the shell has to take its own screen again before it draws.
+#
+# What this buys and what it does not. It puts the real sequence through the
+# real suspension, so the round trip is exercised rather than described. It
+# does not assert the shell came back to its own screen: which screen a byte
+# landed on is not something a transcript of the bytes can say, and a shell
+# that drew its frame over the transcript would write exactly these records.
+# That assertion is `shuttle-terminal.test.ts`'s, where the escape sequences
+# are what is read.
+printf '\033[?1049h'
+trap 'printf "\033[?1049l"' EXIT
 case "$(cat "$1")" in
   '"garble me"') printf 'not json at all' >"$1" ;;
   '"edited in the editor"') : ;;

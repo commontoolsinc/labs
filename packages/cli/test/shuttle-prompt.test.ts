@@ -1505,6 +1505,47 @@ describe("prompt", () => {
       expect(gave).toBeGreaterThan(stopped);
     });
 
+    it("closes the frame on a second `ctrl-c` at a stopped line", async () => {
+      // Two presses against a line that will not answer: the first stops the
+      // line, and the second is a person asking for the way out.
+      //
+      // What this case reaches and what it does not. It reaches the second key
+      // whichever side of the settle it lands on, which is the property a
+      // person has: the frame goes back, once, and the stopped line answers.
+      // It does not reach the window inside the settle — a cancel reaches the
+      // work through a signal and the outcome arrives three or four turns of
+      // the microtask queue later, and there is no honest way to hold the loop
+      // inside that window from out here. A case that tried would be counting
+      // microtasks, which is the shape that goes flaky when anything between
+      // the abort and the arrival grows an await.
+      //
+      // So the window is guarded by the loop's own rule rather than by this:
+      // `running.stopped()` is the abort signal itself, so a key arriving
+      // inside the window reads the same fact a key arriving after it does.
+
+      const read = gated();
+      const run = awaiting(
+        async function* (wrote) {
+          yield* typed(":ls");
+          yield ENTER;
+          await read.started;
+          const interrupted = wrote((write) =>
+            write.kind === "announce" && write.text === "Interrupted."
+          );
+          yield control("c");
+          yield control("c");
+          await interrupted;
+        },
+        { listing: { getCellValue: read.read } },
+      );
+      const drawn = await run.writes;
+      expect(drawn.filter((write) => write.kind === "unframe").length).toBe(1);
+      expect(produced(drawn)).toContain("Interrupted.");
+      // The prompt is back and being drawn at, which is what says the frame
+      // gave the screen up rather than the run ending with it still held.
+      expect(drawn.at(-1)?.kind).toBe("finish");
+    });
+
     it("abandons the line being typed at the frame before the one in flight", async () => {
       // Innermost first. A search opened while a line is still running is what
       // a `ctrl-c` reaches there, and the line goes on to settle: a person

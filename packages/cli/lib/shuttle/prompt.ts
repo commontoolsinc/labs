@@ -426,7 +426,17 @@ export async function runPrompt(
         // asked for, which this loop holds. Innermost first, which is the order
         // the prompt already takes — so a frame with nothing being typed at it
         // and a line in flight stops the line, and the frame stays up.
-        if (key.name === "ctrl-c" && !lens.typing && running !== undefined) {
+        //
+        // A line already told to stop is not a line to stop again. The cancel
+        // reaches the work through a signal and the outcome arrives some awaits
+        // later, so a second `ctrl-c` typed in that window would find the line
+        // still in flight and stop it twice, leaving the frame up. What a
+        // person pressing it twice is asking for is the way out, which is what
+        // the lens gives it once this arm declines.
+        if (
+          key.name === "ctrl-c" && !lens.typing && running !== undefined &&
+          !running.stopped()
+        ) {
           running.stop();
           held = [];
           buffer.setText("");
@@ -552,6 +562,18 @@ interface Running {
   stop(): void;
 
   /**
+   * Whether it has already been told to stop, which is not the same as having
+   * settled: a cancel reaches the work through a signal, and the outcome it
+   * settles with arrives some awaits later.
+   *
+   * What reads it is the second `ctrl-c` at a frame. The first stops the line;
+   * the second, arriving before the first has settled, would otherwise stop a
+   * line that is already stopping and leave the frame up — where what a person
+   * pressing it twice is asking for is the way out.
+   */
+  stopped(): boolean;
+
+  /**
    * Closes every lens the work opened, including one it settled with that the
    * prompt has not taken, and is absent where the work opens none.
    */
@@ -596,6 +618,7 @@ function start(line: string, shuttle: Shuttle, deps: VerbDeps): Running {
   return {
     kind: "line",
     stop: () => stopper.abort(),
+    stopped: () => stopper.signal.aborted,
     release: () => closeLenses(opened),
     settled: reported.then((arrival) => {
       closeLenses(opened, arrival.kind === "lens" ? arrival.lens : undefined);
@@ -646,6 +669,7 @@ function startCompleting(
   return {
     kind: "completion",
     stop: () => stopper.abort(),
+    stopped: () => stopper.signal.aborted,
     settled: Promise.race([
       completed,
       whenAborted(

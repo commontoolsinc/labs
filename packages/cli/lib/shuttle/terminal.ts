@@ -217,6 +217,10 @@ class StandardTerminal implements PromptTerminal {
    * from parting: the reader awaits it before every read, and every write
    * checks it, so a program that has the terminal has all of it.
    */
+  #frame: {
+    readonly rows: readonly string[];
+    readonly cursor: FrameCursor | undefined;
+  } | undefined;
   #held: Promise<void> | undefined;
 
   /** Ends {@link StandardTerminal.#held}, held by the suspension that made it. */
@@ -301,7 +305,13 @@ class StandardTerminal implements PromptTerminal {
       this.#framed = true;
       this.#write(takingScreen());
     }
-    this.#write(`${screenOf(rows)}${cursorIn(cursor)}`);
+    // Kept as well as sent, because the screen a frame holds can be taken from
+    // it: a program this prompt hands the terminal to draws where it likes,
+    // and what puts the frame back afterwards is drawing it again
+    // ({@link StandardTerminal.suspend}). What it draws is the last thing this
+    // was given, which is the frame as its composer last had it.
+    this.#frame = { rows, cursor };
+    this.#paint();
   }
 
   /**
@@ -318,6 +328,7 @@ class StandardTerminal implements PromptTerminal {
   unframe(): void {
     if (!this.#framed) return;
     this.#framed = false;
+    this.#frame = undefined;
     this.#write(givingScreen());
     const waiting = this.#waiting;
     this.#waiting = [];
@@ -357,6 +368,17 @@ class StandardTerminal implements PromptTerminal {
    * stands.
    */
   async suspend<T>(body: () => Promise<T>): Promise<T> {
+    // The alternate screen is given back before the program and taken again
+    // after it, where a frame is holding one. A terminal keeps no stack of
+    // alternate screens: a program that takes one and leaves it — which is
+    // what a full-screen editor does — leaves this terminal on its primary
+    // screen, where the transcript is. The frame is still this object's as far
+    // as it knows, so the next drawing would paint over that transcript, which
+    // is the one thing taking the screen exists to prevent. Written before the
+    // hold rather than inside it, because nothing this object draws goes out
+    // while the terminal is held.
+    const framed = this.#framed;
+    if (framed) this.#write(givingScreen());
     this.#held = new Promise<void>((resolve) => {
       this.#release = resolve;
     });
@@ -365,14 +387,33 @@ class StandardTerminal implements PromptTerminal {
       return await body();
     } finally {
       // The order is what the property needs: raw mode back first, then the
-      // reader let go, so the loop that wakes reads a terminal in the mode it
-      // expects rather than one still cooked.
+      // screen, then the reader let go, so the loop that wakes reads a terminal
+      // in the mode it expects rather than one still cooked, and finds the
+      // frame where it left it.
       Deno.stdin.setRaw(true);
       this.#painted = NOTHING_PAINTED;
       this.#held = undefined;
+      // Taken and drawn in one, rather than left blank for whatever comes
+      // next to repaint: what comes next is a verb settling, which can be a
+      // write to a server away, and an empty screen for the length of one is
+      // a frame a reader watches disappear.
+      if (framed) {
+        this.#write(takingScreen());
+        this.#paint();
+      }
       this.#release?.();
       this.#release = undefined;
     }
+  }
+
+  /**
+   * Helper for the two that draw a frame, which sends the frame this was last
+   * given, and sends nothing where it has been given none.
+   */
+  #paint(): void {
+    const frame = this.#frame;
+    if (frame === undefined) return;
+    this.#write(`${screenOf(frame.rows)}${cursorIn(frame.cursor)}`);
   }
 
   /**
