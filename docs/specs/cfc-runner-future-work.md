@@ -39,17 +39,15 @@ facet of that one representational distance. Most of the flat model's narrowness
 holes, called out explicitly.
 
 **Default posture.** The commit gate is on by default: the Runtime constructor
-defaults `cfcEnforcementMode` to `enforce-explicit`
+defaults `cfcEnforcementMode` to `enforce-strict`
 ([`runtime.ts:495`](../../packages/runner/src/runtime.ts)), as does lib-shell's
 `createRuntimeClientOptions` — the types-level
 `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`
 ([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
-bare-transaction fallback. What *is* dormant: flow-labels are `persist` in the
-shell and `off` in every other host, the render confidentiality ceiling is wired
-end-to-end but the shell builds one only behind a flag that defaults off, and no
-host runs at `enforce-strict`, leaving the one reject that rung adds — the
-writer-fit misfit — unexercised in deployment. So the flow-taint and display
-protections below are *built but dormant* until a host turns them on — see Epic H.
+bare-transaction fallback. Flow labels persist and the render confidentiality
+ceiling is built by default, so the one reject the strict rung adds — the
+writer-fit misfit — is exercised in deployment rather than dormant. A host that
+wants less states it.
 
 ---
 
@@ -260,7 +258,7 @@ Not new machinery so much as turning the system on:
   which closes the direct trigger channel; multi-hop closure follows once flow
   persists (SC-3).
 - **`enforce-strict` default deployment states.** The effective deployment
-  default is `enforce-explicit` (Runtime + lib-shell; the types-level `disabled`
+  default is `enforce-strict` (Runtime + lib-shell; the types-level `disabled`
   is the bare-transaction fallback). The strict rung carries one differentiated
   reject: the SC-18b writer-fit misfit. The per-transaction flow join landing on
   a written document must fit that document's declared store policy; under
