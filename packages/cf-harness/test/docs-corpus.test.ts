@@ -87,6 +87,24 @@ describe("docs-corpus", () => {
   });
 
   describe("selectSections()", () => {
+    it("skips a section that exceeds the remaining character budget without clipping it", () => {
+      const sections = splitMarkdownSections(
+        document,
+        "# Guide guide\nThe full long guide.\n# Guide\nShort guide.",
+      );
+      expect(selectSections(sections, "guide", { maxChars: 12 })).toEqual([
+        sections[1],
+      ]);
+    });
+
+    it("returns nothing when the question contains only stop words", () => {
+      const sections = splitMarkdownSections(
+        document,
+        "# Guide\nUse the guide.",
+      );
+      expect(selectSections(sections, "how should you use this")).toEqual([]);
+    });
+
     const sections = splitMarkdownSections(
       document,
       "# Glazing\n\nDip the donut once.\n\n# Frying\n\nGlazing comes later.\n",

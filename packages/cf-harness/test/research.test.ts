@@ -29,6 +29,7 @@ import {
   type HarnessResearchRequest,
   MAX_RESEARCH_EXAMPLE_CHARS,
   MAX_RESEARCH_MODEL_TURNS,
+  MAX_RESEARCH_TOOL_CALLS,
   MAX_RESEARCH_TOTAL_READ_CHARS,
 } from "../src/research/runner.ts";
 import {
@@ -150,6 +151,125 @@ describe("research", () => {
       expect(schema.required).toEqual(["task"]);
       expect(schema.additionalProperties).toBe(false);
       expect(Object.keys(schema.properties)).toEqual(["task"]);
+    });
+  });
+
+  describe("private tool boundaries", () => {
+    it("pairs invalid requests without admitting their outputs", async () => {
+      const token = "cfh:a:available";
+      const corpus = corpusWith([{
+        path: "docs/contract.md",
+        heading: "Contract",
+        text: "short",
+      }]);
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "short-query",
+            name: "search_docs",
+            input: { query: "x" },
+          }, {
+            id: "past-end",
+            name: "open_doc_section",
+            input: { sectionId: "section-0", offset: 99 },
+          }, {
+            id: "unknown-section",
+            name: "open_doc_section",
+            input: { sectionId: "section-99" },
+          }, {
+            id: "search-without-index",
+            name: "search_pattern_index",
+            input: { text: "contract" },
+          }, {
+            id: "inspect-without-index",
+            name: "inspect_pattern",
+            input: { patternId: "missing-pattern" },
+          }, {
+            id: "inventory",
+            name: "list_handles",
+            input: {},
+          }, {
+            id: "restricted-handle",
+            name: "describe_handle",
+            input: { token: "cfh:a:restricted" },
+          }, {
+            id: "unavailable-description",
+            name: "describe_handle",
+            input: { token },
+          }, {
+            id: "unknown-tool",
+            name: "future_research_tool",
+            input: {},
+          }]),
+        () => finalResult(),
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ corpus, handleTokens: [token] }),
+      );
+      const outputs = toolOutputs(model.requests[1]);
+
+      expect(outputs).toEqual([
+        { error: "query must be at least 2 characters" },
+        { error: "offset 99 exceeds 5 characters" },
+        { error: "unknown documentation section section-99" },
+        { error: "this run has no configured pattern index" },
+        { error: "this run has no configured pattern index" },
+        { tokens: [token] },
+        { error: "unknown or restricted handle cfh:a:restricted" },
+        { error: "handle description is unavailable" },
+        { error: "unknown research tool future_research_tool" },
+      ]);
+      expect(reply.record.budgets).toEqual({
+        modelTurns: 2,
+        toolCalls: 9,
+        readChars: 0,
+      });
+      expect(reply.record.sourceReads).toEqual([]);
+    });
+
+    it("validates index queries and records an empty result's label gap", async () => {
+      let searches = 0;
+      const index: HarnessResearchPatternIndex = {
+        searchPatterns: () => {
+          searches += 1;
+          return Promise.resolve({ results: [] });
+        },
+        getPattern: () => Promise.reject(new Error("unexpected inspection")),
+      };
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "empty-query",
+            name: "search_pattern_index",
+            input: {},
+          }, {
+            id: "empty-result",
+            name: "search_pattern_index",
+            input: { tags: ["missing"] },
+          }, {
+            id: "empty-pattern-id",
+            name: "inspect_pattern",
+            input: { patternId: "" },
+          }]),
+        () => finalResult(),
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ getPatternIndex: () => Promise.resolve(index) }),
+      );
+      const outputs = toolOutputs(model.requests[1]);
+
+      expect(outputs).toEqual([
+        { error: "pattern search requires text, tags, or both" },
+        { results: [] },
+        { error: "patternId is required" },
+      ]);
+      expect(searches).toBe(1);
+      expect(reply.record.cfc.missingLabels).toEqual([{
+        source: "pattern-index-metadata",
+        detail: "empty search_pattern_index response",
+      }]);
     });
   });
 
@@ -437,6 +557,133 @@ describe("research", () => {
       expect(reply.kit.missing.some((item) => item.includes("was not read")))
         .toBe(true);
     });
+
+    it("rejects tool use during citation repair and retains the original candidate", async () => {
+      const corpus = corpusWith([{
+        path: "docs/api.md",
+        heading: "Pattern contract",
+        text: "Use the exact documented pattern contract.",
+      }]);
+      const usage: number[] = [];
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "read",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }]),
+        (request) => {
+          const sourceId = String(
+            toolOutputs(request, "open_doc_section")[0].sourceId,
+          );
+          return finalResult({
+            status: "complete",
+            summary: "Original candidate",
+            recommendation: {
+              kind: "focused-api",
+              rationale: "The opened section establishes the rule.",
+            },
+            rules: [{
+              rule: "Use the documented pattern contract.",
+              sourceIds: [`${sourceId}-wrong`],
+            }],
+            sourceIds: [`${sourceId}-wrong`],
+            missing: [],
+          });
+        },
+        (request) => {
+          const sourceId = String(
+            toolOutputs(request, "open_doc_section")[0].sourceId,
+          );
+          const corrected = finalResult({
+            status: "complete",
+            summary: "Corrected candidate",
+            recommendation: {
+              kind: "focused-api",
+              rationale: "The opened section establishes the rule.",
+            },
+            rules: [{
+              rule: "Use the documented pattern contract.",
+              sourceIds: [sourceId],
+            }],
+            sourceIds: [sourceId],
+            missing: [],
+          }).assistant.content;
+          return {
+            ...assistant(corrected, [{
+              id: "forbidden-repair-read",
+              name: "open_doc_section",
+              input: { sectionId: "section-0" },
+            }]),
+            usage: { totalTokens: 23 },
+          };
+        },
+      ]);
+
+      const reply = await createResearchRunner({
+        modelClient: model,
+        onUsage: (entry) => usage.push(entry.totalTokens ?? 0),
+      })(requestFor({ corpus }));
+
+      expect(usage).toEqual([23]);
+      expect(model.requests[2].tools).toEqual([]);
+      expect(reply.record.messages.at(-1)).toEqual({
+        role: "tool",
+        toolCallId: "forbidden-repair-read",
+        toolName: "open_doc_section",
+        content: JSON.stringify({
+          error: "private tools are withheld on the citation repair turn",
+        }),
+      });
+      expect(reply.kit.summary).toBe("Original candidate");
+      expect(reply.kit.status).toBe("incomplete");
+    });
+
+    it("retains the original candidate when citation repair is malformed", async () => {
+      const corpus = corpusWith([{
+        path: "docs/api.md",
+        heading: "Pattern contract",
+        text: "Use the exact documented pattern contract.",
+      }]);
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "read",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }]),
+        (request) => {
+          const sourceId = String(
+            toolOutputs(request, "open_doc_section")[0].sourceId,
+          );
+          return finalResult({
+            status: "complete",
+            summary: "Original malformed-repair candidate",
+            recommendation: {
+              kind: "focused-api",
+              rationale: "The opened section establishes the rule.",
+            },
+            rules: [{
+              rule: "Use the documented pattern contract.",
+              sourceIds: [`${sourceId}-wrong`],
+            }],
+            sourceIds: [`${sourceId}-wrong`],
+            missing: [],
+          });
+        },
+        () => assistant("not repair JSON"),
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ corpus }),
+      );
+
+      expect(model.requests).toHaveLength(3);
+      expect(reply.kit.summary).toBe("Original malformed-repair candidate");
+      expect(reply.kit.sources).toEqual([]);
+      expect(reply.kit.missing.some((item) => item.includes("was not read")))
+        .toBe(true);
+    });
   });
 
   describe("published pattern research", () => {
@@ -638,6 +885,161 @@ describe("research", () => {
       expect(reply.kit.missing).toContain(
         `pattern ${patternId} was not inspected successfully`,
       );
+    });
+
+    it("rejects malformed index inspection responses without retaining evidence", async () => {
+      await ensureCompilerStack();
+      const base = {
+        ownerDid: "did:key:zPublisher",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        description: "Malformed index fixture",
+        hashtags: [],
+        dependencies: [],
+      };
+      const index: HarnessResearchPatternIndex = {
+        searchPatterns: () => Promise.resolve({ results: [] }),
+        getPattern: ({ patternId }) => {
+          if (patternId === "wrong-response") {
+            return Promise.resolve({
+              ...base,
+              patternId: "different-pattern",
+            });
+          }
+          if (patternId === "missing-program") {
+            return Promise.resolve({ ...base, patternId });
+          }
+          return Promise.resolve({
+            ...base,
+            patternId,
+            program: {
+              main: "/main.tsx",
+              files: [{
+                name: "/main.tsx",
+                contents:
+                  'import value from "./missing.ts";\nexport default value;\n',
+              }],
+            },
+          });
+        },
+      };
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "wrong-response",
+            name: "inspect_pattern",
+            input: { patternId: "wrong-response" },
+          }, {
+            id: "missing-program",
+            name: "inspect_pattern",
+            input: { patternId: "missing-program" },
+          }, {
+            id: "incomplete-closure",
+            name: "inspect_pattern",
+            input: { patternId: "incomplete-closure" },
+          }]),
+        () => finalResult(),
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ getPatternIndex: () => Promise.resolve(index) }),
+      );
+      const outputs = toolOutputs(model.requests[1], "inspect_pattern");
+
+      expect(outputs).toEqual([{
+        error: "pattern index returned different-pattern for wrong-response",
+      }, {
+        error: "pattern missing-program has no indexed source program",
+      }, {
+        error:
+          "incomplete closure: './missing.ts' imported by '/main.tsx' did not resolve to an included file",
+      }]);
+      expect(reply.record.sourceReads).toEqual([]);
+      expect(reply.record.confirmedPatterns).toEqual([]);
+    });
+
+    it("retains deferred fabric-import evidence but refuses direct execution", async () => {
+      await ensureCompilerStack();
+      const patternId = "fabric-import-pattern";
+      const pattern: PatternIndexPattern = {
+        patternId,
+        ownerDid: "did:key:zPublisher",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        description: "Composes another published pattern",
+        hashtags: ["composition"],
+        dependencies: ["dependency-pattern"],
+        program: {
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: [
+              'import Part from "cf:pattern:dependency-pattern";',
+              "export default Part;",
+            ].join("\n"),
+          }],
+        },
+      };
+      const index: HarnessResearchPatternIndex = {
+        searchPatterns: () => Promise.resolve({ results: [] }),
+        getPattern: () => Promise.resolve(pattern),
+      };
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "inspect",
+            name: "inspect_pattern",
+            input: { patternId },
+          }, {
+            id: "missing-file",
+            name: "open_pattern_file",
+            input: { patternId, path: "/missing.ts" },
+          }]),
+        (request) => {
+          const inspection = toolOutputs(request, "inspect_pattern")[0];
+          return finalResult({
+            status: "complete",
+            recommendation: {
+              kind: "direct-run",
+              rationale: "Run the inspected pattern.",
+            },
+            selectedPatternIds: [patternId],
+            sourceIds: [inspection.sourceId],
+            missing: [],
+          });
+        },
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor({ getPatternIndex: () => Promise.resolve(index) }),
+      );
+      const inspection = toolOutputs(
+        model.requests[1],
+        "inspect_pattern",
+      )[0];
+      const missingFile = toolOutputs(
+        model.requests[1],
+        "open_pattern_file",
+      )[0];
+
+      expect(
+        (inspection.evidence as Record<string, unknown>).identityVerification,
+      ).toEqual({
+        status: "deferred",
+        method: "full-fabric-compiler",
+        detail:
+          "fabric import 'cf:pattern:dependency-pattern' in '/main.tsx' is not supported by the light identity path",
+      });
+      expect(missingFile).toEqual({
+        error: `pattern ${patternId} has no file /missing.ts`,
+      });
+      expect(reply.record.confirmedPatterns).toHaveLength(1);
+      expect(reply.kit.patterns[0]?.identityVerification?.status).toBe(
+        "deferred",
+      );
+      expect(reply.kit.missing).toEqual(expect.arrayContaining([
+        "direct-run requires verified published source identities",
+        "direct-run requires a complete run_pattern input example",
+      ]));
+      expect(reply.kit.status).toBe("incomplete");
     });
 
     it("commits no pattern when its inspection evidence exceeds the read budget", async () => {
@@ -959,6 +1361,35 @@ describe("research", () => {
         heading: "Pattern contract",
         text: "Use the documented pattern contract.",
       }]);
+      const malformedResult = (request: HarnessModelTurnRequest) => {
+        const read = toolOutputs(request, "open_doc_section")[0];
+        return finalResult({
+          status: "complete",
+          recommendation: {
+            kind: "author",
+            rationale: "The documented contract supports new source.",
+          },
+          inputs: [{
+            name: "mail",
+            purpose: "Read mail",
+          }, {
+            name: "   ",
+            token,
+            purpose: "Read mail",
+          }, {
+            name: "mail",
+            token,
+            purpose: "   ",
+          }],
+          example: {
+            kind: "pattern-source",
+            content: "export default 1;",
+            sourceIds: [read.sourceId, "documentation:unread"],
+          },
+          sourceIds: [read.sourceId],
+          missing: [],
+        });
+      };
       const model = new ScriptedModelClient([
         () =>
           assistant("", [{
@@ -970,31 +1401,8 @@ describe("research", () => {
             name: "open_doc_section",
             input: { sectionId: "section-0" },
           }]),
-        (request) => {
-          const read = toolOutputs(request, "open_doc_section")[0];
-          return finalResult({
-            status: "complete",
-            recommendation: {
-              kind: "author",
-              rationale: "The documented contract supports new source.",
-            },
-            inputs: [{
-              name: "mail",
-              purpose: "Read mail",
-            }, {
-              name: "   ",
-              token,
-              purpose: "Read mail",
-            }],
-            example: {
-              kind: "pattern-source",
-              content: "export default 1;",
-              sourceIds: [read.sourceId],
-            },
-            sourceIds: [read.sourceId],
-            missing: [],
-          });
-        },
+        malformedResult,
+        malformedResult,
       ]);
 
       const reply = await createResearchRunner({ modelClient: model })(
@@ -1021,6 +1429,14 @@ describe("research", () => {
       expect(reply.kit.missing).toContain(
         `handle ${token} has no nonempty input name`,
       );
+      expect(reply.kit.missing).toContain(
+        `handle ${token} has no nonempty binding purpose`,
+      );
+      expect(reply.kit.missing).toContain(
+        "the example cited one or more unread sources",
+      );
+      expect(reply.kit.example?.sourceIds).toHaveLength(1);
+      expect(model.requests).toHaveLength(3);
       expect(reply.kit.status).toBe("incomplete");
     });
 
@@ -1140,6 +1556,29 @@ describe("research", () => {
   });
 
   describe("bounded execution", () => {
+    it("stops before the first model turn when already cancelled", async () => {
+      const abort = new AbortController();
+      abort.abort(new Error("cancel before research"));
+      const model = new ScriptedModelClient([() => finalResult()]);
+
+      let failure: HarnessResearchError | undefined;
+      try {
+        await createResearchRunner({ modelClient: model })(requestFor({
+          signal: abort.signal,
+        }));
+      } catch (error) {
+        if (error instanceof HarnessResearchError) failure = error;
+      }
+
+      expect(model.requests).toEqual([]);
+      expect(failure?.message).toBe("cancel before research");
+      expect(failure?.record.budgets).toEqual({
+        modelTurns: 0,
+        toolCalls: 0,
+        readChars: 0,
+      });
+    });
+
     it("reserves the final model turn for tool-free synthesis", async () => {
       const steps: ModelStep[] = Array.from(
         { length: MAX_RESEARCH_MODEL_TURNS - 1 },
@@ -1164,6 +1603,82 @@ describe("research", () => {
         "Current citable source catalog",
       );
       expect(reply.kit.status).toBe("incomplete");
+    });
+
+    it("reports calls beyond the private tool budget without executing them", async () => {
+      const model = new ScriptedModelClient([
+        () =>
+          assistant(
+            "",
+            Array.from(
+              { length: MAX_RESEARCH_TOOL_CALLS + 1 },
+              (_, index) => ({
+                id: `inventory-${index}`,
+                name: "list_handles",
+                input: {},
+              }),
+            ),
+          ),
+        () => finalResult(),
+      ]);
+
+      const reply = await createResearchRunner({ modelClient: model })(
+        requestFor(),
+      );
+      const outputs = toolOutputs(model.requests[1], "list_handles");
+
+      expect(outputs).toHaveLength(MAX_RESEARCH_TOOL_CALLS + 1);
+      expect(outputs.at(-1)).toEqual({
+        error:
+          `research tool-call budget of ${MAX_RESEARCH_TOOL_CALLS} is exhausted`,
+      });
+      expect(reply.record.budgets).toEqual({
+        modelTurns: 2,
+        toolCalls: MAX_RESEARCH_TOOL_CALLS,
+        readChars: 0,
+      });
+    });
+
+    it("fails after a tool call on the reserved synthesis turn", async () => {
+      const model = new ScriptedModelClient(
+        Array.from(
+          { length: MAX_RESEARCH_MODEL_TURNS },
+          (_, index) => () =>
+            assistant("", [{
+              id: `inventory-${index}`,
+              name: "list_handles",
+              input: {},
+            }]),
+        ),
+      );
+
+      let failure: HarnessResearchError | undefined;
+      try {
+        await createResearchRunner({ modelClient: model })(requestFor());
+      } catch (error) {
+        if (error instanceof HarnessResearchError) failure = error;
+      }
+      if (failure === undefined) {
+        throw new Error("expected synthesis-turn tool use to fail research");
+      }
+      const finalTool = failure.record.messages.at(-1);
+      if (finalTool?.role !== "tool") {
+        throw new Error("expected paired synthesis-turn tool result");
+      }
+
+      expect(model.requests).toHaveLength(MAX_RESEARCH_MODEL_TURNS);
+      expect(model.requests.at(-1)?.tools).toEqual([]);
+      expect(JSON.parse(finalTool.content)).toEqual({
+        error: "private tools are withheld on the synthesis turn",
+      });
+      expect(failure.message).toBe(
+        `research exceeded ${MAX_RESEARCH_MODEL_TURNS} model turns without a final kit`,
+      );
+      expect(failure.record.budgets).toEqual({
+        modelTurns: MAX_RESEARCH_MODEL_TURNS,
+        toolCalls: MAX_RESEARCH_MODEL_TURNS - 1,
+        readChars: 0,
+      });
     });
 
     it("carries exact reads when final JSON is malformed", async () => {
@@ -1204,6 +1719,34 @@ describe("research", () => {
       ).toHaveLength(1);
     });
 
+    it("preserves an existing research failure without wrapping it again", async () => {
+      const failingModel = new ScriptedModelClient([() => {
+        throw new Error("initial research failure");
+      }]);
+      let existing: HarnessResearchError | undefined;
+      try {
+        await createResearchRunner({ modelClient: failingModel })(requestFor());
+      } catch (error) {
+        if (error instanceof HarnessResearchError) existing = error;
+      }
+      if (existing === undefined) {
+        throw new Error("expected an initial research failure");
+      }
+      const forwardingModel = new ScriptedModelClient([() => {
+        throw existing;
+      }]);
+      let forwarded: unknown;
+      try {
+        await createResearchRunner({ modelClient: forwardingModel })(
+          requestFor(),
+        );
+      } catch (error) {
+        forwarded = error;
+      }
+
+      expect(forwarded).toBe(existing);
+    });
+
     it("carries partial provenance when the provider fails after a read", async () => {
       const corpus = corpusWith([{
         path: "docs/api.md",
@@ -1236,7 +1779,101 @@ describe("research", () => {
       expect(failure?.record.budgets.modelTurns).toBe(1);
     });
 
-    it("checks cancellation between private calls and pairs the remaining calls", async () => {
+    it("stops before citation repair when cancellation follows the candidate", async () => {
+      const abort = new AbortController();
+      const corpus = corpusWith([{
+        path: "docs/api.md",
+        heading: "Contract",
+        text: "Use the exact API contract.",
+      }]);
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "read",
+            name: "open_doc_section",
+            input: { sectionId: "section-0" },
+          }]),
+        () => {
+          abort.abort(new Error("cancel before citation repair"));
+          return finalResult({
+            status: "complete",
+            sourceIds: ["documentation:unread"],
+            missing: [],
+          });
+        },
+      ]);
+
+      let failure: HarnessResearchError | undefined;
+      try {
+        await createResearchRunner({ modelClient: model })(requestFor({
+          corpus,
+          signal: abort.signal,
+        }));
+      } catch (error) {
+        if (error instanceof HarnessResearchError) failure = error;
+      }
+
+      expect(model.requests).toHaveLength(2);
+      expect(failure?.message).toBe("cancel before citation repair");
+      expect(failure?.record.sourceReads).toHaveLength(1);
+      expect(failure?.record.budgets).toEqual({
+        modelTurns: 2,
+        toolCalls: 1,
+        readChars: 27,
+      });
+      expect(
+        failure?.record.messages.some((message) =>
+          message.role === "user" &&
+          message.content.includes("Citation repair turn")
+        ),
+      ).toBe(false);
+    });
+
+    it("pairs current and pending calls when cancellation interrupts a tool", async () => {
+      const abort = new AbortController();
+      let descriptions = 0;
+      const model = new ScriptedModelClient([
+        () =>
+          assistant("", [{
+            id: "first",
+            name: "describe_handle",
+            input: { token: "cfh:a:first" },
+          }, {
+            id: "second",
+            name: "describe_handle",
+            input: { token: "cfh:a:second" },
+          }]),
+      ]);
+
+      let failure: HarnessResearchError | undefined;
+      try {
+        await createResearchRunner({ modelClient: model })(requestFor({
+          handleTokens: ["cfh:a:first", "cfh:a:second"],
+          signal: abort.signal,
+          describeHandle: (token) => {
+            descriptions += 1;
+            abort.abort("stop research");
+            throw new Error(`description failed for ${token}`);
+          },
+        }));
+      } catch (error) {
+        if (error instanceof HarnessResearchError) failure = error;
+      }
+
+      expect(descriptions).toBe(1);
+      const results =
+        failure?.record.messages.filter((message) => message.role === "tool") ??
+          [];
+      expect(results).toHaveLength(2);
+      expect(results[0].role === "tool" ? results[0].content : "").toContain(
+        "cancelled during",
+      );
+      expect(results[1].role === "tool" ? results[1].content : "").toContain(
+        "cancelled before",
+      );
+    });
+
+    it("pairs pending calls after a successful tool cancels the run", async () => {
       const abort = new AbortController();
       let descriptions = 0;
       const model = new ScriptedModelClient([
@@ -1275,14 +1912,24 @@ describe("research", () => {
         if (error instanceof HarnessResearchError) failure = error;
       }
 
-      expect(descriptions).toBe(1);
       const results =
         failure?.record.messages.filter((message) => message.role === "tool") ??
           [];
-      expect(results).toHaveLength(2);
-      expect(results[1].role === "tool" ? results[1].content : "").toContain(
-        "cancelled before",
-      );
+      expect(descriptions).toBe(1);
+      expect(results.map((message) => JSON.parse(message.content))).toEqual([{
+        outputId: "describe-1",
+        token: "cfh:a:first",
+        known: true,
+        hasSchema: false,
+      }, {
+        error: "research cancelled before this call executed",
+      }]);
+      expect(failure?.message).toBe("stop research");
+      expect(failure?.record.budgets).toEqual({
+        modelTurns: 1,
+        toolCalls: 1,
+        readChars: 0,
+      });
     });
 
     it("reports private usage through the parent accounting hook", async () => {
