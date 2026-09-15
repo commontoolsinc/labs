@@ -1,0 +1,14 @@
+/**
+ * Holds the `high-degree` group of Topics read-budget cases to the limits in
+ * `topics-read-budget-limits.ts`, and shows each of those limits exceeded by
+ * the regression variant `topics-read-budget.ts` assigns it. Each case runs
+ * the headless Topics fixture in this process, with no browser and no server.
+ */
+
+import { describe } from "@std/testing/bdd";
+
+import { describeReadBudgetGroup } from "./topics-read-budget-suite.ts";
+
+describe("topics-read-budget-high-degree", () => {
+  describeReadBudgetGroup("high-degree");
+});

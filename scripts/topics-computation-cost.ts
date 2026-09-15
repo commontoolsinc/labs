@@ -11,6 +11,10 @@
  * the limit, skips the larger sizes of that case's series, and carries on. Any
  * other failure ends the run. Output is JSON lines on stdout; progress, and
  * everything a child prints, goes to stderr.
+ *
+ * Given `--derive-limits`, it instead runs the read-budget cases five times
+ * each and writes the read-budget limits module to stdout, as the "Topics read
+ * budget" section of `docs/development/BENCHMARKS.md` describes.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -23,21 +27,24 @@ import {
   BOARD_NOT_MEASURED,
   caseNamed,
   caseRecord,
-  demandOf,
-  measureWarmUpdates,
+  measureCasePhases,
   type PhaseRecord,
-  phaseRecord,
   type ProbeCase,
   probeCases,
-  verifyIdleLifts,
-  verifyOutputs,
-  verifyReopen,
 } from "../packages/patterns/integration/topics-cost-cases.ts";
 import {
   buildTopicsFixture,
-  measureTopicsFixture,
   TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS,
 } from "../packages/patterns/integration/topics-headless-fixture.ts";
+import {
+  GATED_MEASURES,
+  type GatedMeasure,
+  gatedMeasuresOf,
+  limitFor,
+  limitsModuleSource,
+  type ReadBudgetLimits,
+  TOPICS_READ_BUDGET_GROUPS,
+} from "../packages/patterns/integration/topics-read-budget.ts";
 
 /** The repository root, where a child process finds the workspace config. */
 const REPOSITORY_ROOT = fromFileUrl(new URL("..", import.meta.url));
@@ -102,12 +109,7 @@ async function runProbe(options: RunOptions): Promise<void> {
     (options.filter?.test(probeCase.id) ?? true)
   );
   if (cases.length === 0) throw new Error("No case matches the arguments.");
-  const v8Flags = [
-    "--expose-gc",
-    ...(options.maxOldSpaceSize === undefined
-      ? []
-      : [`--max-old-space-size=${options.maxOldSpaceSize}`]),
-  ];
+  const v8Flags = childV8Flags(options.maxOldSpaceSize);
   emit({
     kind: "environment",
     ...await gitState(),
@@ -176,6 +178,19 @@ async function runProbe(options: RunOptions): Promise<void> {
     }
   }
   emit({ kind: "complete", samples, limitedSeries: [...limits.keys()] });
+}
+
+/**
+ * Returns the V8 flags a child process starts with, with its heap set to
+ * `maxOldSpaceSize` megabytes when that is given.
+ */
+function childV8Flags(maxOldSpaceSize?: number): string[] {
+  return [
+    "--expose-gc",
+    ...(maxOldSpaceSize === undefined
+      ? []
+      : [`--max-old-space-size=${maxOldSpaceSize}`]),
+  ];
 }
 
 /** Writes `record` to stdout as one JSON line. */
@@ -305,41 +320,20 @@ async function forwardToStderr(
  * Measures `probeCase` and writes its sample to `sampleFile`: the case, the
  * heap limit the process ran under, and a record for each phase.
  *
- * @throws Error for a `board` case, which is not measured, or when an output
- * differs from what the fixture data says it should be after any phase, a lift
- * outside the demand ran in one, or the runtime reports an error.
+ * @throws Error as {@link measureCasePhases} does.
  */
 async function measureCase(
   probeCase: ProbeCase,
   sampleFile: string,
 ): Promise<void> {
-  const { id, options, workload } = probeCase;
-  if (workload === "board") {
-    throw new Error(`Case \`${id}\` is not measured: ${BOARD_NOT_MEASURED}`);
-  }
   const heapSizeLimitBytes = getHeapStatistics().heap_size_limit;
   // Written before anything is measured, so that a limit record can name the
   // heap this process had even when the case never finishes. The sample
   // replaces it.
   await Deno.writeTextFile(sampleFile, JSON.stringify({ heapSizeLimitBytes }));
-  const fixture = buildTopicsFixture(options);
-  console.error(`${id}: initialization`);
-  await using measurement = await measureTopicsFixture(
-    fixture,
-    `topics-computation-cost ${id}`,
-    demandOf(workload),
-  );
-  const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
-  verifyOutputs(measurement, fixture);
-  verifyIdleLifts(measurement, measurement);
-  const updated = await measureWarmUpdates(id, measurement, fixture, phases);
-  console.error(`${id}: reopen`);
-  const reopened = await measurement.reopen();
-  phases.push(phaseRecord("reopen", reopened));
-  verifyOutputs(measurement, updated);
-  verifyIdleLifts(measurement, reopened);
-  verifyReopen(measurement, reopened);
-
+  const { fixture, phases } = await measureCasePhases(probeCase, {
+    progress: (line) => console.error(line),
+  });
   await Deno.writeTextFile(
     sampleFile,
     JSON.stringify({
@@ -350,6 +344,88 @@ async function measureCase(
       phases,
     }),
   );
+}
+
+//
+// Deriving the read-budget limits
+//
+
+/** How many rounds `--derive-limits` runs every read-budget case. */
+const DERIVATION_ROUNDS = 5;
+
+/**
+ * Runs every case the read-budget groups name in {@link DERIVATION_ROUNDS}
+ * rounds, each case in a process of its own started with `v8Flags`, and writes
+ * the read-budget limits module to stdout. Each gated count of each measured
+ * phase gets {@link limitFor} the largest value the rounds observed, or, where
+ * the rounds observed different values, is written as ungated with those
+ * values.
+ *
+ * @throws Error when a case fails or exhausts its heap, and, once the module is
+ * written, when any gated count differed between rounds.
+ */
+async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
+  const ids = Object.values(TOPICS_READ_BUDGET_GROUPS).flat();
+  // By case, then by phase, each gated count every round observed.
+  const observed = new Map<string, Map<string, Record<GatedMeasure, number[]>>>(
+    ids.map((id) => [id, new Map()]),
+  );
+  for (let round = 1; round <= DERIVATION_ROUNDS; round++) {
+    for (const id of ids) {
+      console.error(`derivation round ${round}: ${id}`);
+      const outcome = await runCase(caseNamed(id), v8Flags);
+      if (outcome.kind === "limit") {
+        throw new Error(
+          `Case \`${id}\` exhausted its heap: ${outcome.message}`,
+        );
+      }
+      const phases = observed.get(id)!;
+      for (const record of outcome.sample.phases as PhaseRecord[]) {
+        if (!record.measured) continue;
+        const counts = gatedMeasuresOf(record);
+        const values = phases.get(record.phase) ??
+          Object.fromEntries(
+            GATED_MEASURES.map((measure) => [measure, [] as number[]]),
+          ) as Record<GatedMeasure, number[]>;
+        for (const measure of GATED_MEASURES) {
+          values[measure].push(counts[measure]);
+        }
+        phases.set(record.phase, values);
+      }
+    }
+  }
+
+  const limits: Record<
+    string,
+    Record<string, ReadBudgetLimits[string][string]>
+  > = {};
+  const differing: string[] = [];
+  for (const [id, phases] of observed) {
+    limits[id] = {};
+    for (const [phase, values] of phases) {
+      limits[id][phase] = Object.fromEntries(
+        GATED_MEASURES.map((measure) => {
+          const counts = values[measure];
+          const repeated = counts.length === DERIVATION_ROUNDS &&
+            counts.every((count) => count === counts[0]);
+          if (!repeated) {
+            differing.push(`${id}, ${phase}, ${measure}: ${counts.join(", ")}`);
+          }
+          return [
+            measure,
+            repeated ? limitFor(Math.max(...counts)) : { ungated: counts },
+          ];
+        }),
+      ) as ReadBudgetLimits[string][string];
+    }
+  }
+  console.log(limitsModuleSource(limits));
+  if (differing.length > 0) {
+    throw new Error(
+      `These gated counts differed between rounds, and are written as ` +
+        `ungated:\n${differing.join("\n")}`,
+    );
+  }
 }
 
 //
@@ -371,18 +447,34 @@ function positiveInteger(name: string, value: string): number {
 
 /**
  * Runs the probe, or, given `--case`, measures that one case as a child of a
- * run.
+ * run, or, given `--derive-limits`, derives the read-budget limits.
  *
  * @throws Error for an argument the probe does not take.
  */
 async function main(): Promise<void> {
   const args = parseArgs(Deno.args, {
-    boolean: ["small"],
+    boolean: ["derive-limits", "small"],
     string: ["case", "filter", "max-old-space-size", "repeat", "sample-file"],
     unknown: (arg) => {
       throw new Error(`Unknown argument: \`${arg}\``);
     },
   });
+  const maxOldSpaceSize = args["max-old-space-size"] === undefined
+    ? undefined
+    : positiveInteger("max-old-space-size", args["max-old-space-size"]);
+  if (args["derive-limits"]) {
+    if (
+      args.case !== undefined || args.small || args.filter !== undefined ||
+      args.repeat !== undefined
+    ) {
+      throw new Error(
+        "`--derive-limits` takes no `--case`, `--small`, `--filter`, or " +
+          "`--repeat`.",
+      );
+    }
+    await deriveLimits(childV8Flags(maxOldSpaceSize));
+    return;
+  }
   if (args.case !== undefined) {
     if (args["sample-file"] === undefined) {
       throw new Error("`--case` needs `--sample-file`.");
@@ -396,9 +488,7 @@ async function main(): Promise<void> {
       : positiveInteger("repeat", args.repeat),
     small: args.small,
     filter: args.filter === undefined ? undefined : new RegExp(args.filter),
-    maxOldSpaceSize: args["max-old-space-size"] === undefined
-      ? undefined
-      : positiveInteger("max-old-space-size", args["max-old-space-size"]),
+    maxOldSpaceSize,
   });
 }
 

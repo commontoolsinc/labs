@@ -19,6 +19,7 @@ import type {
 import {
   type AttemptReads,
   type BodyReads,
+  buildTopicsFixture,
   DEFAULT_COMMENTS_PER_TOPIC,
   DEFAULT_LINKS_PER_TOPIC,
   type FixtureComment,
@@ -26,6 +27,7 @@ import {
   type FixtureTopic,
   latestStamp,
   MAX_SINGLE_BUCKET_MENTIONS_PER_SOURCE,
+  measureTopicsFixture,
   mentionersOf,
   type MentionGraph,
   pivotEntriesOf,
@@ -39,6 +41,7 @@ import {
   type TopicsMeasurement,
   type TopicsOperation,
   type TopicsReads,
+  type TopicsVariant,
 } from "./topics-headless-fixture.ts";
 
 //
@@ -293,17 +296,144 @@ interface StoredTopic {
 /** What a warm update's edit touched, by topic and entry index. */
 type EditRecord = Readonly<Record<string, number | boolean>>;
 
+/**
+ * Completed-body reads summed over a group of runs, as a phase record holds
+ * them: the counts of {@link BodyReads}, with its actions counted rather than
+ * listed.
+ */
+export type BodyRecord = Readonly<
+  Record<
+    | "runs"
+    | "actions"
+    | "proxyAccesses"
+    | "linkResolutions"
+    | "distinctDocuments"
+    | "registeredDependencies"
+    | "maxRunProxyAccesses",
+    number
+  >
+>;
+
+/** What a measured phase recorded. */
+export interface MeasuredPhaseRecord {
+  /** The phase's name. */
+  readonly phase: string;
+
+  /** That the phase was measured. */
+  readonly measured: true;
+
+  /** For a warm update, what its edit touched. */
+  readonly edit?: EditRecord;
+
+  /** Wall-clock milliseconds from the start of the phase through settlement. */
+  readonly elapsedMs: number;
+
+  /** Completed-body reads by role, and summed over every run as `total`. */
+  readonly bodies: {
+    readonly producer: { readonly crossrefTable: BodyRecord };
+    readonly consumer: { readonly backlinksOf: BodyRecord };
+    readonly aggregate: {
+      readonly presentCommentCountOf: BodyRecord;
+      readonly lastActivityOf: BodyRecord;
+    };
+    readonly other: BodyRecord;
+    readonly total: BodyRecord;
+  };
+
+  /** Transaction-attempt reads by role, and summed over all as `total`. */
+  readonly attempts: {
+    readonly producer: { readonly crossrefTable: AttemptReads };
+    readonly consumer: { readonly backlinksOf: AttemptReads };
+    readonly aggregate: {
+      readonly presentCommentCountOf: AttemptReads;
+      readonly lastActivityOf: AttemptReads;
+    };
+    readonly other: AttemptReads;
+    readonly unattributed: AttemptReads;
+    readonly total: AttemptReads;
+  };
+
+  /** The scheduler graph's node and edge counts once the phase settled. */
+  readonly graph: { readonly nodes: number; readonly edges: number };
+
+  /** The process's memory use once the phase settled. */
+  readonly memory: Readonly<Record<string, number | boolean>>;
+}
+
 /** What a phase recorded, or why it was not measured. */
 export type PhaseRecord =
-  | Readonly<Record<string, unknown> & { phase: string; measured: true }>
+  | MeasuredPhaseRecord
   | {
     readonly phase: string;
     readonly measured: false;
     readonly reason: string;
   };
 
+/** A measured case: its fixture data, and a record for each of its phases. */
+export interface CaseMeasurement {
+  /** The fixture data the case's options build, before any warm update. */
+  readonly fixture: TopicsFixture;
+
+  /** A record for each phase, in the order the phases ran. */
+  readonly phases: readonly PhaseRecord[];
+}
+
+/** How {@link measureCasePhases} runs a case. */
+export interface CaseMeasurementOptions {
+  /** Extra work each of the case's runtimes starts beside its lifts. */
+  readonly variant?: TopicsVariant;
+
+  /** Called with a line naming the case and a phase as each phase starts. */
+  readonly progress?: (line: string) => void;
+}
+
+/**
+ * Measures `probeCase` in this process, phase by phase on one evolving
+ * fixture, under `variant` when one is given, and returns the fixture data and
+ * a record for each phase. A variant starts its work beside the demanded
+ * lifts, and every check below still applies to those lifts.
+ *
+ * @throws Error for a `board` case, which is not measured, or when an output
+ * differs from what the fixture data says it should be after any phase, a lift
+ * outside the demand ran in one, or the runtime reports an error.
+ */
+export async function measureCasePhases(
+  probeCase: ProbeCase,
+  { variant, progress }: CaseMeasurementOptions = {},
+): Promise<CaseMeasurement> {
+  const { id, options, workload } = probeCase;
+  if (workload === "board") {
+    throw new Error(`Case \`${id}\` is not measured: ${BOARD_NOT_MEASURED}`);
+  }
+  const report = (phase: string) => progress?.(`${id}: ${phase}`);
+  const fixture = buildTopicsFixture(options);
+  report("initialization");
+  await using measurement = await measureTopicsFixture(
+    fixture,
+    `topics-computation-cost ${id}`,
+    demandOf(workload),
+    variant,
+  );
+  const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
+  verifyOutputs(measurement, fixture);
+  verifyIdleLifts(measurement, measurement);
+  const updated = await measureWarmUpdates(
+    report,
+    measurement,
+    fixture,
+    phases,
+  );
+  report("reopen");
+  const reopened = await measurement.reopen();
+  phases.push(phaseRecord("reopen", reopened));
+  verifyOutputs(measurement, updated);
+  verifyIdleLifts(measurement, reopened);
+  verifyReopen(measurement, reopened);
+  return { fixture, phases };
+}
+
 /** Returns the demand `workload` names, opening the focus topic. */
-export function demandOf(workload: Workload): TopicsDemand {
+function demandOf(workload: Workload): TopicsDemand {
   switch (workload) {
     case "board":
       return { workload };
@@ -317,13 +447,14 @@ export function demandOf(workload: Workload): TopicsDemand {
 }
 
 /**
- * Helper for {@link measureCase}, which measures each warm update in turn on
- * the one evolving fixture, appending a record for each to `phases` and
- * checking every output and every undemanded lift after each, and returns the
- * fixture data as the updates left it.
+ * Helper for {@link measureCasePhases}, which measures each warm update in turn
+ * on the one evolving fixture, calling `report` with each phase's name as it
+ * starts, appending a record for each to `phases` and checking every output
+ * and every undemanded lift after each, and returns the fixture data as the
+ * updates left it.
  */
-export async function measureWarmUpdates(
-  id: string,
+async function measureWarmUpdates(
+  report: (phase: string) => void,
   measurement: TopicsMeasurement,
   fixture: TopicsFixture,
   phases: PhaseRecord[],
@@ -341,7 +472,7 @@ export async function measureWarmUpdates(
     next: TopicsFixture,
     write: (tx: IExtendedStorageTransaction) => void,
   ) => {
-    console.error(`${id}: ${phase}`);
+    report(phase);
     const update = await measurement.update(write);
     phases.push(phaseRecord(phase, update, edit));
     model = next;
@@ -600,7 +731,7 @@ function demandedActionsOf(
  *
  * @throws Error when one differs, or when the runtime has reported an error.
  */
-export function verifyOutputs(
+function verifyOutputs(
   measurement: TopicsMeasurement,
   model: TopicsFixture,
 ): void {
@@ -650,7 +781,7 @@ export function verifyOutputs(
  *
  * @throws Error when such a lift completed an action.
  */
-export function verifyIdleLifts(
+function verifyIdleLifts(
   measurement: TopicsMeasurement,
   operation: { readonly reads: TopicsReads },
 ): void {
@@ -671,7 +802,7 @@ export function verifyIdleLifts(
  *
  * @throws Error when a demanded lift completed no action.
  */
-export function verifyReopen(
+function verifyReopen(
   measurement: TopicsMeasurement,
   reopened: TopicsOperation,
 ): void {
@@ -691,7 +822,7 @@ export function verifyReopen(
  * attempt reads by role, the graph once settled, and the memory in use after a
  * collection.
  */
-export function phaseRecord(
+function phaseRecord(
   phase: string,
   measured: {
     readonly reads: TopicsReads;
@@ -699,7 +830,7 @@ export function phaseRecord(
     readonly elapsedMs: number;
   },
   edit?: EditRecord,
-): PhaseRecord {
+): MeasuredPhaseRecord {
   const { reads, graph, elapsedMs } = measured;
   const { bodies, attempts } = reads;
   return {
@@ -734,12 +865,12 @@ export function phaseRecord(
 }
 
 /** Returns `body` with its actions counted rather than listed. */
-function bodyRecord(body: BodyReads): Record<string, number> {
+function bodyRecord(body: BodyReads): BodyRecord {
   return { ...body, actions: body.actions.size };
 }
 
 /** Returns `bodies` summed, with the largest single run's proxy accesses. */
-function bodyTotalOf(bodies: readonly BodyReads[]): Record<string, number> {
+function bodyTotalOf(bodies: readonly BodyReads[]): BodyRecord {
   const sum = (count: (body: BodyReads) => number) =>
     bodies.reduce((total, body) => total + count(body), 0);
   return {
