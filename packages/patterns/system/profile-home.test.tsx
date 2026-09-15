@@ -30,6 +30,24 @@ export default pattern(() => {
       host: "estuary.example.ts.net",
     });
   });
+  const action_set_inbox_with_credentials = action(() => {
+    profile.setInbox.send({
+      space: INBOX_SPACE,
+      host: "https://alice:secret@estuary.example.ts.net",
+    });
+  });
+  const action_set_inbox_with_a_path_and_query = action(() => {
+    profile.setInbox.send({
+      space: INBOX_SPACE,
+      host: "https://estuary.example.ts.net/api?x=1",
+    });
+  });
+  const action_set_inbox_with_a_loose_did = action(() => {
+    profile.setInbox.send({
+      space: "did:key:not-base58-0OIl",
+      host: "https://estuary.example.ts.net",
+    });
+  });
   const action_clear_inbox = action(() => {
     profile.setInbox.send({});
   });
@@ -179,6 +197,12 @@ export default pattern(() => {
       { action: action_set_inbox },
       { assertion: assert_inbox_set_with_the_host_trimmed },
       { action: action_set_inbox_half },
+      { assertion: assert_inbox_kept_over_a_half_pointer },
+      { action: action_set_inbox_with_credentials },
+      { assertion: assert_inbox_kept_over_a_half_pointer },
+      { action: action_set_inbox_with_a_path_and_query },
+      { assertion: assert_inbox_kept_over_a_half_pointer },
+      { action: action_set_inbox_with_a_loose_did },
       { assertion: assert_inbox_kept_over_a_half_pointer },
       { action: action_clear_inbox },
       { assertion: assert_inbox_cleared },

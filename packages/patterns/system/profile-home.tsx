@@ -538,25 +538,50 @@ const setBio = handler<
   },
 );
 
-const INBOX_SPACE_DID = /^did:[a-z0-9]+:[^\s/]+$/;
-const INBOX_HOST_ORIGIN = /^https?:\/\/[^\s/]+$/;
+// A share inbox space is minted by the owner's daemon as a did:key (ed25519,
+// base58btc: `z` then the alphabet without 0, O, I, l), so that is the one
+// grammar the pointer admits — a value that cannot name a space is not
+// published, not stored half-right.
+const INBOX_SPACE_DID = /^did:key:z[1-9A-HJ-NP-Za-km-z]{20,}$/;
+
+/** The memory host as an http(s) ORIGIN and nothing more: parsed, not
+ *  pattern-matched, so credentials, a path, a query, a fragment or an
+ *  unparseable port are refused rather than stored for a sender to read
+ *  back. Returns the origin, or "" when the value is not one. */
+function inboxHostOrigin(value: string): string {
+  const raw = value.trim();
+  if (raw === "") return "";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return "";
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+  if (url.username !== "" || url.password !== "") return "";
+  if (url.search !== "" || url.hash !== "") return "";
+  if (url.pathname !== "/" && url.pathname !== "") return "";
+  if (raw.endsWith("?") || raw.endsWith("#")) return "";
+  return url.origin;
+}
 
 // The single authorized writer for the share inbox pointer. A pointer is
-// both parts shaped or nothing: a DID for the space, an http(s) origin for
-// the host; both empty clears it (the owner retired their inbox). Anything
-// else is dropped, never half-written — a sender that read a half pointer
-// would knock on nothing.
+// both parts shaped or nothing: a did:key for the space, an http(s) origin
+// for the host; both empty clears it (the owner retired their inbox).
+// Anything else is dropped, never half-written — a sender that read a half
+// pointer would knock on nothing.
 const setInbox = handler<
   SetProfileInboxEvent,
   { inbox: Writable<ProfileInboxPointer> }
 >((event, state) => {
   const space = (event.space ?? "").trim();
-  const host = (event.host ?? "").trim().replace(/\/+$/, "");
-  if (space === "" && host === "") {
+  const rawHost = (event.host ?? "").trim();
+  if (space === "" && rawHost === "") {
     state.inbox.set({ space: "", host: "" });
     return;
   }
-  if (!INBOX_SPACE_DID.test(space) || !INBOX_HOST_ORIGIN.test(host)) return;
+  const host = inboxHostOrigin(rawHost);
+  if (!INBOX_SPACE_DID.test(space) || host === "") return;
   state.inbox.set({ space, host });
 });
 
