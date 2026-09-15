@@ -362,9 +362,30 @@ describe("prompt-loop delegate_task skillHandle", () => {
                 );
               } else {
                 expect(JSON.stringify(requests[1])).toContain(returnedToken);
-                const nextParentInput = JSON.stringify(requests[2].input);
-                expect(nextParentInput).toContain(returnedToken);
-                expect(nextParentInput).not.toContain(`${ref}/resource`);
+                const childOutputs = (requests[2].input as Array<
+                  Record<string, unknown>
+                >).filter((item) =>
+                  item.type === "function_call_output" &&
+                  item.call_id === "call_one"
+                );
+                expect(childOutputs).toHaveLength(1);
+                expect(JSON.stringify(childOutputs[0])).not.toContain(
+                  `${ref}/resource`,
+                );
+                const sentResults = JSON.parse(
+                  String(childOutputs[0].output),
+                ).subagent.nativeModelToolResults;
+                expect(sentResults).toHaveLength(1);
+                const sentEvidence = sentResults[0];
+                expect(sentEvidence.sources[0].title).toBe(returnedToken);
+                expect(
+                  sentEvidence.providerMetadata.searchCalls[0].action.query,
+                )
+                  .toBe(returnedToken);
+                expect(
+                  sentEvidence.providerMetadata.searchCalls[0]
+                    .action[returnedToken],
+                ).toBe("source note");
                 expect(evidence.sources[0].title).toBe(returnedToken);
                 expect(evidence.providerMetadata.searchCalls[0].action.query)
                   .toBe(returnedToken);
