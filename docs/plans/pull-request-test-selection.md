@@ -382,7 +382,7 @@ table is the migration's checklist.
 
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
-| `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `repo-gates` | `Check` (all but the type check) | — | `deno`, `github-api` |
 | `repo-history-gates` | the two append-only gates in `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `typecheck` | `Check` (the type check) | — | `deno` |
 | `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
@@ -1205,6 +1205,7 @@ batches.
 | `jq` | `jq` | about 2 seconds |
 | `browser` | Relaxes the AppArmor user-namespace restriction | under a second |
 | `git-history` | Unshallows the checkout | 3–10 seconds |
+| `github-api` | Exports the GitHub token the runner is holding, to the suites that declared it | under a second |
 | `toolshed` | A Toolshed server listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
 | `toolshed-baked` | The same, from a compiled binary, whose baked shell a browser can drive | 42 seconds to build, or 17 to restore |
@@ -2565,6 +2566,7 @@ pr-tests:
   timeout-minutes: *lane-job-timeout
   env:
     CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   permissions:
     contents: read
   strategy:
@@ -2601,6 +2603,16 @@ pr-tests:
 The full-depth checkout and the `origin/<base>` spelling are what the
 `pattern-vintage` job already does to diff against the merge base, so the
 mechanism is proven in this workflow rather than newly invented here.
+
+The token in the job's environment is what the `github-api` capability
+distributes. A job may not name a secret per step here the way the
+`Check` job does, because which step a gate runs in is a fact about the
+lane's packing rather than about the workflow, so the token arrives
+job-wide and the runner narrows it: it takes the token out of its own
+environment before it opens anything, and only a suite that declared
+`github-api` is given it back. The `contents: read` permission bounds
+what the token can do to reading this repository, which is what
+`check-action-pins` asks the service for.
 
 Two new timeout anchors join the block at the top of the file:
 `LANE_WORK_TIMEOUT_MINUTES` at five and `LANE_JOB_TIMEOUT_MINUTES` at 15,
@@ -2647,42 +2659,46 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Resolve the manifest from the commit's date and fetch it. No manifest
+1. Take the GitHub token out of its own environment and hold it. Every
+   child the lane spawns inherits what the lane holds, so this comes
+   before the lane reads, plans, opens or runs anything, and a suite that
+   declared `github-api` is given the token back through that capability.
+2. Resolve the manifest from the commit's date and fetch it. No manifest
    at or before that date, or a fetch failure, takes the fallback (see
    [Failure modes](#failure-modes)).
-2. Enumerate every suite against the working tree, and read the manifest
+3. Enumerate every suite against the working tree, and read the manifest
    against that enumeration. The tree decides which tests exist and the
    manifest decides what each is worth and costs, so an entry naming a
    unit the tree no longer has drops out and a unit the manifest has
    never seen gains a stand-in. Everything after this reads the result
    rather than the manifest the store gave, which is what keeps the full
    run and a pull request working from one answer about what exists.
-3. Compute the diff against the merge base, and ask each suite which of
+4. Compute the diff against the merge base, and ask each suite which of
    its units the diff touched. The full run skips this: it has no diff.
-4. Call `plan()`, take this lane's plan. The full run calls it with the
-   `everything` policy, and with the empty diff step 3 left it. Those two
+5. Call `plan()`, take this lane's plan. The full run calls it with the
+   `everything` policy, and with the empty diff step 4 left it. Those two
    values are the whole of the difference between the two runs.
-5. Print the plan to the job summary: which batches, which items, what
+6. Print the plan to the job summary: which batches, which items, what
    each is expected to cost, why each was chosen, which items were
    withheld and why, which of them a failure would not fail the lane for,
    and which manifest the plan came from.
-6. Set up the union of the capabilities the batches need, recording each
+7. Set up the union of the capabilities the batches need, recording each
    one's duration.
-7. Run each batch execution with fresh spool and JUnit output paths,
+8. Run each batch execution with fresh spool and JUnit output paths,
    recording planned and actual durations and continuing past a failure so
    that one failure does not hide later batches or repeats.
-8. Immediately after each execution, gather its direct records and
+9. Immediately after each execution, gather its direct records and
    described JUnit outputs into the lane spool through the shared gather
    function. Validate record surfaces and apply the suite's optional
    variant before another execution can reuse any runner-owned path. Then
    convert the coverage this lane produced into one report per workspace
    member and upload it for `Status` to join.
-9. Exit non-zero if any batch failed, or if any repeat of any item
-   failed. A failure the full run's non-gating rule covers is left out of
-   that, and a batch that did not account for every identity it was asked
-   to run is never left out of it. [An excluded test still runs on
-   `main`](#an-excluded-test-still-runs-on-main) says which failures those
-   are and how the runner tells them apart.
+10. Exit non-zero if any batch failed, or if any repeat of any item
+    failed. A failure the full run's non-gating rule covers is left out
+    of that, and a batch that did not account for every identity it was
+    asked to run is never left out of it. [An excluded test still runs on
+    `main`](#an-excluded-test-still-runs-on-main) says which failures
+    those are and how the runner tells them apart.
 
 ## The full run on `main`
 
