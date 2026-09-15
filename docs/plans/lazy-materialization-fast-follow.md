@@ -160,9 +160,13 @@ must not accidentally inherit it.
       failure; those findings remain part of the acceptance decision.
       The [reload diagnosis](../history/development/performance/2026-09-15-lazy-reload-diagnosis.md)
       identifies the eager nullable-cell input and a stalled browser displaying
-      a note instead of its notebook. Correlating the navigation event across
-      reload remains required; current default-on passes do not resolve the
-      earlier intermittent failure.
+      a note instead of its notebook. The [navigation-policy diagnosis](../history/development/performance/2026-09-15-notebook-reload-navigation-policy.md)
+      ties the reload test's selection assumption to the existing speculative
+      navigation contract: source assertions must read the captured notebook,
+      and reload measurement must explicitly select it. The corrected default-on
+      scenario passes; eager renders all notes but fails on nullable reads.
+      Resolve the eager correctness gap or select a rollback route that does not
+      depend on that posture before retiring the flag.
       The [derived-state correction decision](../history/development/2026-09-14-derived-state-correction.md)
       permits two exact stale fetch-status transitions during vintage replay;
       it does not retire the flag or waive other state-loss findings.

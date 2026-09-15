@@ -8,6 +8,7 @@ import {
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
+import { NAVIGATE_EVENT } from "@commonfabric/navigation";
 import { assert, assertEquals } from "@std/assert";
 import {
   collectSchedulerLoadSummary,
@@ -104,10 +105,23 @@ describe("default-app notebook reload integration test", () => {
     );
 
     await waitForCondition(page, notebookSourceStateMatches, {
-      args: [noteCreates],
+      args: [noteCreates, notebookId],
     });
 
     await waitForRuntimeSynced(page);
+    // Speculative navigation can remain on a note even when the authoritative
+    // handler stays in the notebook (server-side-execution/speculation.md §2).
+    // Select the captured notebook before measuring its reload.
+    await page.evaluate((eventName, spaceName, pieceId) => {
+      globalThis.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: { spaceName, pieceId },
+        }),
+      );
+    }, { args: [NAVIGATE_EVENT, notebookSpaceName, notebookId] });
+    await waitForCondition(page, notebookReloadRendered, {
+      args: [noteCreates, notebookId],
+    });
     const beforeReload = await page.evaluate(() => ({
       url: location.href,
       view: globalThis.app?.serialize?.()?.view,
@@ -274,14 +288,13 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
 }
 
 // Serialized into the page by waitForCondition: drain the worker, read the
-// notebook's argument and internal cells, and report whether the rapidly
-// created notes have all landed — `expectedCount` notes present, the new-note
-// prompt closed, and the "create another" flag cleared. Inlines the collection
-// that collectNotebookSourceState performs (including its runtime idle) so the
-// wait resolves the instant the source state converges rather than on a poll.
+// captured notebook's argument and internal cells, and report whether all
+// `expectedCount` notes have landed, the new-note prompt is closed, and the
+// "create another" flag is cleared. The selection can independently show a note.
 const notebookSourceStateMatches = async (
   _probe: ProbeApi,
   expectedCount: number,
+  notebookEntityId: string,
 ): Promise<boolean> => {
   const api = globalThis.commonfabric as {
     rt?: { idle?: () => Promise<void> };
@@ -293,12 +306,7 @@ const notebookSourceStateMatches = async (
   } | undefined;
   await api?.rt?.idle?.();
 
-  const view = globalThis.app?.serialize?.()?.view;
-  const notebookEntityId = view && typeof view === "object" &&
-      "pieceId" in view && typeof view.pieceId === "string"
-    ? view.pieceId
-    : undefined;
-  if (!notebookEntityId || !api?.readCell) return false;
+  if (!api?.readCell) return false;
 
   const resolveInternalManifest = async (
     manifest: unknown,
