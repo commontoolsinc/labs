@@ -1254,7 +1254,7 @@ const readSkillRegistry = async (
   };
 };
 
-/** A root run whose first user message exactly matches one batch task. */
+/** A root run whose opening request exactly matches one batch task. */
 interface RunCandidate {
   runId: string;
 }
@@ -1267,9 +1267,10 @@ interface RunCandidateScan {
 }
 
 /**
- * Finds root runs created during this batch whose first user message matches
- * `taskText`. Ambiguity is left for the caller to refuse rather than settled
- * by directory order.
+ * Finds root runs created during this batch whose opening request matches
+ * `taskText`. The request is the last user message before the first assistant
+ * or tool message, following any host context. Ambiguity is left for the
+ * caller to refuse rather than settled by directory order.
  */
 const runCandidates = async (
   artifactRoot: string,
@@ -1333,11 +1334,13 @@ const runCandidates = async (
       unread.push(`${entry.name}/transcript.json was not a message list`);
       continue;
     }
-    const firstUser = transcript.find((message) =>
-      typeof message === "object" && message !== null &&
-      (message as Record<string, unknown>).role === "user"
-    ) as Record<string, unknown> | undefined;
-    if (firstUser?.content !== taskText) continue;
+    let openingRequest: Record<string, unknown> | undefined;
+    for (const message of transcript) {
+      if (typeof message !== "object" || message === null) continue;
+      if (message.role === "assistant" || message.role === "tool") break;
+      if (message.role === "user") openingRequest = message;
+    }
+    if (openingRequest?.content !== taskText) continue;
     candidates.push({ runId: entry.name });
   }
   return {
@@ -1469,7 +1472,7 @@ export const runTask = async (
     if (candidates.length > 1) {
       reason = `the run lookup is ambiguous: ${
         candidates.map((candidate) => candidate.runId).join(", ")
-      } all have this task as their first user message`;
+      } all have this task as their opening request`;
     } else if (scan.unread.length > 0) {
       reason = candidates.length === 1
         ? `the run lookup found ${
@@ -1478,7 +1481,7 @@ export const runTask = async (
         : `the run lookup could not read ${scan.unread.join("; ")}`;
     } else {
       reason =
-        `no root run created after ${options.batchStartedAt} has this task as its first user message`;
+        `no root run created after ${options.batchStartedAt} has this task as its opening request`;
     }
     return {
       ...base,

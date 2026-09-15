@@ -23,6 +23,7 @@ import {
   runTask,
 } from "../scripts/run-measurement-batch.ts";
 import { emptyTotals as emptyMeasurementTotals } from "../scripts/measure-runs.ts";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import observedStatus from "./support/measurement-console-status.json" with {
   type: "json",
 };
@@ -1707,6 +1708,115 @@ describe("run-measurement-batch", () => {
       }
     });
 
+    describe("opening request matching", () => {
+      const task = "Track the books I am reading.";
+      const hostContext = {
+        role: "user",
+        content: "Host Loom context: this turn has no originating Loom.",
+      } as const;
+      const request = { role: "user", content: task } as const;
+      const otherRequest = {
+        role: "user",
+        content: "Create a shopping list.",
+      } as const;
+      const cases: readonly {
+        name: string;
+        messages: readonly HarnessTranscriptMessage[];
+        matches: boolean;
+      }[] = [
+        {
+          name: "measures a task preceded by host context",
+          messages: [hostContext, request],
+          matches: true,
+        },
+        {
+          name:
+            "measures a task preceded by host context and granted references",
+          messages: [hostContext, {
+            role: "user",
+            content: "Granted references: piece-registry (cfh:a:grant).",
+          }, request],
+          matches: true,
+        },
+        {
+          name:
+            "ignores matching context followed by a different opening request",
+          messages: [request, otherRequest],
+          matches: false,
+        },
+        {
+          name: "ignores a matching request after the first assistant response",
+          messages: [otherRequest, {
+            role: "assistant",
+            content: "Created the shopping list.",
+          }, request],
+          matches: false,
+        },
+        {
+          name: "ignores a matching request after a tool result",
+          messages: [otherRequest, {
+            role: "tool",
+            toolName: "search_patterns",
+            toolCallId: "earlier-search",
+            content: "No results.",
+          }, request],
+          matches: false,
+        },
+      ];
+
+      for (const { name, messages, matches } of cases) {
+        it(name, async () => {
+          const artifactRoot = await Deno.makeTempDir();
+          try {
+            await copy(FIXTURE_ROOT, artifactRoot, { overwrite: true });
+            const path = `${artifactRoot}/fixture-run/transcript.json`;
+            const transcript: HarnessTranscriptMessage[] = JSON.parse(
+              await Deno.readTextFile(path),
+            );
+            await Deno.writeTextFile(
+              path,
+              JSON.stringify([
+                transcript[0],
+                ...messages,
+                ...transcript.slice(2),
+              ]),
+            );
+            const console_ = startFakeConsole({
+              streams: [completedStream()],
+              artifactRoot,
+            });
+            try {
+              const client = await ConsoleClient.open(console_.url);
+              const result = await runTask(
+                client,
+                { id: "books", text: task },
+                () => {},
+                { ...RUN_TASK_OPTIONS, artifactRoot },
+              );
+              if (matches) {
+                expect(result.runId).toBe("fixture-run");
+                expect(result.measurement?.runs.map((run) => run.runId))
+                  .toEqual([
+                    "fixture-run",
+                    "fixture-run.subagent.1",
+                  ]);
+                expect(result.measurement?.totals.searches).toBe(5);
+                expect(result.measurementUnread).toBeUndefined();
+              } else {
+                expect(result.runId).toBeUndefined();
+                expect(result.measurement).toBeUndefined();
+                expect(result.measurementUnread).toContain("no root run");
+              }
+            } finally {
+              await console_.close();
+            }
+          } finally {
+            await Deno.remove(artifactRoot, { recursive: true });
+          }
+        });
+      }
+    });
+
     it("prefers the session artifact root to the console-wide fallback", async () => {
       const console_ = startFakeConsole({
         streams: [completedStream()],
@@ -1877,7 +1987,7 @@ describe("run-measurement-batch", () => {
           );
           expect(result.measurement).toBeUndefined();
           expect(result.measurementUnread).toBe(
-            "no root run created after 2026-08-28T21:00:00.000Z has this task as its first user message",
+            "no root run created after 2026-08-28T21:00:00.000Z has this task as its opening request",
           );
           expect(result.configuration.skillsUnread).toBe(
             "no run was selected, so no skill registry could be read",

@@ -147,12 +147,15 @@ turns a slow run into a failed one.
 
 After a turn settles, the runner locates its root run under the session's
 `artifactRoot`, falling back to the console-wide root. A candidate must have
-been created after the batch began and its transcript's first user message must
-exactly equal the suite task. No match is recorded as not measured. More than
-one match is an ambiguity, also recorded as not measured with every candidate
-run identifier; directory order never chooses a run silently. The runner writes
-`report.md` and `report.json` under `--out`, and exits non-zero if any task
-ended other than completed.
+been created after the batch began and its transcript's opening request must
+exactly equal the suite task. The opening request is the last user message
+before the first assistant or tool message, or the last user message if the run
+ended before either appeared. Host context and granted references precede that
+request; a task repeated in a later conversation turn does not match. No match
+is recorded as not measured. More than one match is an ambiguity, also recorded
+as not measured with every candidate run identifier; directory order never
+chooses a run silently. The runner writes `report.md` and `report.json` under
+`--out`, and exits non-zero if any task ended other than completed.
 
 Measuring runs that are already on disk needs no console:
 
