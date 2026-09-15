@@ -603,6 +603,20 @@ export default pattern(() => {
     return inbound.length === 1 && equals(inbound[0], twinB);
   });
 
+  // `mentionedBy` lists a source once for each entry of the list it is handed
+  // whose mentions name the topic, so `twinA` at two entries is listed twice.
+  // The board's backlinks count a duplicated source once because the pivot
+  // hands `mentionedBy` the list `distinctByIdentity` returns.
+  const assert_mentioned_by_counts_each_matching_entry = assert(() => {
+    const inbound = mentionedBy(
+      twinB,
+      [twinA, twinA, twinB],
+      [[twinB], [twinB], []],
+    );
+    return inbound.length === 2 && equals(inbound[0], twinA) &&
+      equals(inbound[1], twinA);
+  });
+
   const assert_repeated_mentions_contribute_one_edge_per_source_entry = assert(
     () => {
       const inbound = mentionedBy(
@@ -1238,6 +1252,7 @@ export default pattern(() => {
       { action: action_seed_row_universe },
       { assertion: assert_row_universe_accepted },
       { assertion: assert_self_mention_inert_through_a_twin },
+      { assertion: assert_mentioned_by_counts_each_matching_entry },
       {
         assertion:
           assert_repeated_mentions_contribute_one_edge_per_source_entry,
