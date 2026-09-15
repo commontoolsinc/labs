@@ -13,8 +13,8 @@
 // a reload between intent and ack re-reads the unacked intent on
 // resubscribe and MAY re-enact it, which is ACCEPTED for reversible
 // effects (LT8, RULED 2026-08-03). The record is taken BEFORE the
-// enactment settles, with its outcome attached, and the two paths that
-// take it converge on each other in either order:
+// enactment's callback runs, with its outcome attached, and the two
+// paths that take it converge on each other in either order:
 //
 // - the OPTIMISTIC path — the speculation overlay hands its navigateTo
 //   flush to `enactOnce` (speculation.md §2), which runs the flush and
@@ -134,15 +134,16 @@ export class EffectsChannel {
 
   /** Enact `nonce` at most once in this life: run `work` and record
    * the nonce, or CONVERGE on the enactment already recorded for it.
-   * Both arms of one journey arrive here in either order — the
-   * speculation overlay's optimistic flush and this channel's own
-   * authoritative delivery — and one navigation results (protocol.md
-   * §5; T2.Q7). An enactment still in flight is awaited rather than
-   * assumed: it FAILING retracts its record, and this caller then
-   * enacts, so convergence never stands on an enactment that did not
-   * happen. Resolves true when the nonce's enactment succeeded, false
-   * when the work this call ran failed — which leaves the durable
-   * entry unacked for a later delivery to re-enact. */
+   * This is the OPTIMISTIC arm's entry point — the speculation
+   * overlay's navigateTo flush — and it meets this channel's own
+   * authoritative delivery on the shared record in either order, so
+   * one navigation results (protocol.md §5; T2.Q7). An enactment still
+   * in flight is awaited rather than assumed: it FAILING retracts its
+   * record, and this caller then enacts, so convergence never stands
+   * on an enactment that did not happen. Resolves true when the
+   * nonce's enactment succeeded, false when the work this call ran
+   * failed — which leaves the durable entry unacked for a later
+   * delivery to re-enact. */
   async enactOnce(
     nonce: string,
     work: () => Promise<unknown>,
@@ -153,7 +154,7 @@ export class EffectsChannel {
       if (await inFlight) return true;
     }
     if (this.#enacted.has(nonce)) return true;
-    return await this.#beginEnactment(nonce, work());
+    return await this.#beginEnactment(nonce, work);
   }
 
   /** Subscribe to this session's effects instance in `space` (idempotent
@@ -229,10 +230,21 @@ export class EffectsChannel {
    * record and releases any ack chained on the returned promise;
    * FAILURE retracts the record and withholds the ack, so the durable
    * entry — still unacked in the store — re-enacts on a later
-   * delivery (or the LT8 reload re-read). */
-  #beginEnactment(nonce: string, work: Promise<unknown>): Promise<boolean> {
+   * delivery (or the LT8 reload re-read).
+   *
+   * BOTH records are installed before `work` is invoked, so a callback
+   * that enacts synchronously — or that re-enters a reconcile before
+   * returning its promise — meets the record rather than a gap, and a
+   * synchronous throw resolves as a failed enactment. `work` is still
+   * called on this turn, which keeps a caller's own bookkeeping (the
+   * delivery arm's `trackAsyncWork`) on the turn that started it. */
+  #beginEnactment(
+    nonce: string,
+    work: () => Promise<unknown>,
+  ): Promise<boolean> {
     this.#enacted.add(nonce);
-    const settled = work.then(() => true, (error) => {
+    const started = Promise.withResolvers<unknown>();
+    const settled = started.promise.then(() => true, (error) => {
       logger.warn("enact-failed", () => [
         `navigate enactment for ${nonce} failed; left unacked — a ` +
         "later delivery retries",
@@ -245,6 +257,11 @@ export class EffectsChannel {
       return ok;
     });
     this.#enactInFlight.set(nonce, settled);
+    try {
+      started.resolve(work());
+    } catch (error) {
+      started.reject(error);
+    }
     return settled;
   }
 
@@ -346,7 +363,7 @@ export class EffectsChannel {
           }
           continue;
         }
-        let work: Promise<unknown>;
+        let work: () => Promise<unknown>;
         try {
           const target = entry.args?.target;
           if (target === null || typeof target !== "object") {
@@ -358,8 +375,11 @@ export class EffectsChannel {
             scope: (target.scope ?? "space") as never,
             path: [...(target.path ?? [])],
           });
-          work = Promise.resolve().then(() => navigate(targetCell));
-          this.#runtime.trackAsyncWork(work);
+          work = () => {
+            const enacting = Promise.resolve().then(() => navigate(targetCell));
+            this.#runtime.trackAsyncWork(enacting);
+            return enacting;
+          };
         } catch (error) {
           // Staging failed (malformed target, a cell-construction
           // throw): nothing was recorded and nothing acks — the entry

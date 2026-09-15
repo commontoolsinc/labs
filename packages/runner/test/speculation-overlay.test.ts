@@ -724,6 +724,54 @@ describe("Phase 2 speculation overlay", () => {
     expect(flushed).toEqual([failing]);
   });
 
+  it("records the nonce before the enactment runs, so work that enacts synchronously cannot be enacted twice (protocol.md §5)", async () => {
+    // The record has to be installed before the callback can observe
+    // it. A navigation callback that enacts synchronously, or that
+    // re-enters a delivery before returning its promise, meets the
+    // record rather than a gap; a callback that throws synchronously
+    // resolves as a failed enactment rather than escaping as a throw.
+    const { destination, channel } = destinationWithChannel();
+    const nonce = "nav:synchronous";
+    const seen: boolean[] = [];
+    const enacted = await channel.enactOnce(nonce, () => {
+      // What a re-entrant delivery would find mid-enactment.
+      seen.push(channel.hasEnacted(nonce));
+      return Promise.resolve();
+    });
+    expect(enacted).toBe(true);
+    expect(seen).toEqual([true]);
+
+    const flushed: string[] = [];
+    const reachedBarrier = Promise.withResolvers<void>();
+    const derivationTx = {} as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(derivationTx, {
+      actionId: "spec-record-before-work",
+      kind: "derivation",
+    });
+    expect(
+      destination.deferSealedEffects(derivationTx, [
+        navigateEffect(nonce, () => {
+          flushed.push(nonce);
+        }),
+        navigateEffect("nav:barrier", () => {
+          reachedBarrier.resolve();
+        }),
+      ]),
+    ).toBe(true);
+    await reachedBarrier.promise;
+    expect(flushed).toEqual([]);
+
+    // A synchronous throw is the enactment failing, not an escaping
+    // exception, so the record retracts and a caller may enact again.
+    const throwing = "nav:throws-synchronously";
+    expect(
+      await channel.enactOnce(throwing, () => {
+        throw new Error("enactment failed (test-injected)");
+      }),
+    ).toBe(false);
+    expect(channel.hasEnacted(throwing)).toBe(false);
+  });
+
   it("the llm-dialog tool loop's egress is dropped under speculation (review 2026-08-11 m5): the claimed updateArgument mitigation, asserted", async () => {
     // llm-dialog's turn starts as a `llmDialog-start` sink-request
     // post-commit effect (llm-dialog.ts's

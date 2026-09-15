@@ -936,17 +936,13 @@ export class SpeculationOverlayDestination
           const flush = () => Promise.resolve(effect.flush(tx));
           if (effect.nonce !== undefined && channel !== undefined) {
             // Phase 4 (protocol.md §5, T2.Q7): the channel arbitrates
-            // the run's deterministic nonce in either order. It runs
-            // this flush and records the nonce BEFORE the flush's
-            // callback can run — the flush awaits an arbitrary
-            // (possibly slow, async) navigateCallback, and the
-            // authoritative intent can arrive on the channel MID-flush,
-            // where the in-flight record makes it converge instead of
-            // double-navigating within one life (LT8 accepts
-            // re-enactment only across a RELOAD). Call order is safe
-            // because the flush's callback is deferred to a microtask
-            // (navigate-to.ts's Promise.resolve().then), so the record
-            // lands first. An intent that arrived and enacted BEFORE
+            // the run's deterministic nonce in either order. It records
+            // the nonce before it calls this flush — the flush awaits
+            // an arbitrary (possibly slow, async) navigateCallback, and
+            // the authoritative intent can arrive on the channel
+            // MID-flush, where the in-flight record makes it converge
+            // instead of double-navigating within one life (LT8 accepts
+            // re-enactment only across a RELOAD). An intent that arrived and enacted BEFORE
             // this run sealed leaves the nonce already recorded, and
             // the flush does not run: the journey's one navigation
             // happened, and enacting here would navigate a second time

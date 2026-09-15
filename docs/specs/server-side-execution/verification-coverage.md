@@ -3827,8 +3827,12 @@ Delta 2026-09-15 — nonce reconciliation in either order:
   converged, and nothing converged the optimistic enactment on an
   intent that had already arrived and enacted, so one fire navigated
   twice whenever the served round trip beat the client's speculative
-  run. The nonce is now arbitrated by the effects channel
-  (`EffectsChannel.enactOnce`), which both arms call.
+  run. The nonce is now arbitrated by the effects channel, against one
+  record both arms meet: `EffectsChannel.enactOnce` is the optimistic
+  arm's entry point, and the channel's own delivery arm converges on
+  that record inline before it takes the nonce. The record is
+  installed before an enactment's callback runs, so a callback that
+  enacts synchronously meets it rather than a gap.
 - Instrument: `packages/runner/test/speculation-overlay.test.ts` — the
   already-enacted nonce is not flushed while a fresh one is, and an
   in-flight enactment is awaited rather than assumed, so its FAILURE
