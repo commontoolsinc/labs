@@ -2092,14 +2092,17 @@ export interface BrowserLoadSummary {
 }
 
 /**
- * How long the worker is given to answer the request for its statistics.
+ * How long the worker is given to answer the request for its statistics,
+ * unless a caller names its own budget.
  *
  * Reading them is itself a request, and a request carries no deadline of its
  * own, so a worker that has stopped answering would hold a collection open
- * for as long as the page lived. An early fire reports the main-thread half
- * alone and marks `workerStatus` as `unavailable`, which is what a worker
- * that never answers produces, so the caller reaches the same outcome either
- * way and no diagnostic is wrong -- only absent.
+ * for as long as the page lived. The cost of the budget is that a worker
+ * which was slow rather than stopped loses the statistics it was about to
+ * return: nothing reported is wrong, but the worker half can be missing from
+ * a summary that could have carried it. A collection that always returns is
+ * worth that, since the summary exists to explain a run that is already in
+ * trouble.
  */
 const WORKER_STATS_BUDGET_MS = 5_000;
 
@@ -2108,15 +2111,19 @@ const WORKER_STATS_BUDGET_MS = 5_000;
  * (`commonfabric.getTimingStatsBreakdown()`) plus the worker's
  * scheduler/runner/storage timing (`commonfabric.rt.getLoggerCounts()`).
  * Worker collection is skipped when `includeWorker` is false, and abandoned
- * when the worker does not answer within `WORKER_STATS_BUDGET_MS`, so failure
- * diagnostics are readable from a page whose worker is stalled. Missing worker
+ * when the worker does not answer within `workerBudgetMs`, so failure
+ * diagnostics are readable from a page whose worker is stalled. A worker that
+ * answers later than the budget loses its statistics. Missing worker
  * statistics are identified by `workerStatus`.
  */
 export async function collectBrowserLoadSummary(
   page: Page,
   label: string,
-  options: { includeWorker?: boolean } = {},
+  options: { includeWorker?: boolean; workerBudgetMs?: number } = {},
 ): Promise<BrowserLoadSummary> {
+  const workerBudget = (options.includeWorker ?? true)
+    ? options.workerBudgetMs ?? WORKER_STATS_BUDGET_MS
+    : 0;
   const collected = await page.evaluate(async (workerBudgetMs: number) => {
     type Stats = {
       count?: number;
@@ -2306,7 +2313,7 @@ export async function collectBrowserLoadSummary(
     }
 
     return { ...collectMain(), workerIpc, worker, churn, workerStatus };
-  }, { args: [(options.includeWorker ?? true) ? WORKER_STATS_BUDGET_MS : 0] });
+  }, { args: [workerBudget] });
   return {
     label,
     ipc: collected.ipc,

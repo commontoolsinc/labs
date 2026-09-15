@@ -100,13 +100,25 @@ describe("CFC browser helpers", () => {
       };
     });
     try {
+      // A short budget, so the case pays milliseconds rather than the
+      // production default. The elapsed span is asserted against that budget
+      // below: the worker's answer never comes, so a collection that returned
+      // sooner would be one that abandoned the request without waiting, and
+      // the backstop would go unexercised while the status still read
+      // `unavailable`.
+      const budget = 250;
+      const startedAt = performance.now();
       const summary = await collectBrowserLoadSummary(
         page,
         "worker not answering",
+        { workerBudgetMs: budget },
       );
+      const elapsed = performance.now() - startedAt;
+
       // The collection returns rather than waiting on the worker forever, and
       // says the worker half is missing rather than reporting it as empty.
       expect(summary.workerStatus).toBe("unavailable");
+      expect(elapsed).toBeGreaterThanOrEqual(budget);
       expect(summary.ipcFailures).toMatchObject([{
         key: "ipc-outcome/cancelled/runtime:idle",
         count: 1,

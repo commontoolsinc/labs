@@ -56,19 +56,13 @@ early fire only repeats cleanup work is tolerable. A bound whose early fire
 fails a passing test, drops a real result, or corrupts state is not — and
 wanting one there is the signal to make the wait event-driven instead.
 
-The bounds the repository keeps sort into those two kinds. Two keep a bound
-whose early fire is harmless. The shutdown escalation in the FUSE mount
-handshake `SIGKILL`s a child that was already exiting, reaching the same end
-either way; the rationale document's [case
+The bounds the repository keeps sort into those two kinds. The shutdown
+escalation in the FUSE mount handshake keeps a bound whose early fire is
+harmless — it `SIGKILL`s a child that was already exiting, reaching the same
+end either way; the rationale document's [case
 studies](waiting-in-tests-rationale.md#production-case-studies) walk through
-it. The browser load summary in
-`packages/patterns/integration/cfc-browser-helpers.ts` gives the worker a
-budget to answer the request for its statistics, because reading them is
-itself a request and a request carries no deadline; an early fire reports the
-main-thread half alone and marks the worker half missing, which is the same
-result a worker that never answers produces. The rest — the polling waits
-under [Where the polling `waitFor` stays](#where-the-polling-waitfor-stays),
-the [deno-web-test per-test stuck
+it. The rest — the polling waits under [Where the polling `waitFor`
+stays](#where-the-polling-waitfor-stays), the [deno-web-test per-test stuck
 detector](#browser-hosted-unit-tests-have-a-harness-backstop), and the FUSE
 exec suite's teardown bound (in [the rationale
 document](waiting-in-tests-rationale.md#the-fuse-exec-suite)) — keep a bound
@@ -78,6 +72,20 @@ run and fail it. That is a fragility we accept for want of an alternative,
 sized so only a multi-minute jump reaches it — except the stuck detector,
 which a competing ceiling keeps lower; its section explains. When an event
 boundary does exist, use it, and neither kind of exception arises.
+
+One bound sits between the two kinds, and is written down here because its
+cost is easy to understate. The browser load summary in
+`packages/patterns/integration/cfc-browser-helpers.ts` gives the worker a
+budget to answer the request for its statistics. Reading them is itself a
+request, and a request carries no deadline, so a worker that has stopped
+answering would hold the collection open for as long as the page lived. An
+early fire fails no test and corrupts nothing, but it does drop a real
+result: a worker that was slow rather than stopped loses the statistics it
+was about to return, and the summary reports the worker half as missing. That
+is the price of a collection that always returns, paid because the summary
+exists to explain a run already in trouble. The budget is a caller's option,
+so a case that wants the backstop exercised asks for a short one rather than
+waiting out the default.
 
 ## The primitives to use instead
 
