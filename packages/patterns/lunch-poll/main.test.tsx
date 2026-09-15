@@ -61,6 +61,18 @@ const findNodeByProp = (
     return props !== undefined && readValue(props[prop]) === expected;
   });
 
+/**
+ * The `box-shadow` a vote swatch carries. The self mark reaches the view as
+ * this style alone: a ring around the viewer's own vote, and "none" on every
+ * other swatch.
+ */
+const selfRingOf = (node: unknown): unknown => {
+  const style = readValue(propsOf(node)?.style);
+  return style instanceof Object
+    ? readValue(Reflect.get(style, "boxShadow"))
+    : undefined;
+};
+
 const SEEDED_OPTION: Option = {
   id: "opt-seeded",
   title: "Leftover Café",
@@ -185,6 +197,21 @@ export default pattern(() => {
     votes: departedVotes,
   });
 
+  // Sixth instance, for the self mark: two participants who share a display
+  // name. The mark compares the viewer's profile cell with the vote's, so the
+  // name they share cannot decide it, and only one of the two swatches is
+  // ringed. The assertion checks the two cells differ, so a runtime that
+  // minted one cell for both would fail here rather than pass emptily.
+  const samMine = Writable.of<LunchProfile>({ name: "Sam" });
+  const samTheirs = Writable.of<LunchProfile>({ name: "Sam" });
+  const twinUsers = Writable.of<User[]>([]);
+  const twinVotes = Writable.of<Vote[]>([]);
+  const twinPoll = CozyPoll({
+    options: [SEEDED_OPTION],
+    users: twinUsers,
+    votes: twinVotes,
+  });
+
   // Fourth instance: a NAME-ONLY claim (no profile cell anywhere) must not
   // produce an identity. This exercises main's override-vs-wish selection with
   // the profile side of the claim absent — the browser wish-path shape, where
@@ -255,6 +282,28 @@ export default pattern(() => {
         castAt: now,
       },
     ]);
+    twinUsers.set([
+      { profile: samMine, name: "Sam", avatar: "", color: "#2f6f4e" },
+      { profile: samTheirs, name: "Sam", avatar: "", color: "#c2573a" },
+    ]);
+    twinVotes.set([
+      {
+        voter: samMine,
+        optionId: SEEDED_OPTION.id,
+        voteType: "green",
+        castAt: now,
+      },
+      {
+        voter: samTheirs,
+        optionId: SEEDED_OPTION.id,
+        voteType: "red",
+        castAt: now,
+      },
+    ]);
+  });
+
+  const action_become_my_sam = action(() => {
+    twinPoll.overrideViewer.send({ profile: samMine, name: "Sam" });
   });
 
   const action_become_alex = action(() => {
@@ -670,6 +719,18 @@ export default pattern(() => {
       readValue(propsOf(namelessSwatch)?.["aria-label"]) === ": red vote";
   });
 
+  // Two participants share the name "Sam", and the viewer is one of them. The
+  // self mark follows the profile cell, so it lands on the viewer's swatch and
+  // not on the other Sam's.
+  const assert_self_mark_follows_the_cell_not_the_name = assert(() => {
+    const ui = twinPoll[UI];
+    const mine = findNodeByProp(ui, "aria-label", "Sam: green vote");
+    const theirs = findNodeByProp(ui, "aria-label", "Sam: red vote");
+    return !equals(samMine, samTheirs) &&
+      mine !== undefined && theirs !== undefined &&
+      selfRingOf(mine) !== "none" && selfRingOf(theirs) === "none";
+  });
+
   const assert_vote_swatches_have_accessible_names = assert(() => {
     const ui = initialsPoll[UI];
     const daffodil = findNodeByProp(
@@ -895,6 +956,9 @@ export default pattern(() => {
       { assertion: assert_vote_swatches_have_accessible_names },
       // A vote whose voter never joined still counts, and renders unnamed.
       { assertion: assert_departed_voter_tallies_namelessly },
+      // Sharing a display name does not share the viewer's self mark.
+      { action: action_become_my_sam },
+      { assertion: assert_self_mark_follows_the_cell_not_the_name },
       // Seeded stale (yesterday) vote: stored but hidden everywhere.
       { assertion: assert_legacy_option_without_image_renders },
       { assertion: assert_stale_vote_hidden },
