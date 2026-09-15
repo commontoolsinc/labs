@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Loom investigation review clarifications](development/performance/2026-09-15-loom-person-inbox-review-clarifications.md) — complete 203-document access-shape accounting and raw repetitions explaining independently calculated policy and opening medians.
+
 - [Loom person-inbox policy budget](development/performance/2026-09-15-loom-person-inbox-policy-budget.md) — nine retained-candidate policy preparations below 200 ms, per-node click attribution, full runtime validation, interleaved raw measurements, and rejected preconstruction experiments exposing quadratic label coverage.
 - [Loom person-inbox policy optimization rounds](development/performance/2026-09-14-loom-person-inbox-policy-rounds.md) — four measured runtime optimization rounds, metadata-reuse follow-up, full runner validation, and a final same-thread comparison with raw load records and retained failures.
 - [Loom person-inbox policy processing](development/performance/2026-09-14-loom-person-inbox-policy-processing.md) — repeated read and label counts, generated provenance, cache invalidation boundaries, and a validated offline attribution memoization replay.

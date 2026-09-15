@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-14
-archived: 2026-09-14
+created: 2026-09-15
+archived: 2026-09-15
 reason: "Worker and browser attribution for a real-data thread open after the pattern and runtime improvements."
 ---
 

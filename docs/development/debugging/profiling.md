@@ -95,8 +95,14 @@ visible. Gate the run on actual source readiness before starting its clock.
 For a client-only comparison, keep one compatible server process and data store
 running while swapping prebuilt client artifacts between repetitions. Record
 source revisions and artifact hashes, and check the served bytes after every
-swap. Restarting a server can select a version-keyed store or change cache
-warmth, making a client comparison measure server differences too. If the
+swap. Start each arm in a fresh browser context with a new page and worker;
+prevent HTTP or service-worker caches from serving the previous artifact, or
+verify hashes of the resources actually loaded by the measured page. Record the
+same cache posture for both arms. Checking the server alone cannot identify code
+already executing in an existing page or worker.
+
+Restarting a server can select a version-keyed store or change cache warmth,
+making a client comparison measure server differences too. If the
 clients require different server protocols, use explicitly matched server/data
 arms and describe the broader comparison instead.
 

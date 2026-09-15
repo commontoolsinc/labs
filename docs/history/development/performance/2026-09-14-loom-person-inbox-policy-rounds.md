@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-14
-archived: 2026-09-14
+created: 2026-09-15
+archived: 2026-09-15
 reason: "Measured Loom thread-open optimization experiments and their validation."
 ---
 

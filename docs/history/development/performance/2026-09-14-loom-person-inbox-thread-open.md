@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-09-14
-archived: 2026-09-14
+created: 2026-09-15
+archived: 2026-09-15
 reason: "Real-data comparison of Loom inbox thread opening across two labs browser builds."
 ---
 

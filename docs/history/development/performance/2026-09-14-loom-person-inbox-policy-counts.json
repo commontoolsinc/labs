@@ -1,4 +1,8 @@
 {
+  "status": "historical",
+  "created": "2026-09-15",
+  "archived": "2026-09-15",
+  "reason": "Captured policy-processing counts from the September 14 Loom thread-open investigation.",
   "counts": {
     "header-policy-1": {
       "errors": [],
