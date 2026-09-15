@@ -6,6 +6,7 @@ import {
   main,
   measuredSetFigures,
   parseReportArgs,
+  report,
   type ReportOptions,
   repositoryFigures,
   summarize,
@@ -50,15 +51,12 @@ async function directoryOf(files: Record<string, string>): Promise<string> {
 }
 
 /** The rest of a command line, for a run over `root` reading `reports`. */
-function optionsFor(root: string, reports: string): ReportOptions {
-  return {
-    reports,
-    out: path.join(root, "metrics.json"),
-    runId: 1,
-    sha: "abc",
-    createdAt: WHEN,
-    root,
-  };
+function optionsFor(
+  root: string,
+  reports: string,
+  out = "/dev/null",
+): ReportOptions {
+  return { reports, out, runId: 1, sha: "abc", createdAt: WHEN, root };
 }
 
 /**
@@ -205,6 +203,20 @@ describe("coverage-report", () => {
         lcov: [],
         unlaunchedMembers: [],
       });
+    });
+
+    it("throws where the path names a file rather than a directory", async () => {
+      // An absent directory is a run whose lanes uploaded nothing. A
+      // path that is something other than a directory is a caller
+      // pointed at the wrong thing, and reading it as an empty artifact
+      // would publish that mistake as a measurement.
+
+      const file = await Deno.makeTempFile({ prefix: "coverage-report-" });
+      try {
+        await expect(collectReports(file)).rejects.toThrow();
+      } finally {
+        await Deno.remove(file);
+      }
     });
   });
 
@@ -389,6 +401,43 @@ describe("coverage-report", () => {
 
     it("returns a summary saying so where no lane reported", () => {
       expect(summarize([])).toContain("No lane reported coverage");
+    });
+  });
+
+  describe("report()", () => {
+    it("publishes every figure stamped with the run it came from", async () => {
+      // The gate looks a baseline up by the commit it was measured at,
+      // and the manifest keeps only the baselines inside its window, so a
+      // figure that reached the file without its stamp reaches no reader.
+
+      const source = path.join(REPOSITORY, MEMBER, "src/index.ts");
+      const reports = await directoryOf({
+        [await reportPathIn("lane-1")]:
+          `SF:${source}\nDA:1,1\nDA:2,0\nend_of_record\n`,
+      });
+      const out = await Deno.makeTempFile({ prefix: "coverage-report-" });
+      try {
+        const summary = await report({
+          ...optionsFor(REPOSITORY, reports, out),
+          runId: 42,
+          sha: "cafef00d",
+        });
+        const published: {
+          metrics: { name: string; runId: number; sha: string }[];
+        } = JSON.parse(await Deno.readTextFile(out));
+        expect(published.metrics.map((metric) => metric.name)).toContain(
+          measuredSetCoverageMetric(`${SUITE}/${MEMBER}`),
+        );
+        expect(
+          published.metrics.every((metric) =>
+            metric.sha === "cafef00d" && metric.runId === 42
+          ),
+        ).toBe(true);
+        expect(summary).toContain("uncovered lines");
+      } finally {
+        await Deno.remove(reports, { recursive: true });
+        await Deno.remove(out);
+      }
     });
   });
 
