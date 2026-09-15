@@ -378,7 +378,12 @@ function localObject(commit: string, at: string): string {
 }
 
 /** One object holding what one lane measured about itself. */
-function laneObject(commit: string, at: string): string {
+function laneObject(
+  commit: string,
+  at: string,
+  planned = 40,
+  spent = 92,
+): string {
   const context: RunContext = {
     schema: 1,
     line: "context",
@@ -408,8 +413,8 @@ function laneObject(commit: string, at: string): string {
   });
   return buildObjectBody(context, [
     measured("ci-lane setup fuse", 14_800),
-    measured("ci-lane batch workspace-unit", 92_000),
-    measured("ci-lane planned batch workspace-unit", 40_000),
+    measured("ci-lane batch workspace-unit", spent * 1000),
+    measured("ci-lane planned batch workspace-unit", planned * 1000),
   ]);
 }
 
@@ -489,6 +494,35 @@ describe("publish()", () => {
     // with the work, so the whole difference is the suite's fixed cost.
     expect(manifest.calibration.suites["workspace-unit"])
       .toEqual({ overhead: 52, correction: 1 });
+  });
+
+  it("publishes a cost model the manifest reader will carry", async () => {
+    // A correction at or below zero is refused, and the whole manifest is
+    // refused with it, so one suite whose batches were packed for more
+    // and more while spending less and less would leave every lane
+    // reading no manifest at all.
+    const objects = seed();
+    [[30, 300], [60, 200], [90, 100]].forEach(([planned, spent], lane) => {
+      objects[CI(DAY, `lane-${lane}`)] = laneObject(
+        `c-lane-${lane}`,
+        `2026-08-20T0${lane + 3}:00:00.000Z`,
+        planned,
+        spent,
+      );
+    });
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noBaselines,
+    );
+    const name = [...created.keys()].find((one) => one.includes("/manifest-"))!;
+    const manifest = parseManifest(await gunzipToText(created.get(name)!));
+    expect(manifest).toBeDefined();
+    expect(manifest!.calibration.suites["workspace-unit"]!.correction)
+      .toBeGreaterThan(0);
   });
 
   it("publishes an empty cost model when no lane has measured one", async () => {
