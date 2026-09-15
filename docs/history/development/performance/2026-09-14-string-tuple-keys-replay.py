@@ -24,7 +24,7 @@ const groups=[
  ['runner/test/cfc-consumed-source-dedup',10,20,3,true],
  ['runner/test/scheduler-invalid-causes',6,100,10,false],
 ];
-const results={base:Deno.args[0],version:Deno.version,cpu:os.cpus()[0].model,loadBefore:os.loadavg(),started:new Date().toISOString(),cases:[]};
+const results={base:"CHECKOUT",version:Deno.version,cpu:os.cpus()[0].model,loadBefore:os.loadavg(),started:new Date().toISOString(),cases:[]};
 for(const [path,count,warmup,batches,bracketed] of groups){
  const offset=registered.length;
  for(const suffix of ['', '.final'])await import(new URL(`packages/${path}${suffix}.bench.ts`,Deno.args[0]+'/').href);
