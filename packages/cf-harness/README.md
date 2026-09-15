@@ -1127,9 +1127,21 @@ do not offer it.
 takes an exact id returned by `search_skills`, resolves the source repository's
 default branch to a full commit SHA, reads GitHub's recursive tree at that
 commit, and derives the candidate root from exact path-segment equality with the
-discovery slug. No case folding or path normalization participates. Zero or
-multiple candidates refuse, and a tree response marked `truncated` refuses
-because an unread inventory is not evidence of absence.
+discovery slug.
+
+The id may carry the commit itself, `owner/repo/slug@<commit sha>`, and then
+those are the bytes acquired and GitHub is not asked where the default branch
+points; everything after that step is identical, and the pin the run records is
+the same either way. That spelling exists because an operator's script allowlist
+is keyed on a commit while a default branch moves, so a run acquiring by name
+alone holds the allowed bytes only when nothing was pushed in between. The run
+is told which pins its operator allowed scripts of before its first turn, which
+is what lets it name one. A run that acquires the same skill at another commit
+is refused at `delegate_task` with both commits named, rather than handing a
+child a mounted skill and no tool to run it with. No case folding or path
+normalization participates. Zero or multiple candidates refuse, and a tree
+response marked `truncated` refuses because an unread inventory is not evidence
+of absence.
 
 The path whitelist is scoped to the selected candidate root's subtree, so
 sibling skills and repository files outside that root do not leak into the

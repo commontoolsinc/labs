@@ -56,6 +56,7 @@ import { patternRefsContextMessage } from "./pattern-refs.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { allowedSkillScriptsContextMessage } from "./skills/scripts.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
 import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
 
@@ -323,8 +324,8 @@ export interface EstablishHarnessSessionContextOptions {
 /**
  * Brings up everything a run holds before its first model turn, and returns
  * the context messages announcing it: the skill registry and any preloaded
- * skills, the well-known grants of the session's space, and the operator's
- * input cells.
+ * skills, the acquired-skill scripts the operator allowed, the well-known
+ * grants of the session's space, and the operator's input cells.
  *
  * The three differ in how they fail, and deliberately. A missing skills root
  * simply yields no messages. Grants are best-effort: a session that will not
@@ -382,6 +383,15 @@ const establishContextMessages = async (
       await engine.persistSkillActivations(context.activations);
       messages.push(context.contextText);
     }
+  }
+  // Read off the engine rather than taken as configuration, because it is the
+  // run's own allowlist that decides this and every surface has already
+  // resolved one into the engine by here.
+  const allowedScriptsMessage = allowedSkillScriptsContextMessage(
+    engine.config.allowedSkillScripts,
+  );
+  if (allowedScriptsMessage !== undefined) {
+    messages.push(allowedScriptsMessage);
   }
   if (engine.fabricSessionAvailable) {
     try {

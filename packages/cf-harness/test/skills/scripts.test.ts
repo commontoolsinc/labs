@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import {
   allowedSkillScriptKey,
+  allowedSkillScriptsContextMessage,
   isSkillScriptAllowlisted,
   normalizeAllowedSkillScript,
   parseAllowedSkillScriptSpec,
@@ -151,6 +152,41 @@ describe("scripts.ts", () => {
         { skill: PIN, path: "scripts/report.sh" },
         { skill: "agent-browser", path: "scripts/run.ts" },
       ]);
+    });
+  });
+
+  describe("allowedSkillScriptsContextMessage()", () => {
+    it("names each allowed pin with the script it allows", () => {
+      const message = allowedSkillScriptsContextMessage([
+        { skill: PIN, path: "scripts/report.sh" },
+      ]);
+
+      expect(message).toContain(`- ${PIN} -> scripts/report.sh`);
+    });
+
+    it("says to acquire by the whole pin", () => {
+      // The pin is the point: acquiring the same skill by name alone resolves
+      // to the default-branch head, which is the allowed bytes only by luck.
+      expect(
+        allowedSkillScriptsContextMessage([
+          { skill: PIN, path: "scripts/report.sh" },
+        ]),
+      ).toContain("`acquire_skill` id");
+    });
+
+    it("returns nothing for an allowlist holding only registry entries", () => {
+      // A registry skill is addressed by its name, which the run's own
+      // registry already offers.
+      expect(
+        allowedSkillScriptsContextMessage([
+          { skill: "agent-browser", path: "scripts/run.ts" },
+        ]),
+      ).toBeUndefined();
+    });
+
+    it("returns nothing for an empty or absent allowlist", () => {
+      expect(allowedSkillScriptsContextMessage([])).toBeUndefined();
+      expect(allowedSkillScriptsContextMessage(undefined)).toBeUndefined();
     });
   });
 });

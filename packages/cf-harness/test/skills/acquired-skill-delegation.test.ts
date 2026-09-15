@@ -16,6 +16,7 @@ import { DEFAULT_SUBAGENT_PROFILE } from "../../src/contracts/subagent.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
 import { OpenAICompatibleGatewayClient } from "../../src/gateway/openai-client.ts";
 import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
+import { establishHarnessSessionContext } from "../../src/session-assembly.ts";
 import { SkillsShAcquisitionClient } from "../../src/skills-sh/acquisition.ts";
 import type { ProcessRunner } from "../../src/sandbox/process-runner.ts";
 import {
@@ -107,7 +108,247 @@ const assistantTurn = (content: string) => ({
   choices: [{ index: 0, message: { role: "assistant", content } }],
 });
 
+/** What a scenario's scripted model turns are given, and may write back. */
+interface AcquisitionScenarioContext {
+  /** The handle `acquire_skill` returned, once the parent has read it. */
+  handleToken: string;
+  /** The pin the child's `<skill_context>` header carried, once delegated. */
+  childPin?: string;
+  /** Every URL the scenario's GitHub fetch was asked for, in order. */
+  githubUrls: string[];
+}
+
+/**
+ * Runs one parent with a real engine, a real sandbox configuration and a
+ * scripted model, and hands the finished run to `assert`.
+ *
+ * The heavy half of one of these is the same every time — an emulated space,
+ * an engine owning a sandbox configuration, and an acquisition client over the
+ * captured GitHub responses — so what a scenario states is the two things that
+ * differ: the operator's allowlist, and what the model does on each turn.
+ */
+const runAcquisitionScenario = async (options: {
+  allowedSkillScripts: readonly { skill: string; path: string }[];
+  turn: (
+    index: number,
+    body: { input?: { type?: string; output?: string }[] },
+    context: AcquisitionScenarioContext,
+  ) => unknown;
+  assert: (
+    engine: CfHarnessEngine,
+    artifactRoot: string,
+    context: AcquisitionScenarioContext,
+  ) => Promise<void> | void;
+}): Promise<void> => {
+  const identity = await Identity.fromPassphrase(
+    `acquired-delegation-${crypto.randomUUID()}`,
+  );
+  const storageManager = StorageManager.emulate({ as: identity });
+  const runtime = new Runtime({
+    apiUrl: new URL("http://toolshed.test"),
+    storageManager,
+  });
+  const pieces = new PiecesController(
+    await createSession({
+      identity,
+      spaceName: `acquired-delegation-${crypto.randomUUID()}`,
+    }),
+    runtime,
+  );
+  await pieces.synced();
+  const artifactRoot = await Deno.makeTempDir({
+    prefix: "acquired-delegation-",
+  });
+  const workspace = await Deno.makeTempDir({
+    prefix: "acquired-delegation-workspace-",
+  });
+  const context: AcquisitionScenarioContext = {
+    handleToken: "",
+    githubUrls: [],
+  };
+  try {
+    const engine = new CfHarnessEngine({
+      runId: "acquired-delegation-run",
+      artifactRoot,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+      processRunner: scriptedDockerRunner,
+      sandbox: {
+        dockerBinary: "docker",
+        runtimeName: "runsc-cfc",
+        image: "cf-harness:test",
+        workspaceHostPath: workspace,
+        workspaceMountPath: "/workspace",
+        shellPath: "/bin/bash",
+        dockerNetworkMode: "none",
+        additionalMounts: [],
+        extraDockerArgs: [],
+      },
+      allowedSkillScripts: options.allowedSkillScripts,
+      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      skillsShAcquisitionClientFactory: () =>
+        Promise.resolve(
+          new SkillsShAcquisitionClient({
+            fetch: (input, init) => {
+              context.githubUrls.push(String(input));
+              return githubFetch(input, init);
+            },
+          }),
+        ),
+    });
+
+    let requests = 0;
+    const modelFetch: typeof fetch = (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        input?: { type?: string; output?: string }[];
+      };
+      const index = requests;
+      requests += 1;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            responsesBodyFromChatFixture(options.turn(index, body, context)),
+          ),
+          { status: 200 },
+        ),
+      );
+    };
+
+    const loop = new CfHarnessPromptLoop({
+      engine,
+      gatewayClient: new OpenAICompatibleGatewayClient({
+        baseUrl: engine.config.gatewayBaseUrl,
+        authMode: engine.config.gatewayAuthMode,
+        apiKey: "test-key",
+        transportRetries: 0,
+        fetchFn: modelFetch,
+      }),
+      allowedToolIds: ["acquire_skill", "delegate_task"],
+      allowedSubagentProfiles: [DEFAULT_SUBAGENT_PROFILE],
+    });
+
+    // Brought up the way every surface brings a session up, so what the
+    // parent is told before its first turn is what a real run is told.
+    const contextMessages = await establishHarnessSessionContext({
+      engine,
+      config: { skillNames: [] },
+    });
+    await loop.runPrompt({
+      prompt: "Acquire the skill and delegate it.",
+      contextMessages,
+    });
+    await options.assert(engine, artifactRoot, context);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+    await Deno.remove(workspace, { recursive: true });
+  }
+};
+
+/** Reads the handle out of the `acquire_skill` output the parent just saw. */
+const handleFromOutput = (
+  body: { input?: { type?: string; output?: string }[] },
+): string => {
+  const acquired = (body.input ?? []).findLast((entry) =>
+    entry.type === "function_call_output"
+  );
+  return (JSON.parse(String(acquired?.output)) as { skillHandle: string })
+    .skillHandle;
+};
+
 describe("delegating an acquired skill to a child", () => {
+  it("tells the parent which pins its operator allowed scripts of", async () => {
+    // The parent is the run that acquires, and a pin is the only thing that
+    // makes the acquisition and the allowlist name the same bytes — so a run
+    // never told the allowed pin can only acquire by name and hope.
+    let openingContext = "";
+    await runAcquisitionScenario({
+      allowedSkillScripts: [
+        { skill: PIN, path: SCRIPT_PATH },
+        { skill: "agent-browser", path: "scripts/run.ts" },
+      ],
+      turn: (index, body) => {
+        if (index === 0) {
+          openingContext = chatViewOfRequest(body).messages
+            .map((message) => message.content).join("\n");
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: () => {
+        expect(openingContext).toContain(`- ${PIN} -> ${SCRIPT_PATH}`);
+        expect(openingContext).toContain("`acquire_skill` id");
+        // A registry entry is addressed by name, which the run's registry
+        // already offers, so it is not repeated here.
+        expect(openingContext).not.toContain("agent-browser");
+      },
+    });
+  });
+
+  it("acquires the exact commit an id pins, asking GitHub for no branch", async () => {
+    // An operator's allowlist entry is keyed on a commit, so a run that
+    // acquires by name gets the allowed bytes only when the default branch has
+    // not moved. Naming the commit is what makes the two agree by construction.
+    await runAcquisitionScenario({
+      allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+      turn: (index, body, context) => {
+        if (index === 0) {
+          return toolCallTurn("call-acquire", "acquire_skill", { id: PIN });
+        }
+        if (index === 1) {
+          context.handleToken = handleFromOutput(body);
+          return assistantTurn("Acquired.");
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: (engine, _artifactRoot, context) => {
+        expect(engine.getRunState().acquiredSkills?.skills[0]?.pin).toBe(PIN);
+        expect(context.githubUrls).not.toContain(
+          `https://api.github.com/repos/${OWNER}/${REPO}`,
+        );
+        expect(context.githubUrls).not.toContain(
+          `https://api.github.com/repos/${OWNER}/${REPO}/branches/main`,
+        );
+      },
+    });
+  });
+
+  it("refuses the delegation naming both commits when the allowlist names another", async () => {
+    // The child would otherwise receive no `run_skill_script` at all, which
+    // reads exactly as an operator who allowed nothing — so the two commits
+    // are said, and no child is spawned to hold a skill it cannot run.
+    const otherPin = `${SKILL_ID}@${"1".repeat(40)}`;
+    let delegateOutput = "";
+    await runAcquisitionScenario({
+      allowedSkillScripts: [{ skill: otherPin, path: SCRIPT_PATH }],
+      turn: (index, body, context) => {
+        if (index === 0) {
+          return toolCallTurn("call-acquire", "acquire_skill", { id: PIN });
+        }
+        if (index === 1) {
+          context.handleToken = handleFromOutput(body);
+          return toolCallTurn("call-delegate", "delegate_task", {
+            goal: "Use the acquired skill.",
+            skillHandle: context.handleToken,
+          });
+        }
+        if (index === 2) {
+          delegateOutput = String(
+            (body.input ?? []).findLast((entry) =>
+              entry.type === "function_call_output"
+            )?.output,
+          );
+          return assistantTurn("Parent done.");
+        }
+        return assistantTurn("Parent done.");
+      },
+      assert: (engine) => {
+        expect(delegateOutput).toContain(otherPin);
+        expect(delegateOutput).toContain(PIN);
+        expect(delegateOutput).toContain("another commit");
+        expect(engine.getRunState().subagentRuns ?? []).toHaveLength(0);
+      },
+    });
+  });
+
   it("gives the child the mount, the tool, and only its own pin's entries", async () => {
     const identity = await Identity.fromPassphrase(
       `acquired-delegation-${crypto.randomUUID()}`,
@@ -222,7 +463,16 @@ describe("delegating an acquired skill to a child", () => {
         allowedSubagentProfiles: [DEFAULT_SUBAGENT_PROFILE],
       });
 
-      await loop.runPrompt({ prompt: "Acquire the skill and delegate it." });
+      // Brought up the way every surface brings a session up, so what the
+      // parent is told before its first turn is what a real run is told.
+      const contextMessages = await establishHarnessSessionContext({
+        engine,
+        config: { skillNames: [] },
+      });
+      await loop.runPrompt({
+        prompt: "Acquire the skill and delegate it.",
+        contextMessages,
+      });
 
       expect(childPin).toBe(PIN);
       const acquired = engine.getRunState().acquiredSkills?.skills[0];

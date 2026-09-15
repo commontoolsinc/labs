@@ -92,7 +92,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
   toolId: "acquire_skill",
   title: "Acquire Skill",
   description:
-    "Acquire a discovered skill id from its pinned GitHub commit after checking the complete recursive listing. The parent never receives skill text: a loaded result carries a handle only. A refusal is an expected outcome with its reason and offending paths as inert metadata; do not retry around it. Acquisition grants no permission and loads nothing into the parent. Loading the handle into a child is a separate later delegate_task decision.",
+    "Acquire a discovered skill id from its pinned GitHub commit after checking the complete recursive listing. An id given without a commit resolves to the default-branch head, which moves; naming the commit acquires those exact bytes, which is what an operator's script allowlist is keyed on. The parent never receives skill text: a loaded result carries a handle only. A refusal is an expected outcome with its reason and offending paths as inert metadata; do not retry around it. Acquisition grants no permission and loads nothing into the parent. Loading the handle into a child is a separate later delegate_task decision.",
   effectClass: "write",
   inputSchema: {
     type: "object",
@@ -100,7 +100,7 @@ export const acquireSkillToolDescriptor: HarnessToolDescriptor = {
       id: {
         type: "string",
         description:
-          "Exact discovery id returned by search_skills, in owner/repository/slug form.",
+          "Exact discovery id returned by search_skills, in owner/repository/slug form, optionally followed by @<commit sha> to acquire that exact commit rather than the repository's default-branch head.",
       },
     },
     required: ["id"],

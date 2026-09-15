@@ -534,11 +534,18 @@ Policy rules:
   snapshot by digest and size.
 - An acquired skill's script goes through the same allowlist, with the pin its
   bytes were read at — `owner/repo/slug@<commit sha>` — in the `skill` field,
-  since an acquired skill has no registry name to key an entry on. It has no
-  registry and no run-start snapshot either, so the two conditions above are met
-  differently: the run must hold an activation whose acquisition names that pin,
-  and the file must match the digest taken at acquisition. It runs in the
-  sandbox; a run whose skill-script execution target is the host refuses it.
+  since an acquired skill has no registry name to key an entry on.
+  `acquire_skill` takes that same spelling as its `id`, acquiring those exact
+  bytes rather than the repository's default-branch head, and the run is told
+  which pins its operator allowed scripts of before its first turn — so an entry
+  and an acquisition name the same commit by construction rather than by the
+  branch not having moved. A run that acquires the skill at another commit
+  anyway is refused at `delegate_task`, naming both commits, rather than handing
+  its child a mounted skill and no tool. It has no registry and no run-start
+  snapshot either, so the two conditions above are met differently: the run must
+  hold an activation whose acquisition names that pin, and the file must match
+  the digest taken at acquisition. It runs in the sandbox; a run whose
+  skill-script execution target is the host refuses it.
 - What backs `run_skill_script` for an acquired script is the mount that puts it
   at a path, so a run given no `--skills-root` still offers the tool to a child
   whose sandbox carries that mount, and `--allow-skill-script` takes an acquired

@@ -157,3 +157,40 @@ export const isSkillScriptAllowlisted = (
     allowedSkillScriptKey(normalizeAllowedSkillScript(allowed)) === key
   );
 };
+
+/**
+ * What a run is told about the acquired-skill scripts its operator allowed,
+ * or `undefined` where none were.
+ *
+ * An entry keys on the pin its bytes were read at, and a run that acquires a
+ * skill by name alone gets whatever the default branch holds when it runs —
+ * which is the allowed bytes only by luck. Naming the allowed pins is what
+ * lets a run acquire the bytes that were allowed, so this says the pin and
+ * says to acquire by it.
+ *
+ * Registry entries are left out. Those are addressed by a skill's name, which
+ * the run's own registry already offers, and nothing about them is a thing the
+ * model could otherwise not find out.
+ */
+export const allowedSkillScriptsContextMessage = (
+  allowlist: readonly HarnessAllowedSkillScript[] | undefined,
+): string | undefined => {
+  const acquired = (allowlist ?? []).filter((script) =>
+    parseAcquiredSkillPin(script.skill) !== undefined
+  );
+  if (acquired.length === 0) {
+    return undefined;
+  }
+  return [
+    "Operator-allowed acquired skill scripts:",
+    ...acquired.map((script) => `- ${script.skill} -> ${script.path}`),
+    "",
+    "Each line is a skill pinned to an exact commit, and a script of it that " +
+    "may run. Pass the whole pin as the `acquire_skill` id, so what you " +
+    "acquire is what was allowed; acquiring the same skill by name alone " +
+    "resolves to the repository's current default-branch head, which is " +
+    "these bytes only by coincidence. A child given the resulting handle " +
+    "receives `run_skill_script` for the listed scripts of that pin and for " +
+    "nothing else.",
+  ].join("\n");
+};

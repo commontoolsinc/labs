@@ -91,10 +91,15 @@ The current package provides:
   scripts (which run in the sandbox, and so still ask for the flag). The same
   allowlist and the same execution path take an acquired skill's script, keyed
   by the pin its bytes were read at and checked against the digest taken at
-  acquisition; the tool output and the execution record carry that acquisition
-  in place of the registry digest fields, and the invocation is labeled with
-  confidentiality alone, because a non-empty `integrity` array in
-  `cfcInputLabels` makes the sandbox fail to start (CT-2302);
+  acquisition. `acquire_skill` accepts that pin as its `id` and acquires that
+  commit without asking where the default branch points, the run is told which
+  pins its operator allowed scripts of before its first turn, and a delegation
+  whose handle names the same skill at a different commit is refused naming both
+  rather than granting the child no tool; the tool output and the execution
+  record carry that acquisition in place of the registry digest fields, and the
+  invocation is labeled with confidentiality alone, because a non-empty
+  `integrity` array in `cfcInputLabels` makes the sandbox fail to start
+  (CT-2302);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
   wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming

@@ -19,6 +19,7 @@ import type {
   HarnessAllowedSkillScript,
   HarnessSkillAcquisition,
 } from "../contracts/skill.ts";
+import { parseAcquiredSkillPin } from "./scripts.ts";
 
 /** The mount name a child's acquired-skill directory is bound under. */
 export const ACQUIRED_SKILL_MOUNT_NAME = "acquired-skill";
@@ -154,6 +155,14 @@ export const childSandboxOptions = (
  * others, and a delegation carries one `skillHandle`, so one pin is the whole
  * of what this child was given. A run whose allowlist names none of its scripts
  * grants nothing, and the child's surface is its profile's, unchanged.
+ *
+ * `pinMismatch` separates that from the one case where granting nothing is a
+ * mistake rather than a decision. An entry naming this same skill at a
+ * DIFFERENT commit is an operator who allowed these scripts and an acquisition
+ * that fetched other bytes — the repository's default branch moved between the
+ * entry being written and the skill being acquired. The child would receive no
+ * tool, which reads exactly like an operator who allowed nothing, so the two
+ * commits are reported and the caller says so instead.
  */
 export const acquiredSkillScriptSurface = (
   runAllowlist: readonly HarnessAllowedSkillScript[] | undefined,
@@ -161,13 +170,36 @@ export const acquiredSkillScriptSurface = (
 ): {
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
   toolIds: readonly "run_skill_script"[];
+  pinMismatch?: {
+    readonly acquiredPin: string;
+    readonly allowedPins: readonly string[];
+  };
 } => {
   const allowedSkillScripts = acquired === undefined
     ? []
     : (runAllowlist ?? []).filter((script) => script.skill === acquired.pin);
+  const toolIds = allowedSkillScripts.length > 0
+    ? ["run_skill_script"] as const
+    : [] as const;
+  if (acquired === undefined || allowedSkillScripts.length > 0) {
+    return { allowedSkillScripts, toolIds };
+  }
+  const acquiredSkillId = parseAcquiredSkillPin(acquired.pin)?.id;
+  const allowedPins = acquiredSkillId === undefined ? [] : [
+    ...new Set(
+      (runAllowlist ?? [])
+        .filter((script) =>
+          parseAcquiredSkillPin(script.skill)?.id === acquiredSkillId
+        )
+        .map((script) => script.skill),
+    ),
+  ];
   return {
     allowedSkillScripts,
-    toolIds: allowedSkillScripts.length > 0 ? ["run_skill_script"] : [],
+    toolIds,
+    ...(allowedPins.length > 0
+      ? { pinMismatch: { acquiredPin: acquired.pin, allowedPins } }
+      : {}),
   };
 };
 

@@ -3828,7 +3828,9 @@ export class CfHarnessPromptLoop {
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
-    let resolvedDelegateSkill: { text: string; token: string } | undefined;
+    let resolvedDelegateSkill:
+      | { text: string; token: string; acquisition?: HarnessSkillAcquisition }
+      | undefined;
     if (toolId === "delegate_task") {
       const parsedDelegateInput = parseDelegateTaskInput(input);
       if ("invalid" in parsedDelegateInput) {
@@ -4002,6 +4004,41 @@ export class CfHarnessPromptLoop {
             ? { acquisition: entry!.acquisition }
             : {}),
         };
+        // The operator allowed scripts of this skill at a commit, and the
+        // acquisition fetched another. Left alone the child receives no
+        // `run_skill_script` at all, which reads exactly as an operator who
+        // allowed nothing, so the delegation is refused with both commits
+        // named instead. The model can act on it: `acquire_skill` takes a pin,
+        // so acquiring the allowed one is the answer.
+        const mismatch = acquiredSkillScriptSurface(
+          this.engine.config.allowedSkillScripts,
+          acquiredSkillForHandle(
+            this.engine.getRunState().acquiredSkills?.skills,
+            resolvedDelegateSkill.acquisition,
+          ),
+        ).pinMismatch;
+        if (mismatch !== undefined) {
+          return await this.#rejectInvalidToolCall({
+            toolCall,
+            invalid: {
+              reason: "invalid-argument",
+              toolId: "delegate_task",
+              field: "skillHandle",
+              expected:
+                `a handle for a skill whose scripts this run allows. This ` +
+                `run allows scripts of ${mismatch.allowedPins.join(", ")}, ` +
+                `and the handle names ${mismatch.acquiredPin}, which is the ` +
+                `same skill at another commit; acquire it by the allowed pin`,
+            },
+            sequence,
+            startedAt: activityStartedAt,
+            effectClass: tool.descriptor.effectClass,
+            ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+            toolInputSummary,
+            policyEventIndexes,
+            recordActivity,
+          });
+        }
       }
     }
     await this.engine.recordPolicyDecision({
