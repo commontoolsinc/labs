@@ -482,36 +482,34 @@ describe("topics-headless-fixture", () => {
       expect(measurement.errors).toEqual([]);
     });
 
-    it("returns a duplicated topic its own backlinks once per board entry, pinning current behavior pending the owner's decision", () => {
-      // The pivot pushes a link to the topic's one row for each board entry,
-      // and `backlinksOf` keeps every entry whose topic matches, so the lookup
-      // returns the row's `mentionedBy` twice. That contradicts the comment in
-      // `backlinksOf` saying at most one row matches, and the doc comment on
-      // `TopicCrossrefRow` saying a reader finds exactly one. This case pins
-      // what the lifts do today until the Topics owner decides what a
-      // duplicate entry should return; it does not say doubling is intended.
-
+    it("returns a duplicated topic its own backlinks once", () => {
       const { seeded } = measurement;
       const oracle = mentionedByIndex(measurement, fixture, DUPLICATED);
       expect(oracle).toEqual(mentionersOf(fixture, DUPLICATED));
       expect(oracle).toEqual([0, 1]);
       expect(
         topicIndicesOf(seeded, backlinksOutputOf(measurement, DUPLICATED)),
-      ).toEqual([
-        ...oracle,
-        ...oracle,
-      ]);
+      ).toEqual(oracle);
     });
 
-    it("returns both of a duplicated topic's pivot entries linking its one row", () => {
+    it("returns one pivot entry per distinct topic, each on its own row, in the order of each topic's first board entry", () => {
+      // The duplicate is the board's last entry, so ordering by last
+      // occurrence would move the duplicated topic to the end.
+
       const entries = pivotEntriesOf(
         measurement.seeded,
         measurement.outputs.table,
       );
-      expect(entries.map((entry) => entry.topic)).toEqual(fixture.board);
-      expect(entries[DUPLICATED].row).toBe(entries.at(-1)?.row);
+      expect(fixture.board).toEqual([0, 1, 2, 3, 4, 5, DUPLICATED]);
+      const firstOccurrences = [0, 1, 2, 3, 4, 5];
+      expect(
+        entries.map(({ topic, mentionedBy }) => ({ topic, mentionedBy })),
+      ).toEqual(firstOccurrences.map((topic) => ({
+        topic,
+        mentionedBy: mentionedByIndex(measurement, fixture, topic),
+      })));
       expect(new Set(entries.map((entry) => entry.row)).size).toBe(
-        fixture.topics.length,
+        firstOccurrences.length,
       );
     });
 

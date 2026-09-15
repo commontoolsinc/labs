@@ -22,7 +22,7 @@ import {
   tagFromFabricValue,
   tagFromFabricValueElseNull,
   VALUE_TAGS,
-} from "@/value-tags.ts";
+} from "@/value-tags";
 
 import {
   type BaselineVisitResult,

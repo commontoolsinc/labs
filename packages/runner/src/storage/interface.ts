@@ -2866,6 +2866,22 @@ export interface ISpaceReplica extends ISpace {
     identity?: ScopeKeyIdentity,
   ): boolean;
 
+  /**
+   * The seq this replica's CONFIRMED view stands at for the document
+   * instance — the last accepted write to it this replica has taken, and 0
+   * for one it has taken none of. Says nothing about the replica's own
+   * pending writes over that base, which carry no accepted seq.
+   *
+   * A caller comparing this against the store's head learns whether the
+   * replica is behind the store on the document, and so whether a run that
+   * read it here read what the store now holds.
+   */
+  confirmedDocumentSeq(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): number;
+
   /** Observes changes in residency, including delivery of a known absence. */
   subscribeLocalCoverage?(
     observer: (

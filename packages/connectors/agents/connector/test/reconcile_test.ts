@@ -1,5 +1,9 @@
 import { assertEquals } from "@std/assert";
-import { collectSource, prepareSession } from "../src/reconcile.ts";
+import {
+  collectSource,
+  prepareSession,
+  streamSource,
+} from "../src/reconcile.ts";
 import type {
   AgentDriver,
   NativeSessionSnapshot,
@@ -171,6 +175,55 @@ Deno.test("collectSource ends an inventory that repeats one session under fresh 
     { message: "Error: session enumeration exceeded safety limit" },
   ]);
   assertEquals(collected.complete, false);
+});
+
+Deno.test("streamSource reads the next session only after publication advances", async () => {
+  const calls: string[] = [];
+  const driver = fakeDriver();
+  const listSessions = driver.listSessions;
+  const readSession = driver.readSession;
+  driver.listSessions = async (cursor) => {
+    calls.push(`list:${cursor ?? "first"}`);
+    return await listSessions(cursor);
+  };
+  driver.readSession = async (nativeSessionId) => {
+    calls.push(`read:${nativeSessionId}`);
+    return await readSession(nativeSessionId);
+  };
+
+  const collected = streamSource(driver);
+  const sessions = collected.sessions[Symbol.asyncIterator]();
+  assertEquals((await sessions.next()).value?.summary.nativeSessionId, "one");
+  assertEquals(calls, ["list:first", "read:one"]);
+  assertEquals(collected.outcome.sessionCount, 1);
+
+  assertEquals((await sessions.next()).value?.summary.nativeSessionId, "two");
+  assertEquals(calls, ["list:first", "read:one", "list:next", "read:two"]);
+  assertEquals((await sessions.next()).done, true);
+  assertEquals(collected.outcome, {
+    errors: [],
+    complete: true,
+    sessionCount: 2,
+    consumed: true,
+  });
+});
+
+Deno.test("streamSource consults the current cancellation signal", async () => {
+  const controller = new AbortController();
+  let cancellationEnabled = true;
+  const collected = streamSource(
+    fakeDriver(),
+    () => cancellationEnabled ? controller.signal : undefined,
+  );
+  const sessions = collected.sessions[Symbol.asyncIterator]();
+  assertEquals((await sessions.next()).value?.summary.nativeSessionId, "one");
+
+  controller.abort(new Error("publication can no longer stop"));
+  cancellationEnabled = false;
+
+  assertEquals((await sessions.next()).value?.summary.nativeSessionId, "two");
+  assertEquals((await sessions.next()).done, true);
+  assertEquals(collected.outcome.complete, true);
 });
 
 Deno.test("collectSource retains lifecycle state reported only by inventory", async () => {

@@ -281,8 +281,32 @@ export function mentionedBy<T extends object>(
 }
 
 /**
- * The board's mention pivot: one row per topic, naming the topics that mention
- * it.
+ * The entries of `list` naming distinct topics, each kept at its first entry
+ * and in `list`'s order, leaving out an entry with nothing behind it yet. These
+ * are the topics the pivot builds rows for.
+ *
+ * Identity is `equals`, the comparison `mentionedBy` makes, so two entries that
+ * resolve to one document are one topic whether they hold the same link or one
+ * holds an alias of it. Nothing in the pattern API turns a `ReadonlyCell` entry
+ * into a resolved key carrying space, scope, and path, so each entry is
+ * compared with `equals` against the distinct entries kept before it: at most
+ * `n(n - 1) / 2` comparisons over `n` entries.
+ */
+export function distinctByIdentity<T extends object>(
+  list: readonly (T | undefined)[],
+): T[] {
+  const distinct: T[] = [];
+  for (const entry of list) {
+    if (entry && !distinct.some((kept) => equals(kept, entry))) {
+      distinct.push(entry);
+    }
+  }
+  return distinct;
+}
+
+/**
+ * The board's mention pivot: one row per distinct topic, naming the topics that
+ * mention it.
  *
  * The whole reference graph is derived HERE, once, and every topic reads its
  * own row out of the result. The alternative — each topic deriving its own
@@ -297,6 +321,11 @@ export function mentionedBy<T extends object>(
  * Matching uses `equals` so aliases and scoped references keep their canonical
  * identity semantics. The scan runs over plain arrays and compares source
  * identity only after finding a matching mention.
+ *
+ * The rows come from `distinctByIdentity`, and the join from the whole list. A
+ * topic the board lists at two entries therefore gets one row, which is what
+ * lets a topic's lookup by identity find exactly one, while each of those
+ * entries still counts as a source in the row of every topic it mentions.
  *
  * Each row is addressed by the topic it describes — `Writable.for(topic)` — so
  * a row keeps its identity wherever it sits in the array and however the board
@@ -318,21 +347,22 @@ const crossrefTable = lift(
     },
   ): TopicCrossrefRow[] => {
     const rows: unknown[] = [];
-    // Both passes below are over a plain array. The scan is quadratic, and an
-    // element read through the reactive array resolves a link every time, so
-    // reading it there costs a link resolution per topic per topic.
+    // Every pass below reads this plain array: an element read through the
+    // reactive array resolves a link every time, and the passes read each
+    // element many times.
     const list = Array.from(sources);
     // Materialize each mention array once; scanning a reactive array resolves
     // its elements again for every destination topic.
     const mentions = mentionListsOf(list).map((refs) =>
       refs === undefined ? undefined : Array.from(refs)
     );
-    list.forEach((topic) => {
-      // An entry with nothing behind it yet (mid-sync) has no identity to
-      // address a row by, and `Writable.for(undefined)` is not a cause. It gets
-      // no row rather than a junk one — the lookup is by identity, not by
-      // position, so a shorter table costs nothing.
-      if (!topic) return;
+    // One row per distinct topic, while the join below still reads every entry
+    // of `list`. An entry with nothing behind it yet (mid-sync) has no identity
+    // to address a row by, and `Writable.for(undefined)` is not a cause, so
+    // `distinctByIdentity` leaves it out. It gets no row rather than a junk one
+    // — the lookup is by identity, not by position, so a shorter table costs
+    // nothing.
+    distinctByIdentity(list).forEach((topic) => {
       const inbound = mentionedBy(topic, list, mentions);
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets

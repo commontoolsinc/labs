@@ -4,6 +4,8 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Stale derived-state correction decision](development/2026-09-14-derived-state-correction.md) — approval and exact fixture scope for two calculated lunch-poll status corrections, consequences, and alternatives.
+
 - [Lazy-off integration evidence](development/performance/2026-09-14-lazy-off-integration.md) — isolated runner, runtime-client, and shell/browser integration results with eager materialization, explicit execution postures, and retirement evidence limits.
 - [Notebook reload materialization evidence](development/performance/2026-09-14-lazy-materialization-reload-evidence.md) — 2026-09-14: eager-mode browser errors, an unresolved default-on control failure, and a passing instrumented control on isolated synthetic data.
 
@@ -189,6 +191,9 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [String tuple key measurements](development/performance/2026-09-14-string-tuple-keys.md) — paired utility, consumed-label, and scheduler measurements with a reviewed migration boundary for opaque string keys.
+- [String tuple key replay](development/performance/2026-09-14-string-tuple-keys-replay.py) — portable replay using an isolated baseline worktree and candidate modules from a fixed checkout.
+- [String tuple key raw results](development/performance/2026-09-14-string-tuple-keys.results.json) — exploratory and final paired samples, benchmark reports, source hashes, and capture scripts.
 - [JSON Pointer encoding](development/performance/2026-09-14-encode-pointer.md) — interleaved encoder and Map lookup measurements, guarded escaping, semantic checks, and limits on deployed impact.
 - [JSON Pointer encoding replay](development/performance/2026-09-14-encode-pointer-replay.py) — portable adjacent-pair driver accepting baseline and fixed checkout roots and an output path.
 - [JSON Pointer encoding measurements](development/performance/2026-09-14-encode-pointer.results.json) — raw Deno reports, adjacent paired samples, source hashes, and replay drivers.

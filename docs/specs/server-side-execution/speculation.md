@@ -151,16 +151,13 @@ currency. The existing overlay and retirement rules below still apply.
   > being retriggered when any of the reads so far change (just like a
   > regular call), and the output being `undefined`.
 
-  — owner (Berni), 2026-08-21. Two clauses, both RULED and built, each
-  except as its text notes:
+  — owner (Berni), 2026-08-21. Two clauses, both RULED and built:
 
   1. **The unresolved read refuses.** Link resolution marks a dead-end
      behind a followed hop (`pendingHopDoc`); the lazy read path
      throws `UnresolvedInputError` (a `SchemaMismatchError` subclass,
      so the action-run boundary's existing "argument did not resolve"
-     disposal treats it identically, except that a refusal a
-     synchronous body throws leaves the previous result standing until
-     the fix clause 2 points at lands — §4's reconciliation is
+     disposal treats it identically — §4's reconciliation is
      unchanged). This applies ONLY when the reader's schema declares
      NO default: a declared default is the stated absent value and
      still flows (the `get() ?? fallback` idiom, and a computed that
@@ -184,17 +181,13 @@ currency. The existing overlay and retirement rules below still apply.
      population audit).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
-     it) and the run's transaction aborts with it as the reason — the
-     same non-event disposal, re-triggering on the reads so far. Today
-     that holds for an asynchronous body's rejection; a refusal a
-     synchronous body throws reaches the runner's catch before its
-     `postRun` is assigned, so the previous result stands, and the fix
-     is the one the [design plan's Stage
-     5](../../plans/lazy-cell-materialization.md) names. A pattern
-     body cannot yet MINT the error itself (it is runner-internal; a
-     pattern-facing refusal export is a flagged API question with the
-     owner), so the built coverage is the read-propagation path — the
-     OW51 shape — with the deliberate body-throw awaiting that export.
+     it) and produces an undefined result through the ordinary result
+     path — the same non-event disposal, re-triggering on the reads so far. A
+     pattern body cannot yet MINT the error itself (it is
+     runner-internal; a pattern-facing refusal export is a flagged API
+     question with the owner), so the built coverage is the
+     read-propagation path — the OW51 shape — with the deliberate
+     body-throw awaiting that export.
 
   **The serving-side re-trigger, explicit (RULED 2026-08-21 — the
   option-3 ruling on the demand-closure fork):**

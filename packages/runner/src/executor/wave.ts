@@ -54,6 +54,7 @@ import type {
   StorageTransactionRejected,
   TransactionSealDestination,
   Unit,
+  URI,
 } from "../storage/interface.ts";
 import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -560,6 +561,19 @@ export interface WaveCommitSink {
     sinceSeq: number,
   ): Promise<ReadonlyArray<readonly string[]>>;
 
+  /**
+   * Whether a commit after `sinceSeq` wrote `doc` that `holder`'s own
+   * derived commits do not account for — §3d's INTRUSION on a document
+   * this tenure derives into. A sink that cannot answer omits it, and the
+   * pure-derivation arm's view check below then stands down.
+   */
+  intrusionSince?(
+    space: MemorySpace,
+    doc: { id: string; scope?: CellScope; scopeKey: string },
+    sinceSeq: number,
+    holder: string | undefined,
+  ): Promise<boolean>;
+
   commitWave(
     batch: WaveSpaceCommit,
   ): Promise<Result<{ seq: number }, WaveCommitRejection>>;
@@ -618,6 +632,12 @@ interface WaveContribution {
    * the run actually served, which keys its basis rows (S4 —
    * server-execution v2 stage A). */
   discoveredScope: CellScope;
+
+  /** Per home doc-instance key: the seq the replica's CONFIRMED view
+   * stood at for that instance when this run sealed — the view its
+   * writes rest on, which the wave's own basis can be ahead of
+   * (#viewSeqsAtSeal). */
+  viewSeqs: ReadonlyMap<string, number>;
 }
 
 interface SealedSpaceContribution {
@@ -1311,6 +1331,7 @@ export class WaveAccumulator
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
         discoveredScope: assembly.discoveredScope,
+        viewSeqs: this.#viewSeqsAtSeal(assembly.spaces, context),
       };
       this.#contributions.push(contribution);
       waveSettlements.set(
@@ -1826,6 +1847,52 @@ export class WaveAccumulator
       if ((heads.get(key) ?? 0) > this.#basisSeq) conflicted.add(key);
     }
 
+    /** Whether `key` conflicts FOR this contribution: the doc moved past
+     * the wave's basis, or — for a pure derivation — past the view its own
+     * seal stood on, with an INTRUSION accounting for the difference.
+     *
+     * The basis and that view differ because the basis is the serverSeq
+     * the wave OPENED at, while the runs sealing into it read the
+     * replica's. A seal opens a wave when none is open, so a run that read
+     * before a commit was admitted can seal into a wave opened after it:
+     * the basis counts that commit and the view does not, and the doc's
+     * head then sits AT OR BELOW the basis while the derivation that wrote
+     * it never saw the value there. Committing that write is §3d's
+     * forbidden blind derived write — the shape that erased a user's first
+     * PerUser input under the initialization materializing their scoped
+     * slots.
+     *
+     * The intrusion question is what separates that from this tenure's own
+     * derived commits, which advance a document under runs still in flight
+     * as a matter of course: a view older than the head means nothing when
+     * the loop itself moved it. So a document only this tenure writes
+     * never conflicts here, which is §3d's own reading of a derived
+     * document — there are no other writers on one.
+     *
+     * Dropping costs nothing: the value is re-derivable, and a derivation
+     * that read the doc carries it in its basis rows, so the arrival of
+     * the commit it missed re-runs it through the ordinary dependency
+     * path. Non-re-derivable consequences keep the wave's basis alone —
+     * their conflict arm rebases or requeues rather than dropping, and
+     * requeueing against a seq the replica has not caught up to is the
+     * sustained-traffic livelock §3d forbids. */
+    const conflictsFor = async (
+      contribution: WaveContribution,
+      key: string,
+      doc: { id: string; scope?: CellScope; scopeKey: string },
+    ): Promise<boolean> => {
+      if (conflicted.has(key)) return true;
+      if (contribution.context.kind !== "derivation") return false;
+      const held = contribution.viewSeqs.get(key) ?? 0;
+      if ((heads.get(key) ?? 0) <= held) return false;
+      return await sink.intrusionSince?.(
+        this.#space,
+        doc,
+        held,
+        this.#lease?.holder,
+      ) === true;
+    };
+
     /** The head a contribution observed on a conflicted doc through one of
      * the loop's own direct commits, or `undefined` when the doc moved for
      * some other reason, the contribution was sealed before the commit,
@@ -1873,9 +1940,9 @@ export class WaveAccumulator
         const docs = homeWrites[contribution.index];
         for (const [key, doc] of docs) {
           if (
-            !conflicted.has(key) ||
             droppedDocs[contribution.index].has(key) ||
-            rebasedDocs[contribution.index].has(key)
+            rebasedDocs[contribution.index].has(key) ||
+            !await conflictsFor(contribution, key, doc)
           ) {
             continue;
           }
@@ -2433,6 +2500,46 @@ export class WaveAccumulator
       });
     }
     return docs;
+  }
+
+  /**
+   * Where the replica's CONFIRMED view stands on each home doc a sealing
+   * run writes — pending writes excluded, so what it reports is the state
+   * the run's own layer sits on.
+   *
+   * Taken AT SEAL because that is the moment the contribution's writes
+   * are fixed against a view. The wave's basis is the serverSeq it opened
+   * at, which a seal can open after a commit this replica has not taken,
+   * and the commit step runs later still, by which time the frame may
+   * have landed and the replica no longer says what the run derived from.
+   */
+  #viewSeqsAtSeal(
+    spaces: readonly SealedSpaceContribution[],
+    context: WaveRunContext,
+  ): ReadonlyMap<string, number> {
+    const replica = this.#replicaFor(this.#space);
+    const identity = context.scopeKeyIdentity ?? this.#scopeKeyIdentity;
+    const home = spaces.find((space) => space.space === this.#space);
+    const writes = (home?.sealed.commit.operations ?? []).filter((operation) =>
+      operation.op !== "sqlite"
+    );
+    const seqs = new Map<string, number>();
+    for (const operation of writes) {
+      // Two operations on one instance read the same seq, so the second
+      // overwrites the first with what it already held.
+      seqs.set(
+        docInstanceKey(
+          operation.id,
+          this.#scopeKeyFor(operation.scope, context),
+        ),
+        replica.confirmedDocumentSeq(
+          operation.id as URI,
+          operation.scope,
+          identity,
+        ),
+      );
+    }
+    return seqs;
   }
 
   /** M1 (scopes.md §5, §7): a run's scoped addresses resolve against the

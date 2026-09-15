@@ -18,6 +18,8 @@ import {
   assertThrows,
 } from "@std/assert";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import type { Ctx, TileView } from "../types.ts";
 import { BENCH_TREND_BUCKET_MS, REPO } from "../config.ts";
 import { BenchmarkHistoryStore } from "../benchmark-history-cache.ts";
@@ -35,6 +37,7 @@ import {
   benchPage,
   CALIBRATION_FILE,
   formatNs,
+  keyBenchmarks,
   pointsForWindow,
   representativeBenchmarkCpu,
   sampleBenchmarkRuns,
@@ -2071,7 +2074,7 @@ Deno.test("benchmark: the tile sums the totals, and one artifact per bucket is k
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertStringIncludes(v.value ?? "", "flat"); // the headline trend, flat over the window
     assertEquals(v.status, "good");
-    assertEquals(v.label, "benchmarks");
+    assertEquals(v.label, "all benchmarks");
     assertEquals(v.duration, 11 * DAY);
     assertEquals(v.sub, undefined);
     assertStringIncludes(v.extra ?? "", "<svg");
@@ -3935,4 +3938,299 @@ Deno.test("runtime history reports a recent failed collection without starting a
     } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
     await Deno.remove(directory, { recursive: true });
   }
+});
+
+describe("keyBenchmarks", () => {
+  /** Builds ten daily benchmark artifacts ending inside the headline window. */
+  async function history(
+    idBase: number,
+    makeReport: (day: number) => string,
+  ): Promise<Api> {
+    const artifacts: Api["artifacts"] = {};
+    const zips: Api["zips"] = {};
+    const runs: GhRun[] = [];
+    for (let day = 0; day < 10; day++) {
+      const id = idBase + day;
+      runs.unshift(ghRun(id, SAMPLED_BASE - (9 - day) * DAY));
+      artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+      zips[id * 10] = await benchZip(makeReport(day));
+    }
+    return { pages: { 1: runs }, artifacts, zips };
+  }
+
+  const navigation =
+    "packages/patterns/integration/topic-board-navigation.bench.ts";
+  const scale = "packages/patterns/integration/topic-board-scale.bench.ts";
+
+  it("balances the selected changes geometrically and removes machine changes", async () => {
+    const api = await history(930_000, (day) => {
+      const changed = day >= 5;
+      const host = changed ? 1.25 : 1;
+      return report([
+        bench(
+          navigation,
+          "topic board",
+          "journey",
+          timings(1e9 * host * (changed ? 2 : 1)),
+        ),
+        bench(
+          scale,
+          "topic board scale",
+          "100",
+          timings(1e9 * host * (changed ? 0.5 : 1)),
+        ),
+        bench(
+          scale,
+          "topic board scale",
+          "1000",
+          timings(1e9 * host * (changed ? 100 : 1)),
+        ),
+        bench(
+          navigation,
+          "topic board",
+          "load",
+          timings(1e9 * host * (changed ? 100 : 1)),
+        ),
+        bench(
+          navigation,
+          "other topic board",
+          "journey",
+          timings(1e9 * host * (changed ? 100 : 1)),
+        ),
+        bench(
+          CALIBRATION_FILE,
+          null,
+          "integer arithmetic",
+          timings(1e6 * host),
+        ),
+      ]);
+    });
+    await withApi(api, async (calls) => {
+      const [selected, all] = await Promise.all([
+        keyBenchmarks.collect(ctx({ GH_TOKEN: "t" })),
+        benchmark.collect(ctx({ GH_TOKEN: "t" })),
+      ]);
+      expect(runListCalls(calls)).toHaveLength(1);
+      expect(selected.label).toBe("key benchmarks");
+      expect(selected.status).toBe("good");
+      expect(selected.value).toBe("flat");
+      expect(selected.extra).toContain(">2 benchmarks</div>");
+      expect(selected.extra).toContain("<svg");
+      expect(selected.duration).toBe(9 * DAY);
+      const downloads = artifactCalls(calls).length;
+
+      expect(all.label).toBe("all benchmarks");
+      expect(all.status).toBe("warn");
+      expect(all.extra).toContain(">5 benchmarks</div>");
+      expect(all.href).toBe("/bench?view=runtime&repo=labs");
+      expect(selected.href).toBe("/bench?view=runtime&repo=labs&key=1");
+      expect(rows(benchPage("p99", "file", 45)).map((row) => row.name))
+        .toContain("topic board scale/1000");
+      await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      expect(artifactCalls(calls)).toHaveLength(downloads);
+    });
+  });
+
+  it("opens the key tile's drilldown with only key rows and preserves the filter", async () => {
+    const api = await history(938_000, (day) =>
+      report([
+        bench(
+          navigation,
+          "topic board",
+          "journey",
+          timings(day >= 5 ? 4e9 : 1e9),
+        ),
+        bench(scale, "topic board scale", "100", timings(1e9)),
+        bench(scale, "topic board scale", "1000", timings(1e9)),
+        bench("packages/other/other.bench.ts", null, "unrelated", timings(1e6)),
+      ]));
+    await withApi(api, async () => {
+      const tile = await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" }));
+      const url = new URL(tile.href!, "http://x");
+      const initial =
+        await (await benchmark.routes![0].handler(new Request(url), url))
+          .text();
+      expect(initial).toContain('id="key-only" name="key" value="1" checked');
+      expect(rows(initial).map((row) => row.name).sort()).toEqual([
+        "topic board scale/100",
+        "topic board/journey",
+      ]);
+      for (const sort of ["file", "duration", "trend"]) {
+        const html = await page(`key=1&sort=${sort}&stat=p75&days=7`);
+        expect(rows(html).map((row) => row.name.split(" &gt; ").at(-1)).sort())
+          .toEqual([
+            "topic board scale/100",
+            "topic board/journey",
+          ]);
+        expect(html).toContain('<span class="cpu-detail">2 benchmarks ·');
+        expect(html).not.toContain("packages/other/other.bench.ts");
+        const links = [
+          ...html.matchAll(/href="(\/bench\?view=runtime[^"]+)"/g),
+        ];
+        expect(links.length).toBeGreaterThan(1);
+        for (const [, href] of links) {
+          const target = new URL(href.replaceAll("&amp;", "&"), "http://x");
+          expect(target.searchParams.get("key")).toBe("1");
+          expect(target.searchParams.get("days")).toBe("7");
+        }
+        const fragment = await page(
+          `key=1&sort=${sort}&stat=p75&days=7&fragment=range`,
+        );
+        expect(rows(fragment)).toEqual(rows(html));
+      }
+      const all = await page("");
+      expect(all).toContain('id="key-only" name="key" value="1">');
+      expect(rows(all)).toHaveLength(4);
+      expect(all).toContain('<span class="cpu-detail">4 benchmarks ·');
+      expect(rows(await page("key=0"))).toEqual(rows(all));
+    });
+  });
+
+  it("shows an empty filtered view when only non-key benchmarks were measured", async () => {
+    await withTotals(
+      [{ id: 939_000, at: SAMPLED_BASE, total: 1e6 }],
+      async () => {
+        await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+        const html = await page("key=1");
+        expect(rows(html)).toEqual([]);
+        expect(html).toContain(
+          "No benchmark samples were found in the selected window.",
+        );
+        expect(html).not.toContain('class="cpu-key"');
+        expect(rows(await page(""))).toHaveLength(1);
+      },
+    );
+  });
+
+  it("reports a selected regression that the full benchmark set dilutes", async () => {
+    const api = await history(931_000, (day) =>
+      report([
+        bench(
+          navigation,
+          "topic board",
+          "journey",
+          timings(day >= 5 ? 4e9 : 1e9),
+        ),
+        bench(scale, "topic board scale", "100", timings(1e9)),
+        ...Array.from({ length: 38 }, (_, index) =>
+          bench("packages/a/x.bench.ts", null, `flat ${index}`, timings(1e6))),
+      ]));
+    await withApi(api, async () => {
+      const selected = await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" }));
+      const all = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      expect(selected.status).toBe("warn");
+      expect(selected.value).toBe("▲100%");
+      expect(selected.extra).toContain(">2 benchmarks</div>");
+      expect(all.status).toBe("good");
+      expect(all.extra).toContain(">40 benchmarks</div>");
+    });
+    await withApi({ throws: new Error("network offline") }, async () => {
+      const selected = await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" }));
+      expect(selected.label).toBe("key benchmarks");
+      expect(selected.status).toBe("unknown");
+      expect(selected.value).toBe("▲100%");
+      expect(selected.sub).toBeTruthy();
+      expect(selected.extra).toContain(">2 benchmarks</div>");
+    });
+  });
+
+  it("keeps the index flat when a selected benchmark is added or removed", async () => {
+    const api = await history(932_000, (day) =>
+      report([
+        bench(navigation, "topic board", "journey", timings(1e9)),
+        ...(day >= 3 && day <= 6
+          ? [bench(scale, "topic board scale", "100", timings(100e9))]
+          : []),
+        bench(scale, "topic board scale", "1000", timings(1e9 * (day + 1))),
+      ]));
+    await withApi(api, async () => {
+      const selected = await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" }));
+      expect(selected.status).toBe("good");
+      expect(selected.value).toBe("flat");
+      expect(selected.extra).toContain(">1 benchmark</div>");
+      expect(selected.duration).toBe(9 * DAY);
+    });
+  });
+
+  it("reports missing selected data even when other benchmarks succeeded", async () => {
+    await withApi({ pages: { 1: [] } }, async () => {
+      expect(await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" })))
+        .toMatchObject({
+          label: "key benchmarks",
+          status: "unknown",
+          value: "—",
+          sub: "no benchmark runs",
+        });
+    });
+    await withTotals(
+      [{ id: 933_000, at: SAMPLED_BASE, total: 1e6 }],
+      async () => {
+        expect(await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" })))
+          .toMatchObject({
+            label: "key benchmarks",
+            status: "bad",
+            value: "failed",
+            sub: "no benchmark data",
+          });
+        const all = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+        expect(all.status).toBe("good");
+        expect(all.extra).toContain(">1 benchmark</div>");
+      },
+    );
+  });
+
+  it("keeps the index flat when consecutive runs share no selected measurement", async () => {
+    const api = await history(935_000, (day) => {
+      const host = day >= 5 ? 0.8 : 1;
+      return report([
+        day < 5
+          ? bench(navigation, "topic board", "journey", timings(1e9 * host))
+          : bench(scale, "topic board scale", "100", timings(1e9 * host)),
+        bench(scale, "topic board scale", "1000", timings(1e9 * host)),
+        bench(
+          CALIBRATION_FILE,
+          null,
+          "integer arithmetic",
+          timings(1e6 * host),
+        ),
+      ]);
+    });
+    await withApi(api, async () => {
+      const selected = await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" }));
+      const all = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      expect(selected.status).toBe("good");
+      expect(selected.value).toBe("flat");
+      expect(selected.extra).toContain(">1 benchmark</div>");
+      expect(all.value).toBe("flat");
+    });
+  });
+
+  it("keeps the selected trend behind failure and running status", async () => {
+    const api = await history(934_000, (day) =>
+      report([
+        bench(
+          navigation,
+          "topic board",
+          "journey",
+          timings(day >= 5 ? 2e9 : 1e9),
+        ),
+        bench(scale, "topic board scale", "100", timings(day >= 5 ? 2e9 : 1e9)),
+      ]));
+    api.pages![1].unshift(
+      {
+        ...ghRun(934_091, SAMPLED_BASE + 20 * 60_000, null),
+        status: "in_progress",
+      },
+      ghRun(934_090, SAMPLED_BASE + 10 * 60_000, "failure"),
+    );
+    await withApi(api, async () => {
+      const selected = await keyBenchmarks.collect(ctx({ GH_TOKEN: "t" }));
+      expect(selected.status).toBe("bad");
+      expect(selected.valueLabel).toBe("failed (was ▲100%)");
+      expect(selected.sub).toMatch(/^last good .+ ago · 1 run failed$/);
+      expect(selected.aside).toContain("running");
+      expect(selected.extra).toContain("<svg");
+      expect(selected.extra).not.toContain("2 benchmarks");
+    });
+  });
 });

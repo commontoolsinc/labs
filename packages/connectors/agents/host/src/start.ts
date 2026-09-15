@@ -80,6 +80,7 @@ const defaultDependencies: StartAgentsHostDependencies = {
 export class RunningAgentsHost {
   readonly host: AgentsHost;
   readonly runtime: Runtime;
+  readonly #graphRuntime?: Runtime;
   readonly spaceDid: string;
   readonly debugPieceId?: string;
   readonly commandProducers: readonly BoundCommandProducer[];
@@ -99,6 +100,7 @@ export class RunningAgentsHost {
   }) {
     this.host = options.host;
     this.runtime = options.fabric.runtime;
+    this.#graphRuntime = options.fabric.graphRuntime;
     this.spaceDid = options.fabric.spaceDid;
     this.debugPieceId = options.debugPieceId;
     this.commandProducers = [...(options.commandProducers ?? [])];
@@ -119,6 +121,7 @@ export class RunningAgentsHost {
     await this.runtime.storageManager.synced().catch((error) =>
       failures.push(error)
     );
+    await this.#graphRuntime?.dispose().catch((error) => failures.push(error));
     await this.runtime.dispose().catch((error) => failures.push(error));
     for (const lock of [...this.#processLocks].reverse()) {
       await lock.release().catch((error) => failures.push(error));
@@ -284,6 +287,9 @@ export async function startAgentsHost(
       await fabric?.runtime.settled(Infinity).catch((settledError) => {
         cleanupFailures.push(settledError);
       });
+      await fabric?.graphRuntime?.dispose().catch((disposeError) => {
+        cleanupFailures.push(disposeError);
+      });
       await fabric?.runtime.dispose().catch((disposeError) => {
         cleanupFailures.push(disposeError);
       });
@@ -296,6 +302,9 @@ export async function startAgentsHost(
       });
       await fabric?.runtime.settled(Infinity).catch((settledError) => {
         cleanupFailures.push(settledError);
+      });
+      await fabric?.graphRuntime?.dispose().catch((disposeError) => {
+        cleanupFailures.push(disposeError);
       });
       await fabric?.runtime.dispose().catch((disposeError) => {
         cleanupFailures.push(disposeError);

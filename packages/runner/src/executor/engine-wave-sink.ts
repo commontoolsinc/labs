@@ -39,6 +39,7 @@ import type { Engine } from "@commonfabric/memory/v2/engine";
 import {
   applyCommit,
   applyWaveCommit,
+  hasIntrusionSince,
   readState,
   RowLabelCommitError,
   selectDocHead,
@@ -194,6 +195,20 @@ export class EngineWaveCommitSink implements WaveCommitSink {
       id: doc.id,
       scopeKey: doc.scopeKey,
       sinceSeq,
+    }));
+  }
+
+  intrusionSince(
+    space: MemorySpace,
+    doc: { id: string; scope?: CellScope; scopeKey: string },
+    sinceSeq: number,
+    holder: string | undefined,
+  ): Promise<boolean> {
+    return Promise.resolve(hasIntrusionSince(this.#engineFor(space), {
+      id: doc.id,
+      scopeKey: doc.scopeKey,
+      sinceSeq,
+      ...(holder === undefined ? {} : { holder }),
     }));
   }
 
