@@ -45,7 +45,8 @@ const JS_PRIMITIVE_TYPE_VALUE_TAGS = Object.freeze(
 );
 
 /**
- * The tags of all JS types other than `object`, plus `null`.
+ * The tags of all JS types other than `object`, plus `null`: the vocabulary of
+ * `typeOfIncludingNull()`, less `object`.
  */
 export const JS_TYPE_VALUE_TAGS = Object.freeze(
   {

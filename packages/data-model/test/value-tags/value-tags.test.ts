@@ -26,6 +26,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { JsTypeTagIncludingNull } from "@commonfabric/utils/types";
+
 import {
   BaseFabricPrimitive,
   VALUE_TAG,
@@ -48,7 +50,6 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   JS_TYPE_VALUE_TAGS,
-  jsTagFromValue,
   type JsTypeValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
@@ -203,27 +204,13 @@ describe("value-tags", () => {
         new Set(Object.values(JS_TYPE_VALUE_TAGS)),
       );
     });
-  });
 
-  describe("jsTagFromValue()", () => {
-    for (const [label, value, tag] of JS_TYPE_TAGS) {
-      it(`returns \`${tag}\` for ${label}`, () => {
-        expect(jsTagFromValue(value)).toBe(tag);
-      });
-    }
+    it("is the `typeOfIncludingNull()` vocabulary, less `object`", () => {
+      type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false)
+        : false;
 
-    it("returns `object` for an object of any kind", () => {
-      // The value `null` has a tag and every other object has none, whatever
-      // its class; a plain object, an array, and both kinds of fabric class
-      // are the same to this.
-
-      expect(jsTagFromValue({})).toBe("object");
-      expect(jsTagFromValue([])).toBe("object");
-      expect(jsTagFromValue(new Date())).toBe("object");
-      expect(jsTagFromValue(new FabricHash(new Uint8Array(32), "fid1")))
-        .toBe("object");
-      expect(jsTagFromValue(FabricError.fromNativeError(new Error("x"))))
-        .toBe("object");
+      const _same: Same<JsTypeValueTag | "object", JsTypeTagIncludingNull> =
+        true;
     });
   });
 
