@@ -3989,9 +3989,12 @@ export function fabricFromConvertibleJsValue(
 > a native class instance, decided last by its class, read from its prototype,
 > by a `switch` on constructor identity; a recognized one is a value the
 > conversion has yet to import, the heavier path, so the lookup's cost sits on
-> it alone. A `FabricPrimitive` subclass that reports no tag of its own is
-> tagged as its parent, which is a defect in that subclass rather than one the
-> dispatch guards against.
+> it alone. That `switch` names only the classes no earlier question decides:
+> an object merely built on the prototype of `Object`, `Array`, or an `Error`
+> class is none of those by the test that decides it, and comes back `null`,
+> unrecognized rather than misidentified. A `FabricPrimitive` subclass that
+> reports no tag of its own is tagged as its parent, which is a defect in that
+> subclass rather than one the dispatch guards against.
 
 > **Implementation: centralized shallow-clone utility.** The conversion
 > functions use a centralized `cloneIfNecessary()` utility (in

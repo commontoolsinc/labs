@@ -1798,10 +1798,12 @@ describe("convertible-js", () => {
       });
 
       it("throws for a non-array whose prototype is `Array.prototype`", () => {
-        // Such a value has `constructor === Array`, so type-tag dispatch routes
-        // it to array handling even though `Array.isArray()` is `false` for it.
+        // `Array.isArray()` is `false` for such a value, so it is no array to
+        // the dispatch, and its prototype naming `Array` does not make it one.
         // It has no fabric representation as either an array or an object, so
-        // it must be rejected rather than quietly converted.
+        // it is rejected rather than quietly converted; the reason names the
+        // class it presents itself as, which the validity check decides on its
+        // own.
 
         const fake = Object.create(Array.prototype) as Record<string, unknown>;
         fake[0] = "a";

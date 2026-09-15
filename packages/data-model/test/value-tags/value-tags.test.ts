@@ -698,26 +698,19 @@ describe("value-tags", () => {
 
   describe("recognition is by the class the prototype names", () => {
     // The class is read from the prototype and compared by identity, so an
-    // object created from a builtin's prototype is tagged as that builtin
-    // whether or not it carries the builtin's internal slots. An array and an
-    // error are decided before any class is read, so the objects here are
-    // neither.
+    // object created from a recognized builtin's prototype is tagged as that
+    // builtin whether or not it carries the builtin's internal slots. A plain
+    // object, an array, and an error are decided by tests that read the value
+    // itself, so an object merely built on one of those prototypes is none of
+    // them and is unrecognized.
 
     for (
       const [label, ctor, tag] of [
-        ["`Error`", Error, VALUE_TAGS.JsError],
-        ["`TypeError`", TypeError, VALUE_TAGS.JsError],
-        ["`RangeError`", RangeError, VALUE_TAGS.JsError],
-        ["`SyntaxError`", SyntaxError, VALUE_TAGS.JsError],
-        ["`ReferenceError`", ReferenceError, VALUE_TAGS.JsError],
-        ["`URIError`", URIError, VALUE_TAGS.JsError],
-        ["`EvalError`", EvalError, VALUE_TAGS.JsError],
         ["`Map`", Map, VALUE_TAGS.JsMap],
         ["`Set`", Set, VALUE_TAGS.JsSet],
         ["`Date`", Date, VALUE_TAGS.JsDate],
         ["`Uint8Array`", Uint8Array, VALUE_TAGS.JsUint8Array],
         ["`RegExp`", RegExp, VALUE_TAGS.JsRegExp],
-        ["`Array`", Array, VALUE_TAGS.Array],
       ] as ReadonlyArray<[string, { prototype: object }, ValueTag]>
     ) {
       it(`returns \`${tag}\` for an object whose prototype is that of ${label}`, () => {
@@ -726,18 +719,34 @@ describe("value-tags", () => {
       });
     }
 
-    it("returns `JsError` tag for an object whose prototype is that of an exotic `Error` subclass", () => {
+    for (
+      const [label, ctor] of [
+        ["`Array`", Array],
+        ["`Error`", Error],
+        ["`TypeError`", TypeError],
+        ["`RangeError`", RangeError],
+        ["`SyntaxError`", SyntaxError],
+        ["`ReferenceError`", ReferenceError],
+        ["`URIError`", URIError],
+        ["`EvalError`", EvalError],
+      ] as ReadonlyArray<[string, { prototype: object }]>
+    ) {
+      it(`returns \`null\` for a non-instance whose prototype is that of ${label}`, () => {
+        expect(tagOfConvertibleJsValueElseNull(Object.create(ctor.prototype)))
+          .toBe(null);
+      });
+    }
+
+    it("returns `null` for a non-error whose prototype is that of an exotic `Error` subclass", () => {
       class ExoticError extends Error {}
 
       expect(
         tagOfConvertibleJsValueElseNull(Object.create(ExoticError.prototype)),
-      )
-        .toBe(VALUE_TAGS.JsError);
+      ).toBe(null);
     });
 
-    it("returns `Object` tag for an object whose prototype is a plain object", () => {
-      expect(tagOfConvertibleJsValueElseNull(Object.create({})))
-        .toBe(VALUE_TAGS.Object);
+    it("returns `null` for an object whose prototype is a plain object", () => {
+      expect(tagOfConvertibleJsValueElseNull(Object.create({}))).toBe(null);
     });
 
     it("returns `null` for an instance of an unrecognized builtin class", () => {

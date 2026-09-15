@@ -134,7 +134,11 @@ export function tagOfFabricValueElseNull(
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
  *
- * A native JS builtin is recognized by the identity of the class its
+ * A plain object, an array, and an error are each decided by a test that
+ * reads the value itself rather than its prototype: `Object.prototype` or a
+ * null prototype, `Array.isArray()`, and `Error.isError()`. An object merely
+ * built on one of those prototypes is none of them, and comes back `null`.
+ * The remaining builtins are recognized by the identity of the class the
  * prototype names. Answering that needs no class this system defines, and
  * this module holds none: a concrete fabric class reaches the codecs and,
  * through them, the instance bases, so a module holding one in order to
@@ -191,27 +195,9 @@ export function tagOfConvertibleJsValueElseNull(
   const ctor = constructorOfPrototype(proto);
 
   // A `switch` on constructor identity, rather than sequential `instanceof`
-  // checks.
+  // checks. A prototype naming no callable constructor at all reaches the
+  // default arm.
   switch (ctor) {
-    case Object: {
-      return VALUE_TAGS.Object;
-    }
-
-    case Array: {
-      return VALUE_TAGS.Array;
-    }
-
-    // `Error` and standard subclasses all map to the `JsError` tag.
-    case Error:
-    case TypeError:
-    case RangeError:
-    case SyntaxError:
-    case ReferenceError:
-    case URIError:
-    case EvalError: {
-      return VALUE_TAGS.JsError;
-    }
-
     case Map: {
       return VALUE_TAGS.JsMap;
     }
@@ -233,14 +219,7 @@ export function tagOfConvertibleJsValueElseNull(
     }
 
     default: {
-      // Catch exotic `Error` subclasses (e.g. custom subclasses with
-      // non-standard constructors). `Error.isError()` is no use here: it
-      // recognizes actual `Error` instances, not a prototype chain, and what
-      // is in hand is a constructor. A prototype naming no callable
-      // constructor at all gets no tag.
-      return ((ctor !== undefined) && (ctor.prototype instanceof Error))
-        ? VALUE_TAGS.JsError
-        : null;
+      return null;
     }
   }
 }
