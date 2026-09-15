@@ -1,19 +1,15 @@
 /**
- * What a caller can still observe about a topic it filed through the board,
- * once the board demands only the fields it renders.
+ * What a caller can observe about a topic it filed through the board, when the
+ * board demands only the fields it renders.
  *
- * These three properties were pattern tests until the board's `topics` demand
- * narrowed. A pattern test can only reach a stored topic through the holder's
- * projection, and that projection no longer carries verbs, threads, or the
- * mention graph — so the properties stopped being observable there. They are
- * observable here, because this is the move the design says a caller makes:
- * survey the board, resolve the row to the topic's own address, and read or
- * call the topic itself, where its own schema governs.
+ * These cases make the move the design says a caller makes: survey the board,
+ * resolve the row to the topic's own address, and read or call the topic
+ * itself, where its own schema governs.
  *
- * Each `it()` therefore guards a property of `addTopic`'s children that nothing
- * else can: that the child is wired to the board's mention pivot, that a body
- * given at create is not recorded as a body update, and that the board's index
- * row tracks the child's thread after the fact.
+ * Each `it()` guards a property of `addTopic`'s children: that the child is
+ * wired to the board's mention pivot, that a body given at create is not
+ * recorded as a body update, and that the board's index row tracks the child's
+ * thread after the fact.
  */
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -167,19 +163,15 @@ describe("topic-board-child-contract", () => {
 });
 
 /**
- * The board's mention pivot, exercised where it is still reachable.
+ * The board's mention pivot, exercised through a board and the topics it
+ * created.
  *
- * `crossrefTable` derives the whole reference graph once on the board, and each
- * topic reads its own row out of it. Testing that needs two things at the same
- * time: topics that are ON a board, so the pivot sees them, and `mention` /
- * `unmention` / `referencedBy` on those same topics. A pattern test can no
- * longer have both — the board's demand carries no verbs, and a topic
- * constructed in a pattern body cannot be placed on a board either (pushing one
- * in reports a schema mismatch and the action never runs; seeding the array at
- * construction fails because `Cell.of()` takes static data only).
- *
- * Here both hold, because a caller files through the board and then addresses
- * the created topic by its own fid.
+ * `crossrefTable()` derives the whole reference graph once on the board, and
+ * each topic reads its own row out of it. Testing that needs two things at the
+ * same time: topics that are ON a board, so the pivot sees them, and
+ * `mention` / `unmention` / `referencedBy` on those same topics. Here both
+ * hold, because a caller files through the board and then addresses the
+ * created topic by its own fid.
  */
 describe("topic-board-pivot-contract", () => {
   let cc: PiecesController;

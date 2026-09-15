@@ -210,8 +210,7 @@ usage:
 
 ## Testing the board through a narrowed demand
 
-A pattern test reaches a stored topic only through the holder's projection, so
-the narrowing takes several properties out of its reach. They are guarded in
+Several properties of the topics a board creates are guarded in
 `packages/patterns/integration/topic-board-child-contract.test.ts`, which does
 what a caller does: file through the board, resolve the row to the topic's own
 address, then read and call the topic there. That covers `addTopic` wiring its
@@ -219,19 +218,20 @@ child to the pivot, a body given at create not being recorded as a body update,
 an index row tracking a thread that grew after the row was built, and the
 pivot's own rules.
 
-Two constraints shape what can be tested where, and both are worth knowing
-before writing a case:
+Two facts shape what can be tested where, and both are worth knowing before
+writing a case:
 
-- A piece built in a pattern body cannot be placed on a board. An action pushing
-  one never runs, its argument logged as a potential schema mismatch, and
-  seeding the array at construction is refused because a cell constructor takes
-  static data. A pattern test therefore cannot hold a topic that is both on a
-  board and callable.
+- A board built in a pattern test with topics in its argument lists them, one
+  topic twice included, and runs its pivot over them. Those topics get no
+  `referencedBy` of their own, because the board wires `boardCrossrefs` only
+  into the topics `addTopic` and the composer create. An action that pushes a
+  Topic built in a pattern body does not run: its argument reads as undefined,
+  which the runner logs as a potential schema mismatch.
 - The pivot excludes a topic from its own inbound edges by identity rather than
   array position. Only a list holding the same topic twice separates those, and
-  a board can hold one: writing a live topic handle into the board's `topics`
-  through the piece controller's `input`, or linking a topic there with
-  `PiecesController.link`, adds an entry for a topic the board already lists.
+  a board can hold one: writing the live handle of a topic the board already
+  lists into its `topics` through the piece controller's `input`, or linking
+  that topic there with `PiecesController.link`, adds a second entry for it.
   `mentionedBy` is exported so that a test can hand it such a list directly.
 
 ## Deploying to the team board
