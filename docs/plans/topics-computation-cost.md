@@ -67,29 +67,9 @@ and removal timestamps. Removing them from the aggregate could move activity
 backward. Preserve optional-field defaults and compatibility with stored topic
 generations. Preserve linked record identity for editing handlers.
 
-Reactive callback operators (`.map()`, `.filter()`, `.flatMap()`, `.count()`
-with a predicate, `.minBy()`, `.maxBy()`, `.groupBy()`, and `.keyBy()`) lower to
-nested patterns, as sections
-[9.4](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#94-array-method-strategy)
-and
-[7.2](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#72-emitter-behaviors)
-of the transformer spec describe. The
-[hoisting transformer](../../packages/ts-transformers/src/transformers/builder-call-hoisting.ts)
-numbers those patterns per file, using the per-prefix counters section
-[11.3](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#113-hoist-placement-and-tdz-ordering)
-describes, and stored state records the numbers. In each Topics source file, the
-existing operators' hoists keep their numbers and bodies, and the check is
-mechanical: compare the ordered `__cfPattern_N` hoists that
-`cf check --show-transformed` prints for the baseline and for each candidate. A
-new operator, or a subpattern that uses one, keeps the invariant when declared
-after the existing operator sites, or when it lives in a pattern in its own
-module, whose operators are numbered separately; in `topic.tsx`, an operator the
-view reads, such as T4's maintained count, comes before the view's operators and
-takes the own-module route. An operator nested inside an existing operator's
-callback is numbered before that operator, so it breaks the invariant. The
-[pattern update gates](../specs/pattern-update-testing.md) do not establish that
-a changed hoist is safe: T5 records the comparison for each accepted change, and
-T6 checks the rows of any operator whose hoist changed.
+No stored hoist name on any deployed topic generation may resolve to a different
+body. The [pattern update gates](../specs/pattern-update-testing.md) do not
+establish this; T5 establishes how to check it, with evidence from stored data.
 
 ## Execution tracker
 
@@ -166,10 +146,10 @@ implementation and prototypes can begin earlier.
       regression read budgets, run all relevant authored/package/integration
       tests, preserve compatibility baselines, pass the
       [pattern update gates](../specs/pattern-update-testing.md), and update
-      maintained docs. Produce matched before/after demos and reports, and
-      record each accepted change's hoist comparison under
-      [compatibility requirements](#compatibility-requirements). Each
-      implementation PR needs a review through the
+      maintained docs. Produce matched before/after demos and reports. Establish
+      and record how to check the hoist requirement under
+      [compatibility requirements](#compatibility-requirements), with evidence
+      from stored data. Each implementation PR needs a review through the
       [`cf-review` skill](../../skills/cf-review/SKILL.md) and a clean Cubic
       review on its final head before merge. Exit: all accepted T1–T4 changes
       are merged, remaining proposals are explicitly deferred, and exact
@@ -202,16 +182,16 @@ each candidate's alike, and reaches their non-exported derivations without
 adding exports for measurement; a compiled module
 [registers by name](../specs/ts-transformer/ts_transformers_current_behavior_spec.md#114-__cfreg-content-addressed-registration)
 its non-exported top-level builder artifacts under its content identity. A
-derivation inside a pattern body registers under a position-numbered name that
-can differ between the baseline and a candidate, so the tier measures it through
-the pattern that holds it rather than by registered name. It runs at 32, 128,
-and 512 topics, with low-degree and high-degree mention graphs, and varies E
-independently of N. Exercise a single large inbound bucket as well as
-distributed links. Test threads at 10, 100, and 1,000 comments, varying L
-separately. The headless read-budget test runs in CI at sizes up to 128 topics
-and threads up to 100 comments; 512 topics and 1,000 comments run only from this
-tier's probe script. T0 builds this tier's fixture; if a size cannot be built,
-T0 records the measured limit and the tier runs at the largest size it builds.
+derivation inside a pattern body registers under a name that can differ between
+the baseline and a candidate, so the tier measures it through the pattern that
+holds it rather than by registered name. It runs at 32, 128, and 512 topics,
+with low-degree and high-degree mention graphs, and varies E independently of N.
+Exercise a single large inbound bucket as well as distributed links. Test
+threads at 10, 100, and 1,000 comments, varying L separately. The headless
+read-budget test runs in CI at sizes up to 128 topics and threads up to 100
+comments; 512 topics and 1,000 comments run only from this tier's probe script.
+T0 builds this tier's fixture; if a size cannot be built, T0 records the
+measured limit and the tier runs at the largest size it builds.
 
 The browser tier measures the whole system, rendering included, through the
 scale and navigation benchmarks at the board sizes their seed builds. Its new
@@ -227,13 +207,21 @@ only the headless tier varies E independently of N. Each tier includes a small
 case to expose startup and maintenance overhead that scaling tests can hide.
 
 Three demand workloads are distinct: the board alone, the board with one topic
-open, and all backlink outputs. The headless tier runs all three, labeling the
-all-backlinks workload a scaling probe rather than normal UI behavior. The
-browser tier runs the board-alone and board-with-one-topic workloads and not the
-all-backlinks one. Measure cold initialization, warm updates, and reopen or
-reconnect separately. Hold runtime, source package, data, demand, and feature
-flags constant between comparison arms; alternate repeated timing runs and
-report their distribution rather than a single favorable sample.
+open, and all backlink outputs. The browser tier runs the board-alone and
+board-with-one-topic workloads and not the all-backlinks one. The headless tier
+follows the demand the browser measured, and runs the all-backlinks workload as
+a scaling probe rather than normal UI behavior. In that measurement, with client
+execution and stored card values, a board with no topic open ran none of the
+pivot, backlinks, comment-count, or last-activity lifts, because its cards read
+stored values. Opening a topic ran the pivot, that topic's backlinks, and its
+comment count. The measurement is one small sample, taken with
+[lazy materialization](../development/EXPERIMENTAL_OPTIONS.md#lazymaterialization)
+on. [Server execution](../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
+and lazy materialization off are not yet measured; the browser tier measures
+both before the baseline report. Measure cold initialization, warm updates, and
+reopen or reconnect separately. Hold runtime, source package, data, demand, and
+feature flags constant between comparison arms; alternate repeated timing runs
+and report their distribution rather than a single favorable sample.
 
 Test mention insertion/removal, same-count destination retargeting, duplicate
 and self-mentions, aliases/scoped references, topic reorder/removal, rename-only
@@ -256,14 +244,14 @@ Read budgets are total and per-run, with explicit output/UI demand. Read and
 graph limits live in a code table beside the headless read-budget test, not as
 numbers in this plan. A gated count must repeat identically across five runs
 before its limit is set, and the limit is the largest observed value plus 10%.
-Each gated measure has a scan-regression variant, a negative control that must
-exceed its limit to prove the budget detects the intended regression. Startup
-and latency limits are recorded in this section and are not gated in CI. An
-accepted candidate must preserve semantics, improve its targeted scaling/work
-measure, and stay within the read, graph, startup, and latency limits. If
-measurement noise prevents a latency conclusion, say so; if a cost exceeds its
-limit, revise or defer the candidate rather than silently moving the limit. A
-new tradeoff needs a documented decision and rationale.
+Each gated measure has a negative control: a regression variant that grows that
+measure and must exceed its limit. Startup and latency limits are recorded in
+this section and are not gated in CI. An accepted candidate must preserve
+semantics, improve its targeted scaling/work measure, and stay within the read,
+graph, startup, and latency limits. If measurement noise prevents a latency
+conclusion, say so; if a cost exceeds its limit, revise or defer the candidate
+rather than silently moving the limit. A new tradeoff needs a documented
+decision and rationale.
 
 ## Stored-state and deployment procedure
 
@@ -315,11 +303,12 @@ board's package does not upgrade those existing children.
 6. Verify authored content independently of `space verify --expect-migration`:
    that command detects removal, not in-place clobbering. Check board
    membership, ordering, names, backlinks, titles/bodies, attribution,
-   comment/link records, handlers, settled background churn, and the rows of any
-   operator whose hoist the T5 comparison shows changed. Check that each topic's
-   stored `topicStateVersion` reaches `TOPIC_STATE_VERSION`, or record the step
-   still pending and why. Stop the clone server, reset, restart, and repeat from
-   the pristine snapshot for a second clean pass.
+   comment/link records, handlers, settled background churn, and the hoist
+   requirement under [compatibility requirements](#compatibility-requirements),
+   using the check T5 records. Check that each topic's stored
+   `topicStateVersion` reaches `TOPIC_STATE_VERSION`, or record the step still
+   pending and why. Stop the clone server, reset, restart, and repeat from the
+   pristine snapshot for a second clean pass.
 7. Before live execution, record target order, link-binds, exact package hashes,
    retained source revisions, expected schema/data changes, acceptance commands,
    snapshot location, and rollback actions. Coordinate legacy writers and client
