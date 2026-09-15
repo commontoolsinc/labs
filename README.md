@@ -1,6 +1,6 @@
-# Common Fabric Platform
+# Common Fabric
 
-**Common Labs** is where the Common Fabric platform is built in the open. This
+**Common Labs** is where Common Fabric is built in the open. This
 is early, fast-moving work: interfaces change often, and there is no API
 stability yet. You are welcome to explore the code, run and write patterns, and
 contribute.
@@ -19,14 +19,11 @@ safety attaches to the data — every datum carries its own policies, anything
 derived from it carries them too, and code that cannot prove it honors those
 policies does not compile.
 
-Three ways in, depending on how much you want:
+Two ways in, depending on how much you want:
 
 - [**Why**](docs/why.md) — what that rule has cost, and why it is worth
   replacing. Prose, five minutes.
-- [**How it works**](docs/how.md) — the same argument as code: a real pattern,
-  what the compiler emits for it, where the runtime checks the result, and what
-  is not built yet. Every snippet is verbatim from a file in this repository.
-- [**The long form**](docs/inverting-the-physics-of-trust.md) — the physics, the
+- [**Inverting the physcis of trust**](docs/inverting-the-physics-of-trust.md) — the physics, the
   hardware, and the objections.
 
 ### Core Concepts
