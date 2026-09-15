@@ -12,10 +12,11 @@
  * Attachments and starts are the workbench's own records, sessions are read
  * from the connector's complete index, and "start a session" sends the
  * connector a `start` command through a queue the connector's host binds to
- * this pattern's own handler. A start is recorded until the index carries the
- * session it named; only then does it count as attached, since the queue may
- * not be bound yet or the connector may refuse the start, and until then it
- * can be withdrawn through the same handler. The composed shell command stays
+ * this pattern's own handler. Every start is recorded; it counts as attached
+ * only once the index carries the session it named, since the queue may not
+ * be bound yet or the connector may refuse the start, and until then it can
+ * be withdrawn through the same handler. A confirmed start's record stays,
+ * being what attaches its session. The composed shell command stays
  * as the fallback for a person whose host has no queue for this piece. What
  * this shares with the person workbench lives in `../workbench/`.
  */
@@ -179,8 +180,9 @@ export interface WorkbenchOutput {
   /**
    * Start a session for the topic: sends the connector a `start` command
    * carrying the kickoff prompt, the picked checkout, and the topic's name as
-   * the session title, and records the start until the index carries the
-   * session.
+   * the session title, and records the start. Until the index carries the
+   * session the start can be withdrawn; once it does, the record is what
+   * attaches the session.
    */
   startSession: Stream<void>;
   // The connector's host reads this field's schema to learn which handler may

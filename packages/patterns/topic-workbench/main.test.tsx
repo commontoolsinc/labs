@@ -16,7 +16,9 @@
  * bucket is called out, a start carries the configured mode and a shown
  * harness no source runs is listed but starts nothing, the rail's own
  * buttons attach and detach a row and add the topic's words to the prompt,
- * and a verb call without both ids is refused.
+ * provider identities differing only in where a slash falls stay apart while
+ * casing and padding the connector normalizes join the same row, and a verb
+ * call without both ids is refused.
  */
 import {
   action,
@@ -200,6 +202,21 @@ export default pattern(() => {
   const recentBucket = Workbench({
     topic,
     sessions: new Writable<IndexFixture>({ ...INDEX, bucket: "recent" }),
+  });
+  // Provider identities that a naive join would confuse: a source id with a
+  // slash, and casing and padding the connector normalizes.
+  const keysAttached = new Writable<Attachment[] | Default<[]>>([]);
+  const keys = Workbench({
+    topic,
+    sessions: new Writable<IndexFixture>({
+      ...INDEX,
+      sessions: [
+        { ...INDEX.sessions[0]!, sourceId: "a/b", nativeSessionId: "c" },
+        { ...INDEX.sessions[1]!, sourceId: "a", nativeSessionId: "b/c" },
+        INDEX.sessions[0]!,
+      ],
+    }),
+    attached: keysAttached,
   });
   // A start mode for the first turn, and a harness shown that no source runs.
   const shownCommands = new Writable<CommandValue[] | Default<[]>>([]);
@@ -599,6 +616,37 @@ export default pattern(() => {
     )
   );
 
+  // The join key keeps `("a/b", "c")` apart from `("a", "b/c")`, and an
+  // attach spelled with the source's casing and padding the connector
+  // normalizes away joins the row all the same, under one record.
+  const action_attach_keys = action(() => {
+    keys.attach.send({ sourceId: "a/b", nativeSessionId: "c" });
+    keys.attach.send({ sourceId: " CLAUDE ", nativeSessionId: "aaa" });
+  });
+  const assert_keys_distinct = assert(() =>
+    keys.attachedSessions.length === 2 &&
+    keys.attachedSessions.some((row) =>
+      row.sourceId === "a/b" && row.nativeSessionId === "c" &&
+      row.title === "topic #7: Workbench topic"
+    ) &&
+    keys.attachedSessions.some((row) =>
+      row.sourceId === "claude" && row.nativeSessionId === "aaa" &&
+      row.title === "topic #7: Workbench topic"
+    ) &&
+    keys.recentSessions.length === 1 &&
+    keys.recentSessions[0]?.sourceId === "a" &&
+    keys.recentSessions[0]?.nativeSessionId === "b/c" &&
+    keysAttached.get().length === 2
+  );
+  const action_detach_keys = action(() => {
+    keys.detach.send({ sourceId: "claude", nativeSessionId: "aaa" });
+  });
+  const assert_keys_detached = assert(() =>
+    keys.attachedSessions.length === 1 &&
+    keys.attachedSessions[0]?.sourceId === "a/b" &&
+    keys.recentSessions.length === 2
+  );
+
   // A verb call without both ids is refused and changes nothing.
   const action_attach_without_ids = action(() => {
     wb.attach.send({ sourceId: "", nativeSessionId: "" });
@@ -674,6 +722,10 @@ export default pattern(() => {
       { assertion: assert_clicked_detached },
       { action: action_click_topic_words },
       { assertion: assert_topic_words_appended },
+      { action: action_attach_keys },
+      { assertion: assert_keys_distinct },
+      { action: action_detach_keys },
+      { assertion: assert_keys_detached },
       { action: action_attach_without_ids },
       { assertion: assert_attach_refused },
     ],
