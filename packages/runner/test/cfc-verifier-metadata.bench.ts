@@ -118,7 +118,7 @@ for (const targets of [10, 30, 100]) {
 
 globalThis.addEventListener("unload", () => {
   void (async () => {
-    await runtime.dispose();
+    await runtime.dispose({ closeStorage: false });
     await storageManager.close();
   })();
 });

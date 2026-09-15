@@ -1217,10 +1217,6 @@ class VerifierMetadataResolver {
       this.#seenWrites = 0;
       return;
     }
-    if (writes.length < this.#seenWrites) {
-      this.#envelopes.clear();
-      this.#seenWrites = 0;
-    }
     for (let index = this.#seenWrites; index < writes.length; index++) {
       const write = writes[index];
       this.#envelopes.delete(

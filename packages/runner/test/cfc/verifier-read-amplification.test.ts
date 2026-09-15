@@ -71,8 +71,11 @@ describe("prepareBoundaryCommit()", () => {
         const internalReads = [...getTransactionReadActivities(tx)].filter((
           read,
         ) => isInternalVerifierRead(read.meta));
-        // Each target can load and persist its own envelope; checking the
-        // shared input must fit a linear budget as targets are added.
+        // This fixture currently records 3 reads per target plus 1 for the
+        // shared source (see cfc-verifier-metadata.bench.ts). Budget twice that
+        // per-target work and 10 fixed reads so small accounting changes fit.
+        // Revisit this budget if legitimate per-target work changes; repeated
+        // input resolution on each target grows quadratically and exceeds it.
         expect(internalReads.length).toBeLessThanOrEqual(6 * targets + 10);
         expect((await tx.commit()).error).toBeUndefined();
 
@@ -87,7 +90,7 @@ describe("prepareBoundaryCommit()", () => {
           verify.abort();
         }
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });

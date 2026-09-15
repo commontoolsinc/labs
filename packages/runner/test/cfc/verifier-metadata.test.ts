@@ -129,7 +129,7 @@ describe("prepareBoundaryCommit()", () => {
         verify.abort();
       }
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -164,7 +164,7 @@ describe("prepareBoundaryCommit()", () => {
       const result = await tx.commit();
       expect(result.error?.message).toContain("maxConfidentiality");
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -207,7 +207,7 @@ describe("prepareBoundaryCommit()", () => {
         "maxConfidentiality",
       );
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -257,7 +257,7 @@ describe("prepareBoundaryCommit()", () => {
         "maxConfidentiality",
       );
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
@@ -313,7 +313,7 @@ describe("prepareBoundaryCommit()", () => {
         tx.prepareCfc();
         expect((await tx.commit()).error?.message).toContain(message);
       } finally {
-        await runtime.dispose();
+        await runtime.dispose({ closeStorage: false });
         await storageManager.close();
       }
     });

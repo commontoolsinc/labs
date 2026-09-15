@@ -77,6 +77,13 @@ describe("prepareBoundaryCommit()", () => {
       ).set(intermediate);
 
       try {
+        // .set() records the value and schema; target A's preparation persists
+        // the confidential envelope. Target B must then re-read that envelope
+        // instead of reusing the absent metadata cached while checking A.
+        expect(tx.readOrThrow({
+          ...intermediate.getAsNormalizedFullLink(),
+          path: ["cfc"],
+        })).toBeUndefined();
         const reasons = prepareBoundaryCommit(withoutWriteInspection(tx));
         expect(reasons.some((reason) => reason.includes("maxConfidentiality")))
           .toBe(true);
@@ -84,7 +91,7 @@ describe("prepareBoundaryCommit()", () => {
         tx.abort();
       }
     } finally {
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
       await storageManager.close();
     }
   });
