@@ -1946,8 +1946,8 @@ type TimingRow = {
 /**
  * One timing-stats row distilled from a logger's `timeStats` (ms). Used to
  * surface where wall-clock goes under multi-browser contention — chiefly the
- * main-thread `runtime-client` IPC round-trips, which are what time out with
- * "RuntimeClient request timed out" when the worker can't keep up.
+ * main-thread `runtime-client` IPC round-trips, which are what stretch when
+ * the worker can't keep up.
  */
 export interface TimingStatRow {
   key: string;
@@ -2178,10 +2178,10 @@ export async function collectBrowserLoadSummary(
           })),
       };
     };
-    const skipWorker = !includeWorker ||
-      collectMain().ipcFailures.some((row) =>
-        row.key.startsWith("ipc-outcome/timeout/")
-      );
+    // Contacting the worker is itself a request. A worker that already owes
+    // an answer would not reach this one either, so the main-thread half is
+    // reported alone when anything is still in flight.
+    const skipWorker = !includeWorker || collectMain().pendingIpc.length > 0;
     let workerStatus: "collected" | "skipped" | "unavailable" = skipWorker
       ? "skipped"
       : "unavailable";

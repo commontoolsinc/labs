@@ -727,6 +727,24 @@ every connection a test builds would drive the fake clock to its runaway
 guard. The full analysis is in [the rationale
 document](waiting-in-tests-rationale.md#why-the-runtime-client-suite-stays-on-the-real-clock).
 
+One case opens a `FakeTime` of its own, which is the directly-imported tool
+described below rather than the preload the paragraph above rules out. It pins
+that a request the worker has not answered settles on nothing but its reply or
+the connection's disposal. Proving that a request stays pending means proving
+a negative over time, and a task drain cannot: it crosses one macrotask
+boundary, which no positive-delay timer is due within, so it would pass just
+as well against a connection that rejects the request a minute later. The
+fake clock advances an hour and runs every timer any bound would have been
+armed on.
+
+Two things make that case safe here, and both are worth repeating in any other
+case that reaches for the same tool. It builds its connection before opening
+the clock, so the loop-lag interval is armed on the real one: `unrefTimer`
+hands the id it is given to `Deno.unrefTimer`, and a faked id would name an
+unrelated real timer. Building first also keeps that interval off the fake
+clock, where an hour of ticks would run it thirty-six thousand times for
+nothing.
+
 ## The utils package: a fake clock the test imports
 
 The reconciler and runner harnesses above install their fake clock through a

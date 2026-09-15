@@ -68,7 +68,7 @@ describe("CFC browser helpers", () => {
     await browser.close();
   });
 
-  it("retains timeout outcomes without contacting the stalled worker", async () => {
+  it("reports the main-thread half without contacting a worker that owes a reply", async () => {
     await page.evaluate(() => {
       const row = {
         count: 1,
@@ -83,32 +83,35 @@ describe("CFC browser helpers", () => {
         getTimingStatsBreakdown: () => ({
           "runtime-client": {
             "ipc/runtime:idle": row,
-            "ipc-outcome/timeout/runtime:idle": row,
+            "ipc-outcome/cancelled/runtime:idle": row,
           },
         }),
         rt: {
           getLoggerCounts: () => {
             throw new Error("worker contacted");
           },
+          // The request the worker has not answered. Its presence is what
+          // tells the collector that a second request would not arrive either.
+          getPendingRequests: () => [{ type: "runtime:idle", ageMs: 60_000 }],
           getRequestTimeline: () => [{
             type: "runtime:idle",
             sentAtMs: 0,
-            doneAtMs: 60_000,
-            error: true,
-            outcome: "timeout",
           }],
         },
       };
     });
     try {
-      const summary = await collectBrowserLoadSummary(page, "timed out");
+      const summary = await collectBrowserLoadSummary(
+        page,
+        "worker not answering",
+      );
       expect(summary.workerStatus).toBe("skipped");
       expect(summary.ipcFailures).toMatchObject([{
-        key: "ipc-outcome/timeout/runtime:idle",
+        key: "ipc-outcome/cancelled/runtime:idle",
         count: 1,
         total: 60_000,
       }]);
-      expect(summary.requestTimeline[0]).toMatchObject({ outcome: "timeout" });
+      expect(summary.pendingIpc).toMatchObject([{ type: "runtime:idle" }]);
       expect(summary.ipc).toHaveLength(1);
     } finally {
       await page.evaluate(() => {
