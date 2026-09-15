@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import {
   discoverHarnessSkills,
@@ -391,14 +392,26 @@ Deno.test("loadHarnessSkillContextFromText digests the exact text it wrapped", a
     text: "same text",
     handleToken: "cfh:a:wwwww",
     runId: "run-digest",
+    acquisition: {
+      registryId: "owner/repo/trip",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      sourceUrl:
+        "https://raw.githubusercontent.com/owner/repo/0123456789abcdef0123456789abcdef01234567/trip/SKILL.md",
+      verification: "git-commit-sha",
+      valueDigest: "sha256:instructions",
+      receivedAt: "2026-09-15T00:00:00.000Z",
+    },
   });
   const changed = await loadHarnessSkillContextFromText({
     text: "different text",
     handleToken: "cfh:a:3kk78",
     runId: "run-digest",
   });
-  assertEquals(first.activation.digest, second.activation.digest);
-  assertEquals(first.activation.digest === changed.activation.digest, false);
+  expect(second.contextText).toContain(
+    '<skill_context source="handle:cfh:a:wwwww" pin="owner/repo/trip@0123456789abcdef0123456789abcdef01234567">',
+  );
+  expect(first.activation.digest).toBe(second.activation.digest);
+  expect(first.activation.digest).not.toBe(changed.activation.digest);
 });
 
 Deno.test({

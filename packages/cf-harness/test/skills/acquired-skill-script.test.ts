@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { createHarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import { skillsShValueDigest } from "../../src/skills-sh/acquisition.ts";
+import {
+  discoverHarnessSkills,
+  loadHarnessSkillContext,
+} from "../../src/skills/registry.ts";
 import type {
   HarnessAcquiredSkill,
   HarnessSkillAcquisition,
@@ -246,6 +250,87 @@ describe("run_skill_script on an acquired skill's script", () => {
       SKILL_SCRIPT: `${SANDBOX_ROOT}/${SCRIPT_PATH}`,
       CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: "sandbox",
     });
+  });
+
+  for (const registryPresent of [false, true]) {
+    for (
+      const { description, skill } of [
+        { description: "frontmatter name", skill: "finance-budget" },
+        { description: "handle token", skill: "cfh:a:f4ecd" },
+      ]
+    ) {
+      it(`explains the pin when a ${description} misses an ${registryPresent ? "empty" : "absent"} registry`, async () => {
+        const output = await runSkillScriptTool.invoke(
+          {
+            ...createContext({
+              sandbox,
+              executions,
+              acquiredSkills: [acquiredSkill()],
+              skillActivations: activationsHoldingTheAcquiredSkill(),
+              allowedSkillScripts: [{ skill: PIN, path: SCRIPT_PATH }],
+            }),
+            skillRegistry: registryPresent
+              ? await discoverHarnessSkills({ skillsRoot: hostRoot })
+              : undefined,
+          },
+          { skill, path: SCRIPT_PATH },
+        );
+
+        expect(output.status).toBe("error");
+        expect(output.error?.code).toBe(
+          registryPresent ? "skill_not_found" : "skill_registry_missing",
+        );
+        expect(output.error?.message).toContain("owner/repo/slug@<commit sha>");
+        expect(output.error?.message).toContain("skill_context");
+        expect(output.error?.message).not.toContain("--skills-root");
+        expect(sandbox.calls).toHaveLength(0);
+      });
+    }
+  }
+
+  it("runs a configured skill by name while holding an acquired skill", async () => {
+    const skillDir = join(hostRoot, "configured");
+    await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+    await Deno.writeTextFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: finance-budget\ndescription: Report a budget\n---\n",
+    );
+    await Deno.writeTextFile(join(skillDir, SCRIPT_PATH), SCRIPT_TEXT);
+    const registry = await discoverHarnessSkills({
+      skillsRoot: hostRoot,
+      sandboxSkillsRoot: "/workspace/skills",
+    });
+    const registeredContext = await loadHarnessSkillContext({
+      registry,
+      skillNames: ["finance-budget"],
+      source: "cli-preload",
+      runId: "run-1",
+    });
+    const output = await runSkillScriptTool.invoke(
+      {
+        ...createContext({
+          sandbox,
+          executions,
+          acquiredSkills: [acquiredSkill()],
+          skillActivations: {
+            ...registeredContext.activations,
+            activations: [
+              ...registeredContext.activations.activations,
+              ...activationsHoldingTheAcquiredSkill().activations,
+            ],
+          },
+          allowedSkillScripts: [{ skill: "finance-budget", path: SCRIPT_PATH }],
+        }),
+        skillRegistry: registry,
+      },
+      { skill: "finance-budget", path: SCRIPT_PATH },
+    );
+
+    expect(output.status).toBe("executed");
+    expect(output.skill).toBe("finance-budget");
+    expect(output.acquisition).toBeUndefined();
+    expect(output.digestMatchesRegistry).toBe(true);
+    expect(sandbox.calls).toHaveLength(1);
   });
 
   it("refuses a pin this run acquired nothing at", async () => {

@@ -156,10 +156,11 @@ The current package provides:
   profile preload; it bypasses the registry — no resource index, name-based
   selection retired for the delegated path — and the child's activation records
   `source: "skill-handle"` with the token and the digest of the injected text.
-  Where the handle came from an acquisition, the child also mounts that one
-  skill's acquired scripts read-only at `/acquired-skill` and no other skill's,
-  in a sandbox of its own built from the parent's configuration plus that mount
-  rather than in the parent's shared one;
+  Where the handle came from an acquisition, the context header carries its
+  `pin="owner/repo/slug@<commit sha>"` for `run_skill_script`, and the child
+  mounts that one skill's acquired scripts read-only at `/acquired-skill` and no
+  other skill's, in a sandbox of its own built from the parent's configuration
+  plus that mount rather than in the parent's shared one;
 - pattern references by trusted record: `delegate_task` takes up to eight
   optional `{ patternId, note? }` entries and resolves each id only from the
   records that run already holds — successful `search_patterns` results retained

@@ -674,6 +674,12 @@ an acquired skill's script is authorized by: the run holds the skill when an
 activation's `acquisition` names the pin, since there is no registry name to
 match.
 
+The child's `skill_context` header includes that acquisition's pin as
+`pin="owner/repo/slug@<commit sha>"`. It is the `skill` argument accepted by
+`run_skill_script`. A run holding acquired skills receives a pin hint when a
+non-pin identifier fails registry lookup. The header is context metadata; the
+activation digest and return scrub cover the skill text itself.
+
 `acquired-skills.json`, written only by a run that acquired a skill carrying
 scripts:
 

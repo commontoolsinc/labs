@@ -1,12 +1,7 @@
 /**
- * What a `delegate_task` carrying a `skillHandle` actually hands the child.
- *
- * The three things a child needs to run an acquired skill's script belong to
- * three different owners: the mount is the sandbox's, the tool is the
- * profile's, and the allowlist entry is the run's. Each is brought to the
- * child by its own line of wiring, so a test that asks one of them in
- * isolation says nothing about whether a delegation delivers all three. This
- * drives the delegation and asks the child's own records.
+ * Delegates an acquired skill and drives script execution from the context
+ * the child receives. The mount, tool, allowlist entry, and pin must all reach
+ * the child for it to execute the script.
  */
 
 import { createSession, Identity } from "@commonfabric/identity";
@@ -23,7 +18,10 @@ import { OpenAICompatibleGatewayClient } from "../../src/gateway/openai-client.t
 import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
 import { SkillsShAcquisitionClient } from "../../src/skills-sh/acquisition.ts";
 import type { ProcessRunner } from "../../src/sandbox/process-runner.ts";
-import { responsesBodyFromChatFixture } from "../support/responses-fixture.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "../support/responses-fixture.ts";
 
 const OWNER = "commontoolsinc";
 const REPO = "acquirable";
@@ -167,6 +165,7 @@ describe("delegating an acquired skill to a child", () => {
 
       let requests = 0;
       let handleToken = "";
+      let childPin: string | undefined;
       const modelFetch: typeof fetch = (_input, init) => {
         const body = JSON.parse(String(init?.body)) as {
           input?: { type?: string; output?: string }[];
@@ -190,8 +189,12 @@ describe("delegating an acquired skill to a child", () => {
             skillHandle: handleToken,
           });
         } else if (index === 2) {
+          const childText = chatViewOfRequest(body).messages
+            .map((message) => message.content).join("\n");
+          childPin = /<skill_context\b[^>]*\bpin="([^"]+)"/.exec(childText)
+            ?.[1];
           turn = toolCallTurn("call-script", "run_skill_script", {
-            skill: PIN,
+            skill: childPin ?? "",
             path: SCRIPT_PATH,
           });
         } else if (index === 3) {
@@ -221,6 +224,7 @@ describe("delegating an acquired skill to a child", () => {
 
       await loop.runPrompt({ prompt: "Acquire the skill and delegate it." });
 
+      expect(childPin).toBe(PIN);
       const acquired = engine.getRunState().acquiredSkills?.skills[0];
       expect(acquired?.pin).toBe(PIN);
 
@@ -251,9 +255,8 @@ describe("delegating an acquired skill to a child", () => {
         mode: "readonly",
       });
 
-      // All three together: the call the child made got past every gate that
-      // the three lines of wiring feed, and ran the pinned bytes from the path
-      // the mount put them at. Any one of them missing stops here instead.
+      // The child uses the pin from its context to run the mounted script
+      // through the tool and the operator's allowlist.
       const executions = JSON.parse(
         await Deno.readTextFile(
           join(

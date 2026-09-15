@@ -965,9 +965,26 @@ const resolveSkillScript = (
   path: string,
 ): SkillScriptResolution => {
   const pin = parseAcquiredSkillPin(skillName);
-  return pin === undefined
-    ? resolveRegistrySkillScript(context, skillName, path)
-    : resolveAcquiredSkillScript(context, pin, skillName, path);
+  if (pin !== undefined) {
+    return resolveAcquiredSkillScript(context, pin, skillName, path);
+  }
+  const resolution = resolveRegistrySkillScript(context, skillName, path);
+  if (
+    !resolution.ok && (context.acquiredSkills?.length ?? 0) > 0 &&
+    (resolution.error.code === "skill_registry_missing" ||
+      resolution.error.code === "skill_not_found")
+  ) {
+    return {
+      ...resolution,
+      error: {
+        ...resolution.error,
+        message: `run_skill_script could not resolve ${
+          JSON.stringify(skillName)
+        } as a configured skill; name an acquired skill by its full pin (owner/repo/slug@<commit sha>), shown in acquire_skill output or the skill_context pin attribute`,
+      },
+    };
+  }
+  return resolution;
 };
 
 const baseOutput = (
