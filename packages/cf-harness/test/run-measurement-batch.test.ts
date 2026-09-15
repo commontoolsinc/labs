@@ -1721,7 +1721,7 @@ describe("run-measurement-batch", () => {
       } as const;
       const cases: readonly {
         name: string;
-        messages: readonly HarnessTranscriptMessage[];
+        messages: readonly unknown[];
         matches: boolean;
       }[] = [
         {
@@ -1736,6 +1736,11 @@ describe("run-measurement-batch", () => {
             role: "user",
             content: "Granted references: piece-registry (cfh:a:grant).",
           }, request],
+          matches: true,
+        },
+        {
+          name: "measures a task after null and non-object transcript entries",
+          messages: [null, "incomplete entry", request],
           matches: true,
         },
         {
