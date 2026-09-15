@@ -11,6 +11,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { normalize } from "@std/path/posix";
 import {
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
@@ -30,6 +31,13 @@ import type {
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+import type {
+  SandboxCommandRequest,
+  SandboxCommandResult,
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+  SandboxShellRequest,
+} from "../src/sandbox/types.ts";
 
 /**
  * An engine that reports what a fabric-configured run establishes, without
@@ -68,6 +76,35 @@ const stubEngine = (
           ),
         ),
   }) as unknown as CfHarnessEngine;
+
+/** Answers every sandbox question so a run comes up without a container. */
+class FakeSandboxRuntime implements SandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+  resolvePath(path: string, cwd = "/workspace"): string {
+    return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
+  }
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
+  }
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
+  }
+  defaultWorkingDirectory(): string {
+    return "/workspace";
+  }
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+  runShell(_request: SandboxShellRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+}
 
 const recordingLoop = (
   seen: HarnessTranscriptMessage[][],
@@ -138,7 +175,81 @@ const startedService = async (
   return service;
 };
 
+/**
+ * A service with no engine, no skills root, no fabric session and no pattern
+ * refs — the shape that skips bringing a run up — configured only with what
+ * the case under test varies.
+ */
+const allowlistOnlyService = async (
+  seen: HarnessTranscriptMessage[][],
+  allowedSkillScripts: readonly { skill: string; path: string }[],
+  artifactRoot: string,
+): Promise<HarnessInteractiveChatService> => {
+  const service = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      allowedSkillScripts,
+      artifactRoot,
+      sandboxRuntime: new FakeSandboxRuntime(),
+    },
+    createPromptLoop: recordingLoop(seen),
+  });
+  await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-session",
+    method: "start_session",
+    params: {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-test",
+    },
+  });
+  return service;
+};
+
 describe("interactive chat session context", () => {
+  it("tells a turn its operator's allowlist when nothing else is configured", async () => {
+    // The allowlist is what the operator decided about this run, so it is
+    // owed to the run whether or not anything it names could execute here.
+    // Skipping the bring-up for want of a skills root or a fabric session is
+    // how a run ends up holding an allowlist its model was never told.
+    const seen: HarnessTranscriptMessage[][] = [];
+    const artifactRoot = await Deno.makeTempDir({ prefix: "allowlist-only-" });
+    try {
+      const service = await allowlistOnlyService(seen, [
+        { skill: "agent-browser", path: "scripts/run.ts" },
+      ], artifactRoot);
+
+      await runTurn(service, "turn-1", "what may you run?");
+
+      const announced = seen[0].find((message) =>
+        message.content.includes("Operator-allowed skill scripts:")
+      );
+      expect(announced?.content).toContain("- agent-browser -> scripts/run.ts");
+      expect(seen[0].at(-1)?.content).toBe("what may you run?");
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("opens a turn with the task alone when the allowlist is empty", async () => {
+    // Nothing configured needs a run brought up, so none is, and the turn
+    // carries no context message at all.
+    const seen: HarnessTranscriptMessage[][] = [];
+    const artifactRoot = await Deno.makeTempDir({ prefix: "allowlist-none-" });
+    try {
+      const service = await allowlistOnlyService(seen, [], artifactRoot);
+
+      await runTurn(service, "turn-1", "what may you run?");
+
+      expect(seen[0].map((message) => message.content)).toEqual([
+        "what may you run?",
+      ]);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
   it("opens a turn with the granted references of its own space", async () => {
     const seen: HarnessTranscriptMessage[][] = [];
     const service = await startedService(seen, { inputCells: [] });

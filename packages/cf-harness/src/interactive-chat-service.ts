@@ -1645,10 +1645,18 @@ export class HarnessInteractiveChatService {
     const skillsRoot = options.engine?.config.skillsRoot ?? options.skillsRoot;
     const fabricSession = options.engine?.config.fabricSession ??
       options.fabricSession;
+    // An allowlist counts as configured, and counts whether or not the run
+    // could execute anything it names: it is what the operator decided about
+    // this run, and the run is owed it before its first turn. Leaving it out
+    // of this condition is how a run ends up holding an allowlist its model is
+    // never told, which is the state the disclosure exists to prevent.
+    const allowedSkillScripts = options.engine?.config.allowedSkillScripts ??
+      options.allowedSkillScripts;
     if (
       options.engine === undefined && skillsRoot === undefined &&
       fabricSession === undefined &&
-      (options.patternRefs?.length ?? 0) === 0
+      (options.patternRefs?.length ?? 0) === 0 &&
+      (allowedSkillScripts?.length ?? 0) === 0
     ) {
       // Nothing configured needs a run to be brought up before its first model
       // turn, and constructing an engine to discover that would build a

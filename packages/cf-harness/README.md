@@ -1141,10 +1141,12 @@ commit — which acquiring by bare id can still do, the default branch having
 moved — is refused at `delegate_task` with both commits named, rather than
 handing a child a mounted skill and no tool to run it with. A delegation that
 wanted the skill's prose rather than its script says so with
-`withoutSkillScript` and proceeds; it attaches nothing and permits nothing. No
-case folding or path normalization participates. Zero or multiple candidates
-refuse, and a tree response marked `truncated` refuses because an unread
-inventory is not evidence of absence.
+`withoutSkillScript` and proceeds: the child is given the skill's instructions,
+as any handle-carrying delegation is, and is given neither the acquired-skill
+mount nor `run_skill_script` — so the bytes it says it will not run are not
+reachable by other means either. No case folding or path normalization
+participates. Zero or multiple candidates refuse, and a tree response marked
+`truncated` refuses because an unread inventory is not evidence of absence.
 
 The path whitelist is scoped to the selected candidate root's subtree, so
 sibling skills and repository files outside that root do not leak into the

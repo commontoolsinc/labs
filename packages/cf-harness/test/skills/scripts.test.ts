@@ -160,12 +160,22 @@ describe("scripts.ts", () => {
   });
 
   describe("allowedSkillScriptsContextMessage()", () => {
-    it("names each allowed pin with the script it allows", () => {
+    it("names the operator's entries and no others", () => {
+      // Exclusivity rather than inclusion: a `toContain` per entry stays green
+      // when a later change leaks a pair the operator never wrote, and a
+      // disclosure that names a script nobody allowed is the failure worth
+      // catching. So the whole bullet list is the assertion.
       const message = allowedSkillScriptsContextMessage([
         { skill: PIN, path: "scripts/report.sh" },
+        { skill: "agent-browser", path: "scripts/run.ts" },
       ]);
 
-      expect(message).toContain(`- ${PIN} -> scripts/report.sh`);
+      expect(
+        (message ?? "").split("\n").filter((line) => line.startsWith("- ")),
+      ).toEqual([
+        `- ${PIN} -> scripts/report.sh`,
+        "- agent-browser -> scripts/run.ts",
+      ]);
     });
 
     it("says to acquire by the whole pin", () => {
@@ -178,12 +188,14 @@ describe("scripts.ts", () => {
       ).toContain("`acquire_skill` id");
     });
 
-    it("names a registry entry too, which the run can learn nowhere else", () => {
+    it("names a registry entry alone, which the run can learn nowhere else", () => {
       const message = allowedSkillScriptsContextMessage([
         { skill: "agent-browser", path: "scripts/run.ts" },
       ]);
 
-      expect(message).toContain("- agent-browser -> scripts/run.ts");
+      expect(
+        (message ?? "").split("\n").filter((line) => line.startsWith("- ")),
+      ).toEqual(["- agent-browser -> scripts/run.ts"]);
     });
 
     it("says nothing about acquiring for a registry-only allowlist", () => {
