@@ -9,6 +9,7 @@
  * reader confirm a guess at that value by recomputing the id.
  */
 
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   columnDeclaresIfc,
   type SqliteResultColumn,
@@ -109,11 +110,13 @@ export function resultRowKeys(options: {
     return { table: primaryKey.table, key, tables };
   });
   // A key that two rows share would put two rows in one document, so a result
-  // in which that happens is keyed on position throughout.
+  // in which that happens is keyed on position throughout. Key values are
+  // compared by their Fabric hash: a wide integer key arrives as a `bigint`,
+  // which the hash covers.
   const seen = new Set<string>();
   for (const key of keyed) {
     if (!("key" in key)) continue;
-    const serialized = JSON.stringify(
+    const serialized = hashStringOf(
       primaryKey!.outputs.map(([column]) => key.key[column]),
     );
     if (seen.has(serialized)) {

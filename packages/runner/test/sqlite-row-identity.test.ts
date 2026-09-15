@@ -154,6 +154,22 @@ describe("resultRowKeys()", () => {
     }]);
   });
 
+  it("keys a wide integer key that arrives as a `bigint`", () => {
+    const wide = 2n ** 62n;
+    expect(
+      resultRowKeys({
+        rows: [{ id: wide, body: "a" }, { id: wide + 1n, body: "b" }],
+        columns: notesColumns,
+        tables,
+        columnLabeled: true,
+        rowLabeled: never,
+      }),
+    ).toEqual([
+      { table: "notes", key: { id: wide }, tables },
+      { table: "notes", key: { id: wide + 1n }, tables },
+    ]);
+  });
+
   it("keys on position when the origin table declares no primary key", () => {
     const keyless = { notes: table({ id: "integer", body: "text" }) };
     expect(
