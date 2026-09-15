@@ -315,10 +315,11 @@ the two skipped sizes should be enabled as part of whatever lowers it.
 
 ## Topics browser measurement
 
-`packages/patterns/integration/topics-browser-measurement.ts` measures one
-operation a caller drives in a Topics board's browser page, for the browser tier
-of [the Topics computation plan](../plans/topics-computation-cost.md). It adds
-no benchmark series of its own; a board benchmark calls it around a workload.
+`packages/patterns/integration/topics-browser-measurement.ts` is a helper that
+measures one operation a caller drives in a Topics board's browser page, for the
+browser tier of [the Topics computation plan](../plans/topics-computation-cost.md).
+A caller invokes it around the operation. It adds no benchmark series of its
+own, and the plan's T0 work wires it into the scale and navigation benchmarks.
 
 `measureTopicsReads()` turns telemetry and body read accounting on in the
 shell's runtime client, runs the operation, waits until the view has settled and
@@ -332,41 +333,67 @@ graph's node and edge counts before and after, the operation's elapsed time, and
 the timing statistics the main thread and the worker accumulated over it, less
 the helper's own requests. A timing row sums spans that can overlap, so its total
 can exceed the elapsed time. Accounting is on for that elapsed time and timing,
-and the sample says so. `timeTopicsOperation()` records the same graph, elapsed
-time, and timing with telemetry and accounting off, brackets a `Deno.bench`
-interval when given one, and records no reads.
+and the sample says so. `timeTopicsOperation()` turns telemetry and read
+accounting off before its interval and records that it did, then records the
+same graph, elapsed time, and timing and no reads. Given a `Deno.bench`
+interval, it starts the interval just before the operation and ends it at the
+settled boundary, or where the operation or that wait throws. Both samplers need
+the runtime client that signing in creates, so neither brackets cold
+initialization, and a sample whose client is replaced during the operation
+fails.
 
 A lift is found by name. The helper reads its module from the program root the
 board was deployed from, finds `const <name> = lift(`, and takes the position
 where the lift's function starts, which is the position a run's `src` names. A
-candidate whose lines moved is therefore measured under the same names. A name
-not declared that way fails the measurement. So does a lift's module that is
-running but holds no action at the lift's position, or runs in two versions:
-either way the sources read are not the ones the board runs. A lift whose module
-is not running, such as a topic lift on a board with no topic open, is reported
-with zero runs.
+candidate whose lines moved is therefore measured under the same names. The
+helper then confirms the lift by the implementation running there: the graph
+snapshot's preview of that implementation must use the identifiers of the
+lift's declaration, in order. A name not declared that way fails the
+measurement. So does a lift's module that is running but holds no action at the
+lift's position, holds another lift there, or runs in two versions: in each case
+the sources read are not the ones the board runs. A lift is reported as not
+running, with zero runs, only when its module has not started during the
+operation and no action's `src` names the module's file under any path. A `src`
+naming that file under another path, or the module itself under another root,
+fails the measurement instead.
 
 A measured operation fails when it completes no runs, when an event commit
 fails, or when the page raises an error. A timed operation fails on a page error,
-and reports the count of the worker's `scheduler/run` timing, which misses a run
-that starts while another is being timed.
+and when the worker's `scheduler/run` timing records no run, unless the caller
+declares with `mayRunNothing` that the operation may run nothing; the sample
+records that declaration. The count is of action runs the worker's scheduler
+times with `runSchedulerAction`'s `scheduler/run` span; runs that overlap share
+that span's timer, so it is a lower bound, and timing without that span fails
+the sample. With telemetry off, a timed operation cannot
+observe event commit errors. A measured sample of the same operation checks
+them, which the caller pairs with the timed one, as the rendered lunch-poll
+benchmark pairs its diagnostic vote with its timed vote; the timed sample's
+notes say so.
 
 The helper does not record:
 
 - Transaction-attempt reads. The runtime client's read-stats request enables
   body accounting only, so attempt reads come from the headless tier.
-- Rendering beyond VDOM application. The main thread's
-  `vdom-applicator/apply-batch` timing, which covers applying worker VDOM
-  batches to the DOM, is the only rendering time the shell records. Lit element
-  updates, style, layout, and paint have no timing of their own and appear only
-  in the elapsed time. The main thread's `runtime-client/ipc/*` rows are waits
-  on the worker, not main-thread work.
-- Network bytes, subscriptions, and storage work outside reactive bodies.
+- Rendering apart from the spans the shell already times. The sample's
+  `vdomApply` row is the main thread's `vdom-applicator/apply-batch`, applying
+  worker VDOM batches' operations to the DOM. The main thread also records
+  `vdom-renderer` mount and unmount spans, which wait on the worker,
+  `vdom-renderer` batch spans around applying a batch, `vdom-applicator` dispose
+  and remove-node spans, and `runtime-client/ipc/*` waits on the worker. Lit
+  element updates, style, layout, and paint have no timing of their own and
+  appear only in the elapsed time.
+- Network bytes or subscription events, which it does not count, and storage
+  work, which it does not attribute as body reads. Timing rows can still include
+  the durations of subscription requests and of worker storage spans.
 
 `topics-browser-measurement.test.ts` runs both samplers on a two-topic board in
 which one topic cites the other: opening a topic and returning to the board runs
-each named lift at least once, and an operation that demands nothing fails the
-measurement.
+each named lift at least once with reads recorded, attributed to its own
+implementation; an operation that demands nothing fails the measurement; and the
+timed sampler turns off telemetry a caller left on. The decisions that need no
+browser live in `topics-browser-measurement-core.ts` beside the helper, and
+`packages/patterns/test/topics-browser-measurement-core.test.ts` tests them
+under a plain `deno test`.
 
 ## The multiplayer contention benchmark
 

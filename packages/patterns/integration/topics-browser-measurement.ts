@@ -7,9 +7,12 @@
  *
  * `measureTopicsReads()` turns telemetry and body read accounting on around the
  * operation, so its elapsed time carries their overhead.
- * `timeTopicsOperation()` leaves both off, for an interval a benchmark times.
+ * `timeTopicsOperation()` turns both off, for an interval a benchmark times.
  * Neither records transaction-attempt reads; {@link ATTEMPT_READS_NOTE} says
- * why.
+ * why. Both need the runtime client that signing in creates, so neither
+ * brackets cold initialization, and a sample whose client is replaced during
+ * the operation fails. The decisions that need no page are in
+ * `topics-browser-measurement-core.ts`.
  */
 
 import { join } from "@std/path";
@@ -18,6 +21,20 @@ import type { Page } from "@commonfabric/integration";
 import { RequestType, type RuntimeClient } from "@commonfabric/runtime-client";
 
 import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
+import {
+  confirmLiftImplementations,
+  liftRunningStates,
+  locateLift,
+  parseSrc,
+  type ResolvedTopicsLift,
+  runThenStop,
+  timingDelta,
+  type TimingRow,
+  type TimingSnapshot,
+  type TopicsLift,
+  type TopicsLiftSite,
+  workerRunCount,
+} from "./topics-browser-measurement-core.ts";
 
 /** Why no sample carries transaction-attempt reads. */
 export const ATTEMPT_READS_NOTE =
@@ -25,41 +42,40 @@ export const ATTEMPT_READS_NOTE =
   "because the runtime client's read-stats request enables body accounting " +
   "only.";
 
-/** What the timing rows can and cannot say, rendering included. */
+/** What the timing rows measure, and what no row measures. */
 export const TIMING_NOTE =
-  "Timing: a row sums the durations of spans that can overlap, so its total " +
-  "can exceed the elapsed time. `vdom-applicator/apply-batch` is the only " +
-  "main-thread rendering time the shell records, and it covers applying " +
-  "worker VDOM batches to the DOM. Lit element updates, style, layout, and " +
-  "paint have no timing of their own and fall only in the elapsed time. " +
-  "`runtime-client/ipc/*` rows are main-thread waits on the worker, not " +
-  "main-thread work.";
+  "Timing: a row sums spans that can overlap, so its total can exceed the " +
+  "elapsed time. `vdomApply` is the main thread's " +
+  "`vdom-applicator/apply-batch`, applying worker VDOM batches' operations " +
+  "to the DOM. The main thread's other rows include `vdom-renderer` mount " +
+  "and unmount spans, which wait on the worker, `vdom-renderer` batch spans " +
+  "around applying a batch, `vdom-applicator` dispose and remove-node spans, " +
+  "and `runtime-client/ipc/*` waits on the worker. Lit element updates, " +
+  "style, layout, and paint have no timing of their own and fall only in the " +
+  "elapsed time.";
+
+/** Why a timed interval reports no event commit error. */
+export const COMMIT_ERRORS_NOTE =
+  "Event commit errors: not observed with telemetry off. A measured sample of " +
+  "the same operation, which the caller pairs with this one, checks them.";
 
 const ACCOUNTING_ON_NOTE =
   "Read accounting and telemetry were on around this operation, so its " +
   "elapsed time and timing rows include their overhead: not a latency sample.";
 
 const ACCOUNTING_OFF_NOTE =
-  "Read accounting and telemetry were off for this operation, which records " +
-  "no reads.";
+  "Read accounting and telemetry were turned off before this interval, which " +
+  "records no reads.";
+
+const WORKER_RUNS_NOTE =
+  "Worker runs: action runs the scheduler timed with `runSchedulerAction`'s " +
+  "`scheduler/run` span, a lower bound when runs overlap.";
 
 /**
  * The program root the topic board fixture deploys a board from, against which
  * a lift's module path is read.
  */
 export const TOPICS_SOURCE_ROOT = join(import.meta.dirname!, "..");
-
-/** A lift the plan measures separately, named by its binding. */
-export interface TopicsLift {
-  /** Binding name of the module-scope `lift()` declaration. */
-  readonly name: string;
-
-  /** Declaring module, relative to the program root. */
-  readonly module: string;
-
-  /** Whether the lift produces the board's pivot or reads it per topic. */
-  readonly role: "producer" | "consumer";
-}
 
 /** The board's pivot, and the per-topic lifts that read it or report activity. */
 export const TOPICS_LIFTS: readonly TopicsLift[] = [
@@ -72,21 +88,6 @@ export const TOPICS_LIFTS: readonly TopicsLift[] = [
   },
   { name: "lastActivityOf", module: "topics/topic.tsx", role: "consumer" },
 ];
-
-/** A position in authored source: line 1-based, column 0-based. */
-export interface SourcePosition {
-  /** Authored line, 1-based. */
-  readonly line: number;
-
-  /** Authored column, 0-based. */
-  readonly col: number;
-}
-
-/** A named lift located in the sources the board was deployed from. */
-export interface TopicsLiftSite extends TopicsLift {
-  /** `/<module>:<line>:<col>`, which is how a run's `src` ends. */
-  readonly site: string;
-}
 
 /** Counters summed over a set of completed runs. */
 export interface ReadTotals {
@@ -115,11 +116,18 @@ export interface ReadTotals {
 /** One named lift's totals over a measured operation. */
 export interface TopicsLiftRow extends ReadTotals, TopicsLiftSite {
   /**
-   * Whether the running graph held an action at the lift's site before or
-   * after the operation, or the operation ran one. A lift that is not running
-   * reports zero runs.
+   * Whether the lift's module ran before, during, or after the operation. A
+   * lift reports `false`, with zero runs, only when no action's `src` named its
+   * module's file under any path.
    */
   readonly instantiated: boolean;
+
+  /**
+   * The graph snapshot's preview of the implementation running at the lift's
+   * site, which the helper confirmed against the lift's declaration. Absent
+   * for a lift that is not running.
+   */
+  readonly implementation?: string;
 }
 
 /** Scheduler graph size at one instant. */
@@ -129,21 +137,6 @@ export interface GraphSize {
 
   /** Dependency edges between them. */
   readonly edges: number;
-}
-
-/** One timing key's samples accumulated over an operation. */
-export interface TimingRow {
-  /**
-   * `<logger>/<key>`, with each all-digit segment written as `*` so that
-   * per-batch and per-mount keys add up to one row.
-   */
-  readonly key: string;
-
-  /** Samples recorded over the operation. */
-  readonly count: number;
-
-  /** Their summed duration. */
-  readonly totalMs: number;
 }
 
 /** Timing accumulated over an operation, less the helper's own requests. */
@@ -199,10 +192,16 @@ export interface TopicsTimedSample extends TopicsSampleBase {
   /** Read accounting was off for this sample. */
   readonly readAccounting: false;
 
+  /** Telemetry and read accounting were turned off before the interval. */
+  readonly accountingTurnedOff: true;
+
+  /** Whether the caller declared that the operation may run nothing. */
+  readonly mayRunNothing: boolean;
+
   /**
-   * Worker scheduler runs, from the count of its `scheduler/run` timing. A run
-   * that starts while another is being timed goes uncounted, so this is a
-   * lower bound.
+   * Action runs the worker's scheduler timed with `runSchedulerAction`'s
+   * `scheduler/run` span. Runs that overlap share that span's timer, so this
+   * is a lower bound.
    */
   readonly workerRuns: number;
 }
@@ -236,59 +235,31 @@ export interface TimedInterval {
 
 /** Options for {@link timeTopicsOperation}. */
 export interface TimeTopicsOperationOptions extends TopicsOperationOptions {
-  /** Started just before the operation and ended at its settled boundary. */
+  /**
+   * Started just before the operation, and ended at its settled boundary or
+   * where the operation or the wait for that boundary throws.
+   */
   readonly interval?: TimedInterval;
-}
 
-/**
- * Returns where the function argument of `name`'s module-scope
- * `const <name> = lift(<function>)` declaration starts in `text`. The
- * transformer records that position for a hoisted builder, and the runtime
- * reports it as the line and column of each run's `src`. Comments between the
- * call's parenthesis and the function are skipped; type arguments on `lift`,
- * and a function passed after schema arguments, are not recognized.
- *
- * @throws If `text` holds no such declaration or more than one; `source` names
- *   the text in the message.
- */
-export function liftFunctionPosition(
-  text: string,
-  name: string,
-  source = "the source",
-): SourcePosition {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new Error(`\`${name}\` is not a plain identifier`);
-  }
-  const trivia = String.raw`(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*`;
-  const declaration = new RegExp(
-    String.raw`\bconst\s+${name}\s*=\s*lift\s*\(` + trivia,
-    "g",
-  );
-  const matches = [...text.matchAll(declaration)];
-  if (matches.length !== 1) {
-    throw new Error(
-      `Expected one \`const ${name} = lift(...)\` declaration in ${source}, ` +
-        `found ${matches.length}`,
-    );
-  }
-  const [match] = matches;
-  const lines = text.slice(0, match.index + match[0].length).split("\n");
-  return { line: lines.length, col: lines[lines.length - 1].length };
+  /**
+   * Declares that the operation may run nothing in the worker. Without it, a
+   * timed operation that records no scheduler run fails.
+   */
+  readonly mayRunNothing?: boolean;
 }
 
 /**
  * Reads each lift's module under `sourceRoot` and returns where the lift's
- * function starts.
+ * function starts, with the declaration it was found by.
  *
- * @throws If a module does not declare its lift as
- *   {@link liftFunctionPosition} requires.
+ * @throws If a module does not declare its lift as `locateLift()` requires.
  */
 export async function resolveTopicsLiftSites(
   sourceRoot: string = TOPICS_SOURCE_ROOT,
   lifts: readonly TopicsLift[] = TOPICS_LIFTS,
-): Promise<TopicsLiftSite[]> {
+): Promise<ResolvedTopicsLift[]> {
   const texts = new Map<string, string>();
-  const sites: TopicsLiftSite[] = [];
+  const resolved: ResolvedTopicsLift[] = [];
   for (const lift of lifts) {
     const path = join(sourceRoot, lift.module);
     let text = texts.get(path);
@@ -296,22 +267,29 @@ export async function resolveTopicsLiftSites(
       text = await Deno.readTextFile(path);
       texts.set(path, text);
     }
-    const { line, col } = liftFunctionPosition(text, lift.name, path);
-    sites.push({ ...lift, site: `/${lift.module}:${line}:${col}` });
+    const { position, text: declaration } = locateLift(text, lift.name, path);
+    resolved.push({
+      ...lift,
+      site: `/${lift.module}:${position.line}:${position.col}`,
+      declaration,
+    });
   }
-  return sites;
+  return resolved;
 }
 
 /**
  * Runs `operation` with telemetry and body read accounting on, and returns
  * each named lift's read totals with graph size and timing. Accounting is
  * enabled just before the operation and disabled once the view has settled
- * over an idle runtime, whether or not the operation succeeds.
+ * over an idle runtime, whether or not the operation succeeds. Each running
+ * lift is confirmed by the implementation the graph shows at its site.
  *
- * @throws If a lift cannot be identified in the sources, if a running module
- *   holds actions but none at a named lift's site or runs in two versions, or
- *   if the operation completes no runs, fails an event commit, or raises a
- *   page error.
+ * @throws If a lift cannot be identified in the sources; if its module's file
+ *   runs where `liftRunningStates()` refuses; if the implementation at a
+ *   running lift's site is not the lift's; if the runtime client is replaced;
+ *   or if the operation completes no run with a read sample, fails an event
+ *   commit, or raises a page error. When the operation throws and disabling
+ *   accounting also fails, an `AggregateError` holds both.
  */
 export async function measureTopicsReads(
   page: Page,
@@ -322,18 +300,17 @@ export async function measureTopicsReads(
   try {
     const token = crypto.randomUUID();
     await startSampling(page, token);
-    let sampling: PageSampling | undefined;
-    const measured = await (async () => {
-      const before = await readRuntimeState(page);
-      const startedAt = performance.now();
-      await options.operation();
-      await settleOperation(page);
-      return { before, elapsedMs: performance.now() - startedAt };
-    })().finally(async () => {
-      sampling = await stopSampling(page, token);
-    });
-    const after = await readRuntimeState(page);
-    const state = sampling!;
+    const { value: measured, stopped: state } = await runThenStop(
+      async () => {
+        const before = await readRuntimeState(page, token);
+        const startedAt = performance.now();
+        await options.operation();
+        await settleOperation(page);
+        return { before, elapsedMs: performance.now() - startedAt };
+      },
+      () => stopSampling(page, token),
+    );
+    const after = await readRuntimeState(page, token, true);
 
     assertNoPageErrors(options.label, pageErrors.errors);
     if (state.eventCommitErrors.length > 0) {
@@ -344,20 +321,35 @@ export async function measureTopicsReads(
     }
     const measuredRuns = Object.values(state.bySrc)
       .reduce((sum, totals) => sum + totals.runs, 0);
-    if (measuredRuns + state.runsWithoutReads === 0) {
+    if (measuredRuns === 0) {
       throw new Error(
-        `${options.label}: the measured operation produced no runs`,
+        `${options.label}: the measured operation produced no runs with a ` +
+          `read sample`,
       );
     }
 
-    const running = runningSites(
+    const running = liftRunningStates(sites, [
+      ...Object.keys(measured.before.actions),
+      ...Object.keys(after.actions),
+      ...Object.keys(state.bySrc),
+    ]);
+    const implementations = confirmLiftImplementations(
       sites,
-      [...measured.before.srcs, ...after.srcs, ...Object.keys(state.bySrc)],
+      [measured.before.actions, after.actions],
+      running,
     );
-    const named = new Map(sites.map((lift) => [lift.site, emptyTotals()]));
+    const bySite = new Map(sites.map((lift) => [lift.site, {
+      totals: emptyTotals(),
+      implementation: implementations.get(lift.site),
+    }]));
     const remaining = emptyTotals();
     for (const [src, totals] of Object.entries(state.bySrc)) {
-      addTotals(named.get(parseSrc(src)?.site ?? "") ?? remaining, totals);
+      const site = parseSrc(src)?.site;
+      addTotals(
+        (site === undefined ? undefined : bySite.get(site)?.totals) ??
+          remaining,
+        totals,
+      );
     }
     return {
       label: options.label,
@@ -365,11 +357,18 @@ export async function measureTopicsReads(
       elapsedMs: measured.elapsedMs,
       graph: { before: measured.before.graph, after: after.graph },
       timing: timingBetween(measured.before, after),
-      lifts: sites.map((lift) => ({
-        ...lift,
-        ...named.get(lift.site)!,
-        instantiated: running.has(lift.site),
-      })),
+      lifts: sites.map((lift) => {
+        const entry = bySite.get(lift.site)!;
+        return {
+          name: lift.name,
+          module: lift.module,
+          role: lift.role,
+          site: lift.site,
+          ...entry.totals,
+          instantiated: running.get(lift.site)!,
+          implementation: entry.implementation,
+        };
+      }),
       remaining,
       runsWithoutReads: state.runsWithoutReads,
       eventCommits: state.eventCommits,
@@ -381,11 +380,15 @@ export async function measureTopicsReads(
 }
 
 /**
- * Runs `operation` with telemetry and read accounting left off, and returns
- * its elapsed time, graph size, and timing. `interval`, when given, starts just
- * before the operation and ends at the same settled boundary.
+ * Turns telemetry and read accounting off, runs `operation`, and returns its
+ * elapsed time, graph size, and timing. `interval`, when given, starts just
+ * before the operation and ends at the settled boundary, or where the
+ * operation or the wait for that boundary throws. Event commit errors are not
+ * observed with telemetry off; {@link COMMIT_ERRORS_NOTE} says what checks them.
  *
- * @throws If the page raises an error.
+ * @throws If the page raises an error; if the runtime client is replaced; if
+ *   the worker's timing has no run span to count; or if the worker records no
+ *   scheduler run and the caller did not declare `mayRunNothing`.
  */
 export async function timeTopicsOperation(
   page: Page,
@@ -393,29 +396,45 @@ export async function timeTopicsOperation(
 ): Promise<TopicsTimedSample> {
   const pageErrors = watchPageErrors(page);
   try {
-    const before = await readRuntimeState(page);
+    const token = crypto.randomUUID();
+    await turnAccountingOff(page, token);
+    const before = await readRuntimeState(page, token);
     const startedAt = performance.now();
     options.interval?.start();
-    await options.operation();
-    await settleOperation(page);
-    options.interval?.end();
+    try {
+      await options.operation();
+      await settleOperation(page);
+    } finally {
+      options.interval?.end();
+    }
     const elapsedMs = performance.now() - startedAt;
-    const after = await readRuntimeState(page);
+    const after = await readRuntimeState(page, token, true);
 
     assertNoPageErrors(options.label, pageErrors.errors);
-    const timing = timingBetween(before, after);
-    const workerRuns = timing.worker.find((row) =>
-      row.key === "scheduler/scheduler/run"
-    )
-      ?.count ?? 0;
+    const workerRuns = workerRunCount(before.workerTiming, after.workerTiming);
+    const mayRunNothing = options.mayRunNothing ?? false;
+    if (workerRuns === 0 && !mayRunNothing) {
+      throw new Error(
+        `${options.label}: the timed operation ran nothing in the worker; ` +
+          "declare `mayRunNothing` for an operation that may",
+      );
+    }
     return {
       label: options.label,
       readAccounting: false,
+      accountingTurnedOff: true,
+      mayRunNothing,
       elapsedMs,
       graph: { before: before.graph, after: after.graph },
-      timing,
+      timing: timingBetween(before, after),
       workerRuns,
-      notes: [ACCOUNTING_OFF_NOTE, ATTEMPT_READS_NOTE, TIMING_NOTE],
+      notes: [
+        ACCOUNTING_OFF_NOTE,
+        COMMIT_ERRORS_NOTE,
+        WORKER_RUNS_NOTE,
+        ATTEMPT_READS_NOTE,
+        TIMING_NOTE,
+      ],
     };
   } finally {
     pageErrors.stop();
@@ -478,7 +497,11 @@ export function formatTopicsSample(
         `${sample.eventCommits} event commits`,
     );
   } else {
-    lines.push(`  ${sample.workerRuns} worker scheduler runs`);
+    lines.push(
+      `  ${sample.workerRuns} worker scheduler runs${
+        sample.mayRunNothing ? ", declared that it may run nothing" : ""
+      }; telemetry and read accounting turned off before the interval`,
+    );
   }
   const timingLine = (row: TimingRow) =>
     `    ${row.totalMs.toFixed(1).padStart(9)}ms ${
@@ -515,7 +538,19 @@ interface PageSampling {
   eventCommitErrors: string[];
 }
 
-/** Shell globals a sample reads, and the samplings in progress in the page. */
+/** One sample's hold on the page: the client it started with, and any listener. */
+interface PageSampleEntry {
+  /** The runtime client the sample started against. */
+  client: RuntimeClient;
+
+  /** Run markers collected, for a sample measuring reads. */
+  sampling?: PageSampling;
+
+  /** Unsubscribes the telemetry listener, for a sample measuring reads. */
+  unsubscribe?: () => void;
+}
+
+/** Shell globals a sample reads, and the samples in progress in the page. */
 type MeasurementGlobal = typeof globalThis & {
   /** The shell's debugging globals. */
   commonfabric?: {
@@ -529,26 +564,23 @@ type MeasurementGlobal = typeof globalThis & {
     >;
   };
 
-  /** Samplings in progress, by token. */
-  __cfTopicsSamplings?: Record<
-    string,
-    { sampling: PageSampling; stop: () => void }
-  >;
+  /** Samples in progress, by token. */
+  __cfTopicsSamples?: Record<string, PageSampleEntry>;
 };
 
-/** Graph and timing as they stand at one instant. */
+/** Graph, implementations, and timing as they stand at one instant. */
 interface RuntimeState {
   /** Graph size. */
   graph: GraphSize;
 
-  /** Distinct `src` values of the graph's actions. */
-  srcs: string[];
+  /** Distinct implementation previews of the graph's actions, by `src`. */
+  actions: Record<string, string[]>;
 
-  /** Main-thread `[count, totalTime]` by `<logger>/<key>`. */
-  mainTiming: Record<string, [number, number]>;
+  /** Main-thread timing. */
+  mainTiming: TimingSnapshot;
 
-  /** Worker `[count, totalTime]` by `<logger>/<key>`. */
-  workerTiming: Record<string, [number, number]>;
+  /** Worker timing. */
+  workerTiming: TimingSnapshot;
 }
 
 /** Requests the helper itself sends, whose timing is not the operation's. */
@@ -558,9 +590,6 @@ const HELPER_REQUESTS: ReadonlySet<string> = new Set([
   RequestType.SetReadStatsEnabled,
   RequestType.SetTelemetryEnabled,
 ]);
-
-/** Matches a run's `src`: the module identity, then `/<path>:<line>:<col>`. */
-const SRC_PATTERN = /^cf:module\/([^/]+)(\/.+:\d+:\d+)$/;
 
 /**
  * Helper for the samplers, which collects page errors until `stop()` is
@@ -597,7 +626,8 @@ async function settleOperation(page: Page): Promise<void> {
 
 /**
  * Helper for {@link measureTopicsReads}, which subscribes to the page's
- * telemetry under `token` and enables telemetry and read accounting.
+ * telemetry under `token` and enables telemetry and read accounting, leaving
+ * the page as it found it when enabling fails.
  */
 async function startSampling(page: Page, token: string): Promise<void> {
   await page.evaluate(async (token: string) => {
@@ -642,44 +672,99 @@ async function startSampling(page: Page, token: string): Promise<void> {
       totals.registeredDependencies += marker.reads.registeredDependencies;
     };
     rt.on("telemetry", listener);
-    (scope.__cfTopicsSamplings ??= {})[token] = {
+    const samples = scope.__cfTopicsSamples ??= {};
+    samples[token] = {
+      client: rt,
       sampling,
-      stop: () => rt.off("telemetry", listener),
+      unsubscribe: () => rt.off("telemetry", listener),
     };
-    await rt.setTelemetryEnabled(true);
-    await rt.setReadStatsEnabled(true);
+    try {
+      await rt.setTelemetryEnabled(true);
+      await rt.setReadStatsEnabled(true);
+    } catch (error) {
+      // Leave the page as it was found. The enabling failure is what the
+      // caller hears about, so a failure to disable does not replace it.
+      rt.off("telemetry", listener);
+      delete samples[token];
+      await Promise.allSettled([
+        rt.setReadStatsEnabled(false),
+        rt.setTelemetryEnabled(false),
+      ]);
+      throw error;
+    }
   }, { args: [token] });
 }
 
 /**
- * Helper for {@link measureTopicsReads}, which disables read accounting and
- * telemetry, unsubscribes the sampling under `token`, and returns what it
+ * Helper for {@link timeTopicsOperation}, which records the runtime client
+ * under `token` and turns read accounting and telemetry off so that a timed
+ * interval does not inherit either.
+ */
+async function turnAccountingOff(page: Page, token: string): Promise<void> {
+  await page.evaluate(async (token: string) => {
+    const scope = globalThis as MeasurementGlobal;
+    const rt = scope.commonfabric?.rt;
+    if (!rt) throw new Error("The shell exposes no runtime client to time");
+    (scope.__cfTopicsSamples ??= {})[token] = { client: rt };
+    await rt.setReadStatsEnabled(false);
+    await rt.setTelemetryEnabled(false);
+  }, { args: [token] });
+}
+
+/**
+ * Helper for {@link measureTopicsReads}, which unsubscribes the sampling under
+ * `token`, disables read accounting and telemetry, and returns what it
  * collected.
+ *
+ * @throws If the runtime client is not the one the sampling started against:
+ *   its listener and its accounting belonged to the replaced client.
  */
 async function stopSampling(page: Page, token: string): Promise<PageSampling> {
   return await page.evaluate(async (token: string) => {
     const scope = globalThis as MeasurementGlobal;
-    const entry = scope.__cfTopicsSamplings?.[token];
-    const rt = scope.commonfabric?.rt;
-    if (!entry || !rt) {
-      throw new Error("The sampling or the runtime client it measured is gone");
+    const entry = scope.__cfTopicsSamples?.[token];
+    if (!entry?.sampling || !entry.unsubscribe) {
+      throw new Error("The sampling under this token is gone");
     }
-    await rt.setReadStatsEnabled(false);
-    await rt.setTelemetryEnabled(false);
-    entry.stop();
-    delete scope.__cfTopicsSamplings![token];
+    entry.unsubscribe();
+    if (scope.commonfabric?.rt !== entry.client) {
+      delete scope.__cfTopicsSamples![token];
+      throw new Error(
+        "The runtime client was replaced during the measured operation, so " +
+          "its runs were not all observed",
+      );
+    }
+    await entry.client.setReadStatsEnabled(false);
+    await entry.client.setTelemetryEnabled(false);
     return entry.sampling;
   }, { args: [token] });
 }
 
-/** Helper for the samplers, which reads graph size, `src` values, and timing. */
-async function readRuntimeState(page: Page): Promise<RuntimeState> {
-  return await page.evaluate(async () => {
-    const cf = (globalThis as MeasurementGlobal).commonfabric;
-    const rt = cf?.rt;
+/**
+ * Helper for the samplers, which reads graph size, implementation previews,
+ * and timing, and with `release` forgets the sample under `token`.
+ *
+ * @throws If the runtime client is not the one the sample started against.
+ */
+async function readRuntimeState(
+  page: Page,
+  token: string,
+  release = false,
+): Promise<RuntimeState> {
+  return await page.evaluate(async (token: string, release: boolean) => {
+    const scope = globalThis as MeasurementGlobal;
+    const entry = scope.__cfTopicsSamples?.[token];
+    const cf = scope.commonfabric;
     const mainBreakdown = cf?.getTimingStatsBreakdown;
-    if (!rt || !mainBreakdown) {
-      throw new Error("The shell exposes no runtime client or timing to read");
+    if (!entry || !mainBreakdown) {
+      throw new Error("The sample or the shell's timing to read is gone");
+    }
+    if (release) delete scope.__cfTopicsSamples![token];
+    if (cf?.rt !== entry.client) {
+      throw new Error(
+        "The runtime client was replaced during the operation, so its graph " +
+          "and timing describe another runtime",
+      );
     }
     const flatten = (
       groups: Record<
@@ -695,71 +780,28 @@ async function readRuntimeState(page: Page): Promise<RuntimeState> {
       }
       return flat;
     };
-    const graph = await rt.getGraphSnapshot();
-    const workerTiming = flatten((await rt.getLoggerCounts()).timing);
-    const srcs = new Set<string>();
+    const graph = await entry.client.getGraphSnapshot();
+    const workerTiming = flatten((await entry.client.getLoggerCounts()).timing);
+    const actions: Record<string, string[]> = {};
     for (const node of graph.nodes) {
-      if (node.src !== undefined) srcs.add(node.src);
+      if (node.src === undefined) continue;
+      const previews = actions[node.src] ??= [];
+      if (node.preview !== undefined && !previews.includes(node.preview)) {
+        previews.push(node.preview);
+      }
     }
     return {
       graph: { nodes: graph.nodes.length, edges: graph.edges.length },
-      srcs: [...srcs],
+      actions,
       mainTiming: flatten(mainBreakdown()),
       workerTiming,
     };
-  });
+  }, { args: [token, release] });
 }
 
 //
 // Aggregation
 //
-
-/** Splits a run's `src` into module identity and site, if it has that form. */
-function parseSrc(src: string): { identity: string; site: string } | undefined {
-  const match = SRC_PATTERN.exec(src);
-  return match ? { identity: match[1], site: match[2] } : undefined;
-}
-
-/**
- * Helper for {@link measureTopicsReads}, which returns the sites among `srcs`.
- * A lift's module that appears in `srcs` must run in one version and hold an
- * action at the lift's site; otherwise the sources read are not the running
- * ones, and attributing runs by position would be wrong.
- */
-function runningSites(
-  lifts: readonly TopicsLiftSite[],
-  srcs: readonly string[],
-): Set<string> {
-  const running = new Set<string>();
-  const identitiesByModule = new Map<string, Set<string>>();
-  for (const src of srcs) {
-    const parsed = parseSrc(src);
-    if (parsed === undefined) continue;
-    running.add(parsed.site);
-    const module = parsed.site.replace(/:\d+:\d+$/, "");
-    const identities = identitiesByModule.get(module) ?? new Set();
-    identities.add(parsed.identity);
-    identitiesByModule.set(module, identities);
-  }
-  for (const lift of lifts) {
-    const identities = identitiesByModule.get(`/${lift.module}`);
-    if (identities === undefined) continue;
-    if (identities.size > 1) {
-      throw new Error(
-        `\`/${lift.module}\` runs as ${identities.size} module versions, so ` +
-          `\`${lift.name}\` cannot be attributed by position`,
-      );
-    }
-    if (!running.has(lift.site)) {
-      throw new Error(
-        `\`${lift.name}\` resolves to \`${lift.site}\`, but the running ` +
-          `\`/${lift.module}\` has no action there: the sources read are not ` +
-          `the ones the board runs`,
-      );
-    }
-  }
-  return running;
-}
 
 /** Returns totals of zero. */
 function emptyTotals(): ReadTotals {
@@ -793,41 +835,20 @@ function timingBetween(
   before: RuntimeState,
   after: RuntimeState,
 ): TopicsTiming {
-  const mainThread = timingDelta(before.mainTiming, after.mainTiming);
+  const mainThread = timingDelta(
+    before.mainTiming,
+    after.mainTiming,
+    HELPER_REQUESTS,
+  );
   return {
     mainThread,
-    worker: timingDelta(before.workerTiming, after.workerTiming),
+    worker: timingDelta(
+      before.workerTiming,
+      after.workerTiming,
+      HELPER_REQUESTS,
+    ),
     vdomApply:
       mainThread.find((row) => row.key === "vdom-applicator/apply-batch") ??
         { key: "vdom-applicator/apply-batch", count: 0, totalMs: 0 },
   };
-}
-
-/**
- * Helper for {@link timingBetween}, which subtracts one thread's statistics,
- * drops the helper's own requests, and joins keys differing only in an
- * all-digit segment.
- */
-function timingDelta(
-  before: Record<string, [number, number]>,
-  after: Record<string, [number, number]>,
-): TimingRow[] {
-  const rows = new Map<string, { count: number; totalMs: number }>();
-  for (const [key, [count, totalTime]] of Object.entries(after)) {
-    const [countBefore, totalBefore] = before[key] ?? [0, 0];
-    const segments = key.split("/");
-    if (count <= countBefore || HELPER_REQUESTS.has(segments.at(-1)!)) {
-      continue;
-    }
-    const joined = segments.map((segment) =>
-      /^\d+$/.test(segment) ? "*" : segment
-    ).join("/");
-    const row = rows.get(joined) ?? { count: 0, totalMs: 0 };
-    row.count += count - countBefore;
-    row.totalMs += totalTime - totalBefore;
-    rows.set(joined, row);
-  }
-  return [...rows.entries()]
-    .map(([key, row]) => ({ key, ...row }))
-    .sort((a, b) => b.totalMs - a.totalMs);
 }
