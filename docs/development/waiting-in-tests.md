@@ -56,13 +56,19 @@ early fire only repeats cleanup work is tolerable. A bound whose early fire
 fails a passing test, drops a real result, or corrupts state is not — and
 wanting one there is the signal to make the wait event-driven instead.
 
-The bounds the repository keeps sort into those two kinds. The shutdown
-escalation in the FUSE mount handshake keeps a bound whose early fire is
-harmless — it `SIGKILL`s a child that was already exiting, reaching the same
-end either way; the rationale document's [case
+The bounds the repository keeps sort into those two kinds. Two keep a bound
+whose early fire is harmless. The shutdown escalation in the FUSE mount
+handshake `SIGKILL`s a child that was already exiting, reaching the same end
+either way; the rationale document's [case
 studies](waiting-in-tests-rationale.md#production-case-studies) walk through
-it. The rest — the polling waits under [Where the polling `waitFor`
-stays](#where-the-polling-waitfor-stays), the [deno-web-test per-test stuck
+it. The browser load summary in
+`packages/patterns/integration/cfc-browser-helpers.ts` gives the worker a
+budget to answer the request for its statistics, because reading them is
+itself a request and a request carries no deadline; an early fire reports the
+main-thread half alone and marks the worker half missing, which is the same
+result a worker that never answers produces. The rest — the polling waits
+under [Where the polling `waitFor` stays](#where-the-polling-waitfor-stays),
+the [deno-web-test per-test stuck
 detector](#browser-hosted-unit-tests-have-a-harness-backstop), and the FUSE
 exec suite's teardown bound (in [the rationale
 document](waiting-in-tests-rationale.md#the-fuse-exec-suite)) — keep a bound

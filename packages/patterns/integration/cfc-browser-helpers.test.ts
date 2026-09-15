@@ -68,7 +68,7 @@ describe("CFC browser helpers", () => {
     await browser.close();
   });
 
-  it("reports the main-thread half without contacting a worker that owes a reply", async () => {
+  it("reports the main-thread half when the worker never answers", async () => {
     await page.evaluate(() => {
       const row = {
         count: 1,
@@ -87,11 +87,10 @@ describe("CFC browser helpers", () => {
           },
         }),
         rt: {
-          getLoggerCounts: () => {
-            throw new Error("worker contacted");
-          },
-          // The request the worker has not answered. Its presence is what
-          // tells the collector that a second request would not arrive either.
+          // A worker that has stopped answering. Reading its statistics is
+          // a request like any other, so this promise is the shape a stalled
+          // worker presents: one that never settles.
+          getLoggerCounts: () => new Promise(() => {}),
           getPendingRequests: () => [{ type: "runtime:idle", ageMs: 60_000 }],
           getRequestTimeline: () => [{
             type: "runtime:idle",
@@ -105,7 +104,9 @@ describe("CFC browser helpers", () => {
         page,
         "worker not answering",
       );
-      expect(summary.workerStatus).toBe("skipped");
+      // The collection returns rather than waiting on the worker forever, and
+      // says the worker half is missing rather than reporting it as empty.
+      expect(summary.workerStatus).toBe("unavailable");
       expect(summary.ipcFailures).toMatchObject([{
         key: "ipc-outcome/cancelled/runtime:idle",
         count: 1,

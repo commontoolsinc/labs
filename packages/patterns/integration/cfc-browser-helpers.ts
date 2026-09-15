@@ -2092,19 +2092,32 @@ export interface BrowserLoadSummary {
 }
 
 /**
+ * How long the worker is given to answer the request for its statistics.
+ *
+ * Reading them is itself a request, and a request carries no deadline of its
+ * own, so a worker that has stopped answering would hold a collection open
+ * for as long as the page lived. An early fire reports the main-thread half
+ * alone and marks `workerStatus` as `unavailable`, which is what a worker
+ * that never answers produces, so the caller reaches the same outcome either
+ * way and no diagnostic is wrong -- only absent.
+ */
+const WORKER_STATS_BUDGET_MS = 5_000;
+
+/**
  * Collect aggregate timing stats from one browser: main-thread IPC waits
  * (`commonfabric.getTimingStatsBreakdown()`) plus the worker's
  * scheduler/runner/storage timing (`commonfabric.rt.getLoggerCounts()`).
- * Worker collection is skipped after an IPC timeout, or when `includeWorker`
- * is false, so failure diagnostics can be read without another request to a
- * stalled worker. Missing worker statistics are identified by `workerStatus`.
+ * Worker collection is skipped when `includeWorker` is false, and abandoned
+ * when the worker does not answer within `WORKER_STATS_BUDGET_MS`, so failure
+ * diagnostics are readable from a page whose worker is stalled. Missing worker
+ * statistics are identified by `workerStatus`.
  */
 export async function collectBrowserLoadSummary(
   page: Page,
   label: string,
   options: { includeWorker?: boolean } = {},
 ): Promise<BrowserLoadSummary> {
-  const collected = await page.evaluate(async (includeWorker: boolean) => {
+  const collected = await page.evaluate(async (workerBudgetMs: number) => {
     type Stats = {
       count?: number;
       average?: number;
@@ -2178,10 +2191,9 @@ export async function collectBrowserLoadSummary(
           })),
       };
     };
-    // Contacting the worker is itself a request. A worker that already owes
-    // an answer would not reach this one either, so the main-thread half is
-    // reported alone when anything is still in flight.
-    const skipWorker = !includeWorker || collectMain().pendingIpc.length > 0;
+    // A budget of zero is a caller that does not want the worker asked at
+    // all, which is the same as spending no time on it.
+    const skipWorker = workerBudgetMs === 0;
     let workerStatus: "collected" | "skipped" | "unavailable" = skipWorker
       ? "skipped"
       : "unavailable";
@@ -2204,9 +2216,12 @@ export async function collectBrowserLoadSummary(
       overlayCascadeEchoFlickers: 0,
     };
     try {
-      const workerCounts = skipWorker
-        ? undefined
-        : await cf?.rt?.getLoggerCounts?.();
+      const workerCounts = skipWorker ? undefined : await Promise.race([
+        cf?.rt?.getLoggerCounts?.(),
+        new Promise<undefined>((resolve) => {
+          setTimeout(() => resolve(undefined), workerBudgetMs);
+        }),
+      ]);
       if (workerCounts !== undefined) workerStatus = "collected";
       const workerTiming = workerCounts?.timing ?? {};
       // Prefix-match so sub-loggers are included: storage commit/conflict
@@ -2291,7 +2306,7 @@ export async function collectBrowserLoadSummary(
     }
 
     return { ...collectMain(), workerIpc, worker, churn, workerStatus };
-  }, { args: [options.includeWorker ?? true] });
+  }, { args: [(options.includeWorker ?? true) ? WORKER_STATS_BUDGET_MS : 0] });
   return {
     label,
     ipc: collected.ipc,
