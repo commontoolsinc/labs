@@ -24,7 +24,7 @@
  * place are `operandForChild`'s answers (`place.ts`), which is what a listing
  * prints for the same rows, so a name a completion writes is one `cd` takes
  * back to the row — including a name whose own characters are readings, which
- * comes back as the reference that names it. Where on the line the token may
+ * comes back as the operand that reaches it. Where on the line the token may
  * stand is `candidatesAfter`'s answer (`verbs.ts`), which reads the tokens
  * before it through the dispatch's own option reading, so a completion never
  * offers an operand the verb would refuse.
@@ -103,9 +103,9 @@ export async function completeLine(
  * `my` is completing a key called `my key`, whose token spelling opens with a
  * quote and would match nothing they could have typed.
  *
- * A row `operandForChild` offers no operand for is left out. Neither its name
- * nor the reference reaches it, so there is nothing to write that would take
- * the line to that row.
+ * A row `operandForChild` offers no operand for is left out. No operand it
+ * tries reaches that row, so there is nothing to write that would take the
+ * line there.
  */
 async function childOperands(
   shuttle: Shuttle,

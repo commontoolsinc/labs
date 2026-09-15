@@ -1,4 +1,4 @@
-import { DID, isDID } from "@commonfabric/identity";
+import { assertNotDID, DID, isDID } from "@commonfabric/identity/did";
 import { asSpaceSegment } from "@commonfabric/runner/fabric-url";
 import { isSlugAddress, isValidSlug } from "@commonfabric/runner/slugs";
 
@@ -19,6 +19,16 @@ export type PieceViewRef = {
    * it, and a view carrying one without a slug addresses nothing.
    */
   pieceMember?: string;
+
+  /**
+   * The segments an address carries past its member, joined as written:
+   * `/<space>/top/42/comments/7` holds the member `42` and this `comments/7`.
+   * Only the member is read out of an address, so these are carried rather
+   * than read, and a view holding them addresses nothing that opens. Carrying
+   * them is what keeps such a view from being the view of the member alone,
+   * and what lets whoever opens it name them in refusing it.
+   */
+  pieceExtraPath?: string;
 };
 
 export type AppViewModeRef = {
@@ -54,6 +64,36 @@ export type AppView =
     & AppOpenPathRef
   );
 
+/**
+ * How a view addresses a space, given a name and a DID that may both be
+ * present and may both be absent.
+ *
+ * A name that is a DID addresses the space by DID. Taken as a name it would
+ * instead name the space a key derived from that string reaches, which is a
+ * different space; and the URL it produced would be read back as a space DID
+ * anyway, so the view would not survive its own round trip.
+ *
+ * Returns `undefined` only when neither is given, which is a view that
+ * addresses no space at all; a caller holding a DID always gets one back.
+ */
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID,
+): { spaceName: string } | { spaceDid: DID };
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID | undefined,
+): { spaceName: string } | { spaceDid: DID } | undefined;
+export function spaceViewRef(
+  spaceName: string | undefined,
+  spaceDid: DID | undefined,
+): { spaceName: string } | { spaceDid: DID } | undefined {
+  if (isDID(spaceName)) return { spaceDid: spaceName };
+  if (spaceName) return { spaceName };
+  if (spaceDid) return { spaceDid };
+  return undefined;
+}
+
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
   switch (view as AppBuiltInView) {
     case "home":
@@ -70,7 +110,11 @@ export function isAppView(view: unknown): view is AppView {
   if (!isAppViewModeRef(view)) return false;
   if (!isPieceViewRef(view)) return false;
   if ("spaceName" in view) {
-    return typeof view.spaceName === "string" && !!view.spaceName;
+    // A name that is also a DID is refused rather than tolerated: the URL a
+    // named space produces is read back as a space DID, so such a view would
+    // address one space going out and a different one coming back.
+    return typeof view.spaceName === "string" && !!view.spaceName &&
+      !isDID(view.spaceName);
   }
   if ("spaceDid" in view) {
     return isDID(view.spaceDid);
@@ -93,14 +137,45 @@ function isAppViewModeRef(view: object): view is AppViewModeRef {
  * separator, resolving away, or reading as empty would name something other
  * than what it says — an empty member addresses the collection's own piece
  * rather than a member of it.
+ *
+ * Segments past a member are held only beside a member, because they are
+ * written after it: without one, `appViewToUrlPath` has nothing to write them
+ * after and leaves them out, so the address it writes names the collection
+ * alone. They are also held to a spelling a URL path keeps as written. Any
+ * other spelling writes an address that reads back as another view: a `?` or
+ * `#` starts a query or a fragment, and `../43` reads back as member `43`.
+ * Past that they are not held to a grammar, since a view carrying them is
+ * refused by them rather than resolved through them.
  */
 function isPieceViewRef(view: object): view is PieceViewRef {
   if ("pieceId" in view && "pieceSlug" in view) return false;
   const member = "pieceMember" in view ? view.pieceMember : undefined;
   const slug = "pieceSlug" in view ? view.pieceSlug : undefined;
-  return member === undefined ||
+  const extraPath = "pieceExtraPath" in view ? view.pieceExtraPath : undefined;
+  const memberHeld = member === undefined ||
     (typeof member === "string" && isValidSlug(member) &&
       typeof slug === "string" && !!slug);
+  return memberHeld &&
+    (extraPath === undefined ||
+      (typeof extraPath === "string" && !!extraPath && member !== undefined &&
+        isKeptAsWrittenInPath(extraPath)));
+}
+
+/**
+ * Whether `path`, written after a segment of a URL path, comes back out of
+ * that path as it went in: nothing in it starts a query or a fragment,
+ * resolves away as a dot segment, or is rewritten into another spelling.
+ *
+ * A URL hands its path back parsed and percent-encoded, so every spelling
+ * `urlToAppView` carries out of one passes.
+ */
+function isKeptAsWrittenInPath(path: string): boolean {
+  // Reading the answer off a URL is what keeps this from restating a parser's
+  // rules for dot segments, backslashes, and what each byte encodes to: the
+  // parser these addresses are read by decides, rather than a copy of it here
+  // that would have to be kept in step.
+  const written = `/segment/${path}`;
+  return new URL(written, "http://view.invalid").pathname === written;
 }
 
 /**
@@ -152,6 +227,10 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
         return `/`;
     }
   } else if ("spaceName" in view) {
+    // `urlToAppView` reads a DID-shaped first segment back as a space DID, so
+    // a name that is a DID would round-trip into a different space. Refuse it
+    // here, where the name is still attached to the view that carried it.
+    assertNotDID(view.spaceName, "A space name");
     return `${prefix}/${view.spaceName}${pieceUrlSegments(view)}`;
   } else if ("spaceDid" in view) {
     return `${prefix}/${view.spaceDid}${pieceUrlSegments(view)}`;
@@ -162,14 +241,22 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
 /**
  * The segments a view's piece reference adds after its space, empty for a
  * view naming no piece. A member follows the slug it belongs to; an id
- * carries none, a member being a collection's name for one of its own.
+ * carries none, a member being a collection's name for one of its own. The
+ * segments past a member follow it as they were written, so a page refused by
+ * them keeps the address that named them.
  */
 function pieceUrlSegments(view: PieceViewRef): string {
   const pieceSlug = "pieceSlug" in view ? view.pieceSlug : undefined;
   const pieceId = "pieceId" in view ? view.pieceId : undefined;
   const pieceMember = "pieceMember" in view ? view.pieceMember : undefined;
+  const pieceExtraPath = "pieceExtraPath" in view
+    ? view.pieceExtraPath
+    : undefined;
   if (pieceSlug) {
-    return pieceMember ? `/${pieceSlug}/${pieceMember}` : `/${pieceSlug}`;
+    if (!pieceMember) return `/${pieceSlug}`;
+    return pieceExtraPath
+      ? `/${pieceSlug}/${pieceMember}/${pieceExtraPath}`
+      : `/${pieceSlug}/${pieceMember}`;
   }
   return pieceId ? `/${pieceId}` : "";
 }
@@ -193,9 +280,19 @@ export function urlToAppView(url: URL): AppView {
   // The segment after a slug selects a member of the collection it names.
   // Reading it apart from resolving it is what keeps this pure: whether the
   // slug names a collection at all is the resolver's question. Exactly one
-  // segment reaches a member, so anything past it is no part of the address.
+  // segment reaches a member, and nothing past it is read. What is past it is
+  // still part of what the address says, so it is carried as written — a
+  // trailing separator adds nothing — and the view is not the member's alone.
   const member = segments[2] || undefined;
-  const memberRef: PieceViewRef = member ? { pieceMember: member } : {};
+  const extraPath = member
+    ? segments.slice(3).join("/") || undefined
+    : undefined;
+  const memberRef: PieceViewRef = member
+    ? {
+      pieceMember: member,
+      ...(extraPath ? { pieceExtraPath: extraPath } : {}),
+    }
+    : {};
   // `?path=` is the piece deep link (e.g. a cabinet page Mobile Loom should
   // open). Captured here — the only place the query survives boot — and
   // delivered once by the shell after the piece loads.

@@ -2,7 +2,7 @@
  * The narrowings that ask a shape question of a value already typed as a
  * `FabricValue`, and the container questions a structural walk asks of an
  * `unknown`. Whether a value belongs to the `FabricValue` type at all is
- * `validity-check.ts`'s question, and none of these asks it.
+ * `validation.ts`'s question, and none of these asks it.
  *
  * The narrowings are looser than membership on purpose. Most are asked of a
  * value whose type already claims to be a `FabricValue`, and answer only
@@ -40,8 +40,8 @@ import {
   type FabricPlainObject,
   type FabricPrimitive,
   type FabricValue,
-} from "./interface.ts";
-import { BaseFabricSpecialObject } from "./fabric-bases/BaseFabricSpecialObject.ts";
+} from "@/interface.ts";
+import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
 import { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 /**

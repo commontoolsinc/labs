@@ -12,7 +12,7 @@ import {
   isKeyableObjectOrArray,
   isWalkableObjectNotArray,
   isWalkableObjectOrArray,
-} from "@/type-check.ts";
+} from "@/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricSpecialObject } from "@/fabric-bases/BaseFabricSpecialObject.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -26,7 +26,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
-describe("type-check", () => {
+describe("narrowing", () => {
   describe("isFabricSpecialObject()", () => {
     it("returns `true` for a `FabricPrimitive` and for a `FabricInstance`", () => {
       expect(isFabricSpecialObject(new FabricBytes(new Uint8Array([1])))).toBe(

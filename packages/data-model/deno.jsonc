@@ -8,7 +8,7 @@
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./src/",
     "@/comparison": "./src/comparison/index.ts",
-    "@/value-tags": "./src/value-tags/index.ts",
+    "@/types": "./src/types/index.ts",
     "@/value-visit": "./src/value-visit/index.ts",
     "@node/crypto": "node:crypto"
   },

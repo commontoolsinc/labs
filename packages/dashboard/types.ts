@@ -20,7 +20,7 @@ export interface TileView {
   alignChartBottom?: boolean; // keep the chart at the tile bottom when its grid row grows taller
   aside?: string; // trusted inline html minor header facet (e.g. an MTD or "running" badge)
   href?: string; // if set, the whole tile becomes a link (external opens a new tab)
-  hint?: string; // small drill affordance text, e.g. "commits ↗"
+  hint?: string; // drill arrow tooltip and accessible link description
 }
 
 export interface Route {

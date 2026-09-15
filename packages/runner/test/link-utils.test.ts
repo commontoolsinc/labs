@@ -1619,8 +1619,8 @@ describe("link-utils", () => {
       expect(() => parseLLMFriendlyLink(`/${longId}@any/path`, space)).toThrow(
         /Invalid scope suffix/,
       );
-      expect(() => parseLLMFriendlyLink(`/${longId}@inherit/path`, space))
-        .toThrow(/Invalid scope suffix/);
+      expect(parseLLMFriendlyLink(`/${longId}@inherit/path`, space).scope)
+        .toBe("space");
       expect(() => parseLLMFriendlyLink(`/${longId}@/path`, space)).toThrow(
         /Invalid scope suffix/,
       );
@@ -1664,8 +1664,8 @@ describe("link-utils", () => {
     it("should throw if the embedded space is a name rather than a DID", () => {
       // A link resolves from the string alone, so a space that needs looking
       // up is refused here even though the grammar admits it.
-      expect(() => parseLLMFriendlyLink(`/@my:space/${longId}`, space))
-        .toThrow(/Link spaces must be DIDs.*"my:space"/);
+      expect(() => parseLLMFriendlyLink(`//my-space/${longId}`, space))
+        .toThrow(/Link spaces must be DIDs.*"my-space"/);
     });
   });
 
@@ -1675,7 +1675,7 @@ describe("link-utils", () => {
     it("splits the parts without holding either to a form", () => {
       // The wider vocabulary a session can resolve: a space by name and a
       // piece by slug, in the positions a DID and a handle occupy.
-      expect(parseReferenceParts("/@my-space/tracker@user/items/0")).toEqual({
+      expect(parseReferenceParts("//my-space/tracker@user/items/0")).toEqual({
         id: "tracker",
         scope: "user",
         space: "my-space",
@@ -1689,13 +1689,13 @@ describe("link-utils", () => {
 
     it("throws for a string that is not a reference at all", () => {
       expect(() => parseReferenceParts(`${longId}/path`)).toThrow(
-        "Target must start with a slash",
+        "requires a context piece",
       );
       expect(() => parseReferenceParts(`/@${space}`)).toThrow(
         "Target must include a piece handle",
       );
       expect(() => parseReferenceParts("/@/tracker")).toThrow(
-        'Target must name a space after "@"',
+        "Invalid space",
       );
     });
   });
@@ -1703,17 +1703,27 @@ describe("link-utils", () => {
   describe("createLLMFriendlyLink", () => {
     const longId = "of:bafyabc12345678901234567890";
 
+    it("round-trips trailing whitespace as part of the final path key", () => {
+      const link = {
+        id: longId,
+        space,
+        scope: "space" as const,
+        path: ["..", "a#argument "],
+      } as const;
+      expect(parseLLMFriendlyLink(createLLMFriendlyLink(link), space)).toEqual(
+        link,
+      );
+    });
+
     it("should create LLM friendly link from normalized link", () => {
       const link: NormalizedLink = {
         id: longId,
         path: ["path", "to", "cell"],
         space: space,
       };
-      // We need to cast to NormalizedFullLink because createLLMFriendlyLink expects it,
-      // but it only uses id and path.
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}/path/to/cell`);
+      expect(result).toBe(`//${space}/${longId}@space/path/to/cell`);
     });
 
     it("should create LLM friendly links with non-space scope suffixes", () => {
@@ -1725,17 +1735,17 @@ describe("link-utils", () => {
       };
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}@user/path`);
+      expect(result).toBe(`//${space}/${longId}@user/path`);
     });
 
-    it("should omit explicit space scope when creating LLM friendly links", () => {
+    it("omits the base scope when a context space is supplied", () => {
       const link: NormalizedLink = {
         id: longId,
         path: ["path"],
         space: space,
         scope: "space",
       };
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link as any, space);
 
       expect(result).toBe(`/${longId}/path`);
     });
@@ -1748,7 +1758,7 @@ describe("link-utils", () => {
       };
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}`);
+      expect(result).toBe(`//${space}/${longId}@space`);
     });
 
     it("should encode special characters in path", () => {
@@ -1759,7 +1769,9 @@ describe("link-utils", () => {
       };
       const result = createLLMFriendlyLink(link as any);
 
-      expect(result).toBe(`/${longId}/path~1with~1slash/path~0with~0tilde`);
+      expect(result).toBe(
+        `//${space}/${longId}@space/path~1with~1slash/path~0with~0tilde`,
+      );
     });
   });
 });

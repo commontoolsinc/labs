@@ -314,8 +314,8 @@ const storedSchemaForWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
 ): JSONSchema | undefined => {
-  // An UnknownCfcMetadataVersionError propagates, deliberately: a stored
-  // envelope this build cannot interpret fails the read loudly rather
+  // A `StoredCfcMetadataError` propagates, deliberately: a stored envelope
+  // this build cannot produce labels from fails the read loudly rather
   // than serving the document schemaless.
   const metadata = readStoredCfcMetadata(tx, link);
   if (metadata === undefined) {

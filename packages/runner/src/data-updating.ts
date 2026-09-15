@@ -45,7 +45,7 @@ import {
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
-  UnknownCfcMetadataVersionError,
+  StoredCfcMetadataError,
 } from "./cfc/metadata.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -258,11 +258,11 @@ const recordLinkWritePolicyInput = (
   try {
     sourceMetadata = readStoredCfcMetadata(tx, source);
   } catch (error) {
-    // A source envelope this build cannot interpret still makes the link
-    // CFC-relevant (fail closed): recording the policy input routes the
-    // write to prepare, where the unreadable envelope rejects it in
-    // enforcing modes instead of the labels silently not carrying.
-    if (!(error instanceof UnknownCfcMetadataVersionError)) throw error;
+    // A source envelope this build cannot produce labels from still makes
+    // the link CFC-relevant (fail closed): recording the policy input
+    // routes the write to prepare, where the unreadable envelope rejects
+    // it in enforcing modes instead of the labels silently not carrying.
+    if (!(error instanceof StoredCfcMetadataError)) throw error;
     sourceEnvelopeUninterpretable = true;
   }
   const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||

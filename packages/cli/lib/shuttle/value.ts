@@ -55,20 +55,20 @@ export interface ValueRendering {
  * `undefined` and for a symbol, and `null` is a value a cell can hold. What
  * a cell holds nothing at is nothing, and the word above says that instead.
  *
- * The bound is on nesting rather than on a kind, and it is what a caller
- * cannot see. An `undefined` or an interned symbol under a key loses the key,
- * which reads as a key the fabric does not hold; either of them at an array
- * index, and an array's hole, is written `null`, which reads as a value the
- * fabric holds. Every one of those is a value a cell takes and hands back,
- * and a read produces them without being asked: a property a schema does not
- * require reads as `undefined` where the data underneath does not match it
+ * The bound is on nesting rather than on a kind, and it is what a caller cannot
+ * see. An `undefined` or an interned symbol under a key loses the key, which
+ * reads as a key the fabric does not hold; either of them at an array index,
+ * and an array's hole, is written `null`, which reads as a value the fabric
+ * holds. Every one of those is a value a cell takes and hands back, and a read
+ * produces them without being asked: a property a schema does not require reads
+ * as `undefined` where the data underneath does not match it
  * (`schema-view.ts`). A function and a unique symbol are not bounds here,
  * because neither survives to be read out of a cell. The fabric's
  * value-admission test refuses both on the way in
- * (`assertValidFabricValueLayer`, `packages/data-model/src/validity-check.ts`),
- * and its codec has no form for either at the commit that would store one
- * (`BaseEncodeAct`), so the raw write that skips the first still meets the
- * second.
+ * (`assertValidFabricValueLayer`,
+ * `packages/data-model/src/types/validation.ts`), and its codec has no form for
+ * either at the commit that would store one (`BaseEncodeAct`), so the raw write
+ * that skips the first still meets the second.
  *
  * What the writer leaves for this one to do is the class a terminal acts on.
  * It escapes every C0 character a value held and passes `DEL` and C1 through,
