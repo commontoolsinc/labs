@@ -69,12 +69,14 @@ export function readBudgetGroups(): ReadBudgetGroup[] {
 }
 
 /**
- * Returns the call that makes a test file run the cases of `group`. A file
- * holding no such call registers no test, so its own tests cannot report that
- * it runs nothing; the other groups' files read its source for this call.
+ * Returns the statement that makes a test file run the cases of `group`, as one
+ * whole line. A file holding no such statement registers no test, so its own
+ * tests cannot report that it runs nothing; the other groups' files read its
+ * source for a line that is this statement and nothing else, which a commented
+ * out registration is not.
  */
 export function readBudgetRegistration(group: ReadBudgetGroup): string {
-  return `describeReadBudgetGroup("${group}", import.meta.url)`;
+  return `describeReadBudgetGroup("${group}", import.meta.url);`;
 }
 
 /** The counts a read-budget limit gates, in the order the table lists them. */

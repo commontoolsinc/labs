@@ -58,7 +58,8 @@ export function describeReadBudgetGroup(
       readBudgetGroups().map(async (other) => {
         const file = readBudgetTestFile(other);
         const source = await Deno.readTextFile(new URL(file, directory));
-        return source.includes(readBudgetRegistration(other))
+        const registration = readBudgetRegistration(other);
+        return source.split("\n").some((line) => line.trim() === registration)
           ? file
           : `${file} (runs no read-budget group)`;
       }),
