@@ -107,9 +107,10 @@ because their sparse support was part of the original design:
 
 - **`packages/data-model/src/convertible-js.ts`** —
   `shallowFabricFromConvertibleJsValue` and `fabricFromConvertibleJsValue` use
-  `i in arr` checks. Every accepted array goes through `cloneHelper()`, which
-  rebuilds it with `new Array(length)` and copies only the indices that are
-  present.
+  `i in arr` checks. An accepted array that needs a copy goes through
+  `cloneHelper()`, which rebuilds it with `new Array(length)` and copies only
+  the indices that are present; one that is already a valid deep-frozen
+  `FabricValue` crosses by identity, holes and all.
 - **`packages/data-model/src/codec-json/JsonCodecEngine.ts`** — Encodes a run of
   holes as a single hole-tagged count; decoding rebuilds them as true holes.
 - **`packages/data-model/src/value-hash.ts`** — Feeds holes to the hash

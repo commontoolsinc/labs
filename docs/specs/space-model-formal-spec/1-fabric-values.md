@@ -3362,7 +3362,7 @@ export function fabricFromConvertibleJsValue(
 export function convertibleJsFromFabricValue(
   value: FabricValue,
   frozen?: boolean,
-): FabricValue;
+): FabricConvertibleJsValue;
 ```
 
 In the `Cell` implementation:
