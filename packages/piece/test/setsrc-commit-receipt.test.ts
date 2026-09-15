@@ -308,6 +308,7 @@ describe("setsrc commit receipt", () => {
     // below has the shape the CFC boundary produces when not every reason is
     // a verdict: the message says what refused, and `reason` is only a
     // classification marker.
+
     const piece = await pieces.create(markedProgram("v1"), { input: {} });
     await runtime.idle();
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
