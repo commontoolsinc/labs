@@ -172,10 +172,10 @@ export abstract class FabricInstance extends BaseFabricSpecialObject {
  * any `FabricPrimitive` uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable), pass
- * through the native conversions unchanged, and hold no arbitrary outgoing
- * `FabricValue` reference. `BaseFabricPrimitive` freezes each instance at
- * construction; a subclass keeps its state in private fields, which the freeze
- * does not reach.
+ * through the convertible-JS conversions unchanged, and hold no arbitrary
+ * outgoing `FabricValue` reference. `BaseFabricPrimitive` freezes each instance
+ * at construction; a subclass keeps its state in private fields, which the
+ * freeze does not reach.
  *
  * See Section 1.4.6 of the formal spec.
  */
@@ -196,16 +196,16 @@ export abstract class FabricPrimitive extends BaseFabricSpecialObject {
 }
 
 //
-// Types for dealing with native (non-fabric, a/k/a "wild west") values
+// Types for dealing with convertible JS (non-fabric, a/k/a "wild west") values
 //
 
 /**
- * Union of raw native JS **object** types that the fabric type system can
+ * Union of convertible JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These are
  * the inputs to the "sausage grinder" --
  * `shallowFabricFromConvertibleJsValue()` accepts `unknown`, so callers can
- * hand it `FabricValue`s or raw native JS objects alike, and whatever it cannot
- * represent is rejected there rather than excluded by the signature. The
+ * hand it `FabricValue`s or convertible JS objects alike, and whatever it
+ * cannot represent is rejected there rather than excluded by the signature. The
  * conversion produces `FabricInstance` wrappers or `FabricPrimitive` values
  * that live inside `FabricValue`.
  *
@@ -229,7 +229,8 @@ export type FabricConvertibleJsObject =
  *
  * Distinct from `FabricValue`: containers here may hold
  * `FabricConvertibleJsObject`s. Converting a `FabricError` yields an `Error`,
- * so an array of them is an array of natives, which has no `FabricValue` name.
+ * so an array of them is an array of JS objects, which has no `FabricValue`
+ * name.
  */
 export type FabricConvertibleJsValue = FabricValuePlus<
   FabricConvertibleJsObject

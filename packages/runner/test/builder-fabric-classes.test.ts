@@ -121,7 +121,7 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
     // Both declared constructor overloads, since the pattern-visible
     // declaration offers both and only one of them is the obvious one.
 
-    it("constructs an instance from a native `RegExp`", () => {
+    it("constructs an instance from a JS `RegExp`", () => {
       const BoundFabricRegExp = commonfabric
         .FabricRegExp as typeof FabricRegExp;
       const instance = new BoundFabricRegExp(/ab+c/gi);

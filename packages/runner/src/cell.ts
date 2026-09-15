@@ -2593,7 +2593,7 @@ export class CellImpl<T extends FabricValue>
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
     // by content, mirroring the server's keyless dedup. The content comparison
-    // runs against a fabric-normalized COPY of the candidate (a native `Date`
+    // runs against a fabric-normalized COPY of the candidate (a JS `Date`
     // must match its stored `FabricEpochNsec` form); the original candidate --
     // not the copy -- is what an accepted add writes, so no identity the write
     // path relies on is disturbed.
@@ -3261,8 +3261,8 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Read the cell's value at the fabric layer (no native unwrapping, no
-   * Proxy wrapping). By default returns a deep-frozen `FabricValue`
+   * Read the cell's value at the fabric layer (no unwrapping to JS form,
+   * no Proxy wrapping). By default returns a deep-frozen `FabricValue`
    * snapshot; pass `{ frozen: false }` for a mutable deep copy.
    *
    * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
@@ -3300,9 +3300,9 @@ export class CellImpl<T extends FabricValue>
       }),
       readOptions,
     );
-    // Deep-copy with desired frozenness, without native unwrapping — getRaw()
-    // and getRawUntyped() return fabric-layer values, not native ("wild
-    // west") values.
+    // Deep-copy with desired frozenness, without unwrapping to JS form --
+    // getRaw() and getRawUntyped() return fabric-layer values, not
+    // convertible JS ("wild west") values.
     return cloneIfNecessary(value, { frozen });
   }
 
@@ -4486,7 +4486,7 @@ export function frameAnchorIds(
 
 /**
  * What `convertCellsToLinks()` is handed: what a pattern produced. That is a
- * `FabricValue` or a native convertible to one, and on top of that the `Cell`s
+ * `FabricValue` or a convertible JS value, and on top of that the `Cell`s
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
  *
@@ -4686,7 +4686,7 @@ function convertOneToLinks(
             | Record<string, unknown>;
       }
     } else {
-      // A native object carrying a fabric form is minted into it here: a
+      // A JS object carrying a fabric form is minted into it here: a
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
       // `FabricError`. Anything else comes back `undefined`, which says only
       // that nothing needed minting.
@@ -4942,7 +4942,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         validateStaticData(value);
       }
 
-      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
+      // TODO(danfuzz): JS values in a `Cell.of(...)` initial value are NOT
       // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
       // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
       // (whose diff normalizes at the write boundary). The raw value flows into

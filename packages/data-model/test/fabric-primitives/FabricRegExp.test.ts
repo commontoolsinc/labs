@@ -3,11 +3,11 @@
  * whose dialect they are written in -- rather than as a live `RegExp`.
  *
  * The flavor is what makes this more than a wrapper. A pattern in the dialect
- * this runtime understands is validated and can be handed back as a native
- * `RegExp`; one in any other flavor is stored faithfully and not parsed at
- * all, so a pattern JS would reject survives a round trip instead of becoming
- * a `ProblematicValue`. What fails is asking such a value for a native form,
- * and it fails at that point rather than when the value was stored.
+ * this runtime understands is validated and can be handed back as a JS
+ * `RegExp`; one in any other flavor is stored faithfully and not parsed at all,
+ * so a pattern JS would reject survives a round trip instead of becoming a
+ * `ProblematicValue`. What fails is asking such a value for a convertible JS
+ * form, and it fails at that point rather than when the value was stored.
  *
  * Nothing is aliased in either direction: the constructor does not keep the
  * `RegExp` it was given, and each read builds a fresh one, so mutating what
@@ -112,7 +112,7 @@ describe("FabricRegExp", () => {
     });
 
     describe(".value", () => {
-      it("returns an equivalent native `RegExp` for the `es2025` flavor", () => {
+      it("returns an equivalent JS `RegExp` for the `es2025` flavor", () => {
         const value = new FabricRegExp(/abc/gi).value;
         expect(value).toBeInstanceOf(RegExp);
         expect(value.source).toBe("abc");
@@ -130,7 +130,7 @@ describe("FabricRegExp", () => {
         expect(re.value.lastIndex).toBe(0);
       });
 
-      it("throws for a non-`es2025` flavor (no native representation yet)", () => {
+      it("throws for a non-`es2025` flavor (no JS representation yet)", () => {
         const re = new FabricRegExp("pcre2", "abc", "g");
         expect(() => re.value).toThrow("pcre2");
       });

@@ -1563,7 +1563,7 @@ export function normalizeAndDiff(
     }
   }
 
-  // Mint the fabric form of a native object -- a `Date`, a `Uint8Array`, an
+  // Mint the fabric form of a JS object -- a `Date`, a `Uint8Array`, an
   // `Error`. Anything else comes back `undefined`, which says only that
   // nothing needed minting; the value then has to be storable as it stands,
   // and the vet is what holds it to that. Nothing minted here is a container,
@@ -1606,7 +1606,7 @@ export function normalizeAndDiff(
   // content equality: the ops build their combined arrays by carrying the
   // stored elements through by reference (the stored tree is frozen, so the
   // reference IS the stored value), while the written value here is only
-  // shallowly normalized -- its nested contents (Cells, native objects) are
+  // shallowly normalized -- its nested contents (Cells, JS objects) are
   // converted later in the recursion, so a deep comparison would inspect
   // values whose canonical form does not exist yet.
   //

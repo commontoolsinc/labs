@@ -125,7 +125,7 @@ export function tagOfFabricValueElseNull(
 /**
  * Maps a presumed `FabricConvertibleJsValue` to its tag, based on a shallow
  * evaluation of its type. Returns the tag of a primitive, or that of a
- * recognized convertible native instance, or `null` for a function and for
+ * recognized convertible JS instance, or `null` for a function and for
  * any other object. To be clear, this function does not go out of its way to
  * make a validity determination.
  *

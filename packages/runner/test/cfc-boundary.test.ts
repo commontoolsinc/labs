@@ -892,7 +892,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       // A schema whose `savedBytes` default is a `Uint8Array` cannot be
       // authored as a plain literal (schema interning deep-freezes it and a raw
       // `Uint8Array` cannot be frozen). Instead, round-trip the schema through
-      // a cell read as a query result, which interns the native `Uint8Array`
+      // a cell read as a query result, which interns the JS `Uint8Array`
       // default into a `FabricBytes` -- the realistic way a `FabricValue`
       // reaches `schema.default` (see
       // query-result-proxy-fabric-primitive.test.ts).

@@ -289,8 +289,8 @@ export type FabricSpecialObjectPlus<PlusType> =
 
 /**
  * The `FabricValue`s that participate in the fabric protocol as primitives. An
- * instance is always frozen, passes through the native conversions unchanged,
- * and holds no arbitrary outgoing `FabricValue` reference.
+ * instance is always frozen, passes through the convertible-JS conversions
+ * unchanged, and holds no arbitrary outgoing `FabricValue` reference.
  * `FabricSpecialObject` says how this differs from `FabricInstance`.
  */
 export interface FabricPrimitive {
@@ -483,8 +483,8 @@ export declare const FabricKeyPair: FabricKeyPairConstructor;
  * An immutable regular expression.
  *
  * The pattern is held as a flavor / source / flags triple rather than as a
- * native `RegExp`, so that flavors with no native representation can still be
- * carried. `value` reconstitutes a native `RegExp` where one exists.
+ * JS `RegExp`, so that flavors with no JS representation can still be
+ * carried. `value` reconstitutes a JS `RegExp` where one exists.
  */
 export interface FabricRegExp extends FabricPrimitive {
   readonly source: string;
@@ -492,9 +492,9 @@ export interface FabricRegExp extends FabricPrimitive {
   readonly flavor: string;
 
   /**
-   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * A fresh JS `RegExp` equivalent to this value, returned anew on each
    * call so the internal instance is never aliased out. Throws for a flavor
-   * with no native `RegExp` representation.
+   * with no JS `RegExp` representation.
    */
   readonly value: RegExp;
 }
@@ -517,7 +517,7 @@ export declare const FabricRegExp: FabricRegExpConstructor;
  * whose keys must not collide with the slot names.
  */
 export type FabricErrorState = {
-  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  /** Constructor name of the originating JS `Error` (e.g. `"TypeError"`). */
   readonly type: string;
 
   /** The `.name` property. Omit to mean "same as `type`". */

@@ -1,10 +1,10 @@
 /**
- * The boundary between native JS values and `FabricValue`s, in both
+ * The boundary between convertible JS values and `FabricValue`s, in both
  * directions, along with the predicate saying in advance whether a value can
  * cross it.
  *
  * The inbound work splits along one question -- does conversion produce a new
- * value? Minting a native object's fabric form is one function, and vetting a
+ * value? Minting a JS object's fabric form is one function, and vetting a
  * value that needs no minting is the other, in `validity-check.ts`. The shallow
  * conversion is those two asked in that order, plus a frozenness adjustment,
  * so that a caller can ask either without having to work the answer back out
@@ -16,8 +16,8 @@
  * `FabricValue` crosses by identity instead of being rebuilt, and a cycle is
  * detected rather than followed.
  *
- * Outbound, a wrapper is unwrapped to the native type it stands for, while a
- * `FabricInstance` with no native counterpart passes through untouched. Both
+ * Outbound, a wrapper is unwrapped to the JS type it stands for, while a
+ * `FabricInstance` with no JS counterpart passes through untouched. Both
  * directions take the result's freeze state as an argument; on the way out, a
  * class defined to be always frozen comes back frozen regardless of what was
  * asked for.
@@ -56,7 +56,7 @@ import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
  * Helper for `shallowFabricFromConvertibleJsObjectElseUndefined()`, which
- * rejects native objects with extra enumerable properties.
+ * rejects JS objects with extra enumerable properties.
  */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
@@ -214,7 +214,7 @@ export function shallowFabricFromConvertibleJsObjectElseUndefined(
 ): FabricValueLayer | undefined {
   switch (tagOfConvertibleJsValueElseNull(value)) {
     case VALUE_TAGS.JsError: {
-      // Shallow conversion, so the native `Error` is wrapped without recursing
+      // Shallow conversion, so the JS `Error` is wrapped without recursing
       // into its internals: `cause` and the custom properties are stored as
       // they stand, and the result is only a _shallow_ `FabricError`, whose
       // `.cause` may still be a raw `Error`. A caller needing a proper
@@ -224,7 +224,7 @@ export function shallowFabricFromConvertibleJsObjectElseUndefined(
       // atomic leaf.
       //
       // The identity converter is a type lie: it says the values it hands
-      // back are `FabricValue`s, and they are whatever the native error held.
+      // back are `FabricValue`s, and they are whatever the JS error held.
       // TODO(danfuzz): Address this type lie, for example by giving the deep
       // walk an error arm of its own so that no shallow instance is ever
       // built.
@@ -248,7 +248,7 @@ export function shallowFabricFromConvertibleJsObjectElseUndefined(
     }
 
     case VALUE_TAGS.JsUint8Array: {
-      // A native `Uint8Array` becomes a `FabricBytes`.
+      // A JS `Uint8Array` becomes a `FabricBytes`.
       return new FabricBytes(value as Uint8Array);
     }
 
@@ -381,7 +381,7 @@ function fabricFromConvertibleJsValueInternal(
 
   // `FabricError` has `FabricValue`-typed state slots (`cause`, `extra`) by
   // type contract, but the shallow conversion above copied them through from
-  // the native `Error` as-is (where they may be raw `Error`, `Map`, etc.).
+  // the JS `Error` as-is (where they may be raw `Error`, `Map`, etc.).
   // Rebuild via the deep recursion so the resulting `FabricError`'s slots
   // really are `FabricValue`.
   if (value instanceof FabricError) {
@@ -603,7 +603,7 @@ function isValidFabricConvertibleJsValueInternal(
 
 /**
  * Recursively walks a `FabricValue` tree, unwrapping any `FabricNativeWrapper`
- * values to their underlying native types via `toNativeValue()`. Non-native
+ * values to their underlying JS types via `toNativeValue()`. Non-native
  * `FabricInstance` values (e.g., `UnknownValue`) pass through as-is.
  *
  * The freeze-state contract: the output's freeze state matches `frozen`, except

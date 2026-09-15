@@ -17,7 +17,7 @@ import type {
 
 /**
  * The recursive shape `FabricConvertibleJsValue` names, written out: the values
- * that convert to and from fabric form are `FabricValue`s, native objects, and
+ * that convert to and from fabric form are `FabricValue`s, JS objects, and
  * read-only trees of either.
  */
 type WrittenOutConvertible =
@@ -41,7 +41,8 @@ declare const layerRecord: Exclude<
 function fabricConvertibleValueTypeChecks() {
   // The alias admits the written-out recursion. The reverse is refused by the
   // one arm the written-out recursion lacks: a `FabricInstancePlus` at
-  // `FabricConvertibleJsObject`, an instance whose contents may hold a native.
+  // `FabricConvertibleJsObject`, an instance whose contents may hold a
+  // convertible JS object.
   const fromWrittenOut: FabricConvertibleJsValue = writtenOut;
   // @ts-expect-error a `FabricInstancePlus<FabricConvertibleJsObject>` is admitted only by the alias
   const toWrittenOut: WrittenOutConvertible = convertible;

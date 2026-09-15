@@ -5,10 +5,10 @@
  * a `FabricPrimitive`, and their cases are about what each declines: a type
  * lie, a class outside the vocabulary, and a primitive whose reported tag is
  * not one the vocabulary holds. One group cross-checks them against the
- * native-side dispatch over the whole corpus, on the values membership
+ * JS-side dispatch over the whole corpus, on the values membership
  * accepts, which is where the two are required to agree.
  *
- * The native-side cases classify a value by what it actually is, across the
+ * The JS-side cases classify a value by what it actually is, across the
  * cases where the obvious check fails. A prototype can be severed, an `Error`
  * can arrive from another realm or from a subclass nobody here knows, an
  * array can be an `Array` subclass, and an object can have no prototype at
@@ -432,7 +432,7 @@ describe("value-tags", () => {
     });
   });
 
-  describe("the fabric dispatch and the native dispatch", () => {
+  describe("the fabric dispatch and the convertible-JS dispatch", () => {
     // On a value membership accepts, the two dispatches are asked the same
     // question from different sides -- one of a value typed as a `FabricValue`,
     // one of an `unknown` -- and must give the same answer. Where membership

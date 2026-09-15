@@ -204,7 +204,7 @@ describe("to-encodable-form", () => {
       expect(() => withAliasBindings(err as any)).toThrow("FabricError");
       expect(() => withAliasBindings({ e: err } as any)).toThrow("FabricError");
 
-      // ...including one the conversion itself mints, from a native `Error`.
+      // ...including one the conversion itself mints, from a JS `Error`.
       expect(() => withAliasBindings({ e: new Error("x") } as any)).toThrow(
         "FabricError",
       );

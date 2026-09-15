@@ -3451,7 +3451,7 @@ export class Runtime {
    * defaults. A `Cell` becomes its sigil link on the way in, by `cellAsLink()`;
    * the conversion itself has no representation for one. Everything past that
    * converts via `fabricFromConvertibleJsValue()`, the designed intake for
-   * exactly this: native instances become their fabric counterparts, and input
+   * exactly this: JS instances become their fabric counterparts, and input
    * that is already a deep-frozen `FabricValue` passes through by identity.
    *
    * @param space The space the cell claims as its own (it is not stored

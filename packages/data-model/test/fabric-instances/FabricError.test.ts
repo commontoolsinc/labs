@@ -1,5 +1,5 @@
 /**
- * `Error` as a `FabricValue`, where most of the difficulty is that a native
+ * `Error` as a `FabricValue`, where most of the difficulty is that a JS
  * error carries two names and arbitrary extra properties.
  *
  * `type` and `name` are stored separately, and the encoding leans on their
@@ -158,7 +158,7 @@ describe("FabricError", () => {
         expect(se.message).toBe("changed");
         expect(se.stack).toBe("at nowhere");
         expect(se.cause).toEqual({ detail: 1 });
-        // The native projection reflects the mutated state (no stale cache).
+        // The JS projection reflects the mutated state (no stale cache).
         expect(se.toNativeValue(true).message).toBe("changed");
       });
 
@@ -460,7 +460,7 @@ describe("FabricError", () => {
         expect(result).toBeInstanceOf(Error);
         expect(result.message).toBe("native");
         expect(Object.isFrozen(result)).toBe(true);
-        // The originating native Error is not stored / not mutated.
+        // The originating JS `Error` is not stored / not mutated.
         expect(Object.isFrozen(err)).toBe(false);
       });
 

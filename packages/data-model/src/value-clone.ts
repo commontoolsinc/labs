@@ -82,8 +82,8 @@ function trackForCircularity(
  * Clones an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
- * Unlike `fabricFromConvertibleJsValue()` (which converts native JS values into
- * fabric wrappers), this function assumes the input is already a valid
+ * Unlike `fabricFromConvertibleJsValue()` (which converts convertible JS values
+ * into fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
  * Cyclic values are not supported: a deep clone (the default) throws on a

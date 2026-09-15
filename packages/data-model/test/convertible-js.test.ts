@@ -1,7 +1,7 @@
 /**
- * Converting between native JS values and `FabricValue`s, in both directions
- * and at both depths, plus the predicate saying in advance whether a value
- * will make it across.
+ * Converting between convertible JS values and `FabricValue`s, in both
+ * directions and at both depths, plus the predicate saying in advance whether a
+ * value will make it across.
  *
  * Refusal is central here rather than incidental: conversion is a vetting
  * boundary, and a value that cannot be represented has to be rejected rather
@@ -74,8 +74,8 @@ type FabricClass = new (...args: never[]) => object;
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
- * `fabricFromConvertibleJsValue()` and decodes it back to native form via
- * `convertibleJsFromFabricValue()`.
+ * `fabricFromConvertibleJsValue()` and decodes it back to convertible JS form
+ * via `convertibleJsFromFabricValue()`.
  */
 function roundTrip(value: FabricValue): FabricConvertibleJsValue {
   return convertibleJsFromFabricValue(fabricFromConvertibleJsValue(value));
@@ -120,7 +120,7 @@ describe("convertible-js", () => {
       expect(result.missing).toBe(undefined);
     });
 
-    it("unwraps a `FabricError` back to a native `Error`", () => {
+    it("unwraps a `FabricError` back to a JS `Error`", () => {
       const error = new Error("test error");
       const stored = fabricFromConvertibleJsValue(error);
       const restored = convertibleJsFromFabricValue(stored);
@@ -273,7 +273,7 @@ describe("convertible-js", () => {
       expect(result[2]).toBe(3);
     });
 
-    it("passes through non-native `FabricInstance`", () => {
+    it("passes through a `FabricInstance` with no JS counterpart", () => {
       const us = new UnknownValue("Test@1", null);
       const obj = { thing: us };
       const result = convertibleJsFromFabricValue(obj) as Record<
@@ -323,7 +323,7 @@ describe("convertible-js", () => {
       ) as Error;
       expect(result).toBeInstanceOf(Error);
       expect(result.message).toBe("outer");
-      // cause should be deeply unwrapped to a native Error, not FabricError.
+      // cause should be deeply unwrapped to a JS `Error`, not a `FabricError`.
       expect(result.cause).toBeInstanceOf(Error);
       expect((result.cause as Error).message).toBe("inner");
       // custom property should be unwrapped to FrozenMap.
@@ -725,7 +725,7 @@ describe("convertible-js", () => {
       });
     });
 
-    describe("converts native instances", () => {
+    describe("converts JS instances", () => {
       it("wraps `Error` as a `FabricError`", () => {
         const error = new Error("test message");
         const result = shallowFabricFromConvertibleJsValue(error);
@@ -851,7 +851,7 @@ describe("convertible-js", () => {
     });
 
     describe("rejects extra enumerable properties", () => {
-      // "Death before confusion": a native type with a dedicated fabric
+      // "Death before confusion": a JS type with a dedicated fabric
       // representation carries no room for extra state, so silently dropping it
       // would lose data on a round trip.
 
@@ -1195,14 +1195,14 @@ describe("convertible-js", () => {
         );
       });
 
-      it("converts native `Uint8Array` to `FabricBytes`", () => {
+      it("converts JS `Uint8Array` to `FabricBytes`", () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const result = shallowFabricFromConvertibleJsValue(bytes);
         expect(result).toBeInstanceOf(FabricBytes);
         expect((result as FabricBytes).slice()).toEqual(bytes);
       });
 
-      it("converts native `Uint8Array` to frozen `FabricBytes` by default", () => {
+      it("converts JS `Uint8Array` to frozen `FabricBytes` by default", () => {
         const bytes = new Uint8Array([10, 20]);
         const result = shallowFabricFromConvertibleJsValue(bytes);
         expect(Object.isFrozen(result)).toBe(true);
@@ -2154,7 +2154,7 @@ describe("convertible-js", () => {
       });
     });
 
-    describe("native object types", () => {
+    describe("JS object types", () => {
       it("returns `true` for `Error` instances", () => {
         expect(isValidFabricConvertibleJsValue(new Error("test"))).toBe(true);
         expect(isValidFabricConvertibleJsValue(new TypeError("test"))).toBe(

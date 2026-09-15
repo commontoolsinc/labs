@@ -285,7 +285,7 @@ export function assertValidFabricValueLayer(
  * that a membership check must not invoke.
  *
  * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
- * `isValidFabricConvertibleJsValue()` (which additionally accepts native values
+ * `isValidFabricConvertibleJsValue()` (which additionally accepts JS values
  * *convertible* to fabric form).
  *
  * This is the admission test the encoding path's input contract is written
@@ -388,7 +388,7 @@ export function isValidFabricPlainObject(
 
 /**
  * Returns `true` if the value is a `FabricConvertibleJsObject`: one of the
- * "wild-west" native JS instances that the conversion layer wraps into a
+ * "wild-west" convertible JS objects that the conversion layer wraps into a
  * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
  *
  * Arrays, plain objects, and system-defined `FabricPrimitive`s are _not_
