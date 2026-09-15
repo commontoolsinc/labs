@@ -300,4 +300,45 @@ describe("setsrc commit receipt", () => {
       manager.getArtifactEntryRef = originalGetRef;
     }
   });
+
+  it("rejects a refused setup commit with an `Error` carrying the refusal", async () => {
+    // Storage reports a refusal as a `Result` error, a plain object rather
+    // than an `Error`. One thrown as it stands reaches `cf piece setsrc` as
+    // `[non-error-thrown] [object Object]`, its reason discarded. The refusal
+    // below has the shape the CFC boundary produces when not every reason is
+    // a verdict: the message says what refused, and `reason` is only a
+    // classification marker.
+    const piece = await pieces.create(markedProgram("v1"), { input: {} });
+    await runtime.idle();
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const refusal = {
+      name: "StorageTransactionAborted" as const,
+      message: "CFC enforcement rejected commit: relevant transaction was " +
+        "not prepared: a policy check refused the write",
+      reason: new Error("cfc-refusal-not-a-verdict"),
+    };
+    let refused = false;
+    // The setup transaction is the one carrying source-update authority.
+    // Every other transaction the update opens, persisting the compiled
+    // candidate among them, runs for real.
+    runtime.editWithRetry = ((fn, maxRetries, options) => {
+      if (options?.sourceUpdate === undefined) {
+        return originalEditWithRetry(fn, maxRetries, options);
+      }
+      refused = true;
+      return Promise.resolve({ error: refusal });
+    }) as typeof runtime.editWithRetry;
+
+    try {
+      const thrown = await piece.setPattern(markedProgram("v2")).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refused).toBe(true);
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe(refusal.message);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
 });

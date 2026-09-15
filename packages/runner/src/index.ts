@@ -94,6 +94,7 @@ export type {
   TransactionCommitOptions,
 } from "./storage/interface.ts";
 export { hasOperationStorageCapability } from "./storage/interface.ts";
+export { isCfcEnforcementRejection } from "./storage/rejection.ts";
 export type {
   EntityIdListOptions,
   EntityIdListResult,

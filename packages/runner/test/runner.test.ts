@@ -2055,6 +2055,51 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSyncedWithCommit throws a refused setup commit as an `Error` that keeps the refusal's fields", async () => {
+    // Storage reports a refusal as a `Result` error, a plain object rather
+    // than an `Error`. Thrown as it stands it fails `instanceof Error`, has
+    // no stack, and renders as `[object Object]`, so the message, the one
+    // line an operator can act on, never reaches them. The refusal below has
+    // the shape the CFC boundary produces when not every reason is a
+    // verdict.
+
+    const resultCell = runtime.getCell(space, "runSynced refused setup commit");
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(resultCell, initialPattern, {});
+    const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
+    const refusal = {
+      name: "StorageTransactionAborted" as const,
+      message: "CFC enforcement rejected commit: relevant transaction was " +
+        "not prepared: a policy check refused the write",
+      reason: new Error("cfc-refusal-not-a-verdict"),
+    };
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    runtime.editWithRetry =
+      (() =>
+        Promise.resolve({ error: refusal })) as typeof runtime.editWithRetry;
+
+    try {
+      const thrown = await runtime.runSyncedWithCommit(
+        resultCell,
+        nextPattern,
+        {},
+        { expectedPatternIdentity: previous, pieceSourceTransition },
+      ).then(() => undefined, (error: unknown) => error);
+      expect(thrown).toBeInstanceOf(Error);
+      const error = thrown as Error & { reason?: unknown };
+      expect(error.message).toBe(refusal.message);
+      expect(error.name).toBe("StorageTransactionAborted");
+      expect(error.reason).toBe(refusal.reason);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
   it("runSyncedWithCommit refuses a receipt without a fresh source transition", async () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
