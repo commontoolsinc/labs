@@ -113,6 +113,77 @@ const seedPlainDoc = async (
 };
 
 describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
+  it("enforces input floors through the raw journal when candidate inspection is unavailable", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager });
+    try {
+      await seedLabeledDoc(runtime, "fallback-source", "source", {
+        integrity: [OTHER_ATOM],
+      });
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "fallback-source", undefined, tx).get();
+      runtime.getCell(signer.did(), "fallback-target", SINK_SCHEMA, tx).set({
+        out: "target",
+      });
+      let rawInspections = 0;
+      const view = new Proxy(tx, {
+        get(target, prop) {
+          if (prop === "getPotentiallyExternalReadActivities") return undefined;
+          if (prop === "getReadActivities") {
+            return () => {
+              rawInspections++;
+              return target.getReadActivities?.() ?? [];
+            };
+          }
+          const member = Reflect.get(target, prop, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
+      expect(
+        prepareBoundaryCommit(view).some((reason) =>
+          reason.includes("requiredIntegrity failed")
+        ),
+      ).toBe(true);
+      expect(rawInspections).toBeGreaterThan(0);
+      tx.abort();
+    } finally {
+      await runtime.dispose({ closeStorage: false });
+      await storageManager.close();
+    }
+  });
+
+  it("permits a self-endorsed write with no reads on a backend without read inspection", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager });
+    try {
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "no-read-target", SINK_SCHEMA, tx).set({
+        out: "target",
+      });
+      const view = new Proxy(tx, {
+        get(target, prop) {
+          if (
+            prop === "getPotentiallyExternalReadActivities" ||
+            prop === "getReadActivities"
+          ) return undefined;
+          const member = Reflect.get(target, prop, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
+      const summaries: CfcPrefixProvenanceSummary[] = [];
+      expect(prepareBoundaryCommit(view, {
+        onPrefixProvenance: (summary) => summaries.push(summary),
+      })).toEqual([]);
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].protectedWrites).toBe(1);
+      expect(summaries[0].prefixGatedReads).toBe(0);
+      tx.abort();
+    } finally {
+      await runtime.dispose({ closeStorage: false });
+      await storageManager.close();
+    }
+  });
+
   it("refreshes candidate reads and source envelopes for each target", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager });

@@ -11,6 +11,7 @@
  */
 
 import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { Runtime, UI } from "@commonfabric/runner";
@@ -146,6 +147,169 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       return this;
     }
   }
+
+  await t.step(
+    "keeps a reused element's new reactive props and children read-only and cancels them when replaced",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      const title = runtime.getCell<string>(signer.did(), "transition-title");
+      const children = runtime.getCell<string[]>(
+        signer.did(),
+        "transition-children",
+      );
+      const seed = runtime.edit();
+      title.withTx(seed).set("first title");
+      children.withTx(seed).set(["first child"]);
+      expect((await seed.commit()).error).toBeUndefined();
+      await runtime.idle();
+
+      const root = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: { title: "static title" },
+        children: ["static child"],
+      });
+      const cancel = reconciler.mount(root as unknown as Cell<unknown>);
+      await t.settle();
+      const element = collector.getOpsOfType("create-element")[0];
+      expect(element?.op).toBe("create-element");
+      const elementId = "nodeId" in element ? element.nodeId : undefined;
+      const prepare = runtime.prepareTxForCommit;
+      const subscriptionModes: boolean[] = [];
+      runtime.prepareTxForCommit = (tx) => {
+        subscriptionModes.push(tx.isReadOnly?.() === true);
+        prepare.call(runtime, tx);
+      };
+      try {
+        collector.clear();
+        root.set({
+          type: "vnode",
+          name: "div",
+          props: { title },
+          children,
+        });
+        await runtime.idle();
+        await t.settle();
+        expect(collector.getOpsOfType("create-element")).toEqual([]);
+        expect(collector.getOpsOfType("set-prop")).toContainEqual({
+          op: "set-prop",
+          nodeId: elementId,
+          key: "title",
+          value: "first title",
+        });
+        expect(
+          collector.getOps().some((op) =>
+            "text" in op && op.text === "first child"
+          ),
+        ).toBe(true);
+        expect(subscriptionModes.length).toBeGreaterThanOrEqual(4);
+        expect(subscriptionModes.every(Boolean)).toBe(true);
+
+        collector.clear();
+        subscriptionModes.length = 0;
+        const update = runtime.edit();
+        title.withTx(update).set("second title");
+        children.withTx(update).set(["second child"]);
+        expect((await update.commit()).error).toBeUndefined();
+        await runtime.idle();
+        await t.settle();
+        expect(collector.getOpsOfType("set-prop")).toContainEqual({
+          op: "set-prop",
+          nodeId: elementId,
+          key: "title",
+          value: "second title",
+        });
+        expect(
+          collector.getOps().some((op) =>
+            "text" in op && op.text === "second child"
+          ),
+        ).toBe(true);
+        expect(subscriptionModes.length).toBeGreaterThanOrEqual(4);
+        expect(subscriptionModes.every(Boolean)).toBe(true);
+
+        root.set({
+          type: "vnode",
+          name: "div",
+          props: { title: "static again" },
+          children: ["static again"],
+        });
+        await t.settle();
+        collector.clear();
+        const afterReplacement = runtime.edit();
+        title.withTx(afterReplacement).set("ignored title");
+        children.withTx(afterReplacement).set(["ignored child"]);
+        expect((await afterReplacement.commit()).error).toBeUndefined();
+        await runtime.idle();
+        await t.settle();
+        expect(collector.getOps()).toEqual([]);
+      } finally {
+        cancel();
+        runtime.prepareTxForCommit = prepare;
+      }
+    },
+  );
+
+  await t.step(
+    "switches a reused element to a changing Cell-backed handler and cancels the removed prop",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      const seen: string[] = [];
+      const handler = new MockCell(() => seen.push("first"));
+      const root = new MockCell({
+        type: "vnode",
+        name: "button",
+        props: { onClick: () => seen.push("static") },
+        children: ["click"],
+      });
+      const cancel = reconciler.mount(root as unknown as Cell<unknown>);
+      try {
+        await t.settle();
+        collector.clear();
+        root.set({
+          type: "vnode",
+          name: "button",
+          props: { onClick: handler },
+          children: ["click"],
+        });
+        await t.settle();
+        expect(collector.getOpsOfType("create-element")).toEqual([]);
+        const first = collector.getOpsOfType("set-event");
+        expect(first).toHaveLength(1);
+        if (first[0].op !== "set-event") throw new Error("Expected set-event");
+        reconciler.dispatchEvent(first[0].handlerId, { type: "click" });
+        expect(seen).toEqual(["first"]);
+
+        collector.clear();
+        handler.set(() => seen.push("second"));
+        await t.settle();
+        expect(collector.getOpsOfType("remove-event")).toHaveLength(1);
+        const second = collector.getOpsOfType("set-event");
+        expect(second).toHaveLength(1);
+        if (second[0].op !== "set-event") throw new Error("Expected set-event");
+        reconciler.dispatchEvent(second[0].handlerId, { type: "click" });
+        expect(seen).toEqual(["first", "second"]);
+
+        collector.clear();
+        root.set({
+          type: "vnode",
+          name: "button",
+          props: {},
+          children: ["click"],
+        });
+        await t.settle();
+        expect(collector.getOpsOfType("remove-event")).toHaveLength(1);
+        collector.clear();
+        handler.set(() => seen.push("removed"));
+        await t.settle();
+        expect(collector.getOps()).toEqual([]);
+        expect(seen).toEqual(["first", "second"]);
+      } finally {
+        cancel();
+      }
+    },
+  );
 
   await t.step(
     "renders, updates, and cleans up Cells in a direct array root",

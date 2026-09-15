@@ -119,6 +119,41 @@ describe("read-only Cell subscriptions", () => {
     }
   });
 
+  it("rejects unsupported read-only transactions before delivering a callback", async () => {
+    const { runtime, source, dispose } = await setup();
+    const edit = runtime.edit.bind(runtime);
+    const opened: IExtendedStorageTransaction[] = [];
+    runtime.edit = (...args) => {
+      const tx = edit(...args);
+      opened.push(tx);
+      return new Proxy(tx, {
+        get(target, prop) {
+          if (prop === "setReadOnly") return undefined;
+          const member = Reflect.get(target, prop, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
+    };
+    try {
+      let deliveries = 0;
+      expect(() =>
+        source.sink(() => {
+          deliveries++;
+        }, { readOnly: true })
+      )
+        .toThrow(
+          "Read-only subscriptions require transaction read-only support.",
+        );
+      expect(deliveries).toBe(0);
+      expect(opened.length).toBeGreaterThan(0);
+      expect(opened.at(-1)!.getCfcState().prepare.status).toBe("unprepared");
+    } finally {
+      runtime.edit = edit;
+      for (const tx of opened) tx.abort();
+      await dispose();
+    }
+  });
+
   it("keeps ordinary sink callback child writes writable and committed", async () => {
     const { runtime, source, dispose } = await setup();
     try {
