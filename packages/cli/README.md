@@ -616,7 +616,14 @@ process on every deployment.
 Preflight uses setup's stored-argument validation: optional fields holding
 `undefined` count as absent, and unreadable linked values defer to reactive
 reads. A compatible verdict therefore does not prove that every linked value has
-loaded. A committed direct handle retained under an unchanged input contract
+loaded. It also runs the CFC schema-envelope merge the setup transaction
+performs at commit, in dry run, over both documents that take it: the envelope
+stored on the piece's argument document against the candidate's argument schema,
+and the envelope stored on the piece's own document against its result schema. A
+stored claim the candidate cannot reconcile with — an owner-protected field
+whose `writeAuthorizedBy` claim names a different binding, say — is reported by
+the check in the merge's own words rather than discovered as a commit rejection
+at apply. A committed direct handle retained under an unchanged input contract
 keeps its producer's policy; the check does not require the consumer to
 redeclare that policy. New links and changed handle contracts require the full
 producer-contract proof. A successful render after apply is required.

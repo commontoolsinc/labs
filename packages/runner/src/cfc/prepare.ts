@@ -143,7 +143,12 @@ import {
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
-import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  type CfcSchemaMergeIssue,
+  cfcSchemaMergeIssue,
+  type MergeCfcSchemaEnvelopeOptions,
+  mergeCfcSchemaEnvelopes,
+} from "./schema-merge.ts";
 import {
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
@@ -5204,6 +5209,55 @@ export const decomposeToSameRoot = (
 };
 
 /**
+ * Whether a write under `candidate` leaves a document's stored envelope as it
+ * is, so that no merge runs: the two are equal but for writer stamps, they
+ * decompose to the same root document, or the stored envelope covers the
+ * candidate's.
+ */
+const storedEnvelopeUnchangedByCandidate = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+): boolean =>
+  schemasEqualIgnoringWriterStamp(stored, candidate) ||
+  decomposeToSameRoot(stored, candidate) ||
+  storedSchemaCoversCandidateEnvelope(stored, candidate);
+
+/**
+ * The envelope a document stores after a write under `candidate`: the stored
+ * envelope where the write leaves it unchanged, and the two merged otherwise.
+ * Throws what {@link mergeCfcSchemaEnvelopes} throws.
+ */
+const mergeStoredCfcEnvelope = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions,
+): JSONSchema =>
+  storedEnvelopeUnchangedByCandidate(stored, candidate)
+    ? stored
+    : mergeCfcSchemaEnvelopes(stored, candidate, options);
+
+/**
+ * Would a write under `candidate` commit over this stored envelope?
+ * `undefined` means yes.
+ *
+ * This is {@link mergeStoredCfcEnvelope} in dry run — the fast paths the
+ * persist loop takes before it merges, then the merge itself through
+ * `cfcSchemaMergeIssue` — and it is what `cf piece setsrc --check` drives, so
+ * the preflight and the commit cannot part on whether a candidate merges: a
+ * fast path the preflight skipped would manufacture a rejection the commit
+ * never makes, and one it took alone would hide a rejection the commit does
+ * make. Pure: no transaction, no writes.
+ */
+export const storedCfcEnvelopeMergeIssue = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
+): CfcSchemaMergeIssue | undefined =>
+  storedEnvelopeUnchangedByCandidate(stored, candidate)
+    ? undefined
+    : cfcSchemaMergeIssue(stored, candidate, options);
+
+/**
  * The decomposed spelling of an envelope schema: its root document, ready
  * to ensure. `undefined` keeps the inline spelling — decomposition
  * refused the input, or the root reduced to a `$defs` fragment reference,
@@ -6455,13 +6509,9 @@ export const prepareBoundaryCommit = (
     } else if (stored.status === "loaded") {
       storedSchema = stored.schema;
       try {
-        mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
-            decomposeToSameRoot(storedSchema, schema) ||
-            storedSchemaCoversCandidateEnvelope(storedSchema, schema)
-          ? storedSchema
-          : mergeCfcSchemaEnvelopes(storedSchema, schema, {
-            generatedOutputPaths: generatedOutputPaths.get(key),
-          });
+        mergedSchema = mergeStoredCfcEnvelope(storedSchema, schema, {
+          generatedOutputPaths: generatedOutputPaths.get(key),
+        });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
         // token so the default-root runnability backstop can key on THIS class
