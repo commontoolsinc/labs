@@ -147,6 +147,7 @@ import { isSchemaMismatchError } from "./schema-view.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import {
   type CommitError,
   type DID,
@@ -1350,7 +1351,6 @@ type DeferredStartResult<R> = {
 type BoundNodeIO = {
   inputs: FabricExecValue;
   outputs: FabricExecValue;
-  reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
   /**
    * The bound inputs as an immutable document: what a node reads its
@@ -1361,12 +1361,10 @@ type BoundNodeIO = {
 
 /**
  * A raw node's bound inputs and outputs as `#instantiateRawNode()` hands
- * them to the builtin. `inputCells` is `reads` less the opaque forwarded
- * references the builtin never value-reads.
+ * them to the builtin.
  */
 type RawNodeInputs = BoundNodeIO & {
   argumentCellLink: NormalizedFullLink;
-  inputCells: NormalizedFullLink[];
   resolvedOutputSpot: NormalizedFullLink | undefined;
   outputBinding: NormalizedFullLink | undefined;
 };
@@ -1378,7 +1376,7 @@ type RawNodeInputs = BoundNodeIO & {
  * child's link is written through the outputs, or the outputs already name
  * the child's result cell.
  */
-type PatternNodeBinding = BoundNodeIO & {
+type PatternNodeBinding = Omit<BoundNodeIO, "inputsCell"> & {
   child: Pattern;
   childResultCell: Cell<any> | undefined;
   sendToBindings: boolean;
@@ -1387,8 +1385,8 @@ type PatternNodeBinding = BoundNodeIO & {
 /**
  * What one node's bindings resolve to on a result cell: the module the node
  * runs, its inputs and outputs bound to the piece's argument and result
- * documents, the write-redirect links those bindings read and write
- * through, and what the node's kind adds. Instantiation and the pre-sync
+ * documents, the write-redirect links those bindings write through,
+ * and what the node's kind adds. Instantiation and the pre-sync
  * derive it the same way, so what the pre-sync names is what the
  * instantiated node reads.
  */
@@ -1408,6 +1406,7 @@ type ResolvedJavaScriptModule = {
 };
 
 type JavaScriptNodeContext = BoundNodeIO & {
+  reads: NormalizedFullLink[];
   tx: IExtendedStorageTransaction;
   module: Module;
   resultCell: Cell<any>;
@@ -7813,11 +7812,11 @@ export class Runner {
    * walk delivers what a plan's selector reaches within its space and stops
    * at a link into another, so after the plan syncs land this reads each
    * plan's inputs under its read schema through a read transaction: a read
-   * that dead-ends on such a link kicks that document's load, and the loads
-   * pending after the reads are awaited before the next read, which reaches
-   * one space further. Each round awaits only loads no earlier round
-   * awaited, by document, so a link whose target never arrives, kicked
-   * again by every read, ends the pass rather than extending it, and a round
+   * that dead-ends on such a link kicks that document's load. Pending loads
+   * for documents the transaction read are awaited before the next read,
+   * which reaches one space further. Each round awaits only loads no
+   * earlier round awaited, by document, so a link whose target never arrives,
+   * kicked again by every read, ends the pass rather than extending it, and a round
    * whose reads leave no new load pending ends it. The manager's settled
    * pool is not what is awaited: on a client it holds the runtime's other
    * work, sinks' first loads and coordinators' republishes among it, which
@@ -7833,6 +7832,7 @@ export class Runner {
     for (;;) {
       const readTx = this.#familyReadTx(identity);
       for (const plan of plans) {
+        if (plan.kind === "pattern") continue;
         const schema = this.#planReadSchema(plan);
         if (schema === undefined) continue;
         try {
@@ -7846,9 +7846,18 @@ export class Runner {
           ]);
         }
       }
-      const keys = manager.pendingLoadAddresses()
+      const pending = manager.pendingLoadAddresses();
+      if (pending.length === 0) return;
+      const readIdentity = identity ?? this.#runtime.scopeKeyIdentity;
+      const readKeys = new Set(
+        Array.from(
+          getTransactionReadActivities(readTx),
+          (read) => entityKey(read, readIdentity),
+        ),
+      );
+      const keys = pending
         .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
-        .filter((key) => !awaited.has(key));
+        .filter((key) => readKeys.has(key) && !awaited.has(key));
       if (keys.length === 0) return;
       for (const key of keys) awaited.add(key);
       const settleStart = performance.now();
@@ -8823,9 +8832,6 @@ export class Runner {
     return {
       inputs,
       outputs,
-      reads: findAllWriteRedirectCells(inputs, resultCell, {
-        followRedirectChains: !usesLocalReads(resultCell.tx),
-      }),
       writes: findAllWriteRedirectCells(outputs, resultCell, {
         followRedirectChains: !usesLocalReads(resultCell.tx),
       }),
@@ -10867,7 +10873,17 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const { module, inputs, outputs, reads, writes } = plan;
+    const { module, inputs, outputs, writes } = plan;
+    // Pre-sync reads the inputs document under the module's schema. Only
+    // instantiation needs the scheduler's static read links, so resolve them
+    // here, under the same machinery-read boundary as the bound plan.
+    const reads = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        findAllWriteRedirectCells(inputs, resultCell, {
+          followRedirectChains: !usesLocalReads(resultCell.tx),
+        }),
+    );
     const { fn, name } = this.#resolveJavaScriptFunction(module);
     const context: JavaScriptNodeContext = {
       tx,
@@ -11126,20 +11142,6 @@ export class Runner {
       mappedInputBindings,
     );
 
-    // Opaque forwarded references (argument keys the module's schema marks
-    // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
-    // never value-read by the builtin, so they must not become declared reads
-    // that pull their (possibly unselected) writer. Drop those top-level keys
-    // when building inputCells only; outputCells and other callers keep the
-    // full surface.
-    const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
-    const inputCells = findAllWriteRedirectCells(
-      mappedInputBindings,
-      resultCell,
-      opaqueInputKeys.size > 0
-        ? { skipTopLevelKeys: opaqueInputKeys }
-        : undefined,
-    );
     // outputCells tracks the static write surface for dependency ordering and
     // event preflight.
     const outputCells = findAllWriteRedirectCells(
@@ -11201,14 +11203,8 @@ export class Runner {
     return {
       inputs: mappedInputBindings,
       outputs: mappedOutputBindings,
-      // The full read surface, opaque keys included: what the pre-sync
-      // names. The builtin's declared reads are `inputCells`.
-      reads: opaqueInputKeys.size > 0
-        ? findAllWriteRedirectCells(mappedInputBindings, resultCell)
-        : inputCells,
       writes: outputCells,
       argumentCellLink,
-      inputCells,
       inputsCell,
       resolvedOutputSpot,
       outputBinding,
@@ -11228,12 +11224,27 @@ export class Runner {
       moduleRefName,
       argumentCellLink,
       outputs: mappedOutputBindings,
-      inputCells,
       writes: outputCells,
       inputsCell,
       resolvedOutputSpot,
       outputBinding,
     } = plan;
+    // Opaque forwarded references (e.g. ifElse's unselected branch) are
+    // never value-read by the builtin. Exclude them from its declared reads
+    // so the scheduler does not pull their writers. Resume pre-sync uses
+    // inputsCell directly and does not need this scheduler read list.
+    const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
+    const inputCells = tx.runWithAmbientReadMeta(
+      machineryRead,
+      () =>
+        findAllWriteRedirectCells(
+          plan.inputs,
+          resultCell,
+          opaqueInputKeys.size > 0
+            ? { skipTopLevelKeys: opaqueInputKeys }
+            : undefined,
+        ),
+    );
     if (typeof module.implementation !== "function") {
       throw new Error(
         `Raw module is not a function, got: ${module.implementation}`,
@@ -11574,16 +11585,7 @@ export class Runner {
       child,
       inputs,
       outputs,
-      reads: argumentCellLink === undefined
-        ? []
-        : findAllWriteRedirectCells(inputs, resultCell),
       writes: findAllWriteRedirectCells(outputs, resultCell),
-      inputsCell: this.#runtime.getImmutableCell(
-        resultCell.space,
-        inputs,
-        undefined,
-        tx,
-      ),
     };
 
     // If output bindings is a link to a non-redirect cell,

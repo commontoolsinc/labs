@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
@@ -687,13 +688,38 @@ describe("resume node plan pre-sync", () => {
       leafLocalAfterPresync ??= localOnB(leafDoc, spaceP);
       return walked;
     };
+    const leafId = leafDoc.getAsNormalizedFullLink().id;
+    const replica = managerB.open(spaceP);
+    const syncLeaf = replica.sync.bind(replica);
+    const releaseLeaf = Promise.withResolvers<void>();
+    using _held = stub(replica, "sync", async (...args) => {
+      if (args[0] === leafId) await releaseLeaf.promise;
+      return await syncLeaf(...args);
+    });
+    const waited = Promise.withResolvers<"required wait">();
+    const settle = managerB.loadsSettled.bind(managerB);
+    using _observed = stub(managerB, "loadsSettled", (keys) => {
+      if (keys.some((key) => key.endsWith(`/${leafId}`))) {
+        waited.resolve("required wait");
+      }
+      return settle(keys);
+    });
     const before = commitConflictCount();
+    const resume = createAndResume(
+      DEEP_READ_PROGRAM,
+      { def: top },
+      "cross-space parent",
+    );
     try {
-      const resumed = await createAndResume(
-        DEEP_READ_PROGRAM,
-        { def: top },
-        "cross-space parent",
-      );
+      expect(
+        await Promise.race([
+          resume.then(() => "resumed" as const),
+          waited.promise,
+        ]),
+      ).toBe("required wait");
+      expect(localOnB(leafDoc, spaceP)).toBe(false);
+      releaseLeaf.resolve();
+      const resumed = await resume;
       expect(leafLocalAfterPresync).toBe(true);
       await rt2.idle();
       await rt2.storageManager.synced();
@@ -701,6 +727,8 @@ describe("resume node plan pre-sync", () => {
       await label.pull();
       expect(label.get()).toBe("n:Ada");
     } finally {
+      releaseLeaf.resolve();
+      await resume;
       rt2.runner.accessForTestingOnly.dependencySyncer = undefined;
     }
     expect(commitConflictCount()).toBe(before);
@@ -855,6 +883,100 @@ describe("resume node plan pre-sync", () => {
       expect(label.get()).toBe("n:Ada");
     } finally {
       unrelated.resolve();
+    }
+  });
+
+  it("resumes while an unrelated document load is still in flight", async () => {
+    const unrelated = rt2.getCell(spaceP, "unrelated pending document");
+    const unrelatedId = unrelated.getAsNormalizedFullLink().id;
+    const replica = managerB.open(spaceP);
+    const sync = replica.sync.bind(replica);
+    const release = Promise.withResolvers<void>();
+    using _held = stub(replica, "sync", async (...args) => {
+      if (args[0] === unrelatedId) await release.promise;
+      return await sync(...args);
+    });
+    const unrelatedLoad = unrelated.sync();
+
+    const waited = Promise.withResolvers<"unrelated wait">();
+    const settle = managerB.loadsSettled.bind(managerB);
+    using _observed = stub(managerB, "loadsSettled", (keys) => {
+      if (keys.some((key) => key.endsWith(`/${unrelatedId}`))) {
+        waited.resolve("unrelated wait");
+      }
+      return settle(keys);
+    });
+    const resume = createAndResume(
+      UNREAD_LINK_PROGRAM,
+      { def: { name: "Ada" } },
+      "resume beside unrelated load",
+    );
+    try {
+      expect(
+        managerB.pendingLoadAddresses().some((address) =>
+          address.id === unrelatedId
+        ),
+      ).toBe(true);
+      // The observed wait identifies the stall before the held load is released.
+      const outcome = await Promise.race([
+        resume.then(() => "resumed" as const),
+        waited.promise,
+      ]);
+      expect(outcome).toBe("resumed");
+      expect(
+        managerB.pendingLoadAddresses().some((address) =>
+          address.id === unrelatedId
+        ),
+      ).toBe(true);
+    } finally {
+      release.resolve();
+      await unrelatedLoad;
+      await resume;
+    }
+    const resumed = await resume;
+    await resumed.key("label").pull();
+    expect(resumed.key("label").get()).toBe("n:Ada");
+  });
+
+  it("pre-syncs a principal-only family beside its manager's session load", async () => {
+    const compiled = await rt1.patternManager.compilePattern(
+      UNREAD_LINK_PROGRAM,
+      { space },
+    );
+    const resumed = await createAndResume(
+      UNREAD_LINK_PROGRAM,
+      { def: { name: "Ada" } },
+      "principal-only family",
+    );
+    const tx = rt2.edit();
+    tx.tx.scopeKeyIdentity = { principal: signer.did() };
+    const unrelated = rt2.getCell(
+      spaceP,
+      "manager session load",
+      undefined,
+      undefined,
+      "session",
+    );
+    const unrelatedId = unrelated.getAsNormalizedFullLink().id;
+    const replica = managerB.open(spaceP);
+    const sync = replica.sync.bind(replica);
+    const release = Promise.withResolvers<void>();
+    using _held = stub(replica, "sync", async (...args) => {
+      if (args[0] === unrelatedId) await release.promise;
+      return await sync(...args);
+    });
+    const load = unrelated.sync();
+    try {
+      await rt2.runner.syncStoredPieceCells(resumed.withTx(tx), compiled);
+      expect(
+        managerB.pendingLoadAddresses().some((address) =>
+          address.id === unrelatedId && address.scope === "session"
+        ),
+      ).toBe(true);
+    } finally {
+      release.resolve();
+      await load;
+      tx.abort("principal-only pre-sync complete");
     }
   });
 
