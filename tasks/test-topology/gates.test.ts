@@ -65,20 +65,23 @@ describe("the repository's gate suites", () => {
       await Deno.readTextFile(`${root}/deno.jsonc`),
     ) as { tasks: Record<string, string> };
     const asking: string[] = [];
-    const declared: string[] = [];
+    const undeclared: string[] = [];
     for (const suite of [byId("repo-gates"), byId("repo-history-gates")]) {
       for (const gate of [...WORKING_TREE_GATES, ...HISTORY_GATES]) {
         if (!suite.units.includes(gate.name)) continue;
         const [verb, named] = gate.run;
         const line = verb === "task" ? tasks[named!] ?? "" : "";
-        if (line.includes("api.github.com")) asking.push(gate.name);
-        if (suite.needs.includes("github-api")) declared.push(gate.name);
+        if (!line.includes("api.github.com")) continue;
+        asking.push(gate.name);
+        if (!suite.needs.includes("github-api")) undeclared.push(gate.name);
       }
     }
-    expect(asking).toEqual(["check-action-pins"]);
-    // Every gate of a declaring suite, which is wider than the one that
-    // asks: a suite is the unit a capability's environment reaches.
-    expect(declared).toContain("check-action-pins");
+    // Both sides are read off the tree, and the relation between them is
+    // what the declaration means. The list is here as well because it is
+    // what says the search found anything: a probe that matched nothing
+    // would leave the relation to hold over an empty set.
+    expect(asking.toSorted()).toEqual(["check-action-pins"]);
+    expect(undeclared).toEqual([]);
   });
 
   it("reaches the gates a change names, and no others", () => {

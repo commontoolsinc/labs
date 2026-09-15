@@ -2284,6 +2284,7 @@ describe("what a lane hands the children it spawns", () => {
     const log = console.log;
     console.log = () => {};
     let heldAfter: (string | undefined)[] = [];
+    let reported: Record<string, string[]> = {};
     try {
       await runLane({
         lane: 1,
@@ -2307,19 +2308,26 @@ describe("what a lane hands the children it spawns", () => {
         spool: () => spool,
       });
       heldAfter = names.map((name) => Deno.env.get(name));
+      // Read here rather than beside the assertions, so that the
+      // directories holding it can go in the `finally` and a failing
+      // assertion leaves nothing behind.
+      reported = {
+        "repo-gates": await saw(at, "repo-gates"),
+        "workspace-unit": await saw(at, "workspace-unit"),
+      };
     } finally {
       console.log = log;
       for (const [name, value] of before) {
         if (value === undefined) Deno.env.delete(name);
         else Deno.env.set(name, value);
       }
+      await Deno.remove(at, { recursive: true });
+      await Deno.remove(spool, { recursive: true });
     }
-    expect(await saw(at, "repo-gates")).toEqual(["a-token", "a-token"]);
-    expect(await saw(at, "workspace-unit")).toEqual(["", ""]);
+    expect(reported["repo-gates"]).toEqual(["a-token", "a-token"]);
+    expect(reported["workspace-unit"]).toEqual(["", ""]);
     // The lane itself holds nothing for a child to inherit, which is
     // what leaves the declaration as the only way one gets a token.
     expect(heldAfter).toEqual([undefined, undefined]);
-    await Deno.remove(at, { recursive: true });
-    await Deno.remove(spool, { recursive: true });
   });
 });
