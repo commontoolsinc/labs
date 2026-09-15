@@ -1,9 +1,9 @@
 /**
  * Pattern tests for the naming library's own rules, driven on plain cells
  * with no board: the sequence over the names in use, the allocator re-run
- * against a stale read — the shape a lost commit race leaves behind — both for
- * a member that exists and for one `createNamed()` builds holding its name,
- * the reverse lookup, and the declaration.
+ * against a stale read — the shape a lost commit race leaves behind — the
+ * agreement between the name `createNamed()` hands `create` and the name it
+ * records the member under, the reverse lookup, and the declaration.
  */
 
 import { action, assert, equals, pattern, TESTS, Writable } from "commonfabric";
@@ -90,14 +90,18 @@ export default pattern(() => {
     equals(names.get()["3"] as object, loser)
   );
 
-  // The same lost race for a member built holding its name. The re-run calls
-  // `create` again, so the name the member is built with is the next distinct
-  // one, and it is the name the map records the member under. A `create` that
-  // was handed the stale name would leave `built` reading `1,2`.
+  // `createNamed()` builds the member with the name it records it under, and
+  // returns that same name. The middle step records a member under a name the
+  // allocator did not issue, so the allocation after it runs over a map that
+  // gained a key — the map a re-run reads once it has lost a commit race.
+  // Producing that re-run takes two transactions in flight at once, which no
+  // sequence of steps has: the runner settles each step before sending the
+  // next. `../integration/collection-naming-concurrency.test.ts` overlaps two
+  // creates and holds the re-run to this same agreement.
   const builtNames = new Writable<NamesMap>({});
   const builtFirst = new Writable({ title: "built first" });
-  const builtWinner = new Writable({ title: "built winner" });
-  const builtLoser = new Writable({ title: "built loser" });
+  const recordedByAnother = new Writable({ title: "recorded by another" });
+  const builtAfter = new Writable({ title: "built after" });
   const built = new Writable<string[]>([]);
   const returned = new Writable<string[]>([]);
 
@@ -108,23 +112,23 @@ export default pattern(() => {
     });
     returned.push(name);
   });
-  const action_built_winner_lands = action(() => {
-    builtNames.key("2").set(builtWinner);
+  const action_another_name_lands = action(() => {
+    builtNames.key("2").set(recordedByAnother);
   });
-  const action_built_loser_reruns = action(() => {
+  const action_create_after_it = action(() => {
     const { name } = createNamed(builtNames, (allocated) => {
       built.push(allocated);
-      return builtLoser;
+      return builtAfter;
     });
     returned.push(name);
   });
-  const assert_rerun_builds_with_the_next_distinct_name = assert(() =>
+  const assert_create_builds_with_the_name_it_records = assert(() =>
     built.get().join(",") === "1,3" &&
     returned.get().join(",") === "1,3" &&
     Object.keys(builtNames.get()).join(",") === "1,2,3" &&
     equals(builtNames.get()["1"] as object, builtFirst) &&
-    equals(builtNames.get()["2"] as object, builtWinner) &&
-    equals(builtNames.get()["3"] as object, builtLoser)
+    equals(builtNames.get()["2"] as object, recordedByAnother) &&
+    equals(builtNames.get()["3"] as object, builtAfter)
   );
 
   // Foreign keys on a real map, as a client over the memory protocol could
@@ -201,9 +205,9 @@ export default pattern(() => {
       { action: action_loser_reruns },
       { assertion: assert_rerun_takes_the_next_distinct_name },
       { action: action_create_first },
-      { action: action_built_winner_lands },
-      { action: action_built_loser_reruns },
-      { assertion: assert_rerun_builds_with_the_next_distinct_name },
+      { action: action_another_name_lands },
+      { action: action_create_after_it },
+      { assertion: assert_create_builds_with_the_name_it_records },
       { assertion: assert_names_stay_decimal_past_the_safe_integers },
       { assertion: assert_foreign_keys_are_not_names },
       { action: action_foreign_keys_land },

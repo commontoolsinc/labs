@@ -208,9 +208,11 @@ cf piece call --cell /of:<board> backfillNames --json '{"agentName":"Sol"}'
 
 - `naming.test.tsx` — the sequence rule, the allocator re-run against a stale
   read (a first allocation, a concurrent writer's key landing, and a re-run over
-  the map as the winner left it, which takes the next distinct name) for
-  `assignName` and for `createNamed`, whose re-run builds its member with that
-  next name, the reverse lookup, and the declaration.
+  the map as the winner left it, which takes the next distinct name), the
+  agreement between the name `createNamed` hands `create` and the name it
+  records the member under, the reverse lookup, and the declaration. Two
+  transactions overlapping is what the concurrency test below has and a sequence
+  of test steps does not.
 - `board.test.tsx` — the exemplar end to end: allocation on create, one more
   than the largest name present, a name kept through a rename and through
   leaving the list, the backfill and its idempotence, index rows that are the
