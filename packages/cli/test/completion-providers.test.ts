@@ -195,10 +195,10 @@ Deno.test("piece context: #argument reads the same on both spellings of a target
     assertEquals(bare, rooted);
     assertEquals(bare.piece, "thermostat");
     assertEquals(bare.pieceInput, true);
-    // A scope written in front of the suffix survives it.
+    // A scope written after the member survives it.
     assertEquals(
       resolvePieceContext(
-        lineFor("cf cell get -s demo --piece thermostat@session#argument "),
+        lineFor("cf cell get -s demo --piece thermostat#argument@session "),
       )?.pieceScope,
       "session",
     );

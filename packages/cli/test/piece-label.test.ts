@@ -168,6 +168,7 @@ describe("cf piece CFC labels", () => {
       identity: "/identity.key",
       space: signer.did(),
       piece: "piece",
+      pieceInput: true,
       jsonOutput: true,
     });
     expect(getCalls[0]?.slice(1)).toEqual([

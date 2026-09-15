@@ -342,7 +342,7 @@ describe("prompt", () => {
       );
       expect(produced(writes)).toEqual([
         "The server cannot be reached.",
-        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+        `position  //${SPACE}/${HANDLE}@space\nscope     @space`,
       ]);
     });
 
@@ -453,7 +453,7 @@ describe("prompt", () => {
       );
       expect(produced(writes)).toEqual([
         '{\n  "title": "a"\n}',
-        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+        `position  //${SPACE}/${HANDLE}@space\nscope     @space`,
       ]);
     });
 
@@ -484,7 +484,7 @@ describe("prompt", () => {
         },
       );
       expect(produced(writes)).toEqual([
-        `position  /@${SPACE}/${board}@space\nscope     @space`,
+        `position  //${SPACE}/${board}@space\nscope     @space`,
       ]);
     });
 
@@ -507,7 +507,7 @@ describe("prompt", () => {
       );
       expect(produced(writes)).toEqual([
         "Interrupted.",
-        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+        `position  //${SPACE}/${HANDLE}@space\nscope     @space`,
       ]);
     });
 
@@ -1387,7 +1387,7 @@ describe("prompt", () => {
         typed("q"),
       ).writes;
       expect(produced(drawn).filter((text) => text.startsWith("position")))
-        .toEqual([`position  /@${SPACE}/${HANDLE}@space\nscope     @space`]);
+        .toEqual([`position  //${SPACE}/${HANDLE}@space\nscope     @space`]);
     });
   });
 
@@ -1515,7 +1515,7 @@ describe("prompt", () => {
         listing(read),
       );
       expect(produced(writes)).toEqual([
-        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+        `position  //${SPACE}/${HANDLE}@space\nscope     @space`,
       ]);
     });
 

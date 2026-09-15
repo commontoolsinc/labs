@@ -1190,6 +1190,40 @@ describe("console/steps provenance", () => {
       expect(args[0].ref).toBe("/@did:key:z6MkAbc/of:fid1:xyz");
     });
 
+    it("matches complete references to legacy handles by decoded address", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "//did:key:z6MkAbc/of:fid1:abc@space/numbers" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const handles = consoleRunHandles(composed("cfh:a:aaaaa"), table).map(
+        (handle) => ({ ...handle, ref: `/@did:key:z6MkAbc${handle.ref}` }),
+      );
+      const args = consoleStepArguments(steps[0], handles);
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+    });
+
+    it("preserves path whitespace when reading a padded reference", () => {
+      const steps = composed("  /of:fid1:abc/title ");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].isReference).toBe(true);
+      expect(consoleStepArguments(steps[2], [])[0].ref).toBe(
+        "/of:fid1:abc/title ",
+      );
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+    });
+
+    it("refuses non-entity URI schemes as cell references", () => {
+      for (const value of ["/data:abc", "/fid1:abc"]) {
+        const steps = composed(value);
+        expect(consoleStepArguments(steps[2], [])[0].isReference).toBe(false);
+      }
+    });
+
     it("resolves a link naming a path inside a held cell to that cell", () => {
       const steps = composed("/of:fid1:abc/numbers");
       const handles = consoleRunHandles(steps, table);

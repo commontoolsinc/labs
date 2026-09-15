@@ -78,9 +78,12 @@ describe("watch", () => {
             .toBe(`${HANDLE}/replies @space`);
         });
 
-        it("carries the suffix where the cell watched is the piece's arguments", () => {
+        it("carries the member where the cell watched is the piece's arguments", () => {
+          // On the piece segment, where an operand selects it: written after
+          // the path it would name the result key `replies#argument`.
+
           expect(driving(at("replies"), WIDE, true).watch.label)
-            .toBe(`${HANDLE}/replies#argument @space`);
+            .toBe(`${HANDLE}#argument/replies @space`);
         });
 
         it("names a piece's two cells apart", () => {
@@ -118,6 +121,21 @@ describe("watch", () => {
           );
           expect(result.key === input.key).toBe(false);
         });
+
+        it("holds the arguments cell apart from a result key spelled like it", () => {
+          // A result key named `replies#argument` is a cell of its own. Kills a
+          // key or a label that writes the member after the path, which gives
+          // the two cells one key and one name.
+
+          const argument = driving(at("replies"), WIDE, true).watch;
+          const resultKey = driving(at("replies#argument"), WIDE, false).watch;
+          expect({ key: argument.key, label: argument.label }).toEqual({
+            key: `/${HANDLE}#argument@space/replies`,
+            label: `${HANDLE}#argument/replies @space`,
+          });
+          expect(resultKey.key === argument.key).toBe(false);
+          expect(resultKey.label === argument.label).toBe(false);
+        });
       });
 
       describe("settled()", () => {
@@ -149,7 +167,7 @@ describe("watch", () => {
           driven.watch.settled(14);
           driven.watch.settled(15);
           expect(driven.lines).toEqual([
-            `watch ${HANDLE}/replies#argument @space: changed`,
+            `watch ${HANDLE}#argument/replies @space: changed`,
           ]);
         });
 
@@ -352,7 +370,7 @@ describe("watch", () => {
       const input = driving(place, WIDE, true).watch;
       expect(watchEntries([result, input])).toEqual([{
         label: "watches",
-        value: `${HANDLE}/title @space, ${HANDLE}/title#argument @space`,
+        value: `${HANDLE}/title @space, ${HANDLE}#argument/title @space`,
       }]);
     });
   });

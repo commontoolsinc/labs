@@ -600,9 +600,9 @@ describe("listing", () => {
         rows: [{
           name: "..",
           kind: "value",
-          operand: "/@space/of:fid1:x@space/..",
+          operand: "./..",
         }],
-      })).toEqual(["%1 /@space/of:fid1:x@space/.."]);
+      })).toEqual(["%1 ./.."]);
     });
 
     it("returns a marker in place of a name for a row with no operand", () => {

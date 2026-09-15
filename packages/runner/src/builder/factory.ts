@@ -37,6 +37,7 @@ import {
 import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
 
 import { cellConstructorFactory } from "../cell.ts";
+import { renderCellReference } from "../cell-reference.ts";
 import { getEntityId } from "../create-ref.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
@@ -225,6 +226,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     generateText,
     fetchBinary,
     cellFromUrl,
+    renderCellReference,
     fetchText,
     fetchJson,
     fetchJsonUnchecked,
