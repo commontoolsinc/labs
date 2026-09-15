@@ -41,6 +41,8 @@ import {
   streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { defer } from "@commonfabric/utils/defer";
 import {
   initializePiecesController,
   type PieceController,
@@ -65,25 +67,15 @@ const fetchStats = async (): Promise<EffectStats | undefined> => {
   return body.servingLoop;
 };
 
-const waitUntil = async (
-  predicate: () => boolean | Promise<boolean>,
-  label: string,
-  timeoutMs = 30_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-};
-
 describe("sx2 effect channel (Phase 4 gates)", () => {
   let identity: Identity;
   let cc: PiecesController;
   let piece: PieceController;
   const navigations: string[] = [];
+  /** Resolves as the controller enacts its first navigation — the
+   * callback's own report, so the wait names the enactment rather than
+   * a length turning into a number. */
+  const firstNavigation = defer<void>();
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -93,6 +85,7 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       identity,
       navigateCallback: (target) => {
         navigations.push(target.getAsNormalizedFullLink().id);
+        firstNavigation.resolve();
       },
     });
     const sourcePath = join(
@@ -130,10 +123,7 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       // enacts locally; no effects doc exists anywhere.
       resultCell.key("go").send(undefined as never);
       await cc.runtime.idle();
-      await waitUntil(
-        () => navigations.length === 1,
-        "the client-computed navigation",
-      );
+      await firstNavigation.promise;
       await cc.runtime.storageManager.synced();
       await effectsCell.sync();
       const value = effectsCell.get();
@@ -162,40 +152,38 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
     // The OPTIMISTIC enactment (speculation.md §2's allowlisted
     // navigateTo): the navigation happens before the authoritative
     // intent's round-trip.
-    await waitUntil(
-      () => navigations.length === 1,
-      "the optimistic enactment",
-    );
+    await firstNavigation.promise;
 
     // The served intent lands in THIS session's instance and the
     // channel acks it (the authored `acks[nonce]` mark); the next wave
-    // RETIRES the acked entry. Completion is judged by the ACK COUNTER
-    // plus the drained-but-PRESENT instance (the retired footprint):
-    // the intent's transient stay in the doc can be shorter than a
-    // poll interval (intent → ack → retire across two fast waves), so
-    // requiring the poll to SAMPLE it would flake — the effectAcks
-    // increment is the proof the intent arrived and was acked, and it
-    // can only have been acked by THIS session's channel (the
-    // instance is session-scoped).
+    // RETIRES the acked entry. Completion is judged by the
+    // drained-but-PRESENT instance — the retired footprint. The
+    // instance is created by the served intent and by nothing else (the
+    // OFF arm's strict absence is the same claim from the other side),
+    // so a present instance says the intent arrived, and an empty
+    // `entries`/`acks` inside it says the ack and the retirement both
+    // landed. Sampling the intent itself is not available: its stay in
+    // the doc can be a single pair of fast waves, which is why the
+    // footprint is what the wait names. The ack counter is asserted
+    // below, against the same session's channel. The sync puts the doc
+    // in this session's watch set, so the sink the wait sleeps on hears
+    // the intent land.
+    await effectsCell.sync();
     let sawIntent = false;
     try {
-      await waitUntil(
-        async () => {
-          const value = effectsCell.get();
+      await waitForCellValue<SessionEffectsDocValue>(
+        cc.runtime,
+        effectsCell,
+        (value) => {
           const entries = Array.isArray(value?.entries) ? value.entries : [];
           if (entries.length > 0) sawIntent = true;
-          const acks = value?.acks ?? {};
-          if (
-            value === undefined || entries.length > 0 ||
-            Object.keys(acks).length > 0
-          ) {
-            return false;
-          }
-          const stats = await fetchStats();
-          return stats !== undefined &&
-            stats.effectAcks > statsBefore.effectAcks;
+          return value !== undefined && entries.length === 0 &&
+            Object.keys(value.acks ?? {}).length === 0;
         },
-        "the intent to arrive, ack, and retire",
+        // This process holds a live connection to the toolshed, so a wait
+        // whose condition never arrives has nothing to fail it. The net is
+        // what turns that into the report below.
+        { stuckLabel: "the intent to arrive, ack, and retire" },
       );
     } catch (error) {
       // Diagnose WHERE the lifecycle stalled: the stream sidecar's
@@ -222,11 +210,15 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       );
     }
 
-    // Settle the space (the retirement wave included), then hold: the
+    // Settle the space (the retirement wave included), then take one
+    // more round trip through the same session subscription and drain
+    // the runtime behind it: a resurrected intent would have to reach
+    // this client that way, and enacting it would have to run here. The
     // convergence stands — ONE navigation, nothing resurrected.
     await cc.runtime.storageManager.synced();
     await waitForSettled(cc.runtime, space, 1, { timeoutMs: 30_000 });
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await effectsCell.sync();
+    await cc.runtime.idle();
     assertEquals(
       navigations.length,
       1,

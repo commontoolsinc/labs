@@ -1550,6 +1550,12 @@ export class Server {
   #serverExecutionObserver: ServerExecutionObserver | undefined;
 
   /**
+   * Additive watchers of the same admission hook, independent of the host's
+   * observer above: any number attach, and each sees every notice.
+   */
+  #admittedCommitWatchers = new Set<(notice: AdmittedCommitNotice) => void>();
+
+  /**
    * Per-frame delivery record: the wire strips instance keys (frames carry
    * scope _names_), so a delivery rollback cannot recover _which_ instances a
    * frame carried from the frame alone — a lease holder's explicit foreign
@@ -6807,18 +6813,51 @@ export class Server {
     this.#serverExecutionObserver = observer;
   }
 
+  /**
+   * Watch every commit this server admits: a session transact, a
+   * delegated append, the server's own direct write, and the serving
+   * loop's wave commits, each reported after the engine has applied it.
+   * Any number of watchers attach — the host's own observer above is
+   * separate and unaffected — and the returned function detaches one.
+   *
+   * This is the store's "something landed" edge, and it reports the
+   * commits a client's own subscription does not: a doc outside every
+   * replica's watch set, and the serving loop's own bookkeeping.
+   * `docs/development/waiting-in-tests.md` covers what a test does
+   * with it.
+   */
+  watchAdmittedCommits(
+    watcher: (notice: AdmittedCommitNotice) => void,
+  ): () => void {
+    this.#admittedCommitWatchers.add(watcher);
+    return () => {
+      this.#admittedCommitWatchers.delete(watcher);
+    };
+  }
+
   #notifyCommitAdmitted(notice: AdmittedCommitNotice): void {
     const observer = this.#serverExecutionObserver;
-    if (observer?.commitAdmitted === undefined) return;
-    try {
-      observer.commitAdmitted(notice);
-    } catch (error) {
-      // Admission never fails because the observer threw; the host's
-      // catch-up scan (selectCommitsSince) covers a dropped notice.
-      console.warn(
-        "memory v2: server-execution observer threw on commitAdmitted",
-        error,
-      );
+    if (observer?.commitAdmitted !== undefined) {
+      try {
+        observer.commitAdmitted(notice);
+      } catch (error) {
+        // Admission never fails because the observer threw; the host's
+        // catch-up scan (selectCommitsSince) covers a dropped notice.
+        console.warn(
+          "memory v2: server-execution observer threw on commitAdmitted",
+          error,
+        );
+      }
+    }
+    for (const watcher of this.#admittedCommitWatchers) {
+      try {
+        watcher(notice);
+      } catch (error) {
+        console.warn(
+          "memory v2: admitted-commit watcher threw",
+          error,
+        );
+      }
     }
   }
 
