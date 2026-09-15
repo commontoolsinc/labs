@@ -108,14 +108,17 @@ const THREAD_WORKLOADS = ["aggregates"] as const;
  * a measurement.
  */
 const BOARD_NOT_MEASURED =
-  "A board with no topic open reads its stored card values, and in a browser " +
-  "with client execution it ran none of the reached lifts, so there is no " +
-  "work of theirs to measure headlessly.";
+  "A board loaded before any topic is opened reads its stored card values, " +
+  "and in a browser with client execution loading it ran none of the reached " +
+  "lifts, so there is no work of theirs to measure headlessly. Returning to " +
+  "the board after opening a topic ran that topic's last activity once; that " +
+  "state is not one of the probe's workloads.";
 
 /**
- * The topic a `topic-open` case opens, and the one every warm update edits or
- * mentions. How many other topics mention it depends on the mention graph, and
- * each sample records the count.
+ * The topic a `topic-open` case opens. The mention phases change which topics
+ * mention it, and the comment and link phases edit it; the unrelated sibling
+ * edit changes a different topic, the last one. How many other topics mention
+ * it depends on the mention graph, and each sample records the count.
  */
 const FOCUS_TOPIC = 0;
 
@@ -575,8 +578,8 @@ type PhaseRecord =
  * heap limit the process ran under, and a record for each phase.
  *
  * @throws Error for a `board` case, which is not measured, or when an output
- * differs from what the fixture data says it should be after any phase, or the
- * runtime reports an error.
+ * differs from what the fixture data says it should be after any phase, a lift
+ * outside the demand ran in one, or the runtime reports an error.
  */
 async function measureCase(
   probeCase: ProbeCase,
@@ -600,11 +603,13 @@ async function measureCase(
   );
   const phases: PhaseRecord[] = [phaseRecord("initialization", measurement)];
   verifyOutputs(measurement, fixture);
+  verifyIdleLifts(measurement, measurement);
   const updated = await measureWarmUpdates(id, measurement, fixture, phases);
   console.error(`${id}: reopen`);
   const reopened = await measurement.reopen();
   phases.push(phaseRecord("reopen", reopened));
   verifyOutputs(measurement, updated);
+  verifyIdleLifts(measurement, reopened);
   verifyReopen(measurement, reopened);
 
   await Deno.writeTextFile(
@@ -636,8 +641,8 @@ function demandOf(workload: Workload): TopicsDemand {
 /**
  * Helper for {@link measureCase}, which measures each warm update in turn on
  * the one evolving fixture, appending a record for each to `phases` and
- * checking every output after each, and returns the fixture data as the
- * updates left it.
+ * checking every output and every undemanded lift after each, and returns the
+ * fixture data as the updates left it.
  */
 async function measureWarmUpdates(
   id: string,
@@ -659,9 +664,11 @@ async function measureWarmUpdates(
     write: (tx: IExtendedStorageTransaction) => void,
   ) => {
     console.error(`${id}: ${phase}`);
-    phases.push(phaseRecord(phase, await measurement.update(write), edit));
+    const update = await measurement.update(write);
+    phases.push(phaseRecord(phase, update, edit));
     model = next;
     verifyOutputs(measurement, model);
+    verifyIdleLifts(measurement, update);
   };
 
   // Removal drops every entry naming the focus topic from a topic that
@@ -956,6 +963,28 @@ function verifyOutputs(
       lastActivity: latestStamp(model.topics[topic]),
     });
   }
+}
+
+/**
+ * Checks that no lift `measurement.demand` starts none of completed an action
+ * during `operation`, so that a lift running without being demanded, whether or
+ * not it holds an output, fails the case.
+ *
+ * @throws Error when such a lift completed an action.
+ */
+function verifyIdleLifts(
+  measurement: TopicsMeasurement,
+  operation: { readonly reads: TopicsReads },
+): void {
+  const { demand, seeded } = measurement;
+  const started = demandedActionsOf(demand, seeded.topics.length);
+  const idle = TOPICS_LIFT_NAMES.filter((lift) => started[lift] === 0);
+  expect(
+    idle.map((lift) => ({
+      lift,
+      actions: operation.reads.bodies[lift].actions.size,
+    })),
+  ).toEqual(idle.map((lift) => ({ lift, actions: 0 })));
 }
 
 /**

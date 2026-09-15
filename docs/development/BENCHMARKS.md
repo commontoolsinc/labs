@@ -604,12 +604,13 @@ three links, then with 10, 100, or 1,000 links and three comments. The small
 thread case gives each topic one comment and one link.
 
 The pivot cases are recorded under three demand workloads. The first topic is
-the focus topic: the one `topic-open` opens, and the one every warm update edits
-or mentions.
+the focus topic: the one `topic-open` opens. The mention phases change which
+topics mention it, and the comment and link phases edit it; the unrelated
+sibling edit changes a different topic, the last one.
 
-- `board`: the board with no topic open, which demands none of the four lifts.
-  The probe does not measure it: each `board` case writes a sample recording
-  `measured: false` and the reason, and starts no process.
+- `board`: a board loaded before any topic is opened, which demands none of the
+  four lifts. The probe does not measure it: each `board` case writes a sample
+  recording `measured: false` and the reason, and starts no process.
 - `topic-open`: the board with the focus topic open, which demands the pivot,
   the focus topic's backlinks, and its present comment count, but not its last
   activity.
@@ -618,15 +619,21 @@ or mentions.
 
 The `board` and `topic-open` definitions come from one browser measurement of a
 small Topics board, with client execution, lazy materialization on, and card
-values already stored. Loading the board ran none of the four lifts, since the
-cards read their stored values. Opening a topic ran the pivot and that topic's
-backlinks and comment count; the topic's last activity ran only when the browser
-returned to the board. That is one small sample. Server execution, and lazy
-materialization off, were not measured.
+values already stored. Loading the board, before any topic was opened, ran none
+of the four lifts, since the cards read their stored values. Opening a topic ran
+the pivot and that topic's backlinks and comment count, but not its last
+activity. Returning to the board afterward ran that topic's last activity once;
+a board returned to after opening a topic is not one of the probe's workloads.
+That is one small sample. Server execution, and lazy materialization off, were
+not measured.
 
 The thread cases are measured under one workload, `aggregates`, which demands
-every topic's present comment count and last activity and nothing else, so the
-aggregates are measured directly rather than through a board workload.
+every topic's present comment count and last activity and nothing else. Those
+are the two lifts that read a topic's comments and links, which the thread cases
+scale, and no pivot workload demands a topic's last activity. The browser ran
+them one topic at a time, the comment count on opening a topic and its last
+activity on returning to the board; `aggregates` runs every topic's, so it is
+not what a board in use demands either.
 
 A case's ID names all of that, as
 `pivot/<graph>/mentions-<count>/topics-<count>/<workload>` or

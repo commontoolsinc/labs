@@ -606,7 +606,7 @@ describe("topics-headless-fixture", () => {
     });
   });
 
-  describe("over a board with no topic open", () => {
+  describe("over a board loaded before any topic is opened", () => {
     const fixture = buildTopicsFixture({
       topicCount: 6,
       mentions: { shape: "high-degree", perSource: 2 },

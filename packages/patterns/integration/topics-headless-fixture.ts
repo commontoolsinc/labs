@@ -568,13 +568,15 @@ export const TOPICS_FIXTURE_EXPERIMENTAL_OPTIONS = {
  *
  * The `board` and `topic-open` workloads follow what a browser ran on one small
  * board with client execution, lazy materialization on, and card values
- * already stored: loading the board ran none of the reached lifts, and opening
- * a topic ran the pivot and that topic's backlinks and comment count but not
- * its last activity. That is one small sample, and server execution and lazy
+ * already stored. Loading the board, before any topic was opened, ran none of
+ * the reached lifts; opening a topic ran the pivot and that topic's backlinks
+ * and comment count but not its last activity; and returning to the board
+ * afterward ran that topic's last activity once. That return is not one of
+ * these workloads. It is one small sample, and server execution and lazy
  * materialization off were not measured.
  */
 export type TopicsDemand =
-  /** The board with no topic open: none of the reached lifts. */
+  /** A board loaded before any topic is opened: none of the reached lifts. */
   | { readonly workload: "board" }
   /**
    * The board with one topic open: the pivot, and that topic's backlinks and
@@ -587,8 +589,11 @@ export type TopicsDemand =
    */
   | { readonly workload: "all-backlinks" }
   /**
-   * Every topic's comment count and last activity, and nothing else: the
-   * aggregates measured directly rather than through a board workload.
+   * Every topic's comment count and last activity, and nothing else: the two
+   * lifts that read a topic's comments and links. A browser ran them one topic
+   * at a time, the comment count on opening a topic and its last activity on
+   * returning to the board, so every topic's at once is not what a board in
+   * use demands.
    */
   | { readonly workload: "aggregates" };
 
