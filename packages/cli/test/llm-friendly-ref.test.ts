@@ -114,6 +114,14 @@ describe("llm-friendly-ref", () => {
     });
   });
 
+  it("reads the named-space migration alias", () => {
+    expect(normalizeLLMFriendlyRef("/@my-space/tracker/items")).toEqual({
+      pieceId: "tracker",
+      embeddedSpace: "my-space",
+      path: ["items"],
+    });
+  });
+
   it("settles two space names against each other at parse time", () => {
     // Same name, same space: nothing is left for the session to check.
     expect(

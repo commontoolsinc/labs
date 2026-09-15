@@ -46,6 +46,16 @@ describe("fabric-url", () => {
       ]);
     });
 
+    it("trims rooted ID padding without trimming path keys", () => {
+      for (const prefix of ["/", `//${SPACE}/`, `/@${SPACE}/`]) {
+        const ref = `${prefix}of:fid1:${HASH}`;
+        expect(parseFabricUrl(`  ${ref}  `)?.id).toBe(`of:fid1:${HASH}`);
+        expect(parseFabricUrl(`${ref}/title `)?.path).toEqual(["title "]);
+        expect(parseFabricUrl(`${ref}/ `)?.path).toEqual([" "]);
+        expect(parseFabricUrl(`${ref}/`)?.path).toEqual([""]);
+      }
+    });
+
     describe("a rooted link", () => {
       it("returns the id", () => {
         expect(parseFabricUrl(`/of:fid1:${HASH}`)).toEqual({

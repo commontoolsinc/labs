@@ -113,18 +113,18 @@ a slug and is what distinguishes this form from an address.
 ### 2. How does the document axis recur?
 
 After crossing into a cell, `#argument` has to mean *that* cell's arguments.
-The reference grammar puts the member on a piece segment, before the path, and
-parses `#` nowhere else — which is what keeps `#` ordinary data in a path.
+The reference grammar puts the member on a piece segment or a relative head,
+before the path. In subsequent path segments, `#` is ordinary key data.
 
 Two spellings, and both cost something:
 
 - **As a path segment**, `owner/#argument/theme`. Reads in walking order and
   needs no new character. It respells `#`, which the reference grammar reserves
-  on the piece segment only, so a path reference and a cell reference would
-  read `#` differently in the same position.
+  on the piece segment or relative head, so a path reference and a cell
+  reference would read `#` differently in the same position.
 - **As a suffix on the crossing that produced the cell**,
   `owner#argument/theme`. Keeps `#` on the segment that names a cell,
-  matching the reference grammar's rule exactly, and reads as "the
+  using the reference grammar's member suffix, and reads as "the
   arguments of what `owner` points at".
 
 **Ruled the suffix.** It preserves one meaning per character across both
