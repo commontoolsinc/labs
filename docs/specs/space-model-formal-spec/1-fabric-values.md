@@ -3961,7 +3961,7 @@ export function fabricFromNativeValue(
 | `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
 > **Implementation: tag-based type dispatch.** The conversion functions
-> classify a value through `tagFromNativeValueElseNull()` (in
+> classify a value through `tagOfNativeValueElseNull()` (in
 > `packages/data-model/src/value-tags/`), which returns a tag string from the
 > `VALUE_TAGS` vocabulary -- the JS type tags of `JS_TYPE_VALUE_TAGS` (the
 > `typeof` name of each primitive and of a function, plus `"null"`),
