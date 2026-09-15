@@ -4095,9 +4095,8 @@ const verifyInputRequirements = (
   // whether the measurement dial is on. Resolutions remain valid until the
   // transaction writes the document. The activity list stays live so newly
   // recorded reads remain visible to later targets.
-  metadataResolver.refresh();
   let clockLessReads = 0;
-  const readSources = [
+  const currentReads = [
     ...[
       ...(tx.getPotentiallyExternalReadActivities?.() ??
         tx.getReadActivities?.() ?? []),
@@ -4124,7 +4123,12 @@ const verifyInputRequirements = (
       ...read,
       journalIndex: -Infinity,
     })),
-  ].map((read) => ({
+  ];
+  // Candidate-read inspection is an extension seam and may expose writes made
+  // while producing the current view. Refresh after that inspection so every
+  // envelope resolution observes those writes.
+  metadataResolver.refresh();
+  const readSources = currentReads.map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
     metadata: metadataResolver.read(
