@@ -802,6 +802,17 @@ describe("running everything", () => {
     expect(run(corpus(), { policy: "everything" }).withheld).toEqual([]);
   });
 
+  it("says what it will not fail for, and a pull request says nothing", () => {
+    // A test too noisy to judge a change by is held back from a pull
+    // request and run here anyway: what this run learns about it is the
+    // whole of what says whether the exclusion should reverse. Failing
+    // for it would make the branch red for something no change caused.
+    expect(run(corpus(), { policy: "everything" }).nonGating).toEqual(
+      corpus().withheld,
+    );
+    expect(run(corpus()).nonGating).toEqual([]);
+  });
+
   it("runs what a budgeted plan withholds and excludes", () => {
     const budgeted = keysOf(run(corpus()));
     const flaky = testIdentityKey({ k: "unit", s: "memory", n: "flaky" });

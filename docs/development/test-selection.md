@@ -35,9 +35,14 @@ deno task test-selection explain '["integration","patterns","counter.test.ts","s
 It prints the suite and the invocation unit the identity belongs to, its
 score and its cost, the catches behind that score and how many distinct
 sources they came from, when the most recent one was, its churn and flake
-rate, and whether it is withheld and why. An identity the store has never
+rate, whether the manifest withholds it, how many times it would run, and
+whether the current manifest reaches it. An identity the store has never
 seen is reported as mandatory, which is what an identity with no history
 is.
+
+Each of those is printed on its own, because they are not alternatives: a
+withheld identity a change reaches runs anyway, so an answer that picked
+one of them would be leaving out something true.
 
 The identity resolves through `tasks/test-identity-aliases.jsonl` first,
 so asking about a renamed test under either name finds the joined history.
@@ -152,7 +157,21 @@ Four things are worth knowing before reading a failure.
 
 Nothing about coverage fails a run on `main`. That run measures every set,
 which is where the baselines come from, and merges every report into the
-repository-wide figure the dashboard tile shows.
+repository-wide figure the dashboard tile shows. `tasks/coverage-report.ts`
+is what measures and writes them, over a directory holding the lanes'
+uploaded coverage:
+
+```
+deno run -A tasks/coverage-report.ts --reports <directory>
+```
+
+One set can come out of that with no baseline. A lane that saw a unit of
+a measured set fail writes a marker beside that set's report, and the
+report goes on merging into the repository-wide figure while the set
+publishes nothing. What the marker stops is a number the run did not
+clear becoming the bar every later pull request is held to: the run can
+stay green through such a failure, so nothing else downstream would know
+the number is short by whatever the failing test would have reached.
 
 ## Every dial
 
@@ -543,6 +562,29 @@ newest manifest withholds it and how many runs it is given. The lanes are
 what carry this, so it describes what lands with them rather than what runs
 today, and the reasoning behind each part is in [the
 plan](../plans/pull-request-test-selection.md#an-excluded-test-still-runs-on-main).
+
+A repository gate is a test like any other here. A gate introspects the
+tree where a test runs the code, which decides what it reads and nothing
+about what its failures are worth: a gate disagreeing with itself fails
+somebody's change for something its author cannot act on, exactly as a
+test doing the same does, and the flake tile is what asks for the fix in
+both cases.
+
+Two things go with that rule.
+
+- **A failure the branch has not gone red for is still aged out.** Such a
+  failure waits for a later run to judge it, and once the branch stops
+  going red no such run has to arrive.
+- **A measured set whose unit failed publishes no baseline.** [The
+  coverage gate](#the-coverage-gate) says what that leaves for a later
+  pull request.
+
+A lane decides all of this from the records its batches gathered rather
+than from what a command exited with. A runner that failed only on
+identities a flake rate excuses has told the run nothing it should stop
+for, and a runner that exited zero having run none of its unit has. So a
+unit that recorded nothing fails the lane, and an excusal holds only for
+an invocation that accounted for every identity it was asked to run.
 
 ## What the wall shows
 

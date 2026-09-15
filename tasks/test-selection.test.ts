@@ -139,6 +139,26 @@ describe("test-selection", () => {
       );
     });
 
+    it("says how many runs a withheld identity a change reaches gets", () => {
+      // The three answers do not partition: a withheld identity the
+      // change reaches is selected, and has a repeat count like any
+      // other.
+      const held = manifest();
+      held.withheld = [{
+        test: TEST,
+        suite: "workspace-unit",
+        reason: "flaky",
+      }];
+      const text = explainLines(held, TEST, { selected: true, repeats: 3 })
+        .join("\n");
+      expect(text).toContain("withheld");
+      expect(text).toContain("run 3 times");
+      expect(text).toContain("the current manifest selects it");
+      // And nothing that contradicts the line above it: a change that
+      // reaches a withheld test runs it here.
+      expect(text).not.toContain("not here");
+    });
+
     it("reports the repeat count the packing settled on", () => {
       const held = manifest();
       held.entries[0]!.repeats = 3;
