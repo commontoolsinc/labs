@@ -605,10 +605,24 @@ an invocation that accounted for every identity it was asked to run.
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
-are too noisy to judge a change by, naming the worst few. The selection
-tile reports what share of the corpus five lanes would run and how close
-the fullest lane is to its budget; it goes amber when the manifest has
-gone stale and red when a lane's projected work is past its bound.
+are too noisy to judge a change by. The selection tile reports what share
+of the corpus five lanes would run and how close the fullest lane is to
+its budget; it goes amber when the manifest has gone stale and red when a
+lane's projected work is past its bound. Both tiles link to the full
+manifest detail page.
+
+Each tile charts its measurement from every available manifest, positioned
+by generation time. The selected percentage uses each manifest's own corpus
+size. Empty corpora and unreadable manifests leave gaps; measured zeros
+remain visible. The chart's span follows the available objects. The dashboard
+caches compact counts across restarts and removes them when their source
+objects leave the listing. A latest manifest with no tests makes both
+headlines unknown.
+
+Both tiles show a running indicator while the publisher workflow is queued or
+running on main. Activity and new manifests are checked every 30 seconds.
+Activity requires the dashboard's GitHub token; the public measurements remain
+available when that lookup fails.
 
 Both follow [the wall's rules](../../packages/dashboard/README.md#philosophy-and-values):
 they report on the system, they name tests, and nothing about either is

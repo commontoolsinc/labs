@@ -47,6 +47,9 @@ export interface Tile {
   // GitHub workflow snapshots that drive this tile. The scheduler refreshes
   // each source independently and publishes its due dependent tiles together.
   runSources?: readonly RunSource[];
+  // Optional workflow activity, refreshed independently on the tile's interval.
+  // true lights the running badge; false or undefined clears it.
+  collectActivity?(ctx: Ctx): Promise<boolean | undefined>;
   collect(ctx: Ctx, publish?: (view: TileView) => void): Promise<TileView>; // publish usable data before slower work completes
   routes?: Route[]; // optional drill-down routes this tile owns
 }
