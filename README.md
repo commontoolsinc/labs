@@ -21,8 +21,8 @@ policies does not compile.
 Two ways in, depending on how much you want:
 
 - [**Why**](docs/why.md) — our case for flipping the trust model.
-- [**Inverting the physics of trust**](docs/inverting-the-physics-of-trust.md)
-— the physics, the hardware, and the objections.
+- [**Inverting the physics of trust**](docs/inverting-the-physics-of-trust.md) —
+  the physics, the hardware, and the objections.
 
 ### Core Concepts
 
