@@ -666,14 +666,20 @@ verified code artifact, symbol/binding path within it)**. Same artifact hash
 + same symbol = same identity wherever the artifact is loaded; any code
 change changes the hash and with it every identity within the artifact.
 Rebinding does not inherit authority by default. The narrow temporary exception
-is an explicit `piece setsrc` update: canonical-filename matches in the old and
-new recursive module closures persist a cumulative successor-to-predecessor
-delegation. `writeAuthorizedBy` accepts the current module hash or a predecessor
-reachable through the delegation map authenticated in the target document's
-space, but still requires the same symbol/binding path. A delegation loaded from
-another space grants no authority. Source-file spelling remains diagnostic at
-verification; canonical authored filenames govern whether `setsrc` derives a
-delegation in the first place. Because the delegation list is mutable and
+is an explicit `piece setsrc` update: the new entry succeeds the old entry
+outright, since the update is what names the pair, and every other module in
+the old and new recursive closures matches by canonical filename — directly,
+or under the root substitution the two entry names define when they share a
+tail (the same authored tree served under `/api/patterns` and supplied from a
+checkout under `/packages/patterns`) — persisting a cumulative
+successor-to-predecessor delegation; an ambiguous match derives none.
+`writeAuthorizedBy` accepts the current module hash or a predecessor reachable
+through the delegation map authenticated in the target document's space, but
+still requires the same symbol/binding path. A delegation loaded from another
+space grants no authority. Source-file spelling remains diagnostic at
+verification; whether `setsrc` derives a delegation for a module below the
+entry is governed by canonical authored filenames under either root. Because
+the delegation list is mutable and
 outside the source Merkle identity, it is authority-bearing only when protected
 by the compiler's integrity attestation (field-level in source documents,
 root-level in compiled documents). Replace §8.15.6's "no separate naming

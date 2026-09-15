@@ -477,7 +477,7 @@ describe("place", () => {
                   at.settle({
                     kind: "space-by-name",
                     name: "estuary",
-                    operand: `/@estuary/${v}`,
+                    operand: `//estuary/${v}`,
                     piece: v,
                     path: [],
                     scope: at.place.scope,
@@ -489,7 +489,7 @@ describe("place", () => {
                   at.settle({
                     kind: "space-by-name",
                     name: "estuary",
-                    operand: `/@estuary/${HANDLE}/${v}`,
+                    operand: `//estuary/${HANDLE}/${v}`,
                     piece: HANDLE,
                     path: [v],
                     scope: at.place.scope,
@@ -765,7 +765,7 @@ describe("place", () => {
 
         it("returns the place shuttle stood at for a space named by name", () => {
           const place = atSpaceRoot();
-          moved(place, `/@estuary/${HANDLE}`);
+          moved(place, `//estuary/${HANDLE}`);
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });
       });
@@ -1603,15 +1603,23 @@ describe("place", () => {
             });
           });
 
+          it("refuses the retired named-space prefix", () => {
+            expect(moved(atSpaceRoot(), `/@estuary/${HANDLE}/title`)).toEqual({
+              kind: "refused",
+              reason:
+                "The named-space prefix `/@estuary/` is retired; use `//estuary/`.",
+            });
+          });
+
           it("hands back a reference naming its space by name", () => {
             // The arm carries no space. Whether the name denotes the
             // connected one is what is not yet known, so there is nothing
             // for a space field to hold that would not be a guess.
 
-            expect(moved(atSpaceRoot(), `/@estuary/${HANDLE}/title`)).toEqual({
+            expect(moved(atSpaceRoot(), `//estuary/${HANDLE}/title`)).toEqual({
               kind: "space-by-name",
               name: "estuary",
-              operand: `/@estuary/${HANDLE}/title`,
+              operand: `//estuary/${HANDLE}/title`,
               piece: HANDLE,
               path: ["title"],
               scope: "space",
@@ -3281,7 +3289,7 @@ describe("place", () => {
       describe("settle()", () => {
         it("builds the place from the connected space", () => {
           const place = atSpaceRoot();
-          const move = moved(place, `/@estuary/${HANDLE}/title`);
+          const move = moved(place, `//estuary/${HANDLE}/title`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
           expect(landed(place, place.settle(move, SPACE))).toEqual({
             kind: "moved",
@@ -3299,7 +3307,7 @@ describe("place", () => {
 
         it("keeps the scope a space-named reference asked for", () => {
           const place = atSpaceRoot();
-          const move = moved(place, `/@estuary/${HANDLE}@user`);
+          const move = moved(place, `//estuary/${HANDLE}@user`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
           landed(place, place.settle(move, SPACE));
           expect(place.place.scope).toBe("user");
@@ -3312,7 +3320,7 @@ describe("place", () => {
           // the caller's to supply and this module's to check.
 
           const place = atSpaceRoot();
-          const move = moved(place, `/@estuary/${HANDLE}`);
+          const move = moved(place, `//estuary/${HANDLE}`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
           expect(landed(place, place.settle(move, OTHER_SPACE))).toEqual({
             kind: "refused",
@@ -3336,7 +3344,7 @@ describe("place", () => {
             place.settle({
               kind: "space-by-name",
               name: "estuary",
-              operand: `/@estuary/${HANDLE}`,
+              operand: `//estuary/${HANDLE}`,
               piece: HANDLE,
               path: [3],
               scope: "space",
@@ -3362,7 +3370,7 @@ describe("place", () => {
             place.settle({
               kind: "space-by-name",
               name: "estuary",
-              operand: `/@estuary/${HANDLE}`,
+              operand: `//estuary/${HANDLE}`,
               piece: HANDLE,
               path: [1.5],
               scope: "space",
@@ -3387,7 +3395,7 @@ describe("place", () => {
             place.settle({
               kind: "space-by-name",
               name: "estuary",
-              operand: `/@estuary/${HANDLE}`,
+              operand: `//estuary/${HANDLE}`,
               piece: HANDLE,
               path: ["a\nb"],
               scope: "space",
@@ -3413,7 +3421,7 @@ describe("place", () => {
             place.settle({
               kind: "space-by-name",
               name: "estuary",
-              operand: `/@estuary/${HANDLE}`,
+              operand: `//estuary/${HANDLE}`,
               piece: "Board",
               path: [],
               scope: "space",
@@ -3428,7 +3436,7 @@ describe("place", () => {
 
         it("carries no route, so `..` leaves the piece for the root", () => {
           const place = inSlugs();
-          const move = moved(place, `/@estuary/${HANDLE}`);
+          const move = moved(place, `//estuary/${HANDLE}`);
           if (move.kind !== "space-by-name") throw new Error("not handed on");
           landed(place, place.settle(move, SPACE));
           moved(place, "..");

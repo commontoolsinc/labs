@@ -30,6 +30,9 @@ import {
 import type { SelectionReason } from "./plan.ts";
 import { UNMEASURED_COST_SECONDS, VALUE_FLOOR } from "./policy.ts";
 
+/** How a stand-in's name is built, and what recognizes one again. */
+const UNRECORDED = "unrecorded ";
+
 /**
  * A stand-in identity for a unit no manifest has ever seen. Records exist
  * only for tests that ran, so a unit with none is either brand new or
@@ -43,10 +46,22 @@ export function unknownIdentity(suite: Suite, unit: string): TestIdentity {
   const test: TestIdentity = {
     k: surface?.kind ?? "unit",
     s: surface?.scope ?? "repo",
-    n: `unrecorded ${unit}`,
+    n: `${UNRECORDED}${unit}`,
   };
   if (suite.variant !== undefined) test.v = suite.variant;
   return test;
+}
+
+/**
+ * Whether a manifest entry is a stand-in for a unit no manifest has
+ * seen, rather than a real identity some run recorded.
+ *
+ * A reader that asks which identities a batch accounted for needs this:
+ * no record will ever carry a stand-in's name, because a real record is
+ * named for a test and a stand-in is named for a file.
+ */
+export function isStandIn(entry: ManifestEntry): boolean {
+  return entry.test.n === `${UNRECORDED}${entry.unit}`;
 }
 
 /**
