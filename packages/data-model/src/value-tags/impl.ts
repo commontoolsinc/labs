@@ -123,91 +123,6 @@ export function tagOfFabricValueElseNull(
 }
 
 /**
- * Maps a constructor to its tag, for the native JS builtins alone. Returns
- * `null` for anything else, a fabric class included.
- *
- * Answering this needs no class this system defines, and this function holds
- * none. A concrete fabric class reaches the codecs and, through them, the
- * instance bases, so a module holding one in order to recognize it would close
- * a cycle with everything layered below those bases. A fabric primitive is
- * recognized by the tag its instance carries instead.
- *
- * Recognition is by constructor identity, which is a per-realm question:
- * another realm's `Date` is a different `Date`, and is not this one. Values
- * from another realm are outside what this is asked about, so no brand check
- * stands behind the identity comparison. A cross-realm value that did arrive
- * would come back `null` -- unrecognized rather than misidentified, which is
- * the direction an unhandled case should fail in.
- *
- * This is asked of a class already read from a prototype, which is a
- * question that arises inside this module: a caller holds values, and asks
- * `tagOfConvertibleJsValueElseNull()`.
- */
-function tagOfNativeBuiltinClassElseNull(
-  constructorFn: { prototype: unknown },
-): ConvertibleJsValueTag | null {
-  // A `switch` on constructor identity, rather than sequential `instanceof`
-  // checks.
-  switch (constructorFn) {
-    // The two commonest by a distance, and a `switch` on object identity
-    // compares in order, so they are asked first.
-    case Object: {
-      return VALUE_TAGS.Object;
-    }
-
-    case Array: {
-      return VALUE_TAGS.Array;
-    }
-
-    // `Error` and standard subclasses all map to the `JsError` tag.
-    case Error:
-    case TypeError:
-    case RangeError:
-    case SyntaxError:
-    case ReferenceError:
-    case URIError:
-    case EvalError: {
-      return VALUE_TAGS.JsError;
-    }
-
-    case Map: {
-      return VALUE_TAGS.JsMap;
-    }
-
-    case Set: {
-      return VALUE_TAGS.JsSet;
-    }
-
-    case Date: {
-      return VALUE_TAGS.JsDate;
-    }
-
-    case Uint8Array: {
-      return VALUE_TAGS.JsUint8Array;
-    }
-
-    case RegExp: {
-      return VALUE_TAGS.JsRegExp;
-    }
-
-    default: {
-      // Catch exotic `Error` subclasses (e.g. custom subclasses with
-      // non-standard constructors). `Error.isError()` is no use here: it
-      // recognizes actual `Error` instances, not a prototype chain, and what
-      // is in hand is a constructor. Guard against non-function values too
-      // (e.g. null-prototype objects where `constructor()` is undefined).
-      if (
-        typeof constructorFn === "function" &&
-        constructorFn.prototype instanceof Error
-      ) {
-        return VALUE_TAGS.JsError;
-      }
-      return null;
-    }
-  }
-}
-
-/**
  * Maps a presumed `FabricConvertibleJsValue` to its tag, based on a shallow
  * evaluation of its type. Returns the tag of a primitive, or that of a
  * recognized convertible native instance, or `null` for a function and for
@@ -218,6 +133,20 @@ function tagOfNativeBuiltinClassElseNull(
  * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
  * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
+ *
+ * A native JS builtin is recognized by the identity of the class its
+ * prototype names. Answering that needs no class this system defines, and
+ * this module holds none: a concrete fabric class reaches the codecs and,
+ * through them, the instance bases, so a module holding one in order to
+ * recognize it would close a cycle with everything layered below those bases.
+ * A fabric primitive is recognized by the tag its instance carries instead.
+ *
+ * Constructor identity is a per-realm question: another realm's `Date` is a
+ * different `Date`, and is not this one. Values from another realm are
+ * outside what this is asked about, so no brand check stands behind the
+ * identity comparison. A cross-realm value that did arrive would come back
+ * `null` -- unrecognized rather than misidentified, which is the direction an
+ * unhandled case should fail in.
  */
 export function tagOfConvertibleJsValueElseNull(
   value: unknown,
@@ -261,5 +190,57 @@ export function tagOfConvertibleJsValueElseNull(
   // `Error` and silently rebuilt as one.
   const ctor = constructorOfPrototype(proto);
 
-  return (ctor === undefined) ? null : tagOfNativeBuiltinClassElseNull(ctor);
+  // A `switch` on constructor identity, rather than sequential `instanceof`
+  // checks.
+  switch (ctor) {
+    case Object: {
+      return VALUE_TAGS.Object;
+    }
+
+    case Array: {
+      return VALUE_TAGS.Array;
+    }
+
+    // `Error` and standard subclasses all map to the `JsError` tag.
+    case Error:
+    case TypeError:
+    case RangeError:
+    case SyntaxError:
+    case ReferenceError:
+    case URIError:
+    case EvalError: {
+      return VALUE_TAGS.JsError;
+    }
+
+    case Map: {
+      return VALUE_TAGS.JsMap;
+    }
+
+    case Set: {
+      return VALUE_TAGS.JsSet;
+    }
+
+    case Date: {
+      return VALUE_TAGS.JsDate;
+    }
+
+    case Uint8Array: {
+      return VALUE_TAGS.JsUint8Array;
+    }
+
+    case RegExp: {
+      return VALUE_TAGS.JsRegExp;
+    }
+
+    default: {
+      // Catch exotic `Error` subclasses (e.g. custom subclasses with
+      // non-standard constructors). `Error.isError()` is no use here: it
+      // recognizes actual `Error` instances, not a prototype chain, and what
+      // is in hand is a constructor. A prototype naming no callable
+      // constructor at all gets no tag.
+      return ((ctor !== undefined) && (ctor.prototype instanceof Error))
+        ? VALUE_TAGS.JsError
+        : null;
+    }
+  }
 }
