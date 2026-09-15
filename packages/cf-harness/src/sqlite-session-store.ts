@@ -507,10 +507,18 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
     return row.sequence;
   }
 
+  /**
+   * Closes the database connection, then releases the hold, so no other
+   * process can take the database while this one still has it open; a
+   * connection that fails to close still releases it.
+   */
   close(): void {
-    this.#holderFile?.close();
-    this.#holderFile = undefined;
-    this.database.close();
+    try {
+      this.database.close();
+    } finally {
+      this.#holderFile?.close();
+      this.#holderFile = undefined;
+    }
   }
 }
 

@@ -395,6 +395,39 @@ describe("chat session store hold", () => {
       });
     });
 
+    it("keeps the hold until the database connection has closed", async () => {
+      // The probe runs inside the connection's own `close()`, where a hold
+      // released ahead of it would already be free to take.
+      await withDatabaseUrl(async (url) => {
+        const first = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-1"),
+        });
+        const holderPath = await sqliteHarnessChatSessionStoreHolderPath(url);
+        const database = first.database;
+        const closeDatabase = database.close.bind(database);
+        let heldWhileClosing: boolean | undefined;
+        database.close = () => {
+          const probe = Deno.openSync(holderPath, { read: true, write: true });
+          try {
+            heldWhileClosing = !probe.tryLockSync(true);
+          } finally {
+            probe.close();
+          }
+          closeDatabase();
+        };
+
+        first.close();
+
+        expect(heldWhileClosing).toBe(true);
+        const second = await openSqliteHarnessChatSessionStore({
+          url,
+          holder: holder("instance-2"),
+        });
+        second.close();
+      });
+    });
+
     it("releases a database it held but could not open", async () => {
       await withDatabaseUrl(async (url) => {
         await Deno.writeTextFile(fromFileUrl(url), "not a database");
