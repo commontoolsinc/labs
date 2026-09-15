@@ -193,13 +193,17 @@ step "3. Drive a session over a pseudo-terminal"
 # It has no state and takes no turn: what it saves is decided by what it was
 # given, so each of the three lines below reaches it with a different value and
 # gets a different one of `edit`'s three endings. That is what lets one editor
-# drive all three from a script the driver types in one go.
+# drive all three from a script the driver types in one go. The note has a case
+# of its own for the `e` typed at a view, where what is being shown is that the
+# editor ran at all: leaving the value alone takes the ending that changes
+# nothing, so a step about the view costs the steps after it nothing.
 EDITOR_SCRIPT=$(mktemp)
 cat >"$EDITOR_SCRIPT" <<'EDITS'
 #!/usr/bin/env bash
 case "$(cat "$1")" in
   '"garble me"') printf 'not json at all' >"$1" ;;
   '"edited in the editor"') : ;;
+  '"written once and never again"') : ;;
   *) printf '"edited in the editor"' >"$1" ;;
 esac
 EDITS
@@ -283,6 +287,16 @@ cd .#argument
 ls .#argument
 get ..#argument/items
 cd ../..
+cd /slugs/first
+watch settings/note
+@frame /written\r
+@frame :pwd\r
+@drawn position  //
+@frame e
+@drawn Nothing changed
+@frame q
+watches
+unwatch %1
 LINES
 EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
@@ -820,6 +834,56 @@ contains "climbs and selects the \`#argument\` member in one head" \
 # so two climbs from `first/settings` land on the facet rather than the root.
 check "shuttle /slugs/ @space> " "$(prompt 73 "cd ../..")" \
   "two climbs walk the route back out of the piece to the facet it came through"
+
+step "31. A line typed at a view runs where a typed line runs, and the editor takes the screen from one"
+# The half no unit case can reach, for the keys a view answers to. Every key
+# in the unit suite arrives decoded and every frame comes back as lines, so
+# what is asserted there is what the lens does with a key it was handed; here
+# the keys are bytes a real terminal decoded, the frame is on a real alternate
+# screen, and the editor `e` reaches is a program that takes that screen while
+# the frame is holding it.
+#
+# One record carries all of it. A frame holds back what is written above the
+# prompt until it gives the screen up (`announce`, `terminal.ts`), so the three
+# lines below are written while the view is up and reach the transcript in the
+# order they happened, inside the record of the line that opened the view.
+#
+# What the record says, in order: the watch was armed and numbered before the
+# view opened; `:pwd` ran against the place the shell stands at, which is where
+# a typed line runs and not where the view is pointed; and `e` opened the
+# watched cell in the editor, which saved it unchanged.
+#
+# Each of the two lines is waited for by what it drew in the view before the
+# next key is typed. The keys of a `@frame` are typed in one go, so without
+# that wait the `q` is read while the line before it is still in flight — and a
+# view with a line in flight takes no second one, so the `e` would ask for
+# nothing and the `q` would close the view out from under the answer.
+#
+# The `/written` typed ahead of them is asserted by the session finishing at
+# all rather than by a line of its own — where the search stands is drawn on
+# the alternate screen, which no record of this transcript can see. A `/` that
+# left the view in a state where a key is text would have taken the `:`, the
+# `e` and the `q` into a search line, and the view would never have closed:
+# the `q` that ends this record would not have been read as a key, and the
+# session would have run to its deadline with the screen still held.
+FRAMED=$(said 75 "watch settings/note")
+# Read by position rather than by presence, because the order is half of what
+# is being shown: the listing was written before the view took the screen and
+# the other two while it held it, so the record heads with the one and ends
+# with the last of the others.
+check "%1 first/settings/note @space" "$(printf '%s\n' "$FRAMED" | head -1)" \
+  "the watch was armed and numbered before the view took the screen"
+contains "position  //" "$FRAMED" \
+  "a line typed at the view reached the transcript the view held back"
+contains "/$FIRST@space" "$FRAMED" \
+  "the line ran against the place the shell stands at, not where the view points"
+check "Nothing changed, so nothing was written." \
+  "$(printf '%s\n' "$FRAMED" | tail -1)" \
+  "e opened the watched cell in the editor while the view held the screen"
+check "%1 first/settings/note @space" "$(said 76 "watches")" \
+  "the view closing left the watch armed, as it does when nothing was typed at it"
+check "Disarmed the watch on \`first/settings/note @space\`." \
+  "$(said 77 "unwatch %1")" "unwatch disarms the watch the view was opened onto"
 
 # What step 11 does not reach: a piece that changes under a shell already
 # standing on it. Step 11 reads storage before the session and the shell's own
