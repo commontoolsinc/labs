@@ -143,17 +143,21 @@ export const innermostNode = (
 };
 
 /** Fires a node's `onClick` the way a click does, with an empty event. A
- * handler bound only in JSX is reached through the rendered tree. */
-export const fireClick = (node: unknown): void => {
+ * handler bound only in JSX is reached through the rendered tree. Throws
+ * when there is no node or it has no `onClick`, so a mistyped label fails
+ * the test rather than passing as a control that did nothing. */
+export const fireClick = (node: unknown, what = "the node"): void => {
+  if (node === undefined) throw new Error(`fireClick: ${what} was not found`);
   const onClick = propsOf(node)?.onClick;
-  if (isRecord(onClick) && typeof onClick.send === "function") {
-    (onClick.send as (event: Record<string, never>) => void)({});
+  if (!isRecord(onClick) || typeof onClick.send !== "function") {
+    throw new Error(`fireClick: ${what} has no onClick to fire`);
   }
+  (onClick.send as (event: Record<string, never>) => void)({});
 };
 
 /** Clicks the one button labelled `label` under `root`. */
 export const clickButton = (root: unknown, label: string): void =>
-  fireClick(findNode(root, isButton(label)));
+  fireClick(findNode(root, isButton(label)), `a button labelled "${label}"`);
 
 /** Clicks the button labelled `label` in the row whose text carries
  * `rowText`: the innermost node holding both the text and such a button. */
@@ -167,5 +171,8 @@ export const clickInRow = (
     (node) =>
       hasText(node, rowText) && findNode(node, isButton(label)) !== undefined,
   );
-  fireClick(findNode(row, isButton(label)));
+  fireClick(
+    findNode(row, isButton(label)),
+    `a button labelled "${label}" in the row "${rowText}"`,
+  );
 };

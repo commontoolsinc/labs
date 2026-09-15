@@ -18,6 +18,8 @@
 
 import { Default, lift, Writable } from "commonfabric";
 
+import { sessionKey } from "./session-key.ts";
+
 //
 // Views of the connector's index
 //
@@ -170,18 +172,7 @@ export interface DetachEvent {
 //
 // Module-scope lifts, because the declared parameter is what bounds the read.
 
-/** A session's identity as the connector's contract spells it
- * (`connector/docs/interfaces.md`, "Session key"): both parts trimmed, the
- * source id lowercased, each percent-encoded, and the two joined with one
- * slash, so `("a/b", "c")` and `("a", "b/c")` stay apart. The one key for a
- * record's `elementById` address and for every join against the index, so
- * what is stored and what is shown agree. A control character, which the
- * connector refuses, is encoded here rather than thrown on: a view does not
- * refuse a row. */
-export const sessionKey = (sourceId: string, nativeSessionId: string): string =>
-  `${encodeURIComponent(sourceId.trim().toLowerCase())}/${
-    encodeURIComponent(nativeSessionId.trim())
-  }`;
+export { sessionKey };
 
 /** Whether the index carries a session in any state. A row the connector
  * has since marked deleted still confirms that the session existed, so a
@@ -240,9 +231,14 @@ export const attachmentsOf = lift((
   const started = new Map(
     confirmed.map((c) => [sessionKey(c.sourceId, c.nativeSessionId), c]),
   );
+  // Plain copies, read here where the records are live, so what this list
+  // hands on carries every field.
   const byHand = attached.map((a) => {
     const start = started.get(sessionKey(a.sourceId, a.nativeSessionId));
-    return start && !a.title ? { ...a, title: start.title } : a;
+    return {
+      ...a,
+      title: a.title || start?.title || "",
+    };
   });
   const keys = new Set(
     byHand.map((a) => sessionKey(a.sourceId, a.nativeSessionId)),
@@ -286,6 +282,21 @@ export const sessionRowsOf = lift((
   return rows.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 });
 
+/** The row an attachment shows as when the index does not carry its
+ * session: the record's own facts, and nothing of the live row. */
+export const rowFromAttachment = (a: Attachment): SessionRow => ({
+  key: sessionKey(a.sourceId, a.nativeSessionId),
+  sourceId: a.sourceId,
+  nativeSessionId: a.nativeSessionId,
+  title: a.title,
+  cwd: "",
+  gitBranch: "",
+  gitRepo: "",
+  updatedAt: "",
+  active: false,
+  attached: true,
+});
+
 /** The attached sessions, in attach order, each joined with its live row when
  * the index still carries it. A session the index no longer holds still shows,
  * from the attachment's own record, so an attachment never silently vanishes. */
@@ -297,18 +308,7 @@ export const attachedRowsOf = lift((
 ): SessionRow[] =>
   attached.map((a) => {
     const key = sessionKey(a.sourceId, a.nativeSessionId);
-    return rows.find((r) => r.key === key) ?? {
-      key,
-      sourceId: a.sourceId,
-      nativeSessionId: a.nativeSessionId,
-      title: a.title,
-      cwd: "",
-      gitBranch: "",
-      gitRepo: "",
-      updatedAt: "",
-      active: false,
-      attached: true,
-    };
+    return rows.find((r) => r.key === key) ?? rowFromAttachment(a);
   })
 );
 

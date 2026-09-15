@@ -36,16 +36,22 @@ export const sourceOptionsOf = lift((
     shown?: ShownHarness[] | Default<[]>;
   },
 ): CheckoutOption[] => {
-  const configured = (index?.sources ?? [])
-    .flatMap((source) =>
-      source?.id && source.capabilities?.startSession === true
-        ? [{ label: `${source.id}  (${source.driver})`, value: source.id }]
-        : []
-    )
+  // Read where the row is live: a field of an input element is read at the
+  // element, not on a copy passed along.
+  const startable = (index?.sources ?? []).flatMap((source) =>
+    source?.id && source.capabilities?.startSession === true
+      ? [{ id: source.id, driver: source.driver }]
+      : []
+  );
+  const configured = startable
     .toSorted((a, b) =>
-      (a.label.includes("claude-agent-sdk") ? 0 : 1) -
-      (b.label.includes("claude-agent-sdk") ? 0 : 1)
-    );
+      (a.driver === "claude-agent-sdk" ? 0 : 1) -
+      (b.driver === "claude-agent-sdk" ? 0 : 1)
+    )
+    .map((source) => ({
+      label: `${source.id}  (${source.driver})`,
+      value: source.id,
+    }));
   const known = new Set(configured.map((option) => option.value));
   const extra = (shown ?? [])
     .filter((harness) => harness.id && !known.has(harness.id))
@@ -95,31 +101,45 @@ export const startSourceOf = (
   return startable.includes(sourceId) ? sourceId : "";
 };
 
-/** Why Start would send nothing, or "" when it would send. The handler
- * makes the same checks; this computes them ahead, so the control can be
- * disabled and the caption can say what is missing. */
-export const startBlockerOf = lift((
-  { ownerDid, picked, options, startable, kickoff }: {
-    ownerDid: string;
-    picked: string;
-    options: CheckoutOption[];
-    startable: string[];
-    kickoff: string;
-  },
+/** What a start needs, as the Start control and its handler both see it. */
+export interface StartPreconditions {
+  ownerDid: string;
+  picked: string;
+  options: readonly CheckoutOption[];
+  startable: readonly string[];
+  kickoff: string;
+  /** Whether there is a subject to start from, for a workbench whose
+   * subject can be missing; absent means there always is one. */
+  hasSubject?: boolean;
+}
+
+/** Why Start would send nothing, or "" when it would send. The one
+ * predicate behind the disabled control, its caption, and the handler's own
+ * refusal, so the three cannot drift apart. */
+export const startBlockerReason = (
+  { ownerDid, picked, options, startable, kickoff, hasSubject }:
+    StartPreconditions,
 ): string => {
+  if (hasSubject === false) return "No workstream to start from.";
   if (!ownerDid) {
     return "No session index is linked, so there is no connector to start through.";
   }
   if (startable.length === 0) {
     return "No harness the connector runs here can start a session.";
   }
-  const sourceId = (picked || options[0]?.value || "").trim();
-  if (!startable.includes(sourceId)) {
+  if (!startSourceOf(picked, options, startable)) {
+    const sourceId = (picked || options[0]?.value || "").trim();
     return `${sourceId} is not a harness this Mac runs; pick one that is.`;
   }
   if (!kickoff.trim()) return "Write a prompt to start from.";
   return "";
-});
+};
+
+/** `startBlockerReason` as a lift, for the control and the caption. The
+ * callback is written at the call, as the module verifier asks. */
+export const startBlockerOf = lift((
+  preconditions: StartPreconditions,
+): string => startBlockerReason(preconditions));
 
 /** A version 4 UUID, which is the shape a Claude session id must have. */
 export const mintSessionId = (): string =>
@@ -129,7 +149,10 @@ export const mintSessionId = (): string =>
   });
 
 /** A connector `start` command, JSON-encoded as its queue holds it, and the
- * id it carries. */
+ * id it carries. The connector normalizes a command's source id on receipt
+ * (`connector/src/commands.ts`, `parseCommand`); the envelope carries it
+ * normalized all the same, as the debug view's does, so the two spellings
+ * of this envelope agree. */
 export const startCommandValue = (
   { ownerDid, idPrefix, sourceId, nativeSessionId, text, cwd, title, mode }: {
     ownerDid: string;
@@ -151,7 +174,7 @@ export const startCommandValue = (
       ownerDid,
       id,
       createdAt,
-      sourceId,
+      sourceId: sourceId.trim().toLowerCase(),
       nativeSessionId,
       type: "start",
       payload: {
@@ -183,22 +206,17 @@ const commandIdOf = (value: CommandValue): string => {
  * which the queue's mergeable operations support for a plain string. A
  * command the connector has already claimed runs regardless, since the
  * connector's ledger holds its id and the removal only shortens the queue;
- * its session then shows in the rail unattached. True when a queue entry was
- * removed.
+ * its session then shows in the rail unattached. Nothing here can tell the
+ * two apart, which is why the control's caption says both.
  */
 export const withdrawStart = (
   commands: Writable<CommandValue[] | Default<[]>>,
   starts: Writable<SessionStart[] | Default<[]>>,
   commandId: string,
-): boolean => {
-  let withdrawn = false;
+): void => {
   for (const value of commands.get()) {
-    if (commandIdOf(value) === commandId) {
-      commands.removeByValue(value);
-      withdrawn = true;
-    }
+    if (commandIdOf(value) === commandId) commands.removeByValue(value);
   }
   const start = starts.get().find((s) => s.commandId === commandId);
   if (start) dropStart(starts, start.sourceId, start.nativeSessionId);
-  return withdrawn;
 };

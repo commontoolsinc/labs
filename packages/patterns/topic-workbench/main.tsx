@@ -74,6 +74,7 @@ import {
   mintSessionId,
   sourceOptionsOf,
   startBlockerOf,
+  startBlockerReason,
   startCommandValue,
   startSourceOf,
   withdrawStart,
@@ -355,16 +356,22 @@ export const startSessionCommand = handler<void, {
     withdrawStart(state.commands, state.starts, state.withdraw);
     return;
   }
-  // A harness shown for display has no source to run it, and a configured
-  // source whose driver cannot start is no harness for this either; a picker
-  // value naming one (or a stale choice) starts nothing. `startBlockerOf`
-  // makes the same checks ahead of the click, so the control says so.
+  // The same predicate that disables the control: a click that slips past a
+  // stale rendering starts nothing.
+  const picked = state.spawnSource.get();
+  const blocked = startBlockerReason({
+    ownerDid: state.ownerDid,
+    picked,
+    options: state.sourceOptions,
+    startable: state.configuredSources,
+    kickoff: state.kickoff,
+  });
+  if (blocked) return;
   const sourceId = startSourceOf(
-    state.spawnSource.get(),
+    picked,
     state.sourceOptions,
     state.configuredSources,
   );
-  if (!state.ownerDid || !sourceId || !state.kickoff.trim()) return;
   const nativeSessionId = mintSessionId();
   const sessionTitle = state.shortName
     ? `topic #${state.shortName}: ${state.title}`
