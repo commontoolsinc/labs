@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -307,6 +307,63 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
 
     assertEquals(navigations.length, 1);
     assertEquals(navigations[0], entityRefToString(targetOne.entityId));
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("navigateTo reports a runtime that has no navigate callback", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  // No navigateCallback: navigation has nowhere to go, and the builtin says
+  // so rather than committing a transaction whose effect cannot be released.
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const setupTx: IExtendedStorageTransaction = runtime.edit();
+    const resultCell = runtime.getCell(
+      space,
+      "navigateTo without callback result cell",
+      undefined,
+      setupTx,
+    );
+    const target = runtime.getCell(
+      space,
+      "navigateTo without callback target",
+      undefined,
+      setupTx,
+    );
+    target.set({ title: "unreachable target" });
+    const inputs = runtime.getImmutableCell(
+      space,
+      target.getAsLink(),
+      undefined,
+      setupTx,
+    );
+    const setupResult = await setupTx.commit();
+    assert(setupResult.ok !== undefined);
+
+    const builtin = rawNavigateTo(
+      inputs,
+      (resultTx: IExtendedStorageTransaction, result: unknown) => {
+        resultCell.withTx(resultTx).key("result").set(result);
+      },
+      () => {},
+      [],
+      resultCell,
+      runtime,
+    );
+
+    const tx = runtime.edit();
+    assertThrows(
+      () => builtin.action(tx),
+      Error,
+      "navigateCallback is not set",
+    );
+    tx.abort();
   } finally {
     await runtime.dispose();
     await storageManager.close();
