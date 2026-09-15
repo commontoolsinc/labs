@@ -46,7 +46,7 @@ import {
   errorClassFromType,
   fabricFromConvertibleJsValue,
 } from "@/convertible-js.ts";
-import { isValidFabricValue } from "@/types/validation.ts";
+import { isValidFabricValue } from "@/types";
 
 /**
  * Helper for `FabricError.fromNativeError()`, which converts a nested value

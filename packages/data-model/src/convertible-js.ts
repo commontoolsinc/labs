@@ -40,17 +40,18 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { isFabricSpecialObject } from "@/types/narrowing.ts";
+import {
+  assertValidFabricValueLayer,
+  isFabricSpecialObject,
+  isValidFabricConvertibleJsObject,
+  tagOfConvertibleJsValueElseNull,
+  VALUE_TAGS,
+} from "@/types";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { tagOfConvertibleJsValueElseNull, VALUE_TAGS } from "@/types";
-import {
-  assertValidFabricValueLayer,
-  isValidFabricConvertibleJsObject,
-} from "@/types/validation.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 

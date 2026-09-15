@@ -27,7 +27,7 @@ import type { FabricValue } from "@/interface.ts";
 import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
-} from "@/types/tags.ts";
+} from "@/types";
 import { FabricBytes } from "./FabricBytes.ts";
 
 /**

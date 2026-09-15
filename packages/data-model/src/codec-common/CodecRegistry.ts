@@ -26,7 +26,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import { type JsTypeValueTag, VALUE_TAGS } from "@/types/tags.ts";
+import { type JsTypeValueTag, VALUE_TAGS } from "@/types";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 
 /**
