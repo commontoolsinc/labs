@@ -180,7 +180,7 @@ describe("console/graph", () => {
       const steps = consoleRunSteps([
         call("c1", "run_pattern", {
           sourceText: "x",
-          inputs: { source: "/of:fid1:abc" },
+          inputs: { source: "  /of:fid1:abc" },
         }),
         result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
       ]);

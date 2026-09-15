@@ -438,14 +438,15 @@ while keeping the position. A bare `title` is the same as `./title`.
 Qualifiers repeat as `@name=value`, with each name appearing once. Scope has the
 abbreviations `@space`, `@user`, `@session`, and `@inherit`; the last requires a
 context. `@pin=<43 base64url characters>` is reserved for module identity and
-ignored by runtime cell resolution. The `/@did:…/` space alias stays readable;
-the `/@name/` alias is refused with a message directing callers to `//name/`. A
-space embedded in it names the target space: it supplies the space when
-`--space` is absent, and when both are given they must agree — a mismatch is
-refused rather than resolved, at parse time when the two are written the same
-way and once the session opens when only a derivation can compare them. An
-address printed by one command therefore composes into the next with no flag
-beside it, whatever space the reader has configured.
+ignored by runtime cell resolution; shuttle refuses pinned operands. The
+`/@did:…/` space alias stays readable; the `/@name/` alias is refused with a
+message directing callers to `//name/`. A space embedded in it names the target
+space: it supplies the space when `--space` is absent, and when both are given
+they must agree — a mismatch is refused rather than resolved, at parse time when
+the two are written the same way and once the session opens when only a
+derivation can compare them. An address printed by one command therefore
+composes into the next with no flag beside it, whatever space the reader has
+configured.
 
 A slug may name a collection rather than a piece.
 `cf piece set-slug top /of:fid1:…/names` points `top` at the map a board keeps

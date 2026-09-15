@@ -176,7 +176,15 @@ export function splitArgumentSuffix(
 ): { target: string; input: boolean } {
   const rooted = target.startsWith("/");
   const reference = rooted ? target : `/${target}`;
-  const parsed = parseCellReference(reference);
+  let parsed;
+  try {
+    parsed = parseCellReference(reference);
+  } catch (error) {
+    throw new ValidationError(
+      error instanceof Error ? error.message : String(error),
+      { exitCode: 1 },
+    );
+  }
   const segments = target.split("/");
   const index = target.startsWith("//")
     ? 3

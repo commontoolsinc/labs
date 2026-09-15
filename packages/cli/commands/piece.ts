@@ -3286,8 +3286,8 @@ export interface PieceCellCommandDependencies {
 /**
  * The `cf cell get` action: the target may ride `--cell` or sit in the
  * first positional as a canonical address ({@link readTargetPositionals}
- * decides which the positionals name), and either spelling may end in
- * `#argument`, which reads the arguments cell the way `--input` does.
+ * decides which the positionals name). `#argument` on the piece segment,
+ * before qualifiers or path, reads the arguments cell the way `--input` does.
  *
  * A named export with seams rather than an arrow function at the `.action()`
  * call: what the intake decided is the thing under test — which spelling

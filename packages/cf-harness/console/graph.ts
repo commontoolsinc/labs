@@ -117,7 +117,7 @@ const tokensIn = (value: unknown): string[] => {
  * on the path would draw two nodes for one cell.
  */
 const linkDocument = (value: unknown): string | undefined => {
-  if (typeof value !== "string" || !value.startsWith("/")) {
+  if (typeof value !== "string" || !value.trimStart().startsWith("/")) {
     return undefined;
   }
   const parts = parseConsoleReference(value);

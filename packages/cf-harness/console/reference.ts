@@ -14,10 +14,12 @@ export const parseConsoleReference = (
   text: string,
 ): ReferenceParts | undefined => {
   try {
+    text = text.trimStart();
     const parts = parseCellReference(text.startsWith("/") ? text : `/${text}`);
     const separator = parts.id.indexOf(":");
     if (
-      separator <= 0 || separator === parts.id.length - 1 ||
+      !["of", "computed"].includes(parts.id.slice(0, separator)) ||
+      separator === parts.id.length - 1 ||
       parts.member === "argument"
     ) return undefined;
     return { ...parts, scope: parts.scope ?? "space" };

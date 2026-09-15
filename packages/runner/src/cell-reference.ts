@@ -32,6 +32,13 @@ export interface ReferenceParts {
   path: string[];
 }
 
+/** Refuses a pin outside the module identity's base64url form. */
+function checkPin(pin: string): void {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(pin)) {
+    throw new Error("Invalid `@pin` value: expected 43 base64url characters.");
+  }
+}
+
 /** Helper for the reader, which separates a piece or relative head from its qualifiers. */
 function readHead(segment: string): {
   id: string;
@@ -72,11 +79,7 @@ function readHead(segment: string): {
         scope = value;
         break;
       case "pin":
-        if (!/^[A-Za-z0-9_-]{43}$/.test(value)) {
-          throw new Error(
-            "Invalid `@pin` value: expected 43 base64url characters.",
-          );
-        }
+        checkPin(value);
         pin = value;
         break;
       default:
@@ -300,6 +303,7 @@ export function renderCellReference(
   link: RenderableCellReference,
   context: ReferenceContext = {},
 ): string {
+  if (link.pin !== undefined) checkPin(link.pin);
   if (link.space === undefined && context.space !== undefined) {
     throw new Error(
       "An unresolved reference space cannot inherit a known context space.",

@@ -2,16 +2,14 @@
 
 ## Status
 
-Proposed. This is a decision record for the cell reference grammar — the one
+Adopted. This is a decision record for the cell reference grammar — the one
 string form that names a cell — and for the mechanism by which that grammar
 admits a new requirement. It records the requirements the grammar answers to,
 the decisions taken against them, the alternatives a reader would ask about, and
 the decisions elsewhere in this tree that each confirms or replaces.
 
-Until it is adopted, `parseReferenceParts` in
-`packages/runner/src/link-types.ts` and the documents that quote its form
-describe the grammar as it stands, and [Migration](#migration) names the
-distance between that and this.
+`packages/runner/src/cell-reference.ts` owns the shared reader and renderer.
+[Migration](#migration) describes their adoption across callers.
 [#6775](https://github.com/commontoolsinc/labs/issues/6775) is the question this
 document answers.
 
