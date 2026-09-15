@@ -18,18 +18,20 @@ GitHub's Team plan allows the organization
 That capacity is shared by every workflow and repository in the organization,
 and the full run is what can fill it. A pull request takes five runners.
 
-`LANE_BOUND_SECONDS` is the bound a pull-request lane is killed at, and
-`FULL_LANE_BOUND_SECONDS` the bound a lane of the full run is killed at. What
-the packer fills is a budget derived from each: the bound less
+`LANE_BOUND_SECONDS` is the bound a pull-request lane is packed against, and
+`FULL_LANE_BOUND_SECONDS` the bound a lane of the full run is packed against.
+What the packer fills is a budget derived from each: the bound less
 `LANE_PROLOGUE_SECONDS`, which is what a lane spends before it runs anything,
 and `LANE_SAFETY_SECONDS`, which is what it is left with if every estimate is
 wrong. So a lane filled to its budget finishes seventy seconds short of its
 bound.
 
-The two bounds are the numbers to move when a lane runs long, and the
-workflow's `lane-work-timeout` and `full-lane-work-timeout` anchors are those
-same two numbers in minutes. Moving one without the other leaves a lane packed
-against a budget its job will not allow it.
+Those two are the numbers to move when a lane runs long, and they are not the
+workflow's timeouts. `work-timeout` is a backstop sitting far above both, and
+what it is sized for is the lane the cost model got wrong. That lane is
+carrying the measurements the cost model learns its mistake from, so killing it
+at the bound it overran would cost the next run the same mistake as well as
+costing this one every test it had already run.
 
 Rebalancing is not something anybody does here any more. What a test costs is
 measured on every run and published in the manifest, and the packer distributes
@@ -274,12 +276,12 @@ environment variables are how a workflow declares a value an anchor can name;
 nothing reads them, and merge keys (`<<:`) remain unsupported, so an anchor
 cannot carry a block that a job then overrides.
 
-The lanes take two further pairs. `lane-work-timeout` at five minutes and
-`lane-job-timeout` at fifteen bound a pull-request lane; `full-lane-work-timeout`
-at ten and `full-lane-job-timeout` at twenty bound a lane of the full run. Each
-work bound is the budget the packer packed that lane against, written in
-minutes, so the two move together. A job needing its own bound adds a pair of
-anchors alongside these rather than a number next to the step.
+The lanes carry that same pair rather than one of their own. A lane is packed
+against a budget far below thirty minutes, so this bound is reached only by a
+lane that was given more than it could carry, and it is set high enough that
+such a lane finishes late instead of being killed with its work discarded. A
+job needing its own bound adds a pair of anchors alongside these rather than a
+number next to the step.
 
 The deploy jobs carry no bound at all. A deploy hands the work to a script that
 lives outside this repository, and a bound here would cancel a deploy this
@@ -288,8 +290,9 @@ asks nothing of them.
 
 For every other job, that test fails when a work step has no
 bound, when a job has none, when a bound is written as anything but an alias to
-an anchor, or when fewer than ten minutes separate the step's anchor from its
-job's.
+an anchor, when fewer than ten minutes separate the step's anchor from its
+job's, or when `work-timeout` drops to within a lane's packed bound of that
+bound.
 
 ## The Lane Shape
 

@@ -40,16 +40,22 @@ job fails with it.
 Both aliases point at YAML anchors declared in the `env:` block at the top of
 the file, which is where the minutes themselves are written. Add a work step
 and you add the alias, not a number; a job that needs its own bound adds a pair
-of anchors there, as the lanes have. A lane's work bound is
-`LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS` from
-`tasks/test-selection/policy.ts` written in minutes — the bound the lane is
-killed at, which the budget it is packed against is derived from — so the
-anchor and that constant move together. The deploy jobs are
-the exception and carry no bound, because a deploy's duration is set by a
-script in another repository. `tasks/ci-workflow.test.ts` names those and holds
-every other job to the shape: it fails when a bound is missing, when it is
-written as a number rather than an alias, or when a step's anchor is fewer than
-ten minutes below its job's.
+of anchors there.
+
+That bound is a backstop and not a schedule, which is what keeps it at one pair
+for the whole file. The lanes are the job with a schedule of their own: each is
+packed against `LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS` from
+`tasks/test-selection/policy.ts`, both far below the anchor, so the anchor is
+reached only by a lane the packer gave more than it could carry — and it is
+high enough that such a lane finishes late rather than being killed with every
+test it had already run thrown away.
+
+The deploy jobs are the exception and carry no bound, because a deploy's
+duration is set by a script in another repository. `tasks/ci-workflow.test.ts`
+names those and holds every other job to the shape: it fails when a bound is
+missing, when it is written as a number rather than an alias, when a step's
+anchor is fewer than ten minutes below its job's, or when the work anchor drops
+to within a lane's packed bound of that bound.
 
 ## Adding a test surface is not a workflow edit
 

@@ -411,10 +411,10 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why:
       "Up when more should fit in a lane; down when five minutes is longer " +
-      "than anybody will wait for a first answer. The `lane-work-timeout` " +
-      "anchor in `deno.yml` is the same number in minutes, and " +
-      "`lane-job-timeout` is ten above it; both move with this one, and " +
-      "nothing checks that.",
+      "than anybody will wait for a first answer. Nothing in `deno.yml` " +
+      "follows it: the `work-timeout` anchor there is a backstop set well " +
+      "above this, so a lane packed past its bound finishes late rather " +
+      "than being killed with its work thrown away.",
   },
   {
     name: "LANE_PROLOGUE_SECONDS",
@@ -449,9 +449,8 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "chosen",
     why: "Up when the run on `main` uses more jobs than it needs; down when " +
-      "`main` takes too long to say something broke. The " +
-      "`full-lane-work-timeout` anchor in `deno.yml` is the same number in " +
-      "minutes, and `full-lane-job-timeout` is ten above it.",
+      "`main` takes too long to say something broke. The `work-timeout` " +
+      "backstop in `deno.yml` sits well above this and does not move with it.",
   },
   {
     name: "FULL_LANE_BUDGET_SECONDS",

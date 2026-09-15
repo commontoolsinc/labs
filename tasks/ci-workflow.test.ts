@@ -518,13 +518,25 @@ Deno.test("the workflow spells the dials the packer reads", async () => {
   assertStringIncludes(triggers, "      - labeled\n");
   assertStringIncludes(triggers, "      - unlabeled\n");
 
-  // Each lane's work bound is the bound the packer packs against,
-  // written in minutes.
+  // GitHub's kill is a backstop, not the schedule. A lane is packed
+  // against `LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS`, and one
+  // that runs past the bound it was packed against has been given more
+  // than it could carry. That is a failure of the cost model, and what
+  // corrects the cost model is the measurements that same lane is
+  // carrying: killing it there would throw them away along with every
+  // test it had already run, and the next run would be packed just as
+  // badly. So the backstop is held clear of the packed bound by the whole
+  // of that bound again, which leaves an over-packed lane finishing late
+  // rather than not at all.
   const anchors = anchoredMinutes(contents);
-  assertEquals(anchors.get("lane-work-timeout"), LANE_BOUND_SECONDS / 60);
-  assertEquals(
-    anchors.get("full-lane-work-timeout"),
-    FULL_LANE_BOUND_SECONDS / 60,
+  const minutes = anchors.get("work-timeout");
+  assert(minutes !== undefined, "no work-timeout anchor");
+  const packed = Math.max(LANE_BOUND_SECONDS, FULL_LANE_BOUND_SECONDS);
+  assert(
+    minutes * 60 >= 2 * packed,
+    `the work backstop is ${minutes * 60} seconds against a packed bound ` +
+      `of ${packed}, leaving an over-packed lane less than that bound ` +
+      `again before GitHub kills it`,
   );
 });
 

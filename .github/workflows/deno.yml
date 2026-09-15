@@ -34,26 +34,28 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The bounds the jobs below are built from. They are YAML anchors, used as
-# aliases at each job and each work step, so the numbers live here and nowhere
-# else. The first pair is what a job that builds or reports takes. The lane
-# pairs are `LANE_BOUND_SECONDS` and `FULL_LANE_BOUND_SECONDS` from
-# `tasks/test-selection/policy.ts`, written in minutes: the bound a lane is
-# killed at, which the budget it is packed against is derived from by taking
-# off a prologue and a safety margin. See "Step And Job Timeouts" in
+# The one backstop every job below is held to, as a pair of YAML anchors used
+# as aliases at each job and each work step, so the numbers live here and
+# nowhere else. See "Step And Job Timeouts" in
 # docs/development/CI_PERFORMANCE.md for the sizing rule. The environment
 # variables holding the numbers are how a workflow declares a value an anchor
 # can name; nothing reads them.
+#
+# A backstop, and not a schedule. A lane is packed against
+# `LANE_BOUND_SECONDS` or `FULL_LANE_BOUND_SECONDS` from
+# `tasks/test-selection/policy.ts`, both far below the figure here, and a lane
+# that runs past the bound it was packed against has been given more than it
+# could carry. What GitHub's kill costs in that case is everything that lane
+# did — every test it had already run, the records those runs produced, and the
+# measurements the cost model learns its own mistake from — so the backstop
+# sits far enough above the packed bound that an over-packed lane finishes late
+# rather than not at all.
 env:
   # GitHub's Ubuntu image includes Chrome. Astral uses it directly instead of
   # downloading another browser when the first browser test starts.
   ASTRAL_BIN_PATH: /usr/bin/google-chrome
   WORK_TIMEOUT_MINUTES: &work-timeout 30
   JOB_TIMEOUT_MINUTES: &job-timeout 40
-  LANE_WORK_TIMEOUT_MINUTES: &lane-work-timeout 5
-  LANE_JOB_TIMEOUT_MINUTES: &lane-job-timeout 15
-  FULL_LANE_WORK_TIMEOUT_MINUTES: &full-lane-work-timeout 10
-  FULL_LANE_JOB_TIMEOUT_MINUTES: &full-lane-job-timeout 20
 
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
@@ -123,7 +125,7 @@ jobs:
     name: "Full Tests (${{ matrix.lane }}/${{ needs.plan-full.outputs.lanes }})"
     needs: ["plan-full"]
     runs-on: ubuntu-latest
-    timeout-minutes: *full-lane-job-timeout
+    timeout-minutes: *job-timeout
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     permissions:
@@ -183,7 +185,7 @@ jobs:
           sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"
 
       - name: 🧪 Run the lane
-        timeout-minutes: *full-lane-work-timeout
+        timeout-minutes: *work-timeout
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
@@ -238,7 +240,7 @@ jobs:
       github.event_name == 'pull_request' &&
       !contains(github.event.pull_request.labels.*.name, 'ci: full')
     runs-on: ubuntu-latest
-    timeout-minutes: *lane-job-timeout
+    timeout-minutes: *job-timeout
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     permissions:
@@ -277,7 +279,7 @@ jobs:
           sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"
 
       - name: 🧪 Run the lane
-        timeout-minutes: *lane-work-timeout
+        timeout-minutes: *work-timeout
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
