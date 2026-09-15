@@ -168,7 +168,7 @@ path. The runtime has nowhere to put the answer.
 Capabilities and schemas are derived from types, which makes the type
 system load-bearing. So the escape hatch is closed
 (`packages/ts-transformers/src/transformers/cast-validation.ts`, the
-first of 25 pipeline stages):
+first of 26 pipeline stages):
 
 ```
 error: Double-casting via 'as unknown as' is not allowed.
@@ -189,7 +189,7 @@ it("does not let an author-declared InjectionSafe satisfy a requiredIntegrity ga
 ```
 
 The second case repeats the proof across seven forged evidence atoms.
-Twenty atom types are runtime-minted; an author-declared one survives
+Nineteen atom types are runtime-minted; an author-declared one survives
 only when the writer's identity is a builtin
 (`packages/runner/src/cfc/prepare.ts`).
 
@@ -453,13 +453,14 @@ check the flow, not the author.
 
 ## What runs this
 
-Every pattern in the repository is compiled, transformed and
-SES-verified on every pull request — 444 authored entry files
-(`deno task cfcheck`). A second gate replays each pattern against 455
-recorded contract baselines across 122 patterns, because the updater
-performs no structural check before swapping a pattern onto a running
-piece. Pattern tests run at `enforce-explicit`, the same mode the servers
-run, rather than in an observe mode that would let violations pass. That
+Every authored pattern entry file in the repository is compiled,
+transformed and SES-verified on every pull request
+(`deno task cfcheck`). A second gate (`deno task pattern-compat`)
+replays each of those patterns against every contract recorded for it
+under `packages/patterns/baselines/`, because the updater performs no
+structural check before swapping a pattern onto a running piece.
+Pattern tests run at `enforce-explicit`, the same mode the servers run,
+rather than in an observe mode that would let violations pass. That
 is the runtime's default, no flag sets it, and both server hosts are
 pinned to it (`packages/runner/src/runtime.ts`, `runtime-presets.ts`).
 The two-readers test at the top of this document runs at that plain
@@ -467,8 +468,8 @@ default. A grep will also turn up
 `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in `cfc/types.ts`, which is
 the transaction-level default, not this one.
 
-The flow-control layer is `packages/runner/src/cfc/`: 45 modules, about
-24,000 lines, with 133 test files beside them in `packages/runner/test`.
+The flow-control layer is `packages/runner/src/cfc/`: 50 modules, about
+26,000 lines, with 143 test files beside them in `packages/runner/test`.
 Every dial it exposes is implemented; what differs between hosts is
 which are switched on. The browser shell — the product surface — runs
 label propagation at `persist`, so a value derived from labeled data is
