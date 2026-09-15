@@ -383,6 +383,14 @@ async function deriveLimits(v8Flags: readonly string[]): Promise<void> {
       for (const record of outcome.sample.phases as PhaseRecord[]) {
         if (!record.measured) continue;
         const counts = gatedMeasuresOf(record);
+        for (const measure of GATED_MEASURES) {
+          if (!Number.isSafeInteger(counts[measure])) {
+            throw new Error(
+              `Case \`${id}\` recorded no \`${measure}\` count in its ` +
+                `\`${record.phase}\` phase.`,
+            );
+          }
+        }
         const values = phases.get(record.phase) ??
           Object.fromEntries(
             GATED_MEASURES.map((measure) => [measure, [] as number[]]),
@@ -452,9 +460,17 @@ function positiveInteger(name: string, value: string): number {
  * @throws Error for an argument the probe does not take.
  */
 async function main(): Promise<void> {
+  const booleanOptions = ["derive-limits", "small"] as const;
+  const stringOptions = [
+    "case",
+    "filter",
+    "max-old-space-size",
+    "repeat",
+    "sample-file",
+  ] as const;
   const args = parseArgs(Deno.args, {
-    boolean: ["derive-limits", "small"],
-    string: ["case", "filter", "max-old-space-size", "repeat", "sample-file"],
+    boolean: booleanOptions,
+    string: stringOptions,
     unknown: (arg) => {
       throw new Error(`Unknown argument: \`${arg}\``);
     },
@@ -463,13 +479,19 @@ async function main(): Promise<void> {
     ? undefined
     : positiveInteger("max-old-space-size", args["max-old-space-size"]);
   if (args["derive-limits"]) {
-    if (
-      args.case !== undefined || args.small || args.filter !== undefined ||
-      args.repeat !== undefined
-    ) {
+    // Every option the probe takes, other than these two, selects or runs cases
+    // some other way.
+    const conflicting = [
+      ...booleanOptions.filter((name) => args[name]),
+      ...stringOptions.filter((name) => args[name] !== undefined),
+    ].filter((name) =>
+      name !== "derive-limits" && name !== "max-old-space-size"
+    );
+    if (conflicting.length > 0) {
       throw new Error(
-        "`--derive-limits` takes no `--case`, `--small`, `--filter`, or " +
-          "`--repeat`.",
+        "`--derive-limits` takes no other option but " +
+          "`--max-old-space-size`, and was given " +
+          `${conflicting.map((name) => `\`--${name}\``).join(", ")}.`,
       );
     }
     await deriveLimits(childV8Flags(maxOldSpaceSize));
