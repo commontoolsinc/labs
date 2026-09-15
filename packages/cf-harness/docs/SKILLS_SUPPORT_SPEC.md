@@ -368,12 +368,15 @@ Current v1 behavior:
   an operator narrowing it must include `run_skill_script` — an entry alone does
   not add a tool to a list the operator wrote. A delegated child's surface is
   its profile's, which the operator never writes, so a child handed an acquired
-  skill receives `run_skill_script` exactly when the run allowlisted at least
-  one script at that skill's pin, and nothing else has to be said. There is no
-  configuration anyone wants in which a script is allowlisted and the tool
-  withheld; where that happens on the run's own surface it is a mistake, and a
-  run narrowed that way offers no tool rather than refusing a call, so nothing
-  names the cause.
+  skill receives `run_skill_script` when two things hold together, neither of
+  which the operator names: the run allowlisted at least one script at that
+  skill's pin, and the child's own sandbox mounts that skill. The second is the
+  backing gate, which a child sharing a handed-in runtime fails, no mount having
+  been added for it — so the allowlist decides what may run and the mount is
+  whether there is anything to run. There is no configuration anyone wants in
+  which a script is allowlisted and the tool withheld; where that happens on the
+  run's own surface it is a mistake, and a run narrowed that way offers no tool
+  rather than refusing a call, so nothing names the cause.
 - `--no-skill-catalog` is available for tightly scripted batch runs that only
   want explicit preloaded skills.
 
