@@ -126,8 +126,52 @@ so `$BOARD` and `$OUT` in it are the variables `env.sh` defines.
 Four statements in this record were read in code rather than measured, and each
 says so where it is made: what the survey's validator reads, in § The discovery
 rig; the scheduling explanation in § Check 3; the `equals` caveat in § Check 4;
-and the wait bound in § The browser check. Code
-read on `origin/main` is quoted from `e1bbc1d549`.
+and the wait bound in § The browser check.
+
+The first three quote `origin/main` at `e1bbc1d549`, which is not a commit of
+the experiment branch. The two histories meet at the branch's base,
+`51f8c11053`, and that base is the code every server and every `cf` process ran.
+Each snippet those three statements quote stands byte for byte at the base as
+well as at `e1bbc1d549`, so the code shown is the code the experiment ran. Three
+of the four files they quote hold no change at all between the two commits:
+
+```
+$ git merge-base e1bbc1d549 8a194f9bcf
+51f8c11053771c3acf4099354b776775d489d93d
+
+$ git diff --stat 51f8c11053 e1bbc1d549 -- packages/piece/src/ops/bulk-survey.ts packages/cli/lib/piece.ts packages/patterns/collection-naming/naming.ts
+```
+
+The fourth, `packages/runner/src/cell.ts`, does change between them, elsewhere
+in the file. The two snippets this record quotes from it — the documentation
+comment of `pull()` in § Check 3 and `equals` in § Check 4 — are identical at
+both commits:
+
+```
+$ git diff --stat 51f8c11053 e1bbc1d549 -- packages/runner/src/cell.ts
+ packages/runner/src/cell.ts | 78 +++++++++++++++++++++++++++++++--------------
+ 1 file changed, 54 insertions(+), 24 deletions(-)
+
+$ for c in 51f8c11053 e1bbc1d549; do git show $c:packages/runner/src/cell.ts | sed -n "/^   \* Pull the cell's value/,/^   \*\//p" | shasum; git show $c:packages/runner/src/cell.ts | sed -n '/^    equals($/,/^    },$/p' | shasum; done
+997c1157ccb9284a6b0b214ece1b04ab498c0e45  -
+964bb8b40f51d3559ba824a0e3c784355ba568d5  -
+997c1157ccb9284a6b0b214ece1b04ab498c0e45  -
+964bb8b40f51d3559ba824a0e3c784355ba568d5  -
+```
+
+`packages/patterns/collection-naming/naming.ts` is unchanged on the experiment
+branch too, and § The patterns quotes the import through which the experiment's
+board takes `nameOf` from it, so the `nameOf` quoted in § Check 4 is the source
+that board ran:
+
+```
+$ git diff --stat 51f8c11053 8a194f9bcf -- packages/patterns/collection-naming/naming.ts
+```
+
+The fourth statement, the wait bound, quotes `packages/integration/utils.ts` at
+`2919bb0509`, and says so where it is made. That is the commit the browser
+check's own README names as the worktree the check ran from, and § The browser
+check quotes that README whole.
 
 ## Setup
 
@@ -482,7 +526,10 @@ fid1:Jr9t6W5DMi375rRJOgxQGugGDmlUPSd9rCQKG1LnuwI
 
 `experiment-output/02-file-v0-members.txt` (added in `b7f3f7e32d`) holds the
 `addItem` calls that filed "Legacy item A" to "Legacy item G", and then the
-board's index, with its middle rows elided:
+board's index, whole. The `createdAt` each row carries is when the item was
+filed, in the description both boards compiled it to (§ The lenient upgrade and
+the strict control), and it ascends from A to G, so the index is in filing
+order:
 
 ```
 $ cf cell get $BOARD index --select "@,title,createdAt"
@@ -493,7 +540,31 @@ $ cf cell get $BOARD index --select "@,title,createdAt"
     "title": "Legacy item A",
     "createdAt": 1789430663000
   },
-…
+  {
+    "$link": "/of:fid1:2d-0sZs3u9kXK_FYvHa0zeFKmvE9Dl4vMpyS_iWXlgQ",
+    "title": "Legacy item B",
+    "createdAt": 1789430664000
+  },
+  {
+    "$link": "/of:fid1:w3e4oha_2fU_KdxPUK9yLFyIHlsGqshRIyN25ZUnUE4",
+    "title": "Legacy item C",
+    "createdAt": 1789430665000
+  },
+  {
+    "$link": "/of:fid1:6_rf-QTHfh1ZF7y3lTaTCS7GOVPP8Ch35qW7458QZeU",
+    "title": "Legacy item D",
+    "createdAt": 1789430666000
+  },
+  {
+    "$link": "/of:fid1:MOw7HWau2bDYPUGVloMy06OS8uMlldBZWb_mIWUWflM",
+    "title": "Legacy item E",
+    "createdAt": 1789430667000
+  },
+  {
+    "$link": "/of:fid1:P8hC0z70UnuuOIchd-o_waRkj6Dh70_YC9Eu3Bp1tXk",
+    "title": "Legacy item F",
+    "createdAt": 1789430668000
+  },
   {
     "$link": "/of:fid1:_Y1OtmESlCPxogjFFvSDA7n0uz_2FIjYmSDTvhk6AbU",
     "title": "Legacy item G",
@@ -722,10 +793,11 @@ $ cf piece inspect --cell /of:fid1:q4tbuY-jxhm6UC0KxqIUS_XuqDk9wJKMXGG-BOv2Eco -
 
 ### Backfill
 
-From `experiment-output/09-q2-backfill.txt` (added in `0f27b34d4a`): the backfill,
-the map it wrote, the board's rows after it, with the middle five elided, and a
-second run. A `--select` probe and a read of the names table between them are
-elided:
+From `experiment-output/09-q2-backfill.txt` (added in `0f27b34d4a`): the
+backfill, the map it wrote, the board's rows after it, whole, and a second run.
+A `--select` probe and a read of the names table between them are elided. The
+rows give the whole mapping, `1` to A through `7` to G, which is the filing
+order the board's index reads in § Generation 0:
 
 ```
 $ cf piece call $BOARD backfillNames --json '{"agentName":"exp"}'
@@ -765,7 +837,26 @@ $ cf cell get $BOARD rows --step
     "name": "1",
     "title": "Legacy item A"
   },
-…
+  {
+    "name": "2",
+    "title": "Legacy item B"
+  },
+  {
+    "name": "3",
+    "title": "Legacy item C"
+  },
+  {
+    "name": "4",
+    "title": "Legacy item D"
+  },
+  {
+    "name": "5",
+    "title": "Legacy item E"
+  },
+  {
+    "name": "6",
+    "title": "Legacy item F"
+  },
   {
     "name": "7",
     "title": "Legacy item G"
@@ -974,11 +1065,11 @@ $ git diff b7f3f7e32d 59bbdfc54e -- experiment-output/rigs/discover.sh
 …
 ```
 
-Step 14 was
-recorded twice, and the version that produced the first file,
+Step 14 was recorded twice, and the version that produced the first file,
 `14-q4-discover-after-backfill.txt`, is not in the branch's history; the second
-file's label calls its rig fixed. The comment the rig's name comparison carries
-at `8a194f9bcf` says why the forms differ:
+file's label calls its rig fixed. The comment the name comparison in
+`experiment-output/rigs/discover.sh` carries at `8a194f9bcf` says why the forms
+differ:
 
 ```bash
   # An entry written by addItem renders as the member's result cell and one
@@ -989,7 +1080,8 @@ at `8a194f9bcf` says why the forms differ:
 The rig reads each member's input one member at a time. `cf piece survey` takes
 a validator, and the validator is applied to each piece's result. From
 `experiment-output/07-probe-survey-validator.txt` (added in `b7f3f7e32d`), with
-`experiment-output/rigs/has-short-name.schema.json` holding
+`experiment-output/rigs/has-short-name.schema.json` (added in `b7f3f7e32d`)
+holding
 `{"type":"object","required":["shortName"],"properties":{"shortName":{"type":"string"}}}`,
 every member and the holder failed at step 07, before the backfill of step 09;
 six of the eight identical failures are elided:
@@ -1014,9 +1106,9 @@ $ cf piece survey --cell $BOARD --path items --validator "$OUT/rigs/has-short-na
 [exit 0, 2.79s]
 ```
 
-Read in code: on `origin/main`, `validateResult` in
-`packages/piece/src/ops/bulk-survey.ts` reads the result document and nothing
-else:
+Read in code: on `origin/main` at `e1bbc1d549`, and identical at the branch's
+base, `validateResult` in `packages/piece/src/ops/bulk-survey.ts` reads the
+result document and nothing else:
 
 ```ts
   const result = await controller.result.getCell();
@@ -1040,9 +1132,9 @@ $ git grep -e '^{"label"' 8a194f9bcf -- 'experiment-output/*.txt'
 ```
 
 After the backfill, the fixed rig's rows for A and H, from
-`experiment-output/14-q4-discover-after-backfill-fixed-rig.txt`: A has a name in
-the map, its input is a position in its own argument document, and it reads no
-name; H is bound and reads `8`:
+`experiment-output/14-q4-discover-after-backfill-fixed-rig.txt` (added in
+`59bbdfc54e`): A has a name in the map, its input is a position in its own
+argument document, and it reads no name; H is bound and reads `8`:
 
 ```
 {"piece":"/of:fid1:PkKraMpNf_dZiHcM3uRBsmrEF2d87bjc_LfUoTo2Mds","result":"/of:fid1:q4tbuY-jxhm6UC0KxqIUS_XuqDk9wJKMXGG-BOv2Eco","title":"Legacy item A","mapName":"1","ownShortName":null,"indexShortName":null,"boardInput":"/of:fid1:xz6jlpbON5SiFC-XFYRqJhGMuHEAiW3rvHyPn0_a2-Q/board","noEntry":false,"unbound":true,"disagree":true}
@@ -1676,7 +1768,8 @@ RESULT name=12 member=/of:fid1:y_bApWi0efB70rAyPPzCOKc0NY7UGitPRNpnEkVeF4M mode=
 The discovery rig's comment, quoted in § The discovery rig, gives the
 explanation: with server execution off, nothing re-derives the board's names
 table after a write to `names` until something steps the board. Nothing in this
-record measures that explanation. What bears on it in code, on `origin/main`:
+record measures that explanation. What bears on it in code, on `origin/main` at
+`e1bbc1d549`, and identical at the branch's base:
 
 The documentation comment of `pull()` in `packages/runner/src/cell.ts`, whose
 next paragraph also describes a push-based mode:
@@ -2295,8 +2388,8 @@ not by the index snapshot.
 ### An `equals` caveat, read in code and not verified
 
 Reverse lookup, the board's `rows` and `backfillNames` all match members by
-`equals`. On `origin/main`, `nameOf` in
-`packages/patterns/collection-naming/naming.ts` calls it:
+`equals`. On `origin/main` at `e1bbc1d549`, and identical at the branch's base,
+`nameOf` in `packages/patterns/collection-naming/naming.ts` calls it:
 
 ```ts
   return table.find((row) => equals(member, row.member as object))?.name;
@@ -2507,7 +2600,8 @@ version, whose comment on `badgeAppears` above says it waits for the badge
 "rather than reading the page once". Run 1's `look.json` has keys the final
 version does not write, and records empty lists where the final version records
 a boolean. From
-`experiment-output/checks/browser/run1-single-read-broken/look.json`:
+`experiment-output/checks/browser/run1-single-read-broken/look.json` (added in
+`8a194f9bcf`):
 
 ```
 {
@@ -2539,7 +2633,8 @@ for a badge, and its empty results do not show whether one appeared. No
 conclusion is drawn from run 1.
 
 **Run 2, a bounded wait.** Member V, named `15`. From
-`experiment-output/checks/browser/run2-bounded-wait/look.json`:
+`experiment-output/checks/browser/run2-bounded-wait/look.json` (added in
+`8a194f9bcf`):
 
 ```
 {
