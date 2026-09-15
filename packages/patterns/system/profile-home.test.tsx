@@ -34,18 +34,18 @@ export default pattern(() => {
     profile.setInbox.send({});
   });
   const assert_inbox_empty_at_birth = assert(() =>
-    profile.inbox.space === "" && profile.inbox.host === ""
+    profile.inbox?.space === "" && profile.inbox?.host === ""
   );
   const assert_inbox_set_with_the_host_trimmed = assert(() =>
-    profile.inbox.space === INBOX_SPACE &&
-    profile.inbox.host === "https://estuary.example.ts.net"
+    profile.inbox?.space === INBOX_SPACE &&
+    profile.inbox?.host === "https://estuary.example.ts.net"
   );
   const assert_inbox_kept_over_a_half_pointer = assert(() =>
-    profile.inbox.space === INBOX_SPACE &&
-    profile.inbox.host === "https://estuary.example.ts.net"
+    profile.inbox?.space === INBOX_SPACE &&
+    profile.inbox?.host === "https://estuary.example.ts.net"
   );
   const assert_inbox_cleared = assert(() =>
-    profile.inbox.space === "" && profile.inbox.host === ""
+    profile.inbox?.space === "" && profile.inbox?.host === ""
   );
 
   // CT-1828: same empty-after-trim guard applies to setAvatar.
