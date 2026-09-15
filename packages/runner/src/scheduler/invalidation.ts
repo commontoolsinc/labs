@@ -1,4 +1,5 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 
 import type {
   ChangeGroup,
@@ -305,15 +306,15 @@ export function markInvalid(
 
 /**
  * The key a pending invalid cause is recorded under. Scope participates (an
- * omitted scope normalizes to `space`, matching storage), and JSON keeps
- * path segments unambiguous: ["a","b"] never collides with ["a/b"].
+ * omitted scope normalizes to `space`, matching storage). The three address
+ * fields precede the path segments, keeping empty and split paths distinct.
  */
 function invalidCauseKey(address: IMemorySpaceAddress): string {
-  return JSON.stringify([
+  return stringTupleKey([
     address.space,
     address.scope ?? "space",
     address.id,
-    address.path,
+    ...address.path,
   ]);
 }
 

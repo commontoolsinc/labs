@@ -34,6 +34,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { STREAM_ENTRIES_DOC_PREFIX } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { encodePointer } from "../../../memory/v2/path.ts";
@@ -5458,7 +5459,7 @@ export const collectConsumedLabel = (
     // The tuple keeps address fields and pointer boundaries unambiguous,
     // including paths containing separators. Only atoms sharing that identity
     // need structural comparison; `sources` retains global first-seen order.
-    const key = JSON.stringify([
+    const key = stringTupleKey([
       read.id,
       read.space,
       read.scope,
@@ -5492,7 +5493,7 @@ export const collectConsumedLabel = (
     if (isInternalVerifierRead(read.meta)) continue;
     const scope = normalizeCellScope(read.scope);
     const type = read.type ?? "application/json";
-    const metadataKey = JSON.stringify([read.space, read.id, scope, type]);
+    const metadataKey = stringTupleKey([read.space, read.id, scope, type]);
     if (!labelIndexes.has(metadataKey)) {
       const metadata = storedMetadataFor(tx, read.space, read.id, scope, type);
       labelIndexes.set(

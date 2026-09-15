@@ -1,6 +1,7 @@
 /** Validates stored arguments without treating unreadable links as invalid values. */
 
 import type { FabricValue } from "@commonfabric/data-model";
+import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
@@ -102,7 +103,7 @@ export function readStoredLinkChainRaw(
   ) => {
     const next = parseLink(value, base);
     const path = [...next.path, ...rest];
-    const key = JSON.stringify([next.space, next.id, next.scope, path]);
+    const key = stringTupleKey([next.space, next.id, next.scope, ...path]);
     if (chain.has(key)) return undefined;
     chain.add(key);
     added.push(key);
@@ -224,7 +225,7 @@ function overlayUnreadableLinkPlaceholdersInternal(
   if (isCellLink(raw)) {
     if (materialized === undefined) return UNRESOLVED_LINK_PLACEHOLDER;
     const link = parseLink(raw, base);
-    const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
+    const key = stringTupleKey([link.space, link.id, link.scope, ...link.path]);
     if (context.chain.has(key)) {
       context.incompleteReads++;
       return materialized;
