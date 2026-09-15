@@ -10,5 +10,5 @@ import { describe } from "@std/testing/bdd";
 import { describeReadBudgetGroup } from "./topics-read-budget-suite.ts";
 
 describe("topics-read-budget-mentions-16", () => {
-  describeReadBudgetGroup("mentions-16");
+  describeReadBudgetGroup("mentions-16", import.meta.url);
 });

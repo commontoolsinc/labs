@@ -10,5 +10,5 @@ import { describe } from "@std/testing/bdd";
 import { describeReadBudgetGroup } from "./topics-read-budget-suite.ts";
 
 describe("topics-read-budget-high-degree", () => {
-  describeReadBudgetGroup("high-degree");
+  describeReadBudgetGroup("high-degree", import.meta.url);
 });

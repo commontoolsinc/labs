@@ -220,7 +220,10 @@ export interface LimitCheck {
   /** Which count it is. */
   readonly measure: GatedMeasure;
 
-  /** The count, or `null` where the measurement recorded no such phase. */
+  /**
+   * The count, or `null` where the measurement recorded no such phase, or
+   * recorded the phase without a count for this measure.
+   */
   readonly observed: number | null;
 
   /** The limit, or `null` where the table holds none for the count. */
@@ -240,9 +243,9 @@ export function variantsAssignedTo(
 
 /**
  * Returns each count of `phases`, measured for `probeCase`, that exceeds its
- * limit in `limits`, with each measured count `limits` holds no limit for and
- * each limit on a phase `phases` does not record. An ungated count is not
- * checked. Empty when every limit holds.
+ * limit in `limits`, with each measured count `limits` holds no limit for, each
+ * gated count a measured phase lacks, and each limit on a phase `phases` does
+ * not record. An ungated count is not checked. Empty when every limit holds.
  *
  * @throws Error when `limits` holds no limits for `probeCase`.
  */
@@ -264,18 +267,17 @@ export function limitsExceeded(
     const counts = gatedMeasuresOf(record);
     for (const measure of GATED_MEASURES) {
       const limit = table[phase]?.[measure];
-      if (limit === undefined) {
+      const observed = counts[measure];
+      if (!Number.isSafeInteger(observed)) {
         found.push({
           ...check(phase, measure),
-          observed: counts[measure],
-          limit: null,
+          observed: null,
+          limit: typeof limit === "number" ? limit : null,
         });
-      } else if (typeof limit === "number" && counts[measure] > limit) {
-        found.push({
-          ...check(phase, measure),
-          observed: counts[measure],
-          limit,
-        });
+      } else if (limit === undefined) {
+        found.push({ ...check(phase, measure), observed, limit: null });
+      } else if (typeof limit === "number" && observed > limit) {
+        found.push({ ...check(phase, measure), observed, limit });
       }
     }
   }
@@ -293,8 +295,9 @@ export function limitsExceeded(
 /**
  * Returns each limit of `probeCase` in `limits` assigned to `variant` that
  * `phases`, measured under that variant, does not exceed, including each
- * whose phase `phases` does not record. An ungated count is not checked. Empty
- * when the variant exceeds every limit assigned to it.
+ * whose phase `phases` does not record or records without the count. An
+ * ungated count is not checked. Empty when the variant exceeds every limit
+ * assigned to it.
  *
  * @throws Error when `limits` holds no limits for `probeCase`.
  */
@@ -314,7 +317,8 @@ export function assignedLimitsNotExceeded(
     for (const measure of GATED_MEASURES) {
       const limit = measures[measure];
       if (assigned[measure] !== variant || typeof limit !== "number") continue;
-      const observed = counts?.[measure] ?? null;
+      const counted = counts?.[measure];
+      const observed = Number.isSafeInteger(counted) ? counted! : null;
       if (observed === null || observed <= limit) {
         found.push({
           workload: probeCase.workload,
