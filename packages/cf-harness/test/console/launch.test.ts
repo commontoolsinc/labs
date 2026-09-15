@@ -5,6 +5,7 @@ import {
   type ConsoleLaunchIo,
   type ConsoleLaunchRecords,
   consoleLaunchReport,
+  DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT,
   DEPLOYMENT_PATTERN_INDEX_URL,
   DEPLOYMENT_SKILLS_REGISTRY_URL,
   launchConsole,
@@ -430,6 +431,90 @@ describe("launch", () => {
 
       expect(() => resolveConsoleLaunchPlan(records, OPTIONS)).toThrow(
         "`--cfc-invocation-context-dir`",
+      );
+    });
+
+    it("allows the deployment's demo script when a launch names none", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {});
+
+      expect(
+        JSON.parse(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual([DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT]);
+      const reported = consoleLaunchReport(plan).find((line) =>
+        line.includes("allow script")
+      );
+      expect(reported).toContain(DEPLOYMENT_DEMO_ALLOWED_SKILL_SCRIPT);
+      expect(reported).toContain("labs deployment default (demo)");
+    });
+
+    it("allows what a launch names instead of the deployment's entry", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        allowedSkillScripts: ["cf-tidy:scripts/tidy.sh"],
+      });
+
+      expect(
+        JSON.parse(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual(["cf-tidy:scripts/tidy.sh"]);
+      expect(
+        consoleLaunchReport(plan).find((line) => line.includes("allow script")),
+      ).toContain("named on the command line");
+    });
+
+    it("allows what the variable carries when a launch names nothing", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        inheritedAllowedSkillScripts: ["cf-tidy:scripts/tidy.sh"],
+      });
+
+      expect(
+        JSON.parse(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual(["cf-tidy:scripts/tidy.sh"]);
+      expect(
+        consoleLaunchReport(plan).find((line) => line.includes("allow script")),
+      ).toContain("inherited");
+    });
+
+    it("allows no script, and says so, when the entries are waived", () => {
+      const plan = resolveConsoleLaunchPlan(RECORDS, {
+        noAllowedSkillScripts: true,
+      });
+
+      expect(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS).toBeUndefined();
+      expect(
+        consoleLaunchReport(plan).find((line) => line.includes("allow script")),
+      ).toContain("(none)");
+    });
+
+    it("throws when scripts are both named and waived", () => {
+      expect(() =>
+        resolveConsoleLaunchPlan(RECORDS, {
+          allowedSkillScripts: ["cf-tidy:scripts/tidy.sh"],
+          noAllowedSkillScripts: true,
+        })
+      ).toThrow("contradict each other");
+    });
+
+    it("throws naming a script entry no allowlist can key on", () => {
+      // Refused before the server binds rather than at the call: an entry that
+      // matches nothing grants nothing, and the run would then report the
+      // operator's own script as one they did not allow.
+      expect(() =>
+        resolveConsoleLaunchPlan(RECORDS, {
+          allowedSkillScripts: ["cf-tidy:../escape.sh"],
+        })
+      ).toThrow("`--allow-skill-script` entry `cf-tidy:../escape.sh`");
+
+      // The deployment's own entry is held to the same shape, and names the
+      // constant that holds it rather than a flag nobody passed.
+      expect(() =>
+        resolveConsoleLaunchPlan(RECORDS, {
+          inheritedAllowedSkillScripts: ["cf-tidy:../escape.sh"],
+        })
+      ).toThrow("`CF_HARNESS_ALLOWED_SKILL_SCRIPTS` entry");
+    });
+
+    it("names the script variable among the ones the launcher owns", () => {
+      expect(LAUNCHER_OWNED_VARIABLES).toContain(
+        "CF_HARNESS_ALLOWED_SKILL_SCRIPTS",
       );
     });
 
@@ -906,6 +991,76 @@ describe("launch", () => {
       expect(plan.environment.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE).toBe(
         "observe",
       );
+    });
+
+    it("reads repeated `--allow-skill-script` flags in order", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        [
+          ...NAMED_ARGS,
+          "--allow-skill-script",
+          "cf-tidy:scripts/tidy.sh",
+          "--allow-skill-script",
+          "cf-spend:scripts/spend.sh",
+        ],
+        {},
+        io(),
+      );
+
+      expect(
+        JSON.parse(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual(["cf-tidy:scripts/tidy.sh", "cf-spend:scripts/spend.sh"]);
+    });
+
+    it("reads the allowlist the variable carries", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        NAMED_ARGS,
+        {
+          CF_HARNESS_ALLOWED_SKILL_SCRIPTS: JSON.stringify([
+            "cf-tidy:scripts/tidy.sh",
+          ]),
+        },
+        io(),
+      );
+
+      expect(
+        JSON.parse(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual(["cf-tidy:scripts/tidy.sh"]);
+    });
+
+    it("ranks a named script above the variable's", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--allow-skill-script", "cf-named:scripts/a.sh"],
+        {
+          CF_HARNESS_ALLOWED_SKILL_SCRIPTS: JSON.stringify([
+            "cf-inherited:scripts/b.sh",
+          ]),
+        },
+        io(),
+      );
+
+      expect(
+        JSON.parse(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS!),
+      ).toEqual(["cf-named:scripts/a.sh"]);
+    });
+
+    it("allows no script when `--no-allow-skill-script` is passed", async () => {
+      const { plan } = await prepareConsoleLaunch(
+        [...NAMED_ARGS, "--no-allow-skill-script"],
+        {},
+        io(),
+      );
+
+      expect(plan.environment.CF_HARNESS_ALLOWED_SKILL_SCRIPTS).toBeUndefined();
+    });
+
+    it("throws naming the variable when its value is not JSON", async () => {
+      await expect(
+        prepareConsoleLaunch(
+          NAMED_ARGS,
+          { CF_HARNESS_ALLOWED_SKILL_SCRIPTS: "cf-tidy:scripts/tidy.sh" },
+          io(),
+        ),
+      ).rejects.toThrow("CF_HARNESS_ALLOWED_SKILL_SCRIPTS");
     });
 
     it("leaves the registries out when both are waived", async () => {

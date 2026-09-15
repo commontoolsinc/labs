@@ -366,6 +366,78 @@ describe("console/server", () => {
       expect(policy.allowedToolIds).toContain("acquire_skill");
     });
 
+    it("allows the skill scripts a console is launched with", async () => {
+      const resolved = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+          "--allow-skill-script",
+          "cf-tidy:scripts/tidy.sh",
+        ],
+        {},
+        "/console",
+      );
+
+      expect(resolved.allowedSkillScripts).toEqual([
+        { skill: "cf-tidy", path: "scripts/tidy.sh" },
+      ]);
+    });
+
+    it("allows the skill scripts the launcher's variable carries", async () => {
+      const resolved = await resolveConsoleConfig(
+        [
+          "--fabric-identity",
+          "key.pkcs8",
+          "--fabric-space",
+          "console-test",
+          "--session-db",
+          "none",
+        ],
+        {
+          CF_HARNESS_ALLOWED_SKILL_SCRIPTS: JSON.stringify([
+            `commontoolsinc/labs/cf-spend-digest@${
+              "a".repeat(40)
+            }:scripts/category-budgets.sh`,
+          ]),
+        },
+        "/console",
+      );
+
+      expect(resolved.allowedSkillScripts).toEqual([
+        {
+          skill: `commontoolsinc/labs/cf-spend-digest@${"a".repeat(40)}`,
+          path: "scripts/category-budgets.sh",
+        },
+      ]);
+    });
+
+    it("allows no skill script when neither names one", async () => {
+      expect((await config()).allowedSkillScripts).toEqual([]);
+    });
+
+    it("rejects a skill script entry no allowlist can key on", async () => {
+      await expect(
+        resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--allow-skill-script",
+            "cf-tidy:SKILL.md",
+          ],
+          {},
+          "/console",
+        ),
+      ).rejects.toThrow("`--allow-skill-script` entry `cf-tidy:SKILL.md`");
+    });
+
     it("withholds the skill tools from a session with no registry", async () => {
       const policy = harnessSessionChatPolicy(await config());
       expect(policy.allowedToolIds).not.toContain("search_skills");

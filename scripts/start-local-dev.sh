@@ -49,6 +49,11 @@ BG_UPDATER=false
 # fact about the process tree, not a request for a console, and a flag is the
 # only thing loom needs to know about cf-harness.
 CF_HARNESS=false
+# The skill-script entries this fabric's console is launched with. Which script
+# a run may execute is the operator's decision and no part of starting a
+# fabric implies one, so these are passed through to the launcher verbatim and
+# resolved there, where they are printed beside the rest of what it resolved.
+CONSOLE_SKILL_SCRIPT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force)
@@ -61,6 +66,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cf-harness)
             CF_HARNESS=true
+            shift
+            ;;
+        --allow-skill-script)
+            CONSOLE_SKILL_SCRIPT_ARGS+=(--allow-skill-script "$2")
+            shift 2
+            ;;
+        --allow-skill-script=*)
+            CONSOLE_SKILL_SCRIPT_ARGS+=(--allow-skill-script "${1#*=}")
+            shift
+            ;;
+        --no-allow-skill-script)
+            CONSOLE_SKILL_SCRIPT_ARGS+=(--no-allow-skill-script)
             shift
             ;;
         --bg-updater)
@@ -431,6 +448,9 @@ if [[ "$CF_HARNESS" == "true" ]]; then
     # console then has to read.
     CONSOLE_STORE=${MEMORY_DIR:-"$(cd "$SCRIPT_DIR/../packages/toolshed" && pwd)/cache/memory"}
     CONSOLE_ARGS+=(--store "$CONSOLE_STORE")
+    if [[ ${#CONSOLE_SKILL_SCRIPT_ARGS[@]} -gt 0 ]]; then
+        CONSOLE_ARGS+=("${CONSOLE_SKILL_SCRIPT_ARGS[@]}")
+    fi
     # `DB_PATH` puts the toolshed in single-file mode, where the directory the
     # console would otherwise walk holds nothing. Naming the file keeps the
     # console reading the store this fabric is actually writing.

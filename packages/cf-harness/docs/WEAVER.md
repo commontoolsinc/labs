@@ -97,13 +97,15 @@ are named instead — `--fabric-identity`/`CF_IDENTITY` and
 than a default nobody chose. The pattern index and the skills registry are this
 deployment's rather than any fabric's, so they are constants the printout labels
 as such; `--pattern-index-url` and `--skills-registry-url` move them, and
-`--no-pattern-index` and `--no-skills-registry` run without them. `--port` moves
-the console, `--console-dir` moves its state, and `--fabric-cfc-posture`,
-`--fabric-cfc-flow-labels` and `--fabric-cfc-enforcement-mode` move it off the
-enforcing posture it otherwise runs under. Arguments after `--` reach the
-console untouched, so every other flag it takes —
-[`../console/README.md`](../console/README.md) has them — is reachable through
-this one path:
+`--no-pattern-index` and `--no-skills-registry` run without them. So is the
+skill script this deployment's consoles allow: `--allow-skill-script` names
+others and `--no-allow-skill-script` allows none, and every entry is printed
+with its source. `--port` moves the console, `--console-dir` moves its state,
+and `--fabric-cfc-posture`, `--fabric-cfc-flow-labels` and
+`--fabric-cfc-enforcement-mode` move it off the enforcing posture it otherwise
+runs under. Arguments after `--` reach the console untouched, so every other
+flag it takes — [`../console/README.md`](../console/README.md) has them — is
+reachable through this one path:
 
 ```sh
 deno task --cwd packages/cf-harness console:launch --instance <instance> \
