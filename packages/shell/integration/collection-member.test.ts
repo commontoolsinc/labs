@@ -11,7 +11,11 @@ import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
-import { env, waitForCondition } from "@commonfabric/integration";
+import {
+  env,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
@@ -110,6 +114,27 @@ async function fileBoardWithMembers(
   return boardId;
 }
 
+/**
+ * Settles the rendered view, then reports whether it shows one member with the
+ * expected name.
+ *
+ * An integration test holds no UI subscription, so asking whether the worker
+ * is idle queues the pull work which renders the selected member.
+ */
+async function settledMemberNameIs(
+  probe: ProbeApi,
+  expected: string,
+): Promise<boolean> {
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
+  const badges = probe.collect("[data-member-name]");
+  return badges.length === 1 &&
+    probe.deepText(badges[0]).trim() === expected;
+}
+
 describe("shell collection members", () => {
   // Two suites because they tolerate different things. Opening a member must
   // record no console error at all; only the suite whose subject IS a failed
@@ -138,9 +163,8 @@ describe("shell collection members", () => {
 
       // One badge, reading the board's name for this member. The board
       // renders one per item, so a page carrying exactly one is the member's.
-      await waitForCondition(shell.page(), (probe) => {
-        const badges = probe.collect("[data-member-name]");
-        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      await waitForCondition(shell.page(), settledMemberNameIs, {
+        args: ["2"],
       });
       // The tab names the piece the shell opened. Member 2 is the second item
       // filed, and the board would name itself for its item count instead.
@@ -172,9 +196,8 @@ describe("shell collection members", () => {
         identity,
       });
 
-      await waitForCondition(shell.page(), (probe) => {
-        const badges = probe.collect("[data-member-name]");
-        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      await waitForCondition(shell.page(), settledMemberNameIs, {
+        args: ["2"],
       });
       // The mark says which segment is the space and is no part of it, so the
       // page the shell settles on is the one it would have written itself.

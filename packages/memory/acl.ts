@@ -1,6 +1,6 @@
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { ACL, ACLUser, ANYONE, Capability, DID, DIDKey } from "./interface.ts";
-import { isDID } from "../identity/src/interface.ts";
+import { isDID } from "@commonfabric/identity/did";
 
 export type { ACL, ACLUser, ANYONE, Capability, DID, DIDKey };
 

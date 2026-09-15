@@ -19,11 +19,6 @@ import {
   BGPieceEntrySchema,
 } from "./schema.ts";
 
-/** Returns whether `did` has the shape of a `did:key` DID. */
-export function isValidDID(did: string): boolean {
-  return did?.startsWith("did:key:") && did.length > 10;
-}
-
 /** Returns whether `id` has the length of a piece's entity id. */
 export function isValidPieceId(id: string): boolean {
   return !!id && id.length === 59;

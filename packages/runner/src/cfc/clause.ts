@@ -1,5 +1,5 @@
 import { CFC_ATOM_TYPE, type CfcAtom } from "@commonfabric/api/cfc";
-import { isDID } from "@commonfabric/identity";
+import { parseDID } from "@commonfabric/identity/did";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model";
@@ -81,6 +81,16 @@ export const clausesEqual = (
 ): boolean => deepEqual(normalizeClause(left), normalizeClause(right));
 
 /**
+ * Whether a value is a DID naming both of its parts: `isDID` alone admits
+ * `did:` and `did:key`, which name no principal for the rewrite below to
+ * restate.
+ */
+const isCompleteDID = (value: unknown): boolean => {
+  const parsed = parseDID(value);
+  return parsed !== undefined && parsed.method !== "" && parsed.id !== "";
+};
+
+/**
  * A `PersonalSpace(owner)` label alternative, restated as the one principal
  * every reading of the atom puts inside its audience: its owner.
  *
@@ -106,14 +116,13 @@ export const clausesEqual = (
  * ALONE — the reverse containment, which nothing establishes.
  *
  * Only the canonical two-field shape participates, and only when its `owner`
- * is a DID — the type §15.2 gives the field, tested with the identity
- * package's `isDID` rather than a `did:` prefix, so a truncated or
- * method-only string gets no reading — or the §4.6.4.1 `{digestOf}`
- * commitment the cross-space seam persists that field as. A record carrying
- * further fields, or an `owner` that is neither, is not the atom it resembles
- * and gets no reading either. `isDID` refuses a third colon, so a
- * method-specific id containing one is refused too; that is over-refusal,
- * which is the direction a well-formedness gate should fail in.
+ * is a complete DID — the type §15.2 gives the field — or the §4.6.4.1
+ * `{digestOf}` commitment the cross-space seam persists that field as. A
+ * record carrying further fields, or an `owner` that is neither, is not the
+ * atom it resembles and gets no reading either. Complete means a DID that
+ * names both parts, so a truncated `did:` and a method-only `did:key` get no
+ * reading; that is over-refusal, which is the direction a well-formedness
+ * gate should fail in.
  *
  * Both fields are checked as OWN properties, which the sibling recognizers
  * here do not bother with because they only gate a comparison. This one
@@ -143,7 +152,7 @@ const personalSpaceOwnerAsReader = (atom: CfcAtom): CfcAtom => {
     !Object.hasOwn(record, "type") || !Object.hasOwn(record, "owner") ||
     Object.keys(record).length !== 2 ||
     record.type !== CFC_ATOM_TYPE.PersonalSpace ||
-    !(isDID(record.owner) || isCfcFieldCommitment(record.owner))
+    !(isCompleteDID(record.owner) || isCfcFieldCommitment(record.owner))
   ) {
     return atom;
   }

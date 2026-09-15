@@ -18,7 +18,7 @@ import {
   WorkerIPCMessageType,
 } from "../src/worker-ipc.ts";
 import { loadEnv } from "../src/env.ts";
-import { getIdentity, isValidDID, isValidPieceId } from "../src/utils.ts";
+import { getIdentity, isValidPieceId } from "../src/utils.ts";
 import {
   BackgroundPieceService,
   type BackgroundPieceServiceOptions,
@@ -367,10 +367,7 @@ describe("background piece utility functions", () => {
     assert(!isWorkerIPCResponse({ msgId: 1, type: 42 }));
   });
 
-  it("validates dids and piece ids", () => {
-    assert(isValidDID(TEST_DID));
-    assert(!isValidDID("did:web:example"));
-    assert(!isValidDID("did:key:x"));
+  it("validates piece ids", () => {
     assert(isValidPieceId(PIECE_ID));
     assert(!isValidPieceId(""));
     assert(!isValidPieceId("short"));
