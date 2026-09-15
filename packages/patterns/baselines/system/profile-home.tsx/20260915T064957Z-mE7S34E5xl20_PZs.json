@@ -285,7 +285,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "setAvatar"
               ]
@@ -311,7 +311,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "setBio"
               ]
@@ -336,7 +336,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "mutateElements"
               ]
@@ -365,7 +365,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "mutateExternalProfileLinks"
               ]
@@ -394,7 +394,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "setInbox"
               ]
@@ -425,7 +425,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "setName"
               ]
@@ -505,7 +505,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "s-d9D0coRUNdMnjDyOjX8ZgLqe-8orudcTqf3gMetLQ",
+              "moduleIdentity": "QGxWemFJRgAEPOVguBw3023wOjhDe0UJvuqSoGFblPg",
               "path": [
                 "publishVerifiedIdentities"
               ]
