@@ -208,6 +208,7 @@ describe("sqlite-query-row-identity", () => {
 
     const rowsAfter = rowDocIds(result);
     expect(rowsAfter[0]).toBe(rowsBefore[0]);
+    expect(rowsAfter[1]).not.toBe(rowsBefore[1]);
     expect(rowsAfter[2]).toBe(rowsBefore[2]);
     const secondRun = written.slice(mark);
     const rowWrites = secondRun.filter((w) =>

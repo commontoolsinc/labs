@@ -1411,22 +1411,20 @@ export function sqliteQuery(
               }
               const base = result.getAsNormalizedFullLink();
               // Every row is an entity document of its own, keyed on the
-              // row's content under the result cell: a row the query returns
-              // again links to the document it already has, and the diff
-              // finds nothing to write there. Leaving the rows as plain
-              // objects for `set()` to anchor would draw each document's id
-              // from the result cell's frame counter, which never repeats,
-              // so every run would mint a fresh document per row and orphan
-              // the last run's. Two rows of equal content share a document,
-              // which is what equal content means here.
+              // row's content under the result cell. A row whose content
+              // this result cell has held before links to that document,
+              // and the diff finds nothing to write there; two rows of equal
+              // content share one document. The id must not depend on
+              // anything that varies between runs, or an unchanged result
+              // would mint a document per row per run.
               //
-              // The row's schema, per-column labels and row label included,
-              // goes on the write and not on the stored link. A link that
-              // carries a schema installs it as a content-addressed document
-              // of its own, and two scoped instances of one result settling
-              // in separate waves would then both write that document, which
-              // the second wave refuses. The labels reach the row document
-              // through the write's policy input either way.
+              // The stored link is bare. The row's schema, per-column labels
+              // and row label included, goes on the write alone, whose
+              // policy input is what carries the labels to the row document.
+              // A link carrying a schema would install that schema as a
+              // content-addressed document, and two scoped instances of one
+              // result settling in separate waves would both write it, which
+              // the second wave refuses.
               const storedRows = resultRows.map((row, i) => {
                 const rowCell = createCell(
                   runtime,
